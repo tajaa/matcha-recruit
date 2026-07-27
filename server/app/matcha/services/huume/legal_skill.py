@@ -22,6 +22,8 @@ from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services.ai_usage import feature_scope
+
 logger = logging.getLogger(__name__)
 
 MATTER_TYPES = ("subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other")
@@ -212,11 +214,15 @@ async def ask_matter(
 
     result: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
-    async for ev in ld.run_chat_turn(matter, history, corpus, question):
-        if ev.get("type") == "result":
-            result = ev.get("data")
-        elif ev.get("type") == "error":
-            error_message = ev.get("message")
+    # Attribute the pilot's Gemini call to huume in the admin AI ledger —
+    # without this it lands under the stack-derived `matcha.legal_defense`,
+    # indistinguishable from the standalone /app/legal-pilot UI.
+    with feature_scope("matcha.huume.legal_pilot"):
+        async for ev in ld.run_chat_turn(matter, history, corpus, question):
+            if ev.get("type") == "result":
+                result = ev.get("data")
+            elif ev.get("type") == "error":
+                error_message = ev.get("message")
     if not result:
         return {"status": "error", "message": error_message or "Analysis failed — please try again."}
 
@@ -287,9 +293,10 @@ async def generate_packet(
         )
         company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
 
-        packet = await ld.build_defense_packet(
-            conn, matter, corpus, memo, company_name=company["name"] if company else None,
-        )
+        with feature_scope("matcha.huume.legal_pilot"):
+            packet = await ld.build_defense_packet(
+                conn, matter, corpus, memo, company_name=company["name"] if company else None,
+            )
 
         storage = get_storage()
         base = ld.safe_name(matter.get("title"))

@@ -104,6 +104,9 @@ async def _record_turn_usage(
         model=str(final_usage.get("model") or "unknown"),
         prompt_tokens=final_usage.get("prompt_tokens"),
         completion_tokens=final_usage.get("completion_tokens"),
+        # Only the huume loop records this key today; skill-engine turns
+        # carry no thinking_tokens and price exactly as before.
+        thinking_tokens=final_usage.get("thinking_tokens"),
     )
     final_usage["cost_dollars"] = float(cost)
     try:

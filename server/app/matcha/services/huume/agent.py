@@ -121,6 +121,20 @@ def _cap_payload(value: Any) -> Any:
     return {"_truncated": True, "preview": encoded[:_STEP_PAYLOAD_CAP_CHARS]}
 
 
+def _accumulate_usage(total: dict[str, int], usage: Any) -> None:
+    """Fold one response's usage_metadata into the turn total. thoughts/cached
+    were silently dropped before 2026-07 — total_token_count includes thoughts,
+    so without them prompt+completion never equalled total in the stored blob."""
+    for key, attr in (
+        ("prompt_tokens", "prompt_token_count"),
+        ("completion_tokens", "candidates_token_count"),
+        ("total_tokens", "total_token_count"),
+        ("thinking_tokens", "thoughts_token_count"),
+        ("cached_tokens", "cached_content_token_count"),
+    ):
+        total[key] = total.get(key, 0) + (getattr(usage, attr, 0) or 0)
+
+
 _MAX_IMAGE_PARTS = 6
 _MAX_IMAGE_BYTES_TOTAL = 4 * 1024 * 1024
 
@@ -304,7 +318,8 @@ async def run_huume_turn(
     turn_error: Optional[str] = None
     model_calls = 0
     started = time.monotonic()
-    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                   "thinking_tokens": 0, "cached_tokens": 0}
 
     def elapsed() -> float:
         return time.monotonic() - started
@@ -735,9 +750,7 @@ async def run_huume_turn(
 
             usage = getattr(response, "usage_metadata", None)
             if usage:
-                total_usage["prompt_tokens"] += getattr(usage, "prompt_token_count", 0) or 0
-                total_usage["completion_tokens"] += getattr(usage, "candidates_token_count", 0) or 0
-                total_usage["total_tokens"] += getattr(usage, "total_token_count", 0) or 0
+                _accumulate_usage(total_usage, usage)
 
             all_parts = [
                 part

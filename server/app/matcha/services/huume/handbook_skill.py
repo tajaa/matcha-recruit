@@ -23,6 +23,8 @@ from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services.ai_usage import feature_scope
+
 logger = logging.getLogger(__name__)
 
 _PENDING_CAP = 20
@@ -163,11 +165,15 @@ async def draft_content(
 
     result: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
-    async for ev in hp.run_chat_turn(session, history, corpus, request_text):
-        if ev.get("type") == "result":
-            result = ev.get("data")
-        elif ev.get("type") == "error":
-            error_message = ev.get("message")
+    # Attribute the pilot's Gemini call to huume in the admin AI ledger —
+    # without this it lands under the stack-derived `matcha.handbook_pilot`,
+    # indistinguishable from the standalone /app/handbook-pilot UI.
+    with feature_scope("matcha.huume.handbook_pilot"):
+        async for ev in hp.run_chat_turn(session, history, corpus, request_text):
+            if ev.get("type") == "result":
+                result = ev.get("data")
+            elif ev.get("type") == "error":
+                error_message = ev.get("message")
     if not result:
         return {"status": "error", "message": error_message or "Drafting failed — please try again."}
 

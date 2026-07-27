@@ -20,6 +20,14 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "input_per_1m": Decimal("2.00"),
         "output_per_1m": Decimal("12.00"),
     },
+    # Gemini 3.6 Flash — the Huume agent-loop model (huume/agent.py _MODEL).
+    # Must match ai_usage.PRICING's row — the admin ledger priced this
+    # correctly while billing fell to DEFAULT_PRICING (~3x low) on every
+    # Huume turn.
+    "gemini-3.6-flash": {
+        "input_per_1m": Decimal("1.50"),
+        "output_per_1m": Decimal("7.50"),
+    },
     # Gemini 3.1 Flash Lite — flash-lite tier
     "gemini-3.1-flash-lite": {
         "input_per_1m": Decimal("0.10"),
@@ -64,6 +72,7 @@ def calculate_call_cost(
     model: str,
     prompt_tokens: int | None,
     completion_tokens: int | None,
+    thinking_tokens: int | None = None,
 ) -> Decimal:
     """Calculate the dollar cost of a single AI call based on model and token counts.
 
@@ -72,7 +81,11 @@ def calculate_call_cost(
     pricing = MODEL_PRICING.get(model, DEFAULT_PRICING)
 
     input_cost = Decimal(prompt_tokens or 0) * pricing["input_per_1m"] / Decimal("1000000")
-    output_cost = Decimal(completion_tokens or 0) * pricing["output_per_1m"] / Decimal("1000000")
+    # Thinking tokens bill at the output rate (matches ai_usage.compute_cost).
+    output_cost = (
+        Decimal((completion_tokens or 0) + (thinking_tokens or 0))
+        * pricing["output_per_1m"] / Decimal("1000000")
+    )
 
     total = (input_cost + output_cost).quantize(Decimal("0.000001"), rounding=ROUND_UP)
 

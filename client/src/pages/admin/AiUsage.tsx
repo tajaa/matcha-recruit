@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { AlertCircle, ChevronDown, ChevronRight, Cpu, Image, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, Bot, ChevronDown, ChevronRight, Cpu, Image, RefreshCw, X } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import { getAiUsageCalls, getAiUsageSummary, getAiUsageTimeseries } from '../../api/admin/aiUsage'
 import type {
   AiUsageCall,
   AiUsageFeatureRollup,
+  AiUsageMetrics,
   AiUsageModelRollup,
   AiUsagePoint,
   AiUsageStatus,
@@ -39,7 +40,13 @@ const IMAGE_MODEL_PREFIX = 'gemini-3.1-flash-image'
 // historical traffic by now, not worth a multi-value filter on the backend).
 const CURRENT_IMAGE_MODEL = 'gemini-3.1-flash-image'
 
-function sumImageMetrics(rows: AiUsageModelRollup[]) {
+// Every Huume-attributed feature label — the agent loop plus its embedded
+// pilot tools, each scoped separately (services/huume/agent.py,
+// legal_skill.py, handbook_skill.py) so this rollup can tell them apart via
+// the button row below, not just sum them into one number.
+const HUUME_FEATURE_PREFIX = 'matcha.huume.'
+
+function sumRollupMetrics(rows: AiUsageMetrics[]) {
   const calls = rows.reduce((s, r) => s + r.calls, 0)
   const cost_usd = rows.some((r) => r.cost_usd != null)
     ? rows.reduce((s, r) => s + (r.cost_usd ?? 0), 0)
@@ -50,10 +57,12 @@ function sumImageMetrics(rows: AiUsageModelRollup[]) {
     cost_usd,
     // Only the PRICED calls contributed to cost_usd, so the average divides by
     // those — dividing the partial cost by the full call count (which includes
-    // unpriced/errored rows) would bias "avg cost / image" below the true value.
+    // unpriced/errored rows) would bias "avg cost / call" below the true value.
     priced_calls: calls - unknown_cost_calls,
     input_tokens: rows.reduce((s, r) => s + r.input_tokens, 0),
     output_tokens: rows.reduce((s, r) => s + r.output_tokens, 0),
+    thinking_tokens: rows.reduce((s, r) => s + r.thinking_tokens, 0),
+    cached_tokens: rows.reduce((s, r) => s + r.cached_tokens, 0),
     errors: rows.reduce((s, r) => s + r.errors, 0),
     unknown_cost_calls,
   }
@@ -290,7 +299,12 @@ export default function AiUsage() {
   // pre-summed into its own card row per the ask "make sure /ai-usage has
   // info about image calls like we do for other aspects".
   const imageModelRows = summary?.by_model.filter((r) => r.model.startsWith(IMAGE_MODEL_PREFIX)) ?? []
-  const imageTotals = imageModelRows.length ? sumImageMetrics(imageModelRows) : null
+  const imageTotals = imageModelRows.length ? sumRollupMetrics(imageModelRows) : null
+  // Derived, not fetched — same pattern as the image block above: by_feature
+  // already carries every huume label's rollup (matcha.huume.loop plus the
+  // embedded matcha.huume.legal_pilot / .handbook_pilot sub-features).
+  const huumeRows = summary?.by_feature.filter((r) => r.feature.startsWith(HUUME_FEATURE_PREFIX)) ?? []
+  const huumeTotals = huumeRows.length ? sumRollupMetrics(huumeRows) : null
 
   // Separate fetch for the call log: it's interaction-driven (selection,
   // status, page) rather than page-level, so it doesn't belong in the
@@ -444,6 +458,47 @@ export default function AiUsage() {
           {imageTotals.unknown_cost_calls > 0 && (
             <p className="mt-1.5 text-[11px] text-amber-300/90">
               {imageTotals.unknown_cost_calls} image call(s) have unknown cost — spend above is undercounted.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Huume's agent loop (services/huume/agent.py) plus its embedded Legal
+          Pilot / Handbook Pilot tool calls, each scoped under matcha.huume.* via
+          feature_scope so this spend doesn't get lost in matcha.legal_defense /
+          matcha.handbook_pilot alongside the standalone pilot UIs. Same
+          derived-not-fetched pattern as the image block above. */}
+      {huumeTotals && (
+        <div className="mb-4">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <Bot size={11} /> Huume agent
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <StatCard label="Huume calls" value={String(huumeTotals.calls)} />
+            <StatCard label="Huume spend" value={fmtCost(huumeTotals.cost_usd)} />
+            <StatCard label="Tokens in" value={fmtTokens(huumeTotals.input_tokens)} sub="context" />
+            <StatCard label="Thinking" value={fmtTokens(huumeTotals.thinking_tokens)} />
+            <StatCard label="Cached" value={fmtTokens(huumeTotals.cached_tokens)} />
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {huumeRows.map((r) => (
+              <button
+                key={r.feature}
+                type="button"
+                onClick={() => selectFeature(r.feature)}
+                className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                  selection?.kind === 'feature' && selection.value === r.feature
+                    ? 'border-emerald-500 text-emerald-300'
+                    : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {r.feature.slice(HUUME_FEATURE_PREFIX.length)} · {r.calls} · {fmtCost(r.cost_usd)}
+              </button>
+            ))}
+          </div>
+          {huumeTotals.unknown_cost_calls > 0 && (
+            <p className="mt-1.5 text-[11px] text-amber-300/90">
+              {huumeTotals.unknown_cost_calls} huume call(s) have unknown cost — spend above is undercounted.
             </p>
           )}
         </div>
