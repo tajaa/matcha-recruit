@@ -18,6 +18,7 @@ from uuid import UUID
 
 from . import epl_readiness
 from ..insurance import wc_depth, controls_evidence
+from ..ir.ir_wc_metrics import compute_wc_metrics
 
 
 def readiness_band(score: int) -> str:
@@ -142,7 +143,6 @@ async def compute_property_readiness(conn, company_id: UUID, *, sov=None) -> dic
 async def compute_readiness(conn, company_id: UUID, *, wc=None, epl=None, controls=None) -> dict:
     """Gather the completeness signals + score. Accepts precomputed wc/epl/controls."""
     if wc is None:
-        from ...routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
         wc = await compute_wc_metrics(conn, company_id)
     if epl is None:
         epl = await epl_readiness.compute_epl_readiness(conn, company_id)

@@ -25,6 +25,7 @@ from typing import Optional
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from .broker_risk_alerts import should_suppress
+from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics
 
 # ── Tunables (code constants) ────────────────────────────────────────────────
 INCIDENT_FREE_TIERS = (90, 180, 365)  # days-since-last-recordable thresholds
@@ -117,7 +118,6 @@ def decide_milestone_action(existing: Optional[dict], candidate: dict) -> str:
 
 # ── Async runner ─────────────────────────────────────────────────────────────
 async def _run_broker_milestones() -> dict:
-    from app.matcha.routes.ir_incidents import compute_wc_metrics
     from app.matcha.dependencies import BROKER_ACTIVE_LINK_STATUSES
 
     conn = await get_db_connection()

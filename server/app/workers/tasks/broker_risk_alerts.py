@@ -17,6 +17,7 @@ from typing import Optional
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics
 
 # ── Tunables (code constants per design; no per-broker settings UI) ──────────
 COOLDOWN_DAYS = 1               # re-email once per day until broker marks viewed
@@ -209,7 +210,6 @@ def decide_action(existing: Optional[dict], candidate: dict, *, now: datetime) -
 async def _run_broker_risk_alerts() -> dict:
     from app.core.services.email import EmailService
     from app.config import get_settings
-    from app.matcha.routes.ir_incidents import compute_wc_metrics
     from app.matcha.dependencies import BROKER_ACTIVE_LINK_STATUSES
 
     conn = await get_db_connection()

@@ -82,8 +82,8 @@ router.include_router(_broker_sharing_router)
 
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
-from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
-from .analytics import compute_behavioral_friction  # noqa: F401  (used by broker_risk_alerts worker)
+from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
+from app.matcha.services.ir.ir_wc_metrics import compute_behavioral_friction  # noqa: F401  (used by broker_risk_alerts worker)
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
     MAX_INTAKE_FILES,
     MAX_INTAKE_FILE_BYTES,
