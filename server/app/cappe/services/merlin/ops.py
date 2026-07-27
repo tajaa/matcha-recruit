@@ -24,7 +24,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from .merlin_catalog import (
+from .catalog import (
     AI_ASPECT_RATIOS,
     AI_IMAGE_PROMPT_MAX,
     AI_IMAGE_SIZES,
@@ -49,9 +49,9 @@ from .merlin_catalog import (
     THEME_MODE_VALUES,
 )
 
-from .section_presets import PRESETS_BY_KEY, SECTION_PRESETS
-from .style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
-from .theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
+from ..section_presets import PRESETS_BY_KEY, SECTION_PRESETS
+from ..style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
+from ..theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -62,7 +62,7 @@ _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 _COLUMN_DESIGN_KEYS = frozenset({"columns", "columnsMd", "columnsSm"})
 
 # ---------------------------------------------------------------------------
-# Low-level value helpers (moved verbatim from merlin.py — behavior-preserving)
+# Low-level value helpers (moved verbatim from merlin/turn.py — behavior-preserving)
 # ---------------------------------------------------------------------------
 
 def _sid(value: Any) -> Optional[str]:
@@ -849,7 +849,7 @@ OP_NAMES: frozenset[str] = frozenset(OPS_BY_NAME)
 # One JSON view of the whole registry-derived surface, so a consumer (the editor,
 # tooling, a drift test) can read the op/block/design/theme vocabulary from the
 # server's single source of truth instead of hand-mirroring it. This is the
-# mechanism that retires merlin_catalog.py's "hand-maintained mirror" role;
+# mechanism that retires merlin/catalog.py's "hand-maintained mirror" role;
 # wiring the frontend to consume it is a separate (client) stage.
 
 def _spec_json(spec: Any) -> Any:
@@ -872,7 +872,7 @@ def _spec_json(spec: Any) -> Any:
 def build_merlin_schema() -> dict[str, Any]:
     """Assemble the full Merlin schema from the registries + catalog. Pure and
     JSON-serializable."""
-    from .merlin_catalog import (
+    from .catalog import (
         BLOCK_LABELS,
         CANVAS_ELEMENT_KINDS,
         CANVAS_GRID_COLS,
@@ -992,7 +992,7 @@ def validate_ops(
         # real op's validator (see _v_apply_style_recipe / _v_apply_section_
         # preset). Snapshot BEFORE validating, not just the op name after: if
         # the delegate rejects, the rejection (and the retry feedback
-        # _rejection_feedback in merlin.py builds from it) must describe the
+        # _rejection_feedback in merlin/turn.py builds from it) must describe the
         # op the model actually sent, not the expanded shape a rewritten "op"
         # alone would still leave behind.
         original_raw = dict(raw)

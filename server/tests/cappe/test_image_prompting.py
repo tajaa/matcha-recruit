@@ -11,7 +11,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services.image_prompting import build_image_prompt  # noqa: E402
-from app.cappe.services.merlin_catalog import AI_IMAGE_PROMPT_MAX  # noqa: E402
+from app.cappe.services.merlin.catalog import AI_IMAGE_PROMPT_MAX  # noqa: E402
 
 
 def test_bare_prompt_gains_default_style_and_mood_clauses():

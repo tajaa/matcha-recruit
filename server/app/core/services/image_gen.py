@@ -42,14 +42,14 @@ IMAGE_GEN_TIMEOUT = 60  # seconds — outer backstop on the awaited coroutine
 # wait_for gives up. Without this a stalled endpoint pins a shared pool thread.
 _HTTP_TIMEOUT_MS = 55_000
 # Aspect ratios the model accepts. The AI-op validator keeps a mirror of these
-# keys in `cappe/services/merlin_catalog.py:AI_ASPECT_RATIOS` (that module must
+# keys in `cappe/services/merlin/catalog.py:AI_ASPECT_RATIOS` (that module must
 # stay import-light — no google SDK — so it can't import this one).
 ASPECT_RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"})
 DEFAULT_ASPECT = "16:9"
 # Output resolutions the model accepts (uppercase "K" is load-bearing — the SDK
 # passes this straight through as a free-form string; a lowercase "2k" is
 # silently ignored by the API and the model falls back to its 1K default).
-# Mirror in `cappe/services/merlin_catalog.py:AI_IMAGE_SIZES` (import-light).
+# Mirror in `cappe/services/merlin/catalog.py:AI_IMAGE_SIZES` (import-light).
 IMAGE_SIZES = frozenset({"512", "1K", "2K", "4K"})
 
 

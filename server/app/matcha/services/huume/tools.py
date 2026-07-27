@@ -1,6 +1,6 @@
 """Huume's tool registry — the loop's vocabulary.
 
-Mirrors the shape of `cappe/services/merlin_ops.py` (frozen-dataclass entries
+Mirrors the shape of `cappe/services/merlin/ops.py` (frozen-dataclass entries
 + a single dict lookup), scaled down to what a Gemini-native function-calling
 tool declaration needs: no client-side applier, no op-shape prompt lines
 (each tool's own `description` carries that instead, since Huume's tools are

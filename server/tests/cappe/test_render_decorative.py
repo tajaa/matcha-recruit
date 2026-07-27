@@ -16,7 +16,7 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-from app.cappe.services.merlin_ops import validate_ops  # noqa: E402
+from app.cappe.services.merlin.ops import validate_ops  # noqa: E402
 from app.cappe.services.render import _DIVIDER_PATHS, render_site_html  # noqa: E402
 
 _BLOCKS = [{"id": "b1", "type": "hero", "heading": "H"}]

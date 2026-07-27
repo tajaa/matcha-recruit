@@ -17,12 +17,12 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from ..routes._shared import loads_list
+from ..common import loads_list
 
 logger = logging.getLogger(__name__)
 
 # MESSAGES (not turns — a turn is a user+assistant pair) replayed into the
-# prompt. Mirrors _MAX_HISTORY_MESSAGES in merlin.py/merlin_agent.py — the
+# prompt. Mirrors _MAX_HISTORY_MESSAGES in merlin/turn.py / merlin/agent.py — the
 # transcript can be long now that it persists, but the prompt window can't
 # grow with it. Was named HISTORY_TURNS at 10 (5 actual exchanges) while the
 # two prompt-builders' own "_MAX_HISTORY_TURNS" slice was also 10 messages —

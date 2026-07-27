@@ -23,7 +23,7 @@ from ..models.cappe import (
 from ..services import cappe_assets, image_quota
 from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
-from ..services.merlin_catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
+from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
 from ._shared import get_owned_site
 
 logger = logging.getLogger(__name__)

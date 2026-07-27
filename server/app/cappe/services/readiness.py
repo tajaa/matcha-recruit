@@ -5,7 +5,7 @@ something to book or buy). Recommended items are nudges, not blockers. The same
 computation backs the GET /readiness endpoint and the publish gate, so the UI
 and the server can never disagree about what's missing.
 """
-from ..routes._shared import loads
+from .common import loads
 
 # Blocks that count as real homepage content (an intro / about / sections).
 _CONTENT_BLOCKS = {"hero", "text", "features", "menu", "gallery", "pricing", "testimonial"}

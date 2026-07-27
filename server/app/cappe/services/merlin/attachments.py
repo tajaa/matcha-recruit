@@ -25,8 +25,8 @@ import io
 import logging
 from typing import Any, Optional
 
-from ...config import get_settings
-from ...core.services.storage import get_storage
+from ....config import get_settings
+from ....core.services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 

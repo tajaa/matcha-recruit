@@ -1,6 +1,6 @@
 """The AI image-generation daily quota, shared by the editor's Generate button
 (`routes/uploads.py`) and Merlin's agent-loop `generate_image` tool
-(`services/merlin_agent.py`).
+(`services/merlin/agent.py`).
 
 One counter, one place the numbers live — a request through either path spends
 against the same allowance, so an agent turn can't grant free image generation

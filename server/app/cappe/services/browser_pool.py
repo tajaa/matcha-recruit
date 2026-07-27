@@ -1,6 +1,6 @@
 """A process-wide headless Chromium, for screenshotting rendered Cappe pages.
 
-The Merlin agent loop (`services/merlin_agent.py`) renders its working copy of
+The Merlin agent loop (`services/merlin/agent.py`) renders its working copy of
 the page to standalone HTML and screenshots it, so the model can SEE what its
 own edit did instead of reasoning about a JSON tree. That happens inside an
 interactive SSE turn, so:

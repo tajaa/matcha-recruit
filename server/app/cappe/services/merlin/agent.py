@@ -1,6 +1,6 @@
 """Merlin's agent loop — the version of Merlin that can SEE its own work.
 
-The single-shot path (`services/merlin.py`) asks Gemini for an op plan and
+The single-shot path (`services/merlin/turn.py`) asks Gemini for an op plan and
 returns it. That model has never looked at the page: it reasons over a JSON
 block tree and a theme dict, which is exactly how the 2026-07-21 incidents
 happened (a dark-on-dark gradient that rendered invisible; a "make it look
@@ -41,22 +41,22 @@ from typing import Any, AsyncIterator, Optional
 from fastapi import HTTPException
 from google.genai import types
 
-from ...core.services.ai_usage import feature_scope
-from ...core.services.genai_client import get_genai_client
-from ...core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
-from ...core.services.storage import get_storage
-from .browser_pool import SHOT_EXT, SHOT_MIME
-from .design_gate import is_premium_plan
-from . import image_quota
-from .merlin import (
+from ....core.services.ai_usage import feature_scope
+from ....core.services.genai_client import get_genai_client
+from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from ....core.services.storage import get_storage
+from ..browser_pool import SHOT_EXT, SHOT_MIME
+from ..design_gate import is_premium_plan
+from .. import image_quota
+from .turn import (
     DEFAULT_MODEL_TIER,
     build_shared_prompt_sections,
     has_theme_intent,
     strip_prompt_noise,
 )
-from .merlin_apply import apply_ops
-from .merlin_attachments import caption_lines
-from .merlin_catalog import (
+from .apply import apply_ops
+from .attachments import caption_lines
+from .catalog import (
     AI_ASPECT_RATIOS,
     AI_IMAGE_PROMPT_MAX,
     AI_IMAGE_SIZE_COST_ESTIMATE,
@@ -65,7 +65,7 @@ from .merlin_catalog import (
     DEFAULT_AI_IMAGE_SIZE,
     MODEL_TIERS,
 )
-from .merlin_ops import validate_ops
+from .ops import validate_ops
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +95,13 @@ _BOUNDS: dict[str, _Bounds] = {
 # can't consume the whole turn.
 _CALL_TIMEOUT = 75.0
 
-# MESSAGES, not turns — matches merlin_store.HISTORY_MESSAGES / merlin.py's
+# MESSAGES, not turns — matches merlin/store.py's HISTORY_MESSAGES / merlin/turn.py's
 # own constant of the same corrected name (see that file's comment: named
 # _MAX_HISTORY_TURNS at 10 while already meaning messages, this slice never
 # actually trimmed anything since the store query already capped there first).
 _MAX_HISTORY_MESSAGES = 20
 
-# `MERLIN_OPS`' MAX_OPS_PER_TURN (merlin_ops.py) caps a single apply_ops CALL —
+# `MERLIN_OPS`' MAX_OPS_PER_TURN (merlin/ops.py) caps a single apply_ops CALL —
 # the single-shot path's only call. The agent loop can call apply_ops several
 # times in one turn (fix, screenshot, fix again), and op_log accumulates
 # across all of them uncapped — a `max` turn could legitimately reach ~180 ops
@@ -523,7 +523,7 @@ async def run_merlin_agent(
     async def do_screenshot(args: dict[str, Any]):
         """Returns (function_response payload, step frame, png bytes | None)."""
         nonlocal screenshots
-        from .browser_pool import ScreenshotUnavailable, screenshot_html
+        from ..browser_pool import ScreenshotUnavailable, screenshot_html
 
         viewport = args.get("viewport") or "desktop"
         if screenshots >= bounds.screenshots:
@@ -617,8 +617,8 @@ async def run_merlin_agent(
         op) — the whole point of the tool is that the model sees what it made.
         """
         nonlocal work_blocks, work_theme
-        from ...core.services.image_gen import IMAGE_MODEL, ImageGenError, generate_image
-        from .image_prompting import build_image_prompt
+        from ....core.services.image_gen import IMAGE_MODEL, ImageGenError, generate_image
+        from ..image_prompting import build_image_prompt
 
         if time_left() <= 0:
             # Same reasoning as do_screenshot's check: generation has its own
@@ -820,7 +820,7 @@ async def run_merlin_agent(
                     if png is not None:
                         image_parts.append(types.Part.from_bytes(data=png, mime_type=SHOT_MIME))
                 elif name == "generate_image":
-                    from ...core.services.image_gen import IMAGE_MODEL as _IMG_MODEL
+                    from ....core.services.image_gen import IMAGE_MODEL as _IMG_MODEL
 
                     _size = args.get("image_size") if args.get("image_size") in AI_IMAGE_SIZES else DEFAULT_AI_IMAGE_SIZE
                     _cost = AI_IMAGE_SIZE_COST_ESTIMATE.get(_size, "")

@@ -23,7 +23,7 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.services import merlin_store  # noqa: E402
+from app.cappe.services.merlin import store as merlin_store  # noqa: E402
 
 _NOW = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
 

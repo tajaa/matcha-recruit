@@ -22,8 +22,8 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.services import merlin_router  # noqa: E402
-from app.cappe.services.merlin_router import route_tier  # noqa: E402
+from app.cappe.services.merlin import routing as merlin_router  # noqa: E402
+from app.cappe.services.merlin.routing import route_tier  # noqa: E402
 
 _PRO = "pro"
 _FREE = "free"
@@ -162,7 +162,7 @@ async def test_a_classified_tier_is_used_as_is(classifier, expected):
 def test_complexity_verdicts_map_onto_real_tiers():
     """The model answers in complexity words; those must land on tiers that
     exist, or every classified turn silently falls back."""
-    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    from app.cappe.services.merlin.catalog import MODEL_TIERS
 
     assert set(merlin_router._COMPLEXITY_TIERS) == {"trivial", "standard", "complex"}
     for tier in merlin_router._COMPLEXITY_TIERS.values():

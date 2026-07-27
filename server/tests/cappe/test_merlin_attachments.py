@@ -21,8 +21,8 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.services import merlin_attachments  # noqa: E402
-from app.cappe.services.merlin_attachments import (  # noqa: E402
+from app.cappe.services.merlin import attachments as merlin_attachments  # noqa: E402
+from app.cappe.services.merlin.attachments import (  # noqa: E402
     caption_lines,
     load_attachments,
 )

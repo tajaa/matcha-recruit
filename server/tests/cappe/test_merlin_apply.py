@@ -24,7 +24,7 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.services.merlin_apply import apply_ops  # noqa: E402
+from app.cappe.services.merlin.apply import apply_ops  # noqa: E402
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "merlin_apply_cases.json"
 _CASES = json.loads(_FIXTURE.read_text())["cases"]

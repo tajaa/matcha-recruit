@@ -22,8 +22,8 @@ load_settings()  # run_merlin_turn reads settings.analysis_model
 
 from google.genai.types import ThinkingLevel as _ThinkingLevel  # noqa: E402
 
-from app.cappe.services import merlin  # noqa: E402
-from app.cappe.services.merlin import _build_prompt, run_merlin_turn  # noqa: E402
+from app.cappe.services.merlin import turn as merlin  # noqa: E402
+from app.cappe.services.merlin.turn import _build_prompt, run_merlin_turn  # noqa: E402
 
 _BLOCKS = [{"id": "b1", "type": "hero", "heading": "Old"}]
 
@@ -245,7 +245,7 @@ async def test_invalid_ops_are_reported_not_raised(monkeypatch):
     ("business", "max", "max"),
 ])
 def test_resolve_model_tier_clamps_to_plan(plan, requested, expected):
-    from app.cappe.services.merlin import resolve_model_tier
+    from app.cappe.services.merlin.turn import resolve_model_tier
     assert resolve_model_tier(requested, plan) == expected
 
 
@@ -285,14 +285,14 @@ async def test_turn_configures_thinking_per_tier(monkeypatch, tier, expect_level
 def test_no_tier_uses_a_thinking_budget():
     """The 3.x models take thinking_level only. A tier configured with a
     budget is a 400 on every single turn it serves."""
-    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    from app.cappe.services.merlin.catalog import MODEL_TIERS
     valid = {"minimal", "low", "medium", "high"}
     for name, cfg in MODEL_TIERS.items():
         assert cfg.thinking_level in valid, f"{name}: {cfg.thinking_level!r} is not a ThinkingLevel"
 
 
 def test_max_tier_gets_a_longer_timeout_than_lite():
-    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    from app.cappe.services.merlin.catalog import MODEL_TIERS
     assert MODEL_TIERS["max"].timeout > MODEL_TIERS["lite"].timeout
 
 
@@ -300,7 +300,7 @@ def test_no_heavy_pro_tier_is_offered():
     """Guard against re-adding an unmetered expensive model by accident. `max`
     doesn't violate this — it's the SAME model as `regular` (3.6-flash)
     reconfigured with more thinking, not a distinct heavier model."""
-    from app.cappe.services.merlin_catalog import MODEL_TIERS
+    from app.cappe.services.merlin.catalog import MODEL_TIERS
     assert set(MODEL_TIERS) == {"lite", "regular", "max"}
     assert not any("pro-" in t.model for t in MODEL_TIERS.values())
 
@@ -316,7 +316,7 @@ async def test_turn_falls_back_to_lite_on_an_unknown_tier(monkeypatch):
 
 
 def test_every_tier_maps_to_a_real_model():
-    from app.cappe.services.merlin_catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
+    from app.cappe.services.merlin.catalog import DEFAULT_MODEL_TIER, MODEL_TIERS
     assert DEFAULT_MODEL_TIER in MODEL_TIERS
     assert all(t.model.startswith("gemini-") for t in MODEL_TIERS.values())
     # No two tiers are configured identically (max/regular share a MODEL but
@@ -344,7 +344,7 @@ def test_every_tier_maps_to_a_real_model():
     ("update the palette please", True),
 ])
 def test_theme_intent_detection(message, expected):
-    from app.cappe.services.merlin import _THEME_INTENT_RE
+    from app.cappe.services.merlin.turn import _THEME_INTENT_RE
     assert bool(_THEME_INTENT_RE.search(message)) is expected
 
 

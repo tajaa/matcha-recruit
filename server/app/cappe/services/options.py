@@ -1,10 +1,15 @@
-"""Cappe product options — pure validation + pricing (no DB, unit-tested).
+"""Cappe product options — validation + pricing, plus the group/option fetch.
 
 A product's option groups (Size, Milk, Add-ons) carry options with a signed
 price_delta_cents. At checkout the customer sends only the selected option ids;
-this module validates them against the product's live groups and returns the
-total delta plus a snapshot to persist on the order line. Money is recomputed
-here server-side — never trusted from the client.
+`validate_and_price_options` validates them against the product's live groups
+(fetched by `fetch_option_groups`) and returns the total delta plus a snapshot
+to persist on the order line. Money is recomputed here server-side — never
+trusted from the client.
+
+`validate_and_price_options` is pure (no DB, unit-tested); `fetch_option_groups`
+is the DB-touching fetch that feeds it — shared by the owner shop routes and
+the public storefront.
 """
 
 
@@ -53,3 +58,38 @@ def validate_and_price_options(groups, selected_ids):
             snapshot.append({"group": g.get("name"), "name": o.get("name"), "price_delta_cents": d})
 
     return delta_total, snapshot
+
+
+async def fetch_option_groups(conn, product_ids: list) -> dict:
+    """{product_id: [group dicts with nested options]} for the given products.
+    Read-only; shared by the owner shop routes and the public storefront."""
+    if not product_ids:
+        return {}
+    grows = await conn.fetch(
+        "SELECT id, product_id, name, select_type, required, sort_order "
+        "FROM cappe_product_option_groups WHERE product_id = ANY($1::uuid[]) "
+        "ORDER BY sort_order, created_at",
+        product_ids,
+    )
+    orows = await conn.fetch(
+        "SELECT o.id, o.group_id, o.name, o.price_delta_cents, o.sort_order, o.inventory "
+        "FROM cappe_product_options o "
+        "JOIN cappe_product_option_groups g ON g.id = o.group_id "
+        "WHERE g.product_id = ANY($1::uuid[]) ORDER BY o.sort_order, o.created_at",
+        product_ids,
+    )
+    opts_by_group: dict = {}
+    for o in orows:
+        opts_by_group.setdefault(o["group_id"], []).append({
+            "id": o["id"], "name": o["name"],
+            "price_delta_cents": o["price_delta_cents"], "sort_order": o["sort_order"],
+            "inventory": o["inventory"],
+        })
+    by_product: dict = {}
+    for g in grows:
+        by_product.setdefault(g["product_id"], []).append({
+            "id": g["id"], "name": g["name"], "select_type": g["select_type"],
+            "required": g["required"], "sort_order": g["sort_order"],
+            "options": opts_by_group.get(g["id"], []),
+        })
+    return by_product

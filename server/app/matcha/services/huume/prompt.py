@@ -1,7 +1,7 @@
 """Huume's system prompt. The tool list is generated from `tools.py`'s
 registry — never hand-duplicate a tool's name/description here, or the
 prompt and the actual declarations can drift (same rule Merlin's
-`merlin.py:_op_shapes_text` follows for its op registry)."""
+`merlin/turn.py:_op_shapes_text` follows for its op registry)."""
 
 from __future__ import annotations
 

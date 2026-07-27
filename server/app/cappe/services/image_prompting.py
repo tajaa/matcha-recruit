@@ -16,7 +16,7 @@ Pure string building — safe to unit test without the SDK, and reusable by
 both the wizard's direct-generate path and (if it ever needs it) the agent
 tool's prompt guidance.
 """
-from .merlin_catalog import AI_IMAGE_PROMPT_MAX
+from .merlin.catalog import AI_IMAGE_PROMPT_MAX
 
 # Keyed on the wizard's own chip labels (MerlinPanel.tsx WIZARD_STYLES /
 # WIZARD_MOODS) so a chip pick maps straight to a clause. Free text (a style

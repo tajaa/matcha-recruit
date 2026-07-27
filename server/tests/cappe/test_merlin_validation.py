@@ -8,8 +8,8 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
-from app.cappe.services.merlin import validate_ops  # noqa: E402
-from app.cappe.services.merlin_catalog import CANVAS_MAX_ELEMENTS, MAX_OPS_PER_TURN  # noqa: E402
+from app.cappe.services.merlin.turn import validate_ops  # noqa: E402
+from app.cappe.services.merlin.catalog import CANVAS_MAX_ELEMENTS, MAX_OPS_PER_TURN  # noqa: E402
 
 _HERO = {"id": "b1", "type": "hero", "heading": "Old", "subheading": "Sub"}
 _CANVAS = {
@@ -318,7 +318,7 @@ def test_server_catalog_matches_client_block_schemas():
     import pathlib
     import re
 
-    from app.cappe.services.merlin_catalog import BLOCK_TYPES
+    from app.cappe.services.merlin.catalog import BLOCK_TYPES
 
     schemas = pathlib.Path(__file__).resolve().parents[2] / (
         "../client/src/cappe/pages/site/PageEditor/blockSchemas.ts"

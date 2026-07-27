@@ -3,7 +3,7 @@
 `client/src/cappe/pages/site/PageEditor/merlinOps.ts:applyMerlinOps` is the
 canonical applier — the client is still the one that mutates real editor state,
 and this module never writes a page. It exists so the AGENT LOOP
-(`services/merlin_agent.py`) can fold ops onto a throwaway copy of the request
+(`services/merlin/agent.py`) can fold ops onto a throwaway copy of the request
 snapshot, render THAT, and screenshot it — i.e. so the model can look at what
 its own edit did before committing to it.
 
@@ -37,13 +37,13 @@ import re
 import uuid
 from typing import Any, Optional
 
-from .merlin_catalog import (
+from .catalog import (
     BLOCK_FIELDS,
     BLOCK_LABELS,
     CANVAS_MAX_ELEMENTS,
     LIST_KINDS,
 )
-from .theme_presets import PRESETS_BY_ID
+from ..theme_presets import PRESETS_BY_ID
 
 
 class ApplyResult:
@@ -207,7 +207,7 @@ def apply_ops(
     ops: list[dict[str, Any]],
 ) -> ApplyResult:
     """Fold validated ops onto a snapshot. Pure — the caller's blocks/theme are
-    never mutated. Ops are expected to have passed `merlin_ops.validate_ops`
+    never mutated. Ops are expected to have passed `merlin.ops.validate_ops`
     already; anything that still can't be resolved (an id removed by an earlier
     op in the same turn) degrades to a skipped chip, never an exception."""
     next_blocks: list[dict[str, Any]] = [copy.deepcopy(b) for b in blocks]

@@ -26,7 +26,7 @@ from app.cappe.services.design_registry import (  # noqa: E402
     RenderRule,
     build_design_groups,
 )
-from app.cappe.services.merlin_catalog import DESIGN_GROUPS  # noqa: E402
+from app.cappe.services.merlin.catalog import DESIGN_GROUPS  # noqa: E402
 from app.cappe.services.render import _emit_design_group, render_site_html  # noqa: E402
 
 # The historical, hand-written AI surface. If a real change to what Merlin may

@@ -14,8 +14,8 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 import json  # noqa: E402
 
-from app.cappe.services.merlin_catalog import BLOCK_FIELDS, DESIGN_GROUPS  # noqa: E402
-from app.cappe.services.merlin_ops import (  # noqa: E402
+from app.cappe.services.merlin.catalog import BLOCK_FIELDS, DESIGN_GROUPS  # noqa: E402
+from app.cappe.services.merlin.ops import (  # noqa: E402
     MERLIN_OPS,
     OP_NAMES,
     OPS_BY_NAME,
