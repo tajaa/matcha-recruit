@@ -26,7 +26,7 @@ from google.genai import types
 LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents",
-    "pto_leave", "policies", "discipline", "compliance",
+    "pto_leave", "policies", "discipline", "compliance", "documents",
 )
 
 
@@ -59,9 +59,11 @@ TOOLS: tuple[HuumeTool, ...] = (
         "company-wide training completion/overdue status, the published "
         "schedule for the next 7 days, recent incident counts by type/severity "
         "(never named individuals — that's a legal record), credential/license "
-        "expirations, upcoming approved PTO/leave, active policy titles, "
-        "discipline record counts by status (never narrative details), or "
-        "open compliance requirement counts by category. Call this before "
+        "expirations, upcoming approved PTO/leave plus PENDING PTO requests "
+        "awaiting a decision, active policy titles, discipline record counts "
+        "by status (never narrative details), open compliance requirement "
+        "counts by category, or documents still awaiting employee signature. "
+        "Call this before "
         "drafting an offer if you're unsure whether the candidate already has "
         "one, or before building a plan to check what integrations are "
         "actually connected.",
@@ -180,6 +182,86 @@ TOOLS: tuple[HuumeTool, ...] = (
             ),
         },
         required=["employee_name", "infraction_type", "occurrence_dates", "description"],
+    ),
+    # ---- HR ops skills (each re-checks its own subsystem flag) ---------------
+    _tool(
+        "report_incident", "staged",
+        "File a safety, behavioral, property, or near-miss incident into the "
+        "company's IR log. This STAGES the report for the admin's confirmation "
+        "— nothing is filed until they confirm on a LATER turn (pass confirm_id "
+        "back exactly as given). An incident is a legal record: use the admin's "
+        "own account of what happened and never invent details. Leave "
+        "incident_type/severity out unless the admin was explicit — the IR "
+        "classifier infers them. Named individuals belong in the description "
+        "only if the admin named them; the record is editable in Incidents "
+        "afterwards.",
+        properties={
+            "description": types.Schema(type=types.Type.STRING, description="Factual account of what happened, in the admin's words."),
+            "occurred_at": types.Schema(type=types.Type.STRING, description="ISO datetime of the incident. Omit to use now."),
+            "incident_type": types.Schema(type=types.Type.STRING, enum=["safety", "behavioral", "property", "near_miss", "other"]),
+            "severity": types.Schema(type=types.Type.STRING, enum=["critical", "high", "medium", "low"]),
+            "location": types.Schema(type=types.Type.STRING, description="Where it happened, e.g. 'Warehouse B loading dock'."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
+            ),
+        },
+        required=["description"],
+    ),
+    _tool(
+        "open_er_case", "staged",
+        "Open an employment-relations (ER) case — the investigation file for a "
+        "workplace complaint or dispute. This STAGES the case for the admin's "
+        "confirmation; nothing is created until they confirm on a LATER turn "
+        "(pass confirm_id back exactly as given). Involved employees are NEVER "
+        "inferred from the narrative — the admin adds them on the ER page. Use "
+        "the admin's own words for the description.",
+        properties={
+            "description": types.Schema(type=types.Type.STRING, description="What was reported or is in dispute, in the admin's words."),
+            "title": types.Schema(type=types.Type.STRING, description="Short case title. Omit to derive one from the description."),
+            "category": types.Schema(
+                type=types.Type.STRING,
+                enum=["harassment", "discrimination", "safety", "retaliation", "policy_violation", "misconduct", "wage_hour", "other"],
+            ),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
+            ),
+        },
+        required=["description"],
+    ),
+    _tool(
+        "assign_training", "staged",
+        "Assign a training requirement to specific employees. This STAGES the "
+        "assignment for the admin's confirmation; nothing is assigned until "
+        "they confirm on a LATER turn. Takes ids, never names — call "
+        "lookup_context(topic='training') for the requirement catalog and "
+        "topic='roster' (or 'employee') for employee ids first. An employee "
+        "who already has this training open keeps the earlier due date.",
+        properties={
+            "requirement_id": types.Schema(type=types.Type.STRING, description="UUID of the training requirement, from lookup_context(topic='training')."),
+            "employee_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="UUIDs of employees to assign, from lookup_context(topic='roster').",
+            ),
+            "due_date": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD. Omit to use the requirement's own default."),
+        },
+        required=["requirement_id", "employee_ids"],
+    ),
+    _tool(
+        "decide_pto_request", "staged",
+        "Approve or deny a PENDING PTO request. This STAGES the decision for "
+        "the admin's confirmation; nothing changes until they confirm on a "
+        "LATER turn. Takes the request's id — call "
+        "lookup_context(topic='pto_leave') to list pending requests and their "
+        "ids first. Approving also draws the hours down from the employee's "
+        "balance.",
+        properties={
+            "request_id": types.Schema(type=types.Type.STRING, description="UUID of the pending PTO request, from lookup_context(topic='pto_leave')."),
+            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny"]),
+            "note": types.Schema(type=types.Type.STRING, description="Optional note recorded with the decision."),
+        },
+        required=["request_id", "decision"],
     ),
     # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
     _tool(

@@ -8,7 +8,9 @@ role-gate execution on its own — every guard a normal record write would get
 must be re-asserted here.
 
 Staged things live in `mw_threads.current_state`:
-  - `huume_action` — a single staged action (`send_offer` or `discipline_draft`).
+  - `huume_action` — a SINGLE staged action, one slot: `send_offer`,
+    `discipline_draft`, `ir_report`, `er_case`, `training_assign` or
+    `pto_decision`. Staging a new one replaces whatever was pending.
   - `huume_plans`  — onboarding plans staged after an offer is accepted,
     keyed by `offer_id` (a thread can be onboarding several candidates at
     once — each plan is independent).
@@ -23,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -67,7 +70,7 @@ _STEP_INTEGRATION_PROVIDER = {
 @dataclass(frozen=True)
 class HuumeVerdict:
     """Result of the pure safety envelope for a staged `huume_action`
-    (`send_offer` or `discipline_draft`). Mirrors HrActionVerdict — a
+    (any type in _HUUME_ACTION_REQUIRED_FEATURE). Mirrors HrActionVerdict — a
     would-be "clarify" (missing/invalid fields) collapses into "refuse"
     here since Huume's callers already treat `not verdict.ok` uniformly as
     a refusal message relayed to the model; a distinct kind would be
@@ -92,7 +95,30 @@ class HuumeVerdict:
 _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "send_offer": "offer_letters",
     "discipline_draft": "discipline",
+    "ir_report": "incidents",
+    "er_case": "er_copilot",
+    "training_assign": "training",
+    "pto_decision": "time_off",
 }
+
+# Vocabularies the confirm-turn validators check against. Mirrors of the
+# authoritative Literals — IRIncidentType/IRSeverity (models/ir_incident.py:10-11)
+# and ERCaseCategory (models/er_case.py:11) — kept local so this module stays
+# pure and import-light. A model-supplied value outside the set is DROPPED, not
+# refused, for the optional classifier-inferred fields; a bad value in a
+# required field refuses.
+_IR_INCIDENT_TYPES = frozenset({"safety", "behavioral", "property", "near_miss", "other"})
+_IR_SEVERITIES = frozenset({"critical", "high", "medium", "low"})
+_ER_CATEGORIES = frozenset({
+    "harassment", "discrimination", "safety", "retaliation",
+    "policy_violation", "misconduct", "wage_hour", "other",
+})
+_PTO_DECISIONS = frozenset({"approve", "deny"})
+# Staged types routed to huume's own hr_ops_skill executors (see
+# execute_huume_action for why these don't reuse hr_pilot_actions').
+_HR_OPS_ACTIONS = frozenset({"ir_report", "er_case", "training_assign", "pto_decision"})
+_MAX_TRAINING_ASSIGNEES = 50
+_MAX_PTO_NOTE_CHARS = 500
 
 
 def evaluate_huume_action(
@@ -104,7 +130,7 @@ def evaluate_huume_action(
     this_turn_staged_new: bool,
 ) -> HuumeVerdict:
     """Pure, DB-free safety envelope for executing a staged `huume_action`
-    (`send_offer` or `discipline_draft`). Order: authz → confirm-first →
+    (any type in _HUUME_ACTION_REQUIRED_FEATURE). Order: authz → confirm-first →
     something staged → per-type validation.
 
     Authz runs BEFORE the confirm-first stage branch — a caller who will
@@ -171,7 +197,184 @@ def evaluate_huume_action(
             )
         return HuumeVerdict(kind="proceed", message="", action=normalized)
 
+    if action_type == "ir_report":
+        return _validate_ir_report(staged_action)
+
+    if action_type == "er_case":
+        return _validate_er_case(staged_action)
+
+    if action_type == "training_assign":
+        return _validate_training_assign(staged_action)
+
+    if action_type == "pto_decision":
+        return _validate_pto_decision(staged_action)
+
     return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
+
+
+def _parse_iso_date(value: Any) -> Optional[date]:
+    """Pure — a date, or None when unparseable. Accepts a full datetime and
+    keeps its date part (the model sometimes answers a date question with a
+    timestamp)."""
+    try:
+        return datetime.fromisoformat(str(value).strip().replace("Z", "+00:00")).date()
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    """Pure — a datetime, or None when unparseable. A bare date parses to
+    midnight, which is what `occurred_at` should mean when the admin gave a
+    day but no time."""
+    try:
+        return datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _is_uuid(value: Any) -> bool:
+    """Pure — True when `value` parses as a UUID. Keeps the validators from
+    handing a malformed id to a `WHERE id = $1` that would raise asyncpg's
+    InvalidTextRepresentation instead of a relayable refusal."""
+    try:
+        UUID(str(value))
+    except (ValueError, TypeError, AttributeError):
+        return False
+    return True
+
+
+def _validate_ir_report(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged incident report.
+
+    NOTE the deliberate absence of a hard-stop classifier re-check here (unlike
+    discipline_draft). An incident report's narrative contains safety/harassment
+    language BY CONSTRUCTION — filing it IS the sanctioned channel for that
+    content, exactly as hr_pilot_actions treats its _HANDOFF_ACTIONS. Running
+    the gate would refuse precisely the reports the tool exists to file.
+    """
+    description = str(staged.get("description") or "").strip()
+    if not description:
+        return HuumeVerdict(kind="refuse", message="There's no description of what happened to file.")
+
+    occurred_at = staged.get("occurred_at")
+    if occurred_at not in (None, ""):
+        if _parse_iso_datetime(occurred_at) is None:
+            return HuumeVerdict(
+                kind="refuse",
+                message="I couldn't read that incident date/time — give me a specific date (and time if you have it).",
+            )
+
+    normalized: dict[str, Any] = {
+        "type": "ir_report",
+        "description": description,
+        "occurred_at": occurred_at or None,
+        "location": (str(staged.get("location") or "").strip() or None),
+        "confirm_id": staged.get("confirm_id"),
+    }
+    # Unknown values for the classifier-inferred fields are dropped, not
+    # refused — create_incident_core defaults them and the IR classifier
+    # overrides only what the user didn't set.
+    incident_type = str(staged.get("incident_type") or "").strip().lower()
+    if incident_type in _IR_INCIDENT_TYPES:
+        normalized["incident_type"] = incident_type
+    severity = str(staged.get("severity") or "").strip().lower()
+    if severity in _IR_SEVERITIES:
+        normalized["severity"] = severity
+    return HuumeVerdict(kind="proceed", message="", action=normalized)
+
+
+def _validate_er_case(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged ER case. Same no-classifier
+    reasoning as _validate_ir_report — an ER case is the sanctioned channel
+    for exactly the content the hard-stop gate exists to route away from chat.
+    """
+    description = str(staged.get("description") or "").strip()
+    if not description:
+        return HuumeVerdict(kind="refuse", message="There's no description of the complaint or dispute to open a case with.")
+
+    normalized: dict[str, Any] = {
+        "type": "er_case",
+        "description": description,
+        "title": (str(staged.get("title") or "").strip() or None),
+        "confirm_id": staged.get("confirm_id"),
+    }
+    category = str(staged.get("category") or "").strip().lower()
+    if category in _ER_CATEGORIES:
+        normalized["category"] = category
+    return HuumeVerdict(kind="proceed", message="", action=normalized)
+
+
+def _validate_training_assign(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged training assignment. Ids only —
+    the tool description sends the model to lookup_context for them, so a
+    name here is a bug, not something to resolve fuzzily."""
+    requirement_id = staged.get("requirement_id")
+    if not _is_uuid(requirement_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the training requirement's id — look it up with lookup_context(topic='training') first.",
+        )
+
+    raw_ids = staged.get("employee_ids")
+    if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need at least one employee id — look them up with lookup_context(topic='roster') first.",
+        )
+    if len(raw_ids) > _MAX_TRAINING_ASSIGNEES:
+        return HuumeVerdict(
+            kind="refuse",
+            message=f"That's more than {_MAX_TRAINING_ASSIGNEES} employees at once — use the Training page for a company-wide assignment.",
+        )
+    employee_ids: list[str] = []
+    for value in raw_ids:
+        if not _is_uuid(value):
+            return HuumeVerdict(
+                kind="refuse",
+                message="One of those employee ids isn't valid — look them up with lookup_context(topic='roster') first.",
+            )
+        employee_ids.append(str(value))
+
+    due_date = staged.get("due_date")
+    if due_date not in (None, "") and _parse_iso_date(due_date) is None:
+        return HuumeVerdict(kind="refuse", message="I couldn't read that due date — give me a specific date.")
+
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "training_assign",
+        "requirement_id": str(requirement_id),
+        "employee_ids": employee_ids,
+        "due_date": due_date or None,
+    })
+
+
+def _validate_pto_decision(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged PTO approve/deny."""
+    request_id = staged.get("request_id")
+    if not _is_uuid(request_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the PTO request's id — look it up with lookup_context(topic='pto_leave') first.",
+        )
+    decision = str(staged.get("decision") or "").strip().lower()
+    if decision not in _PTO_DECISIONS:
+        return HuumeVerdict(kind="refuse", message="Tell me whether to approve or deny it.")
+    note = str(staged.get("note") or "").strip() or None
+    if note and len(note) > _MAX_PTO_NOTE_CHARS:
+        note = note[:_MAX_PTO_NOTE_CHARS]
+    # A denial's reason is stored on the record (pto_requests.denial_reason) and
+    # the core refuses without one — catch it here so the model gets a
+    # relayable "ask them why" instead of a failed execute.
+    if decision == "deny" and not note:
+        return HuumeVerdict(
+            kind="refuse",
+            message="A denial needs a reason on the record — ask the admin why it's being denied.",
+        )
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "pto_decision",
+        "request_id": str(request_id),
+        "decision": decision,
+        "note": note,
+    })
 
 
 def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
@@ -386,6 +589,16 @@ async def execute_huume_action(*, company_id: UUID, actor_user_id: Optional[UUID
         # to this caller; the message still explains why.
         from app.matcha.services.pilots.hr_pilot_actions import execute_hr_action
         return await execute_hr_action(company_id=company_id, actor_user_id=actor_user_id, action=action)
+    if action.get("type") in _HR_OPS_ACTIONS:
+        # Huume-own executors rather than hr_pilot_actions'. HR Pilot's
+        # ir_report/er_case are hard-stop HAND-OFFS: they hardcode
+        # occurred_at=now, category="harassment" and source="hr_pilot", which
+        # is the wrong provenance and the wrong field set for an admin filing
+        # a report deliberately. Same underlying *_core writers, though.
+        from app.matcha.services.huume import hr_ops_skill
+        return await hr_ops_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
     return {"status": "error", "message": "Unsupported action."}
 
 

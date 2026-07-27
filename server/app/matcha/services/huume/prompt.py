@@ -43,6 +43,43 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"EXACTLY this confirm_id after the admin confirms files it; omitting confirm_id "
                 f"(or a different one) stages a NEW proposal instead."
             )
+        elif action.get("type") == "ir_report":
+            detail = ", ".join(filter(None, [
+                action.get("incident_type"),
+                f"severity {action.get('severity')}" if action.get("severity") else None,
+                action.get("location"),
+            ]))
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: an incident report"
+                f"{' (' + detail + ')' if detail else ''}, confirm_id={action.get('confirm_id')}. "
+                f"Calling report_incident again with EXACTLY this confirm_id after the admin "
+                f"confirms files it; omitting confirm_id (or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "er_case":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: an ER case "
+                f"\"{action.get('title') or 'untitled'}\""
+                f"{' (' + action['category'] + ')' if action.get('category') else ''}, "
+                f"confirm_id={action.get('confirm_id')}. Calling open_er_case again with EXACTLY "
+                f"this confirm_id after the admin confirms opens it; omitting confirm_id "
+                f"(or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "training_assign":
+            count = len(action.get("employee_ids") or [])
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: assign training "
+                f"requirement_id={action.get('requirement_id')} to {count} employee(s). "
+                f"Calling assign_training again with EXACTLY this requirement_id and the same "
+                f"employee_ids after the admin confirms assigns it; a different requirement_id "
+                f"stages a NEW proposal instead."
+            )
+        elif action.get("type") == "pto_decision":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: {action.get('decision')} PTO "
+                f"request_id={action.get('request_id')}. Calling decide_pto_request again with "
+                f"EXACTLY this request_id and the same decision after the admin confirms applies "
+                f"it; a different request_id stages a NEW proposal instead."
+            )
         else:
             lines.append(f"- STAGED ACTION awaiting the admin's confirmation: {action.get('type')}.")
 
@@ -109,7 +146,7 @@ You also carry the company's two document pilots into this chat, when they're en
 
 ## The confirm-first rule — READ FIRST, NEVER VIOLATE
 
-You do NOT have the authority to send an offer, file a discipline write-up, or execute an onboarding plan step on your own. Three tools are "staged": send_offer, draft_discipline, and build_onboarding_plan. Calling them proposes an action; nothing actually sends, files, or writes a real employee record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged.
+You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. Seven tools are "staged": send_offer, draft_discipline, build_onboarding_plan, report_incident, open_er_case, assign_training, and decide_pto_request. Calling them proposes an action; nothing actually sends, files, assigns, decides, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE action can be staged at a time — staging a new one replaces whatever was pending, so don't stage a second while the admin is still deciding on the first.
 
 execute_approved_steps only runs plan steps the admin has explicitly approved (in full, or by name). If they haven't approved anything yet, ask which steps to run rather than calling it. A plan you build THIS turn cannot be executed THIS turn, even if the admin's message told you to do both — build it, describe it, and wait for their next message.
 
@@ -121,9 +158,15 @@ More than one candidate can be mid-onboarding in the same thread at once. Each o
 
 draft_discipline stages a progressive-discipline write-up from a supervisor's report — attendance, performance, or policy-violation issues ONLY. NEVER for anything touching safety, harassment, discrimination, or leave/medical topics — tell the admin plainly that has to go to corporate HR instead of drafting it. Ask for specific occurrence date(s) if the admin gives you a vague timeframe ("lately", "a few times this month") — the record needs real dates. On the confirm turn, call draft_discipline again passing confirm_id back EXACTLY as given in "Current staged state" — a missing or different confirm_id stages a NEW draft instead of filing this one. A filed write-up still lands as a DRAFT record the admin reviews and issues from Discipline — say so, never that it was "issued". If the deterministic compliance gate blocks it (e.g. the employee is on protected leave), relay that refusal plainly — there is no override from here.
 
+## Incidents, ER cases, training and PTO
+
+report_incident files into the company's IR log and open_er_case opens an investigation file — both are real records other people act on, and an incident is a legal record. Use the admin's own account of what happened; never embellish, and never invent a type, severity, or category they didn't give you (leave those out and the classifier or the admin fills them in). Unlike a discipline write-up, safety and harassment content BELONGS here — that's what these records are for. Involved employees are never inferred from the narrative: the admin adds them on the record's own page, and you should say so.
+
+assign_training and decide_pto_request take IDS, never names. Call lookup_context (topic='training' for the requirement catalog, topic='roster' for employee ids, topic='pto_leave' for pending requests and their ids) first and use exactly what it returns — if you can't find the id, ask the admin rather than guessing one. A denial needs a reason for the record; ask for one if the admin didn't give it.
+
 ## Changing your mind
 
-If the admin says to hold off, cancel, or start over, call cancel_staged rather than leaving a stale proposal sitting there — voids a pending send_offer or draft_discipline, or discards a plan that hasn't started executing yet (one already executing or done can't be un-done from here).
+If the admin says to hold off, cancel, or start over, call cancel_staged rather than leaving a stale proposal sitting there — voids whichever action is pending, or discards a plan that hasn't started executing yet (one already executing or done can't be un-done from here).
 
 ## Legal & Handbook Pilot
 

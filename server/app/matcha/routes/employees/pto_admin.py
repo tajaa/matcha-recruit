@@ -15,6 +15,8 @@ from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 
+from ._shared import decide_pto_request_core
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -152,62 +154,23 @@ async def handle_pto_request(
     if request.action not in ["approve", "deny"]:
         raise HTTPException(status_code=400, detail="Invalid action. Must be 'approve' or 'deny'")
 
+    # The decision logic lives in `_shared.decide_pto_request_core` so Huume's
+    # `pto_decision` staged action reaches the same code path; this handler is
+    # the HTTP shaping around it. The transaction is new — an approval's two
+    # writes (status + balance draw-down) were previously unwrapped.
     async with get_connection() as conn:
-        # Verify request exists and belongs to company employee
-        pto_request = await conn.fetchrow(
-            """
-            SELECT pr.*, e.org_id FROM pto_requests pr
-            JOIN employees e ON pr.employee_id = e.id
-            WHERE pr.id = $1 AND e.org_id = $2
-            """,
-            request_id, company_id
-        )
-
-        if not pto_request:
-            raise HTTPException(status_code=404, detail="PTO request not found")
-
-        if pto_request["status"] != "pending":
-            raise HTTPException(status_code=400, detail="Can only approve/deny pending requests")
-
-        # Get admin's employee ID if they have one
-        admin_employee = await conn.fetchrow(
-            "SELECT id FROM employees WHERE user_id = $1",
-            current_user.id
-        )
-        approved_by = admin_employee["id"] if admin_employee else None
-
-        if request.action == "approve":
-            await conn.execute(
-                """
-                UPDATE pto_requests
-                SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW()
-                WHERE id = $2
-                """,
-                approved_by, request_id
+        async with conn.transaction():
+            result = await decide_pto_request_core(
+                conn,
+                company_id=company_id,
+                request_id=request_id,
+                decision=request.action,
+                actor_user_id=current_user.id,
+                note=request.denial_reason,
             )
 
-            # Update PTO balance used hours
-            await conn.execute(
-                """
-                UPDATE pto_balances
-                SET used_hours = used_hours + $1, updated_at = NOW()
-                WHERE employee_id = $2 AND year = EXTRACT(YEAR FROM CURRENT_DATE)
-                """,
-                pto_request["hours"], pto_request["employee_id"]
-            )
-
-            return {"message": "PTO request approved", "status": "approved"}
-        else:
-            if not request.denial_reason:
-                raise HTTPException(status_code=400, detail="Denial reason is required")
-
-            await conn.execute(
-                """
-                UPDATE pto_requests
-                SET status = 'denied', denial_reason = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
-                WHERE id = $3
-                """,
-                request.denial_reason, approved_by, request_id
-            )
-
-            return {"message": "PTO request denied", "status": "denied"}
+    if result["status"] == "not_found":
+        raise HTTPException(status_code=404, detail=result["message"])
+    if result["status"] != "ok":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return {"message": result["message"], "status": result["decision"]}

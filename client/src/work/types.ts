@@ -558,11 +558,54 @@ export interface HuumeActionDiscipline {
   expected_improvement?: string
 }
 
-/** `current_state.huume_action` — the single staged confirm-first action.
+export interface HuumeActionIrReport {
+  type: 'ir_report'
+  status: 'proposed' | 'filed' | 'failed' | 'cancelled'
+  confirm_id: string
+  description?: string
+  occurred_at?: string | null
+  incident_type?: string
+  severity?: string
+  location?: string | null
+}
+
+export interface HuumeActionErCase {
+  type: 'er_case'
+  status: 'proposed' | 'opened' | 'failed' | 'cancelled'
+  confirm_id: string
+  description?: string
+  title?: string | null
+  category?: string
+}
+
+export interface HuumeActionTrainingAssign {
+  type: 'training_assign'
+  status: 'proposed' | 'assigned' | 'failed' | 'cancelled'
+  requirement_id: string
+  employee_ids?: string[]
+  due_date?: string | null
+}
+
+export interface HuumeActionPtoDecision {
+  type: 'pto_decision'
+  status: 'proposed' | 'decided' | 'failed' | 'cancelled'
+  request_id: string
+  decision?: 'approve' | 'deny'
+  note?: string | null
+}
+
+/** `current_state.huume_action` — the single staged confirm-first action
+ * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
  * words through the normal message path (a separate user turn, so the
  * backend's structural two-turn rule is untouched — see services/huume/actions.py). */
-export type HuumeAction = HuumeActionSendOffer | HuumeActionDiscipline
+export type HuumeAction =
+  | HuumeActionSendOffer
+  | HuumeActionDiscipline
+  | HuumeActionIrReport
+  | HuumeActionErCase
+  | HuumeActionTrainingAssign
+  | HuumeActionPtoDecision
 
 export interface HuumeLegal { matter_id: string; title?: string | null }
 

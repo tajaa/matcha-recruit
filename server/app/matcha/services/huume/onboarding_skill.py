@@ -116,6 +116,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "pto_leave": "employees",
     "policies": "handbooks",
     "discipline": "discipline",
+    "documents": "employees",
 }
 
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
@@ -133,6 +134,12 @@ _OPEN_LEAVE_STATUSES = ("approved", "active")
 # counting it as open overstates what's outstanding. `actioned` and
 # `dismissed` are both terminal; `unread`/`read` are the open set.
 _OPEN_ALERT_STATUSES = ("unread", "read")
+
+# Mirrors `hr_proactive_push.SIGNATURE_STALE_DAYS` — the documents topic and
+# the proactive digest must agree on what counts as overdue, or an admin gets
+# two different answers to the same question. Duplicated rather than imported:
+# this module must not pull in a Celery-worker module.
+_SIGNATURE_STALE_DAYS = 7
 
 
 async def _lookup_context_impl(
@@ -183,7 +190,24 @@ async def _lookup_context_impl(
                 "SELECT COUNT(*) FROM training_assignment_rules WHERE company_id = $1 AND trigger = 'new_hire' AND is_active = TRUE",
                 company_id,
             )
-            return {"topic": "training", "new_hire_rule_count": count or 0}
+            # The requirement catalog is what makes `assign_training` usable —
+            # that tool takes a requirement_id and refuses a name, so the ids
+            # have to be reachable from a lookup.
+            requirements = await conn.fetch(
+                """
+                SELECT id, title, training_type, frequency_months
+                FROM training_requirements
+                WHERE company_id = $1 AND is_active = TRUE
+                  AND ($2::text IS NULL OR title ILIKE '%' || $2 || '%')
+                ORDER BY title LIMIT 20
+                """,
+                company_id, query,
+            )
+            return {
+                "topic": "training",
+                "new_hire_rule_count": count or 0,
+                "active_requirements": [dict(r) for r in requirements],
+            }
         if topic == "credentials":
             rows = await conn.fetch(
                 """
@@ -282,10 +306,65 @@ async def _lookup_context_impl(
                 """,
                 company_id, list(_OPEN_LEAVE_STATUSES),
             )
+            # Pending requests carry their id because `decide_pto_request`
+            # takes one — an approve/deny is unreachable without this.
+            # `pto_requests` has no org_id of its own; tenant scope comes
+            # through the employees join (same trap discipline_compliance
+            # documents).
+            pending_rows = await conn.fetch(
+                """
+                SELECT pr.id, e.first_name, e.last_name, pr.request_type,
+                       pr.start_date, pr.end_date, pr.hours, pr.reason
+                FROM pto_requests pr JOIN employees e ON e.id = pr.employee_id
+                WHERE e.org_id = $1 AND pr.status = 'pending'
+                ORDER BY pr.start_date LIMIT 10
+                """,
+                company_id,
+            )
             return {
                 "topic": "pto_leave",
                 "upcoming_pto": [dict(r) for r in pto_rows],
                 "active_leave": [dict(r) for r in leave_rows],
+                "pending_requests": [dict(r) for r in pending_rows],
+            }
+        if topic == "documents":
+            # Counts + document titles only, never employee names — same rule
+            # as the incidents/discipline topics. "Stale" mirrors the
+            # hr_proactive_push sweep's own threshold so chat and the
+            # proactive digest can't disagree about what's overdue.
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*) AS pending_total,
+                       COUNT(*) FILTER (
+                           WHERE ed.created_at < NOW() - ($2 || ' days')::interval
+                       ) AS stale_total,
+                       MIN(ed.created_at) AS oldest_pending_at
+                FROM employee_documents ed
+                JOIN employees e ON e.id = ed.employee_id
+                WHERE ed.org_id = $1 AND ed.status = 'pending_signature'
+                  AND e.termination_date IS NULL
+                """,
+                company_id, str(_SIGNATURE_STALE_DAYS),
+            )
+            by_document = await conn.fetch(
+                """
+                SELECT ed.title, COUNT(*) AS pending_count
+                FROM employee_documents ed
+                JOIN employees e ON e.id = ed.employee_id
+                WHERE ed.org_id = $1 AND ed.status = 'pending_signature'
+                  AND e.termination_date IS NULL
+                GROUP BY ed.title
+                ORDER BY COUNT(*) DESC, ed.title LIMIT 10
+                """,
+                company_id,
+            )
+            return {
+                "topic": "documents",
+                "pending_total": (row["pending_total"] if row else 0) or 0,
+                "stale_total": (row["stale_total"] if row else 0) or 0,
+                "stale_after_days": _SIGNATURE_STALE_DAYS,
+                "oldest_pending_at": row["oldest_pending_at"] if row else None,
+                "by_document": [dict(r) for r in by_document],
             }
         if topic == "policies":
             rows = await conn.fetch(

@@ -186,6 +186,90 @@ def _json_safe(value: Any) -> Any:
     return value
 
 
+# The four HR-ops staged tools are structurally identical to send_offer:
+# build a staged dict → evaluate → stage / refuse / execute. Only the payload,
+# the id the confirm turn must echo, and the wording differ, so they're a table
+# rather than four near-identical if-blocks. `match_key` is the field
+# `pre_turn_action` is compared on to tell "confirming the staged one" from
+# "staging a new one"; for the two that have no natural persisted id at stage
+# time, a server-minted confirm_id plays that role (same as draft_discipline).
+_HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
+    "report_incident": {
+        "action_type": "ir_report",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("description", "occurred_at", "incident_type", "severity", "location"),
+        "staged_label": "Staged: incident report",
+        "refused_label": "Incident report refused",
+        "done_label": "Filed incident report",
+        "failed_label": "Incident report not filed",
+        "done_status": "filed",
+    },
+    "open_er_case": {
+        "action_type": "er_case",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("description", "title", "category"),
+        "staged_label": "Staged: ER case",
+        "refused_label": "ER case refused",
+        "done_label": "Opened ER case",
+        "failed_label": "ER case not opened",
+        "done_status": "opened",
+    },
+    "assign_training": {
+        "action_type": "training_assign",
+        "match_key": "requirement_id",
+        "mints_confirm_id": False,
+        "fields": ("requirement_id", "employee_ids", "due_date"),
+        "staged_label": "Staged: training assignment",
+        "refused_label": "Training assignment refused",
+        "done_label": "Assigned training",
+        "failed_label": "Training not assigned",
+        "done_status": "assigned",
+    },
+    "decide_pto_request": {
+        "action_type": "pto_decision",
+        "match_key": "request_id",
+        "mints_confirm_id": False,
+        "fields": ("request_id", "decision", "note"),
+        "staged_label": "Staged: PTO decision",
+        "refused_label": "PTO decision refused",
+        "done_label": "Applied PTO decision",
+        "failed_label": "PTO decision not applied",
+        "done_status": "decided",
+    },
+}
+
+
+def _build_hr_ops_staged(spec: dict[str, Any], args: dict[str, Any], existing: Any) -> tuple[dict[str, Any], bool]:
+    """Pure. Returns (staged_action, confirming) for an HR-ops tool call:
+    reuse the pre-turn staged dict when this call echoes its match_key, else
+    build a fresh proposal. Comparing against the TURN-START snapshot is what
+    makes the two-turn rule structural — an action staged earlier in this same
+    turn isn't in it, so it can't be confirmed by the same turn that made it."""
+    match_key = spec["match_key"]
+    echoed = args.get(match_key)
+    echoed = str(echoed).strip() if echoed not in (None, "") else None
+    confirming = (
+        isinstance(existing, dict)
+        and existing.get("type") == spec["action_type"]
+        and existing.get("status") == "proposed"
+        and echoed is not None
+        and str(existing.get(match_key) or "") == echoed
+    )
+    if confirming:
+        return existing, True
+    staged: dict[str, Any] = {"type": spec["action_type"], "status": "proposed"}
+    if spec["mints_confirm_id"]:
+        staged["confirm_id"] = uuid4().hex[:8]
+    for field in spec["fields"]:
+        value = args.get(field)
+        if field == "employee_ids":
+            value = [str(v) for v in (value or [])]
+        staged[field] = value
+    return staged, False
+
+
 async def run_huume_turn(
     *,
     thread_id: UUID,
@@ -368,6 +452,44 @@ async def run_huume_turn(
                 step = recorder.record(
                     tool=name, kind="write", label="Filed discipline write-up" if filed else "Discipline write-up not filed",
                     status="ok" if filed else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name in _HR_OPS_TOOL_SPECS:
+                # Incident report / ER case / training assignment / PTO
+                # decision — one flow, table-driven (see _HR_OPS_TOOL_SPECS).
+                spec = _HR_OPS_TOOL_SPECS[name]
+                staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
+                verdict = actions.evaluate_huume_action(
+                    staged_action=staged, features=features, role=user_role,
+                    thread_huume_mode=True, this_turn_staged_new=not confirming,
+                )
+                if verdict.kind == "stage":
+                    state_updates["huume_action"] = staged
+                    step = recorder.record(tool=name, kind="staged", label=spec["staged_label"], status="ok", detail=verdict.message)
+                    response = {"status": "staged", "message": verdict.message}
+                    # Echo whichever id the confirm turn has to pass back.
+                    response[spec["match_key"]] = staged.get(spec["match_key"])
+                    return _json_safe(response), step
+                if not verdict.ok:
+                    step = recorder.record(tool=name, kind="staged", label=spec["refused_label"], status="rejected", detail=verdict.message)
+                    return {"status": "refused", "message": verdict.message}, step
+                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                done = result.get("status") == "created"
+                state_updates["huume_action"] = {**staged, "status": spec["done_status"] if done else "failed"}
+                # Post-commit enrichment the executors hand back as
+                # (fn, args, kwargs); same best-effort contract as
+                # draft_discipline above — a failed enrichment must not fail a
+                # write that already committed.
+                for _bg in (result.pop("bg_tasks", None) or []):
+                    try:
+                        _fn, _args, _kwargs = _bg
+                        await _fn(*_args, **_kwargs)
+                    except Exception:
+                        logger.warning("huume: %s bg task failed", name, exc_info=True)
+                step = recorder.record(
+                    tool=name, kind="write", label=spec["done_label"] if done else spec["failed_label"],
+                    status="ok" if done else "error", detail=result.get("message"),
                 )
                 return _json_safe(result), step
 
