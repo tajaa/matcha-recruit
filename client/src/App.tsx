@@ -26,6 +26,7 @@ const SimpleCompliancePage = lazy(
 const SimplePlatformPage = lazy(() => import("./pages/simpler-pages/Platform"));
 const SimpleBrokersPage = lazy(() => import("./pages/simpler-pages/Brokers"));
 const SimpleLitePage = lazy(() => import("./pages/simpler-pages/Lite"));
+const HomeV2Page = lazy(() => import("./pages/home-v2")); // light-mode landing preview — not swapped into / yet
 const Subscribe = lazy(() => import("./pages/landing/Subscribe"));
 const TermsPage = lazy(() => import("./pages/landing/TermsPage"));
 const PrivacyPage = lazy(() => import("./pages/landing/PrivacyPage"));
@@ -135,6 +136,7 @@ export default function App() {
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />
         <Route path="/matcha-brokers" element={<SimpleBrokersPage />} />
+        <Route path="/home-v2" element={<HomeV2Page />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />

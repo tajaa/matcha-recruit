@@ -102,6 +102,19 @@ html[data-marketing-noir] {
   }
 }
 
+/* Light twin for /home-v2 — same purpose as data-marketing-noir above (no
+   white/black flash on overscroll, smooth in-page anchor jumps), opposite
+   ground. Set by useMarketingCream() in pages/home-v2/index.tsx. */
+html[data-marketing-cream] {
+  background-color: #f5f2ed;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-marketing-cream] {
+    scroll-behavior: smooth;
+  }
+}
+
 @keyframes ticker {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
