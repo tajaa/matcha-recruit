@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
 from app.core.services.compliance_service import get_location_requirements, get_locations
-from app.matcha.routes.matcha_work.ai_turn import _apply_ai_updates_and_operations
+from app.matcha.services.matcha_work.ai_apply import _apply_ai_updates_and_operations
 from app.matcha.routes.matcha_work._shared import (
     _build_thread_detail_response,
     _json_object,

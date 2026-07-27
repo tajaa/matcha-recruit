@@ -2,8 +2,9 @@
 detection, onboarding provisioning, slide/blog/recruiting context injection,
 and _apply_ai_updates_and_operations (the core AI-response-to-DB-write step).
 
-No routes in this module. Extracted from the original flat matcha_work.py
-during the package split (2026-07-03). See matcha_work/CLAUDE.md.
+No routes in this module — moved here from routes/matcha_work/ai_turn.py
+(refactor round 2, stage 5), where it always had zero routes. Consumed by
+routes/matcha_work/messaging.py and threads.py.
 """
 import asyncio
 import json
@@ -29,7 +30,6 @@ from app.matcha.models.matcha_work import (
     ReviewDocument,
     WorkbookDocument,
 )
-from app.matcha.routes.matcha_work._shared import _json_object
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
 from app.matcha.services.onboarding.onboarding_orchestrator import (
@@ -296,6 +296,10 @@ async def _create_onboarding_employees(
     employees: list[dict],
 ) -> list[dict]:
     """Create employee records and trigger provisioning for each. Returns updated employee dicts."""
+    # Lazy: stays in routes/matcha_work/_shared.py (used by threads.py too) —
+    # a module-level import here would pull services back into routes.
+    from app.matcha.routes.matcha_work._shared import _json_object
+
     results: list[dict] = []
 
     async with get_connection() as conn:
