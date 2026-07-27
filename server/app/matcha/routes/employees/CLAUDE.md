@@ -93,18 +93,32 @@ matcha_router.include_router(leave_admin_router, prefix="/employees/leave", tags
 
 ## Tests
 
-Pre-existing brittle tests use `importlib.util.spec_from_file_location` with hard-coded `employees.py` paths. After the split, the module is a package — these tests break at collection time:
-- `tests/employees/test_employee_invites_and_compliance.py`
-- `tests/employees/test_internal_mobility_routes.py`
-- `tests/er_copilot/test_er_copilot_risk_refresh.py`
-- `tests/training/test_employee_create_supervisor.py`
+Four tests used to load a route module via `importlib.util.spec_from_file_location` with a
+hard-coded `employees.py` path (a pattern that breaks at collection time on any package
+split, silently). Refactor round 2 stage 4 (`f84c537`) rewrote three of them to plain
+imports against the split submodules; only one is still genuinely broken:
 
-These were already pre-broken on `main` per `server/CLAUDE.md`. Skip via `--ignore` rather than fix.
+- `tests/employees/test_employee_invites_and_compliance.py` — **fixed**. 2 tests pass; a
+  third, `test_create_employee_syncs_compliance_location`, is `xfail(strict=True)` — it
+  surfaced a real bug at `crud.py:609` (`body.job_title` references an undefined name,
+  swallowed by a bare `except`), out of scope for the refactor that found it.
+- `tests/employees/test_internal_mobility_routes.py` — **still broken**. Imports
+  `app.matcha.routes.internal_mobility`, a module that does not exist (pre-existing on
+  `main`, not something a package split could fix).
+- `tests/er_copilot/test_er_copilot_risk_refresh.py` — **fixed**, both tests pass. Also
+  surfaced a real patch-target bug in the test itself, not the app: `create_case_core`
+  reaches `log_audit` via `routes.er_copilot._shared`'s own binding, so patching
+  `crud.py`'s copy of the name never intercepted the call.
+- `tests/training/test_employee_create_supervisor.py` — passes; was never actually broken
+  by the spec-load pattern.
 
-Run the passing subset:
+Run the full passing set (no `--ignore` needed anymore, except the one real collection
+error):
 ```bash
-cd server && ./venv/bin/python -m pytest tests/employees/ -q \
-  --ignore=tests/employees/test_employee_invites_and_compliance.py \
-  --ignore=tests/employees/test_internal_mobility_routes.py
+cd server && ./venv/bin/python -m pytest tests/employees/ tests/er_copilot/ tests/training/ -q \
+  --continue-on-collection-errors
 ```
-Expect: 10 passed / 2 failed (pre-existing google_workspace_onboarding) / 8 skipped.
+Expect: only `tests/employees/test_internal_mobility_routes.py` errors at collection;
+everything else passes (plus the 1 `xfail(strict)` above and the pre-existing
+`google_workspace_onboarding` failures noted in `server/CLAUDE.md`). Re-measure rather
+than trust this list — see `server/CLAUDE.md`'s own note on the same point.
