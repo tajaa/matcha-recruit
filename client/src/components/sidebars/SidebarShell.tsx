@@ -101,8 +101,8 @@ function findActiveTo(pathname: string, items: NavItem[]): string | null {
 //      weight, never by the accent. The accent is spent only on counts that
 //      want attention, so the one green mark in the rail actually means
 //      something.
-//   3. TYPE CARRIES HIERARCHY. Serif masthead, spaced-caps org and group
-//      labels, light sans rows that shift to normal weight when selected.
+//   3. TYPE CARRIES HIERARCHY. Space Grotesk masthead, spaced-caps org and
+//      group labels, light sans rows that shift to normal weight when selected.
 //
 // On the neutral ramp: rows sit at zinc-300 and labels at zinc-400. The old
 // rail ran rows at zinc-500 (4.1:1 on zinc-950) and labels at zinc-600
@@ -111,7 +111,7 @@ function findActiveTo(pathname: string, items: NavItem[]): string | null {
 // colour, idle rows can be bright without stealing from the selected one.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const FRAUNCES = "'Fraunces', Georgia, serif"
+const MASTHEAD_FONT = "var(--font-lite)"
 
 /** Row geometry shared by every line in the index, so icons sit on one optical
  *  axis expanded or collapsed. `-mr-2.5` cancels the nav's own padding so a
@@ -296,7 +296,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
             <Link to={logoTo} className="flex min-w-0 flex-1 flex-col justify-center" title={logoLabel}>
               <span
                 className="truncate text-[17px] font-light leading-none tracking-tight text-zinc-100"
-                style={{ fontFamily: FRAUNCES }}
+                style={{ fontFamily: MASTHEAD_FONT }}
               >
                 {logoLabel}
               </span>
