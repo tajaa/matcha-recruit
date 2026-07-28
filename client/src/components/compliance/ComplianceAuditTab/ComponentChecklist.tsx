@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
-import { fetchRequirementComponents, attestRequirementComponent } from '../../../api/compliance/compliance'
+import { fetchRequirementComponents, attestRequirementComponent } from '../../../api/compliance'
 import type { RequirementComponentChecklist as Checklist } from '../../../types/compliance'
 import { STATUS_LABEL, STATUS_CLASS, rollupComponents } from './componentStatus'
 import { AuditRevealModal } from './AuditRevealModal'

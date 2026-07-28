@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import {
   dismissRemediation, fetchAssignableUsers,
-} from '../../../api/compliance/compliance'
+} from '../../../api/compliance'
 import type {
   AssignableUser, ComplianceActionPlanUpdate, RiskIssue,
 } from '../../../types/compliance'

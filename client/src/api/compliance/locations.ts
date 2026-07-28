@@ -1,11 +1,11 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   JurisdictionOption,
   BusinessLocation,
   LocationCreate,
   LocationUpdate,
   FacilityAttributes,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Jurisdictions ──
 

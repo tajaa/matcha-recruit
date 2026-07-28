@@ -1,9 +1,9 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   BusinessLocation,
   LocationCreate,
   ComplianceRequirement,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Admin Compliance Management ──
 

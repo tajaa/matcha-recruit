@@ -1,9 +1,9 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   CheckLogEntry,
   UpcomingLegislation,
   AssignableUser,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Compliance Checks ──
 

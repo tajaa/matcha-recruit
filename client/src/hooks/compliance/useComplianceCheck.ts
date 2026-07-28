@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { getComplianceCheckPath } from '../../api/compliance/compliance'
+import { getComplianceCheckPath } from '../../api/compliance'
 import { postSSE } from '../../api/sse'
 
 export interface ComplianceCheckMessage {

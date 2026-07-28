@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
-import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance/compliance'
+import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance'
 
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   const [open, setOpen] = useState(count > 0)

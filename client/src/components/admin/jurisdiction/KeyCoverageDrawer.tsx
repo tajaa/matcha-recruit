@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
-import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance/compliance'
-import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance/compliance'
+import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance'
+import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance'
 
 interface KeyCoverageDrawerProps {
   jurisdictionId?: string

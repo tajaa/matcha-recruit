@@ -1,8 +1,8 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   AvailablePoster,
   PosterOrder,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Posters ──
 

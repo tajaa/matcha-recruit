@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
-import { draftPolicy, type PolicyDraftResult } from '../../api/compliance/compliance'
+import { draftPolicy, type PolicyDraftResult } from '../../api/compliance'
 
 type Props = {
   locationId?: string | null

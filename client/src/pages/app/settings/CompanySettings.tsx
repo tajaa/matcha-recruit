@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '../../../components/ui'
 import { api } from '../../../api/client'
-import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../../api/compliance/compliance'
+import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../../api/compliance'
 import { ComplianceLocationModal } from '../../../components/compliance/ComplianceLocationModal'
 import { useMe } from '../../../hooks/useMe'
 import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../../../types/compliance'

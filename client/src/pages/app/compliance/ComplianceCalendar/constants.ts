@@ -1,4 +1,4 @@
-import type { ComplianceCalendarItem } from '../../../../api/compliance/compliance'
+import type { ComplianceCalendarItem } from '../../../../api/compliance'
 
 export const STATUS_LABEL: Record<ComplianceCalendarItem['derived_status'], string> = {
   overdue: 'Overdue',

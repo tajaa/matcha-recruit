@@ -1,5 +1,5 @@
-import { api } from '../../client'
-import type { ComplianceSummary } from '../../../types/compliance'
+import { api } from '../client'
+import type { ComplianceSummary } from '../../types/compliance'
 import type { PendingResearch } from './types'
 
 // ── Summary & Dashboard ──
@@ -9,11 +9,11 @@ export function fetchSummary() {
 }
 
 export function fetchRiskSummary() {
-  return api.get<import('../../../types/compliance').ComplianceRiskSummary>('/compliance/risk-summary')
+  return api.get<import('../../types/compliance').ComplianceRiskSummary>('/compliance/risk-summary')
 }
 
 export function fetchRemediations(days = 90) {
-  return api.get<import('../../../types/compliance').RemediationRecord[]>(`/compliance/remediations?days=${days}`)
+  return api.get<import('../../types/compliance').RemediationRecord[]>(`/compliance/remediations?days=${days}`)
 }
 
 export function dismissRemediation(issueKey: string, reason: string) {
@@ -33,7 +33,7 @@ export function fetchPendingResearch() {
 }
 
 export function fetchComplianceDashboard(horizonDays = 90) {
-  return api.get<import('../../../types/dashboard').ComplianceDashboard>(
+  return api.get<import('../../types/dashboard').ComplianceDashboard>(
     `/compliance/dashboard?horizon_days=${horizonDays}`
   )
 }

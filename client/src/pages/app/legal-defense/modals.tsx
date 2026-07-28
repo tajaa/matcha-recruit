@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileUp, Loader2, X } from 'lucide-react'
 import { Button, Input, Modal, Select, Textarea, Toggle, useToast } from '../../../components/ui'
-import { fetchLocations } from '../../../api/compliance/compliance'
+import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
 import { createMatter, parseIntakeDocument, sharePacket, type Matter, type MatterType, type Packet } from '../../../api/legal-defense/legalDefense'
 import { MATTER_TYPES } from './shared'

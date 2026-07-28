@@ -2,14 +2,14 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ComplianceAuditTab } from './ComplianceAuditTab'
-import * as complianceApi from '../../api/compliance/compliance'
+import * as complianceApi from '../../api/compliance'
 import type {
   ComplianceAuditOverview,
   ComplianceAuditStatute,
   RequirementComponentChecklist,
 } from '../../types/compliance'
 
-vi.mock('../../api/compliance/compliance', () => ({
+vi.mock('../../api/compliance', () => ({
   fetchComplianceAudit: vi.fn(),
   fetchRequirementComponents: vi.fn(),
   attestRequirementComponent: vi.fn(),

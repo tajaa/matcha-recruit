@@ -5,7 +5,7 @@ import { useComplianceRequirements, useKnownAuthorities, requirementAuthority } 
 import type { ComplianceRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 import type { CategoryGroup } from '../../generated/complianceCategories'
-import { JURISDICTION_LEVEL_LABELS } from '../../api/compliance/compliance'
+import { JURISDICTION_LEVEL_LABELS } from '../../data/complianceLabels'
 import { CategoryRow } from './ComplianceRequirementsTab/CategoryRow'
 import { LitePreview } from './ComplianceRequirementsTab/LitePreview'
 import { useTargetReqFocus } from './ComplianceRequirementsTab/useTargetReqFocus'

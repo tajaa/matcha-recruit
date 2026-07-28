@@ -1,6 +1,6 @@
 import { Badge, Card } from '../../../../components/ui'
 import { MapPin, HelpCircle } from 'lucide-react'
-import type { ComplianceCalendarItem } from '../../../../api/compliance/compliance'
+import type { ComplianceCalendarItem } from '../../../../api/compliance'
 import { STATUS_LABEL, STATUS_HINT, STATUS_VARIANT } from './constants'
 import { formatDate, formatDays } from './helpers'
 

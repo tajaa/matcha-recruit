@@ -1,5 +1,5 @@
-import { api } from '../../client'
-import type { ComplianceAuditOverview } from '../../../types/compliance'
+import { api } from '../client'
+import type { ComplianceAuditOverview } from '../../types/compliance'
 
 // ── Company-wide audit overview (the Audit tab) ──
 

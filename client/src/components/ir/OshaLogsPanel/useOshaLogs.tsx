@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../api/client'
-import { fetchLocations } from '../../../api/compliance/compliance'
+import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
 import { useMe } from '../../../hooks/useMe'
 import { renderLogPreview, render300aPreview, renderItaPreview } from './previews'

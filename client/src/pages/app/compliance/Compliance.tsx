@@ -22,7 +22,7 @@ import { RegulatoryQuickAsk } from '../../../components/compliance/RegulatoryQui
 import { PayerPolicyNavigator } from '../../../components/compliance/PayerPolicyNavigator'
 import { ProtocolAnalysis } from '../../../components/compliance/ProtocolAnalysis'
 import { PolicyDrafter } from '../../../components/compliance/PolicyDrafter'
-import { updateAlertActionPlan } from '../../../api/compliance/compliance'
+import { updateAlertActionPlan } from '../../../api/compliance'
 import { useMe } from '../../../hooks/useMe'
 import { ComplianceLiteView } from '../../../components/compliance/ComplianceLiteView'
 import { CLINICAL_ENTITY_TYPES } from '../../../types/compliance'

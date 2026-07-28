@@ -1,10 +1,10 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   ComplianceRequirement,
   PinnedRequirement,
   RequirementComponent,
   RequirementComponentChecklist,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Requirements ──
 

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Card } from '../../../../components/ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import type { ComplianceCalendarItem } from '../../../../api/compliance/compliance'
+import type { ComplianceCalendarItem } from '../../../../api/compliance'
 import { formatDate, localDateKey } from './helpers'
 
 interface MonthViewProps {

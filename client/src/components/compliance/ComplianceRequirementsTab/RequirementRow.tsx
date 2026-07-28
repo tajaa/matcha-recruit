@@ -2,7 +2,7 @@ import { EmployeesTooltip } from '../EmployeesTooltip'
 import { requirementAuthority } from '../../../hooks/compliance/useComplianceRequirements'
 import type { Authority } from '../../../hooks/compliance/useComplianceRequirements'
 import type { ComplianceRequirement } from '../../../types/compliance'
-import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../../api/compliance/compliance'
+import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../../data/complianceLabels'
 import { isFuture } from './helpers'
 
 type Props = {

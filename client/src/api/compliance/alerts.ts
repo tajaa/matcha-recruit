@@ -1,8 +1,8 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type {
   ComplianceAlert,
   ComplianceActionPlanUpdate,
-} from '../../../types/compliance'
+} from '../../types/compliance'
 
 // ── Alerts ──
 

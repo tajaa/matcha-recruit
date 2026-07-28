@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Scale } from 'lucide-react'
 import { Modal, Select, Badge } from '../ui'
 import { useAsync } from '../../hooks/useAsync'
-import { fetchLocations } from '../../api/compliance/compliance/locations'
+import { fetchLocations } from '../../api/compliance/locations'
 import { fetchLocationCompliance } from '../../api/employees/employeeSchedule'
 
 const RULE_LABELS: Record<string, { label: string; unit: string }> = {

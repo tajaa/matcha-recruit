@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchComplianceAudit } from '../../api/compliance/compliance'
+import { fetchComplianceAudit } from '../../api/compliance'
 import type { ComplianceAuditOverview } from '../../types/compliance'
 
 // Fetched lazily — this hook only runs when ComplianceAuditTab actually

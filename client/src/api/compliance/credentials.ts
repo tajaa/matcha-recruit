@@ -1,4 +1,4 @@
-import { api } from '../../client'
+import { api } from '../client'
 import type { CompanyCredential } from './types'
 
 // ── Certifications & Licenses (per-company, joined to catalog) ──
