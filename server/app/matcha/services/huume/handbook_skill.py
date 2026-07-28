@@ -213,6 +213,7 @@ async def promote(
     *, company_id: UUID, actor_user_id: Optional[UUID], thread_id: UUID,
     session_id: str, draft_ids: Optional[list[str]] = None,
     exclude_ids: Optional[set[str]] = None, handbook_title: Optional[str] = None,
+    target_handbook_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Promote pending drafts into the real handbook/policy tables via the
     shared `hp.promote_drafts`. `draft_ids` empty/None means "all pending",
@@ -231,6 +232,24 @@ async def promote(
         reason = await hp.unpaid_x_reason(conn, company_id)
         if reason:
             return {"status": "refused", "message": reason}
+
+        target_uuid: Optional[UUID] = None
+        if target_handbook_id:
+            try:
+                target_uuid = UUID(str(target_handbook_id))
+            except ValueError:
+                return {"status": "error",
+                        "message": "That doesn't look like a handbook id."}
+            hb = await conn.fetchrow(
+                "SELECT id, status FROM handbooks WHERE id = $1 AND company_id = $2",
+                target_uuid, company_id,
+            )
+            if not hb:
+                return {"status": "error",
+                        "message": "No handbook with that id belongs to this company."}
+            if hb["status"] == "archived":
+                return {"status": "refused",
+                        "message": "That handbook is archived — unarchive it or promote to a new handbook."}
 
         # Re-derive live scopes (not the session snapshot) so a promoted
         # handbook is scoped to the company's current work locations.
@@ -275,13 +294,19 @@ async def promote(
 
     result = await hp.promote_drafts(
         company_id, session, drafts, scopes=scopes,
-        handbook_title=handbook_title, user_id=actor_user_id,
+        handbook_title=handbook_title,
+        target_handbook_id=str(target_uuid) if target_uuid else None,
+        user_id=actor_user_id,
     )
 
     async with get_connection() as conn:
         await _audit(conn, session["id"], actor_user_id, "promote",
                      {"promoted": list(result["promoted_refs"].keys()),
                       "failed": [f["draft_id"] for f in result["failed"]],
+                      "target_handbook_id": str(target_uuid) if target_uuid else None,
+                      "resolved_change_requests": [
+                          c["change_request_id"]
+                          for c in result["resolved_change_requests"]],
                       "via": "huume", "thread_id": str(thread_id)})
         pending = await _pending_drafts(conn, session["id"])
 
@@ -292,6 +317,7 @@ async def promote(
         "handbook": result["handbook"],
         "policies": result["policies"],
         "failed": result["failed"],
+        "resolved_change_requests": result["resolved_change_requests"],
         "pending_drafts": pending,
     }
     if held_back:

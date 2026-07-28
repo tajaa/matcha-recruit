@@ -793,7 +793,8 @@ def _audit(days_ago: int = 10, n_extra: int = 0):
 
 def _freshness(n: int = 2, change_request: bool = False):
     from datetime import datetime, timezone
-    return [{"id": f"f{i}", "section_key": f"section_{i}", "finding_type": "outdated",
+    return [{"id": f"f{i}", "handbook_id": "hb1", "section_key": f"section_{i}",
+             "finding_type": "outdated",
              "summary": f"Finding {i}: the meal-break rule changed.",
              "source_url": "https://example.com/law", "effective_date": "2026-01-01",
              "age_days": 400, "change_request_id": ("cr1" if change_request else None),
@@ -851,6 +852,21 @@ def test_freshness_records_and_change_request_flag():
 
     withcr, _ = hp._freshness_records(_freshness(n=1, change_request=True))
     assert "already been raised" in withcr[0]["summary"]
+
+
+def test_freshness_records_carry_structured_linkage():
+    # The fresh→change-request linkage must survive as real fields, not just
+    # prose — the promote path resolves change requests through them.
+    rec = hp._freshness_records(_freshness(n=1, change_request=True))[0][0]
+    assert rec["handbook_id"] == "hb1"
+    assert rec["section_key"] == "section_0"
+    assert rec["change_request_id"] == "cr1"
+
+    no_cr = hp._freshness_records(_freshness(n=1))[0][0]
+    assert no_cr["change_request_id"] is None
+    bare = hp._freshness_records([{"id": "f9", "finding_type": "outdated",
+                                   "summary": "x", "checked_at": None}])[0][0]
+    assert bare["handbook_id"] is None and bare["section_key"] is None
 
 
 def test_freshness_records_cap_notes_and_empties():
@@ -922,3 +938,133 @@ def test_employee_redaction_covers_the_new_finding_groups():
     assert "handbook_audit" not in red["sources"] and "handbook_freshness" not in red["sources"]
     # cids leave the index too, so a guessed citation can't resolve either
     assert not any(c.startswith(("audit:", "fresh:")) for c in red["index"])
+
+
+# --------------------------------------------------------------------------- #
+# _fresh_cids_from_drafts — the promote path's fresh-citation extractor
+# --------------------------------------------------------------------------- #
+
+def test_fresh_cids_from_drafts_parses_json_and_list_forms():
+    import json as _json
+    u1 = "11111111-1111-1111-1111-111111111111"
+    u2 = "22222222-2222-2222-2222-222222222222"
+    drafts = [
+        # asyncpg row shape: citations is a JSON string
+        {"kind": "handbook_section",
+         "citations": _json.dumps([f"fresh:{u1}", "law:ca-wage-x", "audit:ca-y"])},
+        # in-memory shape: already a list
+        {"kind": "handbook_section", "citations": [f"fresh:{u2}", f"fresh:{u1}"]},
+    ]
+    out = hp._fresh_cids_from_drafts(drafts)
+    assert [str(u) for u in out] == [u1, u2]  # deduped, order-preserving
+
+
+def test_fresh_cids_from_drafts_skips_junk_and_non_sections():
+    u1 = "11111111-1111-1111-1111-111111111111"
+    drafts = [
+        {"kind": "policy", "citations": [f"fresh:{u1}"]},        # policies never resolve CRs
+        {"kind": "handbook_section", "citations": None},
+        {"kind": "handbook_section", "citations": "not json"},
+        {"kind": "handbook_section", "citations": ["fresh:not-a-uuid", 42, None]},
+        {"kind": "handbook_section"},
+        "junk",
+    ]
+    assert hp._fresh_cids_from_drafts(drafts) == []
+    assert hp._fresh_cids_from_drafts([]) == []
+    assert hp._fresh_cids_from_drafts(None) == []
+
+
+# --------------------------------------------------------------------------- #
+# promote_drafts — amend-mode CR auto-resolve only for sections actually written
+# --------------------------------------------------------------------------- #
+
+class _PromoteConn:
+    """Fake conn for promote_drafts' final block: mark-promoted + amend-mode
+    CR auto-resolve. `cr_rows` simulates the DB's own `status = 'pending'`
+    filter — a row is only returned/updated when its id is in the caller's
+    `cr_ids` AND it's still pending."""
+
+    def __init__(self, finding_rows, cr_rows):
+        self.finding_rows = finding_rows
+        self.cr_rows = cr_rows
+        self.executed: list[tuple[str, tuple]] = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+        return "UPDATE 1"
+
+    async def fetch(self, query, *args):
+        if "handbook_freshness_findings" in query:
+            return self.finding_rows
+        if "UPDATE handbook_change_requests" in query:
+            cr_ids = {str(i) for i in args[0]}
+            return [r for r in self.cr_rows if str(r["id"]) in cr_ids and r.get("status", "pending") == "pending"]
+        return []
+
+
+class _PromoteConnCtx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+def test_promote_drafts_amend_only_resolves_crs_for_sections_actually_written(monkeypatch):
+    # Review finding: a promoted section draft that cites a `fresh:` finding
+    # as background — without its content touching that finding's section —
+    # used to flip that OTHER change request to accepted too. Only the CR for
+    # a section this promotion actually wrote (amend["updated"]/["added"])
+    # may auto-resolve.
+    import asyncio
+
+    import app.database as database_module
+    from app.core.services.handbook_service import HandbookService
+
+    target_handbook_id = "11111111-1111-1111-1111-111111111111"
+    pto_finding_id = "22222222-2222-2222-2222-222222222222"
+    meal_finding_id = "33333333-3333-3333-3333-333333333333"
+    pto_cr_id = "44444444-4444-4444-4444-444444444444"
+    meal_cr_id = "55555555-5555-5555-5555-555555555555"
+
+    async def fake_amend(handbook_id, company_id, sections, updated_by):
+        return {
+            "handbook_id": target_handbook_id, "title": "Employee Handbook",
+            "updated": [{"section_key": "pto", "title": "PTO Policy"}],
+            "added": [],
+        }
+
+    monkeypatch.setattr(HandbookService, "amend_handbook_sections", fake_amend)
+
+    conn = _PromoteConn(
+        finding_rows=[
+            {"change_request_id": pto_cr_id, "section_key": "pto"},
+            {"change_request_id": meal_cr_id, "section_key": "meal_break"},
+        ],
+        cr_rows=[
+            {"id": pto_cr_id, "section_key": "pto"},
+            {"id": meal_cr_id, "section_key": "meal_break"},
+        ],
+    )
+    monkeypatch.setattr(database_module, "get_connection", lambda: _PromoteConnCtx(conn))
+
+    draft = {
+        "id": "66666666-6666-6666-6666-666666666666", "kind": "handbook_section",
+        "title": "PTO Policy", "content": "rewritten PTO section",
+        "section_key": "pto",
+        # Cites the meal-break finding as background context only — its
+        # section is not among amend["updated"]/["added"] above.
+        "citations": [f"fresh:{pto_finding_id}", f"fresh:{meal_finding_id}"],
+    }
+    session = {"id": "session-1", "title": "Session"}
+
+    result = asyncio.run(hp.promote_drafts(
+        "co-1", session, [draft], scopes=[],
+        target_handbook_id=target_handbook_id, user_id="user-1",
+    ))
+
+    resolved_ids = {r["change_request_id"] for r in result["resolved_change_requests"]}
+    assert resolved_ids == {pto_cr_id}

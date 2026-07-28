@@ -309,6 +309,12 @@ def _freshness_records(findings: list[dict] | None) -> tuple[list[dict], list[st
             "summary": "; ".join(bits) + ".",
             "when": (checked.date().isoformat() if hasattr(checked, "date")
                      else str(checked or "")[:10] or "current"),
+            # Structured linkage (not just prose) so a promoted draft citing
+            # this finding can be traced to its handbook + change request.
+            "handbook_id": str(f["handbook_id"]) if f.get("handbook_id") else None,
+            "section_key": f.get("section_key") or None,
+            "change_request_id": (str(f["change_request_id"])
+                                  if f.get("change_request_id") else None),
         })
     return recs, notes
 

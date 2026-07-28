@@ -99,6 +99,7 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "er_case": "er_copilot",
     "training_assign": "training",
     "pto_decision": "time_off",
+    "amend_handbook": "handbook_pilot",
 }
 
 # Vocabularies the confirm-turn validators check against. Mirrors of the
@@ -208,6 +209,16 @@ def evaluate_huume_action(
 
     if action_type == "pto_decision":
         return _validate_pto_decision(staged_action)
+
+    if action_type == "amend_handbook":
+        # No field validation needed beyond "there's a target" — ownership,
+        # archived-status, and upload-vs-template refusal all happen inside
+        # HandbookService.amend_handbook_sections, which every caller (this
+        # one, the Handbook Pilot UI, and this same skill's non-amend path)
+        # goes through regardless.
+        if not staged_action.get("target_handbook_id"):
+            return HuumeVerdict(kind="refuse", message="There's no handbook to amend.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
     return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
 
@@ -572,11 +583,29 @@ def evaluate_plan_step(
 # DB-bound: staged action executor
 # ---------------------------------------------------------------------------
 
-async def execute_huume_action(*, company_id: UUID, actor_user_id: Optional[UUID], action: dict[str, Any]) -> dict[str, Any]:
+async def execute_huume_action(
+    *, company_id: UUID, actor_user_id: Optional[UUID], action: dict[str, Any],
+    thread_id: Optional[UUID] = None, session_id: Optional[str] = None,
+    exclude_ids: Optional[set[str]] = None,
+) -> dict[str, Any]:
     """Execute a validated staged huume_action. Assumes evaluate_huume_action
-    returned kind=='proceed'."""
+    returned kind=='proceed'.
+
+    `thread_id`/`session_id`/`exclude_ids` are needed only by `amend_handbook`
+    — turn-scoped context (which handbook-pilot session, which drafts THIS
+    turn just proposed) that has no natural home on the persisted staged
+    action dict, unlike every other action type here."""
     from app.matcha.services.huume import onboarding_skill
 
+    if action.get("type") == "amend_handbook":
+        from app.matcha.services.huume import handbook_skill
+        return await handbook_skill.promote(
+            company_id=company_id, actor_user_id=actor_user_id, thread_id=thread_id,
+            session_id=session_id, draft_ids=action.get("draft_ids"),
+            exclude_ids=exclude_ids or set(),
+            handbook_title=action.get("handbook_title"),
+            target_handbook_id=action["target_handbook_id"],
+        )
     if action.get("type") == "send_offer":
         return await onboarding_skill.execute_send_offer(
             company_id=company_id, actor_user_id=actor_user_id, offer_id=action["offer_id"],

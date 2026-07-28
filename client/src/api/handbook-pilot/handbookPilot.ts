@@ -62,11 +62,20 @@ export type ContextPreview = {
 }
 
 export type PromoteFailure = { draft_id: string; title: string; error: string }
+export type ResolvedChangeRequest = { change_request_id: string; section_key: string | null }
 export type PromoteResult = {
   promoted: number
-  handbook: { id: string; title: string } | null
+  handbook: {
+    id: string
+    title: string
+    // Present when promoting into an existing handbook (amend mode).
+    amended?: boolean
+    updated_sections?: Array<{ section_key: string; title: string }>
+    added_sections?: Array<{ section_key: string; title: string }>
+  } | null
   policies: Array<{ id: string; title: string }>
   failed: PromoteFailure[]
+  resolved_change_requests: ResolvedChangeRequest[]
 }
 
 export const listPilotSessions = () =>
@@ -92,7 +101,7 @@ export const deletePilotDraft = (draftId: string) =>
 
 export const promotePilotDrafts = (
   sessionId: string,
-  body: { draft_ids: string[]; handbook_title?: string },
+  body: { draft_ids: string[]; handbook_title?: string; target_handbook_id?: string },
 ) => api.post<PromoteResult>(`/handbook-pilot/pilot/sessions/${sessionId}/promote`, body)
 
 // --- Handbook viewer + compliance scan ------------------------------------

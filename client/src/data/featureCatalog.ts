@@ -50,6 +50,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
       werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
+      huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat)',
     },
   },
   {

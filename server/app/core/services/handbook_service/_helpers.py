@@ -68,6 +68,7 @@ __all__ = [
     "_build_state_addendum_content",
     "_build_state_sections",
     "_slugify_key",
+    "_dedupe_section_key",
     "_normalize_custom_sections",
     "_coerce_jurisdiction_scope",
     "_sanitize_wizard_draft_state",
@@ -723,6 +724,18 @@ def _slugify_key(value: str, max_len: int = 100) -> str:
         cleaned = cleaned.replace("__", "_")
     cleaned = cleaned.strip("_")
     return cleaned[:max_len]
+def _dedupe_section_key(base_key: str, taken: set[str]) -> str:
+    """Disambiguate a slugified section key against already-used keys
+    (UNIQUE(handbook_version_id, section_key)): shrink the base so the `_N`
+    suffix always fits within the 120-char column (no infinite loop when
+    base_key is already at the length cap). Does NOT mutate `taken`."""
+    key = base_key
+    suffix = 2
+    while key in taken:
+        suffix_token = f"_{suffix}"
+        key = f"{base_key[: max(1, 120 - len(suffix_token))]}{suffix_token}"
+        suffix += 1
+    return key
 def _normalize_custom_sections(custom_sections: list[HandbookSectionInput]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     used_keys: set[str] = set()
@@ -732,12 +745,7 @@ def _normalize_custom_sections(custom_sections: list[HandbookSectionInput]) -> l
         if not base_key:
             base_key = f"custom_{index + 1}"
 
-        key = base_key
-        suffix = 2
-        while key in used_keys:
-            suffix_token = f"_{suffix}"
-            key = f"{base_key[: max(1, 120 - len(suffix_token))]}{suffix_token}"
-            suffix += 1
+        key = _dedupe_section_key(base_key, used_keys)
         used_keys.add(key)
 
         normalized.append(

@@ -80,6 +80,14 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"EXACTLY this request_id and the same decision after the admin confirms applies "
                 f"it; a different request_id stages a NEW proposal instead."
             )
+        elif action.get("type") == "amend_handbook":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: amend handbook "
+                f"target_handbook_id={action.get('target_handbook_id')} in place — this edits a "
+                f"LIVE handbook's sections directly. Calling promote_handbook_drafts again with "
+                f"EXACTLY this target_handbook_id after the admin confirms applies it; a different "
+                f"target_handbook_id (or omitting it) stages a NEW proposal instead."
+            )
         else:
             lines.append(f"- STAGED ACTION awaiting the admin's confirmation: {action.get('type')}.")
 

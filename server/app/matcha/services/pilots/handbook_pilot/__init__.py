@@ -116,6 +116,7 @@ from .persistence import (  # noqa: F401
     unpaid_x_reason,
     persist_turn,
     promote_drafts,
+    _fresh_cids_from_drafts,
 )
 
 logger = logging.getLogger(__name__)

@@ -798,3 +798,141 @@ def test_list_distribution_recipients_includes_assignment_status(monkeypatch):
     assert result[0].already_assigned is True
     assert result[1].employee_id == UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
     assert result[1].already_assigned is False
+
+
+# --------------------------------------------------------------------------- #
+# amend_handbook_sections — Handbook Pilot's promote-into-existing-handbook path
+# --------------------------------------------------------------------------- #
+
+class _AmendConn:
+    """Fake conn for amend_handbook_sections: a handbook with NO existing
+    sections yet, one active version, and a 'handbook_versions' fetchval that
+    resolves to a fixed version id."""
+
+    def __init__(self, source_type: str = "template", existing_section_keys: tuple = ()):
+        self.handbook_row = {
+            "id": "hb-1", "title": "Employee Handbook", "status": "active",
+            "active_version": 1, "source_type": source_type,
+        }
+        self.existing_section_keys = list(existing_section_keys)
+        self.executed: list[tuple[str, tuple]] = []
+
+    def transaction(self):
+        return _FakeTransaction()
+
+    async def fetchrow(self, query, *args):
+        if "FROM handbooks" in query:
+            return self.handbook_row
+        return None
+
+    async def fetch(self, query, *args):
+        if "FROM handbook_sections" in query:
+            return [{"section_key": k} for k in self.existing_section_keys]
+        return []
+
+    async def fetchval(self, query, *args):
+        if "FROM handbook_versions" in query:
+            return "version-1"
+        if "MAX(section_order)" in query:
+            return 0
+        return None
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+        return "UPDATE 1" if query.lstrip().upper().startswith("UPDATE") else "INSERT 0 1"
+
+
+def test_amend_handbook_sections_refuses_uploaded_handbook(monkeypatch):
+    conn = _AmendConn(source_type="upload")
+    _patch_connection(monkeypatch, conn)
+
+    with pytest.raises(ValueError, match="Cannot amend an uploaded handbook"):
+        asyncio.run(
+            HandbookService.amend_handbook_sections(
+                "hb-1", "co-1", [{"title": "PTO Policy", "content": "..."}], "user-1",
+            )
+        )
+    # Refused before any write — file_url/file_name must survive untouched.
+    assert not conn.executed
+
+
+def test_amend_handbook_sections_dedupes_new_sections_sharing_a_key(monkeypatch):
+    # Review finding: two brand-new sections with the same base key used to
+    # collide — the first insert's key got folded back into the "existing"
+    # set, so the second section's UPDATE overwrote the row the first one
+    # just created instead of deduping to a sibling key like pto_2.
+    conn = _AmendConn(source_type="template")
+    _patch_connection(monkeypatch, conn)
+
+    result = asyncio.run(
+        HandbookService.amend_handbook_sections(
+            "hb-1", "co-1",
+            [
+                {"title": "PTO Policy", "content": "first"},
+                {"title": "PTO Policy", "content": "second"},
+            ],
+            "user-1",
+        )
+    )
+
+    assert result["updated"] == []
+    added_keys = [s["section_key"] for s in result["added"]]
+    assert len(added_keys) == 2
+    assert len(set(added_keys)) == 2, f"expected distinct keys, got {added_keys}"
+
+    insert_queries = [q for q, _ in conn.executed if q.lstrip().upper().startswith("INSERT")]
+    assert len(insert_queries) == 2, "both sections must be inserted, not one insert + one overwrite"
+
+
+def test_amend_handbook_sections_updates_existing_key_in_place(monkeypatch):
+    conn = _AmendConn(source_type="template", existing_section_keys=("pto",))
+    _patch_connection(monkeypatch, conn)
+
+    result = asyncio.run(
+        HandbookService.amend_handbook_sections(
+            "hb-1", "co-1", [{"section_key": "pto", "title": "PTO Policy v2", "content": "rewritten"}], "user-1",
+        )
+    )
+
+    assert result["added"] == []
+    assert result["updated"] == [{"section_key": "pto", "title": "PTO Policy v2"}]
+    update_queries = [q for q, _ in conn.executed if "UPDATE handbook_sections" in q]
+    assert len(update_queries) == 1
+
+
+def test_amend_handbook_sections_writes_updated_by_and_busts_pdf_cache(monkeypatch):
+    conn = _AmendConn(source_type="template")
+    _patch_connection(monkeypatch, conn)
+
+    asyncio.run(
+        HandbookService.amend_handbook_sections(
+            "hb-1", "co-1", [{"title": "PTO Policy", "content": "..."}], "user-42",
+        )
+    )
+
+    handbook_updates = [(q, a) for q, a in conn.executed if q.lstrip().upper().startswith("UPDATE HANDBOOKS SET")]
+    assert len(handbook_updates) == 1
+    query, args = handbook_updates[0]
+    assert "file_url = NULL" in query and "file_name = NULL" in query
+    assert "updated_by" in query
+    assert "user-42" in args
+
+
+# --------------------------------------------------------------------------- #
+# _dedupe_section_key — shared collision suffixer (create + amend paths)
+# --------------------------------------------------------------------------- #
+
+def test_dedupe_section_key_passthrough_and_suffixing():
+    from app.core.services.handbook_service import _dedupe_section_key
+
+    assert _dedupe_section_key("pto", set()) == "pto"
+    assert _dedupe_section_key("pto", {"pto"}) == "pto_2"
+    assert _dedupe_section_key("pto", {"pto", "pto_2"}) == "pto_3"
+
+
+def test_dedupe_section_key_respects_length_cap():
+    from app.core.services.handbook_service import _dedupe_section_key
+
+    base = "k" * 120
+    key = _dedupe_section_key(base, {base})
+    assert key != base and key.endswith("_2") and len(key) <= 120

@@ -100,11 +100,71 @@ class TestEvaluateHuumeAction:
             staged_action=_staged(), features=FEATURES_ON, role="admin",
             thread_huume_mode=True, this_turn_staged_new=False,
         )
-        assert v.ok
+        assert v.kind == "proceed"
 
     def test_missing_offer_id_refuses(self):
         v = evaluate_huume_action(
             staged_action=_staged(offer_id=None), features=FEATURES_ON, role="client",
+            thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "refuse"
+
+
+class TestEvaluateHuumeActionAmendHandbook:
+    """amend_handbook is Huume's confirm-first gate on editing a LIVE handbook
+    in place (review finding: it previously bypassed the stage/confirm
+    envelope every other weighty Huume write goes through)."""
+
+    FEATURES = {**FEATURES_ON, "handbook_pilot": True}
+
+    def _staged_amend(self, **overrides):
+        base = {
+            "type": "amend_handbook", "status": "proposed",
+            "target_handbook_id": "hb-1", "draft_ids": ["d1"], "handbook_title": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_new_stage_is_stage_kind(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(), features=self.FEATURES, role="client",
+            thread_huume_mode=True, this_turn_staged_new=True,
+        )
+        assert v.kind == "stage"
+        assert not v.ok
+
+    def test_confirmed_proposal_proceeds(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(), features=self.FEATURES, role="client",
+            thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "proceed"
+        assert v.action["target_handbook_id"] == "hb-1"
+
+    def test_missing_target_refuses(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(target_handbook_id=None), features=self.FEATURES,
+            role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "refuse"
+
+    def test_handbook_pilot_flag_off_refuses(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(), features={**self.FEATURES, "handbook_pilot": False},
+            role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "refuse"
+
+    def test_already_amended_status_refuses(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(status="amended"), features=self.FEATURES,
+            role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "refuse"
+
+    def test_employee_role_refuses(self):
+        v = evaluate_huume_action(
+            staged_action=self._staged_amend(), features=self.FEATURES, role="employee",
             thread_huume_mode=True, this_turn_staged_new=False,
         )
         assert v.kind == "refuse"

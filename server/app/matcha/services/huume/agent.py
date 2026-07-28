@@ -555,10 +555,12 @@ async def run_huume_turn(
                         return {"status": "refused", "message": "There's nothing staged to cancel."}, step
                     state_updates["huume_action"] = {**staged, "status": "cancelled"}
                     step = recorder.record(tool=name, kind="staged", label="Cancelled staged action", status="ok")
-                    cancel_msg = (
-                        "Cancelled — that offer will not be sent." if staged.get("type") == "send_offer"
-                        else "Cancelled — that write-up will not be filed."
-                    )
+                    if staged.get("type") == "send_offer":
+                        cancel_msg = "Cancelled — that offer will not be sent."
+                    elif staged.get("type") == "amend_handbook":
+                        cancel_msg = "Cancelled — that handbook will not be amended."
+                    else:
+                        cancel_msg = "Cancelled — that write-up will not be filed."
                     return {"status": "ok", "message": cancel_msg}, step
 
                 if target == "plan":
@@ -692,10 +694,62 @@ async def run_huume_turn(
                 if err:
                     step = recorder.record(tool=name, kind="write", label="Promote refused", status="rejected", detail=err)
                     return {"status": "refused", "message": err}, step
+
+                target_handbook_id = args.get("target_handbook_id") or None
+                if target_handbook_id:
+                    # Amending an existing (possibly published) handbook edits
+                    # its live sections in place — destructive/irreversible,
+                    # unlike promoting to a brand-new draft handbook (which is
+                    # just deleted if wrong). Route through the same
+                    # stage/confirm envelope as send_offer/discipline_draft
+                    # instead of executing on the first ask.
+                    existing = pre_turn_action
+                    confirming = (
+                        isinstance(existing, dict) and existing.get("type") == "amend_handbook"
+                        and existing.get("status") == "proposed"
+                        and existing.get("target_handbook_id") == target_handbook_id
+                    )
+                    staged = existing if confirming else {
+                        "type": "amend_handbook", "status": "proposed",
+                        "target_handbook_id": target_handbook_id,
+                        "draft_ids": requested,
+                        "handbook_title": args.get("handbook_title"),
+                    }
+                    verdict = actions.evaluate_huume_action(
+                        staged_action=staged, features=features, role=user_role,
+                        thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    )
+                    if verdict.kind == "stage":
+                        state_updates["huume_action"] = staged
+                        step = recorder.record(tool=name, kind="staged", label="Staged: amend handbook", status="ok", detail=verdict.message)
+                        return {"status": "staged", "message": verdict.message}, step
+                    if not verdict.ok:
+                        step = recorder.record(tool=name, kind="staged", label="Amend handbook refused", status="rejected", detail=verdict.message)
+                        return {"status": "refused", "message": verdict.message}, step
+                    result = await actions.execute_huume_action(
+                        company_id=company_id, actor_user_id=user_id, action=verdict.action,
+                        thread_id=thread_id, session_id=session_id, exclude_ids=handbook_drafts_this_turn,
+                    )
+                    ok = result.get("status") == "ok"
+                    state_updates["huume_action"] = {**staged, "status": "amended" if ok else "failed"}
+                    if ok:
+                        state_updates["huume_handbook"] = {
+                            "session_id": result["session_id"],
+                            "pending_drafts": result.get("pending_drafts") or [],
+                        }
+                    step = recorder.record(
+                        tool=name, kind="write",
+                        label="Amended handbook" if ok else "Amend handbook not applied",
+                        status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
+                        detail=result.get("message"),
+                    )
+                    return _json_safe(result), step
+
                 result = await handbook_skill.promote(
                     company_id=company_id, actor_user_id=user_id, thread_id=thread_id,
                     session_id=session_id, draft_ids=requested,
                     exclude_ids=handbook_drafts_this_turn, handbook_title=args.get("handbook_title"),
+                    target_handbook_id=None,
                 )
                 ok = result.get("status") == "ok"
                 if ok:

@@ -189,8 +189,8 @@ async def _fetch_freshness_findings(conn, company_id) -> list[dict]:
                 WHERE company_id = $1 AND status = 'completed'
                 ORDER BY handbook_id, created_at DESC
             )
-            SELECT f.id, f.section_key, f.finding_type, f.summary, f.source_url,
-                   f.effective_date, f.age_days, f.change_request_id,
+            SELECT f.id, f.handbook_id, f.section_key, f.finding_type, f.summary,
+                   f.source_url, f.effective_date, f.age_days, f.change_request_id,
                    l.created_at AS checked_at, h.title AS handbook_title
             FROM latest l
             JOIN handbook_freshness_findings f ON f.freshness_check_id = l.id
