@@ -11,10 +11,10 @@ Progress tracker:
 
 | PR | Workstream | Branch | Status |
 |---|---|---|---|
-| 1 | A — Broker Pilot: property sub-records + risk index | — | ☐ not started |
-| 2 | B — Legal Pilot: evidence sources + audit appendix | — | ☐ not started |
-| 3 | C — Handbook Pilot: floor records + full-text drafting | — | ☐ not started |
-| 4 | D — Analysis Pilot: from-platform datasets | — | ☐ design confirmation pending |
+| 1 | A — Broker Pilot: property sub-records + risk index | matcha/hr-pilot-upgrades (PR #64) | ☑ done |
+| 2 | B — Legal Pilot: evidence sources + audit appendix | — | ☑ done |
+| 3 | C — Handbook Pilot: floor records + full-text drafting | — | ☑ done |
+| 4 | D — Analysis Pilot: from-platform datasets | — | ☑ done |
 
 ---
 
