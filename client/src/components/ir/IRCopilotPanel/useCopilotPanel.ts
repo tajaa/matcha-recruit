@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type CopilotCard, type AcceptPayload } from '../IRCopilotCard'
-import { api, ensureFreshToken } from '../../../api/client'
+import { api, ensureFreshToken, API_BASE } from '../../../api/client'
 import { consumeSSE } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
-import { BASE } from './helpers'
 import { type CopilotMessage, type CopilotProgress, type CopilotEvidence, type Transcript, type Props } from './types'
 
 export function useCopilotPanel({
@@ -141,7 +140,7 @@ export function useCopilotPanel({
     setError(null)
     try {
       const token = await ensureFreshToken()
-      const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/stream`, {
+      const res = await fetch(`${API_BASE}/ir/incidents/${incidentId}/copilot/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -255,7 +254,7 @@ export function useCopilotPanel({
       if (payload?.numeric_value !== undefined) body.numeric_value = payload.numeric_value
       if (payload?.text_value !== undefined) body.text_value = payload.text_value
       if (payload?.notes !== undefined) body.notes = payload.notes
-      const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/accept`, {
+      const res = await fetch(`${API_BASE}/ir/incidents/${incidentId}/copilot/accept`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

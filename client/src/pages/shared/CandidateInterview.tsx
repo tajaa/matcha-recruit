@@ -3,9 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, Video, CheckCircle2, XCircle, AlertTriangle, Mic, MicOff, Square } from 'lucide-react'
 import { Logo } from '../../components/ui'
 import { useVoiceSession } from '../../work/hooks/useVoiceSession'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type PageState = 'loading' | 'ready' | 'in_progress' | 'starting' | 'active' | 'completed' | 'not_found' | 'expired' | 'error'
 
 interface InviteInfo {
@@ -42,7 +40,7 @@ export default function CandidateInterview() {
 
   useEffect(() => {
     if (!token) { setState('not_found'); return }
-    fetch(`${BASE}/candidate-interview/${token}`)
+    fetch(`${API_BASE}/candidate-interview/${token}`)
       .then(async (res) => {
         if (res.status === 404) { setState('not_found'); return }
         if (res.status === 410) { setState('expired'); return }
@@ -116,7 +114,7 @@ export default function CandidateInterview() {
     setState('starting')
     setTranscripts([])
     try {
-      const res = await fetch(`${BASE}/candidate-interview/${token}/start`, { method: 'POST' })
+      const res = await fetch(`${API_BASE}/candidate-interview/${token}/start`, { method: 'POST' })
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         setError(body?.detail || `Failed to start (${res.status})`)

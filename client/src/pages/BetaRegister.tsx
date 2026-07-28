@@ -2,9 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../hooks/useMe'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../api/client'
 export default function BetaRegister() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
@@ -20,7 +18,7 @@ export default function BetaRegister() {
 
   useEffect(() => {
     if (!token) { setValidating(false); return }
-    fetch(`${BASE}/auth/beta-invite/${token}`)
+    fetch(`${API_BASE}/auth/beta-invite/${token}`)
       .then((r) => r.json())
       .then((data) => {
         setValid(data.valid)
@@ -36,7 +34,7 @@ export default function BetaRegister() {
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${BASE}/auth/register/beta`, {
+      const res = await fetch(`${API_BASE}/auth/register/beta`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, password, name: name.trim() }),

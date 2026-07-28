@@ -3,9 +3,10 @@
 // resume / inventory / candidate uploads share. Internal to this package.
 
 import { postSSE, SSEHttpError } from '../../../api/sse'
+import { API_BASE } from '../../../api/client'
 import type { MWSendResponse, MWStreamEvent } from '../../types'
 
-export const BASE = import.meta.env.VITE_API_URL ?? '/api'
+export const BASE = API_BASE
 
 /** Uploads share a 5-minute ceiling — a large resume batch is slow, but a
  *  stream still quiet past this is hung, not working. */

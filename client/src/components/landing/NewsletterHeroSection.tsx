@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { Check, Loader2 } from 'lucide-react'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type NewsletterVariant = 'caramel' | 'matcha'
 
 // Default 'caramel' = the ivory product-page theme (gold accent). 'matcha' =
@@ -75,7 +73,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
     if (token) headers.Authorization = `Bearer ${token}`
 
     try {
-      const res = await fetch(`${BASE}/newsletter/subscribe`, {
+      const res = await fetch(`${API_BASE}/newsletter/subscribe`, {
         method: 'POST',
         headers,
         body: JSON.stringify({

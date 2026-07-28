@@ -1,9 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useMe } from './useMe'
-import { ensureFreshToken } from '../api/client'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { ensureFreshToken, API_BASE } from '../api/client'
 // Sections that use localStorage-based since timestamps
 type TimestampSection = 'ir' | 'er' | 'escalations'
 // All badge sections
@@ -51,7 +48,7 @@ export function useSidebarBadges() {
     try {
       const token = await ensureFreshToken()
       if (!token) return
-      const res = await fetch(`${BASE}/dashboard/sidebar-badges?${params}`, {
+      const res = await fetch(`${API_BASE}/dashboard/sidebar-badges?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {

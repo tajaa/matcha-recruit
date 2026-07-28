@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { PricingContactModal } from '../components/marketing/PricingContactModal'
-import { api } from '../api/client'
+import { api, API_BASE } from '../api/client'
 import { invalidateMeCache } from '../hooks/useMe'
 
 type LoginResponse = {
@@ -87,8 +87,7 @@ export default function Login() {
     if (!email) { setError('Enter your email to sign in with SSO'); return }
     setSsoLoading(true)
     setError('')
-    const baseUrl = import.meta.env.VITE_API_URL || '/api'
-    window.location.href = `${baseUrl}/sso/login?email=${encodeURIComponent(email)}`
+    window.location.href = `${API_BASE}/sso/login?email=${encodeURIComponent(email)}`
   }
 
   return (

@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 // Shared state machine for the public, token-gated signing pages (SignPolicy,
 // SignEmployeeDocument). The token is an opaque lookup key bound server-side to
 // the row's identity, so these endpoints are unauthenticated and use bare
@@ -35,7 +33,7 @@ export function usePublicToken<T extends { status: string }>(
       setStage('invalid')
       return
     }
-    fetch(`${BASE}/${basePath}/verify/${token}`)
+    fetch(`${API_BASE}/${basePath}/verify/${token}`)
       .then(async (res) => {
         if (res.ok) {
           const d = (await res.json().catch(() => null)) as T | null
@@ -62,7 +60,7 @@ export function usePublicToken<T extends { status: string }>(
     setStage('submitting')
     setError(null)
     try {
-      const res = await fetch(`${BASE}/${basePath}/verify/${token}`, {
+      const res = await fetch(`${API_BASE}/${basePath}/verify/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

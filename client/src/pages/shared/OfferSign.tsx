@@ -2,9 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, FileText, CheckCircle2, XCircle, Download, Sparkles } from 'lucide-react'
 import { Logo } from '../../components/ui'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type PageState = 'loading' | 'sign' | 'range' | 'accepted' | 'declined' | 'already_done' | 'not_found' | 'expired' | 'error'
 
 interface OfferDocument {
@@ -64,7 +62,7 @@ export default function OfferSign() {
 
   useEffect(() => {
     if (!token) { setState('not_found'); return }
-    fetch(`${BASE}/offer-letters/candidate/${token}/document`)
+    fetch(`${API_BASE}/offer-letters/candidate/${token}/document`)
       .then(async (res) => {
         if (res.status === 404) { setState('not_found'); return }
         if (res.status === 410) { setState('expired'); return }
@@ -83,7 +81,7 @@ export default function OfferSign() {
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch(`${BASE}/offer-letters/candidate/${token}/accept`, {
+      const res = await fetch(`${API_BASE}/offer-letters/candidate/${token}/accept`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signed_name: signedName.trim() }),
@@ -112,7 +110,7 @@ export default function OfferSign() {
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch(`${BASE}/offer-letters/candidate/${token}/decline`, {
+      const res = await fetch(`${API_BASE}/offer-letters/candidate/${token}/decline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: declineReason.trim() || undefined }),
@@ -145,7 +143,7 @@ export default function OfferSign() {
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch(`${BASE}/offer-letters/candidate/${token}/submit-range`, {
+      const res = await fetch(`${API_BASE}/offer-letters/candidate/${token}/submit-range`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ range_min: min, range_max: max }),
@@ -215,7 +213,7 @@ export default function OfferSign() {
                 {offer.signed_name ? <> as <span className="text-zinc-200">{offer.signed_name}</span></> : null}.
               </p>
               <a
-                href={`${BASE}/offer-letters/candidate/${token}/pdf`}
+                href={`${API_BASE}/offer-letters/candidate/${token}/pdf`}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 mt-2 text-xs text-emerald-400 hover:text-emerald-300"
@@ -267,7 +265,7 @@ export default function OfferSign() {
                 </div>
               </div>
               <a
-                href={`${BASE}/offer-letters/candidate/${token}/pdf`}
+                href={`${API_BASE}/offer-letters/candidate/${token}/pdf`}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 mb-5 text-xs text-zinc-400 hover:text-zinc-200"

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, CheckCircle } from 'lucide-react';
+import { API_BASE } from '../../api/client';
 
 interface PricingContactModalProps {
   isOpen: boolean;
@@ -65,7 +66,6 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
     setIsSubmitting(true);
 
     try {
-      const apiBase = import.meta.env.VITE_API_URL || '/api';
       const body: Record<string, string> = {
         contact_name: formData.contactName,
         company_name: formData.companyName,
@@ -76,7 +76,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
       if (selectedDate) body.preferred_date = selectedDate;
       if (selectedTime) body.preferred_time = selectedTime;
 
-      const response = await fetch(`${apiBase}/contact`, {
+      const response = await fetch(`${API_BASE}/contact`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

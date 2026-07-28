@@ -3,9 +3,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 // TODO: set the real Matcha-X price. Mirrors Lite's stub for now — keep in
 // sync with matcha_x_price_cents() in server/app/core/services/stripe_service.py.
 function matchaXPriceDollars(headcount: number): number {
@@ -30,7 +28,7 @@ export default function MatchaXSignup() {
   // Broker seat invites pin the company name + seats; prefill + lock them.
   useEffect(() => {
     if (!brokerRef) return
-    fetch(`${BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
+    fetch(`${API_BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
       .then((r) => r.json())
       .then((info) => {
         if (info?.valid) {
@@ -64,7 +62,7 @@ export default function MatchaXSignup() {
     setError(null)
     try {
       // Step 1: register account (features all off until Stripe completes)
-      const regRes = await fetch(`${BASE}/auth/register/business`, {
+      const regRes = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,7 +95,7 @@ export default function MatchaXSignup() {
       }
 
       // Step 2: open Stripe checkout
-      const checkoutRes = await fetch(`${BASE}/resources/checkout/x`, {
+      const checkoutRes = await fetch(`${API_BASE}/resources/checkout/x`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -2,9 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 /**
  * Free-beta signup for Matcha IR. Not linked from main nav — reached
  * by direct URL (/ir/signup) only during private beta. Posts to the
@@ -27,7 +25,7 @@ export default function IrSignup() {
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${BASE}/auth/register/business`, {
+      const res = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

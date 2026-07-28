@@ -6,6 +6,7 @@ import { useSEO } from "../../hooks/useSEO";
 import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "../home/theme";
 import { CONTAINER, EYEBROW, EYEBROW_END } from "../home/layout";
 import { GrainOverlay, PageStyle } from "../home/PageChrome";
+import { API_BASE } from '../../api/client'
 import {
   HEADCOUNT_OPTIONS,
   LOCATION_OPTIONS,
@@ -13,9 +14,6 @@ import {
   QUALIFY_EMAIL_KEY,
   validateWorkEmail,
 } from "../home/qualify";
-
-const BASE = import.meta.env.VITE_API_URL ?? "/api";
-
 export default function StartQualify() {
   const location = useLocation();
 
@@ -73,7 +71,7 @@ export default function StartQualify() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch(`${BASE}/resources/qualify`, {
+      const res = await fetch(`${API_BASE}/resources/qualify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

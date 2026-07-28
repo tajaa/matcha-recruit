@@ -1,7 +1,7 @@
 import { resetAuthCaches } from './authReset'
 import { reportApiError } from './errorReporter'
 
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+export const API_BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 
 let _refreshing: Promise<boolean> | null = null
 
@@ -10,7 +10,7 @@ async function _tryRefresh(): Promise<boolean> {
   if (!refreshToken) return false
 
   try {
-    const res = await fetch(`${BASE}/auth/refresh`, {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
@@ -87,7 +87,7 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('matcha_access_token')
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: _buildHeaders(init, token),
   })
@@ -102,7 +102,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (ok) {
       // Retry with new token
       const newToken = localStorage.getItem('matcha_access_token')
-      const retry = await fetch(`${BASE}${path}`, {
+      const retry = await fetch(`${API_BASE}${path}`, {
         ...init,
         headers: _buildHeaders(init, newToken),
       })
@@ -330,18 +330,18 @@ export const api = {
     request<T>(path, { method: 'POST', body: formData }),
   // GET returning raw text (e.g. the admin traffic report HTML).
   getText: async (path: string) => {
-    const res = await _fetchWithRefresh(`${BASE}${path}`)
+    const res = await _fetchWithRefresh(`${API_BASE}${path}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.text()
   },
   download: async (path: string, filename?: string) => {
-    const res = await _fetchWithRefresh(`${BASE}${path}`)
+    const res = await _fetchWithRefresh(`${API_BASE}${path}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     await _saveBlobResponse(res, path, filename)
   },
   // POST a JSON body and download the binary response as a file.
   downloadPost: async (path: string, body: unknown, filename?: string) => {
-    const res = await _fetchWithRefresh(`${BASE}${path}`, {
+    const res = await _fetchWithRefresh(`${API_BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -375,7 +375,7 @@ export type LandingMedia = {
 
 export const landingMedia = {
   getPublic: async (): Promise<LandingMedia> => {
-    const res = await fetch(`${BASE}/landing-media`)
+    const res = await fetch(`${API_BASE}/landing-media`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
     return res.json()
   },

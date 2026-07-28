@@ -14,8 +14,10 @@
  * unanswered. That handling now lives here and applies to all three.
  */
 
+import { API_BASE } from '../../api/client'
+
 function getWsBase(): string {
-  const base = import.meta.env.VITE_API_URL ?? '/api'
+  const base = API_BASE
   if (base.startsWith('http')) {
     return base.replace(/^http/, 'ws').replace(/\/api$/, '')
   }

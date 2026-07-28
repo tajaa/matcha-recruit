@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { Loader2, CheckCircle, Check, X } from 'lucide-react'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../api/client'
 function checkStrength(pw: string) {
   return {
     length: pw.length >= 8,
@@ -35,7 +33,7 @@ export default function ResetPassword() {
     if (!email.trim()) return
     setSending(true)
     try {
-      await fetch(`${BASE}/auth/forgot-password`, {
+      await fetch(`${API_BASE}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
@@ -56,7 +54,7 @@ export default function ResetPassword() {
     if (password !== confirm) { setError('Passwords do not match'); return }
     setResetting(true)
     try {
-      const res = await fetch(`${BASE}/auth/reset-password`, {
+      const res = await fetch(`${API_BASE}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, new_password: password }),

@@ -8,9 +8,7 @@ import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { productPriceDollars } from '../../utils/tier'
 import { PRODUCT_NAV_CATALOG } from '../../data/productNavCatalog'
 import type { ProductDefinition } from '../../types/dashboard'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 /**
  * Signup for an admin-composed product (/admin/products → /p/:slug/signup).
  *
@@ -42,7 +40,7 @@ export default function ProductSignup() {
   useEffect(() => {
     let cancelled = false
     setLoadingProduct(true)
-    fetch(`${BASE}/products/${encodeURIComponent(slug)}`)
+    fetch(`${API_BASE}/products/${encodeURIComponent(slug)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!cancelled) setProduct(data) })
       .catch(() => { if (!cancelled) setProduct(null) })
@@ -75,7 +73,7 @@ export default function ProductSignup() {
     setSubmitting(true)
     setError(null)
     try {
-      const regRes = await fetch(`${BASE}/auth/register/business`, {
+      const regRes = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +109,7 @@ export default function ProductSignup() {
         return
       }
 
-      const checkoutRes = await fetch(`${BASE}/resources/checkout/product`, {
+      const checkoutRes = await fetch(`${API_BASE}/resources/checkout/product`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

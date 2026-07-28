@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { Mail, Check, Loader2 } from 'lucide-react'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type Variant = 'inline' | 'card' | 'footer'
 
 type Props = {
@@ -63,7 +61,7 @@ export default function NewsletterSignup({
     if (token) headers.Authorization = `Bearer ${token}`
 
     try {
-      const res = await fetch(`${BASE}/newsletter/subscribe`, {
+      const res = await fetch(`${API_BASE}/newsletter/subscribe`, {
         method: 'POST',
         headers,
         body: JSON.stringify({

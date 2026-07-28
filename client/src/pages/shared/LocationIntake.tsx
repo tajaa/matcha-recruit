@@ -4,9 +4,7 @@ import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin, Paperclip, X } f
 import { IRPersonMultiSelect } from '../../components/ir/IRPersonMultiSelect'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 const inputCls =
   'mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700'
 
@@ -77,7 +75,7 @@ export default function LocationIntake() {
       setStage('invalid')
       return
     }
-    fetch(`${BASE}/intake/${token}`)
+    fetch(`${API_BASE}/intake/${token}`)
       .then(async (res) => {
         if (res.ok) {
           const data = (await res.json().catch(() => null)) as IntakeInfo | null
@@ -118,7 +116,7 @@ export default function LocationIntake() {
       )
       for (const f of files) fd.append('files', f)
       // No Content-Type header — the browser must set the multipart boundary.
-      const res = await fetch(`${BASE}/intake/${token}`, { method: 'POST', body: fd })
+      const res = await fetch(`${API_BASE}/intake/${token}`, { method: 'POST', body: fd })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         setError(data.detail ?? 'Submission failed. Please try again.')
@@ -190,7 +188,7 @@ export default function LocationIntake() {
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
         {info?.voice_enabled && (
           <IRPublicDictate
-            parseUrl={`${BASE}/intake/${token}/voice/parse`}
+            parseUrl={`${API_BASE}/intake/${token}/voice/parse`}
             onPrefill={(p) => {
               if (p.description) setDescription(p.description)
               if (p.reported_by_name) setReportedByName(p.reported_by_name)

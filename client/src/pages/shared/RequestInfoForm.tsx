@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 const textareaCls =
   'mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700'
 
@@ -34,7 +32,7 @@ export default function RequestInfoForm() {
       setStage('invalid')
       return
     }
-    fetch(`${BASE}/request-info/${token}`)
+    fetch(`${API_BASE}/request-info/${token}`)
       .then(async (res) => {
         if (res.ok) {
           const data = (await res.json().catch(() => null)) as InfoRequestInfo | null
@@ -58,7 +56,7 @@ export default function RequestInfoForm() {
     setStage('submitting')
     setError(null)
     try {
-      const res = await fetch(`${BASE}/request-info/${token}`, {
+      const res = await fetch(`${API_BASE}/request-info/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

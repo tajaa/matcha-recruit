@@ -2,9 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 // Redeems an admin-generated business invite (server/app/core/routes/admin.py
 // POST /admin/business-invites, table business_invitations) — the generic,
 // tier-agnostic path for provisioning a full Pro/bespoke company with no
@@ -32,7 +30,7 @@ export default function BusinessInviteRegister() {
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${BASE}/auth/register/business`, {
+      const res = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

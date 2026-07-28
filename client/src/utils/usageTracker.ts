@@ -10,7 +10,7 @@
  * Analytics is droppable; it must never surface an error or block the user.
  */
 
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
+import { API_BASE } from '../api/client'
 
 type Surface = 'web' | 'public' | 'werk_desktop'
 
@@ -113,7 +113,7 @@ function flush(useKeepalive = false) {
 
   try {
     const token = localStorage.getItem('matcha_access_token')
-    void fetch(`${BASE}/usage/beacon`, {
+    void fetch(`${API_BASE}/usage/beacon`, {
       method: 'POST',
       // keepalive lets the request outlive the page on tab close. sendBeacon
       // can't be used: it cannot set an Authorization header, and we'd lose

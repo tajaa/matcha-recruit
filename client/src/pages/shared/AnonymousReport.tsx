@@ -3,9 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type Stage = 'validating' | 'invalid' | 'form' | 'submitting' | 'submitted' | 'error'
 
 export default function AnonymousReport() {
@@ -29,7 +27,7 @@ export default function AnonymousReport() {
       setStage('invalid')
       return
     }
-    fetch(`${BASE}/report/${token}`)
+    fetch(`${API_BASE}/report/${token}`)
       .then(async (res) => {
         if (res.ok) {
           const data = (await res.json().catch(() => null)) as { voice_enabled?: boolean } | null
@@ -48,7 +46,7 @@ export default function AnonymousReport() {
     setStage('submitting')
     setError(null)
     try {
-      const res = await fetch(`${BASE}/report/${token}`, {
+      const res = await fetch(`${API_BASE}/report/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -118,7 +116,7 @@ export default function AnonymousReport() {
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
         {voiceEnabled && (
           <IRPublicDictate
-            parseUrl={`${BASE}/report/${token}/voice/parse`}
+            parseUrl={`${API_BASE}/report/${token}/voice/parse`}
             onPrefill={(p) => {
               if (p.description) setDescription(p.description)
               if (p.occurred_at_text) setOccurredAt(p.occurred_at_text)

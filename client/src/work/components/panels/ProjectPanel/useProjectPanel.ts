@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { ProjectSection } from '../../../types'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, listProjectFiles, uploadProjectFile, deleteProjectFile, reorderProjectSectionsNew, reorderProjectSections } from '../../../api/matchaWork'
 import type { ProjectFile } from '../../../api/matchaWork'
-import { ensureFreshToken } from '../../../../api/client'
+import { ensureFreshToken, API_BASE } from '../../../../api/client'
 import { ALLOWED_FILE_EXT } from './constants'
 import { formatBytes } from './helpers'
 import type { ProjectPanelProps } from './types'
@@ -225,9 +225,8 @@ export function useProjectPanel(props: ProjectPanelProps) {
     try {
       if (isNewMode) {
         if (fmt === 'md') {
-          const BASE = import.meta.env.VITE_API_URL ?? '/api'
           const token = await ensureFreshToken()
-          const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/export/md`, {
+          const res = await fetch(`${API_BASE}/matcha-work/projects/${projectId}/export/md`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           })
           const blob = await res.blob()
@@ -242,9 +241,8 @@ export function useProjectPanel(props: ProjectPanelProps) {
         }
       } else {
         if (fmt === 'md') {
-          const BASE = import.meta.env.VITE_API_URL ?? '/api'
           const token = await ensureFreshToken()
-          const res = await fetch(`${BASE}/matcha-work/threads/${threadId}/project/export/md`, {
+          const res = await fetch(`${API_BASE}/matcha-work/threads/${threadId}/project/export/md`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           })
           const blob = await res.blob()

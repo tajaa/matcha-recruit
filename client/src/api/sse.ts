@@ -17,9 +17,7 @@
 // body is gone — so auth goes through authStreamHeaders(), which refreshes
 // proactively before the request opens.
 
-import { authStreamHeaders } from './client'
-
-const BASE = import.meta.env.VITE_API_URL || '/api'
+import { authStreamHeaders, API_BASE } from './client'
 
 // ---------------------------------------------------------------------------
 // Shared pilot types (E1) — these were redeclared verbatim across the five
@@ -168,7 +166,7 @@ export async function postSSE(
     ...opts.headers,
   }
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: opts.method ?? 'POST',
     headers,
     // `body == null` covers null as well as undefined: JSON.stringify(null)

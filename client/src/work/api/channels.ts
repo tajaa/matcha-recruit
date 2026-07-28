@@ -1,4 +1,4 @@
-import { api, ensureFreshToken } from '../../api/client'
+import { api, ensureFreshToken, API_BASE } from '../../api/client'
 
 export interface ChannelSummary {
   id: string
@@ -209,11 +209,10 @@ export const updateChannel = (id: string, updates: { name?: string; description?
   api.patch<ChannelSummary>(`/channels/${id}`, updates)
 
 export async function uploadChannelFiles(channelId: string, files: File[]): Promise<ChannelAttachment[]> {
-  const BASE = import.meta.env.VITE_API_URL ?? '/api'
   const token = await ensureFreshToken()
   const form = new FormData()
   files.forEach((f) => form.append('files', f))
-  const res = await fetch(`${BASE}/channels/${channelId}/upload`, {
+  const res = await fetch(`${API_BASE}/channels/${channelId}/upload`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
@@ -366,11 +365,9 @@ export interface AcceptInviteResponse {
   channel_id: string
 }
 
-const PUBLIC_BASE = import.meta.env.VITE_API_URL ?? '/api'
-
 /** Public (no auth): channel context for the join landing page. */
 export const getChannelInviteInfo = async (code: string): Promise<ChannelInviteInfo> => {
-  const res = await fetch(`${PUBLIC_BASE}/channels/invite-info/${code}`)
+  const res = await fetch(`${API_BASE}/channels/invite-info/${code}`)
   if (!res.ok) throw new Error('Could not load invite')
   return res.json()
 }
@@ -382,7 +379,7 @@ export const acceptChannelInvite = async (
   code: string,
   body: { name: string; password: string; email?: string },
 ): Promise<AcceptInviteResponse> => {
-  const res = await fetch(`${PUBLIC_BASE}/channels/invite/${code}/accept`, {
+  const res = await fetch(`${API_BASE}/channels/invite/${code}/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

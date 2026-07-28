@@ -4,9 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/billing/matchaLitePricing'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 export default function MatchaLiteSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
@@ -32,7 +30,7 @@ export default function MatchaLiteSignup() {
   // Broker seat invites pin the company name + seats; prefill + lock them.
   useEffect(() => {
     if (!brokerRef) return
-    fetch(`${BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
+    fetch(`${API_BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
       .then((r) => r.json())
       .then((info) => {
         if (info?.valid) {
@@ -72,7 +70,7 @@ export default function MatchaLiteSignup() {
     setError(null)
     try {
       // Step 1: register account (features all off until Stripe completes)
-      const regRes = await fetch(`${BASE}/auth/register/business`, {
+      const regRes = await fetch(`${API_BASE}/auth/register/business`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -106,7 +104,7 @@ export default function MatchaLiteSignup() {
       }
 
       // Step 2: open Stripe checkout
-      const checkoutRes = await fetch(`${BASE}/resources/checkout/lite`, {
+      const checkoutRes = await fetch(`${API_BASE}/resources/checkout/lite`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

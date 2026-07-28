@@ -1,9 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type Stage = 'validating' | 'invalid' | 'closed' | 'form' | 'submitting' | 'submitted'
 type Factor = { key: string; label: string }
 
@@ -26,7 +24,7 @@ export default function ExternalIntake() {
 
   useEffect(() => {
     if (!token) { setStage('invalid'); return }
-    fetch(`${BASE}/external-intake/${token}`)
+    fetch(`${API_BASE}/external-intake/${token}`)
       .then(async (res) => {
         if (!res.ok) { setStage('invalid'); return }
         const data = await res.json()
@@ -43,7 +41,7 @@ export default function ExternalIntake() {
     e.preventDefault()
     setStage('submitting')
     try {
-      const res = await fetch(`${BASE}/external-intake/${token}`, {
+      const res = await fetch(`${API_BASE}/external-intake/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ epl: answers }),

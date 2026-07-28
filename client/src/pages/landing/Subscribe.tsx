@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { CheckCircle, Loader2, Mail, ArrowLeft } from 'lucide-react'
-
-const API = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 type SubscribeResponse = {
   ok: boolean
   id: string
@@ -27,7 +25,7 @@ export default function Subscribe() {
     setSubmitting(true)
     setError('')
     try {
-      const res = await fetch(`${API}/newsletter/subscribe`, {
+      const res = await fetch(`${API_BASE}/newsletter/subscribe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

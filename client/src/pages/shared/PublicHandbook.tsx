@@ -5,9 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { BookOpen, Loader2 } from 'lucide-react'
 import { Logo } from '../../components/ui'
 import type { PublicHandbook as PublicHandbookData } from '../../types/handbook'
-
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
+import { API_BASE } from '../../api/client'
 // ---------------------------------------------------------------------------
 // PublicHandbook — a published handbook, readable by anyone holding the link.
 // No auth: the token in the URL is the credential. Renders outside every
@@ -29,7 +27,7 @@ export default function PublicHandbook() {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await fetch(`${BASE}/shared/handbook/${token}`)
+        const res = await fetch(`${API_BASE}/shared/handbook/${token}`)
         if (cancelled) return
         if (res.status === 404) {
           setError('This handbook link is no longer available. It may have been revoked or expired.')
