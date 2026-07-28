@@ -19,6 +19,26 @@ type FeatureFlagStatus = {
   non_test_enabled_count: number
 }
 
+type ProvenanceBucket =
+  | 'tier_forced' | 'addon' | 'custom_product' | 'paid_gate' | 'tier_preset' | 'audit' | 'unknown'
+
+type ProvenanceEntry = { bucket: ProvenanceBucket; detail: unknown }
+type ProvenanceResponse = { company_id: string; features: Record<string, ProvenanceEntry> }
+
+const EMPTY_PROVENANCE: ProvenanceResponse = { company_id: '', features: {} }
+
+// Label + tooltip hint per bucket — see server feature_provenance.py for the
+// classification rules these summarize.
+const PROVENANCE_META: Record<ProvenanceBucket, { label: string; hint: string }> = {
+  tier_forced: { label: 'Bundle', hint: 'Always on for this tier — toggling here has no effect at read time.' },
+  addon: { label: 'Add-on', hint: 'Granted by a purchased add-on subscription.' },
+  custom_product: { label: 'Product', hint: 'Granted by an admin-composed custom product.' },
+  paid_gate: { label: 'Paid gate', hint: "This tier's Stripe checkout gate." },
+  tier_preset: { label: 'Signup', hint: 'Granted at signup for this tier — admin-toggleable.' },
+  audit: { label: 'Manual', hint: 'Traced to a specific admin/webhook write — see the audit log.' },
+  unknown: { label: 'Unknown origin', hint: 'Enabled before the audit log existed, or by an untracked path.' },
+}
+
 function enabledCount(features: Record<string, boolean>) {
   return FEATURE_KEYS.filter((k) => features[k]).length
 }
@@ -52,6 +72,14 @@ export default function Features() {
   // there's something to show, and drop the selection once it scrolls out of
   // the filtered list.
   const selected = filtered.find((c) => c.id === selectedId) ?? filtered[0] ?? null
+
+  const { data: provenance } = useAsync(
+    () => (selected
+      ? api.get<ProvenanceResponse>(`/admin/company-features/${selected.id}/provenance`)
+      : Promise.resolve(EMPTY_PROVENANCE)),
+    [selected?.id],
+    EMPTY_PROVENANCE,
+  )
 
   async function toggle(companyId: string, feature: string, enabled: boolean) {
     const key = `${companyId}:${feature}`
@@ -150,6 +178,13 @@ export default function Features() {
                 {enabledCount(selected.enabled_features)}/{FEATURE_KEYS.length} enabled
               </Badge>
             </div>
+            {Object.values(provenance.features).some((p) => p.bucket === 'unknown') && (
+              <p className="border-b border-white/[0.06] bg-white/[0.02] px-4 py-1.5 text-[11px] text-zinc-500">
+                Some enabled features show "Unknown origin" — they predate the write audit log
+                (feataudit01) or came from a path it doesn't yet cover. That's expected for
+                older grants, not a bug.
+              </p>
+            )}
             <div className="flex-1 space-y-5 overflow-y-auto p-4">
               {FEATURE_GROUPS.map((group) => (
                 <div key={group.label}>
@@ -162,24 +197,34 @@ export default function Features() {
                       // Beta features can only be switched ON for test companies —
                       // turning one OFF (remediation) always stays live.
                       const lockedOn = isBeta && !on && !selected.is_test
+                      const prov = on ? provenance.features[key] : undefined
+                      const provMeta = prov ? PROVENANCE_META[prov.bucket] : undefined
+                      // A tier-forced flag is re-forced by merge_company_features on
+                      // every read regardless of what's stored — toggling it here is
+                      // a no-op at read time, so don't offer a toggle that lies.
+                      const tierForced = prov?.bucket === 'tier_forced'
+                      const title = lockedOn
+                        ? `${FEATURE_LABELS[key]} — beta, test accounts only`
+                        : provMeta
+                          ? `${FEATURE_LABELS[key]} — ${provMeta.hint}`
+                          : FEATURE_LABELS[key]
                       return (
                         <div key={key} className="flex items-center gap-3">
                           <span
                             className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs text-zinc-400"
-                            title={
-                              lockedOn
-                                ? `${FEATURE_LABELS[key]} — beta, test accounts only`
-                                : FEATURE_LABELS[key]
-                            }
+                            title={title}
                           >
                             <span className="truncate">{FEATURE_LABELS[key]}</span>
                             {isBeta && (
                               <Badge variant="warning" className="shrink-0">Beta</Badge>
                             )}
+                            {provMeta && (
+                              <Badge variant="neutral" className="shrink-0">{provMeta.label}</Badge>
+                            )}
                           </span>
                           <Toggle
                             checked={on}
-                            disabled={busy || lockedOn}
+                            disabled={busy || lockedOn || tierForced}
                             onChange={(v) => toggle(selected.id, key, v)}
                             size="sm"
                           />

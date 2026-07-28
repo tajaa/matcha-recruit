@@ -87,12 +87,21 @@ router = APIRouter()
 
 @router.get("/company-features", dependencies=[Depends(require_admin)])
 async def list_company_features():
-    """List all companies with their enabled features."""
+    """List all companies with their EFFECTIVE (not just stored) features.
+
+    Bug fixed here: this previously called merge_company_features with no
+    signup_source, and signup_source wasn't even selected — so a Matcha-X
+    company's overlay-forced flags (training, discipline, handbook_audit,
+    ...) rendered OFF here while being ON in the actual product. The tier
+    overlay (TIER_REQUIRED_FEATURES) only ever applies when signup_source is
+    passed in.
+    """
     async with get_connection() as conn:
         is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
         rows = await conn.fetch(
             f"""
-            SELECT id, name as company_name, industry, size, status, enabled_features, {is_test_col}
+            SELECT id, name as company_name, industry, size, status, enabled_features,
+                   signup_source, {is_test_col}
             FROM companies
             ORDER BY name
             """
@@ -105,7 +114,7 @@ async def list_company_features():
                 "industry": row["industry"],
                 "size": row["size"],
                 "status": row["status"] or "approved",
-                "enabled_features": merge_company_features(row["enabled_features"]),
+                "enabled_features": merge_company_features(row["enabled_features"], row["signup_source"]),
                 "is_test": bool(row["is_test"]),
             }
             for row in rows
@@ -169,7 +178,7 @@ async def toggle_company_feature(
             is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
             row = await conn.fetchrow(
                 f"""
-                SELECT enabled_features, {is_test_col}
+                SELECT enabled_features, signup_source, {is_test_col}
                 FROM companies
                 WHERE id = $1
                 FOR UPDATE
@@ -184,7 +193,11 @@ async def toggle_company_feature(
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-            old_features = merge_company_features(row["enabled_features"])
+            # signup_source passed through so the tier overlay is reflected in
+            # the returned/stored shape too — same bug class as
+            # list_company_features above (a tier-forced flag must not read
+            # back as off after an unrelated toggle).
+            old_features = merge_company_features(row["enabled_features"], row["signup_source"])
             features = dict(old_features)
             features[request.feature] = bool(request.enabled)
 
@@ -203,6 +216,33 @@ async def toggle_company_feature(
             )
 
         return {"enabled_features": features}
+
+
+@router.get("/company-features/{company_id}/provenance", dependencies=[Depends(require_admin)])
+async def company_feature_provenance(company_id: UUID):
+    """Per-feature provenance for one company: which package/tier bundle,
+    which purchased add-on, which custom product, or which admin/webhook
+    write explains each currently-enabled feature. See
+    feature_provenance.feature_provenance for the classification rules —
+    `unknown` is an honest bucket, not a bug, for anything pre-dating the
+    audit log or unresolved by the other rules.
+    """
+    async with get_connection() as conn:
+        company_row = await conn.fetchrow(
+            "SELECT id, enabled_features, signup_source FROM companies WHERE id = $1",
+            company_id,
+        )
+        if company_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+        from app.core.services.product_definitions import SELECT_COLUMNS, row_to_product
+
+        product_rows = await conn.fetch(f"SELECT {SELECT_COLUMNS} FROM product_definitions")
+        products_by_slug = {r["slug"]: row_to_product(r) for r in product_rows}
+
+        provenance = await feature_provenance(conn, company_row, products_by_slug)
+
+    return {"company_id": str(company_id), "features": provenance}
 
 
 @router.post("/companies/{company_id}/credits")
