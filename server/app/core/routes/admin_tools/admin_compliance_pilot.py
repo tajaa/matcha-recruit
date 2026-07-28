@@ -199,6 +199,13 @@ async def _stream_agent_turn(session_id: str, actor_id, history: list[dict]):
     tool calls have already written real `compliance_pilot_actions` rows; losing
     the assistant message that explains them would leave the session's history
     silently out of sync with what's actually staged.
+
+    The same reasoning is why the loop only raises `RateLimitExceeded` when the
+    limit is hit BEFORE any tool ran — a limit hit after tools have written rows
+    comes back as an `agent_result` frame carrying `error`, so it takes the
+    persist path below instead of the handler beneath. The two handlers here
+    cover only the cases where no terminal frame arrives at all: nothing
+    happened (rate limit up front), or the generator died outright.
     """
     result_data = None
     try:

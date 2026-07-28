@@ -1,10 +1,9 @@
 """The Compliance Pilot's agent loop — a bounded Gemini tool-calling loop,
 structurally copied from `matcha/services/huume/agent.py` (fixed bounds on
-model calls and wall clock, force-finish with partial work on a bound hit, a
-never-raises-except-RateLimitExceeded contract, an async generator of
-SSE-shaped frames). Reimplemented here rather than imported because core/ must
-not import matcha/ (see `core.py`'s module docstring) — Huume stays
-byte-untouched.
+model calls and wall clock, force-finish with partial work on a bound hit, an
+async generator of SSE-shaped frames). Reimplemented here rather than imported
+because core/ must not import matcha/ (see `core.py`'s module docstring) —
+Huume stays byte-untouched.
 
 Narrower than Huume in three ways, all because this domain has no in-memory
 thread-state blob to update:
@@ -31,7 +30,17 @@ model-generated — so unlike Huume's pilot skills there is no
 
 Contract with the caller (the route's agent-mode chat handler): an async
 generator of dicts, `{"type": "status"|"step"|"error"|"agent_result"}`.
-Exactly one `agent_result` frame is always emitted last.
+Exactly one `agent_result` frame is emitted last, carrying `error` when the
+turn ended badly — a mid-turn failure (including a Gemini rate limit hit after
+tools have already run) degrades into that frame rather than raising, because
+the route only persists the assistant message when a terminal frame arrives and
+the stage_* tools have by then written real action rows that need explaining.
+
+The ONE case that still raises is `RateLimitExceeded` before any tool ran:
+nothing happened, so there is no turn to record, and the route renders its own
+message instead of persisting an empty one. This is the loop's whole raising
+surface — deliberately narrower than Huume's, which re-raises unconditionally
+because its staged state lives in a thread document the caller writes anyway.
 """
 
 from __future__ import annotations
@@ -680,14 +689,42 @@ async def run_pilot_turn(
             contents.append(types.Content(role="user", parts=response_parts))
 
     except RateLimitExceeded:
-        raise
+        # A turn that never got off the ground re-raises: there is no turn to
+        # record, so the route renders its own friendly rate-limit message and
+        # persists nothing. But once tools have run, re-raising throws away the
+        # ONLY narrative of writes that already happened — the stage_* tools
+        # INSERT real `compliance_pilot_actions` rows, and the route's shielded
+        # persist is skipped when no `agent_result` frame ever arrives, leaving
+        # proposals sitting in the session with no message explaining them.
+        # So a turn with work behind it degrades into a normal terminal frame.
+        if not recorder.steps:
+            raise
+        logger.warning(
+            "Compliance Pilot agent hit the Gemini rate limit after %s step(s) — "
+            "finishing the turn with partial work", len(recorder.steps),
+        )
+        turn_error = (
+            "Gemini's rate limit was reached partway through this turn, so I stopped early. "
+            "Everything listed above already happened — check the staged proposals before retrying."
+        )
     except Exception as exc:
         logger.warning("Compliance Pilot agent turn failed: %s", exc, exc_info=True)
         turn_error = "The Pilot hit a problem mid-turn — keeping what worked."
-        yield {"type": "error", "message": turn_error}
 
+    # An `error` frame is deliberately NOT yielded for either case above: the
+    # `agent_result` frame below IS the terminal error report, and it is the one
+    # that gets persisted. Yielding both leaves the console showing the same
+    # sentence twice — once as a live "⚠" bubble that never reconciles against
+    # the transcript (it can't: the persisted content lacks the marker) and once
+    # as the assistant message. The route keeps its own error frame for the case
+    # this generator dies before reaching here.
     if not final_message:
-        final_message = "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
+        if turn_error:
+            final_message = turn_error
+        elif not recorder.steps:
+            final_message = "I wasn't able to finish that — nothing was changed."
+        else:
+            final_message = "Done for now — see the steps above."
 
     total_usage["model"] = _MODEL
     total_usage["estimated"] = False
