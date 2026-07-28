@@ -57,6 +57,9 @@ export default function NewsletterSignup({
     }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    // Deliberate raw read (documented exception): the token is attribution-only
+    // on this optional-auth endpoint, and ensureFreshToken would bounce an
+    // anonymous marketing-page visitor with a dead session to /login on submit.
     const token = localStorage.getItem('matcha_access_token')
     if (token) headers.Authorization = `Bearer ${token}`
 

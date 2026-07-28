@@ -112,6 +112,9 @@ function flush(useKeepalive = false) {
   _queue = []
 
   try {
+    // Deliberate raw read (documented exception): flush() must stay sync for
+    // the pagehide beacon, and a dead session must not trigger
+    // ensureFreshToken's logout redirect.
     const token = localStorage.getItem('matcha_access_token')
     void fetch(`${API_BASE}/usage/beacon`, {
       method: 'POST',
