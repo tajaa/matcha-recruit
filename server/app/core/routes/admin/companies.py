@@ -23,6 +23,7 @@ from app.core.services.scope_registry.codify import codified_sql
 from app.core.feature_flags import (
     ALL_FEATURES,
     BETA_FEATURES,
+    BUILTIN_TIER_META,
     assert_feature_allowed,
     merge_company_features,
 )
@@ -865,8 +866,13 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
 
         # Paid tiers whose paid gate is established via Stripe checkout,
         # keyed to the flag name each one's webhook flips (incidents for
-        # Lite/X, compliance for Compliance).
-        _stripe_gate_flag = {"matcha_lite": "incidents", "matcha_x": "incidents", "matcha_compliance": "compliance"}
+        # Lite/X, compliance for Compliance). Sourced from BUILTIN_TIER_META
+        # so this list can't drift from what /admin/products shows.
+        _stripe_gate_flag = {
+            slug: meta["stripe_gate_flag"]
+            for slug, meta in BUILTIN_TIER_META.items()
+            if meta.get("stripe_gate_flag")
+        }
         _stripe_gated = set(_stripe_gate_flag)
 
         # Refuse activating a paid tier's gate unless it's already on. Checked
@@ -877,8 +883,9 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
         # same-tier PATCH would otherwise skip this guard entirely and grant
         # the paid preset for free.
         if body.tier in _stripe_gated and not current_features.get(_stripe_gate_flag[body.tier]):
-            _label = {"matcha_x": "Matcha-X", "matcha_compliance": "Matcha Compliance"}.get(body.tier, "Matcha Lite")
-            _path = {"matcha_x": "/matcha-x/signup", "matcha_compliance": "/compliance/signup"}.get(body.tier, "/lite/signup")
+            _meta = BUILTIN_TIER_META.get(body.tier, {})
+            _label = _meta.get("label", body.tier)
+            _path = _meta.get("signup_path") or "/lite/signup"
             raise HTTPException(
                 status_code=400,
                 detail=f"Activating {_label} requires Stripe checkout. Send the customer to {_path} or use a broker referral token; admin cannot promote into a paid tier without payment.",

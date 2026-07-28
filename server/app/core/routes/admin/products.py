@@ -37,6 +37,7 @@ from app.core.services.product_definitions import (
     validate_pricing,
     validate_slug,
 )
+from app.core.feature_flags import BUILTIN_TIER_META, BUILTIN_TIER_SLUGS, builtin_tier_composition
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -144,6 +145,12 @@ async def list_products(current_user=Depends(require_admin)):
         )
         products = [row_to_product(r) for r in rows]
         counts = await _tenant_counts(conn, products)
+        tier_counts_rows = await conn.fetch(
+            "SELECT signup_source, COUNT(*) AS n FROM companies "
+            "WHERE signup_source = ANY($1::text[]) GROUP BY signup_source",
+            list(BUILTIN_TIER_SLUGS),
+        )
+        tier_counts = {r["signup_source"]: r["n"] for r in tier_counts_rows}
     return {
         "products": [{**p.to_dict(), "tenants": counts.get(p.slug, {"total": 0, "active": 0})} for p in products],
         # The builder's feature picker + gate select are driven by this list, so
@@ -151,6 +158,18 @@ async def list_products(current_user=Depends(require_admin)):
         # frontend change.
         "available_features": sorted(ALLOWED_PRODUCT_FEATURES),
         "pricing_models": list(PRICING_MODELS),
+        # Built-in (code-managed) tiers — read-only. RESERVED_SLUGS keeps
+        # these out of product_definitions, so they're synthesized here
+        # instead of queried from the table above.
+        "builtin_products": [
+            {
+                "slug": slug,
+                **BUILTIN_TIER_META.get(slug, {"label": slug, "blurb": "", "signup_path": None, "stripe_gate_flag": None}),
+                **builtin_tier_composition(slug),
+                "tenants": tier_counts.get(slug, 0),
+            }
+            for slug in BUILTIN_TIER_SLUGS
+        ],
     }
 
 

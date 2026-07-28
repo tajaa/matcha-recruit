@@ -374,6 +374,130 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
 }
 
 
+# Signup-time / tier-change feature presets — what gets STORED into
+# companies.enabled_features when an admin moves a company into a tier
+# (admin_change_tier) or an admin-driven signup builds a fresh row. This is a
+# DIFFERENT concept from TIER_REQUIRED_FEATURES above, which is an OVERLAY
+# applied at READ time on every request (so a bundle addition reaches existing
+# tenants with zero backfill). They can legitimately disagree — matcha_lite's
+# preset only sets `incidents` because `employees`/`handbooks` are inherited
+# from TIER_REQUIRED_FEATURES at read time; adding them here would just be
+# redundant with (and could drift from) the overlay.
+#
+# Moved from admin/_shared.py's `_TIER_FEATURE_PRESETS` (that name is kept as
+# an alias there for existing `import *` consumers) so both preset and overlay
+# live beside each other — `builtin_tier_composition()` below reads both.
+TIER_SIGNUP_PRESETS: dict[str, dict[str, bool]] = {
+    # Free / Resources tier: no paid features.
+    "resources_free": {k: False for k in DEFAULT_COMPANY_FEATURES},
+    # Matcha Lite: incidents only (matches what stripe_webhook flips on
+    # checkout.session.completed for matcha_lite — see stripe_webhook.py
+    # line ~214). Don't add `employees` here or the post-tier-change shape
+    # diverges from a real Lite signup.
+    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    # Matcha Lite Essentials — same checkout family as Lite, no employee
+    # roster. Mirrors matcha_lite's preset shape (incidents only; employees/
+    # osha_logs stay off via TIER_REQUIRED_FEATURES at read time).
+    "matcha_lite_essentials": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    # Matcha-X (mid tier): incidents only here, same as Lite — employees/
+    # discipline come from TIER_REQUIRED_FEATURES["matcha_x"] at read time
+    # via merge_company_features, so don't add them to the preset.
+    "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES, plus
+    # the Pro-bundled gates (labor_relations union/CBA admin; handbook_pilot
+    # conversational handbook/policy generation), which default off so they
+    # must be force-set here for admin-created/-tier-changed Pro cos.
+    "bespoke": {**dict(DEFAULT_COMPANY_FEATURES), "labor_relations": True,
+                "handbook_pilot": True},
+    # IR self-serve (Cap): incidents + employees + discipline.
+    "ir_only_self_serve": {
+        **{k: False for k in DEFAULT_COMPANY_FEATURES},
+        "incidents": True, "employees": True, "discipline": True,
+    },
+    # Matcha Compliance (standalone): compliance itself plus the 4-pillar
+    # bundle, forced True directly (no webhook involved in an admin-driven
+    # tier change, unlike the Stripe-flipped self-serve path). Like Lite/X,
+    # `matcha_compliance` is in BUILTIN_TIER_META's stripe-gated set, so
+    # admins can't PATCH a company *into* it without payment (use a signup
+    # link — self-serve or a comped invite token); this preset covers a
+    # same-tier reset-to-clean-defaults and makes the tier a recognized PATCH
+    # target when downgrading a compliance company to something else.
+    "matcha_compliance": {
+        **{k: False for k in DEFAULT_COMPANY_FEATURES},
+        "compliance": True, "handbook_audit": True, "policies": True,
+        "credential_templates": True, "employees": True,
+    },
+}
+
+# Human-facing metadata for the built-in tiers, surfaced read-only in
+# /admin/products alongside admin-composed custom products. `stripe_gate_flag`
+# is the flag each tier's Stripe webhook flips on checkout.session.completed —
+# None for tiers with no payment gate.
+BUILTIN_TIER_META: dict[str, dict[str, Any]] = {
+    "resources_free": {
+        "label": "Free / Resources", "blurb": "Resources hub, no paid features.",
+        "signup_path": None, "stripe_gate_flag": None,
+    },
+    "matcha_lite": {
+        "label": "Matcha Lite", "blurb": "Entry paid tier — incidents + employees + handbook generation.",
+        "signup_path": "/lite/signup", "stripe_gate_flag": "incidents",
+    },
+    "matcha_lite_essentials": {
+        "label": "Matcha Lite Essentials", "blurb": "Lite without an employee roster.",
+        "signup_path": "/lite/signup", "stripe_gate_flag": "incidents",
+    },
+    "matcha_x": {
+        "label": "Matcha-X", "blurb": "Mid tier — training, discipline, handbook audit, compliance taste.",
+        "signup_path": "/matcha-x/signup", "stripe_gate_flag": "incidents",
+    },
+    "matcha_compliance": {
+        "label": "Matcha Compliance", "blurb": "Standalone 4-pillar compliance product.",
+        "signup_path": "/compliance/signup", "stripe_gate_flag": "compliance",
+    },
+    "ir_only_self_serve": {
+        "label": "IR Self-Serve (Cap)", "blurb": "Legacy free private beta — full IR + HR bundle.",
+        "signup_path": "/ir/signup", "stripe_gate_flag": None,
+    },
+    "bespoke": {
+        "label": "Bespoke / Platform", "blurb": "Full platform, sold via contract/invoice.",
+        "signup_path": None, "stripe_gate_flag": None,
+    },
+}
+
+# Every slug with EITHER a read-time overlay or a signup preset — the full set
+# of built-in (non-custom-product) tiers to list in /admin/products.
+BUILTIN_TIER_SLUGS: tuple[str, ...] = tuple(sorted(set(TIER_REQUIRED_FEATURES) | set(TIER_SIGNUP_PRESETS)))
+
+
+def builtin_tier_composition(slug: str) -> dict[str, list[str]]:
+    """The feature makeup of a built-in tier, in four buckets that must not be
+    flattened into one list — they mean different things to an admin:
+
+    - forced_on / forced_off: TIER_REQUIRED_FEATURES overlay entries, applied
+      at READ time on every request regardless of what's stored.
+    - paid_gate: the single flag this tier's Stripe webhook flips on payment.
+    - granted_at_signup: preset keys stored True that aren't already covered
+      by the overlay or the paid gate — admin-toggleable afterward, unlike
+      the overlay entries.
+    """
+    overlay = TIER_REQUIRED_FEATURES.get(slug, {})
+    preset = TIER_SIGNUP_PRESETS.get(slug, {})
+    gate = BUILTIN_TIER_META.get(slug, {}).get("stripe_gate_flag")
+
+    forced_on = sorted(k for k, v in overlay.items() if v is True)
+    forced_off = sorted(k for k, v in overlay.items() if v is False)
+    paid_gate = [gate] if gate else []
+    preset_true = {k for k, v in preset.items() if v is True}
+    granted_at_signup = sorted(preset_true - set(overlay.keys()) - set(paid_gate))
+
+    return {
+        "forced_on": forced_on,
+        "forced_off": forced_off,
+        "paid_gate": paid_gate,
+        "granted_at_signup": granted_at_signup,
+    }
+
+
 def default_company_features_json() -> str:
     return json.dumps(DEFAULT_COMPANY_FEATURES)
 

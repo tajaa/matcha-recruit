@@ -3,8 +3,13 @@ import pytest
 from app.core.feature_flags import (
     ALL_FEATURES,
     BETA_FEATURES,
+    BUILTIN_TIER_META,
+    BUILTIN_TIER_SLUGS,
     DEFAULT_COMPANY_FEATURES,
+    TIER_REQUIRED_FEATURES,
+    TIER_SIGNUP_PRESETS,
     assert_feature_allowed,
+    builtin_tier_composition,
     company_may_use_beta,
     merge_company_features,
 )
@@ -122,3 +127,53 @@ def test_assert_feature_allowed_beta_matrix(monkeypatch, enabled, is_test, shoul
 def test_assert_feature_allowed_noop_for_non_beta_feature(monkeypatch):
     monkeypatch.setattr("app.core.feature_flags.BETA_FEATURES", frozenset({"schedule_intelligence"}))
     assert assert_feature_allowed("handbooks", True, company_row={"is_test": False}) is None
+
+
+# ── Built-in tier composition ────────────────────────────────────────────────
+
+
+def test_builtin_tier_slugs_covers_both_overlay_and_preset():
+    assert set(BUILTIN_TIER_SLUGS) == set(TIER_REQUIRED_FEATURES) | set(TIER_SIGNUP_PRESETS)
+
+
+def test_every_builtin_tier_has_meta():
+    for slug in BUILTIN_TIER_SLUGS:
+        assert slug in BUILTIN_TIER_META, f"{slug} missing from BUILTIN_TIER_META"
+
+
+@pytest.mark.parametrize("slug", list(BUILTIN_TIER_SLUGS))
+def test_builtin_tier_composition_buckets_are_disjoint(slug):
+    buckets = builtin_tier_composition(slug)
+    seen: dict[str, str] = {}
+    for bucket_name, keys in buckets.items():
+        for key in keys:
+            assert key not in seen, (
+                f"{slug}: '{key}' appears in both '{seen.get(key)}' and '{bucket_name}'"
+            )
+            seen[key] = bucket_name
+
+
+def test_matcha_lite_forced_off_bucket_has_training_and_discipline():
+    # These are the flags moved up to Matcha-X — the overlay forces them off
+    # regardless of any stored True, and that must render as "blocked", not
+    # merely absent from "forced_on".
+    buckets = builtin_tier_composition("matcha_lite")
+    assert set(buckets["forced_off"]) == {"training", "discipline"}
+
+
+def test_matcha_lite_paid_gate_is_incidents():
+    assert builtin_tier_composition("matcha_lite")["paid_gate"] == ["incidents"]
+
+
+def test_matcha_lite_essentials_preset_exists():
+    # This preset was missing before this change — admin_change_tier didn't
+    # recognize the tier as a valid PATCH target.
+    assert "matcha_lite_essentials" in TIER_SIGNUP_PRESETS
+    assert TIER_SIGNUP_PRESETS["matcha_lite_essentials"]["incidents"] is True
+
+
+def test_resources_free_and_bespoke_have_no_paid_gate():
+    # Presets exist but no Stripe checkout backs either — LifecycleActions
+    # needs their labels without treating them as gated tiers.
+    assert builtin_tier_composition("resources_free")["paid_gate"] == []
+    assert builtin_tier_composition("bespoke")["paid_gate"] == []

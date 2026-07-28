@@ -59,7 +59,7 @@ from app.core.services.platform_settings import (
 )
 from app.config import get_settings
 from app.core.services.stripe_service import StripeService, StripeServiceError
-from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
+from app.core.feature_flags import DEFAULT_COMPANY_FEATURES, TIER_SIGNUP_PRESETS
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
 from app.core.services.deal_broker import BrokerInputs
@@ -494,43 +494,11 @@ _NOTIFICATION_SUBQUERIES: list[str] = [
 HEARTBEAT_INTERVAL_ADMIN = 10.0
 
 
-_TIER_FEATURE_PRESETS: dict[str, dict] = {
-    # Free / Resources tier: no paid features.
-    "resources_free": {k: False for k in DEFAULT_COMPANY_FEATURES},
-    # Matcha Lite: incidents only (matches what stripe_webhook flips on
-    # checkout.session.completed for matcha_lite — see stripe_webhook.py
-    # line ~214). Don't add `employees` here or the post-tier-change shape
-    # diverges from a real Lite signup.
-    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
-    # Matcha-X (mid tier): incidents only here, same as Lite — employees/
-    # discipline come from TIER_REQUIRED_FEATURES["matcha_x"] at read time
-    # via merge_company_features, so don't add them to the preset.
-    "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
-    # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES, plus
-    # the Pro-bundled gates (labor_relations union/CBA admin; handbook_pilot
-    # conversational handbook/policy generation), which default off so they
-    # must be force-set here for admin-created/-tier-changed Pro cos.
-    "bespoke": {**dict(DEFAULT_COMPANY_FEATURES), "labor_relations": True,
-                "handbook_pilot": True},
-    # IR self-serve (Cap): incidents + employees + discipline.
-    "ir_only_self_serve": {
-        **{k: False for k in DEFAULT_COMPANY_FEATURES},
-        "incidents": True, "employees": True, "discipline": True,
-    },
-    # Matcha Compliance (standalone): compliance itself plus the 4-pillar
-    # bundle, forced True directly (no webhook involved in an admin-driven
-    # tier change, unlike the Stripe-flipped self-serve path). Like Lite/X,
-    # `matcha_compliance` is in _stripe_gated below, so admins can't PATCH a
-    # company *into* it without payment (use a signup link — self-serve or a
-    # comped invite token); this preset covers a same-tier reset-to-clean-
-    # defaults and makes the tier a recognized PATCH target when downgrading
-    # a compliance company to something else.
-    "matcha_compliance": {
-        **{k: False for k in DEFAULT_COMPANY_FEATURES},
-        "compliance": True, "handbook_audit": True, "policies": True,
-        "credential_templates": True, "employees": True,
-    },
-}
+# Moved to feature_flags.py as TIER_SIGNUP_PRESETS (2026-07-28) so it lives
+# beside TIER_REQUIRED_FEATURES — builtin_tier_composition() reads both.
+# Alias kept so admin_change_tier and any other `import *` consumer here are
+# unaffected.
+_TIER_FEATURE_PRESETS = TIER_SIGNUP_PRESETS
 
 
 # ── Deal Flow — saved editor templates (DB-backed; admin-global, one row per tab) ──
