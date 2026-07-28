@@ -122,11 +122,13 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
         }}
       />
       {/* Hairline accent on the top edge */}
-      <div
-        aria-hidden
-        className="absolute inset-x-0 top-0 h-px"
-        style={{ background: `linear-gradient(90deg, transparent, ${P.hairline}, transparent)` }}
-      />
+      {!P.display && (
+        <div
+          aria-hidden
+          className="absolute inset-x-0 top-0 h-px"
+          style={{ background: `linear-gradient(90deg, transparent, ${P.hairline}, transparent)` }}
+        />
+      )}
 
       <div className="relative max-w-2xl mx-auto px-6 text-center">
         <span
@@ -146,7 +148,7 @@ export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: Newsl
           style={{
             color: 'rgba(240,236,228,0.98)',
             lineHeight: 1.08,
-            fontFamily: P.display ? 'var(--font-display)' : undefined,
+            fontFamily: P.display ? 'var(--font-lite)' : undefined,
             fontWeight: P.display ? 400 : 600,
           }}
         >
