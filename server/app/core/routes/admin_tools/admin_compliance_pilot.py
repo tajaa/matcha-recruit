@@ -10,6 +10,7 @@ Actions run as detached background tasks that own their own connections
 (`compliance_pilot.run_action`), so a browser tab close mid-run can't orphan a
 research pass on a request-scoped connection. The frontend polls `GET /actions/{id}`.
 """
+import asyncio
 import json
 import logging
 from typing import List, Literal, Optional
@@ -22,7 +23,10 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from app.core.dependencies import require_admin
 from app.core.services import compliance_pilot as cp
+from app.core.services.compliance_pilot import agent as agent_mod
 from app.core.services.compliance_pilot.approve import _embed_bg, _snapshot_bg
+from app.core.services.compliance_pilot.confirm import ActionConflict, cancel_proposed, confirm_and_launch
+from app.core.services.rate_limiter import RateLimitExceeded
 from app.core.services.redis_cache import check_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -95,24 +99,6 @@ async def _load_messages(conn, session_id: str) -> list[dict]:
     return [{**dict(r), "metadata": _parse_jsonb(r["metadata"])} for r in rows]
 
 
-def _action_out(row) -> dict:
-    d = dict(row)
-    for k in ("params", "progress", "result"):
-        if k in d:
-            d[k] = _parse_jsonb(d[k])
-    d["staged_ids"] = [str(x) for x in (d.get("staged_ids") or [])]
-    return d
-
-
-async def _load_actions(conn, session_id: str) -> list[dict]:
-    rows = await conn.fetch(
-        "SELECT id, kind, params, status, progress, result, staged_ids, started_at, finished_at "
-        "FROM compliance_pilot_actions WHERE session_id = $1 ORDER BY started_at",
-        session_id,
-    )
-    return [_action_out(r) for r in rows]
-
-
 def _latest_coordinate(history: list[dict], actions: list[dict]) -> Optional[dict]:
     """The session's current (state, city, industry_tag) — the latest resolved
     proposal in an assistant turn, else the latest action's params. None on turn 1."""
@@ -170,7 +156,7 @@ async def get_session(session_id: str, current_user=Depends(require_admin)):
         session = await _load_session(conn, session_id)
         session["template"] = cp.get_template(session.get("mode"))
         session["messages"] = await _load_messages(conn, session_id)
-        session["actions"] = await _load_actions(conn, session_id)
+        session["actions"] = await cp.load_actions(conn, session_id)
     return session
 
 
@@ -199,6 +185,58 @@ async def update_session(session_id: str, body: SessionUpdate, current_user=Depe
 # Chat
 # --------------------------------------------------------------------------- #
 
+async def _stream_agent_turn(session_id: str, actor_id, history: list[dict]):
+    """Agent-mode chat stream: pass `agent.run_pilot_turn`'s frames straight
+    through, then persist the assistant summary. `citation_records` (not
+    `citations` — the legacy single-shot mode already owns that key for a
+    DIFFERENT shape, `{point, cited_ids}`; reusing it here would have the
+    frontend render agent-mode's flat `{cid, summary, ...}` records as if they
+    were that shape) carries the resolved citation records, and
+    `proposal_action_ids` the ids any stage_* tool call inserted this turn.
+
+    The persist runs under `asyncio.shield` — a client that aborts the SSE
+    connection cancels this generator, but by the time we're here the turn's
+    tool calls have already written real `compliance_pilot_actions` rows; losing
+    the assistant message that explains them would leave the session's history
+    silently out of sync with what's actually staged.
+    """
+    result_data = None
+    try:
+        async for ev in agent_mod.run_pilot_turn(session_id=session_id, actor_id=actor_id, history=history):
+            if ev.get("type") == "agent_result":
+                result_data = ev.get("data") or {}
+            yield f"data: {json.dumps(ev)}\n\n"
+    except RateLimitExceeded:
+        logger.warning("compliance_pilot: agent turn rate-limited for session %s", session_id)
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Gemini rate limit reached — please try again shortly.'})}\n\n"
+    except Exception:
+        logger.exception("compliance_pilot: agent stream error")
+        yield f"data: {json.dumps({'type': 'error', 'message': 'The Pilot hit a problem.'})}\n\n"
+
+    if result_data:
+        async def _persist():
+            async with get_connection() as c2:
+                await c2.execute(
+                    "INSERT INTO compliance_pilot_messages (session_id, role, content, metadata) "
+                    "VALUES ($1, 'assistant', $2, $3)",
+                    session_id, result_data.get("message", ""),
+                    json.dumps({
+                        "steps": result_data.get("steps"),
+                        "citation_records": result_data.get("citations"),
+                        "proposal_action_ids": result_data.get("proposal_action_ids"),
+                    }),
+                )
+                await c2.execute(
+                    "UPDATE compliance_pilot_sessions SET updated_at = NOW() WHERE id = $1",
+                    session_id,
+                )
+        try:
+            await asyncio.shield(_persist())
+        except Exception:
+            logger.exception("compliance_pilot: failed to persist agent assistant message")
+    yield "data: [DONE]\n\n"
+
+
 @router.post("/sessions/{session_id}/chat")
 async def chat(session_id: str, body: ChatIn, current_user=Depends(require_admin)):
     async with get_connection() as conn:
@@ -206,7 +244,23 @@ async def chat(session_id: str, body: ChatIn, current_user=Depends(require_admin
         await check_rate_limit(str(getattr(current_user, "id", "admin")), "compliance_pilot_chat", 40, 3600)
         mode = session.get("mode") or "research"
         history = await _load_messages(conn, session_id)
-        actions = await _load_actions(conn, session_id)
+
+        if mode == "agent":
+            await conn.execute(
+                "INSERT INTO compliance_pilot_messages (session_id, role, content) VALUES ($1, 'user', $2)",
+                session_id, body.message,
+            )
+            actor_id = getattr(current_user, "id", None)
+            # run_pilot_turn expects the full turn history INCLUDING the latest
+            # user message as its last entry (same convention as Huume) — no
+            # second round trip needed, the row we just inserted is this dict.
+            agent_history = history + [{"role": "user", "content": body.message}]
+            return StreamingResponse(
+                _stream_agent_turn(session_id, actor_id, agent_history),
+                media_type="text/event-stream", headers={"X-Accel-Buffering": "no"},
+            )
+
+        actions = await cp.load_actions(conn, session_id)
         corpus = {"records": [], "index": {}}
         snapshot = None
         if mode == "ask":
@@ -354,14 +408,43 @@ async def create_action(session_id: str, body: ActionCreate, current_user=Depend
 @router.get("/actions/{action_id}")
 async def get_action(action_id: str, current_user=Depends(require_admin)):
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, session_id, kind, params, status, progress, result, staged_ids, "
-            "started_at, finished_at FROM compliance_pilot_actions WHERE id = $1",
-            action_id,
-        )
+        row = await cp.load_action(conn, action_id)
     if not row:
         raise HTTPException(status_code=404, detail="Action not found")
-    return _action_out(row)
+    return row
+
+
+@router.post("/actions/{action_id}/confirm")
+async def confirm_action_route(action_id: str, current_user=Depends(require_admin)):
+    """Execute a proposed action — the REST twin of the agentic loop's
+    `confirm_action` tool. Both funnel through `confirm.confirm_and_launch`, so
+    a chat-driven confirm and a button-driven confirm for the same action can't
+    diverge. No two-turn check here: a REST call is definitionally a separate
+    request from whatever staged the action, so the structural same-turn risk
+    `actions.evaluate_confirm` guards against in the loop doesn't apply — the
+    CAS `WHERE status='proposed'` in `confirm_and_launch` is the whole gate.
+    """
+    actor_id = getattr(current_user, "id", None)
+    try:
+        return await confirm_and_launch(action_id, actor_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Action not found")
+    except ActionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/actions/{action_id}/cancel")
+async def cancel_action_route(action_id: str, current_user=Depends(require_admin)):
+    """Void a proposed action — the REST twin of the agentic loop's
+    `cancel_action` tool, same executor (`confirm.cancel_proposed`)."""
+    try:
+        return await cancel_proposed(action_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Action not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/actions/{action_id}/approve")
