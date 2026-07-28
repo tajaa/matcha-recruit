@@ -1498,6 +1498,20 @@ def test_an_unaudited_hiring_tool_is_surfaced_not_dropped():
     assert "ResumeRanker" in recs[0]["summary"]
 
 
+def test_unaudited_tools_sort_first_so_the_cap_cannot_drop_them():
+    """gather_evidence's _PER_SOURCE_CAP truncates from the FRONT of whatever
+    this query returns (recs[:_PER_SOURCE_CAP]). A company with >100 registered
+    tools must lose its already-audited rows to that cap before it loses the
+    never-audited ones — those are the most probative for a disparate-impact
+    charge, per the comment two lines above the query. NULLS LAST would put them
+    at the tail and hand them to the cap first; assert the query does not."""
+    conn = _RegisterConn()
+    asyncio.run(ld._src_hiring_ai_audits(conn, "cid", None, None, None, None))
+    sql = conn.sql["hiring_ai_audits"]
+    assert "NULLS FIRST" in sql
+    assert "NULLS LAST" not in sql
+
+
 def test_biometric_points_without_a_location_survive_a_location_scope():
     """`location_id` is nullable metadata here, not the row's identity. The
     standard _scope_direct predicate would drop a company-wide fingerprint-clock
@@ -1519,6 +1533,19 @@ def test_biometric_summary_states_missing_consent_flatly():
     recs = asyncio.run(ld._src_biometric_consent(_RegisterConn(rows), "cid", None, None, None, None))
     assert "no consent recorded" in recs[0]["summary"]
     assert "(company-wide)" in recs[0]["summary"]
+
+
+def test_no_consent_points_sort_first_so_the_cap_cannot_drop_them():
+    """A point with no consent recorded IS the BIPA claim. _PER_SOURCE_CAP
+    truncates from the front, so a date-only DESC NULLS LAST order (which sorts
+    the undated/no-consent rows last) would hand them to the cap first on a
+    company with >100 points. Ordered on the `consent_obtained` boolean, not
+    date nullness, since nothing in the schema ties the two together."""
+    conn = _RegisterConn()
+    asyncio.run(ld._src_biometric_consent(conn, "cid", None, None, None, None))
+    sql = conn.sql["biometric_consent_points"]
+    assert "ORDER BY bc.consent_obtained ASC" in sql
+    assert "NULLS LAST" not in sql
 
 
 def test_pay_transparency_scopes_to_the_matters_state():

@@ -9,14 +9,34 @@ function isLive(share: PacketShareStatus): boolean {
   return !share.revoked && !(share.expires_at && new Date(share.expires_at) < new Date())
 }
 
-function shareStatusText(share: PacketShareStatus | null | undefined): string | null {
-  if (!share) return null
-  if (share.revoked) return 'Link revoked'
-  if (share.expires_at && new Date(share.expires_at) < new Date()) return 'Link expired'
+function oneShareStatusText(share: PacketShareStatus): string {
   const who = share.recipient_email ? ` with ${share.recipient_email}` : ''
   if (share.download_count === 0) return `Shared${who} — not yet opened`
   const last = share.last_downloaded_at ? new Date(share.last_downloaded_at).toLocaleDateString() : null
   return `Shared${who} — opened ${share.download_count}×${last ? ` (last ${last})` : ''}`
+}
+
+/** Summary line above the live-links list — must never disagree with it. Built
+ *  from `shares` (every link), not `share` (only the newest): re-share A, then
+ *  B, then revoke B, and `share` is B's now-revoked row — rendering "Link
+ *  revoked" directly above a live entry for A, which reads as a packet that is
+ *  simultaneously not shared and shared. With >1 live link the summary reads
+ *  the count rather than picking one link to represent all of them; falls back
+ *  to the newest link's own status only when none are live. */
+function shareStatusText(shares: PacketShareStatus[] | null | undefined): string | null {
+  const all = shares ?? []
+  if (all.length === 0) return null
+  const live = all.filter(isLive)
+  if (live.length === 1) return oneShareStatusText(live[0])
+  if (live.length > 1) {
+    const opened = live.filter((s) => s.download_count > 0).length
+    return `Shared with ${live.length} link${live.length === 1 ? '' : 's'} — ${opened} opened`
+  }
+  // Nothing live: newest link explains why (revoked / expired).
+  const newest = all[0]
+  if (newest.revoked) return 'Link revoked'
+  if (newest.expires_at && new Date(newest.expires_at) < new Date()) return 'Link expired'
+  return oneShareStatusText(newest)
 }
 
 /** Work product: latest PDF/ZIP pinned, older versions collapsed. Rows keep
@@ -76,7 +96,7 @@ function PacketRow({ matterId, packet, toast, onShare, onRevoked }: {
   onRevoked?: () => void
 }) {
   const [revoking, setRevoking] = useState<string | null>(null)
-  const shareText = shareStatusText(packet.share)
+  const shareText = shareStatusText(packet.shares)
   const size = fmtSize(packet.file_size)
   // Every link that still works, not just the newest. A packet re-shared with a
   // second attorney leaves the first link live, and the row used to show only

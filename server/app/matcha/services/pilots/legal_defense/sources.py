@@ -586,14 +586,19 @@ async def _src_pay_equity(conn, company_id, start, end, loc_id, state, topic=_BR
 async def _src_hiring_ai_audits(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     # Company-wide. A tool that has NEVER been audited (last_audit_date NULL) is
     # the most probative row in this register for a disparate-impact charge, so it
-    # is surfaced explicitly rather than dropped for having no date.
+    # is surfaced explicitly rather than dropped for having no date — which means
+    # NULLS FIRST, not NULLS LAST: gather_evidence's _PER_SOURCE_CAP truncates
+    # from the front of this list, so NULLS LAST would cut the never-audited
+    # tools first on a company with >100 registered tools, keeping only the ones
+    # already audited. (Postgres defaults DESC to NULLS FIRST; NULLS FIRST below
+    # is written explicitly so this isn't silently reversed by a future edit.)
     rows = await conn.fetch(
         f"""
         SELECT ha.id, ha.tool_name, ha.vendor, ha.purpose, ha.last_audit_date,
                ha.next_due_date, {_overdue_sql("ha.next_due_date")} AS overdue
         FROM hiring_ai_audits ha
         WHERE ha.company_id = $1
-        ORDER BY ha.last_audit_date DESC NULLS LAST
+        ORDER BY ha.last_audit_date DESC NULLS FIRST
         """,
         company_id,
     )
@@ -666,6 +671,15 @@ async def _src_biometric_consent(conn, company_id, start, end, loc_id, state, to
     # is excluded while a scope is active" arm would drop a company-wide
     # fingerprint-clock inventory row from a location-scoped BIPA corpus. The
     # NULL arm below keeps it, matching `_scope_er_involved`'s reasoning.
+    #
+    # Ordered on `consent_obtained` first (false before true) rather than on the
+    # date: a point with NO consent recorded is the BIPA claim itself, and
+    # gather_evidence's _PER_SOURCE_CAP truncates this list from the front — a
+    # date-only DESC NULLS LAST order put those points at the tail, so a company
+    # with >100 points had its no-consent rows cut first. Ordering on the
+    # boolean is also more robust than ordering on date nullness: nothing ties
+    # consent_obtained_date to consent_obtained in the schema, so a row could in
+    # principle carry a date despite consent_obtained=false.
     rows = await conn.fetch(
         """
         SELECT bc.id, bc.collection_type, bc.purpose, bc.consent_obtained,
@@ -678,7 +692,7 @@ async def _src_biometric_consent(conn, company_id, start, end, loc_id, state, to
                OR bc.location_id IS NULL
                OR ($2::uuid IS NOT NULL AND bc.location_id = $2)
                OR ($2::uuid IS NULL AND UPPER(bl.state) = UPPER($3)))
-        ORDER BY bc.consent_obtained_date DESC NULLS LAST
+        ORDER BY bc.consent_obtained ASC, bc.consent_obtained_date DESC NULLS FIRST
         """,
         company_id, loc_id, state,
     )

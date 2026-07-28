@@ -8,10 +8,22 @@ import { RecordViewer, type ViewerTarget } from './RecordViewer'
 /** Merged timeline of every dated company record in the evidence scope,
  *  oldest first — the attorney's chronology, assembled from data the corpus
  *  already carries (when_iso). Mirrors the PDF's "Chronology of records"
- *  section (legal_defense._chronology_rows): company-conduct events only —
- *  compliance posture (`compliance`) and jurisdiction context are excluded. */
+ *  section (legal_defense._chronology_rows / _CHRONOLOGY_KINDS): company-conduct
+ *  EVENTS only. Excludes current-posture / inventory sources whose timestamp is
+ *  a record edit, not an act on a timeline — compliance posture (`compliance`),
+ *  jurisdiction context, and (like `compliance`) the two workforce_compliance
+ *  inventories: `pay_transparency` (posting-status edits) and
+ *  `biometric_consent` (consent-collection metadata). The other two
+ *  workforce_compliance sources, `pay_equity` and `hiring_ai_audits`, ARE
+ *  events (running a study or an audit on a date) and stay in, matching
+ *  _CHRONOLOGY_KINDS' `payequity:`/`aiaudit:` prefixes. Keep this set in sync
+ *  with _CHRONOLOGY_KINDS — this filters by source key, that by cid prefix,
+ *  but they must describe the same set of records or this panel and the
+ *  exported memo disagree. */
 
-const EXCLUDED_SOURCES = new Set(['compliance', 'law', 'legislation', 'case_law'])
+const EXCLUDED_SOURCES = new Set([
+  'compliance', 'law', 'legislation', 'case_law', 'pay_transparency', 'biometric_consent',
+])
 
 type Row = {
   cid: string
