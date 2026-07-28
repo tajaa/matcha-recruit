@@ -4,8 +4,9 @@ import {
   streamPilotChat, streamAgentChat, createAction, getAction, approveAction,
   confirmAction, cancelAction,
   type PilotSession, type PilotMessage, type PilotAction, type Proposal,
-  type Citation, type CitationRecord, type PilotStep, type ApproveRowResult, type StagedRow,
+  type Citation, type ApproveRowResult, type StagedRow,
 } from '../../../../api/admin/compliancePilot'
+import type { CitationRecord, PilotStep } from '../../../../types/compliancePilot'
 import StepTimeline from '../../../../components/ui/StepTimeline'
 import { libraryLink, coverageLink } from '../utils'
 

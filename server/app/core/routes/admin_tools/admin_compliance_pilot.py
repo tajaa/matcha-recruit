@@ -195,52 +195,81 @@ async def _stream_agent_turn(session_id: str, actor_id, history: list[dict]):
     `proposal_action_ids` the ids any stage_* tool call inserted this turn.
 
     The persist runs under `asyncio.shield` — a client that aborts the SSE
-    connection cancels this generator, but by the time we're here the turn's
-    tool calls have already written real `compliance_pilot_actions` rows; losing
-    the assistant message that explains them would leave the session's history
-    silently out of sync with what's actually staged.
+    connection (or hits the console's Stop button, or switches sessions) cancels
+    this generator, but by the time we're here the turn's tool calls have
+    already written real `compliance_pilot_actions` rows; losing the assistant
+    message that explains them would leave the session's history silently out
+    of sync with what's actually staged.
 
     The same reasoning is why the loop only raises `RateLimitExceeded` when the
     limit is hit BEFORE any tool ran — a limit hit after tools have written rows
     comes back as an `agent_result` frame carrying `error`, so it takes the
-    persist path below instead of the handler beneath. The two handlers here
-    cover only the cases where no terminal frame arrives at all: nothing
-    happened (rate limit up front), or the generator died outright.
+    persist path below instead of the handler beneath.
+
+    Cancellation needs its own arm, not just the two `except` clauses above:
+    `asyncio.CancelledError` lands wherever this generator is currently
+    suspended — typically deep inside `run_pilot_turn`'s Gemini call, not after
+    it returns — so it unwinds straight past the `if result_data:` block below
+    UNLESS that block lives in a `finally`. It does now. `steps_seen` (built
+    from the `step` frames already yielded by the time cancellation hits) is
+    the fallback source for a summary when the turn never reached its own
+    `agent_result` frame — this is the only path where real tool calls can have
+    run with no `agent_result` to persist from.
     """
-    result_data = None
+    result_data: Optional[dict] = None
+    steps_seen: list[dict] = []
     try:
         async for ev in agent_mod.run_pilot_turn(session_id=session_id, actor_id=actor_id, history=history):
             if ev.get("type") == "agent_result":
                 result_data = ev.get("data") or {}
+            elif ev.get("type") == "step" and ev.get("data"):
+                steps_seen.append(ev["data"])
             yield f"data: {json.dumps(ev)}\n\n"
     except RateLimitExceeded:
         logger.warning("compliance_pilot: agent turn rate-limited for session %s", session_id)
         yield f"data: {json.dumps({'type': 'error', 'message': 'Gemini rate limit reached — please try again shortly.'})}\n\n"
+    except asyncio.CancelledError:
+        # Cancellation is delivered as a normal exception here (this generator
+        # is mid-await, not in the separate GeneratorExit close protocol), so
+        # cleanup below is safe — but nothing is listening anymore, so no more
+        # `yield`s. Re-raise after the `finally` block's persist runs so the
+        # task actually stops rather than being silently swallowed.
+        raise
     except Exception:
         logger.exception("compliance_pilot: agent stream error")
         yield f"data: {json.dumps({'type': 'error', 'message': 'The Pilot hit a problem.'})}\n\n"
+    finally:
+        if result_data is None and steps_seen:
+            result_data = {
+                "message": "The turn was interrupted before finishing — the steps "
+                            "below already happened; check the staged proposals "
+                            "before retrying.",
+                "steps": steps_seen,
+                "citations": [],
+                "proposal_action_ids": [],
+            }
+        if result_data:
+            async def _persist():
+                async with get_connection() as c2:
+                    await c2.execute(
+                        "INSERT INTO compliance_pilot_messages (session_id, role, content, metadata) "
+                        "VALUES ($1, 'assistant', $2, $3)",
+                        session_id, result_data.get("message", ""),
+                        json.dumps({
+                            "steps": result_data.get("steps"),
+                            "citation_records": result_data.get("citations"),
+                            "proposal_action_ids": result_data.get("proposal_action_ids"),
+                        }),
+                    )
+                    await c2.execute(
+                        "UPDATE compliance_pilot_sessions SET updated_at = NOW() WHERE id = $1",
+                        session_id,
+                    )
+            try:
+                await asyncio.shield(_persist())
+            except Exception:
+                logger.exception("compliance_pilot: failed to persist agent assistant message")
 
-    if result_data:
-        async def _persist():
-            async with get_connection() as c2:
-                await c2.execute(
-                    "INSERT INTO compliance_pilot_messages (session_id, role, content, metadata) "
-                    "VALUES ($1, 'assistant', $2, $3)",
-                    session_id, result_data.get("message", ""),
-                    json.dumps({
-                        "steps": result_data.get("steps"),
-                        "citation_records": result_data.get("citations"),
-                        "proposal_action_ids": result_data.get("proposal_action_ids"),
-                    }),
-                )
-                await c2.execute(
-                    "UPDATE compliance_pilot_sessions SET updated_at = NOW() WHERE id = $1",
-                    session_id,
-                )
-        try:
-            await asyncio.shield(_persist())
-        except Exception:
-            logger.exception("compliance_pilot: failed to persist agent assistant message")
     yield "data: [DONE]\n\n"
 
 
