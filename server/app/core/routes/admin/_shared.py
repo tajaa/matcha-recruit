@@ -59,7 +59,7 @@ from app.core.services.platform_settings import (
 )
 from app.config import get_settings
 from app.core.services.stripe_service import StripeService, StripeServiceError
-from app.core.feature_flags import DEFAULT_COMPANY_FEATURES, TIER_SIGNUP_PRESETS
+from app.core.feature_flags import ALL_FEATURES, DEFAULT_COMPANY_FEATURES, TIER_SIGNUP_PRESETS
 from app.core.services.deal_pricing import DealInputs
 from app.core.services.deal_full import FullDealInputs
 from app.core.services.deal_broker import BrokerInputs
@@ -211,21 +211,17 @@ FALLBACK_CITY_ALIASES: dict[tuple[str, str], str] = {
 }
 
 
-# Known feature keys that can be toggled
-KNOWN_FEATURES = {
-    "policies", "handbooks", "compliance",
-    "employees", "offer_letters",
-    "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
-    "matcha_work", "risk_assessment",
-    "training", "i9", "cobra", "separation_agreements", "credential_templates",
-    "hris_import", "hris_gusto", "hris_finch", "hris_deductions",
-    "paid_channel_creator", "discipline", "inventory",
-    "werk_lite", "werk_lite_calls_all_members",
-    "workforce_compliance", "risk_profile", "resident_care", "controls_evidence",
-    "limit_adequacy", "driver_risk", "ir_voice_intake", "legal_defense",
-    "handbook_pilot", "analysis_pilot", "hr_pilot", "employee_schedule",
-    "schedule_intelligence",
-}
+# Known feature keys that can be toggled via PATCH /admin/company-features.
+# Derived from ALL_FEATURES (DEFAULT_COMPANY_FEATURES + incidents/employees) —
+# previously a hand-maintained 39-key set that had drifted from the ~65-key
+# canonical list: er_copilot/offer_letters/time_off gate real
+# require_feature(...) mounts but weren't in DEFAULT_COMPANY_FEATURES at all
+# (invisible to /admin/feature-flags + provenance), and 15 other real flags
+# (benefits_admin, huume, property, compliance_lite, handbook_audit, ...) were
+# in DEFAULT_COMPANY_FEATURES but missing here, so toggling any of them 400'd
+# as "unknown feature" despite being real, shipped features. Single source
+# now — add a flag to DEFAULT_COMPANY_FEATURES and it's toggleable here too.
+KNOWN_FEATURES = ALL_FEATURES
 
 
 _BUSINESS_REGISTRATION_SELECT_TEMPLATE = """

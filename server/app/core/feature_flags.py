@@ -280,6 +280,22 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # than double-gating the mount. Gates /schedule-intelligence +
     # /app/schedule-intelligence. Default off; admin-toggle; NOT bundled.
     "schedule_intelligence": False,
+    # Real `require_feature(...)`-gated flags that were only in the admin
+    # toggle grid's separate KNOWN_FEATURES whitelist (admin/_shared.py) and
+    # not here — so ALL_FEATURES never saw them, hiding er_copilot from
+    # /admin/feature-flags (the beta-management modal) and from provenance
+    # classification, and silently 400ing a PATCH toggle for offer_letters/
+    # time_off (rejected as "unknown feature") even though both gate real
+    # mounts. KNOWN_FEATURES is now derived FROM this dict (single source),
+    # so add anything you gate with require_feature here, not just there.
+    "er_copilot": False,
+    "offer_letters": False,
+    "time_off": False,
+    # No require_feature(...) gate anywhere — kept for parity with the admin
+    # toggle grid / featureCatalog.ts, which already list them; toggling
+    # either is currently a no-op read-side.
+    "interview_prep": False,
+    "inventory": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
