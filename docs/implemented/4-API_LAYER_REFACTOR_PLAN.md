@@ -1,11 +1,10 @@
 # client/src/api — Core Hygiene Refactor (full technical plan)
 
-> **Status (verified 2026-07-26): NOT IMPLEMENTED.** The nested
-> `client/src/api/compliance/compliance/` folder this plan dissolves is still present (15
-> files), and none of its 7 new files exist. Build order: **no fixed slot** — touches only
-> `client/src/api/` (plus single-line import edits in `client/src/work/`), conflicts with
-> nothing, and its 10 steps are each commit-sized and leave `tsc` green. Use as filler
-> between the server-side items. Numbered last for neutrality, not low value.
+> **Status (2026-07-27): IMPLEMENTED.** All 10 steps landed on
+> `chore/api-client-refactor`, one commit per step, `tsc`/tests/`vite build` green
+> throughout. Two pre-existing `{ point: string; cited_ids: string[] }` shapes outside the
+> 5 named pilot modules (`types/er.ts`, `api/discipline/discipline.ts`) were left alone —
+> out of the stated scope, not part of the pilot-chat type dedupe.
 
 ## Context
 
