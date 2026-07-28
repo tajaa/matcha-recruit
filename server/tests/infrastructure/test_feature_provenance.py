@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.core.services.feature_provenance import feature_provenance, record_feature_changes
+from app.core.services.feature_provenance import (
+    feature_provenance,
+    load_active_packs,
+    record_feature_changes,
+    resolve_addons,
+    resolve_plan,
+)
 
 
 class FakeConn:
@@ -100,8 +106,8 @@ async def test_tier_forced_takes_precedence():
     }
     # matcha_lite forces handbooks/employees True via TIER_REQUIRED_FEATURES —
     # no subscriptions, no audit rows needed to explain it.
-    conn = FakeConn(fetch_results=[[], []])  # mw_subscriptions rows, audit rows
-    result = await feature_provenance(conn, company_row, products_by_slug={})
+    conn = FakeConn(fetch_results=[[]])  # audit rows only (no active_packs fetch needed)
+    result = await feature_provenance(conn, company_row, products_by_slug={}, active_packs=[])
     assert result["handbooks"]["bucket"] == "tier_forced"
     assert result["handbooks"]["detail"] == "matcha_lite"
 
@@ -113,11 +119,11 @@ async def test_addon_bucket_from_active_subscription():
         "enabled_features": json.dumps({"ir_voice_intake": True, "incidents": True}),
         "signup_source": "matcha_lite",
     }
-    conn = FakeConn(fetch_results=[
-        [{"pack_id": "matcha_lite_addon_voice_intake", "status": "active"}],
-        [],
-    ])
-    result = await feature_provenance(conn, company_row, products_by_slug={})
+    conn = FakeConn(fetch_results=[[]])
+    result = await feature_provenance(
+        conn, company_row, products_by_slug={},
+        active_packs=["matcha_lite_addon_voice_intake"],
+    )
     assert result["ir_voice_intake"]["bucket"] == "addon"
 
 
@@ -128,8 +134,8 @@ async def test_paid_gate_bucket():
         "enabled_features": json.dumps({"incidents": True}),
         "signup_source": "matcha_lite",
     }
-    conn = FakeConn(fetch_results=[[], []])
-    result = await feature_provenance(conn, company_row, products_by_slug={})
+    conn = FakeConn(fetch_results=[[]])
+    result = await feature_provenance(conn, company_row, products_by_slug={}, active_packs=[])
     assert result["incidents"]["bucket"] == "paid_gate"
 
 
@@ -144,10 +150,9 @@ async def test_audit_bucket_when_nothing_else_explains_it():
         "signup_source": "matcha_lite",
     }
     conn = FakeConn(fetch_results=[
-        [],
         [_audit_row("policies", "admin_toggle", now, actor_user_id="user-9")],
     ])
-    result = await feature_provenance(conn, company_row, products_by_slug={})
+    result = await feature_provenance(conn, company_row, products_by_slug={}, active_packs=[])
     assert result["policies"]["bucket"] == "audit"
     assert result["policies"]["detail"]["source"] == "admin_toggle"
     assert result["policies"]["detail"]["actor_user_id"] == "user-9"
@@ -160,7 +165,72 @@ async def test_unknown_bucket_when_nothing_explains_it():
         "enabled_features": json.dumps({"policies": True}),
         "signup_source": "matcha_lite",
     }
-    conn = FakeConn(fetch_results=[[], []])  # no subs, no audit rows
-    result = await feature_provenance(conn, company_row, products_by_slug={})
+    conn = FakeConn(fetch_results=[[]])  # no audit rows
+    result = await feature_provenance(conn, company_row, products_by_slug={}, active_packs=[])
     assert result["policies"]["bucket"] == "unknown"
     assert result["policies"]["detail"] is None
+
+
+# ── load_active_packs ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_load_active_packs_filters_inactive_and_null():
+    conn = FakeConn(fetch_results=[[
+        {"pack_id": "matcha_lite", "status": "active"},
+        {"pack_id": "matcha_lite_addon_voice_intake", "status": "canceled"},
+        {"pack_id": None, "status": "active"},
+    ]])
+    packs = await load_active_packs(conn, "co-1")
+    assert packs == ["matcha_lite"]
+
+
+# ── resolve_plan ──────────────────────────────────────────────────────────────
+
+
+def test_resolve_plan_builtin_tier():
+    plan = resolve_plan("matcha_x", products_by_slug={})
+    assert plan == {"kind": "builtin", "slug": "matcha_x", "label": "Matcha-X"}
+
+
+def test_resolve_plan_custom_product():
+    class FakeProduct:
+        name = "Safety Pro"
+    plan = resolve_plan("product:safety-pro", products_by_slug={"safety-pro": FakeProduct()})
+    assert plan == {"kind": "custom_product", "slug": "safety-pro", "label": "Safety Pro"}
+
+
+def test_resolve_plan_custom_product_missing_row_falls_back_to_slug():
+    # The product was deleted/renamed but the company's signup_source still
+    # points at the old slug — don't crash, show the slug itself.
+    plan = resolve_plan("product:gone-product", products_by_slug={})
+    assert plan == {"kind": "custom_product", "slug": "gone-product", "label": "gone-product"}
+
+
+def test_resolve_plan_unknown_signup_source():
+    plan = resolve_plan("some_legacy_value", products_by_slug={})
+    assert plan["kind"] == "unknown"
+
+
+def test_resolve_plan_none_signup_source():
+    plan = resolve_plan(None, products_by_slug={})
+    assert plan["kind"] == "unknown"
+    assert plan["label"] == "Unknown"
+
+
+# ── resolve_addons ────────────────────────────────────────────────────────────
+
+
+def test_resolve_addons_maps_active_packs_to_names():
+    addons = resolve_addons(["matcha_lite_addon_voice_intake", "matcha_lite_addon_handbook_watch"])
+    keys = {a["key"] for a in addons}
+    assert keys == {"voice_intake", "handbook_watch"}
+    assert all("name" in a and "feature" in a for a in addons)
+
+
+def test_resolve_addons_ignores_non_addon_packs():
+    assert resolve_addons(["matcha_lite", "product:safety-pro"]) == []
+
+
+def test_resolve_addons_empty_list():
+    assert resolve_addons([]) == []

@@ -13,8 +13,18 @@ Two independent halves:
   a webhook may have written a flag a tier also grants, and "you own this"
   is the more useful answer than "someone flipped it".
 
-Both are read/write helpers over an already-open connection — no pool
-assumptions, callable from request handlers and (if ever needed) Celery.
+Plus two small DISPLAY helpers so an admin page can show "what plan is this
+company on, and what add-ons on top of it" instead of forcing that answer to
+be reverse-engineered from a flat toggle grid: `resolve_plan` (builtin tier /
+custom product / unknown, from signup_source) and `resolve_addons` (active
+LiteAddon purchases). Both are pure and read-only over already-fetched data —
+neither one grants or gates anything; `merge_company_features` +
+`TIER_REQUIRED_FEATURES` remain the only source of truth for what's actually
+enabled.
+
+All DB-touching helpers here are plain async functions over an already-open
+connection — no pool assumptions, callable from request handlers and (if ever
+needed) Celery.
 """
 from __future__ import annotations
 
@@ -31,6 +41,7 @@ from app.core.feature_flags import (
 from app.core.services.lite_addons import ADDON_PACK_PREFIX, addon_for_pack_id
 from app.core.services.product_definitions import (
     PRODUCT_PACK_PREFIX,
+    SIGNUP_SOURCE_PREFIX,
     product_for_pack_id,
 )
 
@@ -85,17 +96,65 @@ def _active_pack_ids(subscription_rows: list) -> list[str]:
     return [r["pack_id"] for r in subscription_rows if r["status"] == "active" and r["pack_id"]]
 
 
+async def load_active_packs(conn, company_id: UUID) -> list[str]:
+    """The company's currently-active mw_subscriptions pack_ids. Fetched once
+    by the route and handed to feature_provenance/resolve_addons so a single
+    page load doesn't query mw_subscriptions twice.
+    """
+    sub_rows = await conn.fetch(
+        "SELECT pack_id, status FROM mw_subscriptions WHERE company_id = $1",
+        company_id,
+    )
+    return _active_pack_ids(sub_rows)
+
+
+def resolve_plan(signup_source: Optional[str], products_by_slug: dict[str, Any]) -> dict[str, Any]:
+    """What plan/tier a company is on, for display — NOT for gating (that's
+    still merge_company_features + TIER_REQUIRED_FEATURES). `kind` is one of
+    builtin / custom_product / unknown (a company with no recognizable
+    signup_source — legacy row or one the tier constants don't name).
+    """
+    from app.core.feature_flags import BUILTIN_TIER_META
+
+    if signup_source and signup_source.startswith(SIGNUP_SOURCE_PREFIX):
+        slug = signup_source[len(SIGNUP_SOURCE_PREFIX):]
+        product = products_by_slug.get(slug)
+        return {
+            "kind": "custom_product",
+            "slug": slug,
+            "label": product.name if product else slug,
+        }
+    meta = BUILTIN_TIER_META.get(signup_source or "")
+    if meta:
+        return {"kind": "builtin", "slug": signup_source, "label": meta["label"]}
+    return {"kind": "unknown", "slug": signup_source, "label": signup_source or "Unknown"}
+
+
+def resolve_addons(active_packs: list[str]) -> list[dict[str, str]]:
+    """Purchased add-ons currently active for a company, for display."""
+    out: list[dict[str, str]] = []
+    for pack_id in active_packs:
+        if pack_id.startswith(ADDON_PACK_PREFIX):
+            addon = addon_for_pack_id(pack_id)
+            if addon:
+                out.append({"key": addon.key, "name": addon.name, "feature": addon.feature})
+    return out
+
+
 async def feature_provenance(
     conn,
     company_row: Any,
     products_by_slug: dict[str, Any],
+    active_packs: list[str],
 ) -> dict[str, dict[str, Any]]:
     """Classify every currently-enabled effective feature for one company.
 
     `company_row` needs `id`, `enabled_features`, `signup_source`.
     `products_by_slug` is a pre-fetched `{slug: ProductDefinition}` map (the
     caller already has the full product list loaded for /admin/products-style
-    pages; fetching it per company here would be N+1).
+    pages; fetching it per company here would be N+1). `active_packs` comes
+    from `load_active_packs` — fetched once by the caller and shared with
+    `resolve_addons` so a page load queries mw_subscriptions only once.
 
     Returns `{feature_key: {"bucket": ..., "detail": ...}}` for every feature
     that reads as enabled via `merge_company_features`. Buckets, in match
@@ -108,12 +167,6 @@ async def feature_provenance(
     signup_source = company_row["signup_source"]
     effective = merge_company_features(company_row["enabled_features"], signup_source)
     enabled_keys = [k for k in ALL_FEATURES if effective.get(k)]
-
-    sub_rows = await conn.fetch(
-        "SELECT pack_id, status FROM mw_subscriptions WHERE company_id = $1",
-        company_row["id"],
-    )
-    active_packs = _active_pack_ids(sub_rows)
 
     active_addon_flags: set[str] = set()
     for pack_id in active_packs:

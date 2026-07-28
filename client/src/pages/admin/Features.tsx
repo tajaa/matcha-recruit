@@ -23,9 +23,24 @@ type ProvenanceBucket =
   | 'tier_forced' | 'addon' | 'custom_product' | 'paid_gate' | 'tier_preset' | 'audit' | 'unknown'
 
 type ProvenanceEntry = { bucket: ProvenanceBucket; detail: unknown }
-type ProvenanceResponse = { company_id: string; features: Record<string, ProvenanceEntry> }
+type PlanInfo = { kind: 'builtin' | 'custom_product' | 'unknown'; slug: string | null; label: string }
+type AddonInfo = { key: string; name: string; feature: string }
+type ProvenanceResponse = {
+  company_id: string
+  plan: PlanInfo
+  addons: AddonInfo[]
+  features: Record<string, ProvenanceEntry>
+}
 
-const EMPTY_PROVENANCE: ProvenanceResponse = { company_id: '', features: {} }
+const EMPTY_PROVENANCE: ProvenanceResponse = {
+  company_id: '', plan: { kind: 'unknown', slug: null, label: '—' }, addons: [], features: {},
+}
+
+const PLAN_BADGE_VARIANT: Record<PlanInfo['kind'], 'success' | 'neutral' | 'warning'> = {
+  builtin: 'success',
+  custom_product: 'success',
+  unknown: 'warning',
+}
 
 // Label + tooltip hint per bucket — see server feature_provenance.py for the
 // classification rules these summarize.
@@ -177,6 +192,51 @@ export default function Features() {
               <Badge variant={enabledCount(selected.enabled_features) > 0 ? 'success' : 'neutral'}>
                 {enabledCount(selected.enabled_features)}/{FEATURE_KEYS.length} enabled
               </Badge>
+            </div>
+            <div className="space-y-2.5 border-b border-white/[0.06] px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-zinc-500">Plan</span>
+                <Badge variant={PLAN_BADGE_VARIANT[provenance.plan.kind]}>{provenance.plan.label}</Badge>
+                {provenance.plan.kind === 'unknown' && (
+                  <span className="text-[11px] text-zinc-600">
+                    (signup_source doesn't match a known tier or product)
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-zinc-500">Add-ons</span>
+                {provenance.addons.length === 0 ? (
+                  <span className="text-[11px] text-zinc-600">None purchased</span>
+                ) : (
+                  provenance.addons.map((a) => (
+                    <span key={a.key} className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300">
+                      {a.name}
+                    </span>
+                  ))
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="text-zinc-500">Beta</span>
+                {betaKeys.size === 0 ? (
+                  <span className="text-[11px] text-zinc-600">No features currently in beta</span>
+                ) : (
+                  Array.from(betaKeys).map((key) => {
+                    const on = !!selected.enabled_features[key]
+                    return (
+                      <span
+                        key={key}
+                        className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                          on
+                            ? 'border-amber-800/40 bg-amber-950/30 text-amber-300'
+                            : 'border-white/[0.08] bg-white/[0.03] text-zinc-500'
+                        }`}
+                      >
+                        {FEATURE_LABELS[key] ?? key}{on ? ' — enabled' : ''}
+                      </span>
+                    )
+                  })
+                )}
+              </div>
             </div>
             {Object.values(provenance.features).some((p) => p.bucket === 'unknown') && (
               <p className="border-b border-white/[0.06] bg-white/[0.02] px-4 py-1.5 text-[11px] text-zinc-500">

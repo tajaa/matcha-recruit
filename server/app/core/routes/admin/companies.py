@@ -27,7 +27,13 @@ from app.core.feature_flags import (
     assert_feature_allowed,
     merge_company_features,
 )
-from app.core.services.feature_provenance import feature_provenance, record_feature_changes
+from app.core.services.feature_provenance import (
+    feature_provenance,
+    load_active_packs,
+    record_feature_changes,
+    resolve_addons,
+    resolve_plan,
+)
 from app.core.services.email import get_email_service
 from app.core.models.compliance import AutoCheckSettings, LocationCreate
 from app.core.models.compliance_evals import EvalRunRequest, FindingResolveRequest
@@ -220,12 +226,12 @@ async def toggle_company_feature(
 
 @router.get("/company-features/{company_id}/provenance", dependencies=[Depends(require_admin)])
 async def company_feature_provenance(company_id: UUID):
-    """Per-feature provenance for one company: which package/tier bundle,
-    which purchased add-on, which custom product, or which admin/webhook
-    write explains each currently-enabled feature. See
-    feature_provenance.feature_provenance for the classification rules —
-    `unknown` is an honest bucket, not a bug, for anything pre-dating the
-    audit log or unresolved by the other rules.
+    """What plan this company is on, its active add-ons, and per-feature
+    provenance: which package/tier bundle, which purchased add-on, which
+    custom product, or which admin/webhook write explains each currently-
+    enabled feature. See feature_provenance.feature_provenance for the
+    classification rules — `unknown` is an honest bucket, not a bug, for
+    anything pre-dating the audit log or unresolved by the other rules.
     """
     async with get_connection() as conn:
         company_row = await conn.fetchrow(
@@ -240,9 +246,17 @@ async def company_feature_provenance(company_id: UUID):
         product_rows = await conn.fetch(f"SELECT {SELECT_COLUMNS} FROM product_definitions")
         products_by_slug = {r["slug"]: row_to_product(r) for r in product_rows}
 
-        provenance = await feature_provenance(conn, company_row, products_by_slug)
+        active_packs = await load_active_packs(conn, company_id)
+        provenance = await feature_provenance(conn, company_row, products_by_slug, active_packs)
+        plan = resolve_plan(company_row["signup_source"], products_by_slug)
+        addons = resolve_addons(active_packs)
 
-    return {"company_id": str(company_id), "features": provenance}
+    return {
+        "company_id": str(company_id),
+        "plan": plan,
+        "addons": addons,
+        "features": provenance,
+    }
 
 
 @router.post("/companies/{company_id}/credits")
