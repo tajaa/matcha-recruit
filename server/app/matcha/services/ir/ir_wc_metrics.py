@@ -1,17 +1,18 @@
 """Workers Comp + behavioral-friction metrics — extracted so the broker
 portfolio endpoints and workers can reuse the same calc per linked client.
 
-Moved from routes/ir_incidents/analytics.py (refactor round 2, stage 3).
-
-The aggregate SQL fragments (`_WC_AGG_COLUMNS` / `_WC_QUARTER_COLUMNS`) and
-`_assemble_wc_metrics` are also used by
-`routes/ir_incidents/analytics.py:_compute_wc_metrics_by_location` (the
-per-location fan-out, which stays a route-layer helper) — that function
-imports them back from here.
+Moved from routes/ir_incidents/analytics.py (refactor round 2, stage 3;
+`compute_wc_metrics_by_location` + `_batch_active_headcounts` followed in the
+same stage's audit — they were left behind as route-layer helpers pulling the
+private `_WC_AGG_COLUMNS` / `_WC_QUARTER_COLUMNS` / `_assemble_wc_metrics`
+names back out of this module; moving them here keeps all three private and
+leaves `analytics.py`'s `get_wc_metrics_by_location` a thin handler).
 """
 from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
+
+from .._shared.time import utc_now_naive as _utc_now_naive
 
 # The aggregate expressions are identical for the company-wide roll-up and the
 # per-location fan-out — only the GROUP BY differs — so they live here once.
@@ -50,15 +51,9 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
     endpoint can reuse the same calc per linked client.
 
     Company-wide only. The per-location scorecard does NOT call this in a loop —
-    see `_compute_wc_metrics_by_location` in routes/ir_incidents/analytics.py,
-    which pulls the same aggregates for every establishment in one grouped pass
-    and shares `_assemble_wc_metrics`.
+    see `compute_wc_metrics_by_location` below, which pulls the same aggregates
+    for every establishment in one grouped pass and shares `_assemble_wc_metrics`.
     """
-    # Lazy: stays in routes/ir_incidents/_shared.py (used widely by other
-    # route submodules too) — a module-level import here would pull services
-    # back into routes.
-    from app.matcha.routes.ir_incidents._shared import _utc_now_naive
-
     period_start = _utc_now_naive() - timedelta(days=period_days)
     prior_start = period_start - timedelta(days=period_days)
     quarter_start = _utc_now_naive() - timedelta(days=730)  # 8 quarters back
@@ -145,7 +140,6 @@ def _assemble_wc_metrics(
     Pure (no DB) so the company-wide path and the per-location fan-out produce
     byte-identical shapes from differently-grouped queries.
     """
-    from app.matcha.routes.ir_incidents._shared import _utc_now_naive
     from app.matcha.services.insurance.wc_benchmarks import (
         lookup_benchmark, estimate_premium_impact, severity_band,
     )
@@ -278,6 +272,12 @@ async def compute_behavioral_friction(conn, company_id: UUID, window_days: int =
     """Per-company behavioral-incident spike metrics for the broker
     "Behavioral Friction & Retention Risk" alert.
 
+    NOT CURRENTLY WIRED IN: `workers/tasks/broker_risk_alerts.py:_run_broker_risk_alerts`
+    builds its `metrics` dict from `compute_wc_metrics` alone, so the fully-implemented,
+    test-covered "Behavioral Friction" alert branch in `evaluate_trends` can never fire
+    in production — its `metrics["behavioral"]` key is never populated. Pre-existing gap,
+    not introduced by this move; wiring it in is a behavior change out of scope here.
+
     A short recent window (default 90d) vs the equal-length window before it,
     so a *sudden* surge in behavioral incidents (incl. insubordination /
     attendance) trips the alert — distinct from the trailing-12mo WC trend in
@@ -291,8 +291,6 @@ async def compute_behavioral_friction(conn, company_id: UUID, window_days: int =
     window), and the single location with the most behavioral incidents this
     window so the alert message can name where the friction is concentrated.
     """
-    from app.matcha.routes.ir_incidents._shared import _utc_now_naive
-
     window_start = _utc_now_naive() - timedelta(days=window_days)
     prior_start = window_start - timedelta(days=window_days)
 
@@ -361,3 +359,132 @@ async def compute_behavioral_friction(conn, company_id: UUID, window_days: int =
         ),
         "generated_at": _utc_now_naive().isoformat(),
     }
+
+
+async def _batch_active_headcounts(conn, company_id, loc_rows) -> dict:
+    """Active-employee count per establishment, in ONE query.
+
+    Mirrors osha.py:_active_headcount exactly — sole-location short-circuit, then
+    FK match OR the work_city/work_state heuristic (HRIS sync populates the city
+    but never the location FK) — but resolves every location at once instead of
+    one query per site.
+    """
+    if len(loc_rows) == 1:
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
+            company_id,
+        ) or 0
+        return {loc_rows[0]["id"]: int(total)}
+
+    rows = await conn.fetch(
+        """
+        SELECT bl.id AS location_id, COUNT(e.id) AS headcount
+        FROM business_locations bl
+        LEFT JOIN employees e
+          ON e.org_id = bl.company_id
+         AND e.termination_date IS NULL
+         AND (
+              e.work_location_id = bl.id
+              OR (
+                   e.work_location_id IS NULL
+                   AND bl.city IS NOT NULL
+                   AND LOWER(e.work_city) = LOWER(bl.city)
+                   AND UPPER(e.work_state) = UPPER(bl.state)
+                 )
+             )
+        WHERE bl.id = ANY($1::uuid[])
+        GROUP BY bl.id
+        """,
+        [lr["id"] for lr in loc_rows],
+    )
+    return {r["location_id"]: int(r["headcount"] or 0) for r in rows}
+
+
+async def compute_wc_metrics_by_location(
+    conn, company_id: UUID, period_days: int, loc_rows, *, industry
+) -> dict:
+    """WC metrics for every establishment, in a fixed number of queries.
+
+    The three aggregates compute_wc_metrics runs company-wide are re-run ONCE
+    each, grouped by location_id, and sliced per site — so a 50-location tenant
+    costs 4 queries instead of the ~200 a per-location compute_wc_metrics loop
+    would issue. Assembly is shared with the company-wide path.
+
+    Moved from routes/ir_incidents/analytics.py (refactor round 2, stage 3
+    follow-up) alongside its sole caller (`get_wc_metrics_by_location`), so the
+    three private aggregate names (`_WC_AGG_COLUMNS` / `_WC_QUARTER_COLUMNS` /
+    `_assemble_wc_metrics`) stay private to this module instead of being pulled
+    back out into a route file.
+    """
+    period_start = _utc_now_naive() - timedelta(days=period_days)
+    prior_start = period_start - timedelta(days=period_days)
+    quarter_start = _utc_now_naive() - timedelta(days=730)
+    loc_ids = [lr["id"] for lr in loc_rows]
+
+    headcounts = await _batch_active_headcounts(conn, company_id, loc_rows)
+
+    bucket_rows = await conn.fetch(
+        f"""
+        SELECT
+            location_id,
+            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+            {_WC_AGG_COLUMNS}
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $3
+          AND location_id = ANY($4::uuid[])
+        GROUP BY location_id, bucket
+        """,
+        company_id, period_start, prior_start, loc_ids,
+    )
+
+    quarter_rows = await conn.fetch(
+        f"""
+        SELECT
+            location_id,
+            DATE_TRUNC('quarter', occurred_at) AS quarter_start,
+            {_WC_QUARTER_COLUMNS}
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $2
+          AND location_id = ANY($3::uuid[])
+        GROUP BY location_id, quarter_start
+        ORDER BY quarter_start
+        """,
+        company_id, quarter_start, loc_ids,
+    )
+
+    last_rows = await conn.fetch(
+        """
+        SELECT location_id, MAX(occurred_at) AS last_recordable
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND location_id = ANY($2::uuid[])
+        GROUP BY location_id
+        """,
+        company_id, loc_ids,
+    )
+    last_by_loc = {r["location_id"]: r["last_recordable"] for r in last_rows}
+
+    out = {}
+    for lid in loc_ids:
+        cur = next(
+            (r for r in bucket_rows if r["location_id"] == lid and r["bucket"] == "current"), None
+        )
+        prv = next(
+            (r for r in bucket_rows if r["location_id"] == lid and r["bucket"] == "prior"), None
+        )
+        out[lid] = _assemble_wc_metrics(
+            period_days=period_days,
+            location_id=lid,
+            industry=industry,
+            headcount=headcounts.get(lid, 0),
+            cur=cur,
+            prv=prv,
+            quarter_rows=[r for r in quarter_rows if r["location_id"] == lid],
+            last_recordable=last_by_loc.get(lid),
+        )
+    return out

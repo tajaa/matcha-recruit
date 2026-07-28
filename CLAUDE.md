@@ -459,7 +459,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 - Email service (Gmail API + MailerSend) → `server/app/core/services/email/` (`EmailService`, `get_email_service()`)
 - Reserved-domain guard (blocks `@example.com` / `*.test` / `*.invalid`) → `server/app/core/services/email.py:_is_reserved_test_domain`
 - Employee invitation send → `server/app/core/services/email.py:send_employee_invitation_email` (callsite: `server/app/matcha/routes/employees/_shared.py:_send_invitation_with_conn`)
-- IR lifecycle notifications → `server/app/matcha/routes/ir_incidents/_shared.py:send_ir_notifications_task`
+- IR lifecycle notifications → `server/app/matcha/services/ir/ir_notifications.py:send_ir_notifications_task` (aliased through `routes/ir_incidents/_shared.py`)
 - Onboarding reminder cron → `server/app/workers/tasks/onboarding_reminders.py`
 
 ### Feature gating + tiers
@@ -486,7 +486,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 - Employee CRUD → `server/app/matcha/routes/employees/crud.py` (10 routes; package split 2026-05-16 — see `server/app/matcha/routes/employees/CLAUDE.md`)
 - Bulk CSV upload → `server/app/matcha/routes/employees/bulk_upload.py:bulk_upload_employees_csv`
-- Send invitation → `server/app/matcha/routes/employees/_shared.py:_send_invitation_with_conn` (callable from single + bulk + multi-batch paths)
+- Send invitation → `server/app/matcha/services/employees/invitations.py:_send_invitation_with_conn` (callable from single + bulk + multi-batch paths, via `routes/employees/_shared.py:send_single_invitation`)
 - Auto-invitation toggle (per-company setting) → `onboarding_notification_settings.auto_send_invitation` column
 - Bulk upload modal (frontend) → `client/src/components/employees/BulkUploadModal.tsx`
 - Multi-batch add modal (frontend) → `client/src/components/employees/MultiBatchModal.tsx`

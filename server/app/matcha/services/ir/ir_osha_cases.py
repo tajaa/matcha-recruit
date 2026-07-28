@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 
 from app.core.services.osha_privacy import determine_privacy_case
 
+from .._shared.jsonio import safe_json_loads as _safe_json_loads
+
 from .ir_cards import (
     OSHA_EMERGENCY_ALERT_CARD_ID,
     build_osha_days_type_query_card,
@@ -33,10 +35,11 @@ async def next_case_step(conn, incident_id):
     and after each capture step. Each card carries ``case_key`` so the handler
     writes the right case row.
     """
-    # Lazy: these stay in routes/ir_incidents/_shared.py (used widely by
-    # other route submodules too) — a module-level import here would pull
-    # services back into routes.
-    from app.matcha.routes.ir_incidents._shared import _hydrate_involved_employees, _safe_json_loads
+    # Lazy: `_hydrate_involved_employees` is a genuine routes-layer helper (still
+    # used by crud.py and osha.py) — a module-level import here would pull services
+    # back into routes. `_safe_json_loads` comes from the services-side leaf instead,
+    # so the pure half of this import no longer boots the IR router package.
+    from app.matcha.routes.ir_incidents._shared import _hydrate_involved_employees
 
     case_rows = await conn.fetch(
         "SELECT * FROM ir_osha_case_details WHERE incident_id = $1 ORDER BY case_seq, case_key",

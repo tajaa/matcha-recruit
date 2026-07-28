@@ -16,22 +16,27 @@ async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> N
     `payload` is the task row dict (or `{"id": ...}` for delete). Caller stamps
     actor_id so clients can suppress their own optimistic-write echoes.
 
-    Best-effort: any send failure is swallowed by `_broadcast_to_project`'s
-    per-conn dead-list handling; callers should still wrap in try/except.
+    Best-effort: any send failure is swallowed by the manager's per-conn
+    dead-list handling; callers should still wrap in try/except.
+
+    Uses only ConnectionManager's PUBLIC surface (`project_room_members` /
+    `broadcast_to_project`). This is a services→routes call, so reaching the
+    private `_broadcast_to_project` / `.lock` / `.project_rooms` would make that
+    class's internals de-facto API for this layer and let a WS-manager refactor
+    break a service silently.
     """
     # Lazy: project_manager is the routes-layer WebSocket connection registry
     # (routes/work/project_ws.py) — a module-level import here would pull
     # services back into routes.
     from app.matcha.routes.work.project_ws import project_manager
 
-    async with project_manager.lock:
-        room = list(project_manager.project_rooms.get(project_id, set()))
+    room = await project_manager.project_room_members(project_id)
     logger.info(
         "broadcast %s project=%s room_size=%d members=%s",
         event, project_id, len(room),
         [str(uid) for uid in room],
     )
-    await project_manager._broadcast_to_project(project_id, {
+    await project_manager.broadcast_to_project(project_id, {
         "type": event,
         "project_id": str(project_id),
         "task": payload,

@@ -144,7 +144,12 @@ def test_send_single_invitation_cancels_pending_invitation_when_email_send_fails
         lambda: _FakeEmailService(sent=False),
     )
 
-    with pytest.raises(HTTPException) as excinfo:
+    # InvitationError, not HTTPException: services/employees/invitations.py is a
+    # domain module and stays FastAPI-free. Only the route endpoint
+    # (routes/employees/invitations.py:send_invitation) maps it to a 503;
+    # send_single_invitation is a routes-layer wrapper that just delegates, and
+    # the bulk callers catch it generically via _exception_message.
+    with pytest.raises(employees_invitations.InvitationError) as excinfo:
         asyncio.run(
             employees_shared.send_single_invitation(
                 conn.employee_id,

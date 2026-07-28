@@ -17,12 +17,13 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.services.employees.invitations import InvitationError
 
 from ._shared import _exception_message, send_single_invitation
 
@@ -78,7 +79,10 @@ async def send_invitation(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        result = await send_single_invitation(employee_id, company_id, current_user.id, conn)
+        try:
+            result = await send_single_invitation(employee_id, company_id, current_user.id, conn)
+        except InvitationError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail)
 
         # Fetch the full invitation record for response
         invitation = await conn.fetchrow(

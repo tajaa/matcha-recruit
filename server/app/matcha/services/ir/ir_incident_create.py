@@ -6,6 +6,11 @@ import json
 import logging
 from typing import Optional
 
+from .ir_incident_parsing import (
+    _detect_osha_reportable_keywords,
+    _parse_occurred_at,
+    generate_incident_number,
+)
 from .ir_notifications import send_ir_notifications_task
 from .ir_osha_cases import _persist_osha_emergency_alert
 from .ir_people_index import _gather_incident_people, _sync_incident_people
@@ -67,14 +72,12 @@ async def create_incident_core(
     `BackgroundTasks` (or awaits). Deferring them lets the caller commit the
     transaction first and keeps this function connection-agnostic.
     """
-    # Lazy: these stay in routes/ir_incidents/_shared.py (used widely by
+    # Lazy: these two stay in routes/ir_incidents/_shared.py (used widely by
     # other route submodules too) — a module-level import here would pull
-    # services back into routes.
+    # services back into routes. The other three moved to
+    # ir_incident_parsing.py (pure, imported above at module level).
     from app.matcha.routes.ir_incidents._shared import (
         _auto_classify_incident_task,
-        _detect_osha_reportable_keywords,
-        _parse_occurred_at,
-        generate_incident_number,
         log_audit,
     )
 

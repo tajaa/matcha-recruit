@@ -35,7 +35,10 @@ from app.core.services.redis_cache import (
     get_redis_cache, cache_get, cache_set, cache_delete, offer_letters_key,
     check_rate_limit,
 )
-from app.matcha.services.offer_letters.document import _send_candidate_range_email
+from app.matcha.services.offer_letters.document import (
+    _generate_offer_letter_html,
+    _send_candidate_range_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1151,8 +1154,7 @@ async def update_offer_letter(
 
 # _safe / _generate_benefits_text / _generate_contingencies_text /
 # _generate_offer_letter_html moved to services/offer_letters/document.py
-# (refactor round 2, stage 3) — imported below.
-from app.matcha.services.offer_letters.document import _generate_offer_letter_html
+# (refactor round 2, stage 3) — imported at the top of this file.
 
 
 async def _build_logo_data_uri(logo_path: str | None) -> str | None:

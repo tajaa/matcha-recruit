@@ -1,9 +1,14 @@
 """US state name -> code lookup for free-text work_state normalization.
 
-Moved from routes/employees/_shared.py (refactor round 2, stage 3).
+Moved from routes/employees/_shared.py (refactor round 2, stage 3) and renamed
+public in the same stage's audit — it is imported across packages
+(`routes/employees/_shared.py`, `services/matcha_work/matcha_work_node.py`), so
+a leading underscore signalled "do not import me" at its only reason to exist.
+`routes/employees/_shared.py` keeps a `_STATE_NAME_TO_CODE` alias for anything
+still reaching for the old private name.
 """
 
-_STATE_NAME_TO_CODE = {
+STATE_NAME_TO_CODE = {
     "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
     "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
     "district of columbia": "DC", "washington dc": "DC", "washington d.c.": "DC",

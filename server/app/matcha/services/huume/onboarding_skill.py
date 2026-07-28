@@ -693,7 +693,6 @@ async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employ
 
 
 async def _step_portal_invitation(conn, *, company_id, actor_user_id, employee_id, **_) -> dict[str, Any]:
-
     try:
         result = await _send_invitation_with_conn(
             UUID(employee_id), company_id, actor_user_id, conn, raise_on_email_failure=False,

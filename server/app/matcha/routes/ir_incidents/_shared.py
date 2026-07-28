@@ -52,11 +52,15 @@ from app.matcha.services.ir.ir_people_index import (  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-# Card builders + their constants live in ._cards (L5 split). Re-exported here so
-# existing `from ._shared import build_osha_...` / `OSHA_INJURY_...` imports — and
-# the DB-backed dispatchers below (next_case_step, _persist_osha_emergency_alert)
-# that build these cards — keep working unchanged.
-from ._cards import (  # noqa: E402,F401
+# Card builders + their constants live in services/ir/ir_cards.py (moved there
+# refactor round 2, stage 3). Re-exported here so existing
+# `from ._shared import build_osha_...` / `OSHA_INJURY_...` imports — and the
+# DB-backed dispatchers below (next_case_step, _persist_osha_emergency_alert)
+# that build these cards — keep working unchanged. `_cards.py` (the former
+# re-export shim, only ever imported from here) was deleted — this package's
+# own `from ._cards import build_osha_...` never existed, so nothing else
+# needed updating.
+from app.matcha.services.ir.ir_cards import (  # noqa: E402,F401
     OSHA_INJURY_TYPES,
     OSHA_INJURY_TYPE_LABELS,
     OSHA_EMERGENCY_ALERT_CARD_ID,
@@ -92,37 +96,12 @@ ANALYSIS_TYPES = Literal[
 
 
 
-# Severe keywords that mandate an immediate OSHA reportable-event call
-# (8 hours for fatality, 24 hours for amputation / lost eye / in-patient
-# hospitalization — 29 CFR 1904.39). Detection runs on incident creation
-# against the title+description; a hit flips severity to critical and
-# pushes the emergency alert card into the Copilot transcript.
-_OSHA_REPORTABLE_KEYWORD_RE = re.compile(
-    r"\b("
-    r"fatalit(?:y|ies)"
-    r"|passed\s+away"
-    r"|(?:was|were)\s+killed"
-    r"|(?:was|were|has)\s+died"
-    r"|amputat(?:e|ed|ion|ing)"
-    r"|lost\s+(?:an?\s+|his\s+|her\s+|their\s+)?eye"
-    r"|hospitali[sz]ed"
-    r"|hospitali[sz]ation"
-    r"|in-?patient\s+admission"
-    r")\b",
-    re.IGNORECASE,
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import _detect_osha_reportable_keywords`
+# inside this package keeps working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+    _detect_osha_reportable_keywords,
 )
-
-
-def _detect_osha_reportable_keywords(text: Optional[str]) -> bool:
-    """True if text mentions a 29 CFR 1904.39 reportable-event term.
-
-    False on None / empty / no match. Boundary-anchored so false-friends
-    like "studied" or "skilled" don't match (no overlap with the pattern
-    anyway, but the word boundary keeps it safe against future additions).
-    """
-    if not text:
-        return False
-    return bool(_OSHA_REPORTABLE_KEYWORD_RE.search(text))
 
 
 def _build_public_link(request: Request, token: str, segment: str) -> str:
@@ -277,11 +256,12 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def generate_incident_number() -> str:
-    """Generate a unique incident number."""
-    now = datetime.now(timezone.utc)
-    random_suffix = secrets.token_hex(2).upper()
-    return f"IR-{now.year}-{now.month:02d}-{random_suffix}"
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import generate_incident_number` inside
+# this package keeps working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+    generate_incident_number,
+)
 
 
 async def log_audit(
@@ -408,115 +388,22 @@ def _company_filter(param_idx: int) -> str:
     return f"i.company_id = ${param_idx}"
 
 
-def _to_naive_utc(value: datetime) -> datetime:
-    """Normalize datetimes to naive UTC for TIMESTAMP (without timezone) columns."""
-    if value.tzinfo:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
-
-
-def _utc_now_naive() -> datetime:
-    """Return current UTC time as naive datetime."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-# dateutil's fuzzy=True has NO relative-date support — parsing "yesterday
-# around 3pm" silently drops "yesterday" and returns TODAY at 3pm, which is
-# silently wrong on an OSHA/legal record. This pre-pass strips a relative-day
-# term out of the text and computes its date ourselves; dateutil only ever
-# sees the remainder (typically just a clock time). Checked in order so
-# "day before yesterday" isn't shadowed by the "yesterday" pattern matching
-# first. Each entry is (pattern, day_offset_from_today, default_hour) — the
-# default_hour is used when the remainder has no clock time of its own;
-# "last night" gets an evening default (21:00) since it implies a specific
-# part of the day, unlike a bare "yesterday".
-_RELATIVE_DAY_TERMS: tuple[tuple[re.Pattern, int, int], ...] = (
-    (re.compile(r"\bday before yesterday\b", re.IGNORECASE), -2, 12),
-    (re.compile(r"\byesterday\b", re.IGNORECASE), -1, 12),
-    (re.compile(r"\blast night\b", re.IGNORECASE), -1, 21),
-    (re.compile(r"\b(?:today|tonight|this morning|this afternoon|this evening)\b", re.IGNORECASE), 0, 12),
+# Both now live in services/_shared/time.py so services can reach them without
+# importing this package (which runs the whole IR router __init__). Aliased to the
+# private names this package's modules already import.
+from app.matcha.services._shared.time import (  # noqa: E402
+    to_naive_utc as _to_naive_utc,
+    utc_now_naive as _utc_now_naive,
 )
-_DAYS_AGO_RE = re.compile(r"\b(\d+)\s+days?\s+ago\b", re.IGNORECASE)
-_EXPLICIT_YEAR_RE = re.compile(r"\b\d{4}\b")
 
 
-def _relative_day_match(text: str) -> Optional[tuple[int, int, str]]:
-    """Find a relative-day term in ``text``. Returns (day_offset, default_hour,
-    remainder) for the first match, or None. ``remainder`` is ``text`` with the
-    matched term blanked out, whitespace collapsed — fed to dateutil so a
-    spoken clock time ("...around 3pm") still lands on the right day."""
-    m = _DAYS_AGO_RE.search(text)
-    if m:
-        offset = -int(m.group(1))
-        remainder = re.sub(r"\s+", " ", _DAYS_AGO_RE.sub(" ", text, count=1)).strip()
-        return offset, 12, remainder
-    for pattern, offset, default_hour in _RELATIVE_DAY_TERMS:
-        if pattern.search(text):
-            remainder = re.sub(r"\s+", " ", pattern.sub(" ", text, count=1)).strip()
-            return offset, default_hour, remainder
-    return None
-
-
-def _clamp_future_occurred_at(parsed: datetime, original_text: str) -> datetime:
-    """Guard against dateutil defaulting a yearless date into the future.
-
-    "Dec 30" parsed in mid-2026 with no default year defaults to the current
-    year, landing months ahead — an incident can't have occurred in the
-    future. If the parse lands more than 26h ahead of now AND the original
-    text had no explicit 4-digit year, retry a year earlier; if it's still in
-    the future (or the retry itself fails), fall back to NOW() rather than
-    ever returning/raising on a bad future date.
-    """
-    now = _utc_now_naive()
-    if parsed <= now + timedelta(hours=26):
-        return parsed
-    if _EXPLICIT_YEAR_RE.search(original_text):
-        return now
-    try:
-        retried = parsed.replace(year=parsed.year - 1)
-    except ValueError:  # e.g. Feb 29 in a non-leap year
-        retried = parsed - timedelta(days=365)
-    return retried if retried <= now + timedelta(hours=26) else now
-
-
-def _parse_occurred_at(value) -> datetime:
-    """Coerce IR submit `occurred_at` to a naive UTC datetime.
-
-    Accepts a real datetime (from rich clients / admin tooling) or a free
-    text string from the slim submit form ("yesterday at 3pm", "May 1 4pm").
-    Falls back to NOW() on parse failure rather than 400'ing — incident
-    capture should never block on a date typo.
-    """
-    if isinstance(value, datetime):
-        if value.tzinfo:
-            return value.astimezone(timezone.utc).replace(tzinfo=None)
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return _utc_now_naive()
-        try:
-            from dateutil import parser as _date_parser
-            relative = _relative_day_match(text)
-            if relative is not None:
-                offset, default_hour, remainder = relative
-                base_date = (datetime.now(timezone.utc) + timedelta(days=offset)).date()
-                default_dt = datetime.combine(base_date, time(default_hour, 0))
-                if remainder:
-                    try:
-                        parsed = _date_parser.parse(remainder, fuzzy=True, default=default_dt)
-                    except (ValueError, OverflowError, TypeError):
-                        parsed = default_dt
-                else:
-                    parsed = default_dt
-            else:
-                parsed = _date_parser.parse(text, fuzzy=True)
-            if parsed.tzinfo:
-                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-            return _clamp_future_occurred_at(parsed, text)
-        except (ValueError, OverflowError, TypeError):
-            return _utc_now_naive()
-    return _utc_now_naive()
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import _parse_occurred_at` inside this
+# package and `from app.matcha.routes.ir_incidents import _parse_occurred_at`
+# from inbound_email.py keep working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+    _parse_occurred_at,
+)
 
 
 def _privacy_signal_overlay(signals: Optional[dict]) -> dict:
@@ -701,17 +588,11 @@ async def _get_incident_with_company_check(conn, incident_id: UUID, current_user
     return row
 
 
-def _safe_json_loads(value, default=None):
-    """Safely parse JSON from a database value."""
-    if value is None:
-        return default if default is not None else {}
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.warning(f"Failed to parse JSON: {e}")
-        return default if default is not None else {}
+# Lives in services/_shared/jsonio.py so services can reach it without importing
+# this package. Aliased to the private name this package's modules already import.
+from app.matcha.services._shared.jsonio import (  # noqa: E402
+    safe_json_loads as _safe_json_loads,
+)
 
 
 def parse_witnesses(witnesses_json) -> list[Witness]:

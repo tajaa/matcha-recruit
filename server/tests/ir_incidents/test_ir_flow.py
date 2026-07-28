@@ -10,9 +10,8 @@ hazard that did NOT result in an actual injury.
 import sys
 from types import ModuleType
 
-# Stub google.genai before any app imports (ir_flow lazily imports from
-# ir_incidents._shared, which pulls in email/storage services that import
-# the genai SDK at module load time).
+# Stub google.genai before any app imports: ir_flow's own import chain reaches
+# services that import the genai SDK at module load time.
 google_module = ModuleType("google")
 genai_module = ModuleType("google.genai")
 types_module = ModuleType("google.genai.types")
@@ -68,12 +67,6 @@ class TestResolveNextStepNearMiss:
         language ("nearly fell", "almost struck") must not surface the
         Injury Assessment / treatment-beyond-first-aid gate — no injury
         occurred, so there is nothing to assess.
-
-        Note: only the near-miss (no-signal) path is exercised here. The
-        signal-found path lazily imports app.matcha.routes.ir_incidents._shared,
-        whose parent package import boots the entire router zoo — per that
-        package's own CLAUDE.md, unit tests here should not boot the full
-        app, so that branch isn't covered from this fast test module.
         """
         incident = _incident(
             title="Near miss on loading dock",
@@ -464,3 +457,92 @@ class TestCopilotEvidenceDuration:
         ))
         assert e["days_open"] == 10
         assert e["is_overdue"] is False
+
+
+class TestResolveNextStepGates:
+    """The three hard OSHA gates resolve_next_step still owns.
+
+    These became cheaply unit-testable in refactor round 2 stage 3: the resolver
+    used to lazily import `routes.ir_incidents._shared`, whose parent package
+    import boots the whole router zoo, so only the returns-None paths could be
+    exercised from a fast test module. `ir_flow` no longer imports routes at all.
+    """
+
+    def test_osha_emergency_freezes_before_anything_else(self):
+        # Not cold-start-gated and not skippable — a reportable event (fatality /
+        # in-patient hospitalization / amputation / loss of eye) carries an
+        # 8/24-hour legal duty that outranks conversational triage.
+        incident = _incident(
+            incident_type="safety",
+            category_data={"osha_emergency_alert_active": True},
+        )
+        result = ir_flow.resolve_next_step(incident, [], 0, is_cold_start=True)
+        assert result is not None
+        assert [c["id"] for c in result["cards"]] == ["osha_emergency_alert"]
+
+    def test_injury_signal_opens_treatment_gate(self):
+        incident = _incident(incident_type="safety", severity="high")
+        result = ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False)
+        assert result is not None
+        assert [c["id"] for c in result["cards"]] == ["treatment_query"]
+
+    def test_treatment_gate_suppressed_on_cold_start(self):
+        # The LLM gets the first word (greet, categorize, gather facts) — this
+        # guard, not the type/severity check, is what stops the copilot opening
+        # with "was treatment provided?" the instant an injury word appears.
+        incident = _incident(incident_type="safety", severity="high")
+        assert ir_flow.resolve_next_step(incident, [], 0, is_cold_start=True) is None
+
+    def test_treatment_gate_not_re_emitted_once_skipped(self):
+        incident = _incident(
+            incident_type="safety",
+            severity="high",
+            category_data={"flow_skipped": ["treatment"]},
+        )
+        assert ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False) is None
+
+    def test_treatment_yes_opens_osha_recordable_chain(self):
+        incident = _incident(
+            incident_type="safety",
+            severity="high",
+            category_data={"treatment_beyond_first_aid": "true"},
+            osha_recordable=None,
+        )
+        result = ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False)
+        assert result is not None
+        assert [c["id"] for c in result["cards"]] == ["osha_recordable_query"]
+
+    def test_osha_chain_not_re_emitted_once_skipped(self):
+        incident = _incident(
+            incident_type="safety",
+            severity="high",
+            category_data={
+                "treatment_beyond_first_aid": "true",
+                "flow_skipped": ["osha"],
+            },
+            osha_recordable=None,
+        )
+        assert ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False) is None
+
+    def test_osha_recordable_already_answered_ends_the_chain(self):
+        incident = _incident(
+            incident_type="safety",
+            severity="high",
+            category_data={"treatment_beyond_first_aid": "true"},
+            osha_recordable=False,
+        )
+        assert ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False) is None
+
+    def test_terminal_status_hands_every_round_to_the_llm(self):
+        # Even with an active emergency alert — a closed incident's follow-up
+        # questions are conversational.
+        for status in ("closed", "resolved"):
+            incident = _incident(
+                status=status,
+                incident_type="safety",
+                category_data={"osha_emergency_alert_active": True},
+            )
+            assert ir_flow.resolve_next_step(incident, [], 0, is_cold_start=False) is None
+
+    def test_empty_incident_returns_none(self):
+        assert ir_flow.resolve_next_step({}, [], 0, is_cold_start=False) is None

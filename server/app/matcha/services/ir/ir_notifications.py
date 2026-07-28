@@ -8,14 +8,24 @@ from datetime import datetime
 from typing import Optional
 
 from app.core.services.email import get_email_service
-from app.database import get_connection
+from app.database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
 
 async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
-    """Return company display name and company-admin/client email recipients."""
-    async with get_connection() as conn:
+    """Return company display name and company-admin/client email recipients.
+
+    Uses `connection_or_direct` rather than `get_connection` — this is a
+    services-layer function (moved from routes/ir_incidents/_shared.py) that
+    `create_incident_core` schedules as a background callable, and that function
+    is now imported at module level by `huume/hr_ops_skill.py` and
+    `pilots/hr_pilot_actions.py`. Nothing calls this from a pool-free Celery
+    worker today, but the next caller that does gets a real connection instead
+    of a confusing pool-not-initialized failure. See root CLAUDE.md: "Workers
+    are pool-free — shared service code must not assume a pool."
+    """
+    async with connection_or_direct() as conn:
         company_name = await conn.fetchval(
             "SELECT name FROM companies WHERE id = $1",
             company_id,

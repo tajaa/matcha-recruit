@@ -30,10 +30,21 @@ from app.matcha.services.risk_analytics.risk_assessment_service import (
 
 logger = logging.getLogger(__name__)
 
-# Moved to services/employees/invitations.py (refactor round 2, stage 3).
+# All three moved to services/employees/ (refactor round 2, stage 3) and
+# re-imported here: `_send_invitation_with_conn` + `INVITATION_SEND_FAILED_DETAIL`
+# because send_single_invitation (below) wraps them, `STATE_NAME_TO_CODE` because
+# _normalize_work_state (below) uses it, and `decide_pto_request_core` purely as a
+# re-export so pto_admin.py's `from ._shared import decide_pto_request_core` keeps
+# working. E402 because they sit after `logger`, not because they're stranded at a
+# deletion site — keep new relocated imports in this block.
 from app.matcha.services.employees.invitations import (  # noqa: F401,E402
     INVITATION_SEND_FAILED_DETAIL,
     _send_invitation_with_conn,
+)
+from app.matcha.services.employees.pto_decisions import decide_pto_request_core  # noqa: F401,E402
+from app.matcha.services.employees.us_states import (  # noqa: F401,E402
+    STATE_NAME_TO_CODE,
+    STATE_NAME_TO_CODE as _STATE_NAME_TO_CODE,  # legacy private alias
 )
 
 # `work_state` values (CSV bulk-upload and single-employee create/update) are
@@ -41,10 +52,6 @@ from app.matcha.services.employees.invitations import (  # noqa: F401,E402
 # state names also normalized) so a typo doesn't silently create an ungrounded
 # compliance jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
 _VALID_WORK_STATE_CODES = US_STATE_CODES
-
-# Moved to services/employees/us_states.py (refactor round 2, stage 3) —
-# re-imported below since _normalize_work_state (this file) still uses it.
-from app.matcha.services.employees.us_states import _STATE_NAME_TO_CODE  # noqa: F401,E402
 
 
 def _normalize_work_state(raw: Optional[str]) -> tuple[Optional[str], bool]:
@@ -60,7 +67,7 @@ def _normalize_work_state(raw: Optional[str]) -> tuple[Optional[str], bool]:
         return None, True
     if len(s) == 2 and s.isalpha() and s.upper() in _VALID_WORK_STATE_CODES:
         return s.upper(), True
-    mapped = _STATE_NAME_TO_CODE.get(s.lower())
+    mapped = STATE_NAME_TO_CODE.get(s.lower())
     if mapped:
         return mapped, True
     return None, False
@@ -546,10 +553,3 @@ async def _send_provisioning_email(
         )
     except Exception:
         logger.exception("Failed to send provisioning welcome email to %s", personal_email)
-
-
-
-# Moved to services/employees/pto_decisions.py (refactor round 2, stage 3) —
-# re-exported so pto_admin.py's `from ._shared import decide_pto_request_core`
-# keeps working unchanged.
-from app.matcha.services.employees.pto_decisions import decide_pto_request_core  # noqa: F401,E402

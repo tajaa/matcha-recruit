@@ -6,11 +6,12 @@ emergency-alert copy, root-cause prompt labels) and ``compose_root_cause_text``.
 These are self-contained (stdlib only) — they build the Copilot card dicts and
 hold no DB or request state. The DB-backed card plumbing (``next_case_step``,
 ``ensure_osha_case_rows``, ``fetch_osha_case_rows``, ``_persist_osha_emergency_alert``)
-stays in ``routes/ir_incidents/_shared.py`` and imports these.
+stays in ``routes/ir_incidents/_shared.py`` and imports these directly.
 
-``routes/ir_incidents/_cards.py`` re-exports every name here, so existing
-``from ._cards import build_osha_...`` / ``from ._shared import OSHA_INJURY_...``
-imports inside the routes package keep working unchanged.
+``routes/ir_incidents/_cards.py`` was a thin re-export shim over this module with
+exactly one importer (``_shared.py``) — deleted; ``_shared.py`` now imports here
+directly. ``from ._shared import build_osha_...`` / ``OSHA_INJURY_...`` keep
+working unchanged for everything else in the routes package.
 """
 
 from typing import Optional

@@ -7,13 +7,28 @@ import secrets
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from fastapi import HTTPException
-
 from app.core.services.email import get_email_service
 
 logger = logging.getLogger(__name__)
 
 INVITATION_SEND_FAILED_DETAIL = "Invitation email could not be sent. Check email delivery settings and try again."
+
+
+class InvitationError(Exception):
+    """Domain error for invitation-send failures — this is a services module and
+    must not raise FastAPI's HTTPException (see root CLAUDE.md: services/ stays
+    FastAPI-free). Carries `status_code` for the one route caller
+    (`routes/employees/invitations.py:send_invitation`) that maps it back to an
+    HTTP response; every other caller — the bulk/invite-all loops
+    (`_exception_message`, which already unwraps `.detail`) and
+    `huume/onboarding_skill.py` (`getattr(exc, "detail", None)`) — already treats
+    exceptions generically and needs no change.
+    """
+
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
 
 
 async def _send_invitation_with_conn(
@@ -37,10 +52,10 @@ async def _send_invitation_with_conn(
         )
 
         if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
+            raise InvitationError(404, "Employee not found")
 
         if employee["user_id"]:
-            raise HTTPException(status_code=400, detail="Employee already has an account")
+            raise InvitationError(400, "Employee already has an account")
 
         # Cancel all existing pending invitations for this employee
         await conn.execute(
@@ -98,7 +113,7 @@ async def _send_invitation_with_conn(
                 "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
                 invitation["id"],
             )
-            raise HTTPException(status_code=503, detail=INVITATION_SEND_FAILED_DETAIL)
+            raise InvitationError(503, INVITATION_SEND_FAILED_DETAIL)
         else:
             # Bulk mode: keep invitation pending so admin can resend later,
             # but raise so the caller records an error row for this employee.

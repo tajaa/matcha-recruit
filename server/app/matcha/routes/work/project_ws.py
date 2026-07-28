@@ -472,6 +472,27 @@ class ProjectConnectionManager:
         except Exception:
             logger.exception("Redis HDEL failed in _presence_hdel")
 
+    async def project_room_members(self, project_id: UUID) -> list[UUID]:
+        """Snapshot of this worker's locally-connected members for a project.
+
+        Public counterpart to reading `.lock` + `.project_rooms` directly —
+        `services/matcha_work/task_events.py` needs it for its broadcast log line
+        and must not depend on this class's internals (see `broadcast_to_project`).
+        """
+        async with self.lock:
+            return list(self.project_rooms.get(project_id, set()))
+
+    async def broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
+        """Public entry point for a project-scope fan-out.
+
+        Exists because `services/matcha_work/task_events.py` (services layer) needs
+        to broadcast: reaching `_broadcast_to_project` across the layer boundary
+        made this class's privates de-facto public API, so any refactor of the WS
+        manager would silently break a service. Same contract as the private
+        implementation it delegates to.
+        """
+        await self._broadcast_to_project(project_id, message, exclude_user=exclude_user)
+
     async def _broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
         """Fan a project-scope event out to every connected member across all
         uvicorn workers. Publishes to Redis; per-worker subscriber dispatches
