@@ -11,11 +11,11 @@ export const CREAM = "#EFEAE0";
 export const CREAM_HI = "#F7F4EC";
 export const INK = "#14150F";
 export const INK_SOFT = "#5E6055";
-export const MATCHA = "#1E2F10";
-export const MATCHA_MID = "#44602A";
-export const MATCHA_LT = "#A3C57D";
-export const MATCHA_WASH = "#EDF2E2";
+export const MATCHA = "#743E0D";
+export const MATCHA_MID = "#9C5A18";
+export const MATCHA_LT = "#E0A863";
+export const MATCHA_WASH = "#F7ECD9";
 export const LINE = "rgba(20,21,15,0.12)";
 
-export const DISPLAY = "var(--font-display)";
+export const DISPLAY = "'Space Grotesk', var(--font-display)";
 export const SANS = "var(--font-sans)";
