@@ -16,7 +16,7 @@ def history_text(history: list[dict], turns: int) -> str:
     """Render the last `turns` user/assistant messages as plain chat history.
 
     Byte-identical across 5 pilots before this extraction (broker_pilot,
-    handbook_pilot, legal_defense, ask_hr, and core/services/compliance_pilot.py
+    handbook_pilot, legal_defense, ask_hr, and core/services/compliance_pilot/
     — the last one left alone: core/ must not import matcha/services/, so it
     keeps its own copy). Each caller closes over its own `_HISTORY_TURNS`
     (10-12 depending on pilot), so `turns` is a parameter rather than a shared

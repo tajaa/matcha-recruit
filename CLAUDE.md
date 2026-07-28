@@ -148,7 +148,8 @@ server/
 │   ├── core/                       # Auth, admin, compliance, AI chat, policies, resources
 │   │   ├── models/
 │   │   ├── routes/                 # see core/routes/CLAUDE.md
-│   │   └── services/               # compliance_service/ and email/ are PACKAGES, not files
+│   │   └── services/               # compliance_service/, email/ and compliance_pilot/
+│   │                               #   are PACKAGES, not files
 │   ├── matcha/                     # Recruiting + HR domain (incl. matcha-work)
 │   │   ├── models/                 # mirrors services/ subdirs: ir/ er/ employees/ pilots/ …
 │   │   ├── routes/                 # Router zoo — see routes/CLAUDE.md

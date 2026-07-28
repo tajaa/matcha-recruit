@@ -35,7 +35,7 @@ def _norm_cat(s) -> str:
 from app.core.services.genai_client import get_genai_client
 
 from app.database import get_connection
-from .change_context import set_change_context
+from app.core.services.change_context import set_change_context
 
 # NOTE: `legal_defense.validate_citations` / `_parse_json` (the shared, pure gate)
 # are imported LAZILY inside run_chat_turn — a module-level `from app.matcha...`
@@ -182,8 +182,8 @@ async def build_ask_corpus(conn, query: str,
                            jurisdiction_ids: Optional[List[UUID]] = None,
                            industry_tags: Optional[List[str]] = None) -> dict:
     """Semantic hits over the catalog as `req:` cid records + a flat index."""
-    from .compliance_rag import ComplianceRAGService
-    from .embedding_service import get_embedding_service
+    from app.core.services.compliance_rag import ComplianceRAGService
+    from app.core.services.embedding_service import get_embedding_service
 
     try:
         rag = ComplianceRAGService(get_embedding_service())
@@ -216,8 +216,8 @@ async def build_scope_snapshot(conn, state: str, city: Optional[str],
                                industry_tag: Optional[str]) -> dict:
     """Coverage snapshot for a coordinate: chain + general coverage map + existing
     row counts. Used both as research/scope chat corpus and the proposal preview."""
-    from .scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
-    from .vertical_coverage import general_coverage_map
+    from app.core.services.scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
+    from app.core.services.vertical_coverage import general_coverage_map
 
     chain = await resolve_jurisdiction_chain(conn, state, city)
     ids = chain["ids"]
@@ -420,8 +420,8 @@ async def resolve_proposal(conn, proposal: dict) -> tuple[Optional[dict], List[s
     """Validate a proposal against the DB, READ-ONLY (never creates a jurisdiction).
     Returns (resolved | None, errors). A resolved proposal carries the concrete
     coordinate + a coverage preview the ProposalCard renders."""
-    from .compliance_service import _resolve_industry
-    from .scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
+    from app.core.services.compliance_service import _resolve_industry
+    from app.core.services.scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
 
     errors: List[str] = []
     kind = proposal["kind"]
@@ -499,7 +499,7 @@ def _codify_gate(regulation_key, citation, source_url, source_url_status):
     (ok, reason, domain_class). Authoritative demands the actual primary legal
     source — never a blog/aggregator link. A failed gate never blocks the approve;
     the row just stays live-but-uncodified with the reason shown."""
-    from .compliance_evals.authority import classify_domain
+    from app.core.services.compliance_evals.authority import classify_domain
     domain_class = classify_domain(source_url) if source_url else "missing"
     if not regulation_key:
         return False, "no regulation key", domain_class
@@ -566,8 +566,8 @@ async def run_action(action_id: UUID, actor_id: Optional[UUID]):
 
 
 async def _run_research(action_id: UUID, actor_id, params: dict):
-    from .compliance_service import (research_specialization_for_jurisdiction,
-                                     _get_or_create_jurisdiction)
+    from app.core.services.compliance_service import (
+        research_specialization_for_jurisdiction, _get_or_create_jurisdiction)
 
     state = params["state"]
     city = params.get("city")
@@ -638,7 +638,7 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
         # legislature / municode hosts reject HEAD (403/405) but are perfectly live.
         # Re-check just those with the GET-based liveness (403/405/429 => alive), fix
         # source_url_status, and recompute the gate so they can codify.
-        from .compliance_evals.authority import check_liveness
+        from app.core.services.compliance_evals.authority import check_liveness
         falsely_dead = [s for s in staged_rows
                         if s["gate_reason"] == "source link is dead"
                         and s["source_domain_class"] == "primary" and s["source_url"]]
@@ -672,8 +672,8 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
 
 
 async def _run_check_sources(action_id: UUID, actor_id, params: dict):
-    from .compliance_evals.authority import run_authority
-    from .scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
+    from app.core.services.compliance_evals.authority import run_authority
+    from app.core.services.scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
 
     state = params["state"]
     city = params.get("city")
