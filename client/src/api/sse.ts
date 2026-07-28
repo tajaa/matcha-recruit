@@ -37,10 +37,14 @@ export type PilotMessage<TMeta = unknown> = {
   created_at: string
 }
 
-/** The status/result/error callback triple every pilot console passes down. */
-export type ChatHandlers<TResult> = {
+/** The status/result/error callback triple every pilot console passes down.
+ * `onStep` is optional and generic over `TStep` — only the agentic Compliance
+ * Pilot emits `step` frames today; every other pilot simply omits it and the
+ * default `unknown` never surfaces. */
+export type ChatHandlers<TResult, TStep = unknown> = {
   onStatus?: (message: string) => void
   onResult?: (data: TResult) => void
+  onStep?: (step: TStep) => void
   onError?: (message: string) => void
 }
 
@@ -198,15 +202,19 @@ export type PilotChatOptions = {
 }
 
 /**
- * One grounded pilot turn: `{type:'status'|'result'|'error'}` frames.
+ * One grounded pilot turn: `{type:'status'|'result'|'step'|'error'}` frames.
+ * `agent_result` is treated as an alias for `result` — the agentic Compliance
+ * Pilot's loop names its terminal frame that way (distinct from the legacy
+ * single-shot `result` shape), but both mean "the turn is done, here's the
+ * payload" to this shared consumer.
  *
  * An aborted turn resolves quietly rather than surfacing an error — switching
  * sessions mid-stream is a normal interaction, not a failure.
  */
-export async function streamPilotChat<TResult>(
+export async function streamPilotChat<TResult, TStep = unknown>(
   path: string,
   body: unknown,
-  h: ChatHandlers<TResult>,
+  h: ChatHandlers<TResult, TStep>,
   opts: PilotChatOptions = {},
 ): Promise<void> {
   try {
@@ -214,9 +222,10 @@ export async function streamPilotChat<TResult>(
       path,
       body,
       (data) => {
-        const frame = data as { type?: string; message?: string; data?: TResult }
+        const frame = data as { type?: string; message?: string; data?: TResult | TStep }
         if (frame.type === 'status') h.onStatus?.(frame.message ?? '')
-        else if (frame.type === 'result') h.onResult?.(frame.data as TResult)
+        else if (frame.type === 'result' || frame.type === 'agent_result') h.onResult?.(frame.data as TResult)
+        else if (frame.type === 'step') h.onStep?.(frame.data as TStep)
         else if (frame.type === 'error') h.onError?.(frame.message ?? 'Chat failed')
       },
       { signal: opts.signal },

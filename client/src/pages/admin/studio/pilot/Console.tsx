@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Loader2, Send, Play, Check, ArrowRight, AlertTriangle, ExternalLink, Circle, Square, CheckSquare } from 'lucide-react'
+import { Loader2, Send, Play, Check, ArrowRight, AlertTriangle, ExternalLink, Circle, Square, CheckSquare, X } from 'lucide-react'
 import {
-  streamPilotChat, createAction, getAction, approveAction,
+  streamPilotChat, streamAgentChat, createAction, getAction, approveAction,
+  confirmAction, cancelAction,
   type PilotSession, type PilotMessage, type PilotAction, type Proposal,
-  type Citation, type ApproveRowResult, type StagedRow,
+  type Citation, type CitationRecord, type PilotStep, type ApproveRowResult, type StagedRow,
 } from '../../../../api/admin/compliancePilot'
+import StepTimeline from '../../../../components/ui/StepTimeline'
 import { libraryLink, coverageLink } from '../utils'
 
 type Props = {
@@ -27,8 +29,16 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
   const [sending, setSending] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [live, setLive] = useState<LiveMsg[]>([])
+  const [pendingSteps, setPendingSteps] = useState<PilotStep[]>([])
   const [runningAction, setRunningAction] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const isAgent = session.mode === 'agent'
+
+  // Abort any in-flight turn when the user switches sessions (unmount) —
+  // an agent turn can run up to 240s, so leaving it dangling on navigation
+  // would keep spending against the shared rate limit for no one watching.
+  useEffect(() => () => abortRef.current?.abort(), [])
 
   const persisted = session.messages ?? []
   const actions = session.actions ?? []
@@ -73,25 +83,42 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
     const msg = text.trim()
     if (!msg || sending) return
     setInput('')
-    setSending(true); setStatus('Thinking…')
+    setSending(true); setStatus('Thinking…'); setPendingSteps([])
     setLive((p) => [...p, { role: 'user', content: msg }])
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
-      await streamPilotChat(session.id, msg, {
-        onStatus: (m) => setStatus(m),
-        onResult: (data) => {
-          setLive((p) => [...p, {
-            role: 'assistant', content: data.assistant_text,
-            metadata: { citations: data.citations, proposal: data.proposal,
-                        proposal_errors: data.proposal_errors },
-          }])
-        },
-        onError: (m) => setLive((p) => [...p, { role: 'assistant', content: `⚠ ${m}` }]),
-      })
+      if (isAgent) {
+        await streamAgentChat(session.id, msg, {
+          onStatus: (m) => setStatus(m),
+          onStep: (s) => setPendingSteps((p) => [...p, s]),
+          onResult: (data) => {
+            setLive((p) => [...p, {
+              role: 'assistant', content: data.message,
+              metadata: { steps: data.steps, citation_records: data.citations,
+                          proposal_action_ids: data.proposal_action_ids },
+            }])
+          },
+          onError: (m) => setLive((p) => [...p, { role: 'assistant', content: `⚠ ${m}` }]),
+        }, controller.signal)
+      } else {
+        await streamPilotChat(session.id, msg, {
+          onStatus: (m) => setStatus(m),
+          onResult: (data) => {
+            setLive((p) => [...p, {
+              role: 'assistant', content: data.assistant_text,
+              metadata: { citations: data.citations, proposal: data.proposal,
+                          proposal_errors: data.proposal_errors },
+            }])
+          },
+          onError: (m) => setLive((p) => [...p, { role: 'assistant', content: `⚠ ${m}` }]),
+        }, controller.signal)
+      }
     } finally {
-      setSending(false); setStatus(null)
+      setSending(false); setStatus(null); setPendingSteps([])
       onRefetch(); onSessionsChanged()
     }
-  }, [session.id, sending, onRefetch, onSessionsChanged])
+  }, [session.id, sending, isAgent, onRefetch, onSessionsChanged])
 
   async function runProposal(p: Proposal) {
     setRunningAction('creating')
@@ -131,8 +158,11 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
         {live.map((m, i) => <MessageRow key={`l${i}`} msg={m} onRun={runProposal} runningAction={runningAction} />)}
 
         {status && (
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {status}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {status}
+            </div>
+            {pendingSteps.length > 0 && <StepTimeline steps={pendingSteps} headerLabel="Pilot" />}
           </div>
         )}
 
@@ -140,7 +170,7 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
           <div className="space-y-2 pt-2">
             <p className="text-[10px] uppercase tracking-wide text-zinc-500">Runs</p>
             {actions.map((a) => (
-              <ActionCard key={a.id} action={a} onApproved={onRefetch}
+              <ActionCard key={a.id} action={a} onApproved={onRefetch} onChanged={onRefetch}
                 committedRowIds={committedRowIds} />
             ))}
           </div>
@@ -154,6 +184,12 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
             rows={1} placeholder="Message the pilot…"
             className="flex-1 resize-none rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-white/20 max-h-32" />
+          {sending && (
+            <button onClick={() => abortRef.current?.abort()} title="Stop"
+              className="rounded-lg border border-white/[0.08] p-2 text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200">
+              <Square className="h-4 w-4" />
+            </button>
+          )}
           <button onClick={() => send(input)} disabled={sending || !input.trim()}
             className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-2 text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-30">
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -196,6 +232,24 @@ function MessageRow({ msg, onRun, runningAction }: {
         )}
         {!isUser && meta?.proposal && (
           <ProposalCard proposal={meta.proposal} onRun={onRun} disabled={runningAction !== null} />
+        )}
+        {!isUser && meta?.citation_records && meta.citation_records.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {meta.citation_records.map((c: CitationRecord) => (
+              <div key={c.cid} className="text-[11px] text-zinc-500">
+                · {c.summary}
+                {c.source_url && (
+                  <a href={c.source_url} target="_blank" rel="noreferrer"
+                    className="ml-1.5 text-cyan-400/60 hover:text-cyan-300 inline-flex items-center gap-0.5">
+                    <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {!isUser && meta?.steps && meta.steps.length > 0 && (
+          <StepTimeline steps={meta.steps} headerLabel="Pilot" />
         )}
       </div>
     </div>
@@ -241,9 +295,77 @@ function ProposalCard({ proposal, onRun, disabled }: {
   )
 }
 
-function ActionCard({ action, onApproved, committedRowIds }: {
-  action: PilotAction; onApproved: () => void; committedRowIds: Set<string>
+// The agentic loop's stage_research/stage_check_sources/stage_approve tools
+// INSERT a real action row with status='proposed' — this IS the staged state
+// (no separate proposal-metadata shape like the legacy modes). Confirm/cancel
+// go through the same REST endpoints the loop's own tools call, so a
+// chat-driven and a button-driven confirm/cancel for the same action agree.
+function ProposedActionCard({ action, onChanged }: { action: PilotAction; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const params = (action.params ?? {}) as Record<string, unknown>
+
+  let summary: string
+  if (action.kind === 'research') {
+    const cats = (params.categories as string[] | undefined) ?? []
+    const place = [params.city, params.state].filter(Boolean).join(', ')
+    summary = `Research ${params.industry_tag ?? '?'} in ${place} — ${cats.length} categor${cats.length === 1 ? 'y' : 'ies'}`
+  } else if (action.kind === 'check_sources') {
+    const place = [params.city, params.state].filter(Boolean).join(', ')
+    summary = `Check source links · ${place}`
+  } else if (action.kind === 'approve') {
+    const selected = (params.selected as number | undefined) ?? 0
+    summary = `Commit ${selected} polic${selected === 1 ? 'y' : 'ies'} (${params.gate_ok ?? 0} pass the codify gate, ${params.gate_blocked ?? 0} would go live uncodified)`
+  } else {
+    summary = String(action.kind)
+  }
+
+  async function run(fn: (id: string) => Promise<unknown>) {
+    setBusy(true); setErr(null)
+    try { await fn(action.id); onChanged() }
+    catch { setErr('That action may already have been actioned — refresh and check.') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/[0.05] px-3 py-2.5">
+      <p className="text-xs text-amber-100">{summary}</p>
+      <p className="text-[10px] text-amber-400/70 mt-0.5">Awaiting confirmation</p>
+      <div className="mt-2 flex items-center gap-2">
+        <button disabled={busy} onClick={() => run(confirmAction)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-200 hover:bg-emerald-500/25 disabled:opacity-30">
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />} Confirm
+        </button>
+        <button disabled={busy} onClick={() => run(cancelAction)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-2.5 py-1 text-xs text-zinc-400 hover:bg-white/[0.05] disabled:opacity-30">
+          <X className="h-3 w-3" /> Cancel
+        </button>
+      </div>
+      {err && <p className="mt-1 text-[11px] text-red-400">{err}</p>}
+    </div>
+  )
+}
+
+function ActionCard({ action, onApproved, onChanged, committedRowIds }: {
+  action: PilotAction; onApproved: () => void; onChanged: () => void; committedRowIds: Set<string>
 }) {
+  if (action.status === 'proposed') {
+    return <ProposedActionCard action={action} onChanged={onChanged} />
+  }
+  if (action.status === 'cancelled') {
+    return (
+      <div className="rounded-lg border border-white/[0.06] px-3 py-2 opacity-60">
+        <p className="text-xs text-zinc-500">Cancelled</p>
+      </div>
+    )
+  }
+  if (action.status === 'superseded') {
+    return (
+      <div className="rounded-lg border border-white/[0.06] px-3 py-2 opacity-50">
+        <p className="text-xs text-zinc-600">Superseded by a newer proposal</p>
+      </div>
+    )
+  }
   if (action.status === 'running') {
     const msg = action.progress?.message ?? 'Working…'
     return (

@@ -8,6 +8,7 @@ import { fmtRelative } from '../utils'
 import Console from './Console'
 
 const MODE_ICON: Record<PilotMode, typeof Bot> = {
+  agent: Bot,
   research: Search,
   ask: MessageSquare,
   check_sources: Wrench,
@@ -61,11 +62,16 @@ export default function PilotTab() {
         <div className="grid grid-cols-2 gap-1.5 mb-3">
           {templates.map((t) => {
             const Icon = MODE_ICON[t.key] ?? Bot
+            const primary = t.key === 'agent'
             return (
               <button key={t.key} disabled={creating} onClick={() => startSession(t.key)}
                 title={t.description}
-                className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-2 text-left text-[11px] text-zinc-300 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors disabled:opacity-40">
-                <Icon className="h-3.5 w-3.5 shrink-0 text-emerald-400/80" />
+                className={`flex items-center gap-1.5 rounded-lg border px-2 py-2 text-left text-[11px] transition-colors disabled:opacity-40 ${
+                  primary
+                    ? 'col-span-2 border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                    : 'border-white/[0.08] text-zinc-400 hover:border-emerald-500/40 hover:bg-emerald-500/5 hover:text-zinc-300'
+                }`}>
+                <Icon className={`h-3.5 w-3.5 shrink-0 ${primary ? 'text-emerald-300' : 'text-emerald-400/60'}`} />
                 <span className="truncate">{t.label}</span>
               </button>
             )
@@ -105,12 +111,12 @@ export default function PilotTab() {
               <Bot className="h-8 w-8 text-zinc-700 mx-auto mb-3" />
               <p className="text-sm text-zinc-400 mb-1">Compliance Pilot</p>
               <p className="text-xs text-zinc-600">
-                Pick a mode to start a session. Research an industry × jurisdiction and
-                codify it into the catalog, ask the catalog, or check source-link health.
+                Scope, research, and codify in one conversation — reads coverage, the
+                research backlog, and readiness mid-turn and stages actions you confirm.
               </p>
-              <button disabled={creating} onClick={() => startSession('research')}
+              <button disabled={creating} onClick={() => startSession('agent')}
                 className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40">
-                <Plus className="h-3.5 w-3.5" /> New research session
+                <Plus className="h-3.5 w-3.5" /> New Pilot session
               </button>
             </div>
           </div>
