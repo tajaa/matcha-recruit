@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { handbooks } from '../../../api/client'
+import { handbooks } from '../../../api/handbook/handbook'
 import { Button, Input, Select, FileUpload } from '../../../components/ui'
 import { HandbookWizardProgress } from '../../../components/handbook/HandbookWizardProgress'
 import { HandbookWizardCard } from '../../../components/handbook/HandbookWizardCard'

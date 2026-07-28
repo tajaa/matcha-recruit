@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { handbooks } from '../../../api/client'
+import { handbooks } from '../../../api/handbook/handbook'
 import { Button, Badge, Card } from '../../../components/ui'
 import { HandbookSectionSidebar } from '../../../components/handbook/HandbookSectionSidebar'
 import { HandbookSectionEditor } from '../../../components/handbook/HandbookSectionEditor'

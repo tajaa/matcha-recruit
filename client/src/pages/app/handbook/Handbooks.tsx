@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { handbooks } from '../../../api/client'
+import { handbooks } from '../../../api/handbook/handbook'
 import { Button, Badge } from '../../../components/ui'
 import { HandbookDistributeModal } from '../../../components/handbook/HandbookDistributeModal'
 import type { HandbookListItem } from '../../../types/handbook'

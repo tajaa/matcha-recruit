@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button, Input, Modal } from '../ui'
-import { handbooks } from '../../api/client'
+import { handbooks } from '../../api/handbook/handbook'
 import type { HandbookDistributionRecipient } from '../../types/handbook'
 
 type Props = {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Copy, Link2, Loader2 } from 'lucide-react'
-import { handbooks } from '../../api/client'
+import { handbooks } from '../../api/handbook/handbook'
 import { Button, Card, useToast } from '../ui'
 import type { HandbookShareLink } from '../../types/handbook'
 

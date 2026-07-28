@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Plus, Trash2, Upload, Check } from 'lucide-react'
 import { Card, Button } from '../../components/ui'
-import { landingMedia, type LandingMedia, type LandingSizzleVideo, type LandingCustomerLogo, type LandingTestimonial } from '../../api/client'
+import { landingMedia, type LandingMedia, type LandingSizzleVideo, type LandingCustomerLogo, type LandingTestimonial } from '../../api/admin/landingMedia'
 
 const EMPTY: LandingMedia = {
   hero_video_url: null,

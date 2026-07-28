@@ -1,7 +1,8 @@
 import { useRef, useState, useCallback } from 'react'
 import { Camera, Loader2, Check, Lock } from 'lucide-react'
 import { useMe } from '../../../hooks/useMe'
-import { uploadAvatar, api } from '../../../api/client'
+import { api } from '../../../api/client'
+import { uploadAvatar } from '../../../api/settings/settings'
 import Avatar from '../../../components/shared/Avatar'
 import ProfileResumeSection from '../../../components/profile/ProfileResumeSection'
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { policies, api } from '../../../api/client'
+import { api } from '../../../api/client'
+import { policies } from '../../../api/handbook/policies'
 import { Button, Badge, Modal } from '../../../components/ui'
 import { Upload, Plus, FileText, ExternalLink, Lightbulb, X } from 'lucide-react'
 import type { PolicyResponse, PolicyCategory, PolicyStatus } from '../../../types/policy'
