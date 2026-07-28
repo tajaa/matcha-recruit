@@ -538,6 +538,49 @@ def _codify_gate(regulation_key, citation, source_url, source_url_status):
 
 
 # --------------------------------------------------------------------------- #
+# Action loading — shared by the route and the agentic loop's tool dispatch
+# --------------------------------------------------------------------------- #
+
+def parse_jsonb(v):
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except Exception:
+            return None
+    return v
+
+
+def action_out(row) -> dict:
+    d = dict(row)
+    for k in ("params", "progress", "result"):
+        if k in d:
+            d[k] = parse_jsonb(d[k])
+    d["staged_ids"] = [str(x) for x in (d.get("staged_ids") or [])]
+    return d
+
+
+_ACTION_FIELDS = (
+    "id, session_id, kind, params, status, progress, result, staged_ids, "
+    "actor_id, confirmed_at, confirmed_by, started_at, finished_at"
+)
+
+
+async def load_actions(conn, session_id) -> List[dict]:
+    rows = await conn.fetch(
+        f"SELECT {_ACTION_FIELDS} FROM compliance_pilot_actions "
+        "WHERE session_id = $1 ORDER BY started_at",
+        session_id,
+    )
+    return [action_out(r) for r in rows]
+
+
+async def load_action(conn, action_id: UUID) -> Optional[dict]:
+    row = await conn.fetchrow(
+        f"SELECT {_ACTION_FIELDS} FROM compliance_pilot_actions WHERE id = $1", action_id)
+    return action_out(row) if row else None
+
+
+# --------------------------------------------------------------------------- #
 # Action runner (background task — owns its connections)
 # --------------------------------------------------------------------------- #
 
