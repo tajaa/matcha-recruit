@@ -77,8 +77,7 @@ export type CappeSite = {
 }
 
 // --- Discover directory ------------------------------------------------------
-
-export type CappeAccountType = 'business' | 'personal'
+// (CappeAccountType is already declared at the top of this file — reused here.)
 
 /** One public directory card. Mirrors the backend's response allowlist exactly
  *  (models/public.py:CappeDirectoryEntry) — there is deliberately no contact
