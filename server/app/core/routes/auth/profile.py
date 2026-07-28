@@ -39,10 +39,12 @@ from app.core.dependencies import (
     session_revoked, revoke_user_sessions,
 )
 from app.core.feature_flags import (
+    BETA_FEATURES,
     DEFAULT_COMPANY_FEATURES,
     default_company_features_json,
     merge_company_features,
 )
+from app.core.routes.admin._shared import is_test_column_exists
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.config import get_settings
@@ -108,8 +110,9 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             }
 
         elif current_user.role in ("client", "individual"):
+            _is_test_col = "comp.is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
             profile = await conn.fetchrow(
-                """
+                f"""
                 SELECT c.id, c.user_id, c.company_id, comp.name as company_name,
                        comp.status as company_status, comp.rejection_reason,
                        comp.industry, comp.healthcare_specialties,
@@ -119,7 +122,8 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        comp.ir_onboarding_completed_at,
                        c.name, c.phone, c.job_title, c.created_at,
                        COALESCE(chp.headcount, 0) as headcount,
-                       COALESCE(chp.compliance_jurisdiction_count, 0) as jurisdiction_count
+                       COALESCE(chp.compliance_jurisdiction_count, 0) as jurisdiction_count,
+                       {_is_test_col}
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
                 LEFT JOIN company_handbook_profiles chp ON chp.company_id = comp.id
@@ -233,6 +237,12 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "jurisdiction_count": int(profile["jurisdiction_count"]) if "jurisdiction_count" in profile.keys() else 0,
                     # Present only for admin-composed products; null otherwise.
                     "product": product_payload,
+                    "is_test": bool(profile["is_test"]),
+                    # So the client never hardcodes the beta set — used to tag
+                    # sidebar nav entries for beta features (only companies
+                    # with is_test=true can have one enabled; see
+                    # feature_flags.company_may_use_beta).
+                    "beta_features": sorted(BETA_FEATURES),
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,

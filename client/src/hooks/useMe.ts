@@ -109,6 +109,11 @@ export function useMe() {
   const mwBetaLite = bf['matcha_work_beta_lite'] === true || bf['matcha_work_beta_full'] === true
   const mwBetaFull = bf['matcha_work_beta_full'] === true
 
+  // Company-level: which feature keys are currently in beta (server:
+  // feature_flags.BETA_FEATURES) — distinct from the per-user `bf` map above.
+  const betaFeatures = new Set(me?.profile?.beta_features ?? [])
+  const isBetaFeature = (f: string): boolean => betaFeatures.has(f)
+
   return {
     me,
     loading,
@@ -121,6 +126,8 @@ export function useMe() {
     isPersonal,
     mwBetaLite,
     mwBetaFull,
+    betaFeatures,
+    isBetaFeature,
     refresh,
   }
 }

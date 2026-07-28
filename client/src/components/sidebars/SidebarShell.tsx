@@ -237,7 +237,16 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const navigate = useNavigate()
   const location = useLocation()
   const { sidebarCollapsed, setSidebarCollapsed } = useLayoutContext()
-  const { hasFeature, me } = useMe()
+  const { hasFeature, isBetaFeature, me } = useMe()
+
+  // A beta feature only ever reaches a real nav item for a test company (the
+  // write-time gate in feature_flags.assert_feature_allowed refuses to turn
+  // one on elsewhere) — so the tag isn't conditioned on is_test here. If one
+  // ever shows up outside a test company, that's a leak worth seeing, not
+  // something to hide.
+  function withBetaTag(item: NavItem): NavItem {
+    return item.feature && isBetaFeature(item.feature) ? { ...item, tag: item.tag ?? 'Beta' } : item
+  }
 
   // Enforce the `feature` contract declared on NavItem/NavGroup for every
   // sidebar that renders through this shell. Locked upsell entries carry no
@@ -245,10 +254,10 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const visibleNav = nav.reduce<(NavItem | NavGroup)[]>((out, item) => {
     if (isGroup(item)) {
       if (item.feature && !hasFeature(item.feature)) return out
-      const items = item.items.filter((child) => !child.feature || hasFeature(child.feature))
+      const items = item.items.filter((child) => !child.feature || hasFeature(child.feature)).map(withBetaTag)
       if (items.length > 0) out.push({ ...item, items })
     } else if (!item.feature || hasFeature(item.feature)) {
-      out.push(item)
+      out.push(withBetaTag(item))
     }
     return out
   }, [])

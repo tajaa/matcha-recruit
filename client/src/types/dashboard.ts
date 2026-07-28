@@ -345,6 +345,14 @@ export interface MeClientProfile {
    *  'product:<slug>' — see /admin/products). Drives the pending/active
    *  sidebar dispatch, the Subscribe price and the generated nav. */
   product?: ProductDefinition | null
+  /** True for test/QA companies — the only ones allowed to enable a beta
+   *  feature (server: companies.is_test, feature_flags.company_may_use_beta). */
+  is_test?: boolean
+  /** Company-level list of feature keys currently in beta (server:
+   *  feature_flags.BETA_FEATURES) — NOT the per-user MeUser.beta_features
+   *  record above, which is an unrelated per-user flag map. Drives the
+   *  sidebar "Beta" tag. */
+  beta_features?: string[]
 }
 
 /** An admin-composed product (server: product_definitions). Public shape —
