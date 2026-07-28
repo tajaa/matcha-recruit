@@ -1,4 +1,4 @@
-import { ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 import { COVERAGE_BODY, COVERAGE_EYEBROW, COVERAGE_HEADING } from "./data";
@@ -16,7 +16,7 @@ const LEVELS: { label: string; w: string; note: string; lit: boolean }[] = [
 
 export function Coverage() {
   return (
-    <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+    <section className={SECTION_Y}>
       <div className={CONTAINER}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
           <Reveal>
@@ -25,7 +25,7 @@ export function Coverage() {
             </span>
             <h2
               className="mt-4 text-[1.7rem] sm:text-[2.1rem] tracking-[-0.015em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               {COVERAGE_HEADING}
             </h2>

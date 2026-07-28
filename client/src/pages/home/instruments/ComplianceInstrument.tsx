@@ -107,7 +107,7 @@ export function useFindingsCascade(count: number, reduce: boolean) {
   return statuses;
 }
 
-export function ComplianceInstrument() {
+export function ComplianceInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
   const TARGET = 60;
   const reduce = useReducedMotion();
   const [score, setScore] = useState(reduce ? TARGET : 0);
@@ -147,7 +147,7 @@ export function ComplianceInstrument() {
         <span
           className="tabular-nums leading-none"
           style={{
-            fontFamily: DISPLAY,
+            fontFamily: numberFont,
             fontWeight: 300,
             fontSize: "3.5rem",
             color: "#E2725B",

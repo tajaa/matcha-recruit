@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D } from "../../home/theme";
 import { CONTAINER } from "../../home/layout";
 import { DailyInstrument } from "../../home/instruments/DailyInstrument";
 
@@ -58,18 +58,18 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
 
             <h1
               className="tracking-[-0.02em] text-[clamp(2.1rem,4.4vw,3.6rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.08, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.08, color: BONE }}
             >
               The everyday{" "}
-              <span style={{ color: LEAF, fontStyle: "italic" }}>intake layer</span>{" "}
+              <span style={{ fontStyle: "italic" }}>intake layer</span>{" "}
               for a team with{" "}
-              <span style={{ color: AMBER, fontStyle: "italic" }}>no time</span> for
+              <span style={{ fontStyle: "italic" }}>no time</span> for
               one.
             </h1>
 
             <p
               className="home-fade-fast mt-6 max-w-lg text-[1.05rem] sm:text-[1.2rem] tracking-[-0.011em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.45, color: ASH }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.45, color: ASH }}
             >
               A magic link anyone can text, type into, or talk into. OSHA logs
               that fill themselves, risk insights from your own data, and a
@@ -97,12 +97,10 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
           </div>
 
           <div className="home-fade-fast" style={{ animationDelay: "160ms" }}>
-            <DailyInstrument />
+            <DailyInstrument numberFont="var(--font-lite)" />
           </div>
         </div>
       </div>
-
-      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   );
 }

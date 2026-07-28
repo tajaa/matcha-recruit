@@ -1,11 +1,11 @@
-import { ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 
 // The best writing on the old page — kept verbatim, re-tokened onto noir.
 export function ThePoint() {
   return (
-    <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+    <section className={SECTION_Y}>
       <Reveal className={CONTAINER}>
         <span className={EYEBROW} style={{ color: ASH }}>
           The point
@@ -13,7 +13,7 @@ export function ThePoint() {
         <p
           className="mt-8 tracking-[-0.02em]"
           style={{
-            fontFamily: DISPLAY,
+            fontFamily: "var(--font-lite)",
             fontWeight: 300,
             color: BONE,
             lineHeight: 1.1,
@@ -22,7 +22,7 @@ export function ThePoint() {
         >
           We don't ship a checklist and disappear. We stay responsible for
           keeping it{" "}
-          <span style={{ color: LEAF, fontStyle: "italic" }}>current</span> —
+          <span style={{ fontStyle: "italic" }}>current</span> —
           so you're never the one who finds out the hard way.
         </p>
       </Reveal>

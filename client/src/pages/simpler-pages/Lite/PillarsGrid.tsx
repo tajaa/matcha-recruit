@@ -5,7 +5,7 @@ import { LazyMount } from '../../landing/LazyMount'
 import { PILLARS, CAPABILITY_EXTRA } from './data'
 import { INSTRUMENTS } from './instruments'
 import type { Pillar } from './types'
-import { ASH, BONE, DISPLAY, LINE_D } from '../../home/theme'
+import { ASH, BONE, LINE_D } from '../../home/theme'
 import { CONTAINER, EYEBROW, SECTION_Y } from '../../home/layout'
 import { Reveal } from '../../home/PageChrome'
 
@@ -26,16 +26,15 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
   return (
     <section
       id={pillar.id}
-      className={`relative overflow-hidden border-t ${SECTION_Y}`}
-      style={{ borderColor: LINE_D }}
+      className={`relative overflow-hidden ${SECTION_Y}`}
     >
       <span
         className="absolute top-6 select-none pointer-events-none leading-none"
         style={{
           [reverse ? 'right' : 'left']: '-0.5rem',
-          fontFamily: DISPLAY,
+          fontFamily: "var(--font-lite)",
           fontWeight: 300,
-          fontSize: 'clamp(9rem, 20vw, 20rem)',
+          fontSize: 'clamp(4.5rem, 10vw, 10rem)',
           color: BONE,
           opacity: 0.04,
         } as React.CSSProperties}
@@ -53,18 +52,18 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] font-mk-mono uppercase tracking-[0.2em] mb-6" style={{ color: pillar.accent }}>
+            <div className="text-[12px] font-mk-mono uppercase tracking-[0.2em] mb-6" style={{ color: ASH }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
               className="tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 3.4vw, 3.25rem)', lineHeight: 1.06 }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 3.4vw, 3.25rem)', lineHeight: 1.06 }}
             >
               {pillar.tagline}
             </h3>
             <p
               className="mt-6"
-              style={{ fontFamily: DISPLAY, fontStyle: 'italic', fontWeight: 300, color: BONE, fontSize: 'clamp(1.1rem, 1.5vw, 1.4rem)', lineHeight: 1.35 }}
+              style={{ fontFamily: "var(--font-lite)", fontStyle: 'italic', fontWeight: 300, color: BONE, fontSize: 'clamp(1.1rem, 1.5vw, 1.4rem)', lineHeight: 1.35 }}
             >
               <span style={{ color: ASH, opacity: 0.7 }}>"</span>
               {pillar.highlight}
@@ -84,7 +83,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             {pillar.id === 'osha' ? (
               <LazyMount minHeight={340} fallback={OSHA_FALLBACK}>
                 <Suspense fallback={OSHA_FALLBACK}>
-                  <OshaLogInstrument />
+                  <OshaLogInstrument numberFont="var(--font-lite)" />
                 </Suspense>
               </LazyMount>
             ) : (
@@ -100,7 +99,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
 export function PillarsGrid() {
   return (
     <>
-      <section className="pt-20 sm:pt-28 pb-2 border-t" style={{ borderColor: LINE_D }}>
+      <section className="pt-20 sm:pt-28 pb-2">
         <div className={CONTAINER}>
           <Reveal>
             <div className="max-w-xl">
@@ -109,7 +108,7 @@ export function PillarsGrid() {
               </div>
               <h2
                 className="tracking-tight"
-                style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
+                style={{ fontFamily: "var(--font-lite)", fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
               >
                 Intake, analysis, and OSHA — the daily layer.
               </h2>
@@ -123,7 +122,7 @@ export function PillarsGrid() {
       ))}
 
       {/* The one CoverageGrid card that wasn't a restatement of a pillar. */}
-      <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+      <section className={SECTION_Y}>
         <Reveal className={CONTAINER}>
           <div
             className="rounded-xl border p-6 sm:p-8 flex items-start gap-5 max-w-2xl"

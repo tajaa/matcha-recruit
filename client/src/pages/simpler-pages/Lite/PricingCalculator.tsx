@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { useMatchaLitePricing, computeLitePriceDollars, type MatchaLiteProductCode } from "../../../api/billing/matchaLitePricing";
-import { ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 
@@ -39,7 +39,7 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
   const signupHref = `/lite/signup?${signupParams.toString()}`;
 
   return (
-    <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+    <section className={SECTION_Y}>
       <div className={CONTAINER}>
         <Reveal>
           <div className="max-w-2xl mb-8 sm:mb-10">
@@ -48,7 +48,7 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
             </span>
             <h2
               className="mt-4 text-[1.7rem] sm:text-[2.1rem] tracking-[-0.015em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               One price per employee. Billed monthly.
             </h2>
@@ -89,7 +89,7 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
                   <span className="text-[13px] font-mk-mono uppercase tracking-[0.14em]" style={{ color: ASH }}>
                     Employees
                   </span>
-                  <span className="tabular-nums" style={{ fontFamily: DISPLAY, color: BONE, fontSize: "1.1rem" }}>
+                  <span className="tabular-nums" style={{ fontFamily: "var(--font-lite)", color: BONE, fontSize: "1.1rem" }}>
                     {clampedHeadcount}
                   </span>
                 </span>
@@ -134,7 +134,7 @@ export function PricingCalculator({ onContactClick }: { onContactClick: () => vo
                     {price !== null ? (
                       <span
                         className="tabular-nums leading-none"
-                        style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: "3rem", color: BONE }}
+                        style={{ fontFamily: "var(--font-lite)", fontWeight: 300, fontSize: "3rem", color: BONE }}
                       >
                         ${formatDollars(price)}
                       </span>

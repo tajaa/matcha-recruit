@@ -40,7 +40,7 @@ export const PLATFORM_DOMAINS = [
   { icon: FileText, label: "Claims", stat: "2 open", color: "#7FB2C9" },
 ] as const;
 
-export function PlatformInstrument() {
+export function PlatformInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
   const TARGET = 73;
   const reduce = useReducedMotion();
   const [score, setScore] = useState(reduce ? TARGET : 0);
@@ -93,7 +93,7 @@ export function PlatformInstrument() {
         <span
           className="tabular-nums leading-none"
           style={{
-            fontFamily: DISPLAY,
+            fontFamily: numberFont,
             fontWeight: 300,
             fontSize: "3.5rem",
             color: band.color,
@@ -292,7 +292,7 @@ export function PlatformInstrument() {
                 </div>
                 <span
                   className="text-[12px] tabular-nums"
-                  style={{ fontFamily: DISPLAY, fontWeight: 400, color: BONE }}
+                  style={{ fontFamily: numberFont, fontWeight: 400, color: BONE }}
                 >
                   {d.stat}
                 </span>

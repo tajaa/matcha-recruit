@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { BadgeCheck, Bell, FileText, Library, ListChecks, Scale, Sparkles } from "lucide-react";
-import { ASH, BONE, DISPLAY, LEAF, LINE_D, SURFACE } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D, SURFACE } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 import { InstrumentFrame, useCyclingIndex, useReducedMotion } from "../../home/instruments/shared";
@@ -29,7 +29,7 @@ export function OneSystem() {
   const copilotIndex = useCyclingIndex(COMPLIANCE_COPILOT.length, 3200, reduceMotion);
 
   return (
-    <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+    <section className={SECTION_Y}>
       <div className={CONTAINER}>
         <Reveal>
           <div className="max-w-2xl mb-12 sm:mb-16">
@@ -38,7 +38,7 @@ export function OneSystem() {
             </span>
             <h2
               className="mt-4 text-[1.8rem] sm:text-[2.4rem] tracking-[-0.015em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.15, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.15, color: BONE }}
             >
               {ONE_SYSTEM_HEADING}
             </h2>

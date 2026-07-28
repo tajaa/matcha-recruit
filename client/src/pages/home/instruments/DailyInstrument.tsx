@@ -65,7 +65,7 @@ export const NARRATIVE_TOKENS: { text: string; field?: number }[] = [
   { text: "." },
 ];
 
-export function DailyInstrument() {
+export function DailyInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
   const reduce = useReducedMotion();
   const total = DAILY_BARS.reduce((a, b) => a + b, 0);
   const max = Math.max(...DAILY_BARS);
@@ -85,7 +85,7 @@ export function DailyInstrument() {
           <span
             className="tabular-nums leading-none"
             style={{
-              fontFamily: DISPLAY,
+              fontFamily: numberFont,
               fontWeight: 300,
               fontSize: "3.35rem",
               color: "#F2C14E",

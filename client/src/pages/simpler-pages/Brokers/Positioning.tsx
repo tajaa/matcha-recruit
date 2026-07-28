@@ -1,4 +1,4 @@
-import { ASH, BONE, DISPLAY, LEAF, LINE_D, SURFACE } from '../../home/theme'
+import { ASH, BONE, LEAF, LINE_D, SURFACE } from '../../home/theme'
 import { CONTAINER, EYEBROW, SECTION_Y } from '../../home/layout'
 import { Reveal } from '../../home/PageChrome'
 
@@ -6,7 +6,7 @@ import { Reveal } from '../../home/PageChrome'
 
 export function Positioning() {
   return (
-    <section className={`${SECTION_Y} border-t`} style={{ borderColor: LINE_D }}>
+    <section className={SECTION_Y}>
       <div className={CONTAINER}>
         <Reveal>
           <div className="grid md:grid-cols-2 gap-12 md:gap-20 items-start">
@@ -16,7 +16,7 @@ export function Positioning() {
               </div>
               <h2
                 className="tracking-tight"
-                style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
+                style={{ fontFamily: "var(--font-lite)", fontWeight: 300, color: BONE, fontSize: 'clamp(2rem, 4vw, 3.25rem)', lineHeight: 1.08 }}
               >
                 They get the platform. You get the signal.
               </h2>

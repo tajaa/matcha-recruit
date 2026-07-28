@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { ASH, BONE, DISPLAY, LEAF, NOIR } from "../../home/theme";
+import { ASH, BONE, LEAF, NOIR } from "../../home/theme";
 import { CONTAINER, SECTION_Y_LG } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 import { CLOSING_HEADING, CLOSING_SUB } from "./data";
@@ -14,7 +14,7 @@ export function CtaBand({ onContactClick }: { onContactClick: () => void }) {
         <h2
           className="tracking-[-0.02em]"
           style={{
-            fontFamily: DISPLAY,
+            fontFamily: "var(--font-lite)",
             fontWeight: 300,
             lineHeight: 1,
             color: BONE,

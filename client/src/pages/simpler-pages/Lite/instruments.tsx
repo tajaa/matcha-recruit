@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
-import { ASH, BONE, DISPLAY, LINE_D } from '../../home/theme'
+import { ASH, BONE, LINE_D } from '../../home/theme'
 import { InstrumentFrame, useCyclingIndex, useReducedMotion } from '../../home/instruments/shared'
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ function IntakeInstrument() {
               className="flex items-center gap-2.5"
             >
               <span style={{ color: INCIDENTS_ACCENT, fontSize: '1.1rem' }}>✓</span>
-              <span style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.4rem', color: BONE }}>
+              <span style={{ fontFamily: "var(--font-lite)", fontWeight: 400, fontSize: '1.4rem', color: BONE }}>
                 Logged.
               </span>
             </motion.div>

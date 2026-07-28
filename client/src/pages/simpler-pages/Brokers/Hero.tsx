@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowRight } from 'lucide-react'
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from '../../home/theme'
+import { ASH, BONE, LEAF, LINE_D } from '../../home/theme'
 import { CONTAINER } from '../../home/layout'
 import { BookInstrument } from './BookInstrument'
 
@@ -57,15 +57,15 @@ export function Hero({ onBookClick }: { onBookClick: () => void }) {
 
             <h1
               className="tracking-[-0.02em] text-[clamp(2.1rem,4.4vw,3.6rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.08, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.08, color: BONE }}
             >
-              The <span style={{ color: LEAF, fontStyle: 'italic' }}>intelligence</span> layer for
-              your whole <span style={{ color: AMBER, fontStyle: 'italic' }}>book</span>.
+              The <span style={{ fontStyle: 'italic' }}>intelligence</span> layer for
+              your whole <span style={{ fontStyle: 'italic' }}>book</span>.
             </h1>
 
             <p
               className="home-fade-fast mt-6 max-w-lg text-[1.05rem] sm:text-[1.2rem] tracking-[-0.011em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.45, color: ASH }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.45, color: ASH }}
             >
               Your clients run live safety and compliance intake. You get the book back as one
               ranked view — which accounts are deteriorating, who needs the loss-control call, and
@@ -97,8 +97,6 @@ export function Hero({ onBookClick }: { onBookClick: () => void }) {
           </div>
         </div>
       </div>
-
-      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   )
 }

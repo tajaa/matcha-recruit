@@ -37,7 +37,7 @@ export const OSHA_ROWS = [
 ];
 export const OSHA_EXPORTS = ["300 CSV", "300A CSV", "300A PDF", "ITA Export"];
 
-export function OshaLogInstrument() {
+export function OshaLogInstrument({ numberFont = DISPLAY }: { numberFont?: string } = {}) {
   const reduce = useReducedMotion();
   return (
     <InstrumentFrame label="OSHA 300 Log" accent="#F2C14E">
@@ -52,7 +52,7 @@ export function OshaLogInstrument() {
           <span
             className="tabular-nums leading-none"
             style={{
-              fontFamily: DISPLAY,
+              fontFamily: numberFont,
               fontWeight: 300,
               fontSize: "3rem",
               color: "#F2C14E",
@@ -94,7 +94,7 @@ export function OshaLogInstrument() {
             <div
               className="tabular-nums leading-none mb-1"
               style={{
-                fontFamily: DISPLAY,
+                fontFamily: numberFont,
                 fontWeight: 400,
                 fontSize: "1.4rem",
                 color: t.color,

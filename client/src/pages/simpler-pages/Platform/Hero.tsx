@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D } from "../../home/theme";
 import { CONTAINER } from "../../home/layout";
 import { PlatformInstrument } from "../../home/instruments/PlatformInstrument";
 
@@ -59,15 +59,15 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
 
             <h1
               className="tracking-[-0.02em] text-[clamp(2.1rem,4.6vw,3.8rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.06, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.06, color: BONE }}
             >
-              One <span style={{ color: LEAF, fontStyle: "italic" }}>brain</span> for the whole{" "}
-              <span style={{ color: AMBER, fontStyle: "italic" }}>risk</span> function.
+              One <span style={{ fontStyle: "italic" }}>brain</span> for the whole{" "}
+              <span style={{ fontStyle: "italic" }}>risk</span> function.
             </h1>
 
             <p
               className="home-fade-fast mt-6 max-w-lg text-[1.05rem] sm:text-[1.2rem] tracking-[-0.011em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.45, color: ASH }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.45, color: ASH }}
             >
               Safety, compliance, and employee relations — usually three
               siloed systems. Matcha runs them on one platform where every
@@ -96,12 +96,10 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
           </div>
 
           <div className="home-fade-fast" style={{ animationDelay: "160ms" }}>
-            <PlatformInstrument />
+            <PlatformInstrument numberFont="var(--font-lite)" />
           </div>
         </div>
       </div>
-
-      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   );
 }

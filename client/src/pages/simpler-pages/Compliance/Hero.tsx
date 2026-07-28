@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "../../home/theme";
+import { ASH, BONE, LEAF, LINE_D } from "../../home/theme";
 import { CONTAINER } from "../../home/layout";
 import { ComplianceInstrument } from "../../home/instruments/ComplianceInstrument";
 import { HERO_DECK, HERO_EYEBROW, HERO_HEADLINE_PARTS } from "./data";
@@ -61,14 +61,14 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
 
             <h1
               className="tracking-[-0.02em] text-[clamp(2.1rem,4.4vw,3.6rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.08, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.08, color: BONE }}
             >
               {HERO_HEADLINE_PARTS.lead}
-              <span style={{ color: LEAF, fontStyle: "italic" }}>
+              <span style={{ fontStyle: "italic" }}>
                 {HERO_HEADLINE_PARTS.accent1}
               </span>
               {HERO_HEADLINE_PARTS.mid}
-              <span style={{ color: AMBER, fontStyle: "italic" }}>
+              <span style={{ fontStyle: "italic" }}>
                 {HERO_HEADLINE_PARTS.accent2}
               </span>
               {HERO_HEADLINE_PARTS.tail}
@@ -76,7 +76,7 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
 
             <p
               className="home-fade-fast mt-6 max-w-lg text-[1.05rem] sm:text-[1.2rem] tracking-[-0.011em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.45, color: ASH }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.45, color: ASH }}
             >
               {HERO_DECK}
             </p>
@@ -102,12 +102,10 @@ export function Hero({ onContactClick }: { onContactClick: () => void }) {
           </div>
 
           <div className="home-fade-fast" style={{ animationDelay: "160ms" }}>
-            <ComplianceInstrument />
+            <ComplianceInstrument numberFont="var(--font-lite)" />
           </div>
         </div>
       </div>
-
-      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   );
 }

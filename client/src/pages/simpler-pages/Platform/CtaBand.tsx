@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ASH, BONE, DISPLAY, LEAF, NOIR } from '../../home/theme'
+import { ASH, BONE, LEAF, NOIR } from '../../home/theme'
 import { CONTAINER, SECTION_Y_LG } from '../../home/layout'
 import { Reveal } from '../../home/PageChrome'
 
@@ -9,7 +9,7 @@ export function CtaBand({ onContactClick }: { onContactClick: () => void }) {
       <Reveal className={`${CONTAINER} text-center`}>
         <h2
           className="tracking-[-0.02em]"
-          style={{ fontFamily: DISPLAY, fontWeight: 300, color: BONE, fontSize: 'clamp(2.5rem, 7vw, 5.5rem)', lineHeight: 1 }}
+          style={{ fontFamily: "var(--font-lite)", fontWeight: 300, color: BONE, fontSize: 'clamp(2.5rem, 7vw, 5.5rem)', lineHeight: 1 }}
         >
           See the whole platform.
         </h2>

@@ -1,4 +1,4 @@
-import { ASH, BONE, DISPLAY, LINE_D } from "../../home/theme";
+import { ASH, BONE, LINE_D } from "../../home/theme";
 import { CONTAINER, EYEBROW, SECTION_Y } from "../../home/layout";
 import { Reveal } from "../../home/PageChrome";
 import { FEATURED_ENFORCEMENT } from "../../../data/enforcementActions";
@@ -21,7 +21,7 @@ export function Stakes() {
             </span>
             <h2
               className="mt-4 text-[1.6rem] sm:text-[2rem] tracking-[-0.015em]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.2, color: BONE }}
+              style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.2, color: BONE }}
             >
               {STAKES_HEADING}
             </h2>
@@ -47,7 +47,7 @@ export function Stakes() {
                 </span>
                 <span
                   className="tabular-nums"
-                  style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: "1.15rem", color: BONE }}
+                  style={{ fontFamily: "var(--font-lite)", fontWeight: 400, fontSize: "1.15rem", color: BONE }}
                 >
                   {item.org}
                 </span>
