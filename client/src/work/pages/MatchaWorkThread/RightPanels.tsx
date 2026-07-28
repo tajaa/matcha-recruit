@@ -5,7 +5,7 @@ import InventoryPanel from '../../components/panels/InventoryPanel'
 import ProjectPanel from '../../components/panels/ProjectPanel'
 import LanguageTutorPanel from '../../components/panels/LanguageTutorPanel'
 import AgentPanel from '../../components/panels/AgentPanel'
-import HuumePlanCard from '../../components/panels/HuumePlanCard'
+import HuumePanel from '../../components/panels/HuumePanel'
 import { getThread, sendCandidateInterviews, syncInterviewStatuses } from '../../api/matchaWork'
 import type { ThreadController } from './useThreadController'
 
@@ -108,7 +108,7 @@ export default function RightPanels({
       )}
 
       {showHuumePanel && (
-        <HuumePlanCard
+        <HuumePanel
           state={thread!.current_state}
           threadId={threadId!}
           lightMode={lightMode}
@@ -128,7 +128,7 @@ export default function RightPanels({
             // (metadata.huume_event = plan_executed) but does NOT broadcast
             // it — a full refetch is how it appears without a reload. Safe
             // to replace `messages` because execute is disabled while
-            // streaming (see HuumePlanCard's streaming prop).
+            // streaming (see HuumePanel's streaming prop).
             if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
           }}
         />

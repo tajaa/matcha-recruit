@@ -77,7 +77,6 @@ export default function MatchaWorkThread() {
         {thread?.huume_mode && huume.action?.status === 'proposed' && (
           <HuumeActionCard
             action={huume.action}
-            variant="banner"
             lightMode={lm}
             streaming={streaming}
             onSendChat={(t) => c.handleSend(t)}

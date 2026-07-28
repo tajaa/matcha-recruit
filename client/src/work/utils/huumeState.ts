@@ -1,4 +1,6 @@
-import type { HuumeAction, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlans } from '../types'
+import type {
+  HuumeAction, HuumeActionSendOffer, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlan, HuumePlans,
+} from '../types'
 
 export interface HuumeState {
   plans: HuumePlans
@@ -42,4 +44,80 @@ export interface HuumePanelGateOpts {
 export function shouldShowHuumePanel(opts: HuumePanelGateOpts): boolean {
   if (!opts.huumeMode || !opts.state) return false
   return hasHuumeContent(getHuumeState(opts.state)) || (!opts.pdfUrl && !opts.agentMode)
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Artifact model — what the right panel actually renders as tabs/documents.
+// ──────────────────────────────────────────────────────────────────────
+
+export type HuumeArtifact =
+  | { kind: 'offer'; key: string; offerId: string }
+  | { kind: 'plan'; key: string; offerId: string; plan: HuumePlan }
+  | { kind: 'action'; key: string; action: Exclude<HuumeAction, HuumeActionSendOffer> }
+  | { kind: 'handbook'; key: string; sessionId: string; pendingDrafts: HuumeHandbook['pending_drafts'] }
+  | { kind: 'legal'; key: string; matterId: string; title?: string | null }
+
+/** Ordered artifact list for the right panel's tabs.
+ * Order: offer(s), one per plan (state-key order), the staged non-offer
+ * action (if any), handbook, legal. `key` is `${kind}:${id}` — stable tab
+ * identity across state updates.
+ *
+ * The offer artifact is synthesized from a staged `send_offer` action when
+ * `huume_offer` hasn't been written yet (drafting happens before the offer
+ * row necessarily has state here) — deduped when both name the same id. A
+ * staged `send_offer` for a DIFFERENT offer than the last-drafted one (e.g.
+ * draft A → send A → draft B → send_offer(offer_id=A) again) gets its own
+ * artifact rather than being silently dropped — otherwise the panel would
+ * render B's letter while ConfirmBar confirms sending A. */
+export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
+  const artifacts: HuumeArtifact[] = []
+
+  const offerIds = new Set<string>()
+  if (h.offer?.offer_id) offerIds.add(h.offer.offer_id)
+  if (h.action?.type === 'send_offer') offerIds.add(h.action.offer_id)
+  for (const offerId of offerIds) artifacts.push({ kind: 'offer', key: `offer:${offerId}`, offerId })
+
+  for (const [planOfferId, plan] of Object.entries(h.plans)) {
+    artifacts.push({ kind: 'plan', key: `plan:${planOfferId}`, offerId: planOfferId, plan })
+  }
+
+  if (h.action && h.action.type !== 'send_offer' && h.action.status !== 'cancelled') {
+    const idKey =
+      h.action.type === 'discipline_draft' ? h.action.confirm_id
+      : h.action.type === 'ir_report' ? h.action.confirm_id
+      : h.action.type === 'er_case' ? h.action.confirm_id
+      : h.action.type === 'training_assign' ? h.action.requirement_id
+      : h.action.request_id
+    artifacts.push({ kind: 'action', key: `action:${h.action.type}:${idKey}`, action: h.action })
+  }
+
+  if (h.handbook && h.handbook.pending_drafts?.length > 0) {
+    artifacts.push({
+      kind: 'handbook', key: `handbook:${h.handbook.session_id}`,
+      sessionId: h.handbook.session_id, pendingDrafts: h.handbook.pending_drafts,
+    })
+  }
+
+  if (h.legal) {
+    artifacts.push({ kind: 'legal', key: `legal:${h.legal.matter_id}`, matterId: h.legal.matter_id, title: h.legal.title })
+  }
+
+  return artifacts
+}
+
+/** Which tab should be selected by default: the artifact owning a
+ * `status === 'proposed'` action (the offer artifact for a staged
+ * `send_offer`, the action artifact otherwise), else the first artifact,
+ * else null when there's nothing to show. */
+export function defaultArtifactKey(artifacts: HuumeArtifact[], action?: HuumeAction): string | null {
+  if (action?.status === 'proposed') {
+    if (action.type === 'send_offer') {
+      const offerArtifact = artifacts.find((a) => a.kind === 'offer' && a.offerId === action.offer_id)
+      if (offerArtifact) return offerArtifact.key
+    } else {
+      const actionArtifact = artifacts.find((a) => a.kind === 'action')
+      if (actionArtifact) return actionArtifact.key
+    }
+  }
+  return artifacts[0]?.key ?? null
 }

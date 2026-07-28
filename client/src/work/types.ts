@@ -607,6 +607,26 @@ export type HuumeAction =
   | HuumeActionTrainingAssign
   | HuumeActionPtoDecision
 
+/** Subset of the backend `OfferLetter` model — only what the Huume panel's
+ * offer viewer needs for the terms strip. Extra backend fields are ignored. */
+export interface OfferLetterDetail {
+  id: string
+  candidate_name: string
+  candidate_email: string | null
+  position_title: string
+  company_name: string
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired'
+  salary: string | null
+  bonus: string | null
+  employment_type: string | null
+  location: string | null
+  start_date: string | null
+  sent_at: string | null
+  signed_name: string | null
+  signed_at: string | null
+  declined_at: string | null
+}
+
 export interface HuumeLegal { matter_id: string; title?: string | null }
 
 export interface HuumeHandbook {

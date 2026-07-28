@@ -96,7 +96,11 @@ client/src/
   - `pages/shared/CandidateInterview.tsx` → `work/hooks/useVoiceSession`
   - `components/sidebars/SidebarShell.tsx` → `work/api/channelSocket` (disconnect-on-logout)
   - work→matcha (reverse): `MatchaWorkThread` → `api/compliance` + `types/compliance`;
-    `TaskBoard` → `types/dashboard`; `channels/JobPostingDetail` → `api/profileResume`
+    `TaskBoard` → `types/dashboard`; `channels/JobPostingDetail` → `api/profileResume`;
+    `work/components/panels/HuumePanel/HandbookDraftsViewer` → `api/handbook-pilot`;
+    `work/components/panels/HuumePanel/LegalMatterViewer` → `api/legal-defense` (+ its
+    `MatterMessage`/`Matter` types) — Huume's right panel renders what those pilots
+    produce, so it reads their pages' own fetch functions rather than duplicating them
 - **Within matcha, `components/` root holds only subject-area folders** — no loose files. New
   component placement: product-tier sidebar → `sidebars/`/`tier-sidebars/`; app-wide infra chrome
   → `shared/`; reusable content widget → `widgets/`; else the relevant domain folder. If you'd

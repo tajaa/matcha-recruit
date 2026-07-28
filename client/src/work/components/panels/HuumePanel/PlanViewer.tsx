@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, Circle, Lock, Loader2, XCircle, PlayCircle, Send, FileSignature, Scale, BookOpen } from 'lucide-react'
-import type { HuumePlan, HuumePlanStep, HuumeOffer } from '../../types'
-import { approveHuumePlan, executeHuumePlan } from '../../api/matchaWork/huume'
-import { getHuumeState, hasHuumeContent } from '../../utils/huumeState'
-import HuumeActionCard from './HuumeActionCard'
-import { useToast } from '../../../components/ui'
+import { CheckCircle2, Circle, Lock, Loader2, XCircle, PlayCircle } from 'lucide-react'
+import type { HuumePlan, HuumePlanStep } from '../../../types'
+import { approveHuumePlan, executeHuumePlan } from '../../../api/matchaWork/huume'
+import { useToast } from '../../../../components/ui'
 
-interface HuumePlanCardProps {
-  state: Record<string, unknown>
+interface PlanViewerProps {
+  offerId: string
+  plan: HuumePlan
   threadId: string
   lightMode?: boolean
   onStateUpdate: (offerId: string, plan: HuumePlan) => void
@@ -18,9 +17,6 @@ interface HuumePlanCardProps {
    * guarantees onExecuted's full message refetch can't clobber an in-flight
    * optimistic message. */
   streaming?: boolean
-  /** Powers the staged-action Confirm/Cancel card — sends the literal chat
-   * text through the thread's normal send path. */
-  onSendChat?: (text: string) => void
   /** REST plan-execute posts an assistant summary message
    * (metadata.huume_event: "plan_executed") but does not broadcast it — this
    * is how it appears without a reload. */
@@ -83,33 +79,12 @@ function StepRow({
   )
 }
 
-function OfferChip({ offer, lightMode }: { offer: HuumeOffer; lightMode?: boolean }) {
-  const label = offer.status === 'accepted' ? 'Accepted' : offer.status === 'rejected' ? 'Declined' : offer.status === 'sent' ? 'Sent — awaiting response' : 'Draft'
-  const color = offer.status === 'accepted'
-    ? (lightMode ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-emerald-950/40 text-emerald-300 border-emerald-800')
-    : offer.status === 'rejected'
-      ? (lightMode ? 'bg-red-50 text-red-700 border-red-300' : 'bg-red-950/40 text-red-300 border-red-800')
-      : offer.status === 'sent'
-        ? (lightMode ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-amber-950/40 text-amber-300 border-amber-800')
-        : (lightMode ? 'bg-zinc-50 text-zinc-600 border-zinc-300' : 'bg-zinc-800/40 text-zinc-400 border-zinc-700')
-  return (
-    <div className={`flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border w-fit ${color}`}>
-      {offer.status === 'accepted' ? <FileSignature size={12} /> : <Send size={12} />}
-      Offer: {label}
-      {offer.status === 'accepted' && offer.signed_name && <span>· signed by {offer.signed_name}</span>}
-    </div>
-  )
-}
-
-/** One candidate's plan section — its own selection/busy/error state so
- * approving/executing one candidate never disturbs another's UI. */
-function PlanSection({
+/** One candidate's onboarding plan — its own selection/busy/error state so
+ * approving/executing one candidate never disturbs another's UI when a
+ * thread has several plan artifacts. */
+export default function PlanViewer({
   offerId, plan, threadId, lightMode, onStateUpdate, streaming, onExecuted,
-}: {
-  offerId: string; plan: HuumePlan; threadId: string; lightMode?: boolean
-  onStateUpdate: (offerId: string, plan: HuumePlan) => void
-  streaming?: boolean; onExecuted?: () => void
-}) {
+}: PlanViewerProps) {
   const { toast } = useToast()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<'approve' | 'execute' | null>(null)
@@ -163,7 +138,7 @@ function PlanSection({
   }
 
   return (
-    <div className={`border-b ${border}`}>
+    <div className="flex w-full flex-1 flex-col overflow-y-auto">
       <div className={`px-3 py-2 border-b ${border}`}>
         <div className={`text-xs font-medium ${lightMode ? 'text-zinc-800' : 'text-zinc-200'}`}>
           Onboarding plan {plan.employee.first_name ? `— ${plan.employee.first_name}${plan.employee.last_name ? ' ' + plan.employee.last_name : ''}` : ''}
@@ -185,7 +160,7 @@ function PlanSection({
         ))}
       </div>
 
-      <div className={`px-3 py-2.5 flex flex-col gap-1.5`}>
+      <div className="px-3 py-2.5 flex flex-col gap-1.5">
         {error && <p className="text-[11px] text-red-500">{error}</p>}
         {lastSummary && !error && <p className={`text-[11px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>{lastSummary}</p>}
         <div className="flex gap-1.5">
@@ -215,64 +190,6 @@ function PlanSection({
           {busy === 'execute' ? <Loader2 size={12} className="animate-spin" /> : <><PlayCircle size={13} /> Execute approved steps</>}
         </button>
       </div>
-    </div>
-  )
-}
-
-/** Right-panel card for a Huume thread — offer status chip, staged-action
- * confirm card, Legal/Handbook Pilot chips, and one plan section per active
- * candidate (plans are keyed by offer_id, since a thread can be onboarding
- * several candidates at once). Mirrors InventoryPanel/ProjectPanel's shape:
- * reads straight off `thread.current_state`, calls back into the thread's
- * own state setter on a successful write. */
-export default function HuumePlanCard({ state, threadId, lightMode, onStateUpdate, streaming, onSendChat, onExecuted }: HuumePlanCardProps) {
-  const huume = getHuumeState(state)
-  const { plans, offer, action, legal, handbook } = huume
-  const planEntries = Object.entries(plans)
-
-  const th = { bg: lightMode ? 'bg-white' : 'bg-zinc-900', border: lightMode ? 'border-zinc-200' : 'border-zinc-800' }
-  const chipBase = 'flex items-center gap-1.5 text-[11px] px-2 py-1 rounded border w-fit'
-  const legalChip = lightMode ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100' : 'bg-amber-950/40 text-amber-300 border-amber-800 hover:bg-amber-950/60'
-  const handbookChip = lightMode ? 'bg-zinc-50 text-zinc-600 border-zinc-300 hover:bg-zinc-100' : 'bg-zinc-800/40 text-zinc-400 border-zinc-700 hover:bg-zinc-800/70'
-
-  if (!hasHuumeContent(huume)) {
-    return (
-      <div className={`flex w-full flex-1 min-w-0 items-center justify-center ${th.bg}`}>
-        <p className={`text-sm px-4 text-center ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
-          Ask Huume to draft an offer or build an onboarding plan to see it here.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className={`flex w-full flex-1 min-w-0 flex-col ${th.bg} overflow-y-auto`}>
-      <div className={`px-3 py-2.5 border-b ${th.border} flex flex-col gap-1.5`}>
-        <div className={`text-xs font-medium uppercase tracking-wide ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>Huume</div>
-        {offer && <OfferChip offer={offer} lightMode={lightMode} />}
-        {action && (
-          <HuumeActionCard action={action} variant="panel" lightMode={lightMode} streaming={streaming} onSendChat={onSendChat} />
-        )}
-        {legal && (
-          // Deep link into the pilot page — FeatureGate there handles a
-          // company that lost the legal_defense flag after this was written.
-          <Link to="/app/legal-pilot" className={`${chipBase} ${legalChip}`}>
-            <Scale size={12} /> Legal matter: {legal.title ?? legal.matter_id}
-          </Link>
-        )}
-        {handbook && handbook.pending_drafts?.length > 0 && (
-          <Link to="/app/handbook-pilot" className={`${chipBase} ${handbookChip}`}>
-            <BookOpen size={12} /> Handbook: {handbook.pending_drafts.length} pending draft{handbook.pending_drafts.length !== 1 ? 's' : ''}
-          </Link>
-        )}
-      </div>
-
-      {planEntries.map(([offerId, plan]) => (
-        <PlanSection
-          key={offerId} offerId={offerId} plan={plan} threadId={threadId} lightMode={lightMode}
-          onStateUpdate={onStateUpdate} streaming={streaming} onExecuted={onExecuted}
-        />
-      ))}
     </div>
   )
 }

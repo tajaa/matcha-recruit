@@ -9,7 +9,7 @@ from typing import List
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 
 from app.database import get_connection
 from app.matcha.models.offer_letters.offer_letter import (
@@ -1177,13 +1177,12 @@ async def _build_logo_data_uri(logo_path: str | None) -> str | None:
         return None
 
 
-@router.get("/{offer_id}/pdf")
-async def download_offer_letter_pdf(
-    offer_id: UUID,
-    request: Request,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Generate and download offer letter as PDF."""
+async def _fetch_offer_scoped(offer_id: UUID, current_user: CurrentUser) -> dict:
+    """Company-scoped offer fetch shared by /pdf and /preview.
+
+    Admin also sees legacy company_id IS NULL rows, mirroring GET /{offer_id}.
+    Raises 404 on a missing or cross-tenant offer_id.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Offer letter not found")
@@ -1203,10 +1202,13 @@ async def download_offer_letter_pdf(
             )
         if not row:
             raise HTTPException(status_code=404, detail="Offer letter not found")
+        return dict(row)
 
-        offer = dict(row)
 
-    # Resolve logo to an embeddable data URI when possible so PDF rendering is reliable.
+async def _render_offer_html(offer: dict, request: Request) -> str:
+    """Render the offer letter's HTML — logo resolved to a data URI (falling
+    back to an absolute URL off the request) and a signature block included
+    once the offer has actually been signed."""
     logo_src = await _build_logo_data_uri(offer.get("company_logo_url"))
     if not logo_src and offer.get("company_logo_url"):
         raw_logo_url = str(offer["company_logo_url"])
@@ -1215,8 +1217,40 @@ async def download_offer_letter_pdf(
         else:
             logo_src = raw_logo_url
 
-    # Generate HTML
-    html_content = _generate_offer_letter_html(offer, logo_src=logo_src)
+    signature = None
+    if offer.get("signed_at"):
+        signature = {
+            "name": offer.get("signed_name"),
+            "signed_at": offer["signed_at"],
+            "ip": offer.get("signer_ip"),
+        }
+
+    return _generate_offer_letter_html(offer, logo_src=logo_src, signature=signature)
+
+
+@router.get("/{offer_id}/preview", response_class=HTMLResponse)
+async def preview_offer_letter_html(
+    offer_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Render the offer letter as HTML for in-app review (e.g. the Huume
+    thread panel) — the same document the PDF and candidate signing page
+    produce, so there is one source of truth for what the letter says."""
+    offer = await _fetch_offer_scoped(offer_id, current_user)
+    html_content = await _render_offer_html(offer, request)
+    return HTMLResponse(content=html_content, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{offer_id}/pdf")
+async def download_offer_letter_pdf(
+    offer_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate and download offer letter as PDF."""
+    offer = await _fetch_offer_scoped(offer_id, current_user)
+    html_content = await _render_offer_html(offer, request)
 
     # Try to use weasyprint for PDF generation
     try:
