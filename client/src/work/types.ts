@@ -594,6 +594,14 @@ export interface HuumeActionPtoDecision {
   note?: string | null
 }
 
+export interface HuumeActionAmendHandbook {
+  type: 'amend_handbook'
+  status: 'proposed' | 'amended' | 'failed' | 'cancelled'
+  target_handbook_id: string
+  draft_ids?: string[]
+  handbook_title?: string | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -606,6 +614,7 @@ export type HuumeAction =
   | HuumeActionErCase
   | HuumeActionTrainingAssign
   | HuumeActionPtoDecision
+  | HuumeActionAmendHandbook
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */

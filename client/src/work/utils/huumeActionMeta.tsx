@@ -1,4 +1,4 @@
-import { CalendarCheck, FileSignature, GraduationCap, Scale, ShieldAlert, Siren } from 'lucide-react'
+import { BookOpen, CalendarCheck, FileSignature, GraduationCap, Scale, ShieldAlert, Siren } from 'lucide-react'
 import type { HuumeAction } from '../types'
 
 /** Terminal status -> the past-tense chip. Keyed by type because each staged
@@ -13,6 +13,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   er_case: { opened: 'ER case opened' },
   training_assign: { assigned: 'Training assigned' },
   pto_decision: { decided: 'PTO decision applied' },
+  amend_handbook: { amended: 'Handbook amended' },
 }
 
 /** One-line summary for the banner strip / the panel's docked ConfirmBar. */
@@ -30,6 +31,8 @@ export function bannerLabel(action: HuumeAction): string {
       return `Assign training to ${action.employee_ids?.length ?? 0} employee(s)?`
     case 'pto_decision':
       return `${action.decision === 'deny' ? 'Deny' : 'Approve'} this PTO request?`
+    case 'amend_handbook':
+      return `Amend ${action.handbook_title ?? 'this handbook'} — confirm?`
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -43,5 +46,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'er_case') return <Scale size={size} />
   if (type === 'training_assign') return <GraduationCap size={size} />
   if (type === 'pto_decision') return <CalendarCheck size={size} />
+  if (type === 'amend_handbook') return <BookOpen size={size} />
   return <ShieldAlert size={size} />
 }

@@ -31,6 +31,12 @@ export default function HandbookDraftsViewer({ sessionId, pendingDrafts, lightMo
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Refetch whenever the set of pending drafts changes, not just when the
+  // session itself does — a later chat turn can add drafts to the SAME
+  // session, and the tab label already reflects the new count via
+  // `pendingDrafts` (a prop), so the body must not lag behind it.
+  const draftIdsKey = pendingDrafts.map((d) => d.draft_id).join(',')
+
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -42,7 +48,7 @@ export default function HandbookDraftsViewer({ sessionId, pendingDrafts, lightMo
     } finally {
       setLoading(false)
     }
-  }, [sessionId])
+  }, [sessionId, draftIdsKey])
 
   useEffect(() => { void load() }, [load])
 

@@ -34,6 +34,8 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return `Training Assignment${action.employee_ids?.length ? ` — ${action.employee_ids.length} employee(s)` : ''}`
     case 'pto_decision':
       return `PTO ${action.decision === 'deny' ? 'Denial' : 'Approval'}`
+    case 'amend_handbook':
+      return `Amend Handbook${action.handbook_title ? ` — ${action.handbook_title}` : ''}`
   }
 }
 
@@ -118,6 +120,16 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Decision" value={action.decision === 'deny' ? 'Deny' : 'Approve'} />
           </div>
           <Prose>{action.note}</Prose>
+        </>
+      )}
+
+      {action.type === 'amend_handbook' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Handbook" value={action.handbook_title ?? action.target_handbook_id} />
+            <Meta label="Sections/policies" value={action.draft_ids?.length} />
+          </div>
+          <p className="text-[11px] opacity-60">This edits the live handbook's sections in place — confirm before proceeding.</p>
         </>
       )}
     </div>

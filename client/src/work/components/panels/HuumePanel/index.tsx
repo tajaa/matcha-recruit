@@ -103,6 +103,7 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
         )}
         {active?.kind === 'offer' && (
           <OfferLetterViewer
+            key={active.key}
             offerId={active.offerId}
             offer={huume.offer?.offer_id === active.offerId ? huume.offer : undefined}
             lightMode={lightMode}
@@ -110,18 +111,19 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
         )}
         {active?.kind === 'plan' && (
           <PlanViewer
+            key={active.key}
             offerId={active.offerId} plan={active.plan} threadId={threadId} lightMode={lightMode}
             onStateUpdate={onStateUpdate} streaming={streaming} onExecuted={onExecuted}
           />
         )}
         {active?.kind === 'action' && (
-          <ActionDocViewer action={active.action} lightMode={lightMode} />
+          <ActionDocViewer key={active.key} action={active.action} lightMode={lightMode} />
         )}
         {active?.kind === 'handbook' && (
-          <HandbookDraftsViewer sessionId={active.sessionId} pendingDrafts={active.pendingDrafts} lightMode={lightMode} />
+          <HandbookDraftsViewer key={active.key} sessionId={active.sessionId} pendingDrafts={active.pendingDrafts} lightMode={lightMode} />
         )}
         {active?.kind === 'legal' && (
-          <LegalMatterViewer matterId={active.matterId} lightMode={lightMode} />
+          <LegalMatterViewer key={active.key} matterId={active.matterId} lightMode={lightMode} streaming={streaming} />
         )}
       </div>
 

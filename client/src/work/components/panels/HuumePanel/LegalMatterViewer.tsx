@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { getMatter, type Matter } from '../../../../api/legal-defense/legalDefense'
@@ -7,6 +7,11 @@ import { pickLatestMemo, tokenizeCids } from './legalMemo'
 interface LegalMatterViewerProps {
   matterId: string
   lightMode?: boolean
+  /** True while Huume is streaming a turn. `huume_legal` only ever carries
+   * `{matter_id, title}` — a new `ask_legal_pilot` turn on the SAME matter
+   * doesn't change either, so matterId alone can't signal "there's a new
+   * memo". Refetch on each true→false edge instead of only on mount. */
+  streaming?: boolean
 }
 
 function MemoText({ text }: { text: string }) {
@@ -34,7 +39,7 @@ function MemoText({ text }: { text: string }) {
  * inline cid tokens, so it's rendered with a lightweight non-clickable pill
  * tokenizer rather than markdown (there is no clickable RecordViewer here in
  * v1 — that needs a separate getEvidence() fetch to label the chips). */
-export default function LegalMatterViewer({ matterId, lightMode }: LegalMatterViewerProps) {
+export default function LegalMatterViewer({ matterId, lightMode, streaming }: LegalMatterViewerProps) {
   const [matter, setMatter] = useState<Matter | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -52,6 +57,12 @@ export default function LegalMatterViewer({ matterId, lightMode }: LegalMatterVi
   }, [matterId])
 
   useEffect(() => { void load() }, [load])
+
+  const wasStreaming = useRef(streaming)
+  useEffect(() => {
+    if (wasStreaming.current && !streaming) void load()
+    wasStreaming.current = streaming
+  }, [streaming, load])
 
   const muted = lightMode ? 'text-zinc-500' : 'text-zinc-500'
   const border = lightMode ? 'border-zinc-200' : 'border-zinc-800'
