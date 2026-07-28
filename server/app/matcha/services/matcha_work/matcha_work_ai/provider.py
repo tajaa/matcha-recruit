@@ -21,7 +21,6 @@ from google import genai
 from app.core.services.genai_client import get_genai_client
 from google.genai import types
 from app.config import get_settings
-from cachetools import TTLCache  # noqa: E402
 
 from ._fields import BLOG_FIELDS, HANDBOOK_FIELDS, HR_PILOT_FIELDS, OFFER_LETTER_FIELDS, ONBOARDING_FIELDS, POLICY_FIELDS, PRESENTATION_FIELDS, PROJECT_FIELDS, REVIEW_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS, WORKBOOK_FIELDS
 from ._models import _get_model, classify_thinking_level

@@ -104,33 +104,6 @@ from .memo import (  # noqa: F401
     _render_pdf,
     build_memo_pdf,
 )
-"""Broker Pilot — grounded per-client P&C analysis chat (Broker Pro).
-
-The broker opens an analysis session for one client (on-platform company or
-off-platform external client), uploads ad-hoc carrier documents (loss runs,
-dec pages, competing quotes, carrier letters, bordereaux), and converses with
-an AI grounded in BOTH the uploads and the platform data already on file
-(`broker_submission._tenant_context` / `_external_context`).
-
-Derived from the Legal Pilot architecture (`services/legal_defense.py`) and
-reuses its pure gates directly: `validate_citations` drops any cited ID not in
-the corpus index before anything reaches the broker, and the memo PDF appendix
-is rendered deterministically from DB rows / the re-gathered context — never
-from model text.
-
-Corpus cid scheme (one flat index; the citation gate and memo renderer key on it):
-- ``doc:<uuid>``            — one record per uploaded document
-- ``docfig:<uuid>.<n>``     — one record per extracted key figure (minted from
-                              the stored extraction JSONB, never per-turn)
-- ``platform:<section>``    — a section of the submission context (wc, epl, …)
-- ``platform:<section>.<sub>`` — a specific factor/line/period within a section
-
-Documents are processed once at upload (classify + extract + local text
-extraction); chat turns never re-send file bytes. A Gemini failure at upload
-degrades the document to ``text_only`` — chat still grounds on the raw text.
-Never raises on the analysis path — failures degrade, they don't 500.
-"""
-
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,6 @@
 plus the minimum-wage violation metrics collector the compliance one reads.
 """
 import logging
-from dataclasses import field
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 from uuid import UUID

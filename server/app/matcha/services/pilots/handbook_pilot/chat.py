@@ -13,6 +13,7 @@ from app.matcha.services.pilots.legal_defense import _parse_json  # pure, unit-t
 
 from ._config import DRAFT_KINDS, MODEL, _CONTENT_CAP, _GEMINI_TIMEOUT, _HISTORY_TURNS, _MAX_DRAFTS_PER_TURN
 from app.matcha.services._shared.gemini import _genai
+from app.matcha.services._shared.text import history_text
 from app.matcha.services._shared.text import _slug
 
 logger = logging.getLogger(__name__)
@@ -68,8 +69,7 @@ def _corpus_text(corpus: dict) -> str:
 
 
 def _history_text(history: list[dict]) -> str:
-    msgs = [m for m in (history or []) if m.get("role") in ("user", "assistant")][-_HISTORY_TURNS:]
-    return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
+    return history_text(history, _HISTORY_TURNS)
 
 
 def _build_prompt(session: dict, history: list[dict], corpus: dict, latest: str) -> str:

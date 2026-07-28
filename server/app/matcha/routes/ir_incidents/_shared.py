@@ -7,8 +7,7 @@ import json
 import logging
 import os
 import re
-import secrets
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -99,7 +98,7 @@ ANALYSIS_TYPES = Literal[
 # Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
 # here so every existing `from ._shared import _detect_osha_reportable_keywords`
 # inside this package keeps working.
-from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
     _detect_osha_reportable_keywords,
 )
 
@@ -240,7 +239,7 @@ def _sse(event: dict) -> str:
 # Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
 # here so every existing `from ._shared import generate_incident_number` inside
 # this package keeps working.
-from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
     generate_incident_number,
 )
 
@@ -372,7 +371,7 @@ def _company_filter(param_idx: int) -> str:
 # Both now live in services/_shared/time.py so services can reach them without
 # importing this package (which runs the whole IR router __init__). Aliased to the
 # private names this package's modules already import.
-from app.matcha.services._shared.time import (  # noqa: E402
+from app.matcha.services._shared.time import (  # noqa: F401,E402
     to_naive_utc as _to_naive_utc,
     utc_now_naive as _utc_now_naive,
 )
@@ -382,7 +381,7 @@ from app.matcha.services._shared.time import (  # noqa: E402
 # here so every existing `from ._shared import _parse_occurred_at` inside this
 # package and `from app.matcha.routes.ir_incidents import _parse_occurred_at`
 # from inbound_email.py keep working.
-from app.matcha.services.ir.ir_incident_parsing import (  # noqa: E402
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
     _parse_occurred_at,
 )
 
@@ -571,7 +570,7 @@ async def _get_incident_with_company_check(conn, incident_id: UUID, current_user
 
 # Lives in services/_shared/jsonio.py so services can reach it without importing
 # this package. Aliased to the private name this package's modules already import.
-from app.matcha.services._shared.jsonio import (  # noqa: E402
+from app.matcha.services._shared.jsonio import (  # noqa: F401,E402
     safe_json_loads as _safe_json_loads,
 )
 

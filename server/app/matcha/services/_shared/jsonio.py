@@ -19,3 +19,21 @@ def safe_json_loads(value, default=None):
     except (json.JSONDecodeError, TypeError) as e:
         logger.warning(f"Failed to parse JSON: {e}")
         return default if default is not None else {}
+
+
+def loads_or_none(v):
+    """Coerce a JSONB column to its Python value, or None.
+
+    Distinct from ``safe_json_loads`` on purpose: this returns ``None`` for a
+    NULL column and for unparseable text, where the other returns ``{}``. The
+    claims/litigation packets need "absent" to stay distinguishable from "empty
+    object" — an empty dict renders as a present-but-blank section in the PDF.
+    """
+    if v is None:
+        return None
+    if isinstance(v, (dict, list)):
+        return v
+    try:
+        return json.loads(v)
+    except Exception:
+        return None

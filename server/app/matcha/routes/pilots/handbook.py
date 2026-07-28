@@ -3,7 +3,7 @@
 Grounded conversational handbook/policy generation: a business admin opens a
 session, converses with an AI grounded in the company's handbook profile +
 applicable jurisdiction requirements + existing handbooks/policies + the
-industry playbook (service: `services/handbook_pilot.py`), and the model
+industry playbook (service: `services/pilots/handbook_pilot/`), and the model
 proposes citation-validated candidate handbook sections and policies. Each
 proposal persists as a reviewable `draft` row the admin edits and PROMOTES into
 the real handbooks / policies tables (drafts to edit/publish normally).

@@ -3,7 +3,6 @@ keyword heuristic that classifies a turn's thinking level.
 """
 import logging
 from app.core.services.platform_settings import get_matcha_work_model_mode
-from cachetools import TTLCache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@
 Grounded per-client analysis chat: the broker opens a session for one client
 (on-platform company or off-platform external client), uploads ad-hoc P&C
 documents, and converses with an AI grounded in the uploads + the platform
-data on file (service: `services/broker_pilot.py`). Exports an analysis-memo
+data on file (service: `services/broker/broker_pilot/`). Exports an analysis-memo
 PDF whose citations were validated against the corpus.
 
 Every endpoint is `require_broker_pro`-gated; per-subject ownership is asserted

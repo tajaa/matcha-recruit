@@ -5,18 +5,15 @@ docstring for the shared rationale. Assembled from `er_cases` and its satellite
 tables, deterministic PDF, ``None`` when not found / not owned.
 """
 import asyncio
-import json
 import logging
 from uuid import UUID
 
 from app.core.services.pdf import render_pdf
 
 from app.matcha.services._shared.pdf import _PDF_CSS, _esc, _fmt_dt
+from app.matcha.services._shared.jsonio import loads_or_none as _loads
 
 logger = logging.getLogger(__name__)
-
-# One shared JSONB coercion; defined with the IR half rather than duplicated.
-from app.matcha.services.ir.ir_claims_packet import _loads
 
 
 # --- ER case packet ---------------------------------------------------------

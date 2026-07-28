@@ -59,6 +59,18 @@ def _call_feature_label_from(module_name: str) -> str:
 @pytest.mark.parametrize("module_name,expected", [
     ("app.cappe.services.merlin", "cappe.merlin"),
     ("app.matcha.services.matcha_work.matcha_work_ai", "matcha.matcha_work_ai"),
+    # LEAF modules inside a split package must collapse to the package label.
+    # Asserting only the package path (the line above) passes vacuously — the
+    # real Gemini callsites live in the leaves, and they fragmented in prod
+    # while this test stayed green.
+    ("app.matcha.services.matcha_work.matcha_work_ai.provider", "matcha.matcha_work_ai"),
+    ("app.matcha.services.matcha_work.matcha_work_ai.compaction", "matcha.matcha_work_ai"),
+    ("app.matcha.services.broker.broker_pilot.chat", "matcha.broker_pilot"),
+    ("app.matcha.services.pilots.handbook_pilot.chat", "matcha.handbook_pilot"),
+    ("app.matcha.services.pilots.legal_defense.chat", "matcha.legal_defense"),
+    ("app.matcha.services.risk_analytics.risk_assessment_service.recommendations",
+     "matcha.risk_assessment_service"),
+    ("app.matcha.services.matcha_work.matcha_work_document.pdf", "matcha.matcha_work_document"),
     # "core"/"workers"/"tasks" are deliberately KEPT (not stripped): they're
     # top-level branches that hold same-named modules for different reasons —
     # app.core.services.legislation_watch (inline research call) vs.
@@ -70,6 +82,32 @@ def _call_feature_label_from(module_name: str) -> str:
 ])
 def test_feature_label_transforms(module_name, expected):
     assert _call_feature_label_from(module_name) == expected
+
+
+def test_split_service_packages_covers_every_real_split_package():
+    """`_SPLIT_SERVICE_PACKAGES` must name EVERY services/<domain>/<pkg>/ package.
+
+    Derives the truth from the tree rather than restating the literal, because a
+    missing entry is invisible at runtime: the call still succeeds, it is just
+    logged under a fragmented `feature` label, so the admin AI-cost console's
+    GROUP BY quietly splits one line into several and the historical label flatlines.
+    That is what happened when the round-2 refactor split 6 packages and only
+    `legal_defense` was listed.
+    """
+    import pathlib
+
+    services = pathlib.Path(ai_usage.__file__).resolve().parents[2] / "matcha" / "services"
+    assert services.is_dir(), services
+    on_disk = {p.parent.name for p in services.glob("*/*/__init__.py")}
+    assert on_disk, "found no split packages — glob or layout changed"
+
+    missing = on_disk - ai_usage._SPLIT_SERVICE_PACKAGES
+    assert not missing, (
+        f"split packages missing from _SPLIT_SERVICE_PACKAGES: {sorted(missing)} — "
+        "their Gemini calls will log fragmented per-leaf-module feature labels"
+    )
+    stale = ai_usage._SPLIT_SERVICE_PACKAGES - on_disk
+    assert not stale, f"_SPLIT_SERVICE_PACKAGES names packages that no longer exist: {sorted(stale)}"
 
 
 def test_feature_label_does_not_collide_core_and_workers_same_leaf_name():

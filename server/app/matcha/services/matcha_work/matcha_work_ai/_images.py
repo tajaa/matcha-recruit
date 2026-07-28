@@ -6,7 +6,6 @@ import asyncio
 import logging
 from typing import Optional
 from app.config import get_settings
-from cachetools import TTLCache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

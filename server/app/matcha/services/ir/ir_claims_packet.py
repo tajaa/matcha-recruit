@@ -23,15 +23,10 @@ from app.matcha.services._shared.pdf import _PDF_CSS, _esc, _fmt_dt
 
 logger = logging.getLogger(__name__)
 
-def _loads(v):
-    if v is None:
-        return None
-    if isinstance(v, (dict, list)):
-        return v
-    try:
-        return json.loads(v)
-    except Exception:
-        return None
+# Lives in services/_shared/jsonio.py so the ER half can reach it without an
+# er -> ir service import (it was only ever shared, never IR-specific).
+# Aliased to the private name both packets already use.
+from app.matcha.services._shared.jsonio import loads_or_none as _loads  # noqa: F401
 
 
 # --- IR incident packet -----------------------------------------------------

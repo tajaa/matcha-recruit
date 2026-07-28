@@ -14,7 +14,6 @@ lives in provider.py, NOT here -- re-exporting a name does not alias the
 binding, so a rebind here would not be seen by the code that reads it.
 """
 import logging
-from cachetools import TTLCache  # noqa: E402
 
 from ._images import (  # noqa: F401
     _IMAGE_FETCH_TIMEOUT,
@@ -73,7 +72,6 @@ from .provider import (  # noqa: F401
     AIResponse,
     MatchaWorkAIProvider,
     GeminiProvider,
-    _provider,
     get_ai_provider,
 )
 from .compaction import (  # noqa: F401

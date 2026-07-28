@@ -2,7 +2,6 @@
 prompt edit is not a diff against the provider.
 """
 import logging
-from cachetools import TTLCache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

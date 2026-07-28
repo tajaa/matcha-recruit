@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from ..._shared.citations import validate_citations  # noqa: F401 — re-export, see Stage 6
+from ..._shared.text import history_text
 from ._shared import (
     _GEMINI_TIMEOUT,
     _HISTORY_TURNS,
@@ -125,8 +126,7 @@ def _corpus_text(corpus: dict) -> str:
 
 
 def _history_text(history: list[dict]) -> str:
-    msgs = [m for m in (history or []) if m.get("role") in ("user", "assistant")][-_HISTORY_TURNS:]
-    return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
+    return history_text(history, _HISTORY_TURNS)
 
 
 def _scope_text(corpus: dict) -> str:

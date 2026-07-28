@@ -80,8 +80,6 @@ from .collaborators import (  # noqa: F401
     ensure_collaborator_in_discussion_channel,
     remove_collaborator,
 )
-"""Project service — CRUD + section management for mw_projects."""
-
 
 logger = logging.getLogger(__name__)
 

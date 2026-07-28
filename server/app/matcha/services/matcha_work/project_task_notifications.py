@@ -10,9 +10,7 @@ without it.
 a lazy in-function import repeated four times — but that module imports only
 the DB pool, so there was never a cycle to dodge.
 """
-import json
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 

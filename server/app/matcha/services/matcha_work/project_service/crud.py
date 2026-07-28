@@ -11,8 +11,8 @@ from typing import Optional
 from uuid import UUID
 from app.database import get_connection
 
-from ._data import _load_and_lock_data, _parse_project, _persist_data, get_project_raw
-from ._config import _compute_blog_stats, PROJECT_TEMPLATE_SECTIONS, _ALLOWED_BLOG_TONES, _ALLOWED_PROJECT_TYPES, _slugify
+from ._data import _parse_project
+from ._config import PROJECT_TEMPLATE_SECTIONS, _ALLOWED_BLOG_TONES, _ALLOWED_PROJECT_TYPES, _slugify
 from .discipline import _seed_discipline_data
 
 logger = logging.getLogger(__name__)

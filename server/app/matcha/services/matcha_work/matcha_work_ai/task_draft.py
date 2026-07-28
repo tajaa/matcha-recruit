@@ -6,7 +6,6 @@ import json
 import logging
 from typing import Optional
 from google.genai import types
-from cachetools import TTLCache  # noqa: E402
 
 from ._models import _get_model
 from ._text import _clean_json_text

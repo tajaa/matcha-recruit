@@ -6,7 +6,6 @@ import json
 import logging
 import re
 from typing import Optional
-from cachetools import TTLCache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

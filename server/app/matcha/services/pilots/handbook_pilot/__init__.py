@@ -13,8 +13,8 @@ before anything reaches the user. Proposed drafts persist as reviewable rows
 that the admin edits and PROMOTES into the real handbooks / policies tables.
 
 Derived from the Broker Pilot / Legal Pilot architecture
-(`services/broker_pilot.py`, `services/legal_defense.py`) and reuses their pure
-gates directly. Never raises on the analysis path — failures degrade, not 500.
+(`services/broker/broker_pilot/`, `services/pilots/legal_defense/`) and reuses
+their pure gates directly. Never raises on the analysis path — failures degrade, not 500.
 
 Corpus cid scheme (one flat index; the citation gate keys on it):
 - ``profile``                        — the company handbook profile record
@@ -117,47 +117,6 @@ from .persistence import (  # noqa: F401
     persist_turn,
     promote_drafts,
 )
-"""Handbook Pilot — grounded conversational handbook/policy generation (Pro + Matcha-X).
-
-A business admin opens a generation session and converses with an AI grounded in
-the company's own material: the handbook profile, the jurisdiction/compliance
-requirements that apply to the company's work locations (the same
-`jurisdiction_requirements` corpus the template generator and the audit grader
-read), the industry playbook baseline, and the company's existing handbook
-sections + policies (so the pilot revises rather than duplicates). The model
-proposes candidate handbook sections and standalone policies; every enforceable
-clause must cite a bracketed corpus ID, and the shared
-`legal_defense.validate_citations` gate drops any citation not in the corpus
-before anything reaches the user. Proposed drafts persist as reviewable rows
-that the admin edits and PROMOTES into the real handbooks / policies tables.
-
-Derived from the Broker Pilot / Legal Pilot architecture
-(`services/broker_pilot.py`, `services/legal_defense.py`) and reuses their pure
-gates directly. Never raises on the analysis path — failures degrade, not 500.
-
-Corpus cid scheme (one flat index; the citation gate keys on it):
-- ``profile``                        — the company handbook profile record
-- ``law:<state>-<cat>-<title-slug>`` — one record per applicable jurisdiction requirement
-- ``handbook:<uuid>``                — one record per existing handbook section
-- ``policy:<uuid>``                  — one record per existing policy
-- ``playbook:<slug>``                — one record per industry playbook baseline section
-- ``floor:<level>-<juris>-<cat>``    — the GOVERNING requirement per category (precedence-resolved)
-- ``audit:<state>-<req-key>``        — one record per open gap from the latest handbook audit
-- ``fresh:<uuid>``                   — one record per finding from the latest freshness check
-
-`audit:` / `fresh:` are findings ABOUT the handbook, not law — the prompt forbids
-citing them as the source of an obligation, and `law_citation_count` (which
-drives the grounded/amber dot) deliberately ignores them.
-
-Law cids are derived from the requirement's *content* (state + category + title),
-not its position in the fetch, because `_fetch_state_requirements` orders by
-effective/updated date — a jurisdiction data refresh reorders the rows. Cids used
-to carry the enumeration ordinal (`law:<state>-<cat>-<n>`), so a refresh silently
-re-pointed every stored citation and cited requirements fell back to "uncovered".
-Citations stored under that old scheme are recovered by `lookup_record`, which
-matches on the `state-category` prefix when it names exactly one requirement.
-"""
-
 
 logger = logging.getLogger(__name__)
 

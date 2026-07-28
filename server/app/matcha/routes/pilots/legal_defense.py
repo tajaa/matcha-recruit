@@ -2,7 +2,7 @@
 
 Litigation-readiness evidence assembly for full-platform (Pro) companies. An
 admin opens a legal matter, converses with a grounded AI that organizes the
-company's own records (service: `services/legal_defense.py`), and exports an
+company's own records (service: `services/pilots/legal_defense/`), and exports an
 attorney-facing packet (memo PDF + ZIP bundle). Business-facing, tenant-isolated.
 A token-gated public route delivers a generated packet to outside counsel.
 

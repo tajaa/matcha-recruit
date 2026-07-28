@@ -70,16 +70,6 @@ from .recommendations import (  # noqa: F401
     _parse_json_response,
     generate_recommendations,
 )
-"""Risk Assessment Service.
-
-Computes a live risk score across 5 dimensions for a company:
-- Compliance (30%)
-- Incidents (25%)
-- ER Cases (25%)
-- Workforce (15%)
-- Legislative (5%)
-"""
-
 
 logger = logging.getLogger(__name__)
 

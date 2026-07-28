@@ -1,6 +1,6 @@
 """Compliance Pilot — chat-driven library building for the admin Compliance Studio.
 
-Modeled on Broker Pilot (`matcha/services/broker_pilot.py`): a static mode tuple
+Modeled on Broker Pilot (`matcha/services/broker/broker_pilot/`): a static mode tuple
 (`PILOT_TEMPLATES`), one strict-JSON Gemini turn per message (status → validated
 result), the shared `legal_defense.validate_citations` gate. The difference is the
 ACTION layer Broker Pilot lacks — a chat turn may emit one structured PROPOSAL

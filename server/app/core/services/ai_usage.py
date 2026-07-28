@@ -124,7 +124,27 @@ _SERVICES_DOMAINS = {
 # folder does above — otherwise "matcha.legal_defense.chat" and
 # "matcha.legal_defense.law" fragment what used to roll up as one
 # "matcha.legal_defense" label.
-_SPLIT_SERVICE_PACKAGES = {"legal_defense"}
+#
+# THIS LIST GOING STALE IS A SILENT DATA BUG, not a crash: the admin AI-cost
+# console GROUPs BY `ai_usage_log.feature`, so an unlisted split package makes
+# its historical label stop accruing while N new per-leaf-module labels appear
+# that don't roll up with it. It shipped exactly that way once — the round-2
+# refactor split 6 more packages and only `legal_defense` was listed, silently
+# fragmenting 8 live Gemini callsites. `tests/core/test_ai_usage.py::
+# test_split_service_packages_covers_every_real_split_package` now derives the
+# truth from the services tree and fails if this set drifts again; keep it a
+# literal (no filesystem walk on the hot path of every AI call).
+_SPLIT_SERVICE_PACKAGES = {
+    "analysis_packs",
+    "broker_pilot",
+    "handbook_pilot",
+    "hr_pilot_corpus",
+    "legal_defense",
+    "matcha_work_ai",
+    "matcha_work_document",
+    "project_service",
+    "risk_assessment_service",
+}
 
 
 def _feature_label() -> str:

@@ -3,7 +3,6 @@ vocabularies. Pure data -- what the AI is allowed to write, per document type.
 """
 import logging
 from app.matcha.models.matcha_work.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PolicyDocument, PresentationDocument, ProjectDocument, ReviewDocument, WorkbookDocument
-from cachetools import TTLCache  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

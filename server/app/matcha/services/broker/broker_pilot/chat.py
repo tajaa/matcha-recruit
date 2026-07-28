@@ -12,6 +12,7 @@ from app.matcha.services._shared.citations import validate_citations, _parse_jso
 
 from ._config import MODEL, _DOC_TEXT_CAP, _FINDING_POINT_CAP, _GAP_SEVERITIES, _GEMINI_TIMEOUT, _HISTORY_TURNS, _MAX_DOC_TEXT_BLOCKS, _MAX_FINDINGS, _MAX_QUESTIONS, _QUESTION_CAP
 from app.matcha.services._shared.gemini import _genai
+from app.matcha.services._shared.text import history_text
 from .templates import _mode_focus
 
 logger = logging.getLogger(__name__)
@@ -90,8 +91,7 @@ def _corpus_text(corpus: dict, docs: list[dict]) -> str:
 
 
 def _history_text(history: list[dict]) -> str:
-    msgs = [m for m in (history or []) if m.get("role") in ("user", "assistant")][-_HISTORY_TURNS:]
-    return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
+    return history_text(history, _HISTORY_TURNS)
 
 
 def _scope_text(corpus: dict) -> str:

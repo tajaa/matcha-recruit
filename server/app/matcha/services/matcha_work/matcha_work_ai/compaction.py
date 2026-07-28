@@ -6,7 +6,6 @@ import logging
 from typing import Optional
 from google import genai
 from google.genai import types
-from cachetools import TTLCache  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
