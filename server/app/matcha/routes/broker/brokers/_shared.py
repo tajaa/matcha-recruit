@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.config import get_settings
-from app.core.feature_flags import default_company_features_json, merge_company_features
+from app.core.feature_flags import (
+    assert_feature_allowed,
+    default_company_features_json,
+    merge_company_features,
+)
 from app.core.models.auth import CurrentUser
 from app.core.services.email import get_email_service
 from app.database import get_connection
@@ -65,7 +69,15 @@ def _normalize_feature_toggles(features: Optional[dict[str, bool]]) -> dict[str,
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unknown feature '{key}' in preconfigured_features",
             )
-        normalized[key] = bool(value)
+        enabled = bool(value)
+        # Broker-created companies are always real clients — no company row
+        # exists yet to check is_test against, so a beta feature is rejected
+        # unconditionally here (see feature_flags.assert_feature_allowed).
+        try:
+            assert_feature_allowed(key, enabled, company_row=None)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        normalized[key] = enabled
     return normalized
 def _to_dict(value) -> dict:
     if isinstance(value, dict):

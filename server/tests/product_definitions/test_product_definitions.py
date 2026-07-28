@@ -104,6 +104,27 @@ def test_a_product_with_nothing_enabled_is_rejected():
         validate_features({"incidents": False})
 
 
+def test_beta_feature_enabled_is_rejected(monkeypatch):
+    # A sellable product reaches real, non-test companies at signup — a beta
+    # feature can never be part of one, unconditionally.
+    monkeypatch.setattr(
+        "app.core.services.product_definitions.is_beta",
+        lambda key: key == "schedule_intelligence",
+    )
+    with pytest.raises(ProductDefinitionError):
+        validate_features({"schedule_intelligence": True, "handbooks": True})
+
+
+def test_beta_feature_disabled_is_allowed(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.services.product_definitions.is_beta",
+        lambda key: key == "schedule_intelligence",
+    )
+    assert validate_features({"schedule_intelligence": False, "handbooks": True}) == {
+        "schedule_intelligence": False, "handbooks": True,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Materialization — the exact shape written to companies.enabled_features.
 # --------------------------------------------------------------------------- #

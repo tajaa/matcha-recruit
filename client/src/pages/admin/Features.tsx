@@ -10,6 +10,13 @@ type CompanyFeatures = {
   id: string
   company_name: string
   enabled_features: Record<string, boolean>
+  is_test: boolean
+}
+
+type FeatureFlagStatus = {
+  key: string
+  is_beta: boolean
+  non_test_enabled_count: number
 }
 
 function enabledCount(features: Record<string, boolean>) {
@@ -21,6 +28,15 @@ export default function Features() {
     () => api.get<CompanyFeatures[]>('/admin/company-features'),
     [],
     [],
+  )
+  const { data: flagStatuses } = useAsync(
+    () => api.get<FeatureFlagStatus[]>('/admin/feature-flags'),
+    [],
+    [],
+  )
+  const betaKeys = useMemo(
+    () => new Set(flagStatuses.filter((f) => f.is_beta).map((f) => f.key)),
+    [flagStatuses]
   )
   const [search, setSearch] = useState('')
   const [toggling, setToggling] = useState<string | null>(null)
@@ -126,7 +142,10 @@ export default function Features() {
         ) : (
           <>
             <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-              <h2 className="text-sm font-semibold text-zinc-100">{selected.company_name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-zinc-100">{selected.company_name}</h2>
+                {selected.is_test && <Badge variant="neutral">Test account</Badge>}
+              </div>
               <Badge variant={enabledCount(selected.enabled_features) > 0 ? 'success' : 'neutral'}>
                 {enabledCount(selected.enabled_features)}/{FEATURE_KEYS.length} enabled
               </Badge>
@@ -139,17 +158,28 @@ export default function Features() {
                     {Object.keys(group.features).map((key) => {
                       const on = !!selected.enabled_features[key]
                       const busy = toggling === `${selected.id}:${key}`
+                      const isBeta = betaKeys.has(key)
+                      // Beta features can only be switched ON for test companies —
+                      // turning one OFF (remediation) always stays live.
+                      const lockedOn = isBeta && !on && !selected.is_test
                       return (
                         <div key={key} className="flex items-center gap-3">
                           <span
-                            className="min-w-0 flex-1 truncate text-xs text-zinc-400"
-                            title={FEATURE_LABELS[key]}
+                            className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs text-zinc-400"
+                            title={
+                              lockedOn
+                                ? `${FEATURE_LABELS[key]} — beta, test accounts only`
+                                : FEATURE_LABELS[key]
+                            }
                           >
-                            {FEATURE_LABELS[key]}
+                            <span className="truncate">{FEATURE_LABELS[key]}</span>
+                            {isBeta && (
+                              <Badge variant="warning" className="shrink-0">Beta</Badge>
+                            )}
                           </span>
                           <Toggle
                             checked={on}
-                            disabled={busy}
+                            disabled={busy || lockedOn}
                             onChange={(v) => toggle(selected.id, key, v)}
                             size="sm"
                           />

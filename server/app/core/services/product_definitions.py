@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ..feature_flags import DEFAULT_COMPANY_FEATURES
+from ..feature_flags import DEFAULT_COMPANY_FEATURES, is_beta
 
 SIGNUP_SOURCE_PREFIX = "product:"
 
@@ -241,6 +241,14 @@ def validate_features(features: Any) -> dict[str, bool]:
     cleaned = {k: bool(v) for k, v in features.items()}
     if not any(cleaned.values()):
         raise ProductDefinitionError("Select at least one enabled feature")
+    # A sellable product reaches real, non-test companies at signup — a beta
+    # feature can never be part of one, unconditionally (no is_test to check
+    # for a not-yet-created company). See feature_flags.assert_feature_allowed.
+    beta_on = sorted(k for k, v in cleaned.items() if v and is_beta(k))
+    if beta_on:
+        raise ProductDefinitionError(
+            f"Feature(s) still in beta, not sellable yet: {', '.join(beta_on)}"
+        )
     return cleaned
 
 

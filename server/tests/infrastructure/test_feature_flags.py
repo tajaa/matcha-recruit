@@ -1,4 +1,13 @@
-from app.core.feature_flags import merge_company_features
+import pytest
+
+from app.core.feature_flags import (
+    ALL_FEATURES,
+    BETA_FEATURES,
+    DEFAULT_COMPANY_FEATURES,
+    assert_feature_allowed,
+    company_may_use_beta,
+    merge_company_features,
+)
 
 
 def test_merge_company_features_defaults_include_handbooks():
@@ -63,3 +72,53 @@ def test_matcha_lite_keeps_employees_payment_gated():
 def test_bespoke_tier_respects_explicit_disable():
     features = merge_company_features({"handbooks": False}, "bespoke")
     assert features["handbooks"] is False
+
+
+# ── Beta gating ──────────────────────────────────────────────────────────────
+
+
+def test_beta_features_is_subset_of_all_features():
+    # Catches a typo'd or since-renamed key in BETA_FEATURES at CI time,
+    # rather than it silently no-op'ing at runtime.
+    assert BETA_FEATURES <= ALL_FEATURES
+
+
+def test_no_default_true_feature_is_marked_beta():
+    # A flag that ships ON for every company by default is GA by definition —
+    # marking it beta would show a locked "beta" toggle on a feature the
+    # customer already has.
+    always_on = {k for k, v in DEFAULT_COMPANY_FEATURES.items() if v is True}
+    assert not (always_on & BETA_FEATURES)
+
+
+def test_company_may_use_beta_requires_is_test_true():
+    assert company_may_use_beta({"is_test": True}) is True
+    assert company_may_use_beta({"is_test": False}) is False
+    assert company_may_use_beta({}) is False
+    assert company_may_use_beta(None) is False
+
+
+@pytest.mark.parametrize(
+    "enabled,is_test,should_raise",
+    [
+        (True, False, True),
+        (True, True, False),
+        (False, False, False),
+        (False, True, False),
+    ],
+)
+def test_assert_feature_allowed_beta_matrix(monkeypatch, enabled, is_test, should_raise):
+    # Exercise the matrix against a synthetic beta key so coverage doesn't
+    # depend on BETA_FEATURES being non-empty at any given time.
+    monkeypatch.setattr("app.core.feature_flags.BETA_FEATURES", frozenset({"schedule_intelligence"}))
+    row = {"is_test": is_test}
+    if should_raise:
+        with pytest.raises(ValueError):
+            assert_feature_allowed("schedule_intelligence", enabled, company_row=row)
+    else:
+        assert assert_feature_allowed("schedule_intelligence", enabled, company_row=row) is None
+
+
+def test_assert_feature_allowed_noop_for_non_beta_feature(monkeypatch):
+    monkeypatch.setattr("app.core.feature_flags.BETA_FEATURES", frozenset({"schedule_intelligence"}))
+    assert assert_feature_allowed("handbooks", True, company_row={"is_test": False}) is None

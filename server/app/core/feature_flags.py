@@ -434,3 +434,77 @@ async def get_company_features(company_id: UUID, *, conn=None) -> dict:
         company_row["enabled_features"] if company_row else None,
         company_row["signup_source"] if company_row else None,
     )
+
+
+# ── Beta gating ──────────────────────────────────────────────────────────────
+#
+# A feature can be marked "beta": enableable ONLY for test companies
+# (companies.is_test=true) until an admin removes it from BETA_FEATURES ("moves
+# it to ready"). This is a code-level, git-audited switch — NOT a DB row —
+# because merge_company_features() above is deliberately pure + sync (it runs
+# in pool-free Celery workers; see the module-level note on that function and
+# the product_definitions "grants are MATERIALIZED, not overlaid" rule in root
+# CLAUDE.md). A DB-backed beta lookup would need a cache on the hot path of
+# every request, or would 403 every toggle during the window where a backend
+# deploy has landed ahead of its migration (the exact failure mode
+# `_is_test_column_exists_cache` in admin/_shared.py exists to avoid).
+#
+# Enforcement is therefore write-time only, at the handful of endpoints where
+# a caller chooses an arbitrary feature key to write into enabled_features
+# (admin company-features toggle, product definitions, broker client setups)
+# — never inside merge_company_features itself, and never blocking turning a
+# beta feature OFF (that is the remediation path, not something to strand).
+#
+# incidents/employees aren't in DEFAULT_COMPANY_FEATURES (they're unioned in
+# separately wherever a caller may sell them — see ALLOWED_PRODUCT_FEATURES in
+# product_definitions.py) so ALL_FEATURES mirrors that union here too.
+ALL_FEATURES: frozenset[str] = frozenset(DEFAULT_COMPANY_FEATURES) | {
+    "incidents",
+    "employees",
+}
+
+# Start empty / with genuinely-unfinished flags only. Every entry here is a
+# real key in ALL_FEATURES — a CI test asserts BETA_FEATURES <= ALL_FEATURES
+# so a typo'd or since-renamed key fails the build instead of silently no-op'ing.
+BETA_FEATURES: frozenset[str] = frozenset()
+
+
+def is_beta(feature: str) -> bool:
+    return feature in BETA_FEATURES
+
+
+def company_may_use_beta(company_row: Any) -> bool:
+    """True if `company_row` (a mapping with an `is_test` key, e.g. an asyncpg
+    Record) may have beta features enabled. Kept as a helper — not an inline
+    `row["is_test"]` check — so widening "who may use beta" later (e.g. a
+    dedicated `beta_opt_in` column for real paying design partners, since
+    `is_test` can't describe them: companies.py refuses to set is_test=true on
+    a company with an active paid subscription) is a one-line change.
+    """
+    if company_row is None:
+        return False
+    try:
+        return bool(company_row["is_test"])
+    except (KeyError, IndexError):
+        return False
+
+
+def assert_feature_allowed(
+    feature: str,
+    enabled: bool,
+    *,
+    company_row: Any = None,
+) -> None:
+    """Raise ValueError if writing `feature=enabled` is disallowed by beta
+    gating. No-op for turning a feature OFF, and no-op for non-beta features
+    — this only ever blocks turning a beta feature ON for a non-test company.
+    Callers map the ValueError to their own 400 (FastAPI HTTPException,
+    ProductDefinitionError, etc.) — this module stays framework-agnostic.
+    """
+    if not enabled or not is_beta(feature):
+        return
+    if not company_may_use_beta(company_row):
+        raise ValueError(
+            f"'{feature}' is in beta — it can only be enabled for test companies "
+            "until it's moved to ready."
+        )

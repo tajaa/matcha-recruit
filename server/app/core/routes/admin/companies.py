@@ -20,7 +20,12 @@ from app.database import get_connection
 from app.core.dependencies import require_admin
 from app.core.services.credential_crypto import decrypt_credential_fields
 from app.core.services.scope_registry.codify import codified_sql
-from app.core.feature_flags import merge_company_features
+from app.core.feature_flags import (
+    ALL_FEATURES,
+    BETA_FEATURES,
+    assert_feature_allowed,
+    merge_company_features,
+)
 from app.core.services.email import get_email_service
 from app.core.models.compliance import AutoCheckSettings, LocationCreate
 from app.core.models.compliance_evals import EvalRunRequest, FindingResolveRequest
@@ -82,9 +87,10 @@ router = APIRouter()
 async def list_company_features():
     """List all companies with their enabled features."""
     async with get_connection() as conn:
+        is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
         rows = await conn.fetch(
-            """
-            SELECT id, name as company_name, industry, size, status, enabled_features
+            f"""
+            SELECT id, name as company_name, industry, size, status, enabled_features, {is_test_col}
             FROM companies
             ORDER BY name
             """
@@ -98,8 +104,50 @@ async def list_company_features():
                 "size": row["size"],
                 "status": row["status"] or "approved",
                 "enabled_features": merge_company_features(row["enabled_features"]),
+                "is_test": bool(row["is_test"]),
             }
             for row in rows
+        ]
+
+
+@router.get("/feature-flags", dependencies=[Depends(require_admin)])
+async def list_feature_flags():
+    """Read-only beta/ready status per feature, plus a remediation signal:
+    which non-test companies already have a beta feature enabled. Beta status
+    itself is code (feature_flags.BETA_FEATURES) — this endpoint has no PATCH
+    twin, moving a feature to ready is a code change + deploy, not an
+    admin-clickable action. See feature_flags.py's "Beta gating" section.
+    """
+    async with get_connection() as conn:
+        counts: dict[str, dict[str, Any]] = {}
+        if BETA_FEATURES:
+            is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
+            rows = await conn.fetch(
+                f"""
+                SELECT id, name as company_name, enabled_features, {is_test_col}
+                FROM companies
+                """
+            )
+            for row in rows:
+                if bool(row["is_test"]):
+                    continue
+                merged = merge_company_features(row["enabled_features"])
+                for key in BETA_FEATURES:
+                    if merged.get(key):
+                        entry = counts.setdefault(key, {"count": 0, "companies": []})
+                        entry["count"] += 1
+                        entry["companies"].append(
+                            {"id": str(row["id"]), "company_name": row["company_name"]}
+                        )
+
+        return [
+            {
+                "key": key,
+                "is_beta": key in BETA_FEATURES,
+                "non_test_enabled_count": counts.get(key, {}).get("count", 0),
+                "non_test_companies": counts.get(key, {}).get("companies", []),
+            }
+            for key in sorted(ALL_FEATURES)
         ]
 
 
@@ -114,9 +162,10 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
 
     async with get_connection() as conn:
         async with conn.transaction():
+            is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
             row = await conn.fetchrow(
-                """
-                SELECT enabled_features
+                f"""
+                SELECT enabled_features, {is_test_col}
                 FROM companies
                 WHERE id = $1
                 FOR UPDATE
@@ -125,6 +174,11 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
             )
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+            try:
+                assert_feature_allowed(request.feature, bool(request.enabled), company_row=row)
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
             features = merge_company_features(row["enabled_features"])
             features[request.feature] = bool(request.enabled)

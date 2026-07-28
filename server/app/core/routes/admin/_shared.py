@@ -119,6 +119,7 @@ __all__ = [
     "FALLBACK_CITY_ALIASES",
     "KNOWN_FEATURES",
     "_business_registration_select",
+    "is_test_column_exists",
     "VALID_BROKER_STATUSES",
     "VALID_BROKER_SUPPORT_ROUTING",
     "VALID_BROKER_BILLING_MODES",
@@ -274,18 +275,14 @@ _BUSINESS_REGISTRATION_SELECT_TEMPLATE = """
 _is_test_column_exists_cache: bool | None = None
 
 
-async def _business_registration_select(conn: asyncpg.Connection) -> str:
-    """Render `_BUSINESS_REGISTRATION_SELECT_TEMPLATE`, degrading gracefully
-    if migration `testacct01` (companies.is_test) hasn't reached this DB yet.
+async def is_test_column_exists(conn: asyncpg.Connection) -> bool:
+    """True once migration `testacct01` (companies.is_test) has reached this DB.
 
     Deploy ordering isn't guaranteed: `update-ec2.sh` ships backend code
-    independently of `migrate-prod.sh`. A prior version of this query hard-
-    selected `comp.is_test`, so a backend deployed ahead of its migration
-    500'd every `/admin/business-registrations` call outright — the
-    `_row_to_registration` fallback (`row.get("is_test") or False`) never
-    ran because the query failed before returning a row. Cached for the
-    process lifetime; `is_test` only ever appears (migrations don't get
-    un-applied), so there's no need to recheck once true.
+    independently of `migrate-prod.sh`. Any query that hard-selects
+    `comp.is_test` 500s outright on a backend deployed ahead of its migration.
+    Cached for the process lifetime; `is_test` only ever appears (migrations
+    don't get un-applied), so there's no need to recheck once true.
     """
     global _is_test_column_exists_cache
     if _is_test_column_exists_cache is None:
@@ -293,7 +290,20 @@ async def _business_registration_select(conn: asyncpg.Connection) -> str:
             "SELECT 1 FROM information_schema.columns "
             "WHERE table_name = 'companies' AND column_name = 'is_test'"
         ))
-    is_test_col = "comp.is_test" if _is_test_column_exists_cache else "FALSE AS is_test"
+    return _is_test_column_exists_cache
+
+
+async def _business_registration_select(conn: asyncpg.Connection) -> str:
+    """Render `_BUSINESS_REGISTRATION_SELECT_TEMPLATE`, degrading gracefully
+    if migration `testacct01` (companies.is_test) hasn't reached this DB yet.
+
+    A prior version of this query hard-selected `comp.is_test`, so a backend
+    deployed ahead of its migration 500'd every `/admin/business-registrations`
+    call outright — the `_row_to_registration` fallback
+    (`row.get("is_test") or False`) never ran because the query failed before
+    returning a row.
+    """
+    is_test_col = "comp.is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
     return _BUSINESS_REGISTRATION_SELECT_TEMPLATE.format(is_test_col=is_test_col)
 
 
