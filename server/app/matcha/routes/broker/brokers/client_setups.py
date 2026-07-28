@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.core.feature_flags import default_company_features_json, merge_company_features
 from app.core.models.auth import CurrentUser
 from app.core.services.email import get_email_service
+from app.core.services.feature_beta import load_beta_features
 from app.database import get_connection
 from app.matcha.dependencies import require_broker
 
@@ -33,7 +34,10 @@ async def create_broker_client_setup(
         await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
         _assert_can_manage_clients(membership)
 
-        normalized_features = _normalize_feature_toggles(request.preconfigured_features)
+        beta_features = await load_beta_features(conn)
+        normalized_features = _normalize_feature_toggles(
+            request.preconfigured_features, beta_features=beta_features,
+        )
         merged_features = merge_company_features(default_company_features_json())
         merged_features.update(normalized_features)
 
@@ -168,12 +172,15 @@ async def batch_create_broker_client_setups(
         await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
         _assert_can_manage_clients(membership)
 
+        beta_features = await load_beta_features(conn)
         created_setup_ids: list[UUID] = []
         errors: list[dict] = []
 
         for idx, client in enumerate(request.clients):
             try:
-                normalized_features = _normalize_feature_toggles(client.preconfigured_features)
+                normalized_features = _normalize_feature_toggles(
+                    client.preconfigured_features, beta_features=beta_features,
+                )
                 merged_features = merge_company_features(default_company_features_json())
                 merged_features.update(normalized_features)
 
@@ -358,7 +365,10 @@ async def update_broker_client_setup(
 
         normalized_features = None
         if request.preconfigured_features is not None:
-            normalized_features = _normalize_feature_toggles(request.preconfigured_features)
+            beta_features = await load_beta_features(conn)
+            normalized_features = _normalize_feature_toggles(
+                request.preconfigured_features, beta_features=beta_features,
+            )
             merged_features = merge_company_features(default_company_features_json())
             merged_features.update(normalized_features)
             await conn.execute(

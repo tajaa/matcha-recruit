@@ -593,8 +593,16 @@ ALL_FEATURES: frozenset[str] = frozenset(DEFAULT_COMPANY_FEATURES) | {
 BETA_FEATURES: frozenset[str] = frozenset()
 
 
-def is_beta(feature: str) -> bool:
-    return feature in BETA_FEATURES
+def is_beta(feature: str, beta_features: "frozenset[str]") -> bool:
+    """`beta_features` is deliberately a required param, not a read of the
+    module constant — every real caller has a connection and must pass
+    `feature_beta.load_beta_features(conn)`, which applies the admin
+    beta->ready DB override on top of BETA_FEATURES. A silent fallback to the
+    code constant here would make that override a no-op exactly where it's
+    supposed to matter (the write-time gates). Tests with no DB pass
+    `BETA_FEATURES` (or a synthetic frozenset) explicitly.
+    """
+    return feature in beta_features
 
 
 def company_may_use_beta(company_row: Any) -> bool:
@@ -617,6 +625,7 @@ def assert_feature_allowed(
     feature: str,
     enabled: bool,
     *,
+    beta_features: "frozenset[str]",
     company_row: Any = None,
 ) -> None:
     """Raise ValueError if writing `feature=enabled` is disallowed by beta
@@ -624,8 +633,11 @@ def assert_feature_allowed(
     — this only ever blocks turning a beta feature ON for a non-test company.
     Callers map the ValueError to their own 400 (FastAPI HTTPException,
     ProductDefinitionError, etc.) — this module stays framework-agnostic.
+
+    `beta_features` is required, not defaulted to the module constant — see
+    `is_beta`'s docstring for why. Pass `feature_beta.load_beta_features(conn)`.
     """
-    if not enabled or not is_beta(feature):
+    if not enabled or not is_beta(feature, beta_features):
         return
     if not company_may_use_beta(company_row):
         raise ValueError(

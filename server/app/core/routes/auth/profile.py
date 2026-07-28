@@ -39,12 +39,12 @@ from app.core.dependencies import (
     session_revoked, revoke_user_sessions,
 )
 from app.core.feature_flags import (
-    BETA_FEATURES,
     DEFAULT_COMPANY_FEATURES,
     default_company_features_json,
     merge_company_features,
 )
 from app.core.routes.admin._shared import is_test_column_exists
+from app.core.services.feature_beta import load_beta_features
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.config import get_settings
@@ -241,8 +241,9 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     # So the client never hardcodes the beta set — used to tag
                     # sidebar nav entries for beta features (only companies
                     # with is_test=true can have one enabled; see
-                    # feature_flags.company_may_use_beta).
-                    "beta_features": sorted(BETA_FEATURES),
+                    # feature_flags.company_may_use_beta). Reflects the admin
+                    # DB override on top of the code constant — see feature_beta.py.
+                    "beta_features": sorted(await load_beta_features(conn)),
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,

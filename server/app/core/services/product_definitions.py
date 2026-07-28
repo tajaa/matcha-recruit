@@ -232,7 +232,10 @@ def validate_slug(slug: str) -> str:
     return slug
 
 
-def validate_features(features: Any) -> dict[str, bool]:
+def validate_features(features: Any, *, beta_features: "frozenset[str]") -> dict[str, bool]:
+    """`beta_features` is required — pass `feature_beta.load_beta_features(conn)`,
+    not the bare `feature_flags.BETA_FEATURES` constant, so an admin's
+    beta->ready override is respected here too. See `is_beta`'s docstring."""
     if not isinstance(features, dict) or not features:
         raise ProductDefinitionError("Select at least one feature")
     unknown = sorted(set(features) - ALLOWED_PRODUCT_FEATURES)
@@ -244,7 +247,7 @@ def validate_features(features: Any) -> dict[str, bool]:
     # A sellable product reaches real, non-test companies at signup — a beta
     # feature can never be part of one, unconditionally (no is_test to check
     # for a not-yet-created company). See feature_flags.assert_feature_allowed.
-    beta_on = sorted(k for k, v in cleaned.items() if v and is_beta(k))
+    beta_on = sorted(k for k, v in cleaned.items() if v and is_beta(k, beta_features))
     if beta_on:
         raise ProductDefinitionError(
             f"Feature(s) still in beta, not sellable yet: {', '.join(beta_on)}"

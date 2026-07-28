@@ -84,9 +84,12 @@ def test_headcount_outside_range_raises_rather_than_quoting_zero():
 # The feature whitelist — the authorization boundary for signup + billing.
 # --------------------------------------------------------------------------- #
 
+NO_BETA: "frozenset[str]" = frozenset()
+
+
 def test_unknown_flag_is_rejected():
     with pytest.raises(ProductDefinitionError):
-        validate_features({"totally_made_up": True})
+        validate_features({"totally_made_up": True}, beta_features=NO_BETA)
 
 
 def test_incidents_and_employees_are_sellable_despite_not_being_defaults():
@@ -94,35 +97,36 @@ def test_incidents_and_employees_are_sellable_despite_not_being_defaults():
     # but they're the two headline sellable flags.
     assert "incidents" not in DEFAULT_COMPANY_FEATURES
     assert "employees" not in DEFAULT_COMPANY_FEATURES
-    assert validate_features({"incidents": True, "employees": True}) == {
+    assert validate_features({"incidents": True, "employees": True}, beta_features=NO_BETA) == {
         "incidents": True, "employees": True,
     }
 
 
 def test_a_product_with_nothing_enabled_is_rejected():
     with pytest.raises(ProductDefinitionError):
-        validate_features({"incidents": False})
+        validate_features({"incidents": False}, beta_features=NO_BETA)
 
 
-def test_beta_feature_enabled_is_rejected(monkeypatch):
+def test_beta_feature_enabled_is_rejected():
     # A sellable product reaches real, non-test companies at signup — a beta
     # feature can never be part of one, unconditionally.
-    monkeypatch.setattr(
-        "app.core.services.product_definitions.is_beta",
-        lambda key: key == "schedule_intelligence",
-    )
+    beta_features = frozenset({"schedule_intelligence"})
     with pytest.raises(ProductDefinitionError):
-        validate_features({"schedule_intelligence": True, "handbooks": True})
+        validate_features({"schedule_intelligence": True, "handbooks": True}, beta_features=beta_features)
 
 
-def test_beta_feature_disabled_is_allowed(monkeypatch):
-    monkeypatch.setattr(
-        "app.core.services.product_definitions.is_beta",
-        lambda key: key == "schedule_intelligence",
-    )
-    assert validate_features({"schedule_intelligence": False, "handbooks": True}) == {
+def test_beta_feature_disabled_is_allowed():
+    beta_features = frozenset({"schedule_intelligence"})
+    assert validate_features(
+        {"schedule_intelligence": False, "handbooks": True}, beta_features=beta_features,
+    ) == {
         "schedule_intelligence": False, "handbooks": True,
     }
+
+
+def test_validate_features_requires_beta_features_kwarg():
+    with pytest.raises(TypeError):
+        validate_features({"incidents": True})
 
 
 # --------------------------------------------------------------------------- #

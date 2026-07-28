@@ -18,6 +18,7 @@ from app.core.feature_flags import (
 )
 from app.core.models.auth import CurrentUser
 from app.core.services.email import get_email_service
+from app.core.services.feature_beta import load_beta_features
 from app.database import get_connection
 from app.matcha.dependencies import require_broker
 
@@ -58,7 +59,13 @@ KNOWN_FEATURES = {
 }
 EDITABLE_SETUP_STATUSES = {"draft", "invited"}
 EXPIRABLE_SETUP_STATUSES = {"draft", "invited"}
-def _normalize_feature_toggles(features: Optional[dict[str, bool]]) -> dict[str, bool]:
+def _normalize_feature_toggles(
+    features: Optional[dict[str, bool]], *, beta_features: "frozenset[str]",
+) -> dict[str, bool]:
+    """`beta_features` is required — pass `feature_beta.load_beta_features(conn)`
+    (callers already hold a connection); see `feature_flags.is_beta`'s
+    docstring for why this can't default to the bare code constant.
+    """
     normalized: dict[str, bool] = {}
     if not features:
         return normalized
@@ -74,7 +81,7 @@ def _normalize_feature_toggles(features: Optional[dict[str, bool]]) -> dict[str,
         # exists yet to check is_test against, so a beta feature is rejected
         # unconditionally here (see feature_flags.assert_feature_allowed).
         try:
-            assert_feature_allowed(key, enabled, company_row=None)
+            assert_feature_allowed(key, enabled, beta_features=beta_features, company_row=None)
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         normalized[key] = enabled

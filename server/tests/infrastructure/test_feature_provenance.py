@@ -8,11 +8,14 @@ from datetime import datetime, timezone
 import pytest
 
 from app.core.services.feature_provenance import (
+    clear_grant,
     feature_provenance,
     load_active_packs,
+    load_grants,
     record_feature_changes,
     resolve_addons,
     resolve_plan,
+    set_grant,
 )
 
 
@@ -159,7 +162,11 @@ async def test_audit_bucket_when_nothing_else_explains_it():
 
 
 @pytest.mark.asyncio
-async def test_unknown_bucket_when_nothing_explains_it():
+async def test_admin_grant_bucket_when_nothing_else_explains_it():
+    # The fallback — in this codebase, the only way a flag gets enabled with
+    # no tier/add-on/product/audit explanation is an admin (or broker, at
+    # company creation) turning it on directly. Not "unknown" in the sense of
+    # unexplainable — see feature_provenance()'s docstring.
     company_row = {
         "id": "co-1",
         "enabled_features": json.dumps({"policies": True}),
@@ -167,7 +174,7 @@ async def test_unknown_bucket_when_nothing_explains_it():
     }
     conn = FakeConn(fetch_results=[[]])  # no audit rows
     result = await feature_provenance(conn, company_row, products_by_slug={}, active_packs=[])
-    assert result["policies"]["bucket"] == "unknown"
+    assert result["policies"]["bucket"] == "admin_grant"
     assert result["policies"]["detail"] is None
 
 
@@ -234,3 +241,52 @@ def test_resolve_addons_ignores_non_addon_packs():
 
 def test_resolve_addons_empty_list():
     assert resolve_addons([]) == []
+
+
+# ── grant classification (why an admin-granted feature was given) ───────────
+
+
+@pytest.mark.asyncio
+async def test_set_grant_writes_expected_row():
+    conn = FakeConn()
+    await set_grant(conn, "co-1", "compliance", "invoiced", note="Q3 renewal", actor_user_id="user-1")
+    assert len(conn.execute_calls) == 1
+    _, args = conn.execute_calls[0]
+    assert args == ("co-1", "compliance", "invoiced", "Q3 renewal", "user-1")
+
+
+@pytest.mark.asyncio
+async def test_set_grant_rejects_unknown_feature():
+    conn = FakeConn()
+    with pytest.raises(ValueError):
+        await set_grant(conn, "co-1", "not_a_real_feature", "comped")
+    assert conn.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_grant_rejects_unknown_grant_type():
+    conn = FakeConn()
+    with pytest.raises(ValueError):
+        await set_grant(conn, "co-1", "compliance", "freebie")
+    assert conn.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_load_grants_shapes_rows():
+    now = datetime.now(timezone.utc)
+    conn = FakeConn(fetch_results=[[
+        {"feature": "compliance", "grant_type": "invoiced", "note": "Q3 renewal", "updated_at": now},
+    ]])
+    grants = await load_grants(conn, "co-1")
+    assert grants == {
+        "compliance": {"grant_type": "invoiced", "note": "Q3 renewal", "updated_at": now.isoformat()},
+    }
+
+
+@pytest.mark.asyncio
+async def test_clear_grant_deletes():
+    conn = FakeConn()
+    await clear_grant(conn, "co-1", "compliance")
+    assert len(conn.execute_calls) == 1
+    _, args = conn.execute_calls[0]
+    assert args == ("co-1", "compliance")

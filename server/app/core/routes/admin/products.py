@@ -38,6 +38,7 @@ from app.core.services.product_definitions import (
     validate_slug,
 )
 from app.core.feature_flags import BUILTIN_TIER_META, BUILTIN_TIER_SLUGS, builtin_tier_composition
+from app.core.services.feature_beta import load_beta_features
 from app.core.services.feature_provenance import record_feature_changes
 
 router = APIRouter()
@@ -63,11 +64,11 @@ class ProductUpsert(BaseModel):
     nav: Optional[list[NavEntry]] = None
 
 
-def _validated(body: ProductUpsert) -> dict[str, Any]:
+def _validated(body: ProductUpsert, beta_features: "frozenset[str]") -> dict[str, Any]:
     """Run every product invariant, returning the row payload to write."""
     try:
         slug = validate_slug(body.slug)
-        features = validate_features(body.features)
+        features = validate_features(body.features, beta_features=beta_features)
         validate_pricing(
             body.pricing_model,
             body.price_cents,
@@ -176,8 +177,9 @@ async def list_products(current_user=Depends(require_admin)):
 
 @router.post("/products", status_code=201)
 async def create_product(body: ProductUpsert, current_user=Depends(require_admin)):
-    payload = _validated(body)
     async with get_connection() as conn:
+        beta_features = await load_beta_features(conn)
+        payload = _validated(body, beta_features)
         exists = await conn.fetchval(
             "SELECT 1 FROM product_definitions WHERE slug = $1", payload["slug"]
         )
@@ -202,8 +204,9 @@ async def create_product(body: ProductUpsert, current_user=Depends(require_admin
 async def update_product(
     product_id: UUID, body: ProductUpsert, current_user=Depends(require_admin)
 ):
-    payload = _validated(body)
     async with get_connection() as conn:
+        beta_features = await load_beta_features(conn)
+        payload = _validated(body, beta_features)
         async with conn.transaction():
             current = await conn.fetchrow(
                 "SELECT slug, status FROM product_definitions WHERE id = $1", product_id

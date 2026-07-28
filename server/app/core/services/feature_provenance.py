@@ -22,6 +22,11 @@ neither one grants or gates anything; `merge_company_features` +
 `TIER_REQUIRED_FEATURES` remain the only source of truth for what's actually
 enabled.
 
+Plus `load_grants`/`set_grant`/`clear_grant` — a SEPARATE question from
+provenance. Provenance answers WHERE a flag came from; a grant answers WHY an
+admin gave it (comped / invoiced / trial / internal), for the features
+provenance classifies as `admin_grant` or `audit` (source=admin_toggle).
+
 All DB-touching helpers here are plain async functions over an already-open
 connection — no pool assumptions, callable from request handlers and (if ever
 needed) Celery.
@@ -159,10 +164,14 @@ async def feature_provenance(
     Returns `{feature_key: {"bucket": ..., "detail": ...}}` for every feature
     that reads as enabled via `merge_company_features`. Buckets, in match
     order: tier_forced, addon, custom_product, paid_gate, tier_preset, audit,
-    unknown. `unknown` is not a failure — it is the honest answer for a
-    feature enabled before this audit log existed, or by a write path this
-    function doesn't (yet) resolve. It does not guess between "manual toggle"
-    and "set at signup"; that distinction is unrecoverable for historical rows.
+    admin_grant. `admin_grant` is the fallback — nothing else explains the
+    flag, and the only way that happens in this codebase is an admin (or
+    broker, at company creation) turning it on directly: comped, invoiced
+    separately, or a pre-audit-log toggle. It is NOT "unknown" in the sense of
+    unexplainable — it just predates `company_feature_audit_log` or a write
+    path this function doesn't (yet) resolve, so the specific actor/timestamp
+    is unrecorded. See `load_grants`/`set_grant` for recording WHY (comped vs
+    invoiced vs trial vs internal) once an admin classifies it.
     """
     signup_source = company_row["signup_source"]
     effective = merge_company_features(company_row["enabled_features"], signup_source)
@@ -221,10 +230,67 @@ async def feature_provenance(
                 },
             }
         else:
-            result[key] = {"bucket": "unknown", "detail": None}
+            result[key] = {"bucket": "admin_grant", "detail": None}
     return result
 
 
 def _stripe_gate_flag_for(signup_source: Optional[str]) -> Optional[str]:
     from app.core.feature_flags import BUILTIN_TIER_META
     return BUILTIN_TIER_META.get(signup_source or "", {}).get("stripe_gate_flag")
+
+
+# ── Grant classification — WHY an admin-granted feature was given ───────────
+#
+# Distinct question from provenance's WHERE-did-this-come-from: an
+# `admin_grant` (or even an `audit`-sourced admin_toggle) bucket tells you an
+# admin turned it on, not whether the company was billed for it. This table
+# is deliberately per (company, feature), not a free-text log — one current
+# classification, overwritten on re-classify, not a history of every note.
+
+GRANT_TYPES = frozenset({"comped", "invoiced", "trial", "internal"})
+
+
+async def load_grants(conn, company_id: UUID) -> dict[str, dict[str, Any]]:
+    """`{feature: {"grant_type": ..., "note": ..., "updated_at": ...}}` for
+    every feature an admin has classified for this company."""
+    rows = await conn.fetch(
+        "SELECT feature, grant_type, note, updated_at FROM company_feature_grants WHERE company_id = $1",
+        company_id,
+    )
+    return {
+        r["feature"]: {
+            "grant_type": r["grant_type"],
+            "note": r["note"],
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in rows
+    }
+
+
+async def set_grant(
+    conn, company_id: UUID, feature: str, grant_type: str,
+    note: Optional[str] = None, actor_user_id: Optional[UUID] = None,
+) -> None:
+    if feature not in ALL_FEATURES:
+        raise ValueError(f"Unknown feature: {feature}")
+    if grant_type not in GRANT_TYPES:
+        raise ValueError(f"Unknown grant_type: {grant_type}. Valid: {', '.join(sorted(GRANT_TYPES))}")
+    await conn.execute(
+        """
+        INSERT INTO company_feature_grants (company_id, feature, grant_type, note, updated_by, updated_at)
+        VALUES ($1, $2, $3, $4, $5, now())
+        ON CONFLICT (company_id, feature) DO UPDATE
+            SET grant_type = EXCLUDED.grant_type,
+                note = EXCLUDED.note,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = now()
+        """,
+        company_id, feature, grant_type, note, actor_user_id,
+    )
+
+
+async def clear_grant(conn, company_id: UUID, feature: str) -> None:
+    await conn.execute(
+        "DELETE FROM company_feature_grants WHERE company_id = $1 AND feature = $2",
+        company_id, feature,
+    )

@@ -112,21 +112,30 @@ def test_company_may_use_beta_requires_is_test_true():
         (False, True, False),
     ],
 )
-def test_assert_feature_allowed_beta_matrix(monkeypatch, enabled, is_test, should_raise):
-    # Exercise the matrix against a synthetic beta key so coverage doesn't
-    # depend on BETA_FEATURES being non-empty at any given time.
-    monkeypatch.setattr("app.core.feature_flags.BETA_FEATURES", frozenset({"schedule_intelligence"}))
+def test_assert_feature_allowed_beta_matrix(enabled, is_test, should_raise):
+    # Exercise the matrix against a synthetic beta set passed explicitly —
+    # beta_features is a required kwarg, not a read of the module constant,
+    # so coverage doesn't depend on BETA_FEATURES being non-empty and doesn't
+    # need monkeypatching.
+    beta_features = frozenset({"schedule_intelligence"})
     row = {"is_test": is_test}
     if should_raise:
         with pytest.raises(ValueError):
-            assert_feature_allowed("schedule_intelligence", enabled, company_row=row)
+            assert_feature_allowed("schedule_intelligence", enabled, beta_features=beta_features, company_row=row)
     else:
-        assert assert_feature_allowed("schedule_intelligence", enabled, company_row=row) is None
+        assert assert_feature_allowed("schedule_intelligence", enabled, beta_features=beta_features, company_row=row) is None
 
 
-def test_assert_feature_allowed_noop_for_non_beta_feature(monkeypatch):
-    monkeypatch.setattr("app.core.feature_flags.BETA_FEATURES", frozenset({"schedule_intelligence"}))
-    assert assert_feature_allowed("handbooks", True, company_row={"is_test": False}) is None
+def test_assert_feature_allowed_noop_for_non_beta_feature():
+    beta_features = frozenset({"schedule_intelligence"})
+    assert assert_feature_allowed("handbooks", True, beta_features=beta_features, company_row={"is_test": False}) is None
+
+
+def test_assert_feature_allowed_requires_beta_features_kwarg():
+    # No silent fallback to the module constant — see is_beta's docstring for
+    # why (it would make an admin's beta->ready DB override a no-op).
+    with pytest.raises(TypeError):
+        assert_feature_allowed("handbooks", True, company_row={"is_test": False})
 
 
 # ── Built-in tier composition ────────────────────────────────────────────────

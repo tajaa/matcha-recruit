@@ -22,17 +22,21 @@ from app.core.services.credential_crypto import decrypt_credential_fields
 from app.core.services.scope_registry.codify import codified_sql
 from app.core.feature_flags import (
     ALL_FEATURES,
-    BETA_FEATURES,
     BUILTIN_TIER_META,
     assert_feature_allowed,
     merge_company_features,
 )
+from app.core.services.feature_beta import load_beta_features, set_beta_status
 from app.core.services.feature_provenance import (
+    GRANT_TYPES,
+    clear_grant,
     feature_provenance,
     load_active_packs,
+    load_grants,
     record_feature_changes,
     resolve_addons,
     resolve_plan,
+    set_grant,
 )
 from app.core.services.email import get_email_service
 from app.core.models.compliance import AutoCheckSettings, LocationCreate
@@ -129,15 +133,15 @@ async def list_company_features():
 
 @router.get("/feature-flags", dependencies=[Depends(require_admin)])
 async def list_feature_flags():
-    """Read-only beta/ready status per feature, plus a remediation signal:
-    which non-test companies already have a beta feature enabled. Beta status
-    itself is code (feature_flags.BETA_FEATURES) — this endpoint has no PATCH
-    twin, moving a feature to ready is a code change + deploy, not an
-    admin-clickable action. See feature_flags.py's "Beta gating" section.
+    """Beta/ready status per feature (code default + admin DB override —
+    see feature_beta.load_beta_features), plus a remediation signal: which
+    non-test companies already have a beta feature enabled. See
+    feature_flags.py's "Beta gating" section and feature_beta.py.
     """
     async with get_connection() as conn:
+        beta_features = await load_beta_features(conn)
         counts: dict[str, dict[str, Any]] = {}
-        if BETA_FEATURES:
+        if beta_features:
             is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
             rows = await conn.fetch(
                 f"""
@@ -149,7 +153,7 @@ async def list_feature_flags():
                 if bool(row["is_test"]):
                     continue
                 merged = merge_company_features(row["enabled_features"])
-                for key in BETA_FEATURES:
+                for key in beta_features:
                     if merged.get(key):
                         entry = counts.setdefault(key, {"count": 0, "companies": []})
                         entry["count"] += 1
@@ -160,12 +164,33 @@ async def list_feature_flags():
         return [
             {
                 "key": key,
-                "is_beta": key in BETA_FEATURES,
+                "is_beta": key in beta_features,
                 "non_test_enabled_count": counts.get(key, {}).get("count", 0),
                 "non_test_companies": counts.get(key, {}).get("companies", []),
             }
             for key in sorted(ALL_FEATURES)
         ]
+
+
+class BetaStatusUpdate(BaseModel):
+    is_beta: bool
+
+
+@router.patch("/feature-flags/{feature_key}", dependencies=[Depends(require_admin)])
+async def update_feature_beta_status(
+    feature_key: str, body: BetaStatusUpdate, current_user=Depends(require_admin),
+):
+    """Move a feature from beta to ready, or back, without a deploy — writes
+    an override row (feature_beta.set_beta_status); the code constant
+    feature_flags.BETA_FEATURES is untouched and still applies to every key
+    with no override row.
+    """
+    async with get_connection() as conn:
+        try:
+            await set_beta_status(conn, feature_key, body.is_beta, actor_user_id=current_user.id)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"key": feature_key, "is_beta": body.is_beta}
 
 
 @router.patch("/company-features/{company_id}", dependencies=[Depends(require_admin)])
@@ -194,8 +219,12 @@ async def toggle_company_feature(
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
+            beta_features = await load_beta_features(conn)
             try:
-                assert_feature_allowed(request.feature, bool(request.enabled), company_row=row)
+                assert_feature_allowed(
+                    request.feature, bool(request.enabled),
+                    beta_features=beta_features, company_row=row,
+                )
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -230,8 +259,9 @@ async def company_feature_provenance(company_id: UUID):
     provenance: which package/tier bundle, which purchased add-on, which
     custom product, or which admin/webhook write explains each currently-
     enabled feature. See feature_provenance.feature_provenance for the
-    classification rules — `unknown` is an honest bucket, not a bug, for
-    anything pre-dating the audit log or unresolved by the other rules.
+    classification rules — `admin_grant` is the fallback bucket for a feature
+    only an admin (or broker, at creation) could have turned on; `grants`
+    below is where that gets classified as comped/invoiced/trial/internal.
     """
     async with get_connection() as conn:
         company_row = await conn.fetchrow(
@@ -250,13 +280,47 @@ async def company_feature_provenance(company_id: UUID):
         provenance = await feature_provenance(conn, company_row, products_by_slug, active_packs)
         plan = resolve_plan(company_row["signup_source"], products_by_slug)
         addons = resolve_addons(active_packs)
+        grants = await load_grants(conn, company_id)
 
     return {
         "company_id": str(company_id),
         "plan": plan,
         "addons": addons,
         "features": provenance,
+        "grants": grants,
+        "grant_types": sorted(GRANT_TYPES),
     }
+
+
+class GrantUpdate(BaseModel):
+    grant_type: str
+    note: Optional[str] = None
+
+
+@router.put("/company-features/{company_id}/grants/{feature}", dependencies=[Depends(require_admin)])
+async def put_company_feature_grant(
+    company_id: UUID, feature: str, body: GrantUpdate, current_user=Depends(require_admin),
+):
+    """Classify WHY an admin-granted feature was given (comped / invoiced /
+    trial / internal) + an optional note. Separate from provenance, which
+    answers WHERE the flag came from — see feature_provenance.py.
+    """
+    async with get_connection() as conn:
+        try:
+            await set_grant(
+                conn, company_id, feature, body.grant_type,
+                note=body.note, actor_user_id=current_user.id,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return {"feature": feature, "grant_type": body.grant_type, "note": body.note}
+
+
+@router.delete("/company-features/{company_id}/grants/{feature}", dependencies=[Depends(require_admin)])
+async def delete_company_feature_grant(company_id: UUID, feature: str):
+    async with get_connection() as conn:
+        await clear_grant(conn, company_id, feature)
+    return {"ok": True}
 
 
 @router.post("/companies/{company_id}/credits")
