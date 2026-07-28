@@ -16,6 +16,7 @@ from ._storage import (
     _should_enforce_company_scoped_matcha_work_storage,
     _storage_path_has_prefix,
 )
+from app.matcha.services.offer_letters.document import _generate_offer_letter_html
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,6 @@ async def generate_pdf(
     cached = await _get_cached_pdf_url(thread_id, version, is_draft, expected_prefix=expected_prefix)
     if cached:
         return cached
-
-    # Lazy import to avoid circular imports at module load time
-    from app.matcha.routes.employee_lifecycle.offer_letters import _generate_offer_letter_html
 
     render_state = dict(state)
     render_state.setdefault("created_at", datetime.utcnow())

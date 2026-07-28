@@ -630,7 +630,7 @@ _MAX_HR_PILOT_PLAYBOOK_SECTIONS = 6
 _MAX_HR_PILOT_COMPLIANCE_CHARS = 8000
 
 # The handbook/policy/requirement fetch caps and the progressive-discipline
-# ladder now live in services/hr_pilot_corpus.py — the ladder as citable
+# ladder now live in services/pilots/hr_pilot_corpus/ — the ladder as citable
 # `ladder:` records rather than one uncitable prose summary.
 
 

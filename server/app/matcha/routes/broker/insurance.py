@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....database import get_connection
 from ...dependencies import require_broker, require_broker_pro
-from ...models.insurance import BrokerQuoteRequest, FnolRequest, PresentRequest
+from app.matcha.models.insurance.insurance import BrokerQuoteRequest, FnolRequest, PresentRequest
 from ...services.insurance import coterie_service
 from ...services.broker import risk_to_rate
 from ...services.insurance.coterie_service import CoterieError

@@ -24,7 +24,7 @@ from ...services.property import property_exposure as exposure
 from ...services.property import property_recommendations as recs
 from ...services.property import property_risk as prisk
 from ...services.broker import submission_readiness as sr
-from ...models.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
+from app.matcha.models.property.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

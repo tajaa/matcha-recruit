@@ -4,7 +4,7 @@ chain-of-custody trails and the appendix-section registry."""
 
 import json
 
-from ...claims_readiness import _esc, _fmt_dt
+from ..._shared.pdf import _esc, _fmt_dt
 from ._shared import _emp_name, _hum
 
 

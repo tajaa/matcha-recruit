@@ -3,21 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, AsyncIterator, Iterable, Optional
 from uuid import UUID, uuid4
 
+from fastapi import HTTPException
 from google.genai import types
+
+from app.matcha.services.matcha_work.message_shapes import _sse_data
 
 logger = logging.getLogger(__name__)
 
+from ....core.services.compliance_service import get_location_requirements, get_locations
 from ....core.services.handbook_service import (
     MANDATORY_STATE_TOPIC_LABELS,
     MANDATORY_STATE_TOPIC_RULES,
     STATE_NAMES,
 )
+from ....core.services.storage import get_storage
+from ..er.er_document_parser import ERDocumentParser
+from . import matcha_work_document as doc_svc
+from .matcha_work_ai import _infer_skill_from_state, get_ai_provider
+
+# _sse_data and _build_thread_detail_response stay in routes/matcha_work/
+# _shared.py — half a dozen other route submodules import them, and they are
+# genuinely HTTP-layer (SSE wire framing, response-model assembly). Imported
+# lazily inside run_handbook_upload rather than at module scope: threads.py
+# imports THIS module at import time, so a top-level reach back into the same
+# route package would be a live cycle.
 
 CORE_SECTION_KEYS = {
     "welcome",
@@ -693,3 +710,446 @@ def audit_uploaded_handbook(
         "handbook_strength_label": strength_label,
         "handbook_total_red_flag_count": total_red_flag_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Upload flow (moved out of routes/matcha_work/threads.py, refactor round 2
+# stage 5). The route keeps auth + the 404/400 shell; everything below --
+# validation, S3 upload, text extraction, relevance gate, and the quarterly
+# SSE audit generator -- is service work.
+# ---------------------------------------------------------------------------
+
+HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
+HANDBOOK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _location_label(location: dict) -> str:
+    city = str(location.get("city") or "").strip()
+    state = str(location.get("state") or "").strip().upper()
+    return f"{city}, {state}" if city else state
+
+
+def _thread_accepts_handbook_upload(thread: dict) -> bool:
+    current_state = thread.get("current_state") or {}
+    current_skill = _infer_skill_from_state(current_state)
+    if current_skill == "chat":
+        return True
+    if current_skill != "handbook":
+        return False
+    # Reject if an analysis is already in progress.
+    if current_state.get("handbook_upload_status") == "analyzing":
+        return False
+    source_type = current_state.get("handbook_source_type")
+    # Allow upload if already in upload mode OR if source type hasn't been
+    # committed yet (user started chatting about a handbook but can still
+    # switch to upload mode via the paperclip button).
+    if source_type in ("upload", None):
+        return True
+    return False
+
+
+def _build_handbook_block_message(location_labels: list[str]) -> str:
+    if not location_labels:
+        return (
+            "Handbook upload audit is blocked because no active Compliance Locations were found. "
+            "Add or sync company locations in /compliance first."
+        )
+    if len(location_labels) == 1:
+        scoped = location_labels[0]
+    else:
+        scoped = ", ".join(location_labels[:6])
+        if len(location_labels) > 6:
+            scoped += f", and {len(location_labels) - 6} more"
+    return (
+        "Handbook upload audit is blocked because these active Compliance Locations are not fully synced: "
+        f"{scoped}. Fix /compliance coverage first, then retry the upload."
+    )
+
+
+def _build_handbook_upload_summary(
+    *,
+    file_name: str,
+    reviewed_locations: list[str],
+    red_flags: list[dict],
+    green_flags: list[dict] | None = None,
+    jurisdiction_summaries: list[dict] | None = None,
+    blocked_message: Optional[str] = None,
+) -> str:
+    if blocked_message:
+        return blocked_message
+
+    passing_count = len(green_flags or [])
+    gap_count = len(red_flags)
+
+    if not red_flags:
+        return (
+            f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
+            f"{passing_count} requirement(s) covered, no jurisdiction coverage gaps detected."
+        )
+
+    counts = {"high": 0, "medium": 0, "low": 0}
+    for row in red_flags:
+        severity = str(row.get("severity") or "medium").lower()
+        if severity in counts:
+            counts[severity] += 1
+
+    severity_bits = []
+    for severity in ("high", "medium", "low"):
+        count = counts[severity]
+        if count:
+            severity_bits.append(f"{count} {severity}")
+
+    severity_summary = ", ".join(severity_bits) if severity_bits else f"{gap_count} issue(s)"
+
+    # Per-jurisdiction coverage snippet
+    jurisdiction_bits: list[str] = []
+    for js in (jurisdiction_summaries or []):
+        jurisdiction_bits.append(f"{js['location_label']} {js['covered_count']}/{js['total_count']}")
+    jurisdiction_snippet = (" | ".join(jurisdiction_bits) + ".") if jurisdiction_bits else ""
+
+    return (
+        f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
+        f"{passing_count} passing, {severity_summary} red flag(s). "
+        + (f"Coverage: {jurisdiction_snippet} " if jurisdiction_snippet else "")
+        + "Review the Preview panel for details."
+    )
+
+
+async def run_handbook_upload(
+    *,
+    thread_id: UUID,
+    company_id: UUID,
+    thread: dict,
+    raw_filename: Optional[str],
+    content: bytes,
+    content_type: Optional[str],
+) -> Optional[AsyncIterator[str]]:
+    """Audit an uploaded handbook against the company's synced jurisdictions.
+
+    Returns ``None`` when the upload was blocked or rejected -- the thread
+    state and the explanatory messages have already been written, and the
+    caller should just re-read the thread. Otherwise returns the SSE generator
+    for the happy-path incremental analysis.
+
+    Raises HTTPException for the caller to surface verbatim (bad extension,
+    empty/oversized file, unreadable text).
+    """
+    # Lazy — see the note beside this module's imports (threads.py imports us
+    # at module scope, so a top-level import of its package would cycle).
+    # `_build_thread_detail_response` is genuinely routes-layer (raises
+    # HTTPException, builds the response model) and threads.py imports THIS
+    # module at scope, so it stays lazy. `_sse_data` is pure and now lives in
+    # a services leaf — imported at module scope above.
+    from app.matcha.routes.matcha_work._shared import _build_thread_detail_response
+
+    filename = (raw_filename or "handbook.pdf").strip() or "handbook.pdf"
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in HANDBOOK_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF, DOCX, and DOC handbooks are supported")
+
+    active_locations = [
+        loc for loc in await get_locations(company_id)
+        if loc.get("is_active", True)
+    ]
+    active_location_labels = [_location_label(loc) for loc in active_locations if _location_label(loc)]
+    unsynced_labels = [
+        _location_label(loc)
+        for loc in active_locations
+        if loc.get("data_status") != "synced" and _location_label(loc)
+    ]
+    if not active_locations or unsynced_labels:
+        blocking_message = _build_handbook_block_message(
+            unsynced_labels if unsynced_labels else active_location_labels
+        )
+        result = await doc_svc.apply_update(
+            thread_id,
+            {
+                "handbook_source_type": "upload",
+                "handbook_upload_status": "blocked",
+                "handbook_title": thread.get("current_state", {}).get("handbook_title") or "Uploaded Employee Handbook",
+                "handbook_status": "error",
+                "handbook_uploaded_file_url": None,
+                "handbook_uploaded_filename": None,
+                "handbook_blocking_error": blocking_message,
+                "handbook_review_locations": active_location_labels,
+                "handbook_red_flags": [],
+                "handbook_sections": [],
+                "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                "handbook_error": None,
+            },
+            diff_summary="Blocked handbook upload audit",
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "system",
+            f"Handbook upload attempted for {filename}.",
+            version_created=result["version"],
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            blocking_message,
+            version_created=result["version"],
+        )
+        return None
+
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded handbook file is empty")
+    if len(content) > HANDBOOK_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Handbook file exceeds the 10 MB limit")
+
+    try:
+        extracted_text, _page_count = ERDocumentParser().extract_text_from_bytes(content, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Failed to extract handbook upload text for thread %s: %s", thread_id, exc, exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to read the uploaded handbook file") from exc
+
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(status_code=400, detail="No readable handbook text was found in the uploaded file")
+
+    # Quick relevance check — reject clearly wrong documents before expensive work.
+    is_handbook, rejection_reason = await check_handbook_relevance(extracted_text, get_ai_provider().client)
+    if not is_handbook:
+        blocking_message = rejection_reason or (
+            "This document does not appear to be an employee handbook. "
+            "Please upload your company's employee handbook and try again."
+        )
+        result = await doc_svc.apply_update(
+            thread_id,
+            {
+                "handbook_source_type": "upload",
+                "handbook_upload_status": "blocked",
+                "handbook_title": thread.get("current_state", {}).get("handbook_title") or "Uploaded Employee Handbook",
+                "handbook_status": "error",
+                "handbook_uploaded_file_url": None,
+                "handbook_uploaded_filename": None,
+                "handbook_blocking_error": blocking_message,
+                "handbook_review_locations": [],
+                "handbook_red_flags": [],
+                "handbook_green_flags": [],
+                "handbook_jurisdiction_summaries": [],
+                "handbook_sections": [],
+                "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                "handbook_error": None,
+            },
+            diff_summary="Rejected non-handbook upload",
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "system",
+            f"Uploaded file: {filename}.",
+            version_created=result["version"],
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            blocking_message,
+            version_created=result["version"],
+        )
+        return None
+
+    # --- Happy path: upload to S3, then stream incremental analysis via SSE ---
+
+    storage = get_storage()
+    uploaded_file_url = await storage.upload_file(
+        content,
+        filename,
+        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "handbooks"),
+        content_type=content_type,
+    )
+    await storage.upload_file(
+        extracted_text.encode("utf-8"),
+        f"{os.path.splitext(filename)[0] or 'handbook'}-extracted.txt",
+        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "handbook-analysis"),
+        content_type="text/plain",
+    )
+
+    # Pre-compute handbook metadata that stays constant across quarters.
+    parsed_sections = parse_handbook_sections(extracted_text)
+    if not parsed_sections:
+        raise HTTPException(status_code=400, detail="No readable handbook text found in the uploaded file")
+
+    handbook_title = derive_handbook_title(filename)
+    all_states = sorted({str(loc.get("state") or "").strip().upper() for loc in active_locations if loc.get("state")})
+    handbook_mode = "single_state" if len(set(all_states)) <= 1 else "multi_state"
+    total_location_count = len(active_locations)
+    all_location_labels = [_location_label(loc) for loc in active_locations if _location_label(loc)]
+    section_previews = [
+        {
+            "section_key": section.section_key,
+            "title": section.title,
+            "content": section.content[:500],
+            "section_type": section.section_type,
+        }
+        for section in parsed_sections[:MAX_SECTION_PREVIEWS]
+    ]
+
+    # Split locations into up to 4 quarter groups for incremental analysis.
+    quarter_size = math.ceil(total_location_count / 4) if total_location_count else 1
+    location_quarters: list[list[dict]] = [
+        active_locations[i : i + quarter_size]
+        for i in range(0, total_location_count, quarter_size)
+    ]
+
+    async def event_stream():
+        try:
+            # Mark thread as analyzing.
+            await doc_svc.apply_update(
+                thread_id,
+                {
+                    "handbook_source_type": "upload",
+                    "handbook_upload_status": "analyzing",
+                    "handbook_analysis_progress": 0,
+                    "handbook_title": handbook_title,
+                    "handbook_uploaded_file_url": uploaded_file_url,
+                    "handbook_uploaded_filename": filename,
+                    "handbook_mode": handbook_mode,
+                    "handbook_states": all_states,
+                    "handbook_sections": section_previews,
+                    "handbook_review_locations": all_location_labels,
+                    "handbook_blocking_error": None,
+                    "handbook_error": None,
+                },
+                diff_summary="Started handbook analysis",
+            )
+            yield _sse_data({"type": "handbook_progress", "progress": 0, "status": "analyzing"})
+
+            seen_flag_keys: set[str] = set()
+            accumulated_red_flags: list[dict] = []
+            accumulated_green_flags: list[dict] = []
+            accumulated_coverage: dict[str, dict[str, set[str]]] = {}
+            num_quarters = len(location_quarters)
+
+            for q_idx, quarter_locs in enumerate(location_quarters, 1):
+                # Fetch requirements for this quarter's locations sequentially
+                # to avoid connection pool exhaustion.
+                audited_locs: list[AuditedLocation] = []
+                for loc in quarter_locs:
+                    if not loc.get("id"):
+                        continue
+                    try:
+                        requirements = await get_location_requirements(UUID(str(loc["id"])), company_id)
+                    except Exception:
+                        logger.error(
+                            "Failed to load location requirements for handbook upload audit thread %s location %s",
+                            thread_id,
+                            loc.get("id"),
+                            exc_info=True,
+                        )
+                        yield _sse_data({"type": "error", "message": "Failed to load synced compliance requirements."})
+                        return
+                    audited_locs.append(
+                        AuditedLocation(
+                            id=UUID(str(loc["id"])),
+                            label=_location_label(loc),
+                            state=str(loc.get("state") or "").strip().upper(),
+                            city=str(loc.get("city") or "").strip() or None,
+                            requirements=list(requirements),
+                        )
+                    )
+
+                # Audit this quarter's locations.
+                q_red, q_green, q_coverage = _audit_location_group(
+                    parsed_sections=parsed_sections,
+                    locations_subset=audited_locs,
+                    all_states=all_states,
+                    total_location_count=total_location_count,
+                    seen_flag_keys=seen_flag_keys,
+                )
+
+                # Accumulate results.
+                accumulated_red_flags.extend(q_red)
+                accumulated_green_flags.extend(q_green)
+                for loc_key, info in q_coverage.items():
+                    if loc_key in accumulated_coverage:
+                        accumulated_coverage[loc_key]["covered"] |= info["covered"]
+                        accumulated_coverage[loc_key]["total"] |= info["total"]
+                        accumulated_coverage[loc_key]["state"] |= info["state"]
+                        accumulated_coverage[loc_key]["city"] |= info["city"]
+                    else:
+                        accumulated_coverage[loc_key] = info
+
+                # Sort and cap red flags.
+                sorted_red = sorted(
+                    accumulated_red_flags,
+                    key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]),
+                )
+                total_red_count = len(accumulated_red_flags)
+                sorted_red = sorted_red[:MAX_RED_FLAGS]
+
+                # Compute running summaries.
+                jurisdiction_summaries, strength_score, strength_label = compute_coverage_summaries(accumulated_coverage)
+                progress = q_idx / num_quarters
+
+                partial_state = {
+                    "handbook_source_type": "upload",
+                    "handbook_upload_status": "analyzing",
+                    "handbook_analysis_progress": progress,
+                    "handbook_title": handbook_title,
+                    "handbook_mode": handbook_mode,
+                    "handbook_states": all_states,
+                    "handbook_uploaded_file_url": uploaded_file_url,
+                    "handbook_uploaded_filename": filename,
+                    "handbook_blocking_error": None,
+                    "handbook_error": None,
+                    "handbook_sections": section_previews,
+                    "handbook_review_locations": all_location_labels,
+                    "handbook_red_flags": sorted_red,
+                    "handbook_green_flags": accumulated_green_flags,
+                    "handbook_jurisdiction_summaries": jurisdiction_summaries,
+                    "handbook_strength_score": strength_score,
+                    "handbook_strength_label": strength_label,
+                    "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                    "handbook_total_red_flag_count": total_red_count,
+                }
+
+                await doc_svc.apply_update(
+                    thread_id,
+                    partial_state,
+                    diff_summary=f"Handbook analysis quarter {q_idx}/{num_quarters}",
+                )
+                yield _sse_data({"type": "handbook_progress", "progress": progress, "partial_state": partial_state})
+
+            # Final: mark as reviewed and add messages.
+            final_state = {
+                **partial_state,
+                "handbook_upload_status": "reviewed",
+                "handbook_analysis_progress": 1.0,
+                "handbook_status": "ready",
+            }
+            result = await doc_svc.apply_update(
+                thread_id,
+                final_state,
+                diff_summary=f"Uploaded handbook audit: {filename}",
+            )
+
+            summary_message = _build_handbook_upload_summary(
+                file_name=filename,
+                reviewed_locations=all_location_labels,
+                red_flags=sorted_red,
+                green_flags=accumulated_green_flags,
+                jurisdiction_summaries=jurisdiction_summaries,
+            )
+            await doc_svc.add_message(
+                thread_id,
+                "system",
+                f"Uploaded handbook file: {filename}.",
+                version_created=result["version"],
+            )
+            await doc_svc.add_message(
+                thread_id,
+                "assistant",
+                summary_message,
+                version_created=result["version"],
+            )
+
+            detail = await _build_thread_detail_response(thread_id, company_id)
+            yield _sse_data({"type": "complete", "data": detail.model_dump(mode="json")})
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.error("Handbook upload stream failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Handbook analysis failed. Please try again."})
+
+    return event_stream()

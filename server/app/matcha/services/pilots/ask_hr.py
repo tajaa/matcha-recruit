@@ -1,7 +1,7 @@
 """Employee "Ask HR" — grounded, citation-gated policy answers for employees.
 
 The employee-facing counterpart to HR Pilot. Same company corpus
-(`services/hr_pilot_corpus.py`), same anti-hallucination gate
+(`services/pilots/hr_pilot_corpus/`), same anti-hallucination gate
 (`legal_defense.validate_citations`), same deterministic hard-stop classifier
 (`services/hr_pilot_escalation.classify_message`) — but a different reader, and
 the differences matter:
@@ -25,26 +25,16 @@ the style of the other grounded pilots ("groundedness over token-streaming" —
 import asyncio
 import logging
 
-from app.core.services.genai_client import get_genai_client
-
 from .hr_pilot_escalation import EMPLOYEE, classify_message
 from .legal_defense import _parse_json, validate_citations
+from .._shared.gemini import _genai
+from .._shared.text import history_text
 
 logger = logging.getLogger(__name__)
 
 MODEL = "gemini-3-flash-preview"
 _GEMINI_TIMEOUT = 60
 _HISTORY_TURNS = 10
-
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
 
 # --------------------------------------------------------------------------- #
 # The hard stop — pure, runs before any model call.
@@ -120,8 +110,7 @@ def _corpus_text(corpus: dict) -> str:
 
 
 def _history_text(history: list[dict]) -> str:
-    msgs = [m for m in (history or []) if m.get("role") in ("user", "assistant")][-_HISTORY_TURNS:]
-    return "\n".join(f"[{m['role']}] {m.get('content', '')}" for m in msgs) or "(no prior messages)"
+    return history_text(history, _HISTORY_TURNS)
 
 
 def build_prompt(employee: dict, history: list[dict], corpus: dict, latest: str) -> str:

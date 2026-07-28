@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ...services.insurance import controls_evidence as ce
-from ...models.controls_evidence import ControlEvidenceUpdate
+from app.matcha.models.risk_analytics.controls_evidence import ControlEvidenceUpdate
 
 router = APIRouter()
 

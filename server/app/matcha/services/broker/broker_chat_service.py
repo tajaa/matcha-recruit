@@ -19,7 +19,7 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from ...models.broker_chat import MessageReference
+from app.matcha.models.broker.chat import MessageReference
 from ...services import notification_service
 
 logger = logging.getLogger(__name__)

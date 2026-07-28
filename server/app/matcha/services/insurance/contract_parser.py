@@ -15,7 +15,7 @@ from typing import Optional, get_args
 
 from app.config import get_settings
 from app.matcha.services.ir.ir_analysis import IRAnalyzer
-from app.matcha.models import limit_adequacy as _models
+from app.matcha.models.insurance import limit_adequacy as _models
 from app.matcha.services.insurance import limit_adequacy as la
 
 # Straight off the Pydantic Literals — the same vocabulary the API validates and

@@ -14,6 +14,8 @@ from uuid import UUID
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+# Byte-identical to the dashboard model; imported rather than redefined.
+from app.matcha.models.dashboard import ManagerHotspot
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -34,10 +36,6 @@ router = APIRouter()
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class ManagerHotspot(BaseModel):
-    manager_id: str
-    manager_name: str
-    flagged_count: int
 
 
 class FlightRiskSummary(BaseModel):

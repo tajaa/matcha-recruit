@@ -41,10 +41,9 @@ import logging
 from typing import Any, Optional
 from uuid import UUID
 
-from app.core.services.genai_client import get_genai_client
-
 from . import discipline_compliance, discipline_engine
-from ..pilots.legal_defense import _parse_json, validate_citations  # pure, unit-tested
+from .._shared.citations import _parse_json, validate_citations  # pure, unit-tested
+from .._shared.gemini import _genai
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +52,6 @@ _GEMINI_TIMEOUT = 60
 _MAX_PRIOR_DISCIPLINE = 20
 _MAX_LEAVE_RECORDS = 20
 _TEXT_CAP = 6_000
-
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
-
 
 # ── Corpus ──────────────────────────────────────────────────────────────
 

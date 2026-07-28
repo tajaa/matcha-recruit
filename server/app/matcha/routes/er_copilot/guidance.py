@@ -18,7 +18,7 @@ from ...services.er.er_guidance import (
 )
 from ...services.er import er_compliance_grounding
 from ...services.pilots import legal_defense
-from ...models.er_case import (
+from app.matcha.models.er.case import (
     SuggestedGuidanceResponse,
     OutcomeAnalysisResponse,
     OutcomeOption,

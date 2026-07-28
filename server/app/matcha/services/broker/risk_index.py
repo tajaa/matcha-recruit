@@ -18,6 +18,7 @@ import asyncpg
 
 from . import epl_readiness
 from ..insurance import wc_depth
+from ..ir.ir_wc_metrics import compute_wc_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,6 @@ async def _wc_component(conn, company_id: UUID, *, wc=None, emr=None):
     ``wc`` (a ``compute_wc_metrics`` result) and ``emr`` may be passed in by a
     caller that already has them, to skip two queries."""
     if wc is None:
-        from ...routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
         wc = await compute_wc_metrics(conn, company_id)
     if emr is None:
         emr = (await wc_depth.latest_mods(conn, [company_id])).get(str(company_id), {}).get("experience_mod")

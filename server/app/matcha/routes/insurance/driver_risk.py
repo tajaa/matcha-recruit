@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ...services.insurance import driver_risk as dr
-from ...models.driver_risk import DriverReviewCreate, DriverReviewUpdate
+from app.matcha.models.insurance.driver_risk import DriverReviewCreate, DriverReviewUpdate
 
 logger = logging.getLogger(__name__)
 

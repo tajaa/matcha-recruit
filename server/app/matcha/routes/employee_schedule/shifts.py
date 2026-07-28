@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import get_connection
 from app.core.feature_flags import get_company_features
 from ...dependencies import require_admin_or_client
-from ...models.employee_schedule import (
+from app.matcha.models.scheduling.employee_schedule import (
     ShiftCreate, ShiftUpdate, PublishRange,
 )
 from ...services.scheduling.schedule_rules import (

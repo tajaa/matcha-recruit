@@ -15,6 +15,7 @@ from .property import router as property_router
 from .resident_care import router as resident_care_router
 from .risk_profile import router as risk_profile_router
 from .tcor import router as tcor_router
+from .wc_rates_admin import router as wc_rates_admin_router
 from .workforce_compliance import router as workforce_compliance_router
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "resident_care_router",
     "risk_profile_router",
     "tcor_router",
+    "wc_rates_admin_router",
     "workforce_compliance_router",
 ]

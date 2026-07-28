@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import IRAuditLogEntry, IRAuditLogResponse
+from app.matcha.models.ir.audit_log import IRAuditLogEntry, IRAuditLogResponse
 
 
 router = APIRouter()

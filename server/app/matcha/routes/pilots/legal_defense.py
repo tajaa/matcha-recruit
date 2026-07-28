@@ -2,7 +2,7 @@
 
 Litigation-readiness evidence assembly for full-platform (Pro) companies. An
 admin opens a legal matter, converses with a grounded AI that organizes the
-company's own records (service: `services/legal_defense.py`), and exports an
+company's own records (service: `services/pilots/legal_defense/`), and exports an
 attorney-facing packet (memo PDF + ZIP bundle). Business-facing, tenant-isolated.
 A token-gated public route delivers a generated packet to outside counsel.
 
@@ -21,6 +21,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from app.matcha.models.pilots.chat import PilotChatIn as ChatIn
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
@@ -99,8 +100,6 @@ class ResearchOptions(BaseModel):
     include_guidance: bool = True
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000)
 
 
 class PacketIn(BaseModel):

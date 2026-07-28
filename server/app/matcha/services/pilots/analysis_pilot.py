@@ -28,13 +28,13 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import render_pdf
 
 from . import analysis_packs as packs
 from .analysis_packs.base import to_float
 from .analysis_packs.corpus import validate_edit_proposals  # pure gate, unit-tested
-from ..claims_readiness import _PDF_CSS, _esc, _fmt_dt
+from .._shared.pdf import _PDF_CSS, _esc, _fmt_dt
+from .._shared.gemini import _genai
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
 
 logger = logging.getLogger(__name__)
@@ -60,15 +60,6 @@ DISCLAIMER = (
     "specific records it relies on. This is an analytical aid, not financial, "
     "actuarial, or investment advice — verify figures against your source data."
 )
-
-_client = None
-
-
-def _genai():
-    global _client
-    if _client is None:
-        _client = get_genai_client()
-    return _client
 
 
 # --------------------------------------------------------------------------- #

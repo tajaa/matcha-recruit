@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from ...models.employee_schedule import RequestReview
+from app.matcha.models.scheduling.employee_schedule import RequestReview
 from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,

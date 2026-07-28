@@ -1,6 +1,6 @@
 # Matcha Routes Zoo
 
-29 routers, ~39,000 lines. Aggregated in `__init__.py` and mounted onto `matcha_router`. Each router corresponds to one product surface or sub-feature.
+**74 mounts, ~69,000 lines, 1,097 route decorators** (measured 2026-07-27; the previous "29 routers, ~39,000 lines" had drifted by a factor of two). Aggregated in `__init__.py` and mounted onto `matcha_router`. Each router corresponds to one product surface or sub-feature.
 
 Loose single-file routers sit at top level; related ones are collected into **grouping folders** (`broker/`, `insurance/`, `pilots/`, `onboarding/`, `intake/`, `employee_lifecycle/`, `work/`, `integrations/` — see below).
 
@@ -18,9 +18,9 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `onboarding/new_hire.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
 | `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |
 | `employee_lifecycle/offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
-| `interviews.py` | — | Live interview WS + transcript handling (1,522 lines) |
+| `interviews.py` | — (no prefix, no gate) | Recruiting interviews (create/get/list/analysis) + the voice-interview WS handler. The 8 `/tutor/*` session + admin-metrics routes moved to `matcha_work/tutor_sessions.py` (2026-07-27) — same `interviews` table as the thread-scoped voice tutor — but are still mounted **here-style**: as a sibling of this router, unprefixed and ungated. `platforms/ios/MatchaTutor` hard-codes `/tutor/sessions` + `/api/ws/interview`, and the `matcha_work` mount's `require_feature` gate would 403 callers these routes never gated; re-prefixing needs an iOS release in lockstep |
 | `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 43 routes; see `er_copilot/CLAUDE.md`) |
-| `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
+| `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (87 routes; `osha/` is a nested split since 2026-07-27), see `ir_incidents/CLAUDE.md` |
 | `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
 | `intake/inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
@@ -35,14 +35,13 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employee_lifecycle/i9.py` | `/i9` | I-9 verification |
 | `employee_lifecycle/cobra.py` | `/cobra` | COBRA admin |
 | `dashboard/` | `/dashboard` | Cross-feature dashboard aggregation — **package** (split 2026-07-26, 14 routes; see `dashboard/CLAUDE.md`). `matcha_work/workspace.py` lazily re-imports `_UPCOMING_SOURCES` / `_apply_company_filter` / `_severity_from_days` / `UpcomingItem` from it |
-| `broker/brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
 | `broker/brokers/` | `/brokers` | HR broker admin — **split-router package** (J7, 2026-07-20): `_models.py` (9 models), `_shared.py` (15 helpers + status consts, `__all__`-gated), `client_setups.py` / `reporting.py` / `tokens.py` / `team.py` / `risk_alerts.py`; `__init__.py` aggregates into `router` (re-exported as `brokers_router`). 25 routes |
 | `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `integrations/provisioning/` | `/provisioning` | Google Workspace + Slack + HRIS (Gusto/Finch) auto-provision — **split-router package** (J7, 2026-07-20): `_models.py` (16 Pydantic models), `_shared.py` (json/bool/comma + `_run_payload`), `google.py`, `slack.py`, `runs.py`, `hris.py`; `__init__.py` aggregates the four sub-routers into one `router`. All routes carry full paths so mount order is cosmetic. 29 routes |
-| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
+| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`; plus the unprefixed `tutor_sessions_router` sibling it exports but does not include) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
 | `work/journals.py` | `/journals` | Matcha-work journals |
-| `billing.py` | (multiple) | Stripe billing + token packs |
+| `work/billing.py` | (multiple) | Stripe billing + token packs |
 | `work/notifications.py` | `/notifications` | Matcha-work notifications |
 | `integrations/fake_hris.py` | `/fake-hris` | Mock HRIS connector for demos |
 | `work/thread_ws.py` | `/threads` | Matcha-work thread websocket |
@@ -89,7 +88,7 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 - Owns 4+ unrelated concerns AND
 - Edits regularly require reading unrelated sections
 
-Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06), `employee_portal/` + `dashboard/` (2026-07-26, both fresh-aggregator).
+Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03), `er_copilot/` (2026-07-06), `employee_portal/` + `dashboard/` (2026-07-26, both fresh-aggregator), `ir_incidents/osha/` (2026-07-27, fresh-aggregator — a nested split *inside* an already-split package).
 
 Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`. **Variant used by `matcha_work/`**: if no submodule declares an empty-path route (check first — grep `@router\.\w+\("")`), skip the crud-owns-router step and just use a fresh `APIRouter()` aggregator in `__init__.py` instead; `_legacy.py` becomes the last remaining domain submodule (renamed to its real name, e.g. `threads.py`) rather than being deleted.
 

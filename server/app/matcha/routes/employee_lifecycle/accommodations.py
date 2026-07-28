@@ -23,7 +23,7 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.core.models.auth import CurrentUser
 from app.config import get_settings
 from app.core.services.storage import get_storage
-from app.matcha.models.accommodation import (
+from app.matcha.models.employees.accommodation import (
     AccommodationCaseCreate,
     AccommodationCaseUpdate,
     AccommodationCaseResponse,

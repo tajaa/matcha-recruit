@@ -24,7 +24,7 @@ import pytest
 from pydantic import ValidationError
 from typing import get_args
 
-from app.matcha.models.interview import (
+from app.matcha.models.interviews.interview import (
     InterviewType,
     TutorSessionCreate,
     InterviewStart,

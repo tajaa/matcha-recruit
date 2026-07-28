@@ -6,8 +6,7 @@ shared by multiple submodules in the employees package. Extracted from
 """
 import json
 import logging
-import secrets
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 from typing import Optional
 from uuid import UUID
 
@@ -31,32 +30,28 @@ from app.matcha.services.risk_analytics.risk_assessment_service import (
 
 logger = logging.getLogger(__name__)
 
-INVITATION_SEND_FAILED_DETAIL = "Invitation email could not be sent. Check email delivery settings and try again."
+# All three moved to services/employees/ (refactor round 2, stage 3) and
+# re-imported here: `_send_invitation_with_conn` + `INVITATION_SEND_FAILED_DETAIL`
+# because send_single_invitation (below) wraps them, `STATE_NAME_TO_CODE` because
+# _normalize_work_state (below) uses it, and `decide_pto_request_core` purely as a
+# re-export so pto_admin.py's `from ._shared import decide_pto_request_core` keeps
+# working. E402 because they sit after `logger`, not because they're stranded at a
+# deletion site — keep new relocated imports in this block.
+from app.matcha.services.employees.invitations import (  # noqa: F401,E402
+    INVITATION_SEND_FAILED_DETAIL,
+    _send_invitation_with_conn,
+)
+from app.matcha.services.employees.pto_decisions import decide_pto_request_core  # noqa: F401,E402
+from app.matcha.services.employees.us_states import (  # noqa: F401,E402
+    STATE_NAME_TO_CODE,
+    STATE_NAME_TO_CODE as _STATE_NAME_TO_CODE,  # legacy private alias
+)
 
 # `work_state` values (CSV bulk-upload and single-employee create/update) are
 # validated against the canonical US jurisdiction set (case-insensitive; full
 # state names also normalized) so a typo doesn't silently create an ungrounded
 # compliance jurisdiction (Phase D2 stopgap — see COMPLIANCE_REMEDIATION_PLAN.md).
 _VALID_WORK_STATE_CODES = US_STATE_CODES
-
-_STATE_NAME_TO_CODE = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
-    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
-    "district of columbia": "DC", "washington dc": "DC", "washington d.c.": "DC",
-    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
-    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
-    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
-    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
-    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
-    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
-    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
-    "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
-    "american samoa": "AS", "guam": "GU", "northern mariana islands": "MP",
-    "puerto rico": "PR", "virgin islands": "VI", "us virgin islands": "VI",
-}
 
 
 def _normalize_work_state(raw: Optional[str]) -> tuple[Optional[str], bool]:
@@ -72,7 +67,7 @@ def _normalize_work_state(raw: Optional[str]) -> tuple[Optional[str], bool]:
         return None, True
     if len(s) == 2 and s.isalpha() and s.upper() in _VALID_WORK_STATE_CODES:
         return s.upper(), True
-    mapped = _STATE_NAME_TO_CODE.get(s.lower())
+    mapped = STATE_NAME_TO_CODE.get(s.lower())
     if mapped:
         return mapped, True
     return None, False
@@ -254,101 +249,6 @@ async def send_single_invitation(
             return await _send_invitation_with_conn(employee_id, org_id, invited_by, own_conn, raise_on_email_failure=raise_on_email_failure)
     return await _send_invitation_with_conn(employee_id, org_id, invited_by, conn, raise_on_email_failure=raise_on_email_failure)
 
-
-async def _send_invitation_with_conn(
-    employee_id: UUID,
-    org_id: UUID,
-    invited_by: UUID,
-    conn,
-    raise_on_email_failure: bool = True,
-) -> dict:
-    async with conn.transaction():
-        # Lock the employee row to serialize concurrent invite/resend calls so
-        # only one active invitation per employee can be created at a time.
-        employee = await conn.fetchrow(
-            "SELECT * FROM employees WHERE id = $1 AND org_id = $2 FOR UPDATE",
-            employee_id, org_id
-        )
-
-        if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        if employee["user_id"]:
-            raise HTTPException(status_code=400, detail="Employee already has an account")
-
-        # Cancel all existing pending invitations for this employee
-        await conn.execute(
-            """
-            UPDATE employee_invitations SET status = 'cancelled'
-            WHERE employee_id = $1 AND status = 'pending'
-            """,
-            employee_id
-        )
-
-        # Generate new invitation token
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(days=7)
-
-        # Create invitation record
-        invitation = await conn.fetchrow(
-            """
-            INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, employee_id, token, status, expires_at, created_at
-            """,
-            org_id, employee_id, invited_by, token, expires_at
-        )
-
-    # Get company name for email (outside transaction — read-only)
-    company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
-    company_name = company["name"] if company else "Your Company"
-
-    await _sync_employee_location_for_compliance(
-        conn,
-        company_id=org_id,
-        employee_id=employee_id,
-        work_state=employee.get("work_state"),
-        work_city=employee.get("work_city"),
-    )
-
-    # Send invitation email
-    email_service = get_email_service()
-    sent = await email_service.send_employee_invitation_email(
-        to_email=employee["email"],
-        to_name=f"{employee['first_name']} {employee['last_name']}",
-        company_name=company_name,
-        token=token,
-        expires_at=expires_at,
-    )
-    if not sent:
-        if raise_on_email_failure:
-            logger.warning(
-                "Employee invitation email failed for employee %s in company %s; cancelling invitation %s",
-                employee_id,
-                org_id,
-                invitation["id"],
-            )
-            await conn.execute(
-                "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
-                invitation["id"],
-            )
-            raise HTTPException(status_code=503, detail=INVITATION_SEND_FAILED_DETAIL)
-        else:
-            # Bulk mode: keep invitation pending so admin can resend later,
-            # but raise so the caller records an error row for this employee.
-            logger.warning(
-                "Employee invitation email failed for employee %s in company %s; invitation %s kept pending for retry",
-                employee_id,
-                org_id,
-                invitation["id"],
-            )
-            raise RuntimeError(INVITATION_SEND_FAILED_DETAIL)
-
-    return {
-        "invitation_id": invitation["id"],
-        "token": invitation["token"],
-        "expires_at": invitation["expires_at"]
-    }
 
 
 async def _auto_send_invitation(
@@ -653,83 +553,3 @@ async def _send_provisioning_email(
         )
     except Exception:
         logger.exception("Failed to send provisioning welcome email to %s", personal_email)
-
-
-async def decide_pto_request_core(
-    conn,
-    *,
-    company_id: UUID,
-    request_id: UUID,
-    decision: str,
-    actor_user_id: Optional[UUID],
-    note: Optional[str] = None,
-) -> dict:
-    """Approve or deny a PENDING PTO request. Caller owns the transaction.
-
-    Lifted out of `pto_admin.handle_pto_request` so non-HTTP callers (Huume's
-    `pto_decision` staged action) reach the same logic. The transaction is the
-    caller's on purpose: an approval writes BOTH `pto_requests.status` AND
-    `pto_balances.used_hours`, which the route did as two bare executes that
-    could diverge if the second failed.
-
-    Returns a verdict dict rather than raising, so a chat surface can relay it:
-      {"status": "ok"|"not_found"|"invalid_status"|"reason_required",
-       "message": str, "decision"?: "approved"|"denied", "employee_id"?: UUID,
-       "hours"?: Any}
-    """
-    decision = (decision or "").strip().lower()
-    if decision not in ("approve", "deny"):
-        return {"status": "invalid_status", "message": "Invalid action. Must be 'approve' or 'deny'"}
-
-    pto_request = await conn.fetchrow(
-        """
-        SELECT pr.*, e.org_id FROM pto_requests pr
-        JOIN employees e ON pr.employee_id = e.id
-        WHERE pr.id = $1 AND e.org_id = $2
-        """,
-        request_id, company_id,
-    )
-    if not pto_request:
-        return {"status": "not_found", "message": "PTO request not found"}
-    if pto_request["status"] != "pending":
-        return {"status": "invalid_status", "message": "Can only approve/deny pending requests"}
-
-    # The acting user's own employee row, when they have one — `approved_by`
-    # references employees, not users, so an admin without a row stays NULL.
-    admin_employee = await conn.fetchrow(
-        "SELECT id FROM employees WHERE user_id = $1", actor_user_id,
-    ) if actor_user_id else None
-    approved_by = admin_employee["id"] if admin_employee else None
-
-    if decision == "approve":
-        await conn.execute(
-            """
-            UPDATE pto_requests
-            SET status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW()
-            WHERE id = $2
-            """,
-            approved_by, request_id,
-        )
-        await conn.execute(
-            """
-            UPDATE pto_balances
-            SET used_hours = used_hours + $1, updated_at = NOW()
-            WHERE employee_id = $2 AND year = EXTRACT(YEAR FROM CURRENT_DATE)
-            """,
-            pto_request["hours"], pto_request["employee_id"],
-        )
-        return {"status": "ok", "message": "PTO request approved", "decision": "approved",
-                "employee_id": pto_request["employee_id"], "hours": pto_request["hours"]}
-
-    if not (note or "").strip():
-        return {"status": "reason_required", "message": "Denial reason is required"}
-    await conn.execute(
-        """
-        UPDATE pto_requests
-        SET status = 'denied', denial_reason = $1, approved_by = $2, approved_at = NOW(), updated_at = NOW()
-        WHERE id = $3
-        """,
-        note.strip(), approved_by, request_id,
-    )
-    return {"status": "ok", "message": "PTO request denied", "decision": "denied",
-            "employee_id": pto_request["employee_id"], "hours": pto_request["hours"]}

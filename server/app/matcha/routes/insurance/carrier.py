@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
-from ...models.insurance import QuoteRequest
+from app.matcha.models.insurance.insurance import QuoteRequest
 from ...services.insurance import coterie_service
 from ...services.insurance.coterie_service import CoterieError
 

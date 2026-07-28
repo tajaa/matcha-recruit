@@ -7,7 +7,7 @@ Employee-facing self-service portal. Split from a 1,727-line flat `employee_port
 | File | Concern | Endpoints |
 |---|---|---|
 | `__init__.py` | Fresh-aggregator `router` + back-compat re-exports | — |
-| `_shared.py` | 5 feature-dep lists + `CompleteTaskRequest` + 2 orphan helpers | — |
+| `_shared.py` | 5 feature-dep lists + `CompleteTaskRequest` | — |
 | `profile.py` | `GET/PATCH /me`, `GET /me/tasks` | 3 |
 | `pto.py` | `/me/pto*` — balance summary, request, cancel (`time_off`) | 3 |
 | `leave.py` | `/me/leave*` + `LEAVE_TYPES` | 5 |
@@ -48,7 +48,7 @@ They were relative (`from .employee_schedule._shared import …`) in the flat fi
 
 ## Orphan helpers (do not delete yet)
 
-`_parse_json_array` and `_normalize_string_list` in `_shared.py` have **zero callers repo-wide** — leftovers of removed internal-mobility routes. They carry a dated NOTE and are deletion candidates in a follow-up, kept verbatim so the split stayed a pure move.
+`_parse_json_array` and `_normalize_string_list` in `_shared.py` had **zero callers repo-wide** — leftovers of removed internal-mobility routes. Kept verbatim through the split so it stayed a pure move; **deleted 2026-07-27** (refactor round 2, stage 5).
 
 ## Back-compat attribute surface
 

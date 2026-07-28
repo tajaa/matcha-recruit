@@ -16,39 +16,14 @@ from app.matcha.services.ir.ir_ita_submission import (
     _stored_form_year,
 )
 
-# `_missing_ita_fields` lives in the osha ROUTE module, which can't be imported in
-# isolation (relative imports + a package `__init__` that eagerly loads env-gated
-# routers like provisioning). Rather than boot that chain, re-declare an identical
-# reference implementation and assert it byte-for-byte against the source, so drift
-# is caught without importing the route.
-_REQUIRED_ESTABLISHMENT_FIELDS = ("ein", "naics", "street_address", "city", "state", "zip_code")
-
-
-def _missing_ita_fields(est: dict) -> list[str]:
-    missing = []
-    for field in _REQUIRED_ESTABLISHMENT_FIELDS:
-        val = est.get(field)
-        if val is None or (isinstance(val, str) and not val.strip()):
-            missing.append(field)
-    if not (est.get("total_hours_worked") or 0) > 0:
-        missing.append("total_hours_worked")
-    if not (est.get("annual_average_employees") or 0) > 0:
-        missing.append("annual_average_employees")
-    return missing
-
-
-def test_missing_ita_fields_reference_matches_source():
-    """Guard: the reference impl above must stay identical to the route's logic.
-    Compares against the source text so a change to one side fails loudly."""
-    import os
-    src = os.path.join(os.path.dirname(__file__), "..", "..",
-                       "app", "matcha", "routes", "ir_incidents", "osha.py")
-    with open(src) as f:
-        text = f.read()
-    # Key invariants of the source function, asserted structurally.
-    assert '"ein", "naics", "street_address", "city", "state", "zip_code"' in text
-    assert 'if not (est.get("total_hours_worked") or 0) > 0:' in text
-    assert 'if not (est.get("annual_average_employees") or 0) > 0:' in text
+# `_missing_ita_fields` is imported from the REAL route package, not re-declared.
+# This file used to carry a local "reference implementation" plus a guard that
+# compared it to the source text — but the guard only asserted 3 substrings, so
+# when the real function grew `ein_invalid` / `zip_code_invalid` checks the copy
+# silently fell behind and every test below was exercising dead code. The comment
+# justifying the copy ("the route module can't be imported in isolation") was
+# already false: the guard itself imported it.
+from app.matcha.routes.ir_incidents.osha import _missing_ita_fields
 
 
 # --- size bands ------------------------------------------------------------
@@ -199,3 +174,37 @@ def test_stored_form_year_reads_back_osha_year():
     # No year in the body → fall back to the requested year.
     assert _stored_form_year({"results": [{"id": 1}]}, fallback=2024) == 2024
     assert _stored_form_year({}, fallback=2023) == 2023
+
+
+# --- present-but-malformed EIN / zip ---------------------------------------
+# These were unreachable while this file re-declared its own _missing_ita_fields:
+# the copy predated the ein_invalid / zip_code_invalid checks and the drift guard
+# didn't assert on them, so the real validators had no coverage at all.
+
+def test_missing_ita_fields_flags_malformed_ein():
+    m = _missing_ita_fields(_est(ein="12345"))
+    assert "ein_invalid" in m
+    assert "ein" not in m  # present, just wrong — a different filer-facing message
+
+
+def test_missing_ita_fields_accepts_punctuated_ein():
+    assert _missing_ita_fields(_est(ein="12-3456789")) == []
+
+
+def test_missing_ita_fields_flags_malformed_zip():
+    m = _missing_ita_fields(_est(zip_code="123"))
+    assert "zip_code_invalid" in m
+    assert "zip_code" not in m
+
+
+@pytest.mark.parametrize("zip_raw", ["12345", "12345-6789", "12345 6789"])
+def test_missing_ita_fields_accepts_valid_zip_shapes(zip_raw):
+    assert _missing_ita_fields(_est(zip_code=zip_raw)) == []
+
+
+def test_absent_field_reported_once_not_also_as_invalid():
+    # A missing value must not produce BOTH "zip_code" and "zip_code_invalid" —
+    # the checklist would show the same gap twice.
+    m = _missing_ita_fields(_est(zip_code=None, ein=None))
+    assert m.count("zip_code") == 1 and "zip_code_invalid" not in m
+    assert m.count("ein") == 1 and "ein_invalid" not in m

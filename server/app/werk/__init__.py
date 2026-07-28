@@ -8,6 +8,6 @@ Matcha platform, not a peer chat app, and its backend stays at
 
 Some legacy coupling between the two still exists and is tracked as follow-up
 work — `matcha_work/collaboration.py` bootstraps a discussion channel for collab
-projects, and `matcha/services/project_service.py` writes `channel_members`.
+projects, and `matcha/services/matcha_work/project_service/` writes `channel_members`.
 That entanglement is preserved here as-is; unwinding it is a separate change.
 """

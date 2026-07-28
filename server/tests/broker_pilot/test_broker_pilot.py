@@ -723,7 +723,10 @@ _GOOD = ('{"assistant_text": "Loss run reviewed.", "key_questions": [], '
 def _run_generate(monkeypatch, replies):
     import asyncio
     calls = []
-    monkeypatch.setattr(bp, "_genai", lambda: _fake_genai(replies, calls))
+    # Patch `bp.chat`, not `bp`: broker_pilot became a facade package and
+    # `_generate_once` resolves `_genai` in chat.py's globals, so patching the
+    # package re-export is silently ignored and this hits the real Gemini client.
+    monkeypatch.setattr(bp.chat, "_genai", lambda: _fake_genai(replies, calls))
     turn = asyncio.run(bp._generate({}, "Acme", [], {"sources": {}, "notes": []}, [], "hi"))
     return turn, calls
 
@@ -767,7 +770,7 @@ def test_dead_turn_is_an_error_frame_not_a_result(monkeypatch):
     the NEXT turn. A turn that produced nothing must not enter that history."""
     import asyncio
 
-    monkeypatch.setattr(bp, "_genai", lambda: _fake_genai(["junk", "junk"], []))
+    monkeypatch.setattr(bp.chat, "_genai", lambda: _fake_genai(["junk", "junk"], []))
 
     async def _collect():
         return [ev async for ev in bp.run_chat_turn(

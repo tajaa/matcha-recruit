@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from ...models.employee_schedule import (
+from app.matcha.models.scheduling.employee_schedule import (
     TemplateCreate, TemplateUpdate, GenerateFromTemplate,
 )
 from ...services.scheduling.schedule_rules import build_patch, template_windows

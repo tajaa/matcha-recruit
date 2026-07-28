@@ -26,7 +26,7 @@ from app.matcha.routes.matcha_work._shared import (
     _row_to_message,
     _sse_data,
 )
-from app.matcha.models.matcha_work import SendInterviewsRequest, SendMessageResponse
+from app.matcha.models.matcha_work.matcha_work import SendInterviewsRequest, SendMessageResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.billing import token_budget_service
 from app.matcha.services.er.er_document_parser import ERDocumentParser

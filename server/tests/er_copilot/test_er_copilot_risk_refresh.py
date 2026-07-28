@@ -1,64 +1,14 @@
 from datetime import datetime, timezone
-import importlib.util
-from pathlib import Path
-import sys
 from types import SimpleNamespace
-import types
 from uuid import uuid4
 
 import pytest
 from fastapi import BackgroundTasks
 
-sys.path.append(str(Path(__file__).resolve().parents[1]))
-
 from app.core.models.auth import CurrentUser
-from app.matcha.models.er_case import ERCaseCreate, ERCaseUpdate
-
-multipart_module = types.ModuleType("multipart")
-multipart_module.__version__ = "0.0"
-multipart_submodule = types.ModuleType("multipart.multipart")
-multipart_submodule.parse_options_header = lambda value: (value, {})
-sys.modules.setdefault("multipart", multipart_module)
-sys.modules.setdefault("multipart.multipart", multipart_submodule)
-
-auth_service_module = types.ModuleType("app.core.services.auth")
-auth_service_module.hash_password = lambda value: f"hashed:{value}"
-
-async def _fake_verify_password_async(plain, hashed):
-    return True
-
-auth_service_module.verify_password_async = _fake_verify_password_async
-sys.modules.setdefault("app.core.services.auth", auth_service_module)
-
-employees_routes_module = types.ModuleType("app.matcha.routes.employees")
-
-async def _fake_refresh_risk_assessment(company_id):
-    return None
-
-employees_routes_module._refresh_risk_assessment = _fake_refresh_risk_assessment
-sys.modules.setdefault("app.matcha.routes.employees", employees_routes_module)
-
-routes_dir = Path(__file__).resolve().parents[1] / "app" / "matcha" / "routes"
-
-routes_package = types.ModuleType("app.matcha.routes")
-routes_package.__path__ = [str(routes_dir)]
-sys.modules.setdefault("app.matcha.routes", routes_package)
-
-# er_copilot became a package (split from the flat er_copilot.py); register it
-# as a package so crud.py's `from ._shared import ...` resolves, then load the
-# crud submodule where create_case / update_case now live.
-er_copilot_package = types.ModuleType("app.matcha.routes.er_copilot")
-er_copilot_package.__path__ = [str(routes_dir / "er_copilot")]
-sys.modules.setdefault("app.matcha.routes.er_copilot", er_copilot_package)
-
-er_spec = importlib.util.spec_from_file_location(
-    "app.matcha.routes.er_copilot.crud",
-    routes_dir / "er_copilot" / "crud.py",
-)
-er_copilot_routes = importlib.util.module_from_spec(er_spec)
-sys.modules["app.matcha.routes.er_copilot.crud"] = er_copilot_routes
-assert er_spec.loader is not None
-er_spec.loader.exec_module(er_copilot_routes)
+from app.matcha.models.er.case import ERCaseCreate, ERCaseUpdate
+from app.matcha.routes.er_copilot import _shared as er_copilot_shared
+from app.matcha.routes.er_copilot import crud as er_copilot_routes
 
 
 class _ConnContext:
@@ -137,6 +87,10 @@ async def test_create_case_queues_risk_refresh(monkeypatch: pytest.MonkeyPatch):
         return None
 
     monkeypatch.setattr(er_copilot_routes, "log_audit", _noop_log_audit)
+    # create_case delegates to create_case_core (services/er/er_case_create.py),
+    # which reaches log_audit via its own lazy import of _shared — patching
+    # crud.py's copy of the name doesn't affect that lookup.
+    monkeypatch.setattr(er_copilot_shared, "log_audit", _noop_log_audit)
 
     background_tasks = BackgroundTasks()
     response = await er_copilot_routes.create_case(

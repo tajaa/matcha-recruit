@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.models.ir_incident import (
+from app.matcha.models.ir.people import (
     IRPersonHistory,
     IRPersonIncidentRef,
     IRPersonRoleCount,

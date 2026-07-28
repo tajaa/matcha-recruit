@@ -359,7 +359,7 @@ def test_card_model_roundtrip_preserves_prefilled():
     # IRCopilotCard before sending to the FE. If the action model omits
     # `prefilled`, Pydantic drops it and the textarea renders blank. Guard it.
     from app.matcha.routes.ir_incidents._shared import build_osha_clean_description_card
-    from app.matcha.models.ir_incident import IRCopilotCard
+    from app.matcha.models.ir.copilot import IRCopilotCard
     card = build_osha_clean_description_card("An employee slipped and fell.")
     validated = IRCopilotCard.model_validate(card)
     assert validated.action.prefilled == "An employee slipped and fell."
@@ -381,7 +381,13 @@ def test_osha_description_approval_writes_and_advances(monkeypatch):
     async def fake_next_case_step(conn, incident_id):
         return None  # no case rows in this unit context → no follow-on card
 
-    monkeypatch.setattr(cp, "next_case_step", fake_next_case_step)
+    # Patch `_shared`, not `copilot`: the handler moved to
+    # services/ir/ir_copilot_flow.py, which reaches `next_case_step` through a
+    # lazy proxy that re-resolves it off `_shared` on every access. Patching the
+    # copilot module here would be silently ignored and this would hit the DB.
+    import app.matcha.routes.ir_incidents._shared as ir_shared
+
+    monkeypatch.setattr(ir_shared, "next_case_step", fake_next_case_step)
 
     res = asyncio.run(cp._handle_text_input(
         FakeConn(),

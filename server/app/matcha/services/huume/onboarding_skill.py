@@ -16,6 +16,9 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.employees.invitations import _send_invitation_with_conn
+from app.matcha.services.offer_letters.document import _send_candidate_range_email
+
 logger = logging.getLogger(__name__)
 
 # The full v1 onboarding plan, in execution order. `create_employee` always
@@ -532,7 +535,6 @@ async def execute_send_offer(*, company_id: UUID, actor_user_id: Optional[UUID],
     """Send the candidate their sign link. Mirrors send_range_offer's token
     minting (offer_letters.py) but for the fixed-terms sign flow."""
     from app.database import get_connection
-    from app.matcha.routes.employee_lifecycle.offer_letters import _send_candidate_range_email
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -691,8 +693,6 @@ async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employ
 
 
 async def _step_portal_invitation(conn, *, company_id, actor_user_id, employee_id, **_) -> dict[str, Any]:
-    from app.matcha.routes.employees._shared import _send_invitation_with_conn
-
     try:
         result = await _send_invitation_with_conn(
             UUID(employee_id), company_id, actor_user_id, conn, raise_on_email_failure=False,

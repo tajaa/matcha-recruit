@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timezone
 import pytest
 from pydantic import ValidationError
 
-from app.matcha.models.employee_schedule import (
+from app.matcha.models.scheduling.employee_schedule import (
     GenerateFromTemplate,
     PublishRange,
     ScheduleRequestCreate,
@@ -131,7 +131,7 @@ def test_valid_unavailable_request():
 
 
 def test_template_create_requires_a_time_window():
-    from app.matcha.models.employee_schedule import TemplateCreate
+    from app.matcha.models.scheduling.employee_schedule import TemplateCreate
 
     tpl = TemplateCreate(name="Day", start_time=time(9), end_time=time(17), days_of_week=[1, 3])
     assert tpl.required_staff == 1 and tpl.break_minutes == 0

@@ -7,10 +7,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from app.database import get_connection
 from app.core.services.storage import get_storage
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.ir_incident import (
-    IRDocumentResponse,
-    IRDocumentUploadResponse,
-)
+from app.matcha.models.ir.documents import IRDocumentResponse, IRDocumentUploadResponse
 
 # log_audit currently lives in _legacy.py; will move to _shared.py in step 10.
 from ._shared import (

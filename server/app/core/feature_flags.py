@@ -197,7 +197,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "hr_pilot": False,
     # Employee "Ask HR" — the employee-portal counterpart to HR Pilot. Employees
     # (role='employee') ask plain policy questions and get answers grounded in
-    # the SAME citation corpus HR Pilot uses (services/hr_pilot_corpus.py:
+    # the SAME citation corpus HR Pilot uses (services/pilots/hr_pilot_corpus/:
     # handbook sections, active policies, the precedence-resolved compliance
     # floor, the industry baseline), with the shared
     # legal_defense.validate_citations gate dropping any invented source. The

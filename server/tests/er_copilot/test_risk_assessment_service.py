@@ -57,8 +57,13 @@ async def test_compliance_dimension_scores_minimum_wage_violations(monkeypatch: 
             "employee_violations": [],
         }
 
+    # Patch `.dimensions`, not the package: risk_assessment_service became a
+    # facade package and `compute_compliance_dimension` resolves this name in
+    # dimensions.py's globals, so a patch on the re-export is ignored.
+    # (This test is failing for a separate, pre-existing reason — repointed
+    # here only so the split does not add a second cause on top of it.)
     monkeypatch.setattr(
-        risk_assessment_service_module,
+        risk_assessment_service_module.dimensions,
         "_collect_minimum_wage_violation_metrics",
         _fake_collect_metrics,
     )

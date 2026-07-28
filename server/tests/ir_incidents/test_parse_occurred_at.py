@@ -24,7 +24,10 @@ sys.modules.setdefault("google.genai.types", types_module)
 
 from datetime import datetime, timedelta, timezone
 
-from app.matcha.routes.ir_incidents._shared import (
+# These are pure and now live services-side (refactor round 2, stage 3) — import
+# them from where they're DEFINED, not through the routes package, whose
+# __init__ boots the whole IR router zoo for a date-parsing unit test.
+from app.matcha.services.ir.ir_incident_parsing import (
     _clamp_future_occurred_at,
     _parse_occurred_at,
     _relative_day_match,

@@ -22,7 +22,7 @@ from app.database import get_connection
 from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.labor_relations import (
+from app.matcha.models.er.labor_relations import (
     AdvanceRequest,
     AttachClausesRequest,
     GrievanceCreateRequest,

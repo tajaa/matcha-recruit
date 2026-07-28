@@ -472,6 +472,27 @@ class ProjectConnectionManager:
         except Exception:
             logger.exception("Redis HDEL failed in _presence_hdel")
 
+    async def project_room_members(self, project_id: UUID) -> list[UUID]:
+        """Snapshot of this worker's locally-connected members for a project.
+
+        Public counterpart to reading `.lock` + `.project_rooms` directly —
+        `services/matcha_work/task_events.py` needs it for its broadcast log line
+        and must not depend on this class's internals (see `broadcast_to_project`).
+        """
+        async with self.lock:
+            return list(self.project_rooms.get(project_id, set()))
+
+    async def broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
+        """Public entry point for a project-scope fan-out.
+
+        Exists because `services/matcha_work/task_events.py` (services layer) needs
+        to broadcast: reaching `_broadcast_to_project` across the layer boundary
+        made this class's privates de-facto public API, so any refactor of the WS
+        manager would silently break a service. Same contract as the private
+        implementation it delegates to.
+        """
+        await self._broadcast_to_project(project_id, message, exclude_user=exclude_user)
+
     async def _broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
         """Fan a project-scope event out to every connected member across all
         uvicorn workers. Publishes to Redis; per-worker subscriber dispatches
@@ -659,28 +680,10 @@ async def stop_project_fanout_subscriber() -> None:
         _project_subscriber_task = None
 
 
-async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> None:
-    """Fan a task lifecycle event out to every connected member of a project room.
-
-    `event` must be one of: "task.created", "task.updated", "task.deleted".
-    `payload` is the task row dict (or `{"id": ...}` for delete). Caller stamps
-    actor_id so clients can suppress their own optimistic-write echoes.
-
-    Best-effort: any send failure is swallowed by `_broadcast_to_project`'s
-    per-conn dead-list handling; callers should still wrap in try/except.
-    """
-    async with project_manager.lock:
-        room = list(project_manager.project_rooms.get(project_id, set()))
-    logger.info(
-        "broadcast %s project=%s room_size=%d members=%s",
-        event, project_id, len(room),
-        [str(uid) for uid in room],
-    )
-    await project_manager._broadcast_to_project(project_id, {
-        "type": event,
-        "project_id": str(project_id),
-        "task": payload,
-    })
+# Moved to services/matcha_work/task_events.py (refactor round 2, stage 3) —
+# re-exported so any remaining `from .project_ws import broadcast_task_event`
+# keeps working unchanged.
+from app.matcha.services.matcha_work.task_events import broadcast_task_event  # noqa: F401,E402
 
 
 def _token_from_request(

@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ...services.insurance import limit_adequacy as la, risk_transfer as rt
-from ...models.limit_adequacy import CoverageLineUpdate, ContractCreate, ContractUpdate
+from app.matcha.models.insurance.limit_adequacy import CoverageLineUpdate, ContractCreate, ContractUpdate
 
 router = APIRouter()
 

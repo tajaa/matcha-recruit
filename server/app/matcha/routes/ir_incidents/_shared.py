@@ -3,36 +3,63 @@
 Cross-cutting utilities used by more than one submodule. Promoted out of
 the original flat `ir_incidents.py` during the package split.
 """
-import asyncio
 import json
 import logging
 import os
 import re
-import secrets
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import HTTPException, Request, UploadFile
 
-from app.core.services.email import get_email_service
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
-from app.matcha.models.ir_incident import IRIncidentResponse, Witness
-from app.core.services.osha_privacy import (
-    determine_privacy_case,
+from app.matcha.models.ir.incident import IRIncidentResponse, Witness
+from app.core.services.osha_privacy import (  # noqa: F401  (re-export: copilot.py)
     PRIVACY_CASE_REASONS,
     PRIVACY_CASE_REASON_LABELS,
+)
+
+# Re-exports (refactor round 2, stage 3) — the real implementations now live
+# in services/ir/*; kept here so every existing `from ._shared import ...`
+# inside this package (crud.py, copilot.py, osha.py, people.py,
+# investigation_interviews.py) and the package's own __init__.py re-export
+# keep working unchanged.
+from app.matcha.services.ir.ir_incident_create import create_incident_core  # noqa: F401
+from app.matcha.services.ir.ir_notifications import (  # noqa: F401
+    send_ir_notifications_task,
+    send_ir_info_request_notification_task,
+)
+from app.matcha.services.ir.ir_osha_cases import (  # noqa: F401
+    next_case_step,
+    ensure_osha_case_rows,
+    fetch_osha_case_rows,
+    fetch_osha_case_rows_for,
+    _persist_osha_emergency_alert,
+)
+from app.matcha.services.ir.ir_people_index import (  # noqa: F401
+    IR_PERSON_ROLES,
+    IR_INCIDENT_BODY_ROLES,
+    _gather_incident_people,
+    _sync_incident_people,
+    _upsert_ir_person,
+    _link_incident_person,
+    _normalize_person_name,
 )
 
 
 logger = logging.getLogger(__name__)
 
-# Card builders + their constants live in ._cards (L5 split). Re-exported here so
-# existing `from ._shared import build_osha_...` / `OSHA_INJURY_...` imports — and
-# the DB-backed dispatchers below (next_case_step, _persist_osha_emergency_alert)
-# that build these cards — keep working unchanged.
-from ._cards import (  # noqa: E402,F401
+# Card builders + their constants live in services/ir/ir_cards.py (moved there
+# refactor round 2, stage 3). Re-exported here so existing
+# `from ._shared import build_osha_...` / `OSHA_INJURY_...` imports — and the
+# DB-backed dispatchers below (next_case_step, _persist_osha_emergency_alert)
+# that build these cards — keep working unchanged. `_cards.py` (the former
+# re-export shim, only ever imported from here) was deleted — this package's
+# own `from ._cards import build_osha_...` never existed, so nothing else
+# needed updating.
+from app.matcha.services.ir.ir_cards import (  # noqa: E402,F401
     OSHA_INJURY_TYPES,
     OSHA_INJURY_TYPE_LABELS,
     OSHA_EMERGENCY_ALERT_CARD_ID,
@@ -68,37 +95,12 @@ ANALYSIS_TYPES = Literal[
 
 
 
-# Severe keywords that mandate an immediate OSHA reportable-event call
-# (8 hours for fatality, 24 hours for amputation / lost eye / in-patient
-# hospitalization — 29 CFR 1904.39). Detection runs on incident creation
-# against the title+description; a hit flips severity to critical and
-# pushes the emergency alert card into the Copilot transcript.
-_OSHA_REPORTABLE_KEYWORD_RE = re.compile(
-    r"\b("
-    r"fatalit(?:y|ies)"
-    r"|passed\s+away"
-    r"|(?:was|were)\s+killed"
-    r"|(?:was|were|has)\s+died"
-    r"|amputat(?:e|ed|ion|ing)"
-    r"|lost\s+(?:an?\s+|his\s+|her\s+|their\s+)?eye"
-    r"|hospitali[sz]ed"
-    r"|hospitali[sz]ation"
-    r"|in-?patient\s+admission"
-    r")\b",
-    re.IGNORECASE,
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import _detect_osha_reportable_keywords`
+# inside this package keeps working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
+    _detect_osha_reportable_keywords,
 )
-
-
-def _detect_osha_reportable_keywords(text: Optional[str]) -> bool:
-    """True if text mentions a 29 CFR 1904.39 reportable-event term.
-
-    False on None / empty / no match. Boundary-anchored so false-friends
-    like "studied" or "skilled" don't match (no overlap with the pattern
-    anyway, but the word boundary keeps it safe against future additions).
-    """
-    if not text:
-        return False
-    return bool(_OSHA_REPORTABLE_KEYWORD_RE.search(text))
 
 
 def _build_public_link(request: Request, token: str, segment: str) -> str:
@@ -207,29 +209,10 @@ def document_type_for_ext(ext: str) -> str:
     return "photo" if ext in _IMAGE_EXTS else "other"
 
 
-async def read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
-    """Read an UploadFile in chunks, aborting at ``max_bytes``.
-
-    Chunked rather than a bare ``await file.read()`` so an oversize body on the
-    public intake is rejected at the cap instead of after it has already been
-    pulled into the process.
-    """
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Max {max_bytes // (1024 * 1024)} MB per file.",
-            )
-        chunks.append(chunk)
-    if total == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    return b"".join(chunks)
+# Lifted to services/_shared/uploads.py so matcha_work's handbook upload can bound
+# its read too, without importing another route package. Aliased here so this
+# package's `from ._shared import read_upload_capped` callers are unchanged.
+from app.matcha.services._shared.uploads import read_upload_capped  # noqa: F401,E402
 
 
 def _info_request_effective_status(row) -> str:
@@ -253,11 +236,12 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
-def generate_incident_number() -> str:
-    """Generate a unique incident number."""
-    now = datetime.now(timezone.utc)
-    random_suffix = secrets.token_hex(2).upper()
-    return f"IR-{now.year}-{now.month:02d}-{random_suffix}"
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import generate_incident_number` inside
+# this package keeps working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
+    generate_incident_number,
+)
 
 
 async def log_audit(
@@ -379,246 +363,27 @@ async def _hydrate_involved_employees(
     ]
 
 
-# ===========================================
-# IR People — lightweight per-person identity (matcha-lite, no roster)
-# ===========================================
-#
-# People named in incidents get a stable id WITHOUT a managed employee
-# roster: identity is the typed name, normalized for dedup. This is
-# distinct from `involved_employee_ids` (which targets the real
-# `employees` table). Name-based identity trades exactness for zero
-# upkeep — two genuinely-different "John Smith"s collapse to one row; the
-# `verified` flag exists so a future manual-merge/confirm step can split
-# or promote them. The create form's type-ahead nudges consistent
-# spelling so the dedup actually catches repeats.
-
-IR_PERSON_ROLES = ("reporter", "involved", "witness", "interviewee")
-
-# Roles owned by the incident create/update body. Interviewee rows are
-# managed separately by the investigation-interview endpoints, so a
-# re-sync from incident edit must NOT delete them.
-IR_INCIDENT_BODY_ROLES = ("reporter", "involved", "witness")
-
-_WS_RE = re.compile(r"\s+")
-
-
-def _normalize_person_name(name: Optional[str]) -> str:
-    """Casefold + collapse whitespace for dedup matching. '' if blank."""
-    if not name:
-        return ""
-    return _WS_RE.sub(" ", str(name).strip()).casefold()
-
-
-def _gather_incident_people(
-    *,
-    reported_by_name: Optional[str] = None,
-    reported_by_email: Optional[str] = None,
-    witnesses=None,
-    category_data: Optional[dict] = None,
-) -> list[tuple[str, Optional[str], str]]:
-    """Extract (display_name, email, role) tuples from an incident's people
-    fields. Roles: reporter, witness (witnesses JSONB), involved
-    (category_data injured_person + parties_involved). Blank names dropped.
-    """
-    out: list[tuple[str, Optional[str], str]] = []
-
-    if reported_by_name and reported_by_name.strip().lower() not in ("", "anonymous", "unknown"):
-        out.append((reported_by_name.strip(), (reported_by_email or None), "reporter"))
-
-    for w in (witnesses or []):
-        name = getattr(w, "name", None) if not isinstance(w, dict) else w.get("name")
-        contact = getattr(w, "contact", None) if not isinstance(w, dict) else w.get("contact")
-        if name and name.strip():
-            out.append((name.strip(), (contact or None), "witness"))
-
-    cd = category_data or {}
-    injured = cd.get("injured_person")
-    if injured and str(injured).strip():
-        out.append((str(injured).strip(), None, "involved"))
-    for party in (cd.get("parties_involved") or []):
-        pname = party.get("name") if isinstance(party, dict) else None
-        if pname and str(pname).strip():
-            out.append((str(pname).strip(), None, "involved"))
-
-    return out
-
-
-async def _upsert_ir_person(
-    conn, company_id: str, name: str, email: Optional[str] = None,
-) -> Optional[str]:
-    """Insert-or-touch an ir_people row by normalized name. Returns id."""
-    norm = _normalize_person_name(name)
-    if not norm or not company_id:
-        return None
-    row = await conn.fetchrow(
-        """
-        INSERT INTO ir_people (company_id, display_name, normalized_name, email)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (company_id, normalized_name)
-        DO UPDATE SET last_seen = NOW(),
-                      email = COALESCE(ir_people.email, EXCLUDED.email)
-        RETURNING id::text AS id
-        """,
-        company_id, name.strip(), norm, (email or None),
-    )
-    return row["id"] if row else None
-
-
-async def _link_incident_person(
-    conn, company_id: str, incident_id: str, name: str,
-    email: Optional[str], role: str,
-) -> None:
-    """Upsert a person and attach them to an incident in a given role."""
-    person_id = await _upsert_ir_person(conn, company_id, name, email)
-    if not person_id:
-        return
-    await conn.execute(
-        """
-        INSERT INTO ir_incident_people (incident_id, person_id, role)
-        VALUES ($1, $2, $3)
-        ON CONFLICT DO NOTHING
-        """,
-        incident_id, person_id, role,
-    )
-
-
-async def _sync_incident_people(
-    conn, company_id: Optional[str], incident_id: str,
-    entries: list[tuple[str, Optional[str], str]],
-    managed_roles: tuple[str, ...] = IR_INCIDENT_BODY_ROLES,
-) -> None:
-    """Re-sync an incident's people rows for the managed roles.
-
-    Delete-and-reinsert scoped to ``managed_roles`` so interviewee links
-    (owned by the interview endpoints) survive an incident edit. Best-effort
-    by contract — callers wrap this and swallow failures so identity tracking
-    never blocks incident submission.
-    """
-    if not company_id:
-        return
-    await conn.execute(
-        "DELETE FROM ir_incident_people WHERE incident_id = $1 AND role = ANY($2::text[])",
-        incident_id, list(managed_roles),
-    )
-    for name, email, role in entries:
-        if role in managed_roles:
-            await _link_incident_person(conn, company_id, incident_id, name, email, role)
-
-
 def _company_filter(param_idx: int) -> str:
     """Build a company_id filter clause for SQL queries."""
     return f"i.company_id = ${param_idx}"
 
 
-def _to_naive_utc(value: datetime) -> datetime:
-    """Normalize datetimes to naive UTC for TIMESTAMP (without timezone) columns."""
-    if value.tzinfo:
-        return value.astimezone(timezone.utc).replace(tzinfo=None)
-    return value
-
-
-def _utc_now_naive() -> datetime:
-    """Return current UTC time as naive datetime."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-# dateutil's fuzzy=True has NO relative-date support — parsing "yesterday
-# around 3pm" silently drops "yesterday" and returns TODAY at 3pm, which is
-# silently wrong on an OSHA/legal record. This pre-pass strips a relative-day
-# term out of the text and computes its date ourselves; dateutil only ever
-# sees the remainder (typically just a clock time). Checked in order so
-# "day before yesterday" isn't shadowed by the "yesterday" pattern matching
-# first. Each entry is (pattern, day_offset_from_today, default_hour) — the
-# default_hour is used when the remainder has no clock time of its own;
-# "last night" gets an evening default (21:00) since it implies a specific
-# part of the day, unlike a bare "yesterday".
-_RELATIVE_DAY_TERMS: tuple[tuple[re.Pattern, int, int], ...] = (
-    (re.compile(r"\bday before yesterday\b", re.IGNORECASE), -2, 12),
-    (re.compile(r"\byesterday\b", re.IGNORECASE), -1, 12),
-    (re.compile(r"\blast night\b", re.IGNORECASE), -1, 21),
-    (re.compile(r"\b(?:today|tonight|this morning|this afternoon|this evening)\b", re.IGNORECASE), 0, 12),
+# Both now live in services/_shared/time.py so services can reach them without
+# importing this package (which runs the whole IR router __init__). Aliased to the
+# private names this package's modules already import.
+from app.matcha.services._shared.time import (  # noqa: F401,E402
+    to_naive_utc as _to_naive_utc,
+    utc_now_naive as _utc_now_naive,
 )
-_DAYS_AGO_RE = re.compile(r"\b(\d+)\s+days?\s+ago\b", re.IGNORECASE)
-_EXPLICIT_YEAR_RE = re.compile(r"\b\d{4}\b")
 
 
-def _relative_day_match(text: str) -> Optional[tuple[int, int, str]]:
-    """Find a relative-day term in ``text``. Returns (day_offset, default_hour,
-    remainder) for the first match, or None. ``remainder`` is ``text`` with the
-    matched term blanked out, whitespace collapsed — fed to dateutil so a
-    spoken clock time ("...around 3pm") still lands on the right day."""
-    m = _DAYS_AGO_RE.search(text)
-    if m:
-        offset = -int(m.group(1))
-        remainder = re.sub(r"\s+", " ", _DAYS_AGO_RE.sub(" ", text, count=1)).strip()
-        return offset, 12, remainder
-    for pattern, offset, default_hour in _RELATIVE_DAY_TERMS:
-        if pattern.search(text):
-            remainder = re.sub(r"\s+", " ", pattern.sub(" ", text, count=1)).strip()
-            return offset, default_hour, remainder
-    return None
-
-
-def _clamp_future_occurred_at(parsed: datetime, original_text: str) -> datetime:
-    """Guard against dateutil defaulting a yearless date into the future.
-
-    "Dec 30" parsed in mid-2026 with no default year defaults to the current
-    year, landing months ahead — an incident can't have occurred in the
-    future. If the parse lands more than 26h ahead of now AND the original
-    text had no explicit 4-digit year, retry a year earlier; if it's still in
-    the future (or the retry itself fails), fall back to NOW() rather than
-    ever returning/raising on a bad future date.
-    """
-    now = _utc_now_naive()
-    if parsed <= now + timedelta(hours=26):
-        return parsed
-    if _EXPLICIT_YEAR_RE.search(original_text):
-        return now
-    try:
-        retried = parsed.replace(year=parsed.year - 1)
-    except ValueError:  # e.g. Feb 29 in a non-leap year
-        retried = parsed - timedelta(days=365)
-    return retried if retried <= now + timedelta(hours=26) else now
-
-
-def _parse_occurred_at(value) -> datetime:
-    """Coerce IR submit `occurred_at` to a naive UTC datetime.
-
-    Accepts a real datetime (from rich clients / admin tooling) or a free
-    text string from the slim submit form ("yesterday at 3pm", "May 1 4pm").
-    Falls back to NOW() on parse failure rather than 400'ing — incident
-    capture should never block on a date typo.
-    """
-    if isinstance(value, datetime):
-        if value.tzinfo:
-            return value.astimezone(timezone.utc).replace(tzinfo=None)
-        return value
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return _utc_now_naive()
-        try:
-            from dateutil import parser as _date_parser
-            relative = _relative_day_match(text)
-            if relative is not None:
-                offset, default_hour, remainder = relative
-                base_date = (datetime.now(timezone.utc) + timedelta(days=offset)).date()
-                default_dt = datetime.combine(base_date, time(default_hour, 0))
-                if remainder:
-                    try:
-                        parsed = _date_parser.parse(remainder, fuzzy=True, default=default_dt)
-                    except (ValueError, OverflowError, TypeError):
-                        parsed = default_dt
-                else:
-                    parsed = default_dt
-            else:
-                parsed = _date_parser.parse(text, fuzzy=True)
-            if parsed.tzinfo:
-                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
-            return _clamp_future_occurred_at(parsed, text)
-        except (ValueError, OverflowError, TypeError):
-            return _utc_now_naive()
-    return _utc_now_naive()
+# Moved to services/ir/ir_incident_parsing.py (pure, no DB/routes) — aliased
+# here so every existing `from ._shared import _parse_occurred_at` inside this
+# package and `from app.matcha.routes.ir_incidents import _parse_occurred_at`
+# from inbound_email.py keep working.
+from app.matcha.services.ir.ir_incident_parsing import (  # noqa: F401,E402
+    _parse_occurred_at,
+)
 
 
 def _privacy_signal_overlay(signals: Optional[dict]) -> dict:
@@ -787,133 +552,6 @@ async def _auto_classify_incident_task(
         logger.exception(f"[IR] auto-classify task crashed for {incident_id}")
 
 
-async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
-    """Return company display name and company-admin/client email recipients."""
-    async with get_connection() as conn:
-        company_name = await conn.fetchval(
-            "SELECT name FROM companies WHERE id = $1",
-            company_id,
-        ) or "Your company"
-
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT
-                u.email,
-                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-            FROM clients c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.company_id = $1
-              AND u.is_active = true
-              AND u.email IS NOT NULL
-            ORDER BY u.email
-            """,
-            company_id,
-        )
-
-    contacts = [
-        {"email": row["email"], "name": row["name"] or row["email"]}
-        for row in rows
-    ]
-    return company_name, contacts
-
-
-async def send_ir_notifications_task(
-    *,
-    company_id: str,
-    incident_id: str,
-    incident_number: str,
-    incident_title: str,
-    event_type: str,
-    current_status: str,
-    changed_by_email: Optional[str] = None,
-    previous_status: Optional[str] = None,
-    location_name: Optional[str] = None,
-    occurred_at: Optional[datetime] = None,
-):
-    """Send IR lifecycle notifications to company admins in the background."""
-    email_service = get_email_service()
-    if not email_service.is_configured():
-        logger.info("[IR] Email service not configured - skipping IR notifications")
-        return
-
-    company_name, contacts = await _get_company_admin_contacts(company_id)
-    if not contacts:
-        logger.info(f"[IR] No admin/client contacts found for company {company_id}")
-        return
-
-    tasks = [
-        email_service.send_ir_incident_notification_email(
-            to_email=contact["email"],
-            to_name=contact.get("name"),
-            company_name=company_name,
-            incident_id=incident_id,
-            incident_number=incident_number,
-            incident_title=incident_title,
-            event_type=event_type,
-            current_status=current_status,
-            changed_by_email=changed_by_email,
-            previous_status=previous_status,
-            location_name=location_name,
-            occurred_at=occurred_at,
-        )
-        for contact in contacts
-    ]
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    sent_count = 0
-    for contact, result in zip(contacts, results):
-        if isinstance(result, Exception):
-            logger.warning(f"[IR] Failed to notify {contact['email']}: {result}")
-            continue
-        if result:
-            sent_count += 1
-
-    if sent_count:
-        logger.info(f"[IR] Sent {sent_count}/{len(contacts)} IR notification email(s)")
-    else:
-        logger.warning("[IR] IR notifications attempted but no emails were sent successfully")
-
-
-async def send_ir_info_request_notification_task(
-    *,
-    company_id: str,
-    incident_id: str,
-    incident_number: str,
-    respondent_name: str,
-):
-    """Notify company admins that a "Request More Info" form was submitted."""
-    email_service = get_email_service()
-    if not email_service.is_configured():
-        logger.info("[IR] Email service not configured - skipping info-request notification")
-        return
-
-    company_name, contacts = await _get_company_admin_contacts(company_id)
-    if not contacts:
-        logger.info(f"[IR] No admin/client contacts found for company {company_id}")
-        return
-
-    incident_url = f"{email_service.settings.app_base_url}/app/ir/{incident_id}"
-
-    tasks = [
-        email_service.send_ir_info_request_response_email(
-            to_email=contact["email"],
-            to_name=contact.get("name"),
-            company_name=company_name,
-            incident_number=incident_number,
-            respondent_name=respondent_name,
-            link=incident_url,
-        )
-        for contact in contacts
-    ]
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    sent_count = sum(1 for r in results if r and not isinstance(r, Exception))
-    if sent_count:
-        logger.info(f"[IR] Sent {sent_count}/{len(contacts)} info-request notification email(s)")
-    else:
-        logger.warning("[IR] Info-request notification attempted but no emails were sent successfully")
-
-
 async def _get_incident_with_company_check(conn, incident_id: UUID, current_user, columns: str = "*"):
     """Fetch an incident row after verifying company ownership. Raises 404 if not found."""
     company_id = await get_client_company_id(current_user)
@@ -930,17 +568,11 @@ async def _get_incident_with_company_check(conn, incident_id: UUID, current_user
     return row
 
 
-def _safe_json_loads(value, default=None):
-    """Safely parse JSON from a database value."""
-    if value is None:
-        return default if default is not None else {}
-    if not isinstance(value, str):
-        return value
-    try:
-        return json.loads(value)
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.warning(f"Failed to parse JSON: {e}")
-        return default if default is not None else {}
+# Lives in services/_shared/jsonio.py so services can reach it without importing
+# this package. Aliased to the private name this package's modules already import.
+from app.matcha.services._shared.jsonio import (  # noqa: F401,E402
+    safe_json_loads as _safe_json_loads,
+)
 
 
 def parse_witnesses(witnesses_json) -> list[Witness]:
@@ -956,274 +588,6 @@ def parse_witnesses(witnesses_json) -> list[Witness]:
         return []
 
 
-# ===========================================
-# OSHA emergency alert helpers
-# ===========================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-async def next_case_step(conn, incident_id):
-    """Drive the per-injured-employee OSHA case-capture chain.
-
-    Returns the next card for the first INCOMPLETE ``ir_osha_case_details`` row,
-    in ``case_seq`` order: days-type (→ days-count) until ``classification`` is
-    set, then injury-type, then the Privacy Case prompt. Returns ``None`` when
-    every case is fully captured (chain complete). Called after recordable=yes
-    and after each capture step. Each card carries ``case_key`` so the handler
-    writes the right case row.
-    """
-    case_rows = await conn.fetch(
-        "SELECT * FROM ir_osha_case_details WHERE incident_id = $1 ORDER BY case_seq, case_key",
-        incident_id,
-    )
-    if not case_rows:
-        return None
-    inc = await conn.fetchrow(
-        "SELECT company_id, category_data, osha_form_301_data, reported_by_name "
-        "FROM ir_incidents WHERE id = $1",
-        incident_id,
-    )
-    cd = (_safe_json_loads(inc["category_data"], {}) if inc else {}) or {}
-    form_301 = (_safe_json_loads(inc["osha_form_301_data"], {}) if inc else {}) or {}
-    _is_priv, suggested = determine_privacy_case(
-        cd, form_301.get("injury_type"), bool(cd.get("employee_privacy_requested")),
-    )
-    emp_ids = [str(r["employee_id"]) for r in case_rows if r["employee_id"]]
-    by_id = {}
-    if emp_ids and inc:
-        hydrated = await _hydrate_involved_employees(conn, inc["company_id"], emp_ids)
-        by_id = {str(e["id"]): e for e in hydrated}
-
-    def _name(cr):
-        if cr["case_key"] == "reporter":
-            return (inc["reported_by_name"] if inc else None) or "this employee"
-        emp = by_id.get(cr["case_key"])
-        if emp:
-            return f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "this employee"
-        return "this employee"
-
-    for cr in case_rows:
-        name = _name(cr)
-        if cr["classification"] is None:
-            return build_osha_days_type_query_card(case_key=cr["case_key"], employee_name=name)
-        if cr["injury_type"] is None:
-            return build_osha_injury_type_query_card(case_key=cr["case_key"], employee_name=name)
-        if cr["privacy_case_reason"] is None:
-            return build_privacy_case_query_card(
-                employee_key=cr["case_key"], employee_name=name, suggested_reason=suggested,
-            )
-    return None
-
-
-# ===========================================
-# Per-injured-employee OSHA case records (ir_osha_case_details)
-# ===========================================
-#
-# One row per injured employee on a recordable incident: each person's own OSHA
-# case (classification, days away/restricted, M-column injury type) + Privacy
-# Case answer. case_key = str(employee_id) for a roster employee, else
-# 'reporter'. These rows are the authoritative source for the 300/301/300A
-# reads; the incident-level columns remain a fallback for un-captured rows.
-
-
-async def ensure_osha_case_rows(conn, incident_id) -> None:
-    """Create one ir_osha_case_details row per injured employee for a recordable
-    incident — roster employees from ``involved_employee_ids`` (in order), else a
-    single ``'reporter'`` row. Seeds from the incident-level values + any prior
-    ``category_data.privacy_cases`` answer. Idempotent (``ON CONFLICT DO
-    NOTHING``) — safe to call whenever recordability is set, by any path.
-
-    Mirrors the migration backfill, scoped to one incident.
-    """
-    await conn.execute(
-        """
-        INSERT INTO ir_osha_case_details
-            (incident_id, case_key, employee_id, case_seq,
-             classification, days_away, days_restricted, injury_type, privacy_case_reason)
-        SELECT i.id, emp.eid::text, emp.eid, emp.ord::int,
-               i.osha_classification, COALESCE(i.days_away_from_work, 0),
-               COALESCE(i.days_restricted_duty, 0), i.osha_form_301_data->>'injury_type',
-               NULLIF(i.category_data->'privacy_cases'->>(emp.eid::text), '')
-        FROM ir_incidents i
-        CROSS JOIN LATERAL unnest(i.involved_employee_ids) WITH ORDINALITY AS emp(eid, ord)
-        WHERE i.id = $1 AND i.osha_recordable = true
-          AND array_length(i.involved_employee_ids, 1) > 0
-        ON CONFLICT (incident_id, case_key) DO NOTHING
-        """,
-        incident_id,
-    )
-    await conn.execute(
-        """
-        INSERT INTO ir_osha_case_details
-            (incident_id, case_key, employee_id, case_seq,
-             classification, days_away, days_restricted, injury_type, privacy_case_reason)
-        SELECT i.id, 'reporter', NULL, 1,
-               i.osha_classification, COALESCE(i.days_away_from_work, 0),
-               COALESCE(i.days_restricted_duty, 0), i.osha_form_301_data->>'injury_type',
-               NULLIF(i.category_data->'privacy_cases'->>'reporter', '')
-        FROM ir_incidents i
-        WHERE i.id = $1 AND i.osha_recordable = true
-          AND array_length(i.involved_employee_ids, 1) IS NULL
-        ON CONFLICT (incident_id, case_key) DO NOTHING
-        """,
-        incident_id,
-    )
-
-
-async def fetch_osha_case_rows(conn, incident_id) -> list[dict]:
-    """All case rows for one incident, ordered by case_seq."""
-    rows = await conn.fetch(
-        "SELECT * FROM ir_osha_case_details WHERE incident_id = $1 ORDER BY case_seq, case_key",
-        incident_id,
-    )
-    return [dict(r) for r in rows]
-
-
-async def fetch_osha_case_rows_for(conn, incident_ids) -> dict:
-    """Batch: ``{str(incident_id): [case rows]}`` for the 300-log (avoids N+1)."""
-    if not incident_ids:
-        return {}
-    rows = await conn.fetch(
-        "SELECT * FROM ir_osha_case_details WHERE incident_id = ANY($1::uuid[]) "
-        "ORDER BY case_seq, case_key",
-        [str(i) for i in incident_ids],
-    )
-    out: dict = {}
-    for r in rows:
-        out.setdefault(str(r["incident_id"]), []).append(dict(r))
-    return out
-
-
-# ===========================================
-# Root-cause interview chain (replaces AI-driven run_analysis root_cause)
-# ===========================================
-#
-# The orchestrator used to recommend `run_analysis root_cause`, but the
-# analyzer only sees the initial title+description and produces generic
-# guesses (or stale failures). Per customer feedback, the Copilot now
-# captures root cause via a structured 3-question interview: Hazard /
-# Why / Prevention. Answers persist verbatim — no AI synthesis.
-# ROOT_CAUSE_INTERVIEW_STEPS moved to ._cards (re-exported at top).
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ===========================================
-# Injury assessment + document capture (deterministic flow engine)
-# ===========================================
-
-
-
-
-
-
-
-
-
-async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) -> None:
-    """Flip severity to critical, mark the alert active in category_data,
-    and persist the emergency card to the Copilot transcript.
-
-    Idempotent: a second call on the same incident skips re-persisting the
-    card if one already exists (e.g. background classifier re-triggered).
-    """
-    await conn.execute(
-        """
-        UPDATE ir_incidents
-        SET severity = 'critical',
-            category_data = jsonb_set(
-                COALESCE(category_data, '{}'::jsonb),
-                '{osha_emergency_alert_active}',
-                'true'::jsonb,
-                true
-            )
-        WHERE id = $1
-        """,
-        incident_id,
-    )
-
-    existing = await conn.fetchval(
-        """
-        SELECT 1 FROM ir_incident_ai_messages
-        WHERE incident_id = $1
-          AND message_type = 'card'
-          AND metadata->'card'->>'id' = $2
-        LIMIT 1
-        """,
-        incident_id,
-        OSHA_EMERGENCY_ALERT_CARD_ID,
-    )
-    if existing:
-        return
-
-    # Inline assistant directive — must precede the card insert so
-    # _extract_current_cards in copilot.py treats the alert as part of
-    # the current round (it walks messages and only includes assistant
-    # cards after the most recent assistant text marker). Without this
-    # text the panel sees a transcript with no active round and renders
-    # the alert card with no guidance copy above it — looks inert.
-    user_id_str = (
-        str(current_user.id) if current_user and getattr(current_user, "id", None) else None
-    )
-    directive_text = (
-        "Severity flipped to critical because the report describes a "
-        "potential OSHA reportable event (29 CFR 1904.39). Acknowledge "
-        "the alert below with your reporting notes, then we'll capture "
-        "the OSHA recordable details for the 300 log."
-    )
-    directive_metadata = {
-        "open_questions": [],
-        "model": "osha_emergency_inline",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await conn.execute(
-        """
-        INSERT INTO ir_incident_ai_messages
-          (incident_id, role, message_type, content, metadata, created_by)
-        VALUES ($1, 'assistant', 'text', $2, $3::jsonb, $4)
-        """,
-        incident_id,
-        directive_text,
-        json.dumps(directive_metadata),
-        user_id_str,
-    )
-
-    card = build_osha_emergency_alert_card()
-    metadata = {"card": card, "accepted": False}
-    await conn.execute(
-        """
-        INSERT INTO ir_incident_ai_messages
-          (incident_id, role, message_type, content, metadata, created_by)
-        VALUES ($1, 'assistant', 'card', $2, $3::jsonb, $4)
-        """,
-        incident_id,
-        card["title"],
-        json.dumps(metadata),
-        user_id_str,
-    )
-
 
 def _location_label(name: Optional[str], city: Optional[str], state: Optional[str]) -> str:
     """Human-readable location label, mirroring the frontend `locationLabel`.
@@ -1236,202 +600,6 @@ def _location_label(name: Optional[str], city: Optional[str], state: Optional[st
     if name and place:
         return f"{name} — {place}"
     return name or place or "Location"
-
-
-async def create_incident_core(
-    conn,
-    *,
-    company_id: Optional[str],
-    description: Optional[str],
-    occurred_at,
-    reported_by_name: str,
-    title: Optional[str] = None,
-    incident_type: Optional[str] = None,
-    severity: Optional[str] = None,
-    location: Optional[str] = None,
-    location_id: Optional[str] = None,
-    reported_by_email: Optional[str] = None,
-    witnesses: Optional[list] = None,
-    category_data: Optional[dict] = None,
-    involved_employee_ids: Optional[list[str]] = None,
-    corrective_actions: Optional[str] = None,
-    created_by: Optional[str] = None,
-    actor_user_id: Optional[str] = None,
-    actor_email: Optional[str] = None,
-    actor_ip: Optional[str] = None,
-    current_user=None,
-    index_people: bool = True,
-) -> tuple[dict, list]:
-    """Insert an incident + run the shared post-insert mechanics.
-
-    Shared by the authenticated create route (`crud.create_incident`), the
-    public location magic-link intake (`inbound_email.submit_location_report`),
-    and the truly-anonymous `/report` intake (`inbound_email.submit_anonymous_report`)
-    so every path produces an incident of the same quality: real `location_id`
-    (where applicable), witnesses, the per-person identity index, OSHA
-    emergency detection, and the same AI auto-classify + policy-map +
-    notification background jobs.
-
-    ``index_people=False`` skips the per-person identity index — required for
-    the anonymous `/report` intake, which per design must NOT mint `ir_people`
-    rows (there's no reporter name or roster to attach them to; see
-    `ir_incidents/CLAUDE.md`). In practice the anonymous form's "Anonymous"
-    reporter name and lack of an `involved_parties` category key already make
-    `_gather_incident_people` a no-op there, but the explicit flag makes that
-    guaranteed rather than incidental, so it can't silently start indexing
-    people if either of those inputs changes later.
-
-    The CALLER owns the connection and its tenant scoping — the authed path uses
-    `get_connection()`; the public token path uses
-    `get_connection(tenant_id=company_id)` so the INSERT clears RLS — as well as
-    transaction boundaries. This function never opens its own connection.
-
-    Returns `(response_row, bg_tasks)` where `response_row` is a dict augmented
-    with company/location names (ready for `row_to_response`) and `bg_tasks` is a
-    list of `(fn, args, kwargs)` tuples the caller schedules on its own
-    `BackgroundTasks` (or awaits). Deferring them lets the caller commit the
-    transaction first and keeps this function connection-agnostic.
-    """
-    witnesses = witnesses or []
-    incident_number = generate_incident_number()
-    occurred_at_dt = _parse_occurred_at(occurred_at)
-
-    # Track whether the caller explicitly set type/severity so the background
-    # classifier knows whether to override the system defaults.
-    user_passed_type = incident_type is not None
-    user_passed_severity = severity is not None and severity != "medium"
-    effective_type = incident_type or "other"
-    effective_severity = severity or "medium"
-
-    # Title derives from the description's first line when not supplied (the
-    # slim + public forms drop the Title field entirely).
-    raw_title = (title or "").strip()
-    if not raw_title:
-        body = (description or "Incident").strip()
-        first_line = body.splitlines()[0] if body else "Incident"
-        raw_title = first_line[:80].strip() or "Incident"
-    effective_title = raw_title
-
-    row = await conn.fetchrow(
-        """
-        INSERT INTO ir_incidents (
-            incident_number, title, description, incident_type, severity,
-            occurred_at, location, reported_by_name, reported_by_email,
-            witnesses, category_data, involved_employee_ids,
-            company_id, location_id, created_by, corrective_actions
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        RETURNING *
-        """,
-        incident_number,
-        effective_title,
-        description,
-        effective_type,
-        effective_severity,
-        occurred_at_dt,
-        location,
-        reported_by_name,
-        reported_by_email,
-        json.dumps([w.model_dump() if hasattr(w, "model_dump") else w for w in witnesses]),
-        json.dumps(category_data or {}),
-        involved_employee_ids,
-        company_id,
-        (str(location_id) if location_id else None),
-        created_by,
-        (corrective_actions or None),
-    )
-
-    # Resolve company / location names for the response payload.
-    company_name = None
-    location_name = None
-    location_city = None
-    location_state = None
-    if company_id:
-        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
-        if company:
-            company_name = company["name"]
-    if row.get("location_id"):
-        loc = await conn.fetchrow(
-            "SELECT name, city, state FROM business_locations WHERE id = $1",
-            row["location_id"],
-        )
-        if loc:
-            location_name = loc["name"]
-            location_city = loc["city"]
-            location_state = loc["state"]
-
-    # Audit — only when there's an actor (public intake has no user).
-    if actor_user_id:
-        await log_audit(
-            conn,
-            str(row["id"]),
-            actor_user_id,
-            "incident_created",
-            "incident",
-            str(row["id"]),
-            {"title": effective_title, "type": effective_type},
-            actor_ip,
-        )
-
-    # Per-person identity index (best-effort; never blocks submit).
-    if company_id and index_people:
-        try:
-            people = _gather_incident_people(
-                reported_by_name=row.get("reported_by_name"),
-                reported_by_email=row.get("reported_by_email"),
-                witnesses=witnesses,
-                category_data=category_data,
-            )
-            await _sync_incident_people(conn, str(company_id), str(row["id"]), people)
-        except Exception:
-            logger.exception("[IR] people sync failed for incident %s", row.get("id"))
-
-    # OSHA reportable-event (29 CFR 1904.39) emergency detection — flips
-    # severity to critical and drops the alert card into the Copilot transcript.
-    if _detect_osha_reportable_keywords(f"{effective_title}\n{description or ''}"):
-        await _persist_osha_emergency_alert(conn, str(row["id"]), current_user)
-        row = await conn.fetchrow("SELECT * FROM ir_incidents WHERE id = $1", row["id"])
-
-    response_row = dict(row)
-    response_row["company_name"] = company_name
-    response_row["location_name"] = location_name
-    response_row["location_city"] = location_city
-    response_row["location_state"] = location_state
-
-    # Post-commit background work — assembled here, scheduled by the caller.
-    bg_tasks: list = []
-    if company_id:
-        bg_tasks.append((
-            send_ir_notifications_task,
-            (),
-            dict(
-                company_id=str(company_id),
-                incident_id=str(row["id"]),
-                incident_number=row["incident_number"],
-                incident_title=row["title"],
-                event_type="created",
-                current_status=row["status"],
-                changed_by_email=actor_email,
-                previous_status=None,
-                location_name=location_name or row.get("location"),
-                occurred_at=row.get("occurred_at"),
-            ),
-        ))
-        bg_tasks.append((
-            _auto_classify_incident_task,
-            (str(row["id"]),),
-            dict(user_passed_type=user_passed_type, user_passed_severity=user_passed_severity),
-        ))
-        # Lazy import: ai_analysis imports from _shared, so a module-level import
-        # here would be circular (same pattern crud.create_incident used).
-        from .ai_analysis import _auto_map_policy_violations
-        bg_tasks.append((
-            _auto_map_policy_violations,
-            (str(row["id"]), str(company_id)),
-            {},
-        ))
-
-    return response_row, bg_tasks
 
 
 def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:

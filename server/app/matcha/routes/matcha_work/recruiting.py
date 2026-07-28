@@ -18,7 +18,7 @@ from app.config import get_settings
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work import RejectCandidateRequest, SendInterviewsRequest
+from app.matcha.models.matcha_work.matcha_work import RejectCandidateRequest, SendInterviewsRequest
 from app.matcha.routes.matcha_work._shared import (
     RESUME_UPLOAD_EXTENSIONS,
     RESUME_UPLOAD_MAX_BYTES,

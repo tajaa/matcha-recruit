@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.database import get_connection
 from app.core.feature_flags import default_company_features_json
-from app.matcha.models.employee import (
+from app.matcha.models.employees.employee import (
     EmployeeResponse, ProfileUpdateRequest,
     PTOBalanceResponse,
     PortalDashboard, PortalTasks, PendingTask,

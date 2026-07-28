@@ -18,6 +18,8 @@ import logging
 import re
 from typing import Any, Optional
 
+from ._shared.gemini import is_model_unavailable_error  # noqa: F401 — re-export
+
 logger = logging.getLogger(__name__)
 
 # Stable fallbacks tried, in order, after the configured primary model when it is
@@ -26,19 +28,6 @@ PRECEDENT_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
 
 # Timeout for a single precedent semantic-enrichment call (seconds).
 GEMINI_CALL_TIMEOUT = 45
-
-
-def is_model_unavailable_error(error: Exception) -> bool:
-    """Return True when the model is unavailable for the current account/project."""
-    message = str(error).lower()
-    if "model" not in message:
-        return False
-    return (
-        "not found" in message
-        or "does not have access" in message
-        or "unsupported model" in message
-        or "404" in message
-    )
 
 
 async def run_semantic_enrichment(

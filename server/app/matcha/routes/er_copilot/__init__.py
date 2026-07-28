@@ -18,15 +18,16 @@ from .search import router as _search_router
 from .reports import router as _reports_router
 from .case_views import router as _case_views_router
 
-# Re-exported for tests that import these helpers directly from the package,
-# and create_case_core for HR Pilot's warm hand-off executor.
+# Re-exported for tests that import these helpers directly from the package.
 from ._shared import (
     _build_document_excerpts,
     _queue_risk_assessment_refresh,
-    create_case_core,
     ER_DOC_PER_DOC_CHAR_CAP,
     ER_DOC_TOTAL_CHAR_CAP,
 )
+# Moved to services/er/ (refactor round 2, stage 3) — imported directly from
+# its real location for HR Pilot's warm hand-off executor.
+from app.matcha.services.er.er_case_create import create_case_core  # noqa: F401
 
 for _sub in (
     _export_router,

@@ -82,8 +82,8 @@ router.include_router(_broker_sharing_router)
 
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
-from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
-from .analytics import compute_behavioral_friction  # noqa: F401  (used by broker_risk_alerts worker)
+from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
+from app.matcha.services.ir.ir_wc_metrics import compute_behavioral_friction  # noqa: F401  (no live caller — see docstring)
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
     MAX_INTAKE_FILES,
     MAX_INTAKE_FILE_BYTES,
@@ -93,13 +93,17 @@ from ._shared import (  # noqa: F401  (used by inbound_email.py)
     _read_audio_or_400,
     _safe_json_loads,
     _info_request_effective_status,
-    create_incident_core,
     document_type_for_ext,
     generate_incident_number,
     read_upload_capped,
+    validate_upload_name,
+)
+# Moved to services/ir/ (refactor round 2, stage 3) — imported directly from
+# their real location rather than via _shared.py's re-export.
+from app.matcha.services.ir.ir_incident_create import create_incident_core  # noqa: F401
+from app.matcha.services.ir.ir_notifications import (  # noqa: F401
     send_ir_notifications_task,
     send_ir_info_request_notification_task,
-    validate_upload_name,
 )
 from .copilot import _close_incident_via_copilot  # noqa: F401  (future cross-router use)
 from .copilot import resume_copilot_after_info_request  # noqa: F401  (used by inbound_email.py)

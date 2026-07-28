@@ -4,8 +4,8 @@ import re
 from typing import NamedTuple, get_args
 
 from app.core.compliance_registry import CATEGORY_KEYS
-from app.matcha.models.er_case import ERCaseCategory
-from app.matcha.models.ir_incident import IRIncidentType
+from app.matcha.models.er.case import ERCaseCategory
+from app.matcha.models.ir.types import IRIncidentType
 
 from ...discipline.discipline_engine import DEFAULT_INFRACTION_TYPES
 from ._shared import _hum

@@ -3,7 +3,7 @@
 Grounded conversational handbook/policy generation: a business admin opens a
 session, converses with an AI grounded in the company's handbook profile +
 applicable jurisdiction requirements + existing handbooks/policies + the
-industry playbook (service: `services/handbook_pilot.py`), and the model
+industry playbook (service: `services/pilots/handbook_pilot/`), and the model
 proposes citation-validated candidate handbook sections and policies. Each
 proposal persists as a reviewable `draft` row the admin edits and PROMOTES into
 the real handbooks / policies tables (drafts to edit/publish normally).
@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from app.matcha.models.pilots.chat import PilotChatIn as ChatIn
 
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
@@ -50,8 +51,6 @@ class SessionUpdate(BaseModel):
     status: Optional[Literal["active", "closed"]] = None
 
 
-class ChatIn(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5_000)
 
 
 class DraftUpdate(BaseModel):

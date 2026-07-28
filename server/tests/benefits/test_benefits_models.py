@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.matcha.models.benefits import (
+from app.matcha.models.benefits.benefits import (
     DependentInput,
     ElectionUpsert,
     OePeriodCreate,

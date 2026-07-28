@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from ....database import get_connection
+from . import entitlements_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +22,21 @@ SUBSCRIPTION_TOKENS = 5_000_000
 SUBSCRIPTION_AMOUNT_CENTS = 4000  # $40/month
 SUBSCRIPTION_PACK_ID = "matcha_work_pro"
 
-# Per-user rolling-window rate-limit defaults — MUST match
-# matcha_work_document.check_token_quota's _DEFAULT_TOKEN_LIMIT / _DEFAULT_WINDOW_HOURS.
+# Per-user rolling-window rate-limit seed for the business-mode grant path
+# below (_grant_quota_for_company) — this IS entitlements_service.PLAN_QUOTAS'
+# business-tier limit (deliberately not matcha_work_document.check_token_quota's
+# personal-plan fail-closed fallback, _DEFAULT_TOKEN_LIMIT, 25k). Read from
+# PLAN_QUOTAS rather than duplicated as a literal so the two can't drift apart
+# again — they did once: this used to hardcode 100k (the LITE limit) while the
+# comment claimed "business-tier baseline", so a company with no existing
+# per-user quota row got a grant-seeded row *below* the 500k business default
+# it would otherwise have fallen back to.
 # The chat send gate enforces BOTH the company budget (this service) and this
 # per-user quota (mw_token_quotas). Admin grants must lift both, or the grant
 # raises the budget while the quota wall still blocks the user.
-QUOTA_DEFAULT_LIMIT = 100_000
-QUOTA_DEFAULT_WINDOW_HOURS = 12
+QUOTA_DEFAULT_LIMIT, QUOTA_DEFAULT_WINDOW_HOURS = entitlements_service.PLAN_QUOTAS[
+    entitlements_service.PLAN_BUSINESS
+]
 
 EXHAUSTED_MESSAGE = "Token budget exhausted. Subscribe to Matcha Work Pro for 5M tokens/month."
 EXHAUSTED_CODE = "token_budget_exhausted"

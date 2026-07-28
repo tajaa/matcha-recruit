@@ -10,6 +10,7 @@ from app.matcha.services.matcha_work.matcha_work_document._coerce import (
     _coerce_bool,
     _coerce_int,
 )
+from app.matcha.services.billing import entitlements_service
 
 import logging
 logger = logging.getLogger(__name__)
@@ -57,13 +58,13 @@ async def log_token_usage_event(
         )
 
 # Last-resort fallback if no mw_token_quotas row exists AND plan resolution
-# (incl. the entitlements_service import) fails — normally the per-plan defaults
-# in entitlements_service.PLAN_QUOTAS apply. Set to the FREE-tier budget so the
-# ultimate failure mode never grants a paid quota (fail closed). Keep in sync
-# with entitlements_service.PLAN_QUOTAS[PLAN_FREE].
-_DEFAULT_TOKEN_LIMIT = 25_000
-
-_DEFAULT_WINDOW_HOURS = 12
+# fails — normally the per-plan defaults in entitlements_service.PLAN_QUOTAS
+# apply. Set to the FREE-tier budget so the ultimate failure mode never grants
+# a paid quota (fail closed). Derived from PLAN_QUOTAS rather than hardcoded
+# so the two can't drift out of sync.
+_DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS = entitlements_service.PLAN_QUOTAS[
+    entitlements_service.PLAN_FREE
+]
 
 async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) -> dict:
     """Check if the user is within their token quota.
@@ -95,14 +96,12 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
         # Plan-based default (resolved outside the connection block — the
         # resolver opens its own connection; don't hold two pool slots).
         # Fail CLOSED: if plan resolution throws, fall back to the FREE-tier
-        # quota, never the higher _DEFAULT_TOKEN_LIMIT — a transient resolver
-        # error must not hand a free user a paid budget.
+        # quota, never a higher one — a transient resolver error must not
+        # hand a free user a paid budget. `entitlements_service` is a
+        # module-level import, so a broken import path fails app boot, not
+        # silently here — this except only ever catches a real resolver
+        # error (e.g. the DB lookup in resolve_plan_for_user).
         try:
-            from . import entitlements_service
-
-            token_limit, window_hours = entitlements_service.PLAN_QUOTAS[
-                entitlements_service.PLAN_FREE
-            ]
             plan = await entitlements_service.resolve_plan_for_user(user_id)
             token_limit, window_hours = entitlements_service.PLAN_QUOTAS[plan]
         except Exception:

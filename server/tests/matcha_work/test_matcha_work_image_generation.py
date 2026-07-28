@@ -114,7 +114,10 @@ async def test_image_generation_routing_and_upload(mock_get_storage):
 
 
 @pytest.mark.asyncio
-@patch("app.matcha.services.matcha_work.matcha_work_ai._get_model")
+# Patch `provider`, not the package: `GeminiProvider.generate` imports
+# `_get_model` into provider.py's globals, so patching the facade
+# re-export would be silently ignored (matcha_work_ai became a package).
+@patch("app.matcha.services.matcha_work.matcha_work_ai.provider._get_model")
 @patch("app.core.services.storage.get_storage")
 async def test_non_image_requests_normal_flow(mock_get_storage, mock_get_model):
     mock_get_model.return_value = "gemini-3.5-flash"
