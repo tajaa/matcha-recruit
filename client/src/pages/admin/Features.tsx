@@ -329,28 +329,6 @@ export default function Features() {
                   </Button>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                <span className="text-zinc-500">Beta</span>
-                {betaKeys.size === 0 ? (
-                  <span className="text-[11px] text-zinc-600">No features currently in beta</span>
-                ) : (
-                  Array.from(betaKeys).map((key) => {
-                    const on = !!selected.enabled_features[key]
-                    return (
-                      <span
-                        key={key}
-                        className={`rounded border px-1.5 py-0.5 text-[11px] ${
-                          on
-                            ? 'border-amber-800/40 bg-amber-950/30 text-amber-300'
-                            : 'border-white/[0.08] bg-white/[0.03] text-zinc-500'
-                        }`}
-                      >
-                        {FEATURE_LABELS[key] ?? key}{on ? ' — enabled' : ''}
-                      </span>
-                    )
-                  })
-                )}
-              </div>
             </div>
             {Object.values(provenance.features).some((p) => p.bucket === 'admin_grant') && (
               <p className="border-b border-white/[0.06] bg-white/[0.02] px-4 py-1.5 text-[11px] text-zinc-500">
