@@ -122,7 +122,7 @@ export function Hero({ onDemoClick }: { onDemoClick?: () => void }) {
                 backgroundImage: `${paperLayers().backgroundImage}, linear-gradient(180deg, rgba(255,255,255,0.07), rgba(0,0,0,0.05))`,
                 backgroundSize: `${paperLayers().backgroundSize}, 100% 100%`,
                 backgroundBlendMode: "overlay, overlay, normal",
-                color: CREAM,
+                color: INK,
                 clipPath: revealed ? "inset(0 0 0 0)" : "inset(0 100% 0 0)",
                 transition: reduceMotion ? undefined : "clip-path 900ms cubic-bezier(0.65,0,0.2,1)",
               }}
@@ -151,7 +151,7 @@ export function Hero({ onDemoClick }: { onDemoClick?: () => void }) {
                   className="inline-flex items-center justify-center h-12 px-7 rounded-[6px] text-[15px] font-medium cursor-pointer transition-opacity hover:opacity-90"
                   style={{
                     backgroundColor: MATCHA,
-                    color: CREAM,
+                    color: INK,
                     boxShadow: "0 1px 2px rgba(20,21,15,0.16)",
                   }}
                 >

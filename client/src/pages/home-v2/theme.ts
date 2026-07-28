@@ -7,15 +7,15 @@
  * SVG presentation attributes in places, so no CSS-variable indirection.
  */
 
-export const CREAM = "#EFEAE0";
-export const CREAM_HI = "#F7F4EC";
-export const INK = "#14150F";
-export const INK_SOFT = "#5E6055";
-export const MATCHA = "#743E0D";
-export const MATCHA_MID = "#9C5A18";
+export const CREAM = "#0A0A08";
+export const CREAM_HI = "#161613";
+export const INK = "#EFEAE0";
+export const INK_SOFT = "#B3AEA3";
+export const MATCHA = "#7E480A";
+export const MATCHA_MID = "#C97A2E";
 export const MATCHA_LT = "#E0A863";
-export const MATCHA_WASH = "#F7ECD9";
-export const LINE = "rgba(20,21,15,0.12)";
+export const MATCHA_WASH = "#211D16";
+export const LINE = "rgba(239,234,224,0.14)";
 
 export const DISPLAY = "'Space Grotesk', var(--font-display)";
 export const SANS = "var(--font-sans)";

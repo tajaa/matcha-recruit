@@ -187,7 +187,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
               className="hidden sm:inline-flex items-center h-9 px-5 text-[13px] font-medium cursor-pointer transition-opacity hover:opacity-90"
               style={{
                 backgroundColor: MATCHA,
-                color: CREAM,
+                color: INK,
                 borderRadius: "6px",
               }}
             >
@@ -253,7 +253,7 @@ export default function HomeV2Nav({ onDemoClick }: Props) {
                 onDemoClick?.();
               }}
               className="mt-4 inline-flex items-center justify-center px-6 h-12 text-base font-medium cursor-pointer"
-              style={{ backgroundColor: MATCHA, color: CREAM, borderRadius: "6px" }}
+              style={{ backgroundColor: MATCHA, color: INK, borderRadius: "6px" }}
             >
               Get a demo
             </button>
