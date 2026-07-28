@@ -5,6 +5,7 @@ import { HOME_V2_JSON_LD } from "./data";
 import { CREAM } from "./theme";
 import HomeV2Nav from "./Nav";
 import { Hero } from "./Hero";
+import { RiskInsightsSection } from "./RiskInsightsSection";
 import { paperSurface } from "./PaperGrain";
 
 // Same latched-lazy pattern as pages/home/index.tsx:16-20,59-78 — mount on
@@ -67,6 +68,7 @@ export default function HomeV2() {
 
       <HomeV2Nav onDemoClick={openPricing} />
       <Hero onDemoClick={openPricing} />
+      <RiskInsightsSection />
 
       <MarketingFooter newsletterVariant="matcha" />
     </div>
