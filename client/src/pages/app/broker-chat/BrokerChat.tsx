@@ -10,7 +10,7 @@ import {
   fetchCompanyMessages,
   markCompanyConversationRead,
   sendCompanyMessage,
-} from '../../../api/broker-chat/brokerChat'
+} from '../../../api/broker-chat/companyBrokerChat'
 import type { BrokerChatSummary } from '../../../types/brokerChat'
 
 export default function BrokerChat() {

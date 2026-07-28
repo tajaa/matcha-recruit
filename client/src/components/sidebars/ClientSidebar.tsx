@@ -10,7 +10,7 @@ import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
-import { fetchCompanyBrokerChatSummary } from '../../api/broker-chat/brokerChat'
+import { fetchCompanyBrokerChatSummary } from '../../api/broker-chat/companyBrokerChat'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
