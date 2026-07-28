@@ -145,14 +145,14 @@ async def list_feature_flags():
             is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
             rows = await conn.fetch(
                 f"""
-                SELECT id, name as company_name, enabled_features, {is_test_col}
+                SELECT id, name as company_name, enabled_features, signup_source, {is_test_col}
                 FROM companies
                 """
             )
             for row in rows:
                 if bool(row["is_test"]):
                     continue
-                merged = merge_company_features(row["enabled_features"])
+                merged = merge_company_features(row["enabled_features"], row["signup_source"])
                 for key in beta_features:
                     if merged.get(key):
                         entry = counts.setdefault(key, {"count": 0, "companies": []})
@@ -228,12 +228,24 @@ async def toggle_company_feature(
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-            # signup_source passed through so the tier overlay is reflected in
-            # the returned/stored shape too — same bug class as
-            # list_company_features above (a tier-forced flag must not read
-            # back as off after an unrelated toggle).
-            old_features = merge_company_features(row["enabled_features"], row["signup_source"])
-            features = dict(old_features)
+            # Storage must only ever hold what was actually set — never the
+            # tier overlay's forced entries. Merging with signup_source here
+            # used to materialize e.g. osha_logs:false into a
+            # matcha_lite_essentials company's stored enabled_features; an
+            # Essentials -> Lite upgrade preserves stored, and the matcha_lite
+            # overlay never mentions osha_logs, so that False survived the
+            # upgrade and the paying customer permanently lost OSHA logs.
+            raw = row["enabled_features"]
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except json.JSONDecodeError:
+                    raw = {}
+            stored_features = dict(raw) if isinstance(raw, dict) else {}
+
+            old_effective = merge_company_features(row["enabled_features"], row["signup_source"])
+
+            features = dict(stored_features)
             features[request.feature] = bool(request.enabled)
 
             await conn.execute(
@@ -245,12 +257,18 @@ async def toggle_company_feature(
                 json.dumps(features),
                 company_id,
             )
+
+            # Effective (overlay-applied) shape for the audit diff and the
+            # response — GET /company-features already merges with
+            # signup_source, so returning the raw stored dict here made a
+            # tier-forced-off toggle look like it took effect until refresh.
+            new_effective = merge_company_features(features, row["signup_source"])
             await record_feature_changes(
-                conn, company_id, old_features, features,
+                conn, company_id, old_effective, new_effective,
                 source="admin_toggle", actor_user_id=current_user.id,
             )
 
-        return {"enabled_features": features}
+        return {"enabled_features": new_effective}
 
 
 @router.get("/company-features/{company_id}/provenance", dependencies=[Depends(require_admin)])
@@ -983,14 +1001,31 @@ async def admin_change_tier(
             detail=f"Unknown tier '{body.tier}'. Valid: {', '.join(_TIER_FEATURE_PRESETS)}",
         )
     async with get_connection() as conn:
+        is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
         current = await conn.fetchrow(
-            "SELECT signup_source, enabled_features FROM companies WHERE id = $1",
+            f"SELECT signup_source, enabled_features, {is_test_col} FROM companies WHERE id = $1",
             company_id,
         )
         if not current:
             raise HTTPException(status_code=404, detail="Company not found")
         current_tier = current["signup_source"]
         current_features = merge_company_features(current["enabled_features"])
+
+        # A tier preset can grant a beta default-off flag (e.g. handbook_pilot,
+        # labor_relations on 'bespoke') the same way the single-feature toggle
+        # can — assert_feature_allowed is the gate for that path, so it must
+        # run here too, not just in toggle_company_feature.
+        beta_features = await load_beta_features(conn)
+        for feature_key, value in preset.items():
+            if value is not True:
+                continue
+            try:
+                assert_feature_allowed(
+                    feature_key, True,
+                    beta_features=beta_features, company_row=current,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
         # Paid tiers whose paid gate is established via Stripe checkout,
         # keyed to the flag name each one's webhook flips (incidents for

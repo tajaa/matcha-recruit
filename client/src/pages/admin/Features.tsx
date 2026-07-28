@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAsync } from '../../hooks/useAsync'
 import { ToggleLeft, Search, Loader2, Settings2 } from 'lucide-react'
 import { Badge, Button, Input, Modal, Select, Toggle, useToast, LABEL } from '../../components/ui'
@@ -34,6 +34,12 @@ type ProvenanceResponse = {
   features: Record<string, ProvenanceEntry>
   grants: Record<string, GrantEntry>
   grant_types: string[]
+}
+
+type BuiltinTierComposition = {
+  slug: string
+  forced_on: string[]
+  forced_off: string[]
 }
 
 const EMPTY_PROVENANCE: ProvenanceResponse = {
@@ -111,6 +117,19 @@ export default function Features() {
     [],
     [],
   )
+  // Built-in tier compositions (forced_on/forced_off from TIER_REQUIRED_FEATURES),
+  // needed to detect a tier-forced-OFF flag — `provenance.features` only lists
+  // currently-ENABLED features, so it can never surface a forced-off entry.
+  const { data: builtinTiers } = useAsync(
+    () => api.get<{ builtin_products: BuiltinTierComposition[] }>('/admin/products')
+      .then((r) => r.builtin_products),
+    [],
+    [] as BuiltinTierComposition[],
+  )
+  const forcedOffByTier = useMemo(
+    () => new Map(builtinTiers.map((t) => [t.slug, new Set(t.forced_off)])),
+    [builtinTiers],
+  )
   const [betaModalOpen, setBetaModalOpen] = useState(false)
   const [grantsModalOpen, setGrantsModalOpen] = useState(false)
   const betaKeys = useMemo(
@@ -132,12 +151,36 @@ export default function Features() {
   // the filtered list.
   const selected = filtered.find((c) => c.id === selectedId) ?? filtered[0] ?? null
 
-  const { data: provenance, reload: reloadProvenance } = useAsync(
+  const { data: provenance, reload: reloadProvenance, setData: setProvenance } = useAsync(
     () => (selected
       ? api.get<ProvenanceResponse>(`/admin/company-features/${selected.id}/provenance`)
       : Promise.resolve(EMPTY_PROVENANCE)),
     [selected?.id],
     EMPTY_PROVENANCE,
+  )
+  // useAsync deliberately doesn't clear `data` on a reload (see its docstring)
+  // so a filter/search re-render doesn't flash empty — but that means
+  // switching the selected company here left `provenance` describing the
+  // PREVIOUS company until the new fetch landed: wrong badges, wrongly
+  // disabled toggles, and GrantsModal could PUT the old company's grant onto
+  // the new one. Clear explicitly on identity change instead of relying on
+  // the shared hook's reload semantics.
+  const prevSelectedIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (selected?.id !== prevSelectedIdRef.current) {
+      prevSelectedIdRef.current = selected?.id ?? null
+      setProvenance(EMPTY_PROVENANCE)
+    }
+  }, [selected?.id, setProvenance])
+  // Flags this tier forces OFF at read time — `provenance.features` only
+  // covers currently-ENABLED features, so a forced-off flag never appears
+  // there and `tierForced` below must be computed from this set too, or the
+  // toggle stays switchable and turning it "on" silently does nothing.
+  const selectedForcedOff = useMemo(
+    () => (provenance.plan.kind === 'builtin' && provenance.plan.slug
+      ? forcedOffByTier.get(provenance.plan.slug) ?? new Set<string>()
+      : new Set<string>()),
+    [provenance.plan, forcedOffByTier],
   )
   // Everything enabled that the plan itself doesn't grant — a real add-on
   // purchase, a custom product, a manual toggle, or unexplained history.
@@ -158,6 +201,9 @@ export default function Features() {
       setCompanies((prev) =>
         prev.map((c) => (c.id === companyId ? { ...c, enabled_features: res.enabled_features } : c))
       )
+      if (companyId === selected?.id) {
+        await reloadProvenance()
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Toggle failed')
     } finally {
@@ -326,12 +372,18 @@ export default function Features() {
                       // turning one OFF (remediation) always stays live.
                       const lockedOn = isBeta && !on && !selected.is_test
                       const prov = on ? provenance.features[key] : undefined
+                      const forcedOff = !on && selectedForcedOff.has(key)
                       const provLabel = prov ? provenanceLabel(prov) : undefined
-                      const provHint = prov ? PROVENANCE_META[prov.bucket].hint : undefined
-                      // A tier-forced flag is re-forced by merge_company_features on
-                      // every read regardless of what's stored — toggling it here is
-                      // a no-op at read time, so don't offer a toggle that lies.
-                      const tierForced = prov?.bucket === 'tier_forced'
+                      const provHint = prov
+                        ? PROVENANCE_META[prov.bucket].hint
+                        : forcedOff
+                          ? 'Always off for this tier — toggling here has no effect at read time.'
+                          : undefined
+                      // A tier-forced flag (on OR off) is re-forced by
+                      // merge_company_features on every read regardless of
+                      // what's stored — toggling it here is a no-op at read
+                      // time, so don't offer a toggle that lies.
+                      const tierForced = prov?.bucket === 'tier_forced' || forcedOff
                       const title = lockedOn
                         ? `${FEATURE_LABELS[key]} — beta, test accounts only`
                         : provHint
@@ -419,7 +471,7 @@ function GrantsModal({
     try {
       await api.put(`/admin/company-features/${company.id}/grants/${key}`, {
         grant_type: draft.grant_type,
-        note: draft.note.trim() || null,
+        note: (draft.note ?? '').trim() || null,
       })
       await onSaved()
       toast(`${FEATURE_LABELS[key] ?? key} classified as ${GRANT_TYPE_LABELS[draft.grant_type] ?? draft.grant_type}`, 'success')
@@ -450,12 +502,18 @@ function GrantsModal({
                 options={typeOptions}
                 value={draft.grant_type}
                 placeholder="Unclassified"
-                onChange={(e) => setDrafts((d) => ({ ...d, [key]: { ...d[key], grant_type: e.target.value } }))}
+                onChange={(e) => setDrafts((d) => ({
+                  ...d,
+                  [key]: { ...(d[key] ?? { grant_type: '', note: '' }), grant_type: e.target.value },
+                }))}
               />
               <Input
                 label="Note"
                 value={draft.note}
-                onChange={(e) => setDrafts((d) => ({ ...d, [key]: { ...d[key], note: e.target.value } }))}
+                onChange={(e) => setDrafts((d) => ({
+                  ...d,
+                  [key]: { ...(d[key] ?? { grant_type: '', note: '' }), note: e.target.value },
+                }))}
                 placeholder="Why / context"
               />
               <Button size="sm" disabled={saving === key || !draft.grant_type} onClick={() => save(key)}>

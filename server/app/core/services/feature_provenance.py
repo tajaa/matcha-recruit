@@ -70,6 +70,16 @@ async def record_feature_changes(
     observing. Callers should still call this INSIDE the same transaction as
     the write when one is already open, so a rolled-back write doesn't leave
     an orphaned audit row.
+
+    The insert runs inside its OWN `conn.transaction()` — asyncpg nests that
+    into a SAVEPOINT when a transaction is already open (the normal caller
+    shape here). Without it, an insert failure (e.g. this backend deployed
+    ahead of migration `feataudit01`, so `company_feature_audit_log` doesn't
+    exist yet) leaves the whole outer transaction aborted; the caller's own
+    try/except-log around this function still swallows the exception, but by
+    then Postgres has already turned the caller's eventual `COMMIT` into a
+    silent `ROLLBACK` — the enabled_features write disappears along with the
+    audit row. The savepoint scopes the failure to just this insert.
     """
     if source not in VALID_SOURCES:
         logger.error("record_feature_changes: unknown source %r, skipping audit", source)
@@ -82,14 +92,15 @@ async def record_feature_changes(
         ]
         if not changed:
             return
-        await conn.executemany(
-            """
-            INSERT INTO company_feature_audit_log
-                (company_id, feature, old_value, new_value, source, actor_user_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            """,
-            [(company_id, key, old, new, source, actor_user_id) for key, old, new in changed],
-        )
+        async with conn.transaction():
+            await conn.executemany(
+                """
+                INSERT INTO company_feature_audit_log
+                    (company_id, feature, old_value, new_value, source, actor_user_id)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                [(company_id, key, old, new, source, actor_user_id) for key, old, new in changed],
+            )
     except Exception:
         logger.exception(
             "record_feature_changes failed for company=%s source=%s (write itself is unaffected)",

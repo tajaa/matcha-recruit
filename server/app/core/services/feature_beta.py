@@ -32,13 +32,23 @@ _table_exists_cache: Optional[bool] = None
 
 
 async def _overrides_table_exists(conn) -> bool:
+    """Only the positive result is cached — migrations don't get un-applied,
+    so once true it's true forever. A negative result is NOT cached: caching
+    it would freeze a process that probed before the migration landed into
+    ignoring every override row until restart, silently no-op'ing
+    `PATCH /admin/feature-flags` even though it still returns 200. The catalog
+    lookup is cheap enough to repeat until the table shows up.
+    """
     global _table_exists_cache
-    if _table_exists_cache is None:
-        _table_exists_cache = bool(await conn.fetchval(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = 'feature_beta_overrides'"
-        ))
-    return _table_exists_cache
+    if _table_exists_cache:
+        return True
+    exists = bool(await conn.fetchval(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_name = 'feature_beta_overrides'"
+    ))
+    if exists:
+        _table_exists_cache = True
+    return exists
 
 
 async def load_beta_features(conn) -> frozenset[str]:
