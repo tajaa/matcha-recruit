@@ -7,6 +7,8 @@
  * Install once at app boot via `installErrorReporter()`.
  */
 
+// Deliberately duplicates client.ts API_BASE — importing it back would create a
+// module cycle (client.ts imports this file at line 2), with a TDZ hazard.
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 interface ClientErrorPayload {
