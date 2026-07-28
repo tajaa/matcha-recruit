@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { useMe } from './useMe'
-import { ensureFreshToken, API_BASE } from '../api/client'
+import { authStreamHeaders, API_BASE } from '../api/client'
 // Sections that use localStorage-based since timestamps
 type TimestampSection = 'ir' | 'er' | 'escalations'
 // All badge sections
@@ -46,11 +46,11 @@ export function useSidebarBadges() {
     if (sinceEsc) params.set('since_escalations', sinceEsc)
 
     try {
-      const token = await ensureFreshToken()
-      if (!token) return
-      const res = await fetch(`${API_BASE}/dashboard/sidebar-badges?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
+      // Raw fetch stays: api.get would report every transient 5xx of a 60s
+      // poll to /client-errors.
+      const headers = await authStreamHeaders()
+      if (!headers.Authorization) return
+      const res = await fetch(`${API_BASE}/dashboard/sidebar-badges?${params}`, { headers })
       if (res.ok) {
         const data = await res.json()
         setBadges({

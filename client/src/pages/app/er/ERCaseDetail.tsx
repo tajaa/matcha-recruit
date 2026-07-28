@@ -24,7 +24,7 @@ import {
   type TimelineAnalysisResponse,
   type ShareLink,
 } from '../../../types/er'
-import { api, ensureFreshToken } from '../../../api/client'
+import { api } from '../../../api/client'
 
 const statusVariant: Record<string, BadgeVariant> = {
   open: 'warning',
@@ -102,24 +102,11 @@ export default function ERCaseDetail() {
     if (!exportPassword.trim()) return
     setExporting(true)
     try {
-      const BASE = import.meta.env.VITE_API_URL ?? '/api'
-      const token = await ensureFreshToken()
-      const res = await fetch(`${BASE}/er/cases/${caseId}/export`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ password: exportPassword }),
-      })
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${case_?.case_number ?? 'case'}-export.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
+      await api.downloadPost(
+        `/er/cases/${caseId}/export`,
+        { password: exportPassword },
+        `${case_?.case_number ?? 'case'}-export.pdf`,
+      )
       setExportPassword('')
     } catch { /* error handled silently */ } finally {
       setExporting(false)

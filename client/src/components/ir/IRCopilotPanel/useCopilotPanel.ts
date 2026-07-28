@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type CopilotCard, type AcceptPayload } from '../IRCopilotCard'
-import { api, ensureFreshToken, API_BASE } from '../../../api/client'
+import { api, authStreamHeaders, API_BASE } from '../../../api/client'
 import { consumeSSE } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
@@ -139,13 +139,11 @@ export function useCopilotPanel({
     setStreaming(true)
     setError(null)
     try {
-      const token = await ensureFreshToken()
+      // Raw fetch, not postSSE: these sites report failures to client-errors
+      // with the response text — postSSE would swallow that.
       const res = await fetch(`${API_BASE}/ir/incidents/${incidentId}/copilot/stream`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ message: userMessage }),
       })
       if (!res.ok || !res.body) {
@@ -248,7 +246,6 @@ export function useCopilotPanel({
     setBusyStage('Starting…')
     setError(null)
     try {
-      const token = await ensureFreshToken()
       const body: Record<string, unknown> = { message_id: messageId, card_id: cardId }
       if (payload?.selected_value !== undefined) body.selected_value = payload.selected_value
       if (payload?.numeric_value !== undefined) body.numeric_value = payload.numeric_value
@@ -256,10 +253,7 @@ export function useCopilotPanel({
       if (payload?.notes !== undefined) body.notes = payload.notes
       const res = await fetch(`${API_BASE}/ir/incidents/${incidentId}/copilot/accept`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: await authStreamHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       })
       if (!res.ok || !res.body) {

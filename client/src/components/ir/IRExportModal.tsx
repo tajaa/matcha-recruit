@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileSpreadsheet, FileText } from 'lucide-react'
-import { api, ensureFreshToken } from '../../api/client'
+import { api } from '../../api/client'
 import { Button, Input, Modal, Select } from '../ui'
 import { INCIDENT_TYPE_OPTIONS } from '../../types/ir'
 
@@ -101,26 +101,8 @@ export function IRExportModal({ open, onClose }: Props) {
       if (status) params.set('status', status)
       if (locationId) params.set('location_id', locationId)
 
-      const base = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
-      const token = await ensureFreshToken()
-      const res = await fetch(`${base}/ir/incidents/export?${params.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      })
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        throw new Error(text || `Export failed (${res.status})`)
-      }
-
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `incidents-${stamp}.${format}`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      await api.download(`/ir/incidents/export?${params.toString()}`, `incidents-${stamp}.${format}`)
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Export failed')
