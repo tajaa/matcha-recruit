@@ -1,4 +1,4 @@
-import { BONE, DISPLAY, NOIR } from "./theme";
+import { BONE, NOIR } from "./theme";
 import { CONTAINER, EYEBROW, EYEBROW_END, SECTION_Y } from "./layout";
 import { Reveal } from "./PageChrome";
 
@@ -23,7 +23,7 @@ export function Manifesto() {
           <p
             className="mt-10 tracking-[-0.02em]"
             style={{
-              fontFamily: DISPLAY,
+              fontFamily: "var(--font-lite)",
               fontWeight: 300,
               lineHeight: 1.04,
               fontSize: "clamp(2rem, 5.5vw, 4.75rem)",

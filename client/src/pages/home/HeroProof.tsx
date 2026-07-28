@@ -1,5 +1,5 @@
 import { HERO_PROOF, type ProofItem } from "./data";
-import { ASH, BONE, DISPLAY, LEAF, LINE_D } from "./theme";
+import { ASH, BONE, LEAF } from "./theme";
 import { EYEBROW } from "./layout";
 
 /**
@@ -23,10 +23,7 @@ export function HeroProof({
   if (HERO_PROOF.length === 0) return null;
 
   return (
-    <div
-      className={`border-t pt-5 ${className}`}
-      style={{ borderColor: LINE_D, ...style }}
-    >
+    <div className={`pt-5 ${className}`} style={style}>
       <ul className="flex flex-wrap items-center gap-x-8 gap-y-3 sm:gap-x-12">
         {HERO_PROOF.map((item, i) => (
           // items-start, not items-center: a claim that wraps to two lines on a
@@ -46,7 +43,7 @@ function ProofEntry({ item }: { item: ProofItem }) {
       <>
         <span
           className="text-[1.6rem] leading-none tracking-[-0.02em] tabular-nums"
-          style={{ fontFamily: DISPLAY, fontWeight: 400, color: BONE }}
+          style={{ fontFamily: "var(--font-lite)", fontWeight: 400, color: BONE }}
         >
           {item.value}
         </span>

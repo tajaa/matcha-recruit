@@ -1,4 +1,4 @@
-import { ASH, BONE, DISPLAY, LEAF, NOIR } from "./theme";
+import { ASH, BONE, LEAF, NOIR } from "./theme";
 import { CONTAINER, SECTION_Y_LG } from "./layout";
 import { Reveal } from "./PageChrome";
 
@@ -9,17 +9,14 @@ export function CTABand({ onDemoClick }: { onDemoClick: () => void }) {
         <h2
           className="tracking-[-0.02em]"
           style={{
-            fontFamily: DISPLAY,
+            fontFamily: "var(--font-lite)",
             fontWeight: 300,
             lineHeight: 0.92,
             fontSize: "clamp(2.75rem, 9vw, 8rem)",
           }}
         >
           Find your{" "}
-          {/* Was `color: MATCHA` — an alias for BONE, so the closing CTA's
-              emphasis rendered as plain body colour. LEAF is the accent the
-              markup was reaching for, and it matches the hero's "people". */}
-          <span style={{ color: LEAF, fontStyle: "italic" }}>
+          <span style={{ fontStyle: "italic" }}>
             starting line.
           </span>
         </h2>

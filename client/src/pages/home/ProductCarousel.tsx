@@ -196,7 +196,7 @@ export function ProductCarousel() {
                     exit="exit"
                     transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
                   >
-                    <Instrument />
+                    <Instrument numberFont="var(--font-lite)" />
                   </motion.div>
                 </AnimatePresence>
               </div>

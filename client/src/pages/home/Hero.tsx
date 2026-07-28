@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
-import { AMBER, ASH, BONE, DISPLAY, LEAF, LINE_D } from "./theme";
+import { ASH } from "./theme";
 import { CONTAINER } from "./layout";
-import { useReducedMotion } from "./instruments/shared";
 import { StartCapture } from "./StartCapture";
 import { HeroProof } from "./HeroProof";
 
@@ -27,29 +25,7 @@ const BEAT = {
   proof: 240,
 } as const;
 
-/**
- * The one editorial flourish that survives, because it is LCP-safe: the two
- * accent words paint in bone with the rest of the headline (so the LCP text is
- * complete at t=0) and only their HUE moves afterwards. No layout, no opacity.
- */
-const ACCENT_SETTLE_MS = 200;
-
 export function Hero() {
-  const reduceMotion = useReducedMotion();
-  const [accented, setAccented] = useState(reduceMotion);
-
-  useEffect(() => {
-    if (reduceMotion) return setAccented(true);
-    const t = window.setTimeout(() => setAccented(true), ACCENT_SETTLE_MS);
-    return () => window.clearTimeout(t);
-  }, [reduceMotion]);
-
-  const accent = (color: string): React.CSSProperties => ({
-    color: accented ? color : BONE,
-    fontStyle: "italic",
-    transition: reduceMotion ? undefined : "color 600ms cubic-bezier(0.16,1,0.3,1)",
-  });
-
   return (
     // NO viewport-height floor. 100svh, then 88svh, both forced dead space under
     // the proof strip AND pushed the showcase — the strongest asset on the page,
@@ -111,10 +87,10 @@ export function Hero() {
             headline by 35% at one pixel of resize. */}
         <h1
           className="tracking-[-0.02em] text-[clamp(2.4rem,5.6vw,5rem)] max-w-[19ch] sm:max-w-none"
-          style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.02 }}
+          style={{ fontFamily: "var(--font-lite)", fontWeight: 300, lineHeight: 1.02 }}
         >
-          We run the whole <span style={accent(AMBER)}>risk</span> &amp;{" "}
-          <span style={accent(LEAF)}>people</span> function.
+          We run the whole <span style={{ fontStyle: "italic" }}>risk</span> &amp;{" "}
+          <span style={{ fontStyle: "italic" }}>people</span> function.
         </h1>
 
         {/* Deck row — subhead left, conversion right. `md:` is the band the
@@ -125,7 +101,7 @@ export function Hero() {
           <p
             className="home-fade-fast max-w-2xl text-[1.25rem] sm:text-[1.6rem] tracking-[-0.011em]"
             style={{
-              fontFamily: DISPLAY,
+              fontFamily: "var(--font-lite)",
               fontWeight: 300,
               lineHeight: 1.42,
               animationDelay: `${BEAT.subhead}ms`,
@@ -152,12 +128,6 @@ export function Hero() {
           style={{ animationDelay: `${BEAT.proof}ms` }}
         />
       </div>
-
-      {/* The animated chevron that used to sit here is gone with the viewport
-          floor that created the room for it. It cost ~72px of fold to say
-          "there is more below" — which a half-visible product showcase says
-          better, and for free. */}
-      <div aria-hidden style={{ height: 1, backgroundColor: LINE_D }} />
     </section>
   );
 }

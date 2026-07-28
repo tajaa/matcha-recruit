@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { PRODUCTS } from "./data";
-import { ASH, BONE, DISPLAY, LINE_D, NOIR } from "./theme";
+import { ASH, BONE, LINE_D, NOIR } from "./theme";
 import { CONTAINER, EYEBROW, EYEBROW_END, SECTION_Y } from "./layout";
 import { Reveal } from "./PageChrome";
 
@@ -49,7 +49,7 @@ export function ProductIndex() {
                   <h3
                     className="tracking-[-0.02em] transition-transform duration-300 group-hover:translate-x-2"
                     style={{
-                      fontFamily: DISPLAY,
+                      fontFamily: "var(--font-lite)",
                       fontWeight: 400,
                       lineHeight: 0.95,
                       fontSize: "clamp(2.25rem, 7vw, 5.5rem)",
