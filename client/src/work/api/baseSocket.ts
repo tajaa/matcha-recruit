@@ -121,6 +121,8 @@ export abstract class BaseSocket {
       clearTimeout(this.reconnectTimeout)
       this.reconnectTimeout = null
     }
+    // Raw read, not ensureFreshToken(): connect() must stay sync — the
+    // WebSocket constructor call below can't await a refresh.
     const token = localStorage.getItem('matcha_access_token')
     if (!token) return
 
@@ -224,6 +226,8 @@ export abstract class BaseSocket {
   // already triggered logout — either way, stop the loop.
   private async _reconnectAfterAuthFailure() {
     if (this._closed) return
+    // Raw read for a before/after diff around the ensureFreshToken() call
+    // below — the point of this read is to compare, not to attach a header.
     const before = localStorage.getItem('matcha_access_token')
     const { ensureFreshToken } = await import('../../api/client')
     const after = await ensureFreshToken()

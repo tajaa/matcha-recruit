@@ -15,3 +15,8 @@ export * from './regulatory'
 export * from './payer'
 export * from './keyCoverage'
 export * from './admin'
+// Labels moved to data/complianceLabels.ts (not an api/ concern) but stay
+// re-exported here — the pre-flatten barrel exported them via
+// `./compliance/labels`, and this comment's "every symbol preserved" claim
+// depends on it.
+export { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../data/complianceLabels'

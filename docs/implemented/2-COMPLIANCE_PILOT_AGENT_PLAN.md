@@ -1,10 +1,7 @@
 # Agentic Compliance Pilot — Huume-style loop in the Compliance Studio
 
-> **Status (verified 2026-07-26): NOT IMPLEMENTED.** `server/app/core/services/compliance_pilot.py`
-> is still one flat ~34KB file — no `compliance_pilot/` package, and no
-> `compilot02_agent_confirm` migration exists. Build order: zero conflicts with any other
-> pending plan (writes nothing under `server/app/matcha/`; Huume is a read-only structural
-> template), self-contained, best leverage-per-effort — can start any time.
+> **Status (2026-07-27): IMPLEMENTED.** `server/app/core/services/compliance_pilot/` is now a
+> package, and the `compilot02_agent_confirm` migration exists. See the plan phases below for the shape.
 
 ## Context
 

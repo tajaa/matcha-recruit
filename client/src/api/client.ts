@@ -1,7 +1,7 @@
 import { resetAuthCaches } from './authReset'
 import { reportApiError } from './errorReporter'
 
-export const API_BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
+export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 let _refreshing: Promise<boolean> | null = null
 
@@ -221,7 +221,13 @@ export const api = {
   },
   download: async (path: string, filename?: string) => {
     const res = await _fetchWithRefresh(`${API_BASE}${path}`)
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null)
+      const msg = errBody?.detail
+        ? typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
+        : `${res.status} ${res.statusText}`
+      throw new ApiError(msg, res.status, errBody)
+    }
     await _saveBlobResponse(res, path, filename)
   },
   // POST a JSON body and download the binary response as a file.

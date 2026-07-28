@@ -131,7 +131,8 @@ client/src/
   `api/client.ts` (trailing-slash-normalized). Never redeclare
   `import.meta.env.VITE_API_URL ?? '/api'`. Sanctioned duplicates: `api/errorReporter.ts`
   (importing `API_BASE` back would create a module cycle — `client.ts` imports
-  `errorReporter.ts`) and `cappe/` (own stack).
+  `errorReporter.ts`), `cappe/` (own stack), and `tellus/` (own stack — `client/tellus/`
+  is a second, separate Vite app under `client/`).
 - Don't construct raw `fetch()` calls in components unless you need streaming (SSE/WebSocket).
 - `SSEHttpError` (`api/sse.ts`) extends `ApiError` (`api/client.ts`) — `catch (e) { e instanceof ApiError }` now covers both transports.
 
@@ -196,7 +197,7 @@ tell that nothing was checked.
 
 ## Common pitfalls
 
-- **Don't read `matcha_access_token` directly from localStorage.** Use `api/client.ts` helpers; they handle the refresh dance. Three documented exceptions (each commented in place, none safely convertible): `utils/usageTracker.ts` (`flush()` — must stay sync for the pagehide beacon), `components/marketing/NewsletterSignup.tsx` and `components/landing/NewsletterHeroSection.tsx` (optional-auth `/newsletter/subscribe` — `ensureFreshToken` would bounce an anonymous visitor to `/login` on submit).
+- **Don't read `matcha_access_token` directly from localStorage.** Use `api/client.ts` helpers; they handle the refresh dance. Documented exceptions (each commented in place, none safely convertible): `utils/usageTracker.ts` (`flush()` — must stay sync for the pagehide beacon), `components/marketing/NewsletterSignup.tsx` and `components/landing/NewsletterHeroSection.tsx` (optional-auth `/newsletter/subscribe` — `ensureFreshToken` would bounce an anonymous visitor to `/login` on submit), `work/api/baseSocket.ts` (`connect()` — must stay sync, token rides the WS constructor's `Sec-WebSocket-Protocol` arg; `_reconnectAfterAuthFailure()` — before/after diff around its own `ensureFreshToken()` call), and `api/errorReporter.ts` (importing `client.ts` back would create the module cycle noted in that file).
 - **Don't bypass `<FeatureGate>` on a feature page.** URL-hopping is the failure mode it exists for.
 - **Don't put product-tier logic in pages.** Centralize in `utils/tier.ts` + `TenantSidebar.tsx`.
 - **Don't introduce a new CSS framework or design system.** Match Tailwind classes used in neighboring components.

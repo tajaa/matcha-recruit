@@ -9,7 +9,8 @@
 
 // Deliberately duplicates client.ts API_BASE — importing it back would create a
 // module cycle (client.ts imports this file at line 2), with a TDZ hazard.
-const BASE = import.meta.env.VITE_API_URL ?? '/api'
+// Keep the trailing-slash strip in sync with client.ts's API_BASE.
+const BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 interface ClientErrorPayload {
   kind: 'js_error' | 'promise_rejection' | 'api_error' | 'react_error'
@@ -75,6 +76,8 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
       }
     }
 
+    // Raw read, not ensureFreshToken(): importing client.ts here would create
+    // the module cycle noted at the top of this file.
     const token = localStorage.getItem('matcha_access_token')
     // Use raw fetch — must NOT go through api.request or we infinite loop on
     // any reporter-generated error.

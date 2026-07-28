@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { API_BASE, ApiError } from './client'
 
 describe('API_BASE', () => {
-  it('never ends with a slash (34 of 36 former redeclarations built double-slash URLs)', () => {
+  it('never ends with a slash (a trailing-slash VITE_API_URL would otherwise double-slash every request)', () => {
     expect(API_BASE.endsWith('/')).toBe(false)
     expect(API_BASE.length).toBeGreaterThan(0)
   })

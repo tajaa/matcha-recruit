@@ -336,7 +336,7 @@ Run `./scripts/seed-prod.sh sb553_components --dry-run --dev` first, always.
 
 ## 6. Frontend
 
-Real paths (the tab is under `components/`, not `pages/`; the api dir is doubly nested behind a barrel):
+Real paths (the tab is under `components/`, not `pages/`; the api dir is a flat barrel over `api/compliance/*.ts`):
 
 | File | Change |
 |---|---|
