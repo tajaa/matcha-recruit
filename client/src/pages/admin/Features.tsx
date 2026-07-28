@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useAsync } from '../../hooks/useAsync'
-import { ToggleLeft, Search, Loader2 } from 'lucide-react'
-import { Badge, Toggle, LABEL } from '../../components/ui'
+import { ToggleLeft, Search, Loader2, Settings2 } from 'lucide-react'
+import { Badge, Button, Input, Modal, Select, Toggle, useToast, LABEL } from '../../components/ui'
 import { api } from '../../api/client'
 import { FEATURE_GROUPS, FEATURE_LABELS, FEATURE_KEYS } from '../../data/featureCatalog'
 
@@ -20,20 +20,32 @@ type FeatureFlagStatus = {
 }
 
 type ProvenanceBucket =
-  | 'tier_forced' | 'addon' | 'custom_product' | 'paid_gate' | 'tier_preset' | 'audit' | 'unknown'
+  | 'tier_forced' | 'addon' | 'custom_product' | 'paid_gate' | 'tier_preset' | 'audit' | 'admin_grant'
 
-type ProvenanceEntry = { bucket: ProvenanceBucket; detail: unknown }
+type AuditDetail = { source: string; actor_user_id: string | null; created_at: string }
+type ProvenanceEntry = { bucket: ProvenanceBucket; detail: AuditDetail | string | null }
 type PlanInfo = { kind: 'builtin' | 'custom_product' | 'unknown'; slug: string | null; label: string }
 type AddonInfo = { key: string; name: string; feature: string }
+type GrantEntry = { grant_type: string; note: string | null; updated_at: string }
 type ProvenanceResponse = {
   company_id: string
   plan: PlanInfo
   addons: AddonInfo[]
   features: Record<string, ProvenanceEntry>
+  grants: Record<string, GrantEntry>
+  grant_types: string[]
 }
 
 const EMPTY_PROVENANCE: ProvenanceResponse = {
   company_id: '', plan: { kind: 'unknown', slug: null, label: '—' }, addons: [], features: {},
+  grants: {}, grant_types: [],
+}
+
+const GRANT_TYPE_LABELS: Record<string, string> = {
+  comped: 'Comped',
+  invoiced: 'Invoiced',
+  trial: 'Trial',
+  internal: 'Internal',
 }
 
 const PLAN_BADGE_VARIANT: Record<PlanInfo['kind'], 'success' | 'neutral' | 'warning'> = {
@@ -50,15 +62,38 @@ const PLAN_BADGE_VARIANT: Record<PlanInfo['kind'], 'success' | 'neutral' | 'warn
 const PLAN_BUCKETS = new Set<ProvenanceBucket>(['tier_forced', 'paid_gate', 'tier_preset'])
 
 // Label + tooltip hint per bucket — see server feature_provenance.py for the
-// classification rules these summarize.
+// classification rules these summarize. `audit` is a placeholder — its real
+// label is derived per-row from detail.source (see auditLabel below), since
+// an admin_toggle audit row reads as "Admin" but a stripe_webhook one reads
+// as "Stripe".
 const PROVENANCE_META: Record<ProvenanceBucket, { label: string; hint: string }> = {
   tier_forced: { label: 'Bundle', hint: 'Always on for this tier — toggling here has no effect at read time.' },
   addon: { label: 'Add-on', hint: 'Granted by a purchased add-on subscription.' },
   custom_product: { label: 'Product', hint: 'Granted by an admin-composed custom product.' },
   paid_gate: { label: 'Paid gate', hint: "This tier's Stripe checkout gate." },
   tier_preset: { label: 'Signup', hint: 'Granted at signup for this tier — admin-toggleable.' },
-  audit: { label: 'Manual', hint: 'Traced to a specific admin/webhook write — see the audit log.' },
-  unknown: { label: 'Unknown origin', hint: 'Enabled before the audit log existed, or by an untracked path.' },
+  audit: { label: 'Admin', hint: 'Traced to a specific write — see the audit log.' },
+  admin_grant: {
+    label: 'Admin',
+    hint: 'No plan, add-on, or product explains this — an admin (or broker, at creation) granted it directly. Actor is unrecorded (predates the write audit log). Use Manage to classify why.',
+  },
+}
+
+// `bucket: 'audit'` covers 4 sources with different meanings — an admin
+// manually flipping a toggle reads very differently from a Stripe webhook
+// write, even though both are "traced" in the strict sense.
+const AUDIT_SOURCE_LABELS: Record<string, string> = {
+  admin_toggle: 'Admin',
+  tier_change: 'Tier change',
+  product_sync: 'Product sync',
+  stripe_webhook: 'Stripe',
+}
+
+function provenanceLabel(entry: ProvenanceEntry): string {
+  if (entry.bucket === 'audit' && entry.detail && typeof entry.detail === 'object') {
+    return AUDIT_SOURCE_LABELS[entry.detail.source] ?? PROVENANCE_META.audit.label
+  }
+  return PROVENANCE_META[entry.bucket].label
 }
 
 function enabledCount(features: Record<string, boolean>) {
@@ -71,11 +106,13 @@ export default function Features() {
     [],
     [],
   )
-  const { data: flagStatuses } = useAsync(
+  const { data: flagStatuses, reload: reloadFlagStatuses } = useAsync(
     () => api.get<FeatureFlagStatus[]>('/admin/feature-flags'),
     [],
     [],
   )
+  const [betaModalOpen, setBetaModalOpen] = useState(false)
+  const [grantsModalOpen, setGrantsModalOpen] = useState(false)
   const betaKeys = useMemo(
     () => new Set(flagStatuses.filter((f) => f.is_beta).map((f) => f.key)),
     [flagStatuses]
@@ -95,7 +132,7 @@ export default function Features() {
   // the filtered list.
   const selected = filtered.find((c) => c.id === selectedId) ?? filtered[0] ?? null
 
-  const { data: provenance } = useAsync(
+  const { data: provenance, reload: reloadProvenance } = useAsync(
     () => (selected
       ? api.get<ProvenanceResponse>(`/admin/company-features/${selected.id}/provenance`)
       : Promise.resolve(EMPTY_PROVENANCE)),
@@ -134,7 +171,10 @@ export default function Features() {
       <div className="flex w-72 shrink-0 flex-col border-r border-white/[0.06]">
         <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-3">
           <ToggleLeft className="h-4 w-4 shrink-0 text-emerald-400" />
-          <h1 className="text-sm font-semibold text-zinc-100">Features</h1>
+          <h1 className="flex-1 text-sm font-semibold text-zinc-100">Features</h1>
+          <Button size="sm" variant="secondary" onClick={() => setBetaModalOpen(true)}>
+            <Settings2 className="h-3.5 w-3.5" /> Manage beta
+          </Button>
         </div>
         <div className="border-b border-white/[0.06] p-2">
           <div className="relative">
@@ -221,16 +261,26 @@ export default function Features() {
                 {outsidePlanEntries.length === 0 ? (
                   <span className="text-[11px] text-zinc-600">Nothing enabled outside the plan</span>
                 ) : (
-                  outsidePlanEntries.map(([key, p]) => (
-                    <span
-                      key={key}
-                      title={PROVENANCE_META[p.bucket].hint}
-                      className="flex items-center gap-1 rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300"
-                    >
-                      {FEATURE_LABELS[key] ?? key}
-                      <span className="text-zinc-600">· {PROVENANCE_META[p.bucket].label}</span>
-                    </span>
-                  ))
+                  outsidePlanEntries.map(([key, p]) => {
+                    const grant = provenance.grants[key]
+                    return (
+                      <span
+                        key={key}
+                        title={grant?.note || PROVENANCE_META[p.bucket].hint}
+                        className="flex items-center gap-1 rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300"
+                      >
+                        {FEATURE_LABELS[key] ?? key}
+                        <span className="text-zinc-600">
+                          · {grant ? GRANT_TYPE_LABELS[grant.grant_type] ?? grant.grant_type : provenanceLabel(p)}
+                        </span>
+                      </span>
+                    )
+                  })
+                )}
+                {outsidePlanEntries.length > 0 && (
+                  <Button size="sm" variant="secondary" onClick={() => setGrantsModalOpen(true)}>
+                    Manage
+                  </Button>
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -256,11 +306,11 @@ export default function Features() {
                 )}
               </div>
             </div>
-            {Object.values(provenance.features).some((p) => p.bucket === 'unknown') && (
+            {Object.values(provenance.features).some((p) => p.bucket === 'admin_grant') && (
               <p className="border-b border-white/[0.06] bg-white/[0.02] px-4 py-1.5 text-[11px] text-zinc-500">
-                Some enabled features show "Unknown origin" — they predate the write audit log
-                (feataudit01) or came from a path it doesn't yet cover. That's expected for
-                older grants, not a bug.
+                Some enabled features are tagged "Admin" with no recorded actor — they predate
+                the write audit log (feataudit01) or came from a path it doesn't yet cover.
+                Use Manage above to classify why (comped, invoiced, trial, internal).
               </p>
             )}
             <div className="flex-1 space-y-5 overflow-y-auto p-4">
@@ -276,15 +326,16 @@ export default function Features() {
                       // turning one OFF (remediation) always stays live.
                       const lockedOn = isBeta && !on && !selected.is_test
                       const prov = on ? provenance.features[key] : undefined
-                      const provMeta = prov ? PROVENANCE_META[prov.bucket] : undefined
+                      const provLabel = prov ? provenanceLabel(prov) : undefined
+                      const provHint = prov ? PROVENANCE_META[prov.bucket].hint : undefined
                       // A tier-forced flag is re-forced by merge_company_features on
                       // every read regardless of what's stored — toggling it here is
                       // a no-op at read time, so don't offer a toggle that lies.
                       const tierForced = prov?.bucket === 'tier_forced'
                       const title = lockedOn
                         ? `${FEATURE_LABELS[key]} — beta, test accounts only`
-                        : provMeta
-                          ? `${FEATURE_LABELS[key]} — ${provMeta.hint}`
+                        : provHint
+                          ? `${FEATURE_LABELS[key]} — ${provHint}`
                           : FEATURE_LABELS[key]
                       return (
                         <div key={key} className="flex items-center gap-3">
@@ -296,8 +347,8 @@ export default function Features() {
                             {isBeta && (
                               <Badge variant="warning" className="shrink-0">Beta</Badge>
                             )}
-                            {provMeta && (
-                              <Badge variant="neutral" className="shrink-0">{provMeta.label}</Badge>
+                            {provLabel && (
+                              <Badge variant="neutral" className="shrink-0">{provLabel}</Badge>
                             )}
                           </span>
                           <Toggle
@@ -316,6 +367,173 @@ export default function Features() {
           </>
         )}
       </div>
+
+      {grantsModalOpen && selected && (
+        <GrantsModal
+          company={selected}
+          entries={outsidePlanEntries}
+          provenance={provenance}
+          onClose={() => setGrantsModalOpen(false)}
+          onSaved={reloadProvenance}
+        />
+      )}
+      {betaModalOpen && (
+        <BetaManageModal
+          flagStatuses={flagStatuses}
+          onClose={() => setBetaModalOpen(false)}
+          onSaved={reloadFlagStatuses}
+        />
+      )}
     </div>
+  )
+}
+
+function GrantsModal({
+  company, entries, provenance, onClose, onSaved,
+}: {
+  company: CompanyFeatures
+  entries: [string, ProvenanceEntry][]
+  provenance: ProvenanceResponse
+  onClose: () => void
+  onSaved: () => Promise<void>
+}) {
+  const { toast } = useToast()
+  const [drafts, setDrafts] = useState<Record<string, { grant_type: string; note: string }>>(() =>
+    Object.fromEntries(
+      entries.map(([key]) => {
+        const grant = provenance.grants[key]
+        return [key, { grant_type: grant?.grant_type ?? '', note: grant?.note ?? '' }]
+      })
+    )
+  )
+  const [saving, setSaving] = useState<string | null>(null)
+
+  const typeOptions = provenance.grant_types.map((t) => ({
+    value: t, label: GRANT_TYPE_LABELS[t] ?? t,
+  }))
+
+  async function save(key: string) {
+    const draft = drafts[key]
+    if (!draft?.grant_type) return
+    setSaving(key)
+    try {
+      await api.put(`/admin/company-features/${company.id}/grants/${key}`, {
+        grant_type: draft.grant_type,
+        note: draft.note.trim() || null,
+      })
+      await onSaved()
+      toast(`${FEATURE_LABELS[key] ?? key} classified as ${GRANT_TYPE_LABELS[draft.grant_type] ?? draft.grant_type}`, 'success')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Save failed', 'error')
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Manage grants — ${company.company_name}`} width="lg">
+      <div className="space-y-4">
+        <p className="text-xs text-zinc-500">
+          Classify why each out-of-plan feature was given — separate from provenance, which only
+          says where the flag came from.
+        </p>
+        {entries.map(([key, p]) => {
+          const draft = drafts[key] ?? { grant_type: '', note: '' }
+          return (
+            <div key={key} className="grid grid-cols-[1fr_140px_1fr_auto] items-end gap-2 border-b border-white/[0.06] pb-3">
+              <div className="text-[13px] text-zinc-300">
+                {FEATURE_LABELS[key] ?? key}
+                <p className="text-[11px] text-zinc-600">{provenanceLabel(p)}</p>
+              </div>
+              <Select
+                label="Type"
+                options={typeOptions}
+                value={draft.grant_type}
+                placeholder="Unclassified"
+                onChange={(e) => setDrafts((d) => ({ ...d, [key]: { ...d[key], grant_type: e.target.value } }))}
+              />
+              <Input
+                label="Note"
+                value={draft.note}
+                onChange={(e) => setDrafts((d) => ({ ...d, [key]: { ...d[key], note: e.target.value } }))}
+                placeholder="Why / context"
+              />
+              <Button size="sm" disabled={saving === key || !draft.grant_type} onClick={() => save(key)}>
+                {saving === key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+              </Button>
+            </div>
+          )
+        })}
+      </div>
+    </Modal>
+  )
+}
+
+function BetaManageModal({
+  flagStatuses, onClose, onSaved,
+}: {
+  flagStatuses: FeatureFlagStatus[]
+  onClose: () => void
+  onSaved: () => Promise<void>
+}) {
+  const { toast } = useToast()
+  const [toggling, setToggling] = useState<string | null>(null)
+  const byKey = useMemo(
+    () => Object.fromEntries(flagStatuses.map((f) => [f.key, f])),
+    [flagStatuses],
+  )
+
+  async function setBeta(key: string, isBeta: boolean) {
+    setToggling(key)
+    try {
+      await api.patch(`/admin/feature-flags/${key}`, { is_beta: isBeta })
+      await onSaved()
+      toast(`${FEATURE_LABELS[key] ?? key} moved to ${isBeta ? 'beta' : 'ready'}`, 'success')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Update failed', 'error')
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Manage beta status" width="lg">
+      <div className="max-h-[70vh] space-y-5 overflow-y-auto">
+        <p className="text-xs text-zinc-500">
+          A beta feature can only be enabled for test companies. Moving it to ready here writes
+          an admin override — no deploy needed; the code default in `feature_flags.BETA_FEATURES`
+          is unaffected.
+        </p>
+        {FEATURE_GROUPS.map((group) => (
+          <div key={group.label}>
+            <div className={`mb-2 ${LABEL}`}>{group.label}</div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-2">
+              {Object.keys(group.features).map((key) => {
+                const status = byKey[key]
+                if (!status) return null
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <span className="min-w-0 flex-1 truncate text-xs text-zinc-400" title={FEATURE_LABELS[key]}>
+                      {FEATURE_LABELS[key]}
+                      {status.is_beta && status.non_test_enabled_count > 0 && (
+                        <span className="ml-1.5 text-[10px] text-amber-400">
+                          ({status.non_test_enabled_count} non-test enabled)
+                        </span>
+                      )}
+                    </span>
+                    <Toggle
+                      checked={status.is_beta}
+                      disabled={toggling === key}
+                      onChange={(v) => setBeta(key, v)}
+                      size="sm"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Modal>
   )
 }
