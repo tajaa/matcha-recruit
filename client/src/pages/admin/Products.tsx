@@ -37,10 +37,24 @@ type Product = {
   tenants: { total: number; active: number }
 }
 
+type BuiltinTier = {
+  slug: string
+  label: string
+  blurb: string
+  signup_path: string | null
+  stripe_gate_flag: string | null
+  forced_on: string[]
+  forced_off: string[]
+  paid_gate: string[]
+  granted_at_signup: string[]
+  tenants: number
+}
+
 type ProductsResponse = {
   products: Product[]
   available_features: string[]
   pricing_models: PricingModel[]
+  builtin_products: BuiltinTier[]
 }
 
 const PRICING_OPTIONS = [
@@ -107,17 +121,20 @@ export default function Products() {
   const { data, loading, reload } = useAsync(
     () => api.get<ProductsResponse>('/admin/products'),
     [],
-    { products: [], available_features: [], pricing_models: [] } as ProductsResponse,
+    { products: [], available_features: [], pricing_models: [], builtin_products: [] } as ProductsResponse,
   )
   const { toast } = useToast()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedBuiltinSlug, setSelectedBuiltinSlug] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const products = data.products
+  const builtinProducts = data.builtin_products
   const selected = products.find((p) => p.id === selectedId) ?? null
+  const selectedBuiltin = builtinProducts.find((t) => t.slug === selectedBuiltinSlug) ?? null
   const isNew = draft !== null && selected === null
 
   const enabledFeatures = useMemo(
@@ -131,15 +148,24 @@ export default function Products() {
   const sellable = new Set(data.available_features)
 
   function startNew() {
+    setSelectedBuiltinSlug(null)
     setSelectedId(null)
     setDraft(emptyDraft())
     setError(null)
   }
 
   function startEdit(p: Product) {
+    setSelectedBuiltinSlug(null)
     setSelectedId(p.id)
     setDraft(toDraft(p))
     setError(null)
+  }
+
+  function selectBuiltin(slug: string) {
+    setSelectedId(null)
+    setDraft(null)
+    setError(null)
+    setSelectedBuiltinSlug(slug)
   }
 
   function toggleFeature(key: string, on: boolean) {
@@ -251,10 +277,36 @@ export default function Products() {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto">
+          {builtinProducts.length > 0 && (
+            <div className="border-b border-white/[0.06]">
+              <p className="px-3 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+                Built-in tiers
+              </p>
+              {builtinProducts.map((t) => (
+                <button
+                  key={t.slug}
+                  type="button"
+                  onClick={() => selectBuiltin(t.slug)}
+                  className={`flex w-full flex-col gap-0.5 border-l-2 px-3 py-2 text-left transition-colors ${
+                    selectedBuiltinSlug === t.slug ? 'border-emerald-400 bg-white/[0.05]' : 'border-transparent hover:bg-white/[0.03]'
+                  }`}
+                >
+                  <span className="truncate text-[13px] text-zinc-200">{t.label}</span>
+                  <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+                    <Badge variant="neutral">built-in</Badge>
+                    {t.tenants} tenant{t.tenants === 1 ? '' : 's'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="px-3 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+            Custom products
+          </p>
           {loading ? (
             <div className="p-3"><Loader2 className="h-4 w-4 animate-spin text-zinc-500" /></div>
           ) : products.length === 0 ? (
-            <p className="p-3 text-xs text-zinc-500">No products yet. Build one.</p>
+            <p className="p-3 text-xs text-zinc-500">No custom products yet. Build one.</p>
           ) : (
             products.map((p) => (
               <button
@@ -289,6 +341,8 @@ export default function Products() {
                 onSync={syncTenants}
                 onCopyLink={copyLink}
               />
+            ) : selectedBuiltin ? (
+              <BuiltinSummary tier={selectedBuiltin} />
             ) : (
               <p>Select a product, or build a new one.</p>
             )}
@@ -517,6 +571,84 @@ function ProductSummary({
       <p className="text-[11px] text-zinc-500">
         Feature grants are written at signup/payment. "Sync tenants" re-applies this product to
         companies already activated on it; pending (unpaid) companies are skipped.
+      </p>
+    </div>
+  )
+}
+
+function FeatureChipRow({ keys, emptyLabel }: { keys: string[]; emptyLabel: string }) {
+  if (keys.length === 0) {
+    return <p className="text-[11px] text-zinc-600">{emptyLabel}</p>
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {keys.map((f) => (
+        <span key={f} className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-400">
+          {FEATURE_LABELS[f] ?? f}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function BuiltinSummary({ tier }: { tier: BuiltinTier }) {
+  return (
+    <div className="w-full max-w-xl space-y-4 p-5 text-left">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-100">{tier.label}</h2>
+          <p className="text-xs text-zinc-500">{tier.blurb}</p>
+        </div>
+        <Badge variant="neutral">built-in</Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-[13px] text-zinc-300">
+        <div><span className="text-zinc-500">Tenants</span><br />{tier.tenants}</div>
+        {tier.signup_path && (
+          <div>
+            <span className="text-zinc-500">Signup link</span><br />
+            <span className="font-mono text-xs text-zinc-400">{tier.signup_path}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-emerald-500">
+            Always on — can't be removed
+          </p>
+          <FeatureChipRow keys={tier.forced_on} emptyLabel="Nothing forced on for this tier." />
+        </div>
+        {tier.forced_off.length > 0 && (
+          <div>
+            <p className="mb-1 text-[11px] uppercase tracking-wide text-red-400">
+              Blocked — overrides a stored "true"
+            </p>
+            <FeatureChipRow keys={tier.forced_off} emptyLabel="" />
+          </div>
+        )}
+        {tier.paid_gate.length > 0 && (
+          <div>
+            <p className="mb-1 text-[11px] uppercase tracking-wide text-amber-400">
+              Unlocked by Stripe checkout
+            </p>
+            <FeatureChipRow keys={tier.paid_gate} emptyLabel="" />
+          </div>
+        )}
+        <div>
+          <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+            Granted at signup — admin-toggleable afterward
+          </p>
+          <FeatureChipRow keys={tier.granted_at_signup} emptyLabel="Nothing else granted at signup." />
+        </div>
+      </div>
+
+      <p className="rounded border border-white/[0.06] bg-white/[0.02] px-3 py-2 text-[11px] text-zinc-500">
+        Code-managed, not editable here. To change what's "always on"/"blocked", edit{' '}
+        <span className="font-mono text-zinc-400">TIER_REQUIRED_FEATURES</span>; to change what's
+        granted at signup, edit <span className="font-mono text-zinc-400">TIER_SIGNUP_PRESETS</span> —
+        both in <span className="font-mono text-zinc-400">server/app/core/feature_flags.py</span>.
+        This slug can't be reused for a custom product (see <span className="font-mono text-zinc-400">RESERVED_SLUGS</span>).
       </p>
     </div>
   )

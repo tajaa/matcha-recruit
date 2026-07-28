@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../api/client'
+import { useAsync } from '../../../hooks/useAsync'
 import type { Registration, Charge } from './types'
 
-const TIER_OPTIONS = [
-  { value: 'resources_free', label: 'Free (Resources only)' },
-  { value: 'matcha_lite', label: 'Matcha Lite' },
-  { value: 'matcha_x', label: 'Matcha-X (mid tier — requires Stripe checkout to activate)' },
-  { value: 'matcha_compliance', label: 'Matcha Compliance (standalone — requires Stripe checkout or a signup link to activate)' },
-  { value: 'bespoke', label: 'Platform / Bespoke (full features)' },
-  { value: 'ir_only_self_serve', label: 'IR Cap (incidents + employees + discipline)' },
-]
+type BuiltinTierOption = { slug: string; label: string; blurb: string; stripe_gate_flag: string | null }
+
+// Sourced from GET /admin/products' `builtin_products` (feature_flags.py's
+// BUILTIN_TIER_META + BUILTIN_TIER_SLUGS) — was a fourth hardcoded copy of
+// tier labels that had drifted (missing matcha_lite_essentials entirely).
+function tierOptionLabel(t: BuiltinTierOption): string {
+  const gated = t.stripe_gate_flag
+    ? ' (requires Stripe checkout or a signup link to activate)'
+    : ''
+  return `${t.label}${gated} — ${t.blurb}`
+}
 
 export function LifecycleActions({
   companyId,
@@ -24,6 +28,11 @@ export function LifecycleActions({
   const [resetUrl, setResetUrl] = useState<string | null>(null)
   const [refundOpen, setRefundOpen] = useState(false)
   const [tierTarget, setTierTarget] = useState('')
+  const { data: tierOptions } = useAsync(
+    () => api.get<{ builtin_products: BuiltinTierOption[] }>('/admin/products').then((r) => r.builtin_products),
+    [],
+    [] as BuiltinTierOption[],
+  )
 
   async function withBusy(fn: () => Promise<void>) {
     if (busy) return
@@ -184,8 +193,8 @@ export function LifecycleActions({
             className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-zinc-500 disabled:opacity-40"
           >
             <option value="">Pick a tier…</option>
-            {TIER_OPTIONS.filter((t) => t.value !== registration.signup_source).map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
+            {tierOptions.filter((t) => t.slug !== registration.signup_source).map((t) => (
+              <option key={t.slug} value={t.slug}>{tierOptionLabel(t)}</option>
             ))}
           </select>
           <button
