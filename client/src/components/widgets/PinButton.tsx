@@ -1,6 +1,6 @@
 import { Pin, PinOff } from 'lucide-react'
 
-import type { ResourceKind } from '../../api/resourcePins'
+import type { ResourceKind } from '../../api/resources/resourcePins'
 import { usePinnedResources } from '../../hooks/usePinnedResources'
 
 /**

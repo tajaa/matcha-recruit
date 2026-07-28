@@ -7,7 +7,7 @@ import {
   addResourcePin,
   listResourcePins,
   removeResourcePin,
-} from '../api/resourcePins'
+} from '../api/resources/resourcePins'
 
 /**
  * Shared in-memory pin set across the whole app — multiple PinButtons +
