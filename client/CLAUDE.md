@@ -39,12 +39,14 @@ client/src/
 │   ├── types.ts             (was types/matchaWork)  data/projectTemplates
 │
 ├── ── MATCHA (main app) — everything below is the risk platform ──
-├── api/                     client.ts (THE http helper), errorReporter, authReset, resourcePins,
-│   │                        profileResume (shared w/ work); domain subfolders — one per
-│   │                        domain, named to match components/ and pages/app/:
-│   └── admin/ analysis-pilot/ billing/ broker/ compliance/ dashboard/ discipline/
-│       employees/ handbook-pilot/ labor/ legal-defense/ limit-adequacy/ matcha-x/
-│       portal/ property/ risk/ training/
+├── api/                     client.ts (THE http helper — exports api, ApiError, API_BASE,
+│   │                        ensureFreshToken, authStreamHeaders), errorReporter, authReset,
+│   │                        sse.ts (+ sse.test.ts, client.test.ts), profileResume (shared w/
+│   │                        work); domain subfolders — one per domain, named to match
+│   │                        components/ and pages/app/:
+│   └── admin/ analysis-pilot/ benefits/ billing/ broker/ broker-chat/ compliance/ dashboard/
+│       discipline/ employees/ handbook/ handbook-pilot/ labor/ legal-defense/
+│       limit-adequacy/ matcha-x/ portal/ property/ resources/ risk/ settings/ training/
 ├── components/
 │   ├── ui/                  Generic primitives (Button, Input, Modal, …) — the shared design system
 │   ├── sidebars/            AdminSidebar, BrokerSidebar, ClientSidebar (full platform),
@@ -106,6 +108,9 @@ client/src/
 - **New api client** goes in the app's `api/` (work/cappe) or a matcha `api/<domain>/` subfolder;
   `api/` root is cross-cutting infra only. Domain folder names match `components/`. Dir-name-
   repeats-filename (`api/discipline/discipline.ts`) is the convention, not an accident.
+  `api/compliance/index.ts` is the one intentional barrel (import path `api/compliance`).
+  `api/broker-chat/companyBrokerChat.ts` is a named exception to dir-name-repeats-filename —
+  disambiguates from the unrelated `api/broker/brokerChat.ts` (broker portal vs. company side).
 - **New page** goes in `pages/app/<domain>/` and is registered in `routes/AppRoutes.tsx`.
 
 ## Conventions
@@ -122,8 +127,13 @@ client/src/
 
 **API calls**:
 - Use the `api` helper from `api/client.ts` (`api.get<T>(path, opts?)`, `api.post`, `api.put`, `api.delete`, `api.upload`, `api.download`).
-- The base URL is `VITE_API_URL` env var, falls back to `/api`.
+- The base URL is `VITE_API_URL` env var, falls back to `/api`. `API_BASE` is exported from
+  `api/client.ts` (trailing-slash-normalized). Never redeclare
+  `import.meta.env.VITE_API_URL ?? '/api'`. Sanctioned duplicates: `api/errorReporter.ts`
+  (importing `API_BASE` back would create a module cycle — `client.ts` imports
+  `errorReporter.ts`) and `cappe/` (own stack).
 - Don't construct raw `fetch()` calls in components unless you need streaming (SSE/WebSocket).
+- `SSEHttpError` (`api/sse.ts`) extends `ApiError` (`api/client.ts`) — `catch (e) { e instanceof ApiError }` now covers both transports.
 
 **TypeScript**:
 - `strict: true` in `tsconfig.json`. No `any` in new code; use `unknown` and narrow.
@@ -186,7 +196,7 @@ tell that nothing was checked.
 
 ## Common pitfalls
 
-- **Don't read `matcha_access_token` directly from localStorage.** Use `api/client.ts` helpers; they handle the refresh dance.
+- **Don't read `matcha_access_token` directly from localStorage.** Use `api/client.ts` helpers; they handle the refresh dance. Three documented exceptions (each commented in place, none safely convertible): `utils/usageTracker.ts` (`flush()` — must stay sync for the pagehide beacon), `components/marketing/NewsletterSignup.tsx` and `components/landing/NewsletterHeroSection.tsx` (optional-auth `/newsletter/subscribe` — `ensureFreshToken` would bounce an anonymous visitor to `/login` on submit).
 - **Don't bypass `<FeatureGate>` on a feature page.** URL-hopping is the failure mode it exists for.
 - **Don't put product-tier logic in pages.** Centralize in `utils/tier.ts` + `TenantSidebar.tsx`.
 - **Don't introduce a new CSS framework or design system.** Match Tailwind classes used in neighboring components.
