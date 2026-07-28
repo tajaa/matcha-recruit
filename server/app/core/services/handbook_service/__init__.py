@@ -1008,7 +1008,7 @@ class HandbookService:
                 async with conn.transaction():
                     handbook = await conn.fetchrow(
                         """
-                        SELECT id, title, status, active_version
+                        SELECT id, title, status, active_version, source_type
                         FROM handbooks
                         WHERE id = $1 AND company_id = $2
                         """,
@@ -1018,18 +1018,31 @@ class HandbookService:
                         raise ValueError("Target handbook not found")
                     if handbook["status"] == "archived":
                         raise ValueError("Cannot amend an archived handbook")
+                    if handbook["source_type"] != "template":
+                        raise ValueError(
+                            "Cannot amend an uploaded handbook — its file_url is the "
+                            "uploaded document, not a section-generated cache"
+                        )
                     version_id = await HandbookService._get_active_version_id(
                         conn, handbook_id, handbook["active_version"]
                     )
                     if version_id is None:
                         raise ValueError("Target handbook has no active version")
 
-                    existing_keys: set[str] = {
+                    # Frozen snapshot of keys that already exist in the DB — decides
+                    # UPDATE-in-place vs. INSERT below. Deliberately NOT the same set
+                    # `all_keys` mutates: if a key this call just inserted were folded
+                    # back in, a second new section sharing that base key would match
+                    # it as "existing" and overwrite the row the first section just
+                    # created, instead of deduping to a sibling key like the
+                    # create_handbook_from_sections path does.
+                    original_keys: set[str] = {
                         r["section_key"] for r in await conn.fetch(
                             "SELECT section_key FROM handbook_sections WHERE handbook_version_id = $1",
                             version_id,
                         )
                     }
+                    all_keys: set[str] = set(original_keys)
                     next_order = await conn.fetchval(
                         "SELECT COALESCE(MAX(section_order), 0) FROM handbook_sections "
                         "WHERE handbook_version_id = $1",
@@ -1045,7 +1058,7 @@ class HandbookService:
                         ) or f"section_{n}"
                         title = str(section.get("title") or "Untitled Section")[:255]
                         content = str(section.get("content") or "")
-                        if base_key in existing_keys:
+                        if base_key in original_keys:
                             # In-place update — deliberately does not touch
                             # last_reviewed_at (resolve_change_request doesn't
                             # either; keep the active-version writers consistent).
@@ -1059,8 +1072,8 @@ class HandbookService:
                             )
                             updated.append({"section_key": base_key, "title": title})
                         else:
-                            key = _dedupe_section_key(base_key, existing_keys)
-                            existing_keys.add(key)
+                            key = _dedupe_section_key(base_key, all_keys)
+                            all_keys.add(key)
                             next_order += 1
                             await conn.execute(
                                 """
@@ -1078,11 +1091,14 @@ class HandbookService:
                             added.append({"section_key": key, "title": title})
 
                     # Content changed — bust the cached PDF, same as
-                    # update_handbook / resolve_change_request.
+                    # update_handbook / resolve_change_request. Safe
+                    # unconditionally here: the guard above already refused
+                    # any non-'template' handbook, so file_url/file_name is
+                    # always the generated-PDF cache, never an uploaded file.
                     await conn.execute(
-                        "UPDATE handbooks SET updated_at = NOW(), file_url = NULL, "
-                        "file_name = NULL WHERE id = $1",
-                        handbook_id,
+                        "UPDATE handbooks SET updated_at = NOW(), updated_by = $2, "
+                        "file_url = NULL, file_name = NULL WHERE id = $1",
+                        handbook_id, updated_by,
                     )
         except ValueError:
             raise

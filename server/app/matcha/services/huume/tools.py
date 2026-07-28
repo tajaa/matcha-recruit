@@ -361,7 +361,11 @@ TOOLS: tuple[HuumeTool, ...] = (
                     "Existing handbook id to amend INSTEAD of creating a new "
                     "draft handbook: matching sections update in place, new "
                     "ones append. Only pass an id the admin explicitly chose. "
-                    "Omit to create a new draft handbook."
+                    "Omit to create a new draft handbook. This edits a LIVE "
+                    "handbook and is NOT a one-shot action: the first call "
+                    "STAGES the amendment for review; you must call this tool "
+                    "again with the SAME target_handbook_id after the admin "
+                    "explicitly confirms before it actually applies."
                 ),
             ),
         },

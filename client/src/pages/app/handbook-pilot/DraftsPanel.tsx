@@ -29,7 +29,7 @@ export function DraftsPanel({ session, onChange }: { session: PilotSession; onCh
   useEffect(() => {
     if (!hasSectionDrafts || targets !== null) return
     handbooks.list()
-      .then((hs) => setTargets(hs.filter((h) => h.status !== 'archived')))
+      .then((hs) => setTargets(hs.filter((h) => h.status !== 'archived' && h.source_type === 'template')))
       .catch(() => setTargets([])) // fetch failure → "New handbook" stays the only option
   }, [hasSectionDrafts, targets])
 

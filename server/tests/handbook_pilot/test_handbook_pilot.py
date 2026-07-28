@@ -972,3 +972,99 @@ def test_fresh_cids_from_drafts_skips_junk_and_non_sections():
     assert hp._fresh_cids_from_drafts(drafts) == []
     assert hp._fresh_cids_from_drafts([]) == []
     assert hp._fresh_cids_from_drafts(None) == []
+
+
+# --------------------------------------------------------------------------- #
+# promote_drafts — amend-mode CR auto-resolve only for sections actually written
+# --------------------------------------------------------------------------- #
+
+class _PromoteConn:
+    """Fake conn for promote_drafts' final block: mark-promoted + amend-mode
+    CR auto-resolve. `cr_rows` simulates the DB's own `status = 'pending'`
+    filter — a row is only returned/updated when its id is in the caller's
+    `cr_ids` AND it's still pending."""
+
+    def __init__(self, finding_rows, cr_rows):
+        self.finding_rows = finding_rows
+        self.cr_rows = cr_rows
+        self.executed: list[tuple[str, tuple]] = []
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+        return "UPDATE 1"
+
+    async def fetch(self, query, *args):
+        if "handbook_freshness_findings" in query:
+            return self.finding_rows
+        if "UPDATE handbook_change_requests" in query:
+            cr_ids = {str(i) for i in args[0]}
+            return [r for r in self.cr_rows if str(r["id"]) in cr_ids and r.get("status", "pending") == "pending"]
+        return []
+
+
+class _PromoteConnCtx:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
+def test_promote_drafts_amend_only_resolves_crs_for_sections_actually_written(monkeypatch):
+    # Review finding: a promoted section draft that cites a `fresh:` finding
+    # as background — without its content touching that finding's section —
+    # used to flip that OTHER change request to accepted too. Only the CR for
+    # a section this promotion actually wrote (amend["updated"]/["added"])
+    # may auto-resolve.
+    import asyncio
+
+    import app.database as database_module
+    from app.core.services.handbook_service import HandbookService
+
+    target_handbook_id = "11111111-1111-1111-1111-111111111111"
+    pto_finding_id = "22222222-2222-2222-2222-222222222222"
+    meal_finding_id = "33333333-3333-3333-3333-333333333333"
+    pto_cr_id = "44444444-4444-4444-4444-444444444444"
+    meal_cr_id = "55555555-5555-5555-5555-555555555555"
+
+    async def fake_amend(handbook_id, company_id, sections, updated_by):
+        return {
+            "handbook_id": target_handbook_id, "title": "Employee Handbook",
+            "updated": [{"section_key": "pto", "title": "PTO Policy"}],
+            "added": [],
+        }
+
+    monkeypatch.setattr(HandbookService, "amend_handbook_sections", fake_amend)
+
+    conn = _PromoteConn(
+        finding_rows=[
+            {"change_request_id": pto_cr_id, "section_key": "pto"},
+            {"change_request_id": meal_cr_id, "section_key": "meal_break"},
+        ],
+        cr_rows=[
+            {"id": pto_cr_id, "section_key": "pto"},
+            {"id": meal_cr_id, "section_key": "meal_break"},
+        ],
+    )
+    monkeypatch.setattr(database_module, "get_connection", lambda: _PromoteConnCtx(conn))
+
+    draft = {
+        "id": "66666666-6666-6666-6666-666666666666", "kind": "handbook_section",
+        "title": "PTO Policy", "content": "rewritten PTO section",
+        "section_key": "pto",
+        # Cites the meal-break finding as background context only — its
+        # section is not among amend["updated"]/["added"] above.
+        "citations": [f"fresh:{pto_finding_id}", f"fresh:{meal_finding_id}"],
+    }
+    session = {"id": "session-1", "title": "Session"}
+
+    result = asyncio.run(hp.promote_drafts(
+        "co-1", session, [draft], scopes=[],
+        target_handbook_id=target_handbook_id, user_id="user-1",
+    ))
+
+    resolved_ids = {r["change_request_id"] for r in result["resolved_change_requests"]}
+    assert resolved_ids == {pto_cr_id}

@@ -1622,9 +1622,20 @@ async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
                 fresh_ids = _fresh_cids_from_drafts(
                     [d for d in section_drafts if str(d["id"]) in promoted])
                 if fresh_ids:
-                    cr_ids = [r["change_request_id"] for r in await conn.fetch(
+                    # A finding is only actually addressed if the section it
+                    # flagged is one this promotion wrote — a draft can cite a
+                    # `fresh:` finding as background without its content
+                    # touching that finding's section (e.g. a PTO rewrite that
+                    # mentions a meal-break finding for context), which must
+                    # NOT flip that other CR to accepted while its section
+                    # stays stale.
+                    written_keys = {
+                        s["section_key"] for s in (amend["updated"] + amend["added"])
+                        if s.get("section_key")
+                    }
+                    finding_rows = await conn.fetch(
                         """
-                        SELECT DISTINCT f.change_request_id
+                        SELECT DISTINCT f.change_request_id, f.section_key
                         FROM handbook_freshness_findings f
                         JOIN handbooks h ON h.id = f.handbook_id
                         WHERE f.id = ANY($1::uuid[])
@@ -1632,7 +1643,9 @@ async def promote_drafts(company_id, session: dict, drafts: list[dict], *,
                           AND f.handbook_id = $3
                           AND f.change_request_id IS NOT NULL
                         """,
-                        fresh_ids, company_id, _UUID(str(target_handbook_id)))]
+                        fresh_ids, company_id, _UUID(str(target_handbook_id)))
+                    cr_ids = [r["change_request_id"] for r in finding_rows
+                              if r["section_key"] in written_keys]
                     if cr_ids:
                         # Status-only accept: the promoted draft is the applied
                         # content — resolve_change_request would overwrite it
