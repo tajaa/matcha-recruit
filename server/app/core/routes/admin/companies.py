@@ -27,6 +27,7 @@ from app.core.feature_flags import (
     assert_feature_allowed,
     merge_company_features,
 )
+from app.core.services.feature_provenance import feature_provenance, record_feature_changes
 from app.core.services.email import get_email_service
 from app.core.models.compliance import AutoCheckSettings, LocationCreate
 from app.core.models.compliance_evals import EvalRunRequest, FindingResolveRequest
@@ -153,7 +154,9 @@ async def list_feature_flags():
 
 
 @router.patch("/company-features/{company_id}", dependencies=[Depends(require_admin)])
-async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest):
+async def toggle_company_feature(
+    company_id: UUID, request: FeatureToggleRequest, current_user=Depends(require_admin),
+):
     """Toggle a single feature on/off for a company."""
     if request.feature not in KNOWN_FEATURES:
         raise HTTPException(
@@ -181,7 +184,8 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-            features = merge_company_features(row["enabled_features"])
+            old_features = merge_company_features(row["enabled_features"])
+            features = dict(old_features)
             features[request.feature] = bool(request.enabled)
 
             await conn.execute(
@@ -192,6 +196,10 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
                 """,
                 json.dumps(features),
                 company_id,
+            )
+            await record_feature_changes(
+                conn, company_id, old_features, features,
+                source="admin_toggle", actor_user_id=current_user.id,
             )
 
         return {"enabled_features": features}
@@ -831,7 +839,9 @@ async def admin_browse_repository(
 
 
 @router.patch("/companies/{company_id}/tier", dependencies=[Depends(require_admin)])
-async def admin_change_tier(company_id: UUID, body: TierChangeBody):
+async def admin_change_tier(
+    company_id: UUID, body: TierChangeBody, current_user=Depends(require_admin),
+):
     """Switch a company's tier — rewrites signup_source + enabled_features.
 
     Tier mutation is destructive: features get stomped to the target tier's
@@ -928,6 +938,11 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
                 WHERE id = $3""",
             body.tier, json.dumps(preset), company_id,
         )
+        if result != "UPDATE 0":
+            await record_feature_changes(
+                conn, company_id, current_features, preset,
+                source="tier_change", actor_user_id=current_user.id,
+            )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Company not found")
     logger.info(

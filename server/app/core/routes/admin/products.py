@@ -38,6 +38,7 @@ from app.core.services.product_definitions import (
     validate_slug,
 )
 from app.core.feature_flags import BUILTIN_TIER_META, BUILTIN_TIER_SLUGS, builtin_tier_composition
+from app.core.services.feature_provenance import record_feature_changes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -328,6 +329,10 @@ async def sync_product_tenants(
                     "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
                     json.dumps(target), company["id"],
                 )
+                await record_feature_changes(
+                    conn, company["id"], stored, target,
+                    source="product_sync", actor_user_id=current_user.id,
+                )
     logger.info(
         "Admin synced product %s: %d updated, %d pending skipped (dry_run=%s)",
         product.slug, len(updated), skipped_pending, dry_run,
@@ -371,7 +376,7 @@ async def activate_product_tenant(
                 ),
             )
         company = await conn.fetchrow(
-            "SELECT id, signup_source FROM companies WHERE id = $1", body.company_id
+            "SELECT id, signup_source, enabled_features FROM companies WHERE id = $1", body.company_id
         )
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
@@ -380,9 +385,21 @@ async def activate_product_tenant(
                 status_code=400,
                 detail="Company is not on this product — change its tier first",
             )
+        target = materialize_features(product)
+        stored = company["enabled_features"]
+        if isinstance(stored, str):
+            try:
+                stored = json.loads(stored)
+            except json.JSONDecodeError:
+                stored = {}
+        stored = stored if isinstance(stored, dict) else {}
         await conn.execute(
             "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
-            json.dumps(materialize_features(product)), body.company_id,
+            json.dumps(target), body.company_id,
+        )
+        await record_feature_changes(
+            conn, body.company_id, stored, target,
+            source="product_sync", actor_user_id=current_user.id,
         )
     logger.info(
         "Admin activated company %s on product %s", body.company_id, product.slug

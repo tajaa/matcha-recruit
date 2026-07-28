@@ -516,9 +516,14 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         # First-time activation only, so a Stripe retry of the
                         # same event doesn't resend the activation email.
                         just_activated = not bool(stored.get(gate)) if gate else True
+                        _target = _materialize(product)
                         await conn.execute(
                             "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
-                            _json.dumps(_materialize(product)), company_id,
+                            _json.dumps(_target), company_id,
+                        )
+                        from app.core.services.feature_provenance import record_feature_changes as _record_feature_changes
+                        await _record_feature_changes(
+                            conn, company_id, stored, _target, source="stripe_webhook",
                         )
                         if just_activated:
                             owner = await conn.fetchrow(
