@@ -5,6 +5,9 @@ import { api } from '../client'
 import {
   streamPilotChat as sharedStreamPilotChat,
   type ChatHandlers as SharedChatHandlers,
+  type PilotMessage as SsePilotMessage,
+  type CitedPoint,
+  type SessionStatus,
 } from '../sse'
 // New (agentic-mode) types live in types/compliancePilot.ts, not here — see
 // client/CLAUDE.md's "don't export a domain type from an api module" rule.
@@ -22,7 +25,7 @@ export type PilotTemplate = {
   starters: string[]
 }
 
-export type Citation = { point: string; cited_ids: string[] }
+export type Citation = CitedPoint
 
 // A proposal, resolved server-side against the DB (concrete coordinate + preview).
 export type ResearchProposal = {
@@ -61,12 +64,7 @@ export type MessageMeta = {
   proposal_action_ids?: string[]
 }
 
-export type PilotMessage = {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  metadata: MessageMeta | null
-  created_at: string
-}
+export type PilotMessage = SsePilotMessage<MessageMeta | null>
 
 export type ActionKind = 'research' | 'approve' | 'check_sources'
 export type ActionStatus = 'proposed' | 'running' | 'done' | 'failed' | 'cancelled' | 'superseded'
@@ -119,7 +117,7 @@ export type PilotSession = {
   id: string
   title: string
   mode: PilotMode
-  status: 'active' | 'closed'
+  status: SessionStatus
   created_at: string
   updated_at: string
   template?: PilotTemplate | null

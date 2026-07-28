@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { consumeSSE } from './sse'
+import { consumeSSE, SSEHttpError } from './sse'
+import { ApiError } from './client'
 
 /** Build a Response whose body streams the given string chunks verbatim, so a
  *  test can place a frame boundary exactly where it wants one. */
@@ -86,5 +87,28 @@ describe('consumeSSE', () => {
 
   it('no-ops on a response with no body rather than throwing', async () => {
     await expect(consumeSSE(new Response(null, { status: 200 }), () => {})).resolves.toBeUndefined()
+  })
+})
+
+describe('SSEHttpError', () => {
+  it('is an ApiError — one instanceof covers both transports', () => {
+    const e = new SSEHttpError('conflict', 409, { detail: 'conflict' })
+    expect(e).toBeInstanceOf(SSEHttpError)
+    expect(e).toBeInstanceOf(ApiError)
+    expect(e).toBeInstanceOf(Error)
+  })
+
+  // Guards the useDefineForClassFields hazard: a redeclared field in the
+  // subclass would clobber the parent-assigned status/body to undefined.
+  it('carries status/body/message through super', () => {
+    const e = new SSEHttpError('conflict', 409, { detail: 'conflict' })
+    expect(e.status).toBe(409)
+    expect(e.body).toEqual({ detail: 'conflict' })
+    expect(e.message).toBe('conflict')
+    expect(e.name).toBe('SSEHttpError')
+  })
+
+  it('a plain ApiError is NOT an SSEHttpError', () => {
+    expect(new ApiError('x', 500, null)).not.toBeInstanceOf(SSEHttpError)
   })
 })

@@ -7,6 +7,7 @@ import {
   streamPilotChat as sharedStreamPilotChat,
   type ChatHandlers as SharedChatHandlers,
   type SessionStatus,
+  type PilotMessage as SsePilotMessage,
 } from '../sse'
 
 export type { SessionStatus } from '../sse'
@@ -19,12 +20,7 @@ export type MessageMeta = {
   draft_ids?: string[]
 } | null
 
-export type PilotMessage = {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  metadata: MessageMeta
-  created_at: string
-}
+export type PilotMessage = SsePilotMessage<MessageMeta>
 
 export type PilotDraft = {
   id: string

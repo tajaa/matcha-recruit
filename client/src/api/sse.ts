@@ -17,7 +17,7 @@
 // body is gone — so auth goes through authStreamHeaders(), which refreshes
 // proactively before the request opens.
 
-import { authStreamHeaders, API_BASE } from './client'
+import { authStreamHeaders, API_BASE, ApiError } from './client'
 
 // ---------------------------------------------------------------------------
 // Shared pilot types (E1) — these were redeclared verbatim across the five
@@ -34,6 +34,10 @@ export type PilotMessage<TMeta = unknown> = {
   metadata: TMeta
   created_at: string
 }
+
+/** A grounded claim + the record ids that establish it. Redeclared verbatim
+ *  across the pilot modules before consolidation. */
+export type CitedPoint = { point: string; cited_ids: string[] }
 
 /** The status/result/error callback triple every pilot console passes down.
  * `onStep` is optional and generic over `TStep` — only the agentic Compliance
@@ -120,15 +124,16 @@ export type PostSSEOptions = {
 }
 
 /** Non-ok response from postSSE, carrying the parsed body for callers that
- *  need it (e.g. the broker document gate's 409 payload). */
-export class SSEHttpError extends Error {
-  status: number
-  body: unknown
+ *  need it (e.g. the broker document gate's 409 payload). Extends ApiError so
+ *  `instanceof ApiError` covers both transports.
+ *
+ *  CRITICAL: no `status`/`body` field declarations here — with
+ *  useDefineForClassFields:true they'd re-define over the parent-assigned
+ *  values as undefined. */
+export class SSEHttpError extends ApiError {
   constructor(message: string, status: number, body: unknown) {
-    super(message)
+    super(message, status, body)
     this.name = 'SSEHttpError'
-    this.status = status
-    this.body = body
   }
 }
 

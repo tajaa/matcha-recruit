@@ -7,6 +7,8 @@ import {
   streamPilotChat as sharedStreamPilotChat,
   type ChatHandlers as SharedChatHandlers,
   type SessionStatus,
+  type PilotMessage as SsePilotMessage,
+  type CitedPoint,
 } from '../sse'
 
 export type { SessionStatus } from '../sse'
@@ -76,7 +78,7 @@ export type PilotTemplate = {
   required_docs: RequiredDocSpec[]
 }
 
-export type EvidenceMapItem = { point: string; cited_ids: string[] }
+export type EvidenceMapItem = CitedPoint
 export type GapSeverity = 'high' | 'medium' | 'low'
 // A gap always cites the records that establish it (the server demotes an
 // ungrounded one to a key question); severity is null when the model didn't rank it.
@@ -92,12 +94,7 @@ export type MessageMeta = {
   dropped_citations?: string[]
 } | null
 
-export type PilotMessage = {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  metadata: MessageMeta
-  created_at: string
-}
+export type PilotMessage = SsePilotMessage<MessageMeta>
 
 export type PilotPacket = {
   id: string

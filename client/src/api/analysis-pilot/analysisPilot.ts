@@ -8,6 +8,7 @@ import {
   streamPilotChat as sharedStreamPilotChat,
   type ChatHandlers as SharedChatHandlers,
   type SessionStatus,
+  type CitedPoint,
 } from '../sse'
 
 export type { SessionStatus } from '../sse'
@@ -90,7 +91,7 @@ export type ProposedEdit = {
 
 export type AnalysisMessageMeta = {
   analysis_plan?: Array<{ step: string; finding: string; cited_ids: string[] }>
-  evidence_map?: Array<{ point: string; cited_ids: string[] }>
+  evidence_map?: CitedPoint[]
   open_questions?: string[]
   dropped_citations?: string[]
   proposed_edits?: ProposedEdit[]
@@ -224,7 +225,7 @@ export const downloadPacket = (sessionId: string, packet: AnalysisPacket) =>
 // --- Grounded chat (SSE) ---
 export type ChatResult = {
   assistant_text: string
-  evidence_map: Array<{ point: string; cited_ids: string[] }>
+  evidence_map: CitedPoint[]
   open_questions: string[]
   dropped_citations?: string[]
   proposed_edits?: ProposedEdit[]

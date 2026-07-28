@@ -5,6 +5,7 @@ import { api } from '../client'
 import {
   streamPilotChat as sharedStreamPilotChat,
   type ChatHandlers as SharedChatHandlers,
+  type CitedPoint,
 } from '../sse'
 
 export type MatterType = 'subpoena' | 'class_action' | 'eeoc_charge' | 'single_plaintiff' | 'audit' | 'other'
@@ -44,7 +45,7 @@ export const SUBJECT_FILTERED_SOURCES = new Set([
   'incidents', 'er_cases', 'compliance', 'compliance_alerts', 'discipline',
 ])
 
-export type EvidenceMapItem = { point: string; cited_ids: string[] }
+export type EvidenceMapItem = CitedPoint
 export type MessageMeta = {
   evidence_map?: EvidenceMapItem[]
   open_questions?: string[]
