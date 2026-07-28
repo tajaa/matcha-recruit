@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, Literal
 from pydantic import BaseModel, Field
 
-from ._types import IRIncidentType, IRSeverity, IRStatus
+from .types import IRIncidentType, IRSeverity, IRStatus
 
 
 

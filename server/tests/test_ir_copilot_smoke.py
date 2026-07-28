@@ -11,7 +11,7 @@ import pytest
 
 from typing import get_args
 
-from app.matcha.models.ir._types import IRCopilotActionType
+from app.matcha.models.ir.types import IRCopilotActionType
 from app.matcha.models.ir.copilot import (
     IRCopilotAcceptRequest,
     IRCopilotCard,

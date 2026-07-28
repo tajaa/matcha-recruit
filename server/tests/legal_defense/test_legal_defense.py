@@ -279,7 +279,7 @@ def test_vocabularies_track_their_sources_of_truth():
     corpus with no test failing."""
     from typing import get_args
     from app.matcha.models.er.case import ERCaseCategory
-    from app.matcha.models.ir._types import IRIncidentType
+    from app.matcha.models.ir.types import IRIncidentType
     from app.matcha.services.discipline.discipline_engine import DEFAULT_INFRACTION_TYPES
 
     assert set(ld._INCIDENT_TYPES) == set(get_args(IRIncidentType))

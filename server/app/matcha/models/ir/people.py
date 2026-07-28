@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel
 
-from ._types import IRIncidentType, IRPersonRole, IRSeverity, IRStatus
+from .types import IRIncidentType, IRPersonRole, IRSeverity, IRStatus
 
 
 class IRPersonSummary(BaseModel):

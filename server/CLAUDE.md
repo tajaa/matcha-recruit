@@ -57,7 +57,7 @@ server/
 - Celery for anything that survives the request lifecycle, runs scheduled, or needs separate concurrency limits. Tasks live in `app/workers/tasks/`. The worker container restarts every 15 min via systemd; `@worker_ready` re-dispatches periodic tasks (no celery-beat).
 
 **Email**:
-- Gmail API via OAuth2 (`app/core/services/email.py`) for transactional. MailerSend for broker invites + a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
+- Gmail API via OAuth2 (`app/core/services/email/`) for transactional. MailerSend for broker invites + a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
 
 **AI**:
 - Gemini via `google.genai` SDK with `settings.gemini_api_key` (from the `LIVE_API` env var). Some services also honor a `GEMINI_API_KEY` env override. Native Google AI only — no Vertex.

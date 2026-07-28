@@ -5,7 +5,7 @@ from typing import Optional
 from uuid import UUID
 from pydantic import BaseModel, Field
 
-from ._types import (
+from .types import (
     CorrectiveActionEffectiveness,
     CorrectiveActionPriority,
     CorrectiveActionStatus,

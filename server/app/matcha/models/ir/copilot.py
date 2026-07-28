@@ -6,7 +6,7 @@ from typing import Optional, Literal, Any
 from uuid import UUID
 from pydantic import BaseModel, Field
 
-from ._types import IRCopilotActionType, IRCopilotMessageType, IRCopilotRole
+from .types import IRCopilotActionType, IRCopilotMessageType, IRCopilotRole
 
 
 

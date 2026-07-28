@@ -31,7 +31,7 @@ The package's exported `router` is **`crud.router` directly** — not a wrapping
 
 ## Relative imports
 
-Submodules sit one directory deeper than the old flat file, so **all relative imports carry one extra dot**: app-level modules are `....database` / `....config` / `....core.*`, and matcha-level modules are `...dependencies` / `...services.*` / `...models.er_case`. Cross-submodule helpers come from `._shared`.
+Submodules sit one directory deeper than the old flat file, so **all relative imports carry one extra dot**: app-level modules are `....database` / `....config` / `....core.*`, and matcha-level modules are `...dependencies` / `...services.*` / `...models.er.case`. Cross-submodule helpers come from `._shared`.
 
 ## Adding a new endpoint
 
