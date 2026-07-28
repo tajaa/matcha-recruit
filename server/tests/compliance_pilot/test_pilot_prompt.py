@@ -68,6 +68,22 @@ def test_state_block_singular_category():
     assert "1 category" in block
 
 
+def test_state_block_names_the_source_run_of_a_staged_commit():
+    """`stage_approve` stores `from_action_id` (evaluate_stage_approve's payload);
+    the legacy REST /approve row stores `from_action`. The block must name a REAL
+    id under either key — rendering "from research run None" is exactly the
+    guessing this block exists to prevent."""
+    for key in ("from_action_id", "from_action"):
+        block = prompt.build_state_block([{
+            "id": A, "kind": "approve", "status": "proposed",
+            "params": {key: B, "selected": 12, "gate_ok": 9, "gate_blocked": 3},
+        }])
+        assert B in block, key
+        assert "None" not in block, key
+        assert "12 staged policies" in block
+        assert "9 pass the codify gate" in block
+
+
 def test_state_block_marks_a_running_action_as_unfinished():
     block = prompt.build_state_block([{
         "id": A, "kind": "research", "status": "running",

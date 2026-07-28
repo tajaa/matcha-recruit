@@ -197,6 +197,26 @@ async def _industry_coverage_map(conn, jurisdiction_ids: list, industry_tag: str
     return result
 
 
+def backlog_note(state: Optional[str], items: list[dict[str, Any]]) -> Optional[str]:
+    """The corpus-boundary warning appended to `uncodified_backlog`. Pure, so the
+    exact wording is pinned by a test rather than by whatever the tool handler
+    happened to render.
+
+    An empty backlog outside California is AMBIGUOUS: the scope registry only
+    enumerates federal + CA authorities, so "no state-level items for TX" means
+    the corpus doesn't reach Texas, not that Texas is covered. Returns None when
+    the question doesn't arise (no state, CA, or state-level items present)."""
+    if not state or state.upper() == "CA":
+        return None
+    if any(i.get("level") == "state" for i in items or ()):
+        return None
+    return (
+        "The scope registry corpus is federal + California only today — zero "
+        f"state-level items for {state} means the corpus doesn't reach there, "
+        "NOT that this state is fully covered."
+    )
+
+
 def _backlog_item(item: dict[str, Any]) -> dict[str, Any]:
     return _json_safe({
         "regulation_key": item.get("regulation_key"), "category": item.get("category_slug"),
@@ -333,13 +353,9 @@ async def run_pilot_turn(
                     "keyed": [_backlog_item(i) for i in keyed[:_BACKLOG_ITEM_CAP]],
                     "unkeyed": [_backlog_item(i) for i in unkeyed[:_BACKLOG_ITEM_CAP]],
                 }
-                state_level = [i for i in (keyed + unkeyed) if i.get("level") == "state"]
-                if state and state.upper() != "CA" and not state_level:
-                    result["note"] = (
-                        "The scope registry corpus is federal + California only today — zero "
-                        f"state-level items for {state} means the corpus doesn't reach there, "
-                        "NOT that this state is fully covered."
-                    )
+                note = backlog_note(state, keyed + unkeyed)
+                if note:
+                    result["note"] = note
                 step = recorder.record(
                     tool=name, kind="read", label=f"Checked research backlog for {city or ''} {state or 'federal'}".strip(),
                     status="ok", detail=f"{len(keyed)} keyed, {len(unkeyed)} unkeyed",

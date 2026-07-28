@@ -81,7 +81,11 @@ def build_state_block(actions: Iterable[dict[str, Any]]) -> str:
             lines.append(
                 f"- AWAITING THE ADMIN'S CONFIRMATION — commit {params.get('selected', '?')} staged "
                 f"polic{'y' if params.get('selected') == 1 else 'ies'} from research run "
-                f"{params.get('from_action')} ({params.get('gate_ok', '?')} pass the codify gate, "
+                # `from_action_id` is what stage_approve stores (actions.evaluate_stage_approve's
+                # payload); `from_action` is the legacy REST /approve row's key. Read both, or
+                # the block renders "from research run None" — the one thing it exists to prevent.
+                f"{params.get('from_action_id') or params.get('from_action')} "
+                f"({params.get('gate_ok', '?')} pass the codify gate, "
                 f"{params.get('gate_blocked', '?')} would go live uncodified). action_id={a.get('id')}. "
                 f"Call confirm_action with EXACTLY this id once they confirm."
             )

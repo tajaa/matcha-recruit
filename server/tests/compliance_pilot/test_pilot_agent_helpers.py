@@ -6,7 +6,7 @@ DB/Gemini).
 Covers `_cap_payload` truncation, `_StepRecorder` args capture, `is_sole_finish`
 (a batched `finish` must be deferred), `_to_contents` history shaping, and the
 list_actions/uncodified_backlog result-shaping helpers (`_compact_result`,
-`_action_overview`, `_backlog_item`).
+`_action_overview`, `_backlog_item`, `backlog_note`).
 """
 
 from app.core.services.compliance_pilot.agent import (
@@ -18,6 +18,7 @@ from app.core.services.compliance_pilot.agent import (
     _cap_payload,
     _compact_result,
     _to_contents,
+    backlog_note,
     is_sole_finish,
 )
 
@@ -163,3 +164,32 @@ def test_backlog_item_projects_the_fields_a_model_needs():
     assert out["category"] == "minimum_wage"
     assert out["level"] == "state"
     assert "classification_id" not in out  # internal id, not useful to the model
+
+
+# --------------------------------------------------------------------------- #
+# backlog_note — the corpus-boundary warning. An empty backlog outside CA must
+# never read as "this state is covered"; the registry corpus is federal + CA.
+# --------------------------------------------------------------------------- #
+
+def test_backlog_note_warns_when_a_non_ca_state_has_no_state_level_items():
+    note = backlog_note("TX", [{"level": "federal"}])
+    assert note is not None
+    assert "TX" in note
+    assert "NOT that this state is fully covered" in note
+
+
+def test_backlog_note_is_silent_for_california():
+    assert backlog_note("CA", []) is None
+    assert backlog_note("ca", [{"level": "federal"}]) is None
+
+
+def test_backlog_note_is_silent_for_a_federal_only_query():
+    # No state named — the federal chain is the whole question, so there is no
+    # boundary to warn about.
+    assert backlog_note(None, []) is None
+    assert backlog_note("", [{"level": "federal"}]) is None
+
+
+def test_backlog_note_is_silent_once_state_level_items_exist():
+    # The corpus demonstrably reaches this state, so the caveat would be wrong.
+    assert backlog_note("NY", [{"level": "federal"}, {"level": "state"}]) is None

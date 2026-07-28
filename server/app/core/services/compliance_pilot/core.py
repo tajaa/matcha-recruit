@@ -814,6 +814,26 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
                 key = (r["jurisdiction_id"], r["category"])
                 written_counts[key] = written_counts.get(key, 0) + 1
             failed_set = set(result.get("failed") or [])
+            # `_mark` is an unconditional overwrite, and `skip_existing` is checked
+            # against the LEAF only — so a city run whose federal/state obligations
+            # all deduped against rows a previous run already wrote lands 0 NEW
+            # pending rows on those ancestors. Stamping that as 'empty' would
+            # downgrade a genuinely-covered cell to "researched, nothing applies"
+            # and zero its count. Read the current statuses first and never write
+            # 'empty' over a 'covered' cell; a real new-coverage or failure verdict
+            # still overwrites, since those are this run's own finding.
+            # Keyed on the FULL cell key (node, industry_tag, category) — the ledger's
+            # own PK. Dropping industry_tag would let the 'general' row for a category
+            # answer for the industry-tagged one and vice versa.
+            existing_cells = {
+                (r["jurisdiction_id"], r["industry_tag"], r["category"]): r["status"]
+                for r in await conn.fetch(
+                    "SELECT jurisdiction_id, industry_tag, category, status "
+                    "FROM jurisdiction_vertical_coverage "
+                    "WHERE jurisdiction_id = ANY($1::uuid[]) AND category = ANY($2::text[])",
+                    node_ids, attempted,
+                )
+            } if node_ids else {}
             for cat in attempted:
                 tag = tag_by_cat.get(cat, industry_tag)
                 for node in node_ids:
@@ -823,6 +843,8 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
                                             error="pilot research run failed")
                         else:
                             n = written_counts.get((node, cat), 0)
+                            if n == 0 and existing_cells.get((node, tag, cat)) == "covered":
+                                continue
                             await _vc._mark(conn, node, tag, cat,
                                             "covered" if n > 0 else "empty", None,
                                             requirements_written=n)
