@@ -21,7 +21,7 @@ Delete:
 - `components/landing/IrAnalysisPanel.tsx` (215)
 - `components/landing/TimelineConstructor.tsx` (213)
 - `components/compliance/ComplianceOverviewTab.tsx` (143)
-- `components/widgets/PinnedResourcesPanel.tsx` (78) + `data/resourceCatalog.ts` (132, sole importer is the panel). Do NOT touch `api/resourcePins.ts` / `hooks/usePinnedResources.ts` — live via `PinButton`.
+- `components/widgets/PinnedResourcesPanel.tsx` (78) + `data/resourceCatalog.ts` (132, sole importer is the panel). Do NOT touch `api/resources/resourcePins.ts` / `hooks/usePinnedResources.ts` — live via `PinButton`.
 
 Also: reword stale comment in `components/landing/RiskInsightsHero.tsx:10` ("lives in IrAnalysisPanel").
 

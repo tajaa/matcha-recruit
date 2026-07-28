@@ -341,8 +341,8 @@ Real paths (the tab is under `components/`, not `pages/`; the api dir is doubly 
 | File | Change |
 |---|---|
 | `client/src/types/compliance.ts` | add `RequirementComponent`, `RequirementComponentChecklist`; add `has_components?: boolean` to `ComplianceRequirement` (lines 195-238) |
-| `client/src/api/compliance/compliance/requirements.ts` | add `fetchRequirementComponents(locationId, catalogId)` + `attestRequirementComponent(locationId, catalogId, componentKey, body)`, matching the file's existing `api.get<T>(...)` style |
-| `client/src/api/compliance/compliance.ts` | re-export the two new functions from the barrel |
+| `client/src/api/compliance/requirements.ts` | add `fetchRequirementComponents(locationId, catalogId)` + `attestRequirementComponent(locationId, catalogId, componentKey, body)`, matching the file's existing `api.get<T>(...)` style |
+| `client/src/api/compliance/index.ts` | no edit — the barrel already `export * from './requirements'`, so the two new functions surface automatically |
 | `client/src/components/compliance/ComplianceRequirementsTab/ComponentChecklist.tsx` | **new** — the card |
 | `client/src/components/compliance/ComplianceRequirementsTab/RequirementRow.tsx` | add local `const [open, setOpen] = useState(false)`; render a disclosure only when `req.has_components`; lazy-fetch the checklist on first open |
 
