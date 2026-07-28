@@ -12,13 +12,16 @@ _codify_gate` (underscore-prefixed, so it must be named explicitly here; a
 `from .core import *` would skip it).
 """
 from app.core.services.compliance_pilot.core import (  # noqa: F401
+    MAX_CONCURRENT_RESEARCH,
     MODEL,
     PILOT_TEMPLATES,
+    STALE_RECLAIM_HOURS,
     _codify_gate,
     build_ask_corpus,
     build_scope_snapshot,
     default_categories,
     get_template,
+    launch_action_task,
     resolve_proposal,
     run_action,
     run_chat_turn,
@@ -26,13 +29,16 @@ from app.core.services.compliance_pilot.core import (  # noqa: F401
 )
 
 __all__ = [
+    "MAX_CONCURRENT_RESEARCH",
     "MODEL",
     "PILOT_TEMPLATES",
+    "STALE_RECLAIM_HOURS",
     "_codify_gate",
     "build_ask_corpus",
     "build_scope_snapshot",
     "default_categories",
     "get_template",
+    "launch_action_task",
     "resolve_proposal",
     "run_action",
     "run_chat_turn",

@@ -10,11 +10,9 @@ Actions run as detached background tasks that own their own connections
 (`compliance_pilot.run_action`), so a browser tab close mid-run can't orphan a
 research pass on a request-scoped connection. The frontend polls `GET /actions/{id}`.
 """
-import asyncio
 import json
 import logging
 from typing import List, Literal, Optional
-from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -24,27 +22,17 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from app.core.dependencies import require_admin
 from app.core.services import compliance_pilot as cp
-from app.core.services.change_context import set_change_context
+from app.core.services.compliance_pilot.approve import _embed_bg, _snapshot_bg
 from app.core.services.redis_cache import check_rate_limit
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Strong refs to detached runner tasks — without this the event loop keeps only a
-# weak ref and the GC can collect a task mid-run (documented CPython pitfall),
-# leaving the action stuck 'running' and the per-session unique index 409-ing
-# forever. Discarded on completion.
-_BG_TASKS: set = set()
-
-# A runner that dies (GC, deploy swap, crash) before its terminal UPDATE leaves the
-# row 'running'. Reclaim rows older than this so the session isn't locked forever —
-# same 2h horizon as vertical_coverage_sweep.
-_STALE_RECLAIM_HOURS = 2
-# Global ceiling on concurrent research runs — each pins a pooled connection for the
-# full multi-minute Gemini pass (pool max_size=10), and the running-guard is only
-# per-session. (Celery is the real fix — fast-follow.)
-_MAX_CONCURRENT_RESEARCH = 2
+# Reclaim horizon + concurrency ceiling now live in compliance_pilot.core
+# (cp.STALE_RECLAIM_HOURS / cp.MAX_CONCURRENT_RESEARCH) — shared with the
+# agentic loop's confirm.py so the two paths can't drift apart. The detached-
+# task strong-ref registry lives there too (cp.launch_action_task).
 
 
 # --------------------------------------------------------------------------- #
@@ -336,14 +324,14 @@ async def create_action(session_id: str, body: ActionCreate, current_user=Depend
             "SET status='failed', finished_at=NOW(), "
             "    result='{\"error\":\"reclaimed: runner lost\"}'::jsonb "
             "WHERE session_id=$1 AND status='running' "
-            f"  AND started_at < NOW() - interval '{_STALE_RECLAIM_HOURS} hours'",
+            f"  AND started_at < NOW() - interval '{cp.STALE_RECLAIM_HOURS} hours'",
             session_id,
         )
         if body.kind == "research":
             running = await conn.fetchval(
                 "SELECT COUNT(*) FROM compliance_pilot_actions WHERE kind='research' AND status='running'"
             ) or 0
-            if running >= _MAX_CONCURRENT_RESEARCH:
+            if running >= cp.MAX_CONCURRENT_RESEARCH:
                 raise HTTPException(status_code=409,
                                     detail="Too many research runs in flight — try again shortly")
         try:
@@ -357,11 +345,9 @@ async def create_action(session_id: str, body: ActionCreate, current_user=Depend
         except asyncpg.ForeignKeyViolationError:
             raise HTTPException(status_code=404, detail="Session not found")
     action_id = row["id"]
-    # Detached runner — owns its own connections; never the request's. Hold a strong
-    # ref so the GC can't collect it mid-run.
-    task = asyncio.create_task(cp.run_action(action_id, actor_id))
-    _BG_TASKS.add(task)
-    task.add_done_callback(_BG_TASKS.discard)
+    # Detached runner — owns its own connections; never the request's.
+    # launch_action_task holds the strong ref (see its docstring for why).
+    cp.launch_action_task(action_id, actor_id)
     return {"action_id": str(action_id)}
 
 
@@ -378,30 +364,6 @@ async def get_action(action_id: str, current_user=Depends(require_admin)):
     return _action_out(row)
 
 
-async def _embed_bg(jurisdiction_ids: list):
-    from app.core.services.compliance_embedding_pipeline import embed_updated_requirements
-    try:
-        async with get_connection() as conn:
-            for jid in jurisdiction_ids:
-                await embed_updated_requirements(conn, jid)
-    except Exception:
-        logger.exception("compliance_pilot: post-approve embed failed")
-
-
-async def _snapshot_bg(snap_targets: list):
-    """Freeze each newly-committed row's cited page — pilot_commit is a tenant-
-    visibility moment, same as the admin approve (which snapshots too)."""
-    import httpx
-    from app.core.services.source_snapshot import snapshot_source
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            for req_id, url in snap_targets:
-                async with get_connection() as conn:
-                    await snapshot_source(conn, req_id, url, "approve", client=client)
-    except Exception:
-        logger.exception("compliance_pilot: post-approve snapshot failed")
-
-
 @router.post("/actions/{action_id}/approve")
 async def approve_action(action_id: str, body: ApproveBody, background_tasks: BackgroundTasks,
                          current_user=Depends(require_admin)):
@@ -409,145 +371,24 @@ async def approve_action(action_id: str, body: ApproveBody, background_tasks: Ba
     via codify_from_requirement — but only when it passes the deterministic
     provenance gate (regulation_key + a statute citation from research + a live
     PRIMARY .gov source). Gate failures stay live-but-uncodified with the reason.
+
+    The work lives in `compliance_pilot.approve.approve_from_action` — shared
+    with the agentic loop's `stage_approve` -> `confirm_action` path so there is
+    exactly one commit implementation.
     """
-    from app.core.services.research_review import approve_staged
-    from app.core.services.scope_registry.codify import codify_from_requirement, reconcile_codifications
-    from app.core.services.compliance_pilot import _codify_gate
+    from app.core.services.compliance_pilot.approve import approve_from_action
 
     actor_id = getattr(current_user, "id", None)
-    async with get_connection() as conn:
-        act = await conn.fetchrow(
-            "SELECT session_id, kind, staged_ids, status FROM compliance_pilot_actions WHERE id = $1",
-            action_id,
-        )
-        if not act:
-            raise HTTPException(status_code=404, detail="Action not found")
-        if act["kind"] != "research":
-            raise HTTPException(status_code=400, detail="Only research actions can be codified")
-        staged = [str(s) for s in (act["staged_ids"] or [])]
-        if body.ids:
-            want = set(body.ids)
-            staged = [s for s in staged if s in want]
-        if not staged:
-            raise HTTPException(status_code=400, detail="Nothing selected to commit")
-        # Still-pending rows among the selection (concurrent Pipeline approval is benign)
-        # + the fields the codify gate needs.
-        rows = await conn.fetch(
-            "SELECT r.id, r.jurisdiction_id, r.title, r.regulation_key, r.source_url, "
-            "       r.source_url_status, r.metadata, j.state, j.city "
-            "FROM jurisdiction_requirements r JOIN jurisdictions j ON j.id = r.jurisdiction_id "
-            "WHERE r.id = ANY($1::uuid[]) AND r.status='pending'",
-            [UUID(s) for s in staged],
-        )
-    pending_ids = [r["id"] for r in rows]
-    jurisdiction_ids = list({r["jurisdiction_id"] for r in rows})
-    already_live = len(staged) - len(pending_ids)
+    try:
+        out = await approve_from_action(action_id, body.ids or [], actor_id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Action not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    # 1. Activate (shared core; also reconciles keys that already had a confirmed
-    #    classification). Rows are now 'active' — codify_from_requirement's guard.
-    core = await approve_staged(pending_ids, actor_id, source="pilot_commit")
+    if out["jurisdiction_ids"]:
+        background_tasks.add_task(_embed_bg, out["jurisdiction_ids"])
+    if out["snap_targets"]:
+        background_tasks.add_task(_snapshot_bg, out["snap_targets"])
 
-    # activated set is the TRUTH of what approve_staged flipped (a row rejected /
-    # approved elsewhere between our SELECT and the UPDATE is NOT in here).
-    activated_ids = {o["id"] for o in core["results"]}  # strings
-
-    # 2. Per-row: gate → MINT the codify trio (no reconcile yet). Each mint in its
-    #    own transaction so a mid-mint failure can't leave a half-written
-    #    classification that a later reconcile silently stamps authoritative.
-    outcomes_by_id: dict = {}
-    minted: list = []            # rows we minted a trio for
-    reconcile_pairs: set = set()
-    async with get_connection() as conn:
-        await set_change_context(conn, "pilot_commit", actor_id)
-        for r in rows:
-            rid = str(r["id"])
-            o = {"id": rid, "title": r["title"], "state": r["state"], "city": r["city"],
-                 "activated": rid in activated_ids, "codified": False,
-                 "statute_citation": None, "citation_url": None, "gate_reason": None}
-            outcomes_by_id[rid] = o
-            if not o["activated"]:
-                o["gate_reason"] = "no longer pending (handled elsewhere)"
-                continue
-            meta = r["metadata"]
-            if isinstance(meta, str):
-                try:
-                    meta = json.loads(meta)
-                except Exception:
-                    meta = {}
-            meta = meta or {}
-            citation = meta.get("research_citation") or (meta.get("grounded_citations") or [None])[0]
-            ok, reason, _cls = _codify_gate(
-                r["regulation_key"], citation, r["source_url"], r["source_url_status"])
-            if not ok:
-                o["gate_reason"] = reason
-                continue
-            try:
-                async with conn.transaction():
-                    await codify_from_requirement(
-                        conn, r["id"], citation=citation, source_url=r["source_url"],
-                        admin_id=actor_id, run_reconcile=False)
-                minted.append(r)
-                st = (r["state"] or "").upper() or None
-                reconcile_pairs.add((st, (r["city"] or "").lower() or None))
-            except Exception as exc:  # noqa: BLE001 — row is already live; never fail approve
-                logger.warning("compliance_pilot: codify mint failed for %s: %s", r["id"], exc)
-                o["gate_reason"] = f"codify error: {str(exc)[:120]}"
-
-        # 3. ONE reconcile per distinct (state,city) for all minted rows (reconcile
-        #    is a full chain scan — never N times).
-        for st, ci in sorted(reconcile_pairs, key=lambda p: (p[0] or "", p[1] or "")):
-            if st:
-                try:
-                    await reconcile_codifications(conn, state=st, city=ci, source="pilot_commit")
-                except Exception as exc:
-                    logger.warning("compliance_pilot: reconcile failed for %s/%s: %s", st, ci, exc)
-
-        # 4. Batch-read the stamped state for minted rows → final codified verdict.
-        if minted:
-            stamped = await conn.fetch(
-                "SELECT r.id, r.statute_citation, r.citation_verified_at IS NOT NULL AS authoritative, "
-                "       ai.source_url AS citation_url "
-                "FROM jurisdiction_requirements r "
-                "LEFT JOIN authority_index_items ai ON ai.id = r.citation_item_id "
-                "WHERE r.id = ANY($1::uuid[])",
-                [r["id"] for r in minted],
-            )
-            for s in stamped:
-                o = outcomes_by_id[str(s["id"])]
-                o["codified"] = s["authoritative"]
-                o["statute_citation"] = s["statute_citation"]
-                o["citation_url"] = s["citation_url"]
-                if not s["authoritative"]:
-                    o["gate_reason"] = "codify ran but the citation wasn't stamped"
-
-    outcomes = [outcomes_by_id[str(r["id"])] for r in rows]
-    codified_n = sum(1 for o in outcomes if o["codified"])
-
-    # Snapshot the union: every activated row with a URL (evidence for live rows,
-    # per the admin approve path), preferring the codified rows' citation_url.
-    snap_map = {rid: url for rid, url in core["snap_targets"]}
-    for r in minted:
-        o = outcomes_by_id[str(r["id"])]
-        if o["codified"]:
-            snap_map[r["id"]] = o["citation_url"] or r["source_url"]
-    snap_targets = [(k, v) for k, v in snap_map.items() if v]
-    result = {
-        "activated": core["activated"], "codified": codified_n,
-        "uncodified": len(outcomes) - codified_n, "already_live": already_live,
-        "results": outcomes,
-    }
-    async with get_connection() as conn:
-        arow = await conn.fetchrow(
-            "INSERT INTO compliance_pilot_actions "
-            "(session_id, kind, params, status, result, actor_id, finished_at) "
-            "VALUES ($1, 'approve', $2::jsonb, 'done', $3::jsonb, $4, NOW()) RETURNING id",
-            act["session_id"], json.dumps({"from_action": action_id}),
-            json.dumps(result), actor_id,
-        )
-
-    if jurisdiction_ids:
-        background_tasks.add_task(_embed_bg, jurisdiction_ids)
-    if snap_targets:
-        background_tasks.add_task(_snapshot_bg, snap_targets)
-
-    return {"action_id": str(arow["id"]), **result}
+    return {k: v for k, v in out.items() if k not in ("jurisdiction_ids", "snap_targets")}

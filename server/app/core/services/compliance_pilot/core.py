@@ -71,6 +71,31 @@ def _genai():
 
 PILOT_TEMPLATES: tuple[dict, ...] = (
     {
+        "key": "agent",
+        "label": "Agentic Pilot",
+        "description": "One conversation to scope, research, and codify — reads "
+                       "coverage/backlog/readiness mid-turn and stages actions "
+                       "you confirm, instead of one mode-locked JSON turn at a "
+                       "time.",
+        "title": "Agent",
+        # Unused by the agentic loop (agent.py builds its own system prompt via
+        # prompt.build_system_prompt) — kept for template_catalog/get_template
+        # symmetry with the legacy modes, and as a safe fallback if this mode
+        # were ever routed through the single-shot _build_prompt by mistake.
+        "focus": (
+            "You are the agentic Compliance Pilot. Use your tools to look up "
+            "coverage, the research backlog, and readiness before staging any "
+            "research or commit action; nothing runs until the admin confirms "
+            "it on a later turn."
+        ),
+        "starters": [
+            "Where are we thin on healthcare coverage in California?",
+            "Research clinical safety requirements for healthcare in Los Angeles.",
+            "What's blocking manufacturing readiness in Texas?",
+            "Check our California source links and fix anything dead.",
+        ],
+    },
+    {
         "key": "research",
         "label": "Research industry",
         "description": "Research the compliance requirements for an industry in a "
@@ -555,6 +580,8 @@ async def run_action(action_id: UUID, actor_id: Optional[UUID]):
             await _run_research(action_id, actor_id, params)
         elif kind == "check_sources":
             await _run_check_sources(action_id, actor_id, params)
+        elif kind == "approve":
+            await _run_approve(action_id, actor_id, params)
     except Exception as exc:  # noqa: BLE001 — a failed run must land as 'failed', not vanish
         logger.exception("compliance_pilot: action %s failed", action_id)
         try:
@@ -563,6 +590,62 @@ async def run_action(action_id: UUID, actor_id: Optional[UUID]):
                                   result={"error": str(exc)[:500]})
         except Exception:
             logger.exception("compliance_pilot: could not mark action %s failed", action_id)
+
+
+async def _run_approve(action_id: UUID, actor_id, params: dict):
+    """The `stage_approve` -> `confirm_action` path: commit a finished research
+    run's staged policies through the SAME implementation the legacy REST
+    `/approve` route uses (`compliance_pilot.approve.approve_from_action`).
+
+    `existing_action_id=str(action_id)` makes `approve_from_action` UPDATE this
+    already-inserted 'approve' row running->done instead of INSERTing a second
+    one — the row was created at stage time (`stage_approve`'s tool handler),
+    not here."""
+    from app.core.services.compliance_pilot.approve import approve_from_action, _embed_bg, _snapshot_bg
+
+    out = await approve_from_action(
+        params["from_action_id"], params.get("ids") or [], actor_id,
+        existing_action_id=str(action_id),
+    )
+    if out["jurisdiction_ids"]:
+        await _embed_bg(out["jurisdiction_ids"])
+    if out["snap_targets"]:
+        await _snapshot_bg(out["snap_targets"])
+
+
+# --------------------------------------------------------------------------- #
+# Action-lifecycle constants — shared by the legacy REST route (`create_action`)
+# and the agentic loop's `confirm.py`, so the two paths can't drift apart.
+# --------------------------------------------------------------------------- #
+
+# A runner that dies (GC, deploy swap, crash) before its terminal UPDATE leaves
+# the row 'running'. Reclaim rows older than this so a session/loop isn't
+# locked forever — same 2h horizon as vertical_coverage_sweep.
+STALE_RECLAIM_HOURS = 2
+# Global ceiling on concurrent research runs — each pins a pooled connection
+# for the full multi-minute Gemini pass (pool max_size=10), and the
+# running-guard is only per-session. (Celery is the real fix — fast-follow.)
+MAX_CONCURRENT_RESEARCH = 2
+
+
+# --------------------------------------------------------------------------- #
+# Detached task launch — strong ref so the GC can't collect a running task
+# --------------------------------------------------------------------------- #
+
+# Without this the event loop keeps only a weak ref to a `create_task` result,
+# and the GC can collect it mid-run (documented CPython pitfall), leaving the
+# action stuck 'running' and the per-session unique index 409-ing forever.
+# Discarded on completion. Lives here (not the route) so the agentic loop's
+# confirm path can launch a task without importing the route — the route
+# imports `compliance_pilot`, so the reverse edge would cycle.
+_BG_TASKS: set = set()
+
+
+def launch_action_task(action_id: UUID, actor_id: Optional[UUID]) -> "asyncio.Task":
+    task = asyncio.create_task(run_action(action_id, actor_id))
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return task
 
 
 async def _run_research(action_id: UUID, actor_id, params: dict):
@@ -588,9 +671,6 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
         # without the timestamp fence, "Approve & codify all" would sweep in and
         # activate THEIR un-reviewed rows. (Residual: a truly concurrent run in the
         # same category+node within the same second — narrow; accepted for v1.)
-        # NOTE(fast-follow): this path does NOT read/write jurisdiction_vertical_coverage,
-        # so the nightly sweep may re-research what the pilot paid for, and ledger
-        # `empty` cells are re-spent. Ledger integration is its own change.
         # created_at is `timestamp WITHOUT time zone` (naive) — match it, or asyncpg
         # can't compare a tz-aware NOW() against the column.
         run_started = await conn.fetchval("SELECT NOW()::timestamp")
@@ -600,8 +680,8 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
         )
         written = result.get("jurisdictions_written") or [jid]
         staged = await conn.fetch(
-            "SELECT r.id, r.title, r.jurisdiction_level, r.regulation_key, r.category, "
-            "       r.source_url, r.source_url_status, r.metadata, j.state, j.city "
+            "SELECT r.id, r.jurisdiction_id, r.title, r.jurisdiction_level, r.regulation_key, "
+            "       r.category, r.source_url, r.source_url_status, r.metadata, j.state, j.city "
             "FROM jurisdiction_requirements r JOIN jurisdictions j ON j.id = r.jurisdiction_id "
             "WHERE r.status='pending' AND r.jurisdiction_id = ANY($1::uuid[]) "
             "AND r.category = ANY($2::text[]) AND r.created_at >= $3",
@@ -655,6 +735,58 @@ async def _run_research(action_id: UUID, actor_id, params: dict):
                 await conn.execute(
                     "UPDATE jurisdiction_requirements SET source_url_status='ok', "
                     "source_checked_at=NOW() WHERE id = ANY($1::uuid[])", fixed)
+
+        # Ledger integration — closes the previously-documented gap where this
+        # path did not read/write jurisdiction_vertical_coverage, so the nightly
+        # sweep could re-research (and re-spend on) what the pilot just paid for.
+        #
+        # Only categories this run actually attempted get a verdict:
+        # result["categories"] (succeeded) and result["failed"] (errored). A
+        # category skip_existing left untouched gets none — it was already
+        # covered by definition, and stamping it would overwrite a prior
+        # genuine verdict with this run's silence. The `{"skipped": True}`
+        # early return leaves both lists empty, so this is naturally a no-op
+        # then. Never stamps 'in_progress' — that status is sweep-reclaim-only
+        # and a wedge here has no sweeper.
+        from app.core.services import vertical_coverage as _vc
+        from app.core.services.scope_registry.jurisdiction_chain import resolve_jurisdiction_chain
+
+        attempted = sorted(set(result.get("categories") or []) | set(result.get("failed") or []))
+        if attempted:
+            chain = await resolve_jurisdiction_chain(conn, state, city)
+            node_ids = chain.get("ids") or []
+            cat_tags = await conn.fetch(
+                "SELECT slug, industry_tag FROM compliance_categories WHERE slug = ANY($1::text[])",
+                attempted,
+            )
+            # Categories reaching this run were resolved via `industry_tag IS
+            # NULL OR industry_tag = $1` (default_categories / resolve_proposal),
+            # so a category's own tag is either NULL (general/core-labor) or
+            # exactly this run's industry_tag — GENERAL_TAG vs. industry_tag is
+            # the only split that can occur.
+            tag_by_cat = {r["slug"]: (_vc.GENERAL_TAG if r["industry_tag"] is None else industry_tag)
+                         for r in cat_tags}
+            written_counts: Dict[Any, int] = {}
+            for r in staged:
+                key = (r["jurisdiction_id"], r["category"])
+                written_counts[key] = written_counts.get(key, 0) + 1
+            failed_set = set(result.get("failed") or [])
+            for cat in attempted:
+                tag = tag_by_cat.get(cat, industry_tag)
+                for node in node_ids:
+                    try:
+                        if cat in failed_set:
+                            await _vc._mark(conn, node, tag, cat, "failed", None,
+                                            error="pilot research run failed")
+                        else:
+                            n = written_counts.get((node, cat), 0)
+                            await _vc._mark(conn, node, tag, cat,
+                                            "covered" if n > 0 else "empty", None,
+                                            requirements_written=n)
+                    except Exception:
+                        logger.exception(
+                            "compliance_pilot: ledger stamp failed for node=%s category=%s",
+                            node, cat)
 
         await _set_action(
             conn, action_id, status="done", staged_ids=staged_ids,
