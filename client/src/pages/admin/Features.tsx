@@ -42,6 +42,13 @@ const PLAN_BADGE_VARIANT: Record<PlanInfo['kind'], 'success' | 'neutral' | 'warn
   unknown: 'warning',
 }
 
+// Buckets the plan itself grants — everything else enabled is "outside the
+// plan": a real add-on purchase, a custom-product grant, a manual toggle, or
+// unexplained history. All four read the same to an admin ("we're paying for
+// this on top of the plan"), so the Add-ons summary lists them together
+// rather than only the formal LiteAddon subset.
+const PLAN_BUCKETS = new Set<ProvenanceBucket>(['tier_forced', 'paid_gate', 'tier_preset'])
+
 // Label + tooltip hint per bucket — see server feature_provenance.py for the
 // classification rules these summarize.
 const PROVENANCE_META: Record<ProvenanceBucket, { label: string; hint: string }> = {
@@ -94,6 +101,12 @@ export default function Features() {
       : Promise.resolve(EMPTY_PROVENANCE)),
     [selected?.id],
     EMPTY_PROVENANCE,
+  )
+  // Everything enabled that the plan itself doesn't grant — a real add-on
+  // purchase, a custom product, a manual toggle, or unexplained history.
+  const outsidePlanEntries = useMemo(
+    () => Object.entries(provenance.features).filter(([, p]) => !PLAN_BUCKETS.has(p.bucket)),
+    [provenance],
   )
 
   async function toggle(companyId: string, feature: string, enabled: boolean) {
@@ -205,12 +218,17 @@ export default function Features() {
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
                 <span className="text-zinc-500">Add-ons</span>
-                {provenance.addons.length === 0 ? (
-                  <span className="text-[11px] text-zinc-600">None purchased</span>
+                {outsidePlanEntries.length === 0 ? (
+                  <span className="text-[11px] text-zinc-600">Nothing enabled outside the plan</span>
                 ) : (
-                  provenance.addons.map((a) => (
-                    <span key={a.key} className="rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300">
-                      {a.name}
+                  outsidePlanEntries.map(([key, p]) => (
+                    <span
+                      key={key}
+                      title={PROVENANCE_META[p.bucket].hint}
+                      className="flex items-center gap-1 rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300"
+                    >
+                      {FEATURE_LABELS[key] ?? key}
+                      <span className="text-zinc-600">· {PROVENANCE_META[p.bucket].label}</span>
                     </span>
                   ))
                 )}
