@@ -504,6 +504,226 @@ async def _src_post_term_claims(conn, company_id, start, end, loc_id, state, top
     } for r in rows]
 
 
+# --------------------------------------------------------------------------- #
+# Employment-practices registers (`workforce_compliance`).
+#
+# Four small registers the tenant keeps about ITSELF — a pay-equity study log, an
+# AI hiring-tool bias-audit register, per-state pay-transparency posting posture,
+# and a biometric/BIPA consent inventory. Each is the documentary answer to a
+# claim type this pilot already models: an equal-pay class action asks whether the
+# employer ever studied its own pay, a disparate-impact hiring charge asks whether
+# the screening tool was audited, and BIPA suits turn entirely on whether written
+# consent was obtained before collection.
+#
+# They are CURRENT POSTURE, not events, so — like `_src_compliance` — none of them
+# is date-filtered: the study that predates the evidence window is still the study
+# the company was operating under during it, and windowing it out would answer
+# "did you ever look at this?" with a false no. Scope params therefore bind at
+# $2/$3, not $4/$5.
+#
+# None is topic-filtered either, for the reason `_src_training` gives: these are
+# the exculpatory half of the record ("we audited, we studied, we obtained
+# consent"), counsel wants the full set whatever the theory, and the registers are
+# small enough that noise is not the failure mode.
+#
+# `is_overdue` / cadence flags are recomputed here from the due date rather than
+# read from their stored columns: those are stamped at write time by
+# `workforce_compliance.audit_dates` and go stale as the calendar moves, and a
+# legal exhibit must not report "current" from a value that was true last year.
+# --------------------------------------------------------------------------- #
+
+def _overdue_sql(col: str) -> str:
+    return f"({col} IS NOT NULL AND {col} < CURRENT_DATE)"
+
+
+async def _src_pay_equity(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Company-wide (no location column). `gap_pct` and `dispersion_pct` are
+    # deliberately rendered as different sentences and never merged: the first is
+    # a measured protected-class gap, the second only the share of roles whose pay
+    # spread exceeds a threshold. Migration payequity02 exists because conflating
+    # them reported a "40% gap" to underwriters; doing it in an attorney-facing
+    # exhibit would be materially worse.
+    rows = await conn.fetch(
+        f"""
+        SELECT pe.id, pe.review_date, pe.scope, pe.methodology, pe.gap_pct,
+               pe.dispersion_pct, pe.remediation, pe.next_due_date,
+               {_overdue_sql("pe.next_due_date")} AS overdue
+        FROM pay_equity_reviews pe
+        WHERE pe.company_id = $1
+        ORDER BY pe.review_date DESC NULLS LAST
+        """,
+        company_id,
+    )
+    out = []
+    for r in rows:
+        bits = []
+        if r["scope"]:
+            bits.append(f"scope {r['scope']}")
+        if r["methodology"]:
+            bits.append(f"methodology {r['methodology']}")
+        if r["gap_pct"] is not None:
+            bits.append(f"measured adjusted pay gap {r['gap_pct']}%")
+        if r["dispersion_pct"] is not None:
+            bits.append(f"{r['dispersion_pct']}% of roles flagged by the pay-dispersion "
+                        f"screen (a screen, not a measured protected-class gap)")
+        if r["remediation"]:
+            bits.append(f"remediation: {r['remediation']}")
+        if r["next_due_date"]:
+            bits.append(f"next study due {_dt(r['next_due_date'])}"
+                        + (" — overdue" if r["overdue"] else ""))
+        out.append({
+            "cid": f"payequity:{r['id']}",
+            "ref": "Pay-equity study",
+            "summary": "Pay-equity study"
+                       + (f" dated {_dt(r['review_date'])}" if r["review_date"] else " (undated)")
+                       + (" — " + ", ".join(bits) if bits else ""),
+            "when": _dt(r["review_date"]),
+            "when_iso": _iso(r["review_date"]),
+        })
+    return out
+
+
+async def _src_hiring_ai_audits(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Company-wide. A tool that has NEVER been audited (last_audit_date NULL) is
+    # the most probative row in this register for a disparate-impact charge, so it
+    # is surfaced explicitly rather than dropped for having no date — which means
+    # NULLS FIRST, not NULLS LAST: gather_evidence's _PER_SOURCE_CAP truncates
+    # from the front of this list, so NULLS LAST would cut the never-audited
+    # tools first on a company with >100 registered tools, keeping only the ones
+    # already audited. (Postgres defaults DESC to NULLS FIRST; NULLS FIRST below
+    # is written explicitly so this isn't silently reversed by a future edit.)
+    rows = await conn.fetch(
+        f"""
+        SELECT ha.id, ha.tool_name, ha.vendor, ha.purpose, ha.last_audit_date,
+               ha.next_due_date, {_overdue_sql("ha.next_due_date")} AS overdue
+        FROM hiring_ai_audits ha
+        WHERE ha.company_id = $1
+        ORDER BY ha.last_audit_date DESC NULLS FIRST
+        """,
+        company_id,
+    )
+    out = []
+    for r in rows:
+        bits = []
+        if r["vendor"]:
+            bits.append(f"vendor {r['vendor']}")
+        if r["purpose"]:
+            bits.append(f"used for {r['purpose']}")
+        if r["last_audit_date"]:
+            bits.append(f"last bias audit {_dt(r['last_audit_date'])}")
+        else:
+            bits.append("no bias audit recorded")
+        if r["next_due_date"]:
+            bits.append(f"next due {_dt(r['next_due_date'])}"
+                        + (" — overdue" if r["overdue"] else ""))
+        out.append({
+            "cid": f"aiaudit:{r['id']}",
+            "ref": "AI hiring-tool audit",
+            "summary": f"AI hiring tool {r['tool_name']} — " + ", ".join(bits),
+            "when": _dt(r["last_audit_date"]),
+            "when_iso": _iso(r["last_audit_date"]),
+        })
+    return out
+
+
+async def _src_pay_transparency(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # Rows ARE per-state, so the matter's state scope applies directly — no
+    # location join needed. `state` is populated from the matter's location when
+    # one is set (gather_evidence resolves location→state first), so this scopes
+    # correctly under either axis, and falls open when neither resolves a state.
+    rows = await conn.fetch(
+        """
+        SELECT pt.id, pt.state, pt.status, pt.postings_include_ranges, pt.note, pt.updated_at
+        FROM pay_transparency_status pt
+        WHERE pt.company_id = $1
+          AND ($2::varchar IS NULL OR UPPER(pt.state) = UPPER($2))
+        ORDER BY pt.state
+        """,
+        company_id, state,
+    )
+    out = []
+    for r in rows:
+        # 'na' means the state has no posting law to be compliant WITH, so it
+        # gets its own phrase: `_hum` renders it "Na", and the ranges clause
+        # below would otherwise report a posting failure against a rule that
+        # does not apply.
+        na = (r["status"] or "").lower() == "na"
+        if na:
+            status = "not applicable in this state"
+        else:
+            status = _hum(r["status"]) + (
+                ", job postings include pay ranges" if r["postings_include_ranges"]
+                else ", job postings do not include pay ranges")
+        out.append({
+            "cid": f"paytransp:{r['id']}",
+            "ref": f"{r['state']} pay transparency",
+            "summary": f"{r['state']} pay-transparency posting status: {status}"
+                       + (f" — {r['note']}" if r["note"] else ""),
+            "when": _dt(r["updated_at"]),
+            "when_iso": _iso(r["updated_at"]),
+        })
+    return out
+
+
+async def _src_biometric_consent(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
+    # `location_id` is nullable metadata here, not the row's identity, so the
+    # standard `_scope_direct` predicate is wrong: its "no attributable location
+    # is excluded while a scope is active" arm would drop a company-wide
+    # fingerprint-clock inventory row from a location-scoped BIPA corpus. The
+    # NULL arm below keeps it, matching `_scope_er_involved`'s reasoning.
+    #
+    # Ordered on `consent_obtained` first (false before true) rather than on the
+    # date: a point with NO consent recorded is the BIPA claim itself, and
+    # gather_evidence's _PER_SOURCE_CAP truncates this list from the front — a
+    # date-only DESC NULLS LAST order put those points at the tail, so a company
+    # with >100 points had its no-consent rows cut first. Ordering on the
+    # boolean is also more robust than ordering on date nullness: nothing ties
+    # consent_obtained_date to consent_obtained in the schema, so a row could in
+    # principle carry a date despite consent_obtained=false.
+    rows = await conn.fetch(
+        """
+        SELECT bc.id, bc.collection_type, bc.purpose, bc.consent_obtained,
+               bc.consent_obtained_date, bc.consent_method, bc.retention_policy,
+               bc.is_active, bl.name AS location_name
+        FROM biometric_consent_points bc
+        LEFT JOIN business_locations bl ON bl.id = bc.location_id
+        WHERE bc.company_id = $1
+          AND (($2::uuid IS NULL AND $3::varchar IS NULL)
+               OR bc.location_id IS NULL
+               OR ($2::uuid IS NOT NULL AND bc.location_id = $2)
+               OR ($2::uuid IS NULL AND UPPER(bl.state) = UPPER($3)))
+        ORDER BY bc.consent_obtained ASC, bc.consent_obtained_date DESC NULLS FIRST
+        """,
+        company_id, loc_id, state,
+    )
+    out = []
+    for r in rows:
+        bits = [f"collection {_hum(r['collection_type'])}"]
+        if r["purpose"]:
+            bits.append(f"purpose {r['purpose']}")
+        # Consent obtained / not obtained is the whole claim under BIPA — state it
+        # flatly in both directions rather than only on the affirmative.
+        if r["consent_obtained"]:
+            bits.append("consent obtained"
+                        + (f" {_dt(r['consent_obtained_date'])}" if r["consent_obtained_date"] else "")
+                        + (f" ({_hum(r['consent_method'])})" if r["consent_method"] else ""))
+        else:
+            bits.append("no consent recorded")
+        if r["retention_policy"]:
+            bits.append(f"retention: {r['retention_policy']}")
+        bits.append("active" if r["is_active"] else "discontinued")
+        out.append({
+            "cid": f"biometric:{r['id']}",
+            "ref": f"{_hum(r['collection_type'])} collection",
+            "summary": "Biometric collection point"
+                       + (f" @ {r['location_name']}" if r["location_name"] else " (company-wide)")
+                       + " — " + ", ".join(bits),
+            "when": _dt(r["consent_obtained_date"]),
+            "when_iso": _iso(r["consent_obtained_date"]),
+        })
+    return out
+
+
 async def _src_compliance_alerts(conn, company_id, start, end, loc_id, state, topic=_BROAD) -> list[dict]:
     # Date-filtered (unlike _src_compliance's current-posture snapshot) — this
     # is deliberately a history: it shows the company was monitoring during

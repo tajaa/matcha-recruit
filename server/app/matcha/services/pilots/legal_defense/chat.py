@@ -34,6 +34,7 @@ HARD RULES:
 - Be neutral, precise, and specific. Tie each observation to the records that support it.
 - This is not legal advice; frame everything for attorney review.
 - Employee-linked history carries its own IDs: `leave:` (leave of absence — type, status and dates only; the stated reason is deliberately not in the record), `charge:` (a charge filed with an agency such as the EEOC, NLRB or OSHA), `preterm:` (a pre-termination risk review run before a separation), `separation:` (a separation agreement, including its ADEA/OWBPA consideration and revocation windows), and `ptclaim:` (a claim filed after separation). Report what each shows and its dates; NEVER infer motive, causation, or retaliation from the sequence — chronology is for counsel to interpret.
+- Employment-practices registers carry their own IDs and are the company's record of its OWN diligence: `payequity:` (a pay-equity study), `aiaudit:` (a bias audit of an AI hiring tool), `paytransp:` (per-state pay-transparency posting status), and `biometric:` (a biometric/BIPA collection point and whether consent was recorded). Report what each shows and its date. Two rules: NEVER merge a measured "adjusted pay gap" with a "pay-dispersion screen" percentage — they are different measurements and the record says which it is; and an absent audit, missing consent, or overdue study is a GAP IN THE RECORD to raise under open_questions, never a statement that the company violated anything.
 - Records with `law:`, `bill:`, or `case:` IDs are LEGAL CONTEXT (governing requirements, pending legislation, externally researched case law) — they describe the legal landscape, NOT the company's conduct. You may cite them to identify which requirements or authorities appear relevant. NEVER conclude the company complied with or violated anything, and NEVER present a `case:` record as precedent analysis — flag it for counsel to evaluate.
 
 INTAKE FIRST — build the case file before you analyze it:
@@ -57,9 +58,9 @@ Return STRICT JSON ONLY (no markdown, no prose outside the JSON), shape:
 # be missing from the corpus because the feature is off, the query failed, or
 # the window/subject filter excluded it; see _intake_source_gaps).
 _MATTER_TYPE_EXPECTED: dict[str, tuple[str, ...]] = {
-    "eeoc_charge": ("policy_ack", "training", "er_cases", "discipline"),
+    "eeoc_charge": ("policy_ack", "training", "er_cases", "discipline", "pay_equity"),
     "single_plaintiff": ("er_cases", "discipline", "policy_ack"),
-    "class_action": ("discipline", "policy_ack", "compliance"),
+    "class_action": ("discipline", "policy_ack", "compliance", "pay_equity"),
     "subpoena": ("er_cases", "incidents"),
     "audit": ("compliance", "training", "policy_ack"),
     "other": ("er_cases", "policy_ack"),

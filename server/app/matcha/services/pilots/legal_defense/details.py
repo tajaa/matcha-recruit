@@ -15,6 +15,7 @@ _AUDIT_ACTION_LABELS = {
     "generate_packet": "Packet generated ({kind})",
     "export": "Packet downloaded",
     "share": "Share link created",
+    "revoke_share": "Share link revoked",
     "shared_download": "Downloaded via share link",
     "research": "External legal research run",
 }

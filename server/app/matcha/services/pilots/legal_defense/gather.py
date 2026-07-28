@@ -8,13 +8,17 @@ from .law import _gather_case_law, _gather_law_cached
 from .sources import (
     _src_accommodations,
     _src_agency_charges,
+    _src_biometric_consent,
     _src_compliance,
     _src_compliance_alerts,
     _src_compliance_remediation,
     _src_discipline,
     _src_er_cases,
+    _src_hiring_ai_audits,
     _src_incidents,
     _src_leave,
+    _src_pay_equity,
+    _src_pay_transparency,
     _src_policy_ack,
     _src_post_term_claims,
     _src_pre_termination,
@@ -110,6 +114,18 @@ _SOURCES = [
      lambda f: bool(f.get("separation_agreements"))),
     ("post_term_claims", "Post-termination claims", _src_post_term_claims,
      lambda f: bool(f.get("employees"))),
+    # Employment-practices registers the company keeps about itself. All four ride
+    # the one `workforce_compliance` flag that gates the trackers that write them —
+    # see the block comment above their queries for why none is date- or
+    # subject-filtered.
+    ("pay_equity", "Pay-equity studies (register)", _src_pay_equity,
+     lambda f: bool(f.get("workforce_compliance"))),
+    ("hiring_ai_audits", "AI hiring-tool bias audits (register)", _src_hiring_ai_audits,
+     lambda f: bool(f.get("workforce_compliance"))),
+    ("pay_transparency", "Pay-transparency posting status (by state)", _src_pay_transparency,
+     lambda f: bool(f.get("workforce_compliance"))),
+    ("biometric_consent", "Biometric / BIPA consent inventory", _src_biometric_consent,
+     lambda f: bool(f.get("workforce_compliance"))),
 ]
 
 

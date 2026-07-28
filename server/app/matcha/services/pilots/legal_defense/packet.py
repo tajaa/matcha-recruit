@@ -143,8 +143,15 @@ def _research_html(research: dict | None) -> str:
 # purpose: it's current tracked posture, and its last_changed_at is the LAW's
 # change date, not a company action. Jurisdiction kinds (law/bill/case) are
 # likewise not company events.
+#
+# The same test splits the employment-practices registers: running a pay-equity
+# study or a hiring-tool bias audit on a date IS a company act, and dating it is
+# most of its evidentiary value ("we studied our pay in March, before the charge
+# was filed"). `paytransp:` and `biometric:` are inventories — their timestamps
+# are record edits and consent-collection metadata, not acts on a timeline.
 _CHRONOLOGY_KINDS = ("incident:", "er_case:", "compliance_alert:", "discipline:",
-                     "training:", "policy_ack:", "accommodation:")
+                     "training:", "policy_ack:", "accommodation:",
+                     "payequity:", "aiaudit:")
 
 
 def _chronology_rows(index: dict) -> list[dict]:
