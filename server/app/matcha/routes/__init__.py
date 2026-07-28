@@ -248,11 +248,16 @@ matcha_router.include_router(
     tags=["matcha-work-billing-admin"],
 )
 # Deliberately ungated: the only /matcha-work/* surface with no
-# require_feature("matcha_work"). All 6 routes are get_current_user-authed
-# and scoped to the caller's own notification rows (not company-scoped), so
-# a matcha_work-disabled tenant can't reach anyone else's data through this —
-# it's a per-user inbox, not a feature surface. Gating by omission, written
-# down per the round-2 refactor review rather than left implicit.
+# require_feature("matcha_work"). Every one of the 6 routes is
+# get_current_user-authed and passes `current_user.id` to the service, so each
+# caller can only ever reach their OWN notification rows — that per-user scoping,
+# not the absence of a company filter, is what makes leaving the gate off safe.
+# (3 of the 6 — list, unread-count, project-unread-counts — additionally narrow
+# by `get_client_company_id`; an earlier version of this comment claimed none of
+# them were company-scoped, which is wrong and would have made the safety
+# argument rest on a false premise.) It's a per-user inbox, not a feature
+# surface. Gating by omission, written down per the round-2 refactor review
+# rather than left implicit.
 matcha_router.include_router(
     mw_notifications_router,
     prefix="/matcha-work",

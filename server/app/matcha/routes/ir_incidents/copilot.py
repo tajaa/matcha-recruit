@@ -34,8 +34,14 @@ router = APIRouter()
 
 
 # The card/chain state machine moved to services/ir/ir_copilot_flow.py in
-# refactor round 2 stage 5. Imported as a module, not by name, so a test that
-# monkeypatches a collaborator on the flow module is seen by these routes.
+# refactor round 2 stage 5.
+#
+# NOTE these are `from … import` BY NAME, so each one is bound into this
+# module's namespace at import time. `monkeypatch.setattr(ir_copilot_flow, "X",
+# fake)` does NOT reach the routes below — they hold their own reference. To
+# patch a name for a route in this file, patch it HERE (`setattr(copilot, "X")`).
+# See ir_incidents/CLAUDE.md for the full three-target rule; an earlier version
+# of this comment claimed the opposite and was wrong.
 from app.matcha.services.ir.ir_copilot_flow import (  # noqa: F401
     _ACTION_PRIORITY_RE,
     _FIELD_LABELS,

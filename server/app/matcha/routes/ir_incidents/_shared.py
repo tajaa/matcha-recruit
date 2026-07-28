@@ -210,29 +210,10 @@ def document_type_for_ext(ext: str) -> str:
     return "photo" if ext in _IMAGE_EXTS else "other"
 
 
-async def read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
-    """Read an UploadFile in chunks, aborting at ``max_bytes``.
-
-    Chunked rather than a bare ``await file.read()`` so an oversize body on the
-    public intake is rejected at the cap instead of after it has already been
-    pulled into the process.
-    """
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Max {max_bytes // (1024 * 1024)} MB per file.",
-            )
-        chunks.append(chunk)
-    if total == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-    return b"".join(chunks)
+# Lifted to services/_shared/uploads.py so matcha_work's handbook upload can bound
+# its read too, without importing another route package. Aliased here so this
+# package's `from ._shared import read_upload_capped` callers are unchanged.
+from app.matcha.services._shared.uploads import read_upload_capped  # noqa: F401,E402
 
 
 def _info_request_effective_status(row) -> str:

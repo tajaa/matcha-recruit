@@ -275,7 +275,11 @@ async def render_300a_pdf(summary: dict) -> bytes:
     full_html = _build_300a_html(summary)
 
     try:
-        from ....core.services.pdf import render_pdf
+        # Absolute: this module moved one directory deeper in the osha/ split, and
+        # the old 4-dot relative silently resolved to `app.matcha.core.services.pdf`
+        # (nonexistent) — swallowed by the except below, so every 300A PDF request
+        # returned 501 "install weasyprint" on a server that has it.
+        from app.core.services.pdf import render_pdf
     except ImportError as ie:
         logger.error("weasyprint import failed: %s", ie)
         raise HTTPException(

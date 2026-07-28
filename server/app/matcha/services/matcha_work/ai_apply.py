@@ -296,9 +296,7 @@ async def _create_onboarding_employees(
     employees: list[dict],
 ) -> list[dict]:
     """Create employee records and trigger provisioning for each. Returns updated employee dicts."""
-    # Lazy: stays in routes/matcha_work/_shared.py (used by threads.py too) —
-    # a module-level import here would pull services back into routes.
-    from app.matcha.routes.matcha_work._shared import _json_object
+    from app.matcha.services.matcha_work.message_shapes import _json_object
 
     results: list[dict] = []
 

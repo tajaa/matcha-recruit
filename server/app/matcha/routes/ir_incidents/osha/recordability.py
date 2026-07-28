@@ -99,7 +99,12 @@ async def update_osha_recordability(
         # otherwise masking would fall to the safety net alone (which can't catch
         # the human-only opt-out). Idempotent + no-op if already asked/answered.
         if update.osha_recordable is True:
-            from .copilot import ensure_case_chain  # lazy: avoid circular import
+            # Lazy: avoid a circular import. Absolute, not `.copilot` — this file
+            # moved into the osha/ subpackage, where a 1-dot relative resolves to
+            # `ir_incidents.osha.copilot`, which does not exist. The UPDATE above
+            # has already committed by this point, so the ModuleNotFoundError
+            # surfaced as an unhandled 500 on a write that had actually succeeded.
+            from app.matcha.routes.ir_incidents.copilot import ensure_case_chain
             await ensure_case_chain(conn, str(incident_id), current_user)
         return {"message": "OSHA recordability updated", "id": str(updated["id"])}
 

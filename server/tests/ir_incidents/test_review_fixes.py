@@ -31,6 +31,94 @@ def test_analytics_module_names_resolve():
     assert callable(getattr(analytics, "get_settings", None))
 
 
+def _ir_route_submodules() -> list[str]:
+    """Every module under routes/ir_incidents/, recursively, incl. subpackages."""
+    import importlib
+    import pkgutil
+
+    pkg = importlib.import_module("app.matcha.routes.ir_incidents")
+    return sorted(
+        m.name
+        for m in pkgutil.walk_packages(pkg.__path__, prefix=f"{pkg.__name__}.")
+    )
+
+
+def test_ir_route_submodule_discovery_covers_the_osha_package():
+    """Guard on the guard: the walk must reach INSIDE osha/, not stop at its
+    __init__. Two production 500s (the 300A PDF import and the recordability
+    privacy-case chain) lived in osha/ submodules that the previously hard-coded
+    list left entirely unchecked."""
+    found = _ir_route_submodules()
+    assert "app.matcha.routes.ir_incidents.osha" in found
+    for leaf in ("logs", "summary_300a", "ita", "recordability", "_shared", "_pdf"):
+        assert f"app.matcha.routes.ir_incidents.osha.{leaf}" in found, leaf
+
+
+def test_ir_route_lazy_imports_resolve():
+    """Every `from X import Y` written INSIDE a function body must resolve.
+
+    Function-scoped imports are the package's documented circular-import escape
+    hatch, so they are common here — and they are invisible to both py_compile
+    and the undefined-globals walk below (they compile to IMPORT_NAME, not
+    LOAD_GLOBAL). They only fail when the line actually executes, which for a
+    rarely-hit branch can be in production.
+
+    Both 2026-07-27 osha/ split blockers were exactly this: a file moved one
+    directory deeper and its relative import silently re-pointed. `....core...`
+    became the nonexistent `app.matcha.core...` (swallowed by an `except
+    ImportError` that assumed weasyprint was missing, so every 300A PDF 501'd),
+    and `.copilot` became `ir_incidents.osha.copilot` (unhandled 500 AFTER the
+    UPDATE had committed).
+    """
+    import ast
+    import importlib
+    import pathlib
+
+    problems = []
+    for name in _ir_route_submodules():
+        mod = importlib.import_module(name)
+        src_path = getattr(mod, "__file__", None)
+        if not src_path:
+            continue
+        tree = ast.parse(pathlib.Path(src_path).read_text())
+
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.ImportFrom):
+                    continue
+                if node.level:  # relative — resolve against this module's package
+                    pkg = mod.__package__ or ""
+                    parts = pkg.split(".")
+                    trim = node.level - 1
+                    base = ".".join(parts[:len(parts) - trim]) if trim else pkg
+                    target = f"{base}.{node.module}" if node.module else base
+                else:
+                    target = node.module or ""
+                try:
+                    imported = importlib.import_module(target)
+                except Exception as e:
+                    problems.append(
+                        f"{name}:{node.lineno} `from {'.' * node.level}"
+                        f"{node.module or ''} import ...` -> {target!r}: {type(e).__name__}: {e}"
+                    )
+                    continue
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    if not hasattr(imported, alias.name):
+                        # A submodule may not be an attribute until imported.
+                        try:
+                            importlib.import_module(f"{target}.{alias.name}")
+                        except Exception:
+                            problems.append(
+                                f"{name}:{node.lineno} {target}.{alias.name} does not exist"
+                            )
+
+    assert not problems, "\n".join(problems)
+
+
 def test_ir_route_modules_have_no_undefined_names():
     """Every name referenced by code objects in the IR route modules must be
     resolvable in the module namespace or builtins — the class of bug behind
@@ -39,14 +127,14 @@ def test_ir_route_modules_have_no_undefined_names():
     import dis
     import importlib
 
-    submodules = [
-        "ai_analysis", "analytics", "anonymous_reporting", "audit_log",
-        "claims_readiness", "copilot", "crud", "documents", "info_requests",
-        "investigation_interviews", "osha", "people", "voice", "_shared",
-    ]
+    # DISCOVERED, never hard-coded. The old literal list named "osha", which the
+    # 2026-07-27 split turned into a re-export-only package __init__ — it defines
+    # no functions, so the walk below silently covered ZERO of the 16 OSHA
+    # handlers while still reading green. Recursing means any future split is
+    # covered the day it lands.
     problems = []
-    for name in submodules:
-        mod = importlib.import_module(f"app.matcha.routes.ir_incidents.{name}")
+    for name in _ir_route_submodules():
+        mod = importlib.import_module(name)
         seen: set[str] = set()
 
         def _walk(code):

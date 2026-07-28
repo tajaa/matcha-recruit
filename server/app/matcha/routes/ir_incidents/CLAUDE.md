@@ -86,17 +86,30 @@ Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule p
 
 - **Circular imports between `_legacy`-era modules**: ai_analysis.py, crud.py, and `services/ir/ir_incident_create.py` all reference `_auto_map_policy_violations`. To avoid a circular module-level import it's a **lazy** `from .ai_analysis import _auto_map_policy_violations` inside function bodies (callsites: `ir_incident_create.create_incident_core` — the shared create tail, now used by both `crud.create_incident` and the public location intake — `crud.update_incident`, and an inline copilot path). Keep this pattern if any submodule needs to call functions defined in a later-loaded submodule.
 - **Absolute imports throughout**: every submodule uses `from app.X import …`, not `from ..X` or `from ...X`. The relative-imports-to-absolute conversion was pre-step-0 of the split; new code should keep using absolute paths so the file can be moved without breaking imports.
-- **Don't define `_safe_json_loads` again**: the real definition is `services/_shared/jsonio.py:safe_json_loads` (singular — the original flat file had two duplicate defs that got deduped during the migration), aliased into `_shared.py` so `from ._shared import _safe_json_loads` keeps working package-wide. Same singular-definition rule for `_sse`, `log_audit`, `parse_witnesses`, `row_to_response` (still local to `_shared.py`). **One live exception**: `osha/_shared.py` carries its own `_safe_json_loads` with different semantics — package `_shared` returns `{}` when `default` is None, the OSHA copy returns `None`, and every OSHA caller is written against the `None` shape. Deliberately NOT unified during the 2026-07-27 split; unifying it is a behavior change, not a cleanup.
+- **Don't define `_safe_json_loads` again**: the real definition is `services/_shared/jsonio.py:safe_json_loads` (singular — the original flat file had two duplicate defs that got deduped during the migration), aliased into both `_shared.py` and `osha/_shared.py` so `from ._shared import _safe_json_loads` keeps working at either level. Same singular-definition rule for `_sse`, `log_audit`, `parse_witnesses`, `row_to_response` (still local to `_shared.py`). The 2026-07-27 osha/ split left a second copy here and this doc recorded it as a permanent exception on "different default semantics" (`None` vs `{}`) — that was wrong: all 8 OSHA call sites pass an explicit `{}`, so the divergent branch was unreachable, and the values come from JSONB columns with no asyncpg codec (always `str`/None), so the one remaining disagreement (a bare int) can't occur either. Unified in the stage-4/5 audit after checking every call site.
 
-- **`services/ir/ir_copilot_flow.py` reaches `_shared` through a lazy proxy.** A
-  plain `from ...ir_incidents._shared import X` at its module scope is a live
-  cycle (importing the flow imports this package, whose `__init__` imports
-  `copilot.py`, which imports the flow back, half-built). The `_ir` proxy in
-  that file re-resolves each attribute off `_shared` on every access, so
-  **a test that patches one of those collaborators must
-  `monkeypatch.setattr(ir_incidents._shared, ...)`, not the `copilot` module** —
-  patching `copilot` is silently ignored and the call reaches the real DB. See
+- **Patching a Copilot collaborator: there are THREE possible targets, and
+  picking the wrong one fails SILENTLY (the real DB/Gemini gets called and the
+  test still reads green).** Pick by where the *calling* function is defined:
+
+  | The function doing the calling lives in… | Patch |
+  |---|---|
+  | `services/ir/ir_copilot_flow.py`, calling a `_shared` helper via the `_ir` proxy | `ir_incidents._shared` |
+  | `services/ir/ir_copilot_flow.py`, calling something defined in that same module | `ir_copilot_flow` |
+  | `routes/ir_incidents/copilot.py` (i.e. a route body) | `copilot` |
+
+  The first row exists because a plain `from ...ir_incidents._shared import X` at
+  the flow module's scope is a live cycle (importing the flow imports this
+  package, whose `__init__` imports `copilot.py`, which imports the flow back,
+  half-built). The `_ir` proxy re-resolves each attribute off `_shared` on every
+  access, so patching `_shared` works and patching `copilot` is ignored — see
   `tests/ir_incidents/test_osha_privacy_case.py`'s `next_case_step` patch.
+
+  The third row is the one a stale comment in `copilot.py` used to deny: that
+  file re-exports ~40 flow names with `from … import`, which **binds them into
+  its own namespace at import time**. A route body therefore reads
+  `copilot.X`, not `ir_copilot_flow.X`, and patching the flow module does not
+  reach it.
 
 ## Tests
 

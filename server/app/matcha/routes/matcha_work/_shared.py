@@ -3,7 +3,6 @@
 Extracted from the original flat matcha_work.py during the package split
 (2026-07-03). See matcha_work/CLAUDE.md for the module map.
 """
-import json
 from typing import Optional
 from uuid import UUID
 
@@ -13,50 +12,25 @@ from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
-from app.matcha.models.matcha_work.matcha_work import MWMessageOut, ThreadDetailResponse
+from app.matcha.models.matcha_work.matcha_work import ThreadDetailResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_ai import _infer_skill_from_state
+
+# Pure shaping helpers — the real definitions live in
+# services/matcha_work/message_shapes.py (moved there in the refactor round 2
+# stage 5 audit, so services/matcha_work/turn_pipeline.py stops importing back
+# into routes/ for names it uses in nearly every stage). Re-exported here so
+# every `from ._shared import _sse_data` in this package is unchanged.
+from app.matcha.services.matcha_work.message_shapes import (  # noqa: F401
+    THREAD_FILE_TEXT_CAP,
+    _json_object,
+    _row_to_message,
+    _sse_data,
+)
 
 RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 
 RESUME_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
-
-def _row_to_message(row: dict) -> MWMessageOut:
-    raw_meta = row.get("metadata")
-    if isinstance(raw_meta, str):
-        try:
-            raw_meta = json.loads(raw_meta)
-        except (json.JSONDecodeError, TypeError):
-            raw_meta = None
-    # Strip the server-only extracted `text` from file attachments before the
-    # message reaches the client. That text is AI context (can be tens of KB),
-    # not display data — the client only needs url/filename/size/kind.
-    # Also presign s3:// urls so the desktop chip is clickable (CloudFront
-    # urls pass through; stored url stays stable for re-extraction).
-    if isinstance(raw_meta, dict) and isinstance(raw_meta.get("attachments"), list):
-        _storage = get_storage()
-        cleaned = []
-        for a in raw_meta["attachments"]:
-            if not isinstance(a, dict):
-                cleaned.append(a)
-                continue
-            a = {k: v for k, v in a.items() if k != "text"}
-            url = a.get("url") or ""
-            if isinstance(url, str) and url.startswith("s3://"):
-                signed = _storage.get_presigned_download_url(url, expires_in=3600)
-                if signed:
-                    a["url"] = signed
-            cleaned.append(a)
-        raw_meta = {**raw_meta, "attachments": cleaned}
-    return MWMessageOut(
-        id=row["id"],
-        thread_id=row["thread_id"],
-        role=row["role"],
-        content=row["content"],
-        version_created=row.get("version_created"),
-        metadata=raw_meta,
-        created_at=row["created_at"],
-    )
 
 async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UUID], *, user_id: UUID | None = None) -> ThreadDetailResponse:
     thread = await doc_svc.get_thread(thread_id, company_id, user_id=user_id)
@@ -124,25 +98,10 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UU
         collaborators=collaborators,
     )
 
-def _sse_data(payload: dict) -> str:
-    return f"data: {json.dumps(payload, default=str)}\n\n"
-
-def _json_object(value) -> dict:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            return {}
-    return {}
-
 THREAD_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".json"}
 
 THREAD_FILE_MAX_BYTES = 10 * 1024 * 1024
 
-THREAD_FILE_TEXT_CAP = 40000
 
 def _strip_markdown(text: str) -> str:
     """Strip common markdown syntax to produce clean plain text for project sections."""

@@ -26,15 +26,16 @@ from app.matcha.services.matcha_work.ai_apply import (
     _blog_mode_state_from_meta,
     _scope_slide_update,
 )
-# These 3 are pure/stateless (SSE formatting, row->response mapping, a byte
-# cap) with zero routes-specific coupling, but stay in _shared.py because
-# several OTHER route submodules (recruiting.py, research_tasks.py,
-# thread_uploads.py, threads.py) use them too. No cycle risk (verified
-# _shared.py has no reverse dependency on this module), so a top-level import
-# is safe — but it's still a services->routes reference, and these functions
-# are called from nearly every stage below, so a per-call lazy import would
-# mean threading the same 3-line import through ~10 functions for no benefit.
-from app.matcha.routes.matcha_work._shared import THREAD_FILE_TEXT_CAP, _row_to_message, _sse_data
+# Pure/stateless (SSE formatting, row->response mapping, a byte cap) with zero
+# routes-specific coupling. They used to live in routes/matcha_work/_shared.py,
+# which made this a services->routes import at module scope; they now live in a
+# services leaf and _shared.py re-exports them for the route submodules
+# (recruiting.py, research_tasks.py, thread_uploads.py, threads.py) that use them.
+from app.matcha.services.matcha_work.message_shapes import (
+    THREAD_FILE_TEXT_CAP,
+    _row_to_message,
+    _sse_data,
+)
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.billing import token_budget_service
 from app.matcha.services.matcha_work.escalation_service import should_escalate, create_escalation

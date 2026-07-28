@@ -12,8 +12,8 @@ transitional phase).
 """
 
 import logging
+import os
 import re
-from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -26,7 +26,6 @@ from app.matcha.routes.matcha_work._shared import (
     _build_thread_detail_response,
     _json_object,
     _row_to_message,
-    _sse_data,
 )
 from app.core.feature_flags import get_company_features
 from app.core.services.storage import get_storage
@@ -62,9 +61,12 @@ from app.matcha.models.matcha_work.matcha_work import (
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.matcha_work.matcha_work_modes import MODE_COLUMNS_SQL, MODES_BY_KEY, THREAD_MODES
 from app.matcha.services.matcha_work.matcha_work_handbook_upload import (
+    HANDBOOK_UPLOAD_EXTENSIONS,
+    HANDBOOK_UPLOAD_MAX_BYTES,
     _thread_accepts_handbook_upload,
     run_handbook_upload,
 )
+from app.matcha.services._shared.uploads import read_upload_capped
 from app.matcha.services.matcha_work.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
 from app.core.services.handbook_service import HandbookService
 
@@ -308,12 +310,21 @@ async def upload_thread_handbook(
             detail="Handbook upload is only available in a new chat or an upload-mode handbook thread.",
         )
 
+    # Extension first, then a CAPPED read. `content=await file.read()` as a call
+    # argument materialized the entire body before run_handbook_upload got to
+    # check the extension whitelist or the synced-locations gate, so a 500MB zip
+    # was pulled fully into the process and then 400'd. The service re-checks
+    # both (it is the contract, and huume calls it too) — this is the bound.
+    extension = os.path.splitext((file.filename or "").strip())[1].lower()
+    if extension not in HANDBOOK_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF, DOCX, and DOC handbooks are supported")
+
     stream = await run_handbook_upload(
         thread_id=thread_id,
         company_id=company_id,
         thread=thread,
         raw_filename=file.filename,
-        content=await file.read(),
+        content=await read_upload_capped(file, HANDBOOK_UPLOAD_MAX_BYTES),
         content_type=file.content_type,
     )
     if stream is None:

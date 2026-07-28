@@ -1,16 +1,9 @@
 """Helpers shared by two or more of the OSHA sub-surfaces.
 
 Only what genuinely crosses a group boundary lives here: the export
-attestation gate (logs + 300A + ITA), the 300A aggregation and headcount
-resolution (300A + ITA), and the local JSON coercion.
-
-NOTE on `_safe_json_loads`: the package-level `ir_incidents/_shared.py` has a
-function of the same name with DIFFERENT semantics (it returns `{}` where
-this one returns `None` when `default` is None). This copy is kept verbatim
-rather than unified, because every OSHA caller was written against the
-`None`-returning shape.
+attestation gate (logs + 300A + ITA) and the 300A aggregation and headcount
+resolution (300A + ITA).
 """
-import json
 import logging
 
 from fastapi import HTTPException
@@ -20,16 +13,15 @@ from app.matcha.routes.ir_incidents._shared import log_audit
 logger = logging.getLogger(__name__)
 
 
-def _safe_json_loads(val, default=None):
-    """Parse a JSON string or return a dict/list as-is."""
-    if val is None:
-        return default
-    if isinstance(val, (dict, list)):
-        return val
-    try:
-        return json.loads(val)
-    except (json.JSONDecodeError, TypeError):
-        return default
+# Unified onto the one shared implementation (refactor round 2, stage 4-5 audit).
+# This module used to carry its own copy, justified as a permanent exception on
+# "different default semantics" — the local one returned `default` (None) where
+# the shared one returns `{}`. That difference is UNREACHABLE: all 8 call sites in
+# this package pass an explicit `{}`, so the None branch was never taken. The only
+# input the two disagree on given `{}` is a bare int, and these values come from
+# JSONB columns with no asyncpg type codec registered, which decode to `str` (or
+# None for NULL) — never an int. Verified case-by-case before merging them.
+from app.matcha.services._shared.jsonio import safe_json_loads as _safe_json_loads  # noqa: F401
 
 
 # Non-privacy incidents with no structured injury data still must NOT show the

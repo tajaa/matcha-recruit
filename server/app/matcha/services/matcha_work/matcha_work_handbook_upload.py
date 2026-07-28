@@ -14,6 +14,8 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from google.genai import types
 
+from app.matcha.services.matcha_work.message_shapes import _sse_data
+
 logger = logging.getLogger(__name__)
 
 from ....core.services.compliance_service import get_location_requirements, get_locations
@@ -834,7 +836,11 @@ async def run_handbook_upload(
     """
     # Lazy — see the note beside this module's imports (threads.py imports us
     # at module scope, so a top-level import of its package would cycle).
-    from app.matcha.routes.matcha_work._shared import _build_thread_detail_response, _sse_data
+    # `_build_thread_detail_response` is genuinely routes-layer (raises
+    # HTTPException, builds the response model) and threads.py imports THIS
+    # module at scope, so it stays lazy. `_sse_data` is pure and now lives in
+    # a services leaf — imported at module scope above.
+    from app.matcha.routes.matcha_work._shared import _build_thread_detail_response
 
     filename = (raw_filename or "handbook.pdf").strip() or "handbook.pdf"
     extension = os.path.splitext(filename)[1].lower()

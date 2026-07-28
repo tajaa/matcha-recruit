@@ -17,7 +17,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | File | Concern | Routes |
 |---|---|---|
 | `__init__.py` | Routing assembly + 3-router re-exports (fresh aggregator, not crud-owned) | — |
-| `_shared.py` | Cross-cutting helpers (`_sse_data`, project-access guards, file-url resolvers, thread-message serializer) + shared constants | — |
+| `_shared.py` | Cross-cutting helpers: project-access guards, file-url resolvers, upload constants. The pure shaping helpers (`_sse_data`, `_json_object`, `_row_to_message`, `THREAD_FILE_TEXT_CAP`) moved to `services/matcha_work/message_shapes.py` in the stage-5 audit — they carry no HTTP coupling, and keeping them here forced `turn_pipeline.py` into a module-level services→routes import. Re-exported here, so `from ._shared import _sse_data` is unchanged | — |
 | `presence.py` | Heartbeat + online-users (**owns `presence_router`**) | 2 |
 | ~~`ai_turn.py`~~ | **Moved to `services/matcha_work/ai_apply.py`** (refactor round 2, stage 5) — it always had zero routes. Field validation, phantom-claim scrubbing, offer-draft detection, onboarding provisioning, slide/blog/recruiting context injection, `_apply_ai_updates_and_operations` (the AI-response-to-DB-write step). Consumed by `messaging.py` and `threads.py` | — |
 | `pdf_export.py` | Markdown→PDF rendering (WeasyPrint) + project/message/thread-project export endpoints | 3 |
@@ -76,7 +76,7 @@ Three same-method overlapping route pairs exist. Each pair lives entirely within
 
 - `_shared` ← everything.
 - `services/matcha_work/ai_apply.py` ← `threads.py`, `messaging.py` (for `_apply_ai_updates_and_operations` + slide/blog/recruiting context helpers).
-- `services/matcha_work/matcha_work_handbook_upload.py` ← `threads.py` (`run_handbook_upload` + `_thread_accepts_handbook_upload`). That service lazily imports `_shared._sse_data` / `_build_thread_detail_response` back **inside** `run_handbook_upload` — a top-level import would cycle, since `threads.py` imports the service at module scope.
+- `services/matcha_work/matcha_work_handbook_upload.py` ← `threads.py` (`run_handbook_upload` + `_thread_accepts_handbook_upload`). That service lazily imports `_shared._build_thread_detail_response` back **inside** `run_handbook_upload` — a top-level import would cycle, since `threads.py` imports the service at module scope. (`_sse_data` no longer needs the lazy hop; it comes from `services/matcha_work/message_shapes.py` at module scope.)
 - `services/matcha_work/turn_pipeline.py` ← `messaging.py` only (the pipeline `send_message_stream` orchestrates).
 - `pdf_export._render_project_pdf` ← `projects.py` (discipline signature flow), `sections.py` (section email).
 - `elements._list_project_elements` ← `projects.py` (bundle endpoint), `github.py` (repo-snapshot stats).
