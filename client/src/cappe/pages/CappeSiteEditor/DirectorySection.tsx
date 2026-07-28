@@ -19,15 +19,27 @@ export function DirectorySection({ siteId }: { siteId: string }) {
   const [suggesting, setSuggesting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
 
   useEffect(() => {
     if (!siteId) return
     cappeApi
       .get<CappeDirectoryListing>(`/sites/${siteId}/directory`)
       .then(setListing)
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => { setError(e.message); setLoadFailed(true) })
   }, [siteId])
 
+  // A failed initial load must say so, not just vanish — otherwise a 500 (or a
+  // missing site row) reads as "this feature doesn't exist for me" rather than
+  // "something broke", and there's nothing on the page to act on.
+  if (loadFailed) {
+    return (
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="mb-2 text-sm font-semibold text-zinc-100">Discover listing</h2>
+        <p className="text-sm text-red-400">{error || 'Could not load your Discover listing.'}</p>
+      </section>
+    )
+  }
   if (!listing) return null
 
   function patch(next: Partial<CappeDirectoryListing>) {
@@ -70,11 +82,25 @@ export function DirectorySection({ siteId }: { siteId: string }) {
     }
   }
 
-  function addTag() {
+  // Returns the authoritative tag list (including anything just committed)
+  // rather than relying on the caller re-reading `listing` afterward. Blur and
+  // click are separate native events, and the button's onClick can fire before
+  // React has re-rendered from the input's blur — so `save()` closing over the
+  // pre-blur `listing` would silently drop a keyword the user typed but never
+  // pressed Enter on. The Save button calls this directly (`addTag()` is
+  // idempotent against a duplicate/empty pending value) and passes the result
+  // straight into `save({tags: ...})`, sidestepping the stale-closure race
+  // entirely instead of depending on event ordering.
+  function addTag(): string[] {
     const tag = tagInput.trim().toLowerCase()
-    if (!tag || listing!.tags.includes(tag) || listing!.tags.length >= 8) { setTagInput(''); return }
-    patch({ tags: [...listing!.tags, tag] })
+    if (!tag || listing!.tags.includes(tag) || listing!.tags.length >= 8) {
+      setTagInput('')
+      return listing!.tags
+    }
+    const next = [...listing!.tags, tag]
+    patch({ tags: next })
     setTagInput('')
+    return next
   }
 
   return (
@@ -203,7 +229,7 @@ export function DirectorySection({ siteId }: { siteId: string }) {
 
         <button
           type="button"
-          onClick={() => void save()}
+          onClick={() => void save({ tags: addTag() })}
           disabled={saving}
           className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
         >

@@ -36,6 +36,7 @@ from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeDirectoryPage, CappeDirectoryCategories
 from ...services.directory import CATEGORY_LABELS, category_options, normalize_category
+from ...services.render.sanitize import _safe_image
 
 router = APIRouter()
 
@@ -63,12 +64,14 @@ _ENTRY_COLS = """
     s.published_at
 """
 
-# Nearest active, geocoded location — drives both the distance filter and the
-# "Los Angeles, CA" line on the card. LEFT JOIN LATERAL so a site with no
-# location still appears in unfiltered browsing.
+# Card display only (no geo filter in play): the site's default location, for
+# the "Los Angeles, CA" line on the card. LEFT JOIN LATERAL so a site with no
+# location still appears in unfiltered browsing. Deliberately NOT used for
+# radius search — see `_geo_cte` below for why a default location is the
+# wrong row to filter/sort on once lat/lng are supplied.
 _LOCATION_LATERAL = """
 LEFT JOIN LATERAL (
-    SELECT l.city, l.region, l.lat, l.lng
+    SELECT l.city, l.region
       FROM cappe_locations l
      WHERE l.site_id = s.id AND l.active
      ORDER BY l.is_default DESC, l.sort_order, l.created_at
@@ -117,7 +120,14 @@ def _entry(row, *, distance_km: Optional[float] = None) -> dict[str, Any]:
         "category_label": CATEGORY_LABELS.get(row["directory_category"] or ""),
         "tags": list(row["directory_tags"] or []),
         "blurb": row["directory_blurb"],
-        "logo_url": row["logo_url"],
+        # `meta_config.logo_url` is tenant-controlled free text, unlike
+        # everything else in the allowlist. Every other render path
+        # (services/render/) runs it through this same guard before emitting
+        # an <img src>; skipping it here would let a tenant point their logo
+        # at their own server and log the IP/UA of every Discover visitor —
+        # not just visitors to their own site — plus `javascript:`/`data:`
+        # schemes and unescaped quote/paren characters.
+        "logo_url": _safe_image(row["logo_url"]),
         "account_type": row["account_type"],
         "city": row["city"],
         "region": row["region"],
@@ -208,8 +218,11 @@ async def browse_directory(
         args.append(account_type)
         where.append(f"a.account_type = ${len(args)}")
 
-    distance_expr = "NULL::float8"
+    # Two entirely different join shapes depending on whether a radius was
+    # asked for — see the long comment below for why they can't share one.
+    geo_cte = ""
     geo_join = _LOCATION_LATERAL
+    distance_km_expr = "NULL::float8"
     if has_geo:
         args.append(lat)
         lat_param = f"${len(args)}"
@@ -218,20 +231,45 @@ async def browse_directory(
         args.append(radius_km)
         radius_param = f"${len(args)}"
 
-        distance_expr = (
-            _DISTANCE_EXPR.replace("$LAT", lat_param).replace("$LNG", lng_param).replace("geo.", "loc.")
+        loc_distance_expr = (
+            _DISTANCE_EXPR.replace("$LAT", lat_param).replace("$LNG", lng_param).replace("geo.", "l.")
         )
-        # Bounding box first so the partial (lat, lng) index does the work and
-        # the trig only runs on candidates. 111.045 km per degree of latitude;
-        # the longitude span widens with latitude, clamped near the poles.
-        where.append(
-            f"""loc.lat IS NOT NULL AND loc.lng IS NOT NULL
-                AND loc.lat BETWEEN {lat_param} - ({radius_param} / 111.045)
-                                AND {lat_param} + ({radius_param} / 111.045)
-                AND loc.lng BETWEEN {lng_param} - ({radius_param} / (111.045 * greatest(cos(radians({lat_param})), 0.01)))
-                                AND {lng_param} + ({radius_param} / (111.045 * greatest(cos(radians({lat_param})), 0.01)))
-                AND ({distance_expr}) <= {radius_param}"""
+        bbox_predicate = f"""
+                l.lat IS NOT NULL AND l.lng IS NOT NULL
+                AND l.lat BETWEEN {lat_param} - ({radius_param} / 111.045)
+                              AND {lat_param} + ({radius_param} / 111.045)
+                AND l.lng BETWEEN {lng_param} - ({radius_param} / (111.045 * greatest(cos(radians({lat_param})), 0.01)))
+                              AND {lng_param} + ({radius_param} / (111.045 * greatest(cos(radians({lat_param})), 0.01)))
+        """
+        # Drive off `cappe_locations` directly rather than picking each site's
+        # DEFAULT location and filtering that: a multi-location business whose
+        # default is its unmapped HQ has a real location inside the radius that
+        # the old per-site-default lateral would never see (its lateral output
+        # was one row — the default — and the radius filter then ran against
+        # THAT row's lat/lng, dropping the site even though a branch matched).
+        # Filtering on `l.*` (the bbox + `active`) here also means Postgres can
+        # use `idx_cappe_locations_geo` as the driving scan; the old shape ran
+        # the bbox against the output of a per-site `LIMIT 1` lateral, which
+        # can't be pushed into an index scan at all.
+        geo_cte = f"""
+        WITH nearest_loc AS (
+            SELECT DISTINCT ON (l.site_id)
+                   l.site_id, l.city, l.region, ({loc_distance_expr}) AS distance_km
+              FROM cappe_locations l
+             WHERE l.active AND ({bbox_predicate})
+             ORDER BY l.site_id, distance_km ASC
         )
+        """
+        # INNER join: a site with no geocoded location inside the box has
+        # nothing to rank or filter by, and radius search is exactly the query
+        # where "no matching location" should mean "not a result", not "show it
+        # anyway with a blank distance".
+        geo_join = "JOIN nearest_loc loc ON loc.site_id = s.id"
+        # The bbox above is a square approximation; the exact circle is only
+        # knowable once distance_km is computed, so it's enforced here rather
+        # than inside the CTE's WHERE (which runs before that column exists).
+        where.append(f"loc.distance_km <= {radius_param}")
+        distance_km_expr = "loc.distance_km"
 
     rank_expr = "0::float4"
     if query_param:
@@ -258,9 +296,10 @@ async def browse_directory(
     offset_param = f"${len(args)}"
 
     sql = f"""
+        {geo_cte}
         SELECT {_ENTRY_COLS},
                loc.city, loc.region,
-               ({distance_expr}) AS distance_km,
+               {distance_km_expr} AS distance_km,
                {rank_expr} AS rank,
                rev.rating, rev.review_count,
                COUNT(*) OVER () AS total_count

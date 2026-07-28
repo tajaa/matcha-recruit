@@ -35,6 +35,7 @@ from google.genai import types
 
 from ...core.services.genai_client import get_genai_client
 from ...core.services.rate_limiter import GeminiRateLimiter
+from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -346,14 +347,22 @@ def _parse_json_response(text: str) -> Any:
     return json.loads(text.strip())
 
 
-async def infer_listing(conn, site_id: UUID) -> Optional[dict[str, Any]]:
+async def infer_listing(site_id: UUID) -> Optional[dict[str, Any]]:
     """Propose {category, tags, blurb} for a site. None on any failure.
 
     NEVER raises: this runs as a background task off the publish path, and a
     Gemini outage must not turn into a failed publish. The caller treats None as
     "leave the listing alone".
+
+    Takes no `conn` — it opens one only to gather context and closes it before
+    the Gemini call. `rate_limiter.check_limit`/`record_call` below each open
+    their OWN connection too, so holding one across a ~30s model call would pin
+    two of the pool's 10 slots per in-flight inference; ten tenants clicking
+    "Suggest for me" (or ten publishes landing) at once would exhaust the pool
+    for the whole backend (matcha + cappe + tellus share it).
     """
-    ctx = await gather_site_context(conn, site_id)
+    async with get_connection() as conn:
+        ctx = await gather_site_context(conn, site_id)
     if ctx is None:
         return None
 
@@ -400,38 +409,75 @@ async def infer_listing(conn, site_id: UUID) -> Optional[dict[str, Any]]:
     }
 
 
-async def apply_inferred_listing(conn, site_id: UUID, *, overwrite: bool = False) -> bool:
+async def apply_inferred_listing(site_id: UUID, *, overwrite: bool = False) -> bool:
     """Infer and persist a listing. Returns True if anything was written.
 
-    ``overwrite=False`` (the publish path) fills only the fields that are still
-    empty, so re-publishing never clobbers a listing the tenant edited by hand.
-    ``overwrite=True`` is the explicit "Suggest for me" button.
+    ``overwrite=False`` (the publish-time hook) fills only fields the tenant has
+    never touched. It is gated on ``directory_confirmed_at IS NULL`` — once a
+    manual edit stamps that column (`routes/sites.py:update_directory_listing`),
+    auto-fill stops entirely, including for a field the tenant deliberately
+    cleared. Without this gate a tenant who intentionally blanks the blurb (to
+    opt out of the field, not the listing) would see AI copy reappear on every
+    later publish — the previous version of this comment claimed this gate
+    existed when nothing actually read the column.
+
+    ``overwrite=True`` is the explicit "Suggest for me" button — but a
+    *successful* inference call is not the same as a *useful* one: the prompt
+    itself tells the model to return ``category="other"``/an empty blurb for a
+    site that looks thin, so a click out of curiosity can otherwise replace a
+    tenant's correct hand-picked category with "other" and NULL a blurb that
+    was passing the directory's quality gate, silently delisting the site. Each
+    field only overwrites when the proposal actually produced something better
+    than what's already there.
+
+    Takes no `conn`: gathering, inferring, and writing each get their own
+    connection rather than holding one across the ~30s Gemini call inside
+    `infer_listing` (see that function's docstring for why).
     """
-    proposal = await infer_listing(conn, site_id)
+    if not overwrite:
+        async with get_connection() as conn:
+            confirmed = await conn.fetchval(
+                "SELECT directory_confirmed_at FROM cappe_sites WHERE id = $1", site_id
+            )
+        if confirmed is not None:
+            return False
+
+    proposal = await infer_listing(site_id)
     if proposal is None:
         return False
 
-    if overwrite:
-        await conn.execute(
-            """UPDATE cappe_sites
-                  SET directory_category = $2::varchar, directory_tags = $3::text[],
-                      directory_blurb = $4::varchar,
-                      updated_at = NOW()
-                WHERE id = $1""",
-            site_id, proposal["category"], proposal["tags"], proposal["blurb"],
-        )
-    else:
-        await conn.execute(
-            """UPDATE cappe_sites
-                  SET directory_category = COALESCE(directory_category, $2::varchar),
-                      directory_tags = CASE
-                          WHEN directory_tags IS NULL OR cardinality(directory_tags) = 0
-                          THEN $3::text[] ELSE directory_tags END,
-                      directory_blurb = COALESCE(directory_blurb, $4::varchar),
-                      updated_at = NOW()
-                WHERE id = $1""",
-            site_id, proposal["category"], proposal["tags"], proposal["blurb"],
-        )
+    async with get_connection() as conn:
+        if overwrite:
+            current = await conn.fetchrow(
+                "SELECT directory_category, directory_tags, directory_blurb "
+                "FROM cappe_sites WHERE id = $1",
+                site_id,
+            )
+            category = proposal["category"]
+            if category == "other" and current and current["directory_category"]:
+                category = current["directory_category"]
+            tags = proposal["tags"] or (list(current["directory_tags"]) if current and current["directory_tags"] else [])
+            blurb = proposal["blurb"] or (current["directory_blurb"] if current else None)
+            await conn.execute(
+                """UPDATE cappe_sites
+                      SET directory_category = $2::varchar, directory_tags = $3::text[],
+                          directory_blurb = $4::varchar,
+                          updated_at = NOW()
+                    WHERE id = $1""",
+                site_id, category, tags, blurb,
+            )
+        else:
+            await conn.execute(
+                """UPDATE cappe_sites
+                      SET directory_category = COALESCE(directory_category, $2::varchar),
+                          directory_tags = CASE
+                              WHEN directory_tags IS NULL OR cardinality(directory_tags) = 0
+                              THEN $3::text[] ELSE directory_tags END,
+                          directory_blurb = COALESCE(directory_blurb, $4::varchar),
+                          updated_at = NOW()
+                    WHERE id = $1""",
+                site_id, proposal["category"], proposal["tags"], proposal["blurb"],
+            )
 
-    await refresh_site_search(conn, site_id)
+        await refresh_site_search(conn, site_id)
     return True

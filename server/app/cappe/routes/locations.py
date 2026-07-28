@@ -36,30 +36,45 @@ async def _geocode_location(site_id: UUID, location_id: UUID) -> None:
     site. Discover's "near me" reads them, which means without this the radius
     filter would match almost nothing.
 
-    Runs after the response (external HTTP, US Census), owns its connection, and
-    swallows everything: a failed geocode costs the site its distance sort, not
-    its location. Never overwrites coordinates the owner typed themselves.
+    Runs after the response and NEVER holds a connection across the Census
+    call: `geocode_address` is an external HTTP request with its own ~12s
+    timeout, and the pool (`max_size=10`, shared by matcha + cappe + tellus)
+    would otherwise be pinned for that whole window per location saved — a
+    Census slowdown becomes backend-wide connection starvation, not just a slow
+    background task. Swallows everything: a failed geocode costs the site its
+    distance sort, not its location.
+
+    Owner-typed vs. geocoder-written coordinates are told apart by
+    `geocoded_at`, not just nullness: on a first save (`geocoded_at IS NULL`)
+    an owner-supplied lat/lng is authoritative and only NULL slots get filled.
+    Once WE have written it (`geocoded_at IS NOT NULL`), a later address edit
+    re-fires this and must overwrite — otherwise an owner who moves from
+    Portland to Seattle keeps Portland's coordinates forever (the city/region
+    text updates, but "near me" still anchors on the old point) because they
+    are no longer NULL.
     """
     try:
         async with get_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT address, lat, lng FROM cappe_locations WHERE id = $1 AND site_id = $2",
+                "SELECT address, geocoded_at FROM cappe_locations WHERE id = $1 AND site_id = $2",
                 location_id, site_id,
             )
-            if row is None or not (row["address"] or "").strip():
-                return
-            result = await geocode_address(row["address"])
-            if result is None:
-                return
-            # COALESCE on lat/lng: an owner-supplied coordinate is authoritative,
-            # but city/region are ours to fill either way.
+        if row is None or not (row["address"] or "").strip():
+            return
+        was_geocoded_by_us = row["geocoded_at"] is not None
+        result = await geocode_address(row["address"])
+        if result is None:
+            return
+        async with get_connection() as conn:
             await conn.execute(
                 """UPDATE cappe_locations
-                      SET lat = COALESCE(lat, $3), lng = COALESCE(lng, $4),
+                      SET lat = CASE WHEN $7 OR lat IS NULL THEN $3 ELSE lat END,
+                          lng = CASE WHEN $7 OR lng IS NULL THEN $4 ELSE lng END,
                           city = $5, region = $6, geocoded_at = NOW(), updated_at = NOW()
                     WHERE id = $1 AND site_id = $2""",
                 location_id, site_id,
                 result["lat"], result["lng"], result["city"], result["region"],
+                was_geocoded_by_us,
             )
             # City/region are indexed at weight D, so "coffee portland" works.
             await refresh_site_search(conn, site_id)

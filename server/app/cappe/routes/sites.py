@@ -63,14 +63,17 @@ async def _infer_listing_after_publish(site_id: UUID) -> None:
     produces. Without this hook, opt-out silently degrades back into opt-in and
     the directory stays empty.
 
-    Runs AFTER the response (its own connection — the request's is long gone),
-    fills only empty fields so a re-publish never clobbers a hand-edited
-    listing, and swallows everything: a Gemini outage must not surface on a
-    publish that already succeeded.
+    Runs AFTER the response, fills only empty fields so a re-publish never
+    clobbers a hand-edited listing, and swallows everything: a Gemini outage
+    must not surface on a publish that already succeeded.
+
+    Does NOT hold a connection across the model call (see `apply_inferred_listing`)
+    — this fires on every publish, so a slow or backlogged Gemini call pinning a
+    pool connection for 30s per publish would be backend-wide contention, not
+    just a slow background task.
     """
     try:
-        async with get_connection() as conn:
-            await apply_inferred_listing(conn, site_id, overwrite=False)
+        await apply_inferred_listing(site_id, overwrite=False)
     except Exception:  # noqa: BLE001 - best-effort, post-response
         logger.warning("cappe: listing inference failed for site %s", site_id, exc_info=True)
 
@@ -497,7 +500,13 @@ async def suggest_directory_listing(
     """
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        await apply_inferred_listing(conn, site_id, overwrite=True)
+    # Connection released before the model call: `infer_listing` awaits Gemini
+    # for up to 30s and the rate limiter itself acquires its own connection
+    # (`check_limit`/`record_call`) — holding this one across both would pin a
+    # second slot out of the pool's 10, and 10 concurrent "Suggest for me"
+    # clicks would exhaust it for the whole backend (matcha + cappe + tellus).
+    await apply_inferred_listing(site_id, overwrite=True)
+    async with get_connection() as conn:
         row = await conn.fetchrow(
             f"SELECT {_LISTING_COLS} FROM cappe_sites WHERE id = $1", site_id
         )
