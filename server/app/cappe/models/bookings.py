@@ -57,6 +57,10 @@ class CappeLocation(BaseModel):
     address: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    # Derived from `address` by the background geocoder, not client-settable —
+    # they drive the Discover directory's location filter and card line.
+    city: Optional[str] = None
+    region: Optional[str] = None
     timezone: Optional[str] = None
     hours: list[dict[str, Any]] = Field(default_factory=list)
     contact_phone: Optional[str] = None

@@ -3,6 +3,12 @@
 // (/api/cappe), so a Cappe session and a matcha session coexist in one browser
 // without colliding. Mirrors api/client.ts's 401 refresh-and-retry.
 
+import type {
+  CappeDirectoryCategories,
+  CappeDirectoryPage,
+  CappeDirectoryQuery,
+} from './types'
+
 const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 
 const ACCESS_KEY = 'cappe_access_token'
@@ -200,3 +206,27 @@ export const cappeApi = {
 }
 
 export { _logout as cappeLogout }
+
+// --- Discover directory (public) ---------------------------------------------
+// These go through cappePublicGet, NOT cappeApi.get: Discover is browsed by
+// anonymous visitors, and the authed helper attaches a token and redirects to
+// /cappe/login on a 401 — which would bounce a logged-out visitor out of the
+// directory they were reading.
+
+export function cappeDirectoryQueryString(query: CappeDirectoryQuery): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue
+    params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export function fetchCappeDirectory(query: CappeDirectoryQuery = {}) {
+  return cappePublicGet<CappeDirectoryPage>(`/public/directory${cappeDirectoryQueryString(query)}`)
+}
+
+export function fetchCappeDirectoryCategories() {
+  return cappePublicGet<CappeDirectoryCategories>('/public/directory/categories')
+}

@@ -1,15 +1,18 @@
 """Cappe sites — CRUD, create-from-template clone, publish, and stubbed
 purchase endpoints."""
 import json
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeDirectoryListing,
+    CappeDirectoryListingUpdate,
     CappePagePreview,
     CappeReadiness,
     CappeSite,
@@ -18,6 +21,15 @@ from ..models.cappe import (
     CappeSiteUpdate,
 )
 from ..services.design_gate import gate_content, gate_theme
+from ..services.directory import (
+    CATEGORY_LABELS,
+    apply_inferred_listing,
+    category_options,
+    normalize_blurb,
+    normalize_category,
+    normalize_tags,
+    refresh_site_search,
+)
 from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
 from .render import invalidate_render_cache, tenant_security_headers
@@ -30,14 +42,38 @@ from ._shared import (
     unique_slug,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 _SITE_COLS = (
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
     "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
     "tax_rate_bps, tax_label, receipt_prefix, "
+    "listed, directory_category, directory_tags, directory_blurb, directory_confirmed_at, "
     "published_at, created_at, updated_at"
 )
+
+
+async def _infer_listing_after_publish(site_id: UUID) -> None:
+    """Background: give a freshly-published site its Discover listing.
+
+    Listing is OPT-OUT, so publishing puts a site in the directory — but the
+    directory's quality gate needs a category and a blurb, which nothing else
+    produces. Without this hook, opt-out silently degrades back into opt-in and
+    the directory stays empty.
+
+    Runs AFTER the response (its own connection — the request's is long gone),
+    fills only empty fields so a re-publish never clobbers a hand-edited
+    listing, and swallows everything: a Gemini outage must not surface on a
+    publish that already succeeded.
+    """
+    try:
+        async with get_connection() as conn:
+            await apply_inferred_listing(conn, site_id, overwrite=False)
+    except Exception:  # noqa: BLE001 - best-effort, post-response
+        logger.warning("cappe: listing inference failed for site %s", site_id, exc_info=True)
+
 
 # Sites allowed per plan. Free is capped at one; paid plans are uncapped (None).
 _PLAN_SITE_LIMIT = {"free": 1}
@@ -281,6 +317,10 @@ async def update_site(
             if "slug" in s and "unique" in s.lower():
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That subdomain is taken")
             raise
+        # `name` is the highest-weighted term in the search vector, so a rename
+        # that didn't reindex would leave the site findable only by its old name.
+        if body.name is not None or body.status is not None:
+            await refresh_site_search(conn, site_id)
     await invalidate_render_cache(site_id)
     return site_row_to_dict(row)
 
@@ -305,7 +345,11 @@ async def site_readiness(site_id: UUID, account: CappeAccount = Depends(require_
 
 
 @router.post("/sites/{site_id}/publish", response_model=CappeSite)
-async def publish_site(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def publish_site(
+    site_id: UUID,
+    background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
+):
     """Mark a site (and its pages) published — gated on the launch checklist."""
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
@@ -334,8 +378,130 @@ async def publish_site(site_id: UUID, account: CappeAccount = Depends(require_ca
                 "WHERE site_id = $1 AND status = 'draft'",
                 site_id,
             )
+        # Publishing is what makes a site discoverable, so it is also what makes
+        # its search index meaningful. Cheap + deterministic, so it runs inline;
+        # the Gemini-backed listing inference goes to the background below.
+        await refresh_site_search(conn, site_id)
     await invalidate_render_cache(site_id)
+    background.add_task(_infer_listing_after_publish, site_id)
     return site_row_to_dict(row)
+
+
+# --- Discover listing --------------------------------------------------------
+
+def _listing_response(row) -> CappeDirectoryListing:
+    category = row["directory_category"]
+    return CappeDirectoryListing(
+        listed=row["listed"],
+        category=category,
+        category_label=CATEGORY_LABELS.get(category or ""),
+        tags=list(row["directory_tags"] or []),
+        blurb=row["directory_blurb"],
+        confirmed_at=row["directory_confirmed_at"],
+        # Mirrors the directory route's own predicate, so the tenant is told the
+        # truth about whether anyone can find them.
+        visible=bool(
+            row["listed"]
+            and not row["directory_blocked"]
+            and row["status"] == "published"
+            and category
+            and row["directory_blurb"]
+        ),
+        blocked=row["directory_blocked"],
+        categories=category_options(),
+    )
+
+
+_LISTING_COLS = (
+    "listed, directory_blocked, directory_category, directory_tags, "
+    "directory_blurb, directory_confirmed_at, status"
+)
+
+
+@router.get("/sites/{site_id}/directory", response_model=CappeDirectoryListing)
+async def get_directory_listing(
+    site_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """How this site appears in Discover, plus the taxonomy to pick from."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn.fetchrow(
+            f"SELECT {_LISTING_COLS} FROM cappe_sites WHERE id = $1", site_id
+        )
+    return _listing_response(row)
+
+
+@router.put("/sites/{site_id}/directory", response_model=CappeDirectoryListing)
+async def update_directory_listing(
+    site_id: UUID,
+    body: CappeDirectoryListingUpdate,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Edit the listing. A true PATCH — only fields present in the request are
+    written, so editing the blurb alone can't blank the tags.
+
+    Note there is no way to clear `directory_blocked` here: platform takedown is
+    not a tenant-editable field.
+    """
+    sets, args = [], []
+    fields = body.model_fields_set
+
+    if "listed" in fields and body.listed is not None:
+        args.append(body.listed)
+        sets.append(f"listed = ${len(args)}")
+    if "category" in fields:
+        # Unrecognized → 400 rather than a silent null: the client picked from a
+        # list we gave it, so a miss is a bug worth surfacing.
+        category = normalize_category(body.category) if body.category else None
+        if body.category and category is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown category '{body.category}'",
+            )
+        args.append(category)
+        sets.append(f"directory_category = ${len(args)}")
+    if "tags" in fields:
+        args.append(normalize_tags(body.tags or []))
+        sets.append(f"directory_tags = ${len(args)}::text[]")
+    if "blurb" in fields:
+        args.append(normalize_blurb(body.blurb))
+        sets.append(f"directory_blurb = ${len(args)}")
+
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        if sets:
+            # Any edit means the tenant has seen the inferred values, so the
+            # publish-time inference stops filling this listing in.
+            sets.append("directory_confirmed_at = NOW()")
+            sets.append("updated_at = NOW()")
+            args.append(site_id)
+            await conn.execute(
+                f"UPDATE cappe_sites SET {', '.join(sets)} WHERE id = ${len(args)}", *args
+            )
+            await refresh_site_search(conn, site_id)
+        row = await conn.fetchrow(
+            f"SELECT {_LISTING_COLS} FROM cappe_sites WHERE id = $1", site_id
+        )
+    return _listing_response(row)
+
+
+@router.post("/sites/{site_id}/directory/suggest", response_model=CappeDirectoryListing)
+async def suggest_directory_listing(
+    site_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """"Suggest for me" — re-run inference and OVERWRITE the listing fields.
+
+    Explicitly destructive (unlike the publish hook, which only fills blanks)
+    because the tenant asked for a fresh proposal. Rate-limited inside
+    `infer_listing`; a failure returns the listing unchanged rather than 500.
+    """
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        await apply_inferred_listing(conn, site_id, overwrite=True)
+        row = await conn.fetchrow(
+            f"SELECT {_LISTING_COLS} FROM cappe_sites WHERE id = $1", site_id
+        )
+    return _listing_response(row)
 
 
 # --- Purchase flows — modeled now, integrations land later -------------------
