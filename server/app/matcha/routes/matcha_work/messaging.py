@@ -93,6 +93,11 @@ async def send_message_stream(
     tc.profile = profile
     tc.context_summary = context_summary
     tc.summary_at_count = summary_at_count
+    # Whether this turn is the thread's first exchange — the one auto-title
+    # dispatch point. `messages` is the pre-turn history (fetched above,
+    # before this turn's own messages are persisted), so an empty list here
+    # means the user's message about to be sent is the first one.
+    is_first_exchange = not messages
     msg_dicts = []
     file_context_parts: list[str] = []
     for m in messages:
@@ -155,16 +160,28 @@ async def send_message_stream(
 
     # Node/compliance context is built inside event_stream() so we can yield status events
 
+    def _dispatch_autotitle() -> None:
+        # Fire-and-forget; the service re-checks the title itself, so this is
+        # harmless even if called from more than one exit path in practice
+        # (only one ever runs per request).
+        if is_first_exchange and thread["title"] == "New Chat":
+            from app.matcha.services.matcha_work import thread_title_service
+            _track_background_task(
+                asyncio.create_task(thread_title_service.maybe_autotitle_thread(thread_id))
+            )
+
     async def event_stream():
         try:
             async for _evt in _run_hard_stop_gates(tc):
                 yield _evt
             if tc.terminated:
+                _dispatch_autotitle()
                 return
 
             async for _evt in _run_huume_dispatch(tc):
                 yield _evt
             if tc.terminated:
+                _dispatch_autotitle()
                 return
 
             # Build mode-specific context with status updates.
@@ -201,6 +218,7 @@ async def send_message_stream(
 
             # Trigger compaction in the background if needed
             _track_background_task(asyncio.create_task(_maybe_compact(thread_id, tc.ai_provider, tc.summary_at_count)))
+            _dispatch_autotitle()
         except BaseException as e:
             logger.error("Matcha Work stream failed for thread %s: %s (%s)", thread_id, e, type(e).__name__, exc_info=True)
             try:

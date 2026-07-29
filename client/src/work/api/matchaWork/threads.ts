@@ -9,6 +9,12 @@ import { BASE } from './_base'
 
 // ── Threads ──
 
+export const THREADS_CHANGED_EVENT = 'mw-threads-changed'
+
+export function notifyThreadsChanged() {
+  window.dispatchEvent(new CustomEvent(THREADS_CHANGED_EVENT))
+}
+
 export function listThreads(status?: string) {
   const qs = status ? `?status=${encodeURIComponent(status)}` : ''
   return api.get<MWThread[]>(`/matcha-work/threads${qs}`)

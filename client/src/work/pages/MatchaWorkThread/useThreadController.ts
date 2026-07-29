@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep } from '../../types'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
@@ -133,6 +133,15 @@ export function useThreadController() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // Pending "did the backend auto-title this yet?" pickup timers — the title
+  // lands via a fire-and-forget background task on the server, not the SSE
+  // response, so we poll a couple of times rather than block the turn on it.
+  const autotitleTimersRef = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  function clearAutotitleTimers() {
+    autotitleTimersRef.current.forEach(clearTimeout)
+    autotitleTimersRef.current = []
+  }
 
   useEffect(() => {
     if (!threadId) return
@@ -154,7 +163,10 @@ export function useThreadController() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load thread'))
       .finally(() => setLoading(false))
 
-    return () => { abortRef.current?.abort('thread-switch') }
+    return () => {
+      abortRef.current?.abort('thread-switch')
+      clearAutotitleTimers()
+    }
   }, [threadId])
 
   const prevLenRef = useRef(0)
@@ -222,6 +234,21 @@ export function useThreadController() {
         }
         setStreaming(false)
         refreshUsage()
+
+        if (thread?.title === 'New Chat') {
+          const pickUpTitle = () => {
+            getThread(threadId)
+              .then((t) => {
+                if (t.title !== 'New Chat') {
+                  setThread((prev) => (prev ? { ...prev, title: t.title } : prev))
+                  notifyThreadsChanged()
+                }
+              })
+              .catch(() => {})
+          }
+          autotitleTimersRef.current.push(setTimeout(pickUpTitle, 2500))
+          autotitleTimersRef.current.push(setTimeout(pickUpTitle, 4000))
+        }
       },
       onError: (err) => {
         setStatusMessage('')
@@ -457,6 +484,7 @@ export function useThreadController() {
       const updated = await updateTitle(threadId, titleDraft.trim())
       setThread((prev) => (prev ? { ...prev, title: updated.title } : prev))
       setEditingTitle(false)
+      notifyThreadsChanged()
     } catch {}
   }
 

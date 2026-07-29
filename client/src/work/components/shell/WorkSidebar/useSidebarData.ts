@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { listChannels, listPendingConnections, CHANNELS_CHANGED_EVENT } from '../../../api/channels'
 import type { ChannelSummary } from '../../../api/channels'
-import { listThreads, listProjects, getMWSubscription } from '../../../api/matchaWork'
+import { listThreads, listProjects, getMWSubscription, THREADS_CHANGED_EVENT } from '../../../api/matchaWork'
 import type { MWThread, MWProject } from '../../../types'
 import { getUnreadCount } from '../../../api/inbox'
 
@@ -43,6 +43,16 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
     }
     window.addEventListener(CHANNELS_CHANGED_EVENT, handler)
     return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)
+  }, [])
+
+  // Refetch threads when a title changes (auto-title landing, manual rename)
+  // or any other thread-list-affecting change fires.
+  useEffect(() => {
+    const handler = () => {
+      listThreads('active').then(setThreads).catch(() => {})
+    }
+    window.addEventListener(THREADS_CHANGED_EVENT, handler)
+    return () => window.removeEventListener(THREADS_CHANGED_EVENT, handler)
   }, [])
 
   // Poll inbox unread
