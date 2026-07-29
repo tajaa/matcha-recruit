@@ -32,6 +32,12 @@ interface HuumePanelProps {
    * indicator (the bug this replaced: the panel's × used to call
    * handleModeToggle('huume')). */
   onDismiss?: () => void
+  /** Switches the mobile chat/panel toggle back to 'chat'. The Confirm/
+   * Cancel buttons live only in the chat strip (HuumeActionCard) — on
+   * mobile that strip is hidden while this panel is showing, so the status
+   * banner below needs a way back to it. No-op on desktop, where both are
+   * already visible side by side. */
+  onReviewInChat?: () => void
 }
 
 function tabLabel(a: HuumeArtifact): { icon: React.ReactNode; label: string } {
@@ -56,7 +62,7 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * memo), with a passive status line for anything awaiting a decision —
  * the actionable Confirm/Cancel lives only in the chat strip
  * (HuumeActionCard) now, so there's exactly one place a click can fire it. */
-export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss }: HuumePanelProps) {
+export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss, onReviewInChat }: HuumePanelProps) {
   const { toast } = useToast()
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
@@ -231,10 +237,15 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
       </div>
 
       {huume.action?.status === 'proposed' && (
-        <div className="flex items-center gap-1.5 border-t border-w-line px-3 py-2 text-[11px] text-w-dim">
+        <button
+          type="button"
+          onClick={onReviewInChat}
+          className="flex md:pointer-events-none items-center gap-1.5 border-t border-w-line px-3 py-2 text-[11px] text-w-dim text-left hover:bg-w-surface2/60 md:hover:bg-transparent"
+        >
           {actionIcon(huume.action.type)}
-          <span className="truncate">Awaiting your confirmation in chat — {bannerLabel(huume.action)}</span>
-        </div>
+          <span className="truncate flex-1">Awaiting your confirmation in chat — {bannerLabel(huume.action)}</span>
+          <span className="md:hidden shrink-0 text-w-accent font-medium">Review →</span>
+        </button>
       )}
     </div>
   )

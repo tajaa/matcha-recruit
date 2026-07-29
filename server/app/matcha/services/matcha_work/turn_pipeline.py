@@ -529,6 +529,13 @@ class TurnContext:
     # event — the outer stream returns immediately without generating.
     terminated: bool = False
 
+    # Set only when termination was the HR-Pilot hard-stop refusal
+    # (classify_message returned verdict.hard_stop). Distinct from the other
+    # `terminated` sites (file-only guard, Huume rate-limit/completion) so
+    # callers can withhold model calls — e.g. autotitle — from a message the
+    # hard stop deliberately kept out of the AI path.
+    hard_stopped: bool = False
+
 
 async def _run_quota_gate(company_id: UUID, current_user: CurrentUser) -> None:
     """Token-budget + per-user quota checks. Raises HTTPException BEFORE the
@@ -818,6 +825,7 @@ async def _run_hard_stop_gates(tc: TurnContext):
                 )
                 yield _sse_data({"type": "complete", "data": guard_response.model_dump(mode="json")})
                 tc.terminated = True
+                tc.hard_stopped = True
                 return
 
 

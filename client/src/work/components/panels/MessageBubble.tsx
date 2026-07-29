@@ -91,6 +91,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   const payerStaffCount = m.metadata?.payer_affected_staff?.length ?? 0
   const payerSourceCount = m.metadata?.payer_sources?.length ?? 0
   const citationCount = cited.ordered.length
+  const droppedCitationCount = m.metadata?.dropped_citations?.length ?? 0
   const stepCount = m.metadata?.huume_steps?.length ?? 0
   const detailParts: string[] = []
   if (hasReasoning) detailParts.push('reasoning')
@@ -101,6 +102,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   if (payerStaffCount > 0) detailParts.push(`${payerStaffCount} payer staff`)
   if (payerSourceCount > 0) detailParts.push(`${payerSourceCount} payer source${payerSourceCount !== 1 ? 's' : ''}`)
   if (citationCount > 0) detailParts.push(`${citationCount} citation${citationCount !== 1 ? 's' : ''}`)
+  if (droppedCitationCount > 0) detailParts.push(`${droppedCitationCount} unverifiable citation${droppedCitationCount !== 1 ? 's' : ''}`)
   if (stepCount > 0) detailParts.push(`${stepCount} step${stepCount !== 1 ? 's' : ''}`)
 
   return (

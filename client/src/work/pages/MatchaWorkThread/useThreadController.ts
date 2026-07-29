@@ -235,19 +235,25 @@ export function useThreadController() {
         setStreaming(false)
         refreshUsage()
 
-        if (thread?.title === 'New Chat') {
+        if (thread?.title.startsWith('New Chat')) {
           const pickUpTitle = () => {
             getThread(threadId)
               .then((t) => {
-                if (t.title !== 'New Chat') {
+                if (!t.title.startsWith('New Chat')) {
                   setThread((prev) => (prev ? { ...prev, title: t.title } : prev))
                   notifyThreadsChanged()
                 }
               })
               .catch(() => {})
           }
-          autotitleTimersRef.current.push(setTimeout(pickUpTitle, 2500))
-          autotitleTimersRef.current.push(setTimeout(pickUpTitle, 4000))
+          // The title write is a detached background task with no WS push
+          // and nothing on the `complete` frame — polling is the only pickup
+          // path. Staggered with backoff so a title that lands slower than
+          // the old fixed 4s cutoff (a slow Gemini call) still surfaces
+          // without the user having to re-navigate into the thread.
+          for (const delay of [2500, 4000, 7000, 12000, 20000]) {
+            autotitleTimersRef.current.push(setTimeout(pickUpTitle, delay))
+          }
         }
       },
       onError: (err) => {

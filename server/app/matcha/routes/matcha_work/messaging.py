@@ -163,8 +163,11 @@ async def send_message_stream(
     def _dispatch_autotitle() -> None:
         # Fire-and-forget; the service re-checks the title itself, so this is
         # harmless even if called from more than one exit path in practice
-        # (only one ever runs per request).
-        if is_first_exchange and thread["title"] == "New Chat":
+        # (only one ever runs per request). Never dispatched on a hard-stop
+        # refusal — the HR-Pilot hard stop's whole point is "no model call"
+        # on that content, and a titler summarizing it into mw_threads.title
+        # would leak it into the company-wide Chats list.
+        if is_first_exchange and thread["title"].startswith("New Chat"):
             from app.matcha.services.matcha_work import thread_title_service
             _track_background_task(
                 asyncio.create_task(thread_title_service.maybe_autotitle_thread(thread_id))
@@ -175,7 +178,8 @@ async def send_message_stream(
             async for _evt in _run_hard_stop_gates(tc):
                 yield _evt
             if tc.terminated:
-                _dispatch_autotitle()
+                if not tc.hard_stopped:
+                    _dispatch_autotitle()
                 return
 
             async for _evt in _run_huume_dispatch(tc):

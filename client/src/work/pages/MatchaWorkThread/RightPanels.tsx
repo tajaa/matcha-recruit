@@ -28,7 +28,7 @@ export default function RightPanels({
   onDismissHuumePanel,
 }: RightPanelsProps) {
   const {
-    mobileView, thread, threadId, handleEditSlide, lightMode, streaming,
+    mobileView, setMobileView, thread, threadId, handleEditSlide, lightMode, streaming,
     setThread, setError, setMessages, agentMode, pdfUrl, setShowTutorSetup, setTutorDismissed,
   } = c
 
@@ -118,6 +118,7 @@ export default function RightPanels({
           lightMode={lightMode}
           streaming={streaming}
           onDismiss={onDismissHuumePanel}
+          onReviewInChat={() => setMobileView('chat')}
           onStateUpdate={(offerId, plan) => {
             setThread((prev) => prev ? {
               ...prev,

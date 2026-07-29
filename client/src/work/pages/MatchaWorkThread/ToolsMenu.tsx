@@ -89,7 +89,7 @@ export default function ToolsMenu({ c }: ToolsMenuProps) {
                     key={m.key}
                     onClick={() => handleModeToggle(m.key)}
                     disabled={togglingMode === m.key}
-                    title={inertWhileHuume ? `${m.tipOn} — Huume is on, so this has no effect this turn.` : (active ? m.tipOn : m.tipOff)}
+                    title={inertWhileHuume ? `${active ? m.tipOn : m.tipOff} — Huume is on, so this has no effect this turn.` : (active ? m.tipOn : m.tipOff)}
                     className={`w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-w-surface2/60 disabled:opacity-50 ${inertWhileHuume ? 'opacity-40' : ''}`}
                   >
                     <span className={active ? 'text-w-accent' : 'text-w-dim'}><Icon size={14} /></span>

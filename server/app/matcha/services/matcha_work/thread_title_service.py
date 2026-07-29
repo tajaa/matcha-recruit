@@ -75,8 +75,12 @@ async def maybe_autotitle_thread(thread_id: UUID) -> None:
             thread_row = await conn.fetchrow(
                 "SELECT title FROM mw_threads WHERE id=$1", thread_id
             )
-            if thread_row is None or thread_row["title"] != _DEFAULT_TITLE:
+            # Espresso (desktop) seeds new threads as "New Chat <dateStr>"
+            # rather than the web client's bare "New Chat" — both are the
+            # placeholder title and are eligible for autotitling.
+            if thread_row is None or not thread_row["title"].startswith(_DEFAULT_TITLE):
                 return
+            original_title = thread_row["title"]
 
             messages = await conn.fetch(
                 """
@@ -104,7 +108,11 @@ async def maybe_autotitle_thread(thread_id: UUID) -> None:
             resp = await _get_client().aio.models.generate_content(
                 model=FLASH_LITE_MODEL,
                 contents=prompt,
-                config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=30),
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=60,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
         except Exception as e:  # noqa: BLE001 — soft-fail, never surface
             logger.warning("thread autotitle: Gemini failed thread=%s: %s", thread_id, e)
@@ -112,6 +120,11 @@ async def maybe_autotitle_thread(thread_id: UUID) -> None:
 
         title = _clean_title(resp.text or "")
         if not title:
+            logger.warning(
+                "thread autotitle: empty response thread=%s finish_reason=%s",
+                thread_id,
+                getattr(resp.candidates[0], "finish_reason", None) if resp.candidates else None,
+            )
             return
 
         async with get_connection() as conn:
@@ -124,7 +137,7 @@ async def maybe_autotitle_thread(thread_id: UUID) -> None:
                 """,
                 title,
                 thread_id,
-                _DEFAULT_TITLE,
+                original_title,
             )
         if updated is not None:
             from app.matcha.services.matcha_work import matcha_work_document as doc_svc
