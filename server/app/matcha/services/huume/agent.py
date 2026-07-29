@@ -45,7 +45,7 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, discipline_skill, handbook_skill, legal_skill, onboarding_skill, record_view, routing, store
+from . import actions, discipline_skill, er_skill, handbook_skill, legal_skill, onboarding_skill, record_view, routing, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -407,6 +407,10 @@ async def run_huume_turn(
 
     def _state_handbook() -> dict[str, Any]:
         val = state_updates.get("huume_handbook") or current_state.get("huume_handbook")
+        return val if isinstance(val, dict) else {}
+
+    def _state_er() -> dict[str, Any]:
+        val = state_updates.get("huume_er") or current_state.get("huume_er")
         return val if isinstance(val, dict) else {}
 
     def _collect_citations(result: dict[str, Any]) -> None:
@@ -849,6 +853,35 @@ async def run_huume_turn(
                     label="Generated legal packet" if ok else "Could not generate legal packet",
                     status="ok" if ok else ("rejected" if result.get("status") == "refused" else "error"),
                     detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "er_case_brief":
+                result = await er_skill.case_brief(company_id=company_id, case_id=str(args.get("case_id") or ""))
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_er"] = {"case_id": result["case_id"], "case_number": result.get("case_number")}
+                step = recorder.record(
+                    tool=name, kind="read",
+                    label="Opened ER case brief" if ok else "Could not brief that ER case",
+                    status="ok" if ok else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "ask_er_copilot":
+                result = await er_skill.ask_case(
+                    company_id=company_id, actor_user_id=user_id,
+                    case_id=args.get("case_id"), state_case_id=_state_er().get("case_id"),
+                    question=str(args.get("question") or ""),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_er"] = {"case_id": result["case_id"], "case_number": result.get("case_number")}
+                    _collect_citations(result)
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Ran ER Copilot analysis" if ok else "ER Copilot analysis failed",
+                    status="ok" if ok else "error", detail=result.get("message"),
                 )
                 return _json_safe(result), step
 

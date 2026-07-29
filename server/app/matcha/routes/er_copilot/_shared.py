@@ -6,15 +6,12 @@ reports / notes / case_views via ``from ._shared import ...``.
 """
 import json
 import logging
-import os
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import BackgroundTasks, HTTPException
-
-from ....config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -134,55 +131,20 @@ def _normalize_intake_context(raw_value: Any) -> Optional[dict]:
     return _normalize_json_dict(raw_value)
 
 
-def _normalize_json_list(raw_value: Any) -> list:
-    """Normalize JSONB list payloads (asyncpg may return a string)."""
-    if isinstance(raw_value, list):
-        return raw_value
-    if isinstance(raw_value, str):
-        try:
-            parsed = json.loads(raw_value)
-            if isinstance(parsed, list):
-                return parsed
-        except Exception:
-            return []
-    return []
-
-
-# Generous per-doc / total budgets for building document text fed to Gemini.
-# Gemini context is ~1M tokens, so 600k chars (~150k tokens) is safe. Linear
-# truncation preserves document order; the old head+tail slice silently dropped
-# middle sections (e.g. the 2nd of 3 interviews concatenated in one PDF).
-ER_DOC_PER_DOC_CHAR_CAP = 100_000
-ER_DOC_TOTAL_CHAR_CAP = 600_000
-
-
-def _build_document_excerpts(rows, *, text_key: str) -> str:
-    """Concatenate document text for an AI prompt under a generous char budget.
-
-    Uses linear truncation (text[:cap]) so document order is preserved and no
-    middle section vanishes. When a cap is hit, a visible marker is appended so
-    the model knows content was cut rather than it disappearing silently.
-    """
-    parts: list[str] = []
-    total = 0
-    for r in rows:
-        text = (r[text_key] or "").strip()
-        if not text:
-            continue
-        doc_type = r["document_type"] or "other"
-        remaining = ER_DOC_TOTAL_CHAR_CAP - total
-        if remaining <= 0:
-            parts.append(
-                f"--- {r['filename']} ({doc_type}) ---\n[omitted, prompt size cap reached]"
-            )
-            continue
-        cap = min(ER_DOC_PER_DOC_CHAR_CAP, remaining)
-        excerpt = text[:cap]
-        if len(text) > cap:
-            excerpt += f"\n[truncated after {cap} chars]"
-        total += len(excerpt)
-        parts.append(f"--- {r['filename']} ({doc_type}) ---\n{excerpt}")
-    return "\n\n".join(parts)
+# The real implementations now live in services/er/er_case_context.py (a
+# services-layer caller — Huume's ER bridge — needs them without importing
+# routes/). Re-imported under the old names so every existing call site in
+# this package, plus tests/er_copilot/test_document_excerpts.py (which
+# imports _build_document_excerpts via the package's __init__.py re-export),
+# is unaffected.
+from app.matcha.services.er.er_case_context import (  # noqa: F401,E402
+    ER_DOC_PER_DOC_CHAR_CAP, ER_DOC_TOTAL_CHAR_CAP,
+    build_document_excerpts as _build_document_excerpts,
+    normalize_json_list as _normalize_json_list,
+    resolve_involved_parties as _resolve_involved_parties,
+    load_guidance_context as _load_guidance_context,
+    build_er_analyzer as _build_er_analyzer,
+)
 
 
 async def _collect_raw_evidence_context(conn, case_id: UUID) -> str:
@@ -283,40 +245,6 @@ async def _fetch_company_policy_context(conn, company_id: UUID) -> str:
     return "\n".join(parts) if parts else ""
 
 
-async def _resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
-    """Resolve involved_employees JSONB into name+role dicts for Gemini context.
-
-    Skips malformed entries (non-dict, missing/invalid employee_id) instead of
-    raising — legacy rows predate Pydantic validation on this JSONB.
-    """
-    involved = _normalize_json_list(raw_employees)
-    if not involved:
-        return []
-    parties: list[tuple[UUID, str]] = []
-    for e in involved:
-        if not isinstance(e, dict) or not e.get("employee_id"):
-            continue
-        try:
-            emp_id = UUID(str(e["employee_id"]))
-        except (ValueError, TypeError):
-            continue
-        parties.append((emp_id, e.get("role", "unknown")))
-    if not parties:
-        return []
-    rows = await conn.fetch(
-        "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[])",
-        [p[0] for p in parties],
-    )
-    name_map = {
-        str(r["id"]): (f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or "Unknown")
-        for r in rows
-    }
-    return [
-        {"name": name_map.get(str(emp_id), "Unknown"), "role": role}
-        for emp_id, role in parties
-    ]
-
-
 def _involved_employee_ids(raw_employees: Any) -> list[str]:
     """Validated employee ids from the involved_employees JSONB, for jurisdiction
     grounding. Kept separate from _resolve_involved_parties (which returns only
@@ -329,63 +257,4 @@ def _involved_employee_ids(raw_employees: Any) -> list[str]:
             except (ValueError, TypeError):
                 continue
     return out
-
-
-async def _load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any]:
-    """Single-round-trip context load shared by the suggested-guidance endpoints.
-
-    Replaces 3 sequential er_case_documents queries (evidence/transcript/all-text
-    views only differ by filter) with one, and replaces an inline per-employee
-    N+1 lookup with the batched _resolve_involved_parties.
-    """
-    enriched_employees = await _resolve_involved_parties(conn, case_row["involved_employees"])
-
-    doc_rows = await conn.fetch(
-        """
-        SELECT id, filename, document_type, scrubbed_text
-        FROM er_case_documents
-        WHERE case_id = $1 AND processing_status = 'completed'
-        ORDER BY created_at DESC
-        """,
-        case_id,
-    )
-    evidence_rows = [r for r in doc_rows if r["document_type"] != "policy"]
-    transcript_rows = [r for r in doc_rows if r["document_type"] == "transcript"]
-    all_doc_text_rows = [
-        r for r in doc_rows
-        if r["scrubbed_text"] is not None and r["scrubbed_text"] != ""
-    ]
-
-    linked_incident = await conn.fetchrow(
-        "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
-        case_id,
-    )
-    completed_investigation_transcript_count = await conn.fetchval(
-        """
-        SELECT COUNT(*) FROM ir_investigation_interviews
-        WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
-        """,
-        case_id,
-    ) or 0
-
-    return {
-        "enriched_employees": enriched_employees,
-        "evidence_rows": evidence_rows,
-        "transcript_rows": transcript_rows,
-        "all_doc_text_rows": all_doc_text_rows,
-        "linked_incident": linked_incident,
-        "completed_investigation_transcript_count": completed_investigation_transcript_count,
-    }
-
-
-def _build_er_analyzer(model_override: Optional[str] = None):
-    """Create ERAnalyzer using shared Gemini credential cascade."""
-    from ...services.er.er_analyzer import ERAnalyzer
-
-    settings = get_settings()
-    model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
-    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-    if not api_key:
-        raise ValueError("ER analysis requires GEMINI_API_KEY or LIVE_API configuration")
-    return ERAnalyzer(api_key=api_key, model=model)
 

@@ -497,6 +497,37 @@ TOOLS: tuple[HuumeTool, ...] = (
             ),
         },
     ),
+    # ---- ER Copilot bridge (feature `er_copilot`) ----------------------------
+    _tool(
+        "er_case_brief", "read",
+        "Get a name-free summary of an ER (employee-relations) case — status, "
+        "category, document count/titles, which analyses have been run and a "
+        "one-line headline for each, note count, and how long it's been open. "
+        "No Gemini call, read-only. Names NOBODY involved — use show_record "
+        "with record_type='er_case' to open the case and see who's involved.",
+        properties={"case_id": types.Schema(type=types.Type.STRING)},
+        required=["case_id"],
+    ),
+    _tool(
+        "ask_er_copilot", "write",
+        "Ask a grounded question about a specific ER case — pulls the case's "
+        "own uploaded document text, its stored AI analyses (timeline, "
+        "discrepancies, policy check, similar cases), and applicable "
+        "jurisdiction requirements, and returns an answer with bracketed "
+        "citations to real records. NOT a lawyer and NOT legal advice — it "
+        "relays what the company's own records show. Call er_case_brief "
+        "first if you don't have a case_id. Pass case_id when more than one "
+        "case is in play; omit it to use the thread's active case.",
+        properties={
+            "case_id": types.Schema(type=types.Type.STRING, description="Which case. Omit to use the thread's active case (see Current staged state)."),
+            "question": types.Schema(type=types.Type.STRING),
+        },
+        required=["question"],
+        intent_hints=(
+            "employee relations", "er case", "er issue", "complaint about",
+            "grievance", "investigation", "workplace complaint",
+        ),
+    ),
     _tool(
         "finish", "finish",
         "End the turn. Call this once you've done what was asked, or to "

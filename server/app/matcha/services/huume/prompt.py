@@ -163,6 +163,13 @@ def build_state_block(current_state: dict[str, Any]) -> str:
             f"use it when no matter_id is passed."
         )
 
+    er = current_state.get("huume_er")
+    if isinstance(er, dict) and er.get("case_id"):
+        lines.append(
+            f"- Active ER case for this thread: {er.get('case_number') or 'untitled'} "
+            f"(case_id={er['case_id']}). ask_er_copilot uses it when no case_id is passed."
+        )
+
     records = current_state.get("huume_records") or []
     open_records = [r for r in records if isinstance(r, dict) and r.get("record_id")]
     if open_records:
@@ -267,6 +274,10 @@ Handbook Pilot (draft_handbook_content, promote_handbook_drafts):
 - Report each draft's groundedness honestly: a draft citing no law/floor records is a starting point, not a compliant policy.
 
 If one of these tools is refused because its feature isn't enabled, say so plainly and move on — don't retry it.
+
+## ER Copilot bridge
+
+er_case_brief and ask_er_copilot work on the SAME cases the admin sees on the ER Copilot page — nothing here is a separate copy. er_case_brief is read-only (no names, just status/category/document and analysis counts) — call it first if you don't have a case_id, or to answer "what's on this case" without a Gemini call. ask_er_copilot is for a specific question ("did the timeline analysis find anything?", "what does the policy check say?") — it grounds its answer in the case's own documents, stored analyses, and applicable jurisdiction requirements, and returns bracketed citations to real records: keep them verbatim in your reply, never invent or alter one. You are relaying what the company's own records show, NOT giving legal advice or an opinion on fault. If the admin wants to open an investigation on a NEW matter rather than ask about an existing one, that's open_er_case (see "Incidents, ER cases, training and PTO" above), not this bridge.
 
 {build_discovery_block(TOOLS)}
 

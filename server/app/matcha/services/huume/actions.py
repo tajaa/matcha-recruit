@@ -560,9 +560,13 @@ PILOT_TOOL_REQUIRED_FEATURE: dict[str, str] = {
     "generate_legal_packet": "legal_defense",
     "draft_handbook_content": "handbook_pilot",
     "promote_handbook_drafts": "handbook_pilot",
+    "er_case_brief": "er_copilot",
+    "ask_er_copilot": "er_copilot",
 }
 
-_PILOT_FEATURE_LABEL = {"legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot"}
+_PILOT_FEATURE_LABEL = {
+    "legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot", "er_copilot": "ER Copilot",
+}
 
 
 def evaluate_pilot_tool(*, tool: str, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
