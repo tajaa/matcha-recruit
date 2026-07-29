@@ -1,0 +1,180 @@
+"""discipline_policy_check: reports candidate policy violations, never
+adjudicates; citation-gated; never raises.
+
+    cd server && ./venv/bin/python -m pytest tests/discipline/test_discipline_policy_check.py -q
+"""
+
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from app.matcha.services.discipline import discipline_policy_check as dpc
+
+MOD = "app.matcha.services.discipline.discipline_policy_check"
+
+INCIDENT = {
+    "id": "inc-1", "title": "Needlestick", "description": "RDA stuck by contaminated needle.",
+    "incident_type": "safety", "severity": "high",
+}
+
+
+def _fake_corpus():
+    return {
+        "sources": {}, "full_text": {"handbook:1": "Sharps must be disposed of in a sharps container."},
+        "index": {"handbook:1": {"title": "Sharps Handling", "summary": "Sharps policy"}},
+    }
+
+
+def _fake_resp(text):
+    resp = MagicMock()
+    resp.text = text
+    return resp
+
+
+@pytest.fixture
+def patch_grounding(monkeypatch):
+    hp_mod = MagicMock()
+    hp_mod.gather_grounding = AsyncMock(return_value={"raw": True})
+    hp_mod.build_corpus = MagicMock(return_value=_fake_corpus())
+    monkeypatch.setattr("app.matcha.services.pilots.handbook_pilot.gather_grounding", hp_mod.gather_grounding)
+    monkeypatch.setattr("app.matcha.services.pilots.handbook_pilot.build_corpus", hp_mod.build_corpus)
+    monkeypatch.setattr(
+        "app.matcha.services.pilots.hr_pilot_corpus.render_corpus_block",
+        MagicMock(return_value="[handbook:1] Sharps Handling"),
+    )
+    return hp_mod
+
+
+class TestCheckIncidentAgainstHandbook:
+    @pytest.mark.asyncio
+    async def test_reports_never_adjudicates(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "violations": [{
+                "policy_cid": "handbook:1", "policy_title": "Sharps Handling", "relevance": "violated",
+                "confidence": 0.9, "reasoning": "Needle not disposed of properly.",
+            }],
+            "summary": "Likely sharps-handling violation.",
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+        monkeypatch.setattr(f"{MOD}.validate_citations", lambda evidence_map, index: (evidence_map, []))
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert result["available"] is True
+        assert len(result["violations"]) == 1
+        v = result["violations"][0]
+        assert "level" not in v and "legality" not in v and "discipline_type" not in v
+        assert set(v.keys()) == {"policy_cid", "policy_title", "relevance", "confidence", "reasoning", "relevant_excerpt"}
+
+    @pytest.mark.asyncio
+    async def test_citation_gate_drops_unknown_ids(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "violations": [
+                {"policy_cid": "handbook:1", "policy_title": "Real", "relevance": "related", "confidence": 0.5, "reasoning": "ok"},
+                {"policy_cid": "handbook:bogus", "policy_title": "Hallucinated", "relevance": "violated", "confidence": 0.9, "reasoning": "made up"},
+            ],
+            "summary": "mixed",
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        def fake_validate(evidence_map, index):
+            clean = [e for e in evidence_map if e["cid"] in index]
+            dropped = [e["cid"] for e in evidence_map if e["cid"] not in index]
+            return clean, dropped
+
+        monkeypatch.setattr(f"{MOD}.validate_citations", fake_validate)
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert len(result["violations"]) == 1
+        assert result["violations"][0]["policy_cid"] == "handbook:1"
+        assert "handbook:bogus" in result["dropped_citations"]
+
+    @pytest.mark.asyncio
+    async def test_gemini_failure_degrades_available_false(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(side_effect=RuntimeError("timeout"))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert result["available"] is False
+        assert result["violations"] == []
+
+    @pytest.mark.asyncio
+    async def test_grounding_failure_never_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.matcha.services.pilots.handbook_pilot.gather_grounding",
+            AsyncMock(side_effect=RuntimeError("db down")),
+        )
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+        assert result["available"] is False
+
+    @pytest.mark.asyncio
+    async def test_empty_corpus_index_skips_gemini_call(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.matcha.services.pilots.handbook_pilot.gather_grounding",
+            AsyncMock(return_value={}),
+        )
+        monkeypatch.setattr(
+            "app.matcha.services.pilots.handbook_pilot.build_corpus",
+            MagicMock(return_value={"sources": {}, "index": {}, "full_text": {}}),
+        )
+        genai_call = MagicMock()
+        monkeypatch.setattr(f"{MOD}._genai", genai_call)
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert result["available"] is True
+        assert result["violations"] == []
+        genai_call.assert_not_called()
+
+
+class TestPersistPolicyCheck:
+    @pytest.mark.asyncio
+    async def test_preserves_policy_mapping_reader_contract(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=None)
+        conn.execute = AsyncMock(return_value=None)
+
+        result = {
+            "violations": [{
+                "policy_cid": "handbook:1", "policy_title": "Sharps Handling", "relevance": "violated",
+                "confidence": 0.9, "reasoning": "reason", "relevant_excerpt": None,
+            }],
+            "citations": ["handbook:1"], "dropped_citations": [], "summary": "found one match", "available": True,
+        }
+
+        await dpc.persist_policy_check(conn, incident_id="inc-1", result=result)
+
+        assert conn.execute.await_count == 1
+        query, incident_id, payload_json = conn.execute.await_args.args
+        assert "ir_incident_analysis" in query
+        assert "policy_mapping" in query
+        payload = json.loads(payload_json)
+        for key in ("matches", "summary", "no_matching_policies", "generated_at"):
+            assert key in payload
+        assert payload["citations"] == ["handbook:1"]
+        assert payload["dropped_citations"] == []
+        assert payload["checked_by"] == "discipline_policy_check"
+        assert payload["matches"][0]["policy_id"] == "handbook:1"
+
+    @pytest.mark.asyncio
+    async def test_preserves_prior_statute_fields_when_upserting(self):
+        conn = MagicMock()
+        conn.fetchval = AsyncMock(return_value=json.dumps({
+            "statute_matches": [{"requirement_id": "r1"}], "statute_states": ["CA"],
+        }))
+        conn.execute = AsyncMock(return_value=None)
+
+        await dpc.persist_policy_check(
+            conn, incident_id="inc-1",
+            result={"violations": [], "citations": [], "dropped_citations": [], "summary": "", "available": True},
+        )
+
+        _, _, payload_json = conn.execute.await_args.args
+        payload = json.loads(payload_json)
+        assert payload["statute_states"] == ["CA"]
