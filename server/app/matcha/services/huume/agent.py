@@ -296,6 +296,7 @@ async def run_huume_turn(
     attachment_texts: Optional[list[str]] = None,
     features: Optional[dict[str, Any]] = None,
     integrations: Optional[dict[str, bool]] = None,
+    run_id: Optional[UUID] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one Huume turn. Yields `status`/`step`/`error` frames, then
     exactly one final `huume_result` frame:
@@ -310,6 +311,13 @@ async def run_huume_turn(
     `features`/`integrations`: pass the dispatcher's already-fetched values
     to skip a second identical `get_thread_features_and_integrations` query
     every turn. Omit only for callers (e.g. tests) with no cheaper source.
+
+    `run_id`: the dispatcher's `huume_runs` row id for this turn, stamped
+    onto `huume_record.opened_at` on a successful `show_record` — a nonce
+    the frontend uses to refocus the panel on a repeat show_record for the
+    SAME record (record_type+record_id alone is an unchanged key then).
+    Optional so existing test callers with no run row don't need updating;
+    `huume_record.opened_at` is simply absent in that case.
     """
     rate_limiter = GeminiRateLimiter()
     recorder = _StepRecorder()
@@ -376,18 +384,24 @@ async def run_huume_turn(
                     record_id=str(args.get("record_id") or ""), features=features,
                 )
                 ok = result.get("status") == "ok"
-                if ok:
-                    state_updates["huume_record"] = {
-                        "record_type": result["record_type"],
-                        "record_id": result["record_id"],
-                        "label": result.get("label"),
-                    }
                 step = recorder.record(
                     tool=name, kind="read",
                     label=(f"Opened {result['record_type'].replace('_', ' ')}: {result.get('label')}" if ok else "Could not open record"),
                     status="ok" if ok else ("rejected" if result.get("status") in ("refused", "not_found") else "error"),
                     detail=result.get("message"),
                 )
+                if ok:
+                    state_updates["huume_record"] = {
+                        "record_type": result["record_type"],
+                        "record_id": result["record_id"],
+                        "label": result.get("label"),
+                        # A per-turn nonce, not a timestamp to display — lets
+                        # the panel tell "re-opened the same record" apart
+                        # from "nothing changed", since record_type+record_id
+                        # alone is an unchanged key on a repeat show_record
+                        # for the same id in a later turn.
+                        "opened_at": str(run_id) if run_id else None,
+                    }
                 return _json_safe(result), step
 
             if name == "draft_offer_letter":

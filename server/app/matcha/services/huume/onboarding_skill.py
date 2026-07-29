@@ -152,9 +152,14 @@ _INCIDENT_LOOKBACK_MAX_DAYS = 365
 
 def _clamp_incident_days(days: Optional[int]) -> int:
     """Model-supplied window, clamped to a sane range. A bad/missing value
-    (None, 0, negative, huge) degrades to the default rather than erroring —
-    this backs a chat lookup, not a form field."""
-    if not isinstance(days, int) or days <= 0:
+    (None, non-numeric, 0, negative, huge) degrades to the default rather
+    than erroring — this backs a chat lookup, not a form field. The tool
+    schema declares `days` as INTEGER, but a digit-string ("30") is coerced
+    rather than silently defaulted — Gemini function-calling args have been
+    observed to arrive JSON-decoded loosely typed."""
+    if isinstance(days, str) and days.strip().lstrip("-").isdigit():
+        days = int(days)
+    if not isinstance(days, int) or isinstance(days, bool) or days <= 0:
         return _INCIDENT_LOOKBACK_DEFAULT_DAYS
     return min(days, _INCIDENT_LOOKBACK_MAX_DAYS)
 
@@ -291,11 +296,14 @@ async def _lookup_context_impl(
             )
             return {"topic": "schedule", "upcoming_shifts": [dict(r) for r in rows]}
         if topic == "incidents":
-            # Detail, but never named individuals — no involved_employee_ids,
-            # witnesses, or reporter identity, same rule as hr_pilot_corpus's
-            # incident: group. show_record (the side-panel tool) fetches the
-            # fuller record separately, gated on the admin's own auth, not
-            # the model.
+            # Detail, but never named individuals or the free-text narrative
+            # — no involved_employee_ids, witnesses, reporter identity, or
+            # description (that's exactly where a legal record names people,
+            # e.g. "Maria slipped near bay 3"), same rule as hr_pilot_corpus's
+            # incident: group. `description` is still searchable server-side
+            # below (query filter), it's just never returned to the model.
+            # show_record (the side-panel tool) fetches the fuller record
+            # separately, gated on the admin's own auth, not the model.
             window_days = _clamp_incident_days(days)
             counts = await conn.fetch(
                 """
@@ -309,7 +317,7 @@ async def _lookup_context_impl(
             detail_rows = await conn.fetch(
                 """
                 SELECT id, incident_number, title, incident_type, severity, status,
-                       occurred_at, location, LEFT(description, 280) AS description
+                       occurred_at, location
                 FROM ir_incidents
                 WHERE company_id = $1 AND occurred_at > NOW() - ($2 || ' days')::interval
                   AND ($3::text IS NULL

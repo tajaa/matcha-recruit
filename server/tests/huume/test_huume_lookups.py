@@ -11,7 +11,12 @@ from app.matcha.services.huume.onboarding_skill import (
     _clamp_incident_days,
     _lookup_context_impl,
 )
-from app.matcha.services.huume.record_view import RECORD_REQUIRED_FEATURE, show_record_for_model
+from app.matcha.services.huume.record_view import (
+    _MODEL_BUILDERS,
+    _VIEW_BUILDERS,
+    RECORD_REQUIRED_FEATURE,
+    show_record_for_model,
+)
 from app.matcha.services.huume.tools import SHOW_RECORD_TYPES
 
 
@@ -146,8 +151,16 @@ class TestShowRecord:
         ))
         assert result["status"] == "not_found"
 
-    def test_every_record_type_has_a_feature_gate(self):
-        assert set(SHOW_RECORD_TYPES) == set(RECORD_REQUIRED_FEATURE)
+    def test_every_record_type_is_registered_in_all_four_places(self):
+        # A record type wired into the enum + feature map but missing from
+        # _VIEW_BUILDERS (or vice versa) would pass the chat tool and 404 the
+        # panel — or the reverse — with nothing else here to catch it.
+        assert (
+            set(SHOW_RECORD_TYPES)
+            == set(RECORD_REQUIRED_FEATURE)
+            == set(_MODEL_BUILDERS)
+            == set(_VIEW_BUILDERS)
+        )
 
 
 class TestClampIncidentDays:
@@ -158,8 +171,15 @@ class TestClampIncidentDays:
         assert _clamp_incident_days(0) == 90
         assert _clamp_incident_days(-5) == 90
 
-    def test_non_int_defaults_to_90(self):
-        assert _clamp_incident_days("30") == 90
+    def test_digit_string_is_coerced_not_defaulted(self):
+        assert _clamp_incident_days("30") == 30
+
+    def test_non_numeric_string_defaults_to_90(self):
+        assert _clamp_incident_days("thirty") == 90
+
+    def test_bool_defaults_to_90(self):
+        # isinstance(True, int) is True in Python — must not sneak through.
+        assert _clamp_incident_days(True) == 90
 
     def test_within_range_passes_through(self):
         assert _clamp_incident_days(30) == 30

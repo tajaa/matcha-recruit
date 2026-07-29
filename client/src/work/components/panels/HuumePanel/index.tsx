@@ -56,10 +56,15 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
   // A newly-opened record wins focus (the whole point of "show it to me" is
   // that the panel jumps to it). Declared before the proposed-action effect
   // below so a simultaneous staged action still wins if both change at once.
+  // Keyed on `opened_at` (not just record_type/record_id) so re-asking
+  // Huume to show the SAME record after navigating away still refocuses —
+  // record_type+record_id alone is identical to the previous stage and
+  // wouldn't re-trigger the effect.
   const recordKey = huume.record ? `record:${huume.record.record_type}:${huume.record.record_id}` : null
+  const recordFocusToken = huume.record ? `${recordKey}:${huume.record.opened_at ?? ''}` : null
   useEffect(() => {
     if (recordKey) setSelectedKey(recordKey)
-  }, [recordKey])
+  }, [recordFocusToken, recordKey])
 
   // A newly-staged proposed action must win over whatever tab the user
   // happens to have open — otherwise the ConfirmBar can ask the user to

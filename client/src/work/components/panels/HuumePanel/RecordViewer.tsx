@@ -9,15 +9,17 @@ interface RecordViewerProps {
   recordType: string
   recordId: string
   lightMode?: boolean
-  /** True while Huume is streaming a turn. `huume_record` only ever carries
-   * `{record_type, record_id, label}` — it can't itself signal "the record
-   * changed" — so refetch on each true→false edge, same reasoning as
+  /** True while Huume is streaming a turn. `huume_record` carries a
+   * `{record_type, record_id, label, opened_at}` reference, never the view
+   * itself — so refetch on each true→false edge, same reasoning as
    * LegalMatterViewer. */
   streaming?: boolean
 }
 
-function Meta({ label, value }: { label: string; value?: string | null }) {
-  if (!value) return null
+// The server always fills a meta row's `value` (missing data renders "—"
+// server-side — see record_view.py's builders) so there's nothing to hide
+// here; this only needs to render.
+function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[10px] uppercase tracking-wide opacity-50">{label}</div>
@@ -86,7 +88,7 @@ export default function RecordViewer({ threadId, recordType, recordId, lightMode
     wasStreaming.current = streaming
   }, [streaming, load])
 
-  const muted = lightMode ? 'text-zinc-500' : 'text-zinc-500'
+  const muted = 'text-zinc-500'
   const border = lightMode ? 'border-zinc-200' : 'border-zinc-800'
   const boxBorder = lightMode ? 'border-zinc-300' : 'border-zinc-700'
   const chipTone = lightMode ? CHIP_TONE_LIGHT : CHIP_TONE

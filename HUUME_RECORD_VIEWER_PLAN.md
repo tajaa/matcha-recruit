@@ -176,3 +176,41 @@ with the `days` window honored; "show it to me" → right panel opens the record
 deep-link to `/app/ir/{id}`; same flow for an ER case / employee / credential once Huume has an
 id for one; a company with the relevant flag off gets a refused step and no tab; reloading the
 thread keeps the record tab open (`huume_record` persists in `current_state`).
+
+## Post-review fixes (2026-07-29)
+
+A review of this plan against the shipped code (PR #92 comment) found two doc/implementation
+mismatches plus several hardening gaps. Fixed in the same PR:
+
+- **`_model_incident`/`_model_er_case` no longer select `description`.** The 280-char snippet
+  was model-visible while the root `CLAUDE.md` row (and this file's own privacy line) documented
+  the model summary as narrative-free. The column-level no-names guard (no
+  `involved_employee_ids`/witnesses/reporter) was real; the free-text narrative — the single
+  densest place a legal record names someone — was not excluded. `description` stays searchable
+  in `onboarding_skill`'s `incidents` topic (the `query` filter still matches against it
+  server-side); it's just never returned to the model.
+- **Dropped the dead `is_anonymous` branch** in `_build_incident_view` — no such column exists on
+  `ir_incidents` (it's on `vibe_check_configs`/`enps_surveys` only). `SELECT *` + `.get()` made
+  this fail silently rather than raise; it always rendered `reported_by_name` in practice.
+- **All four panel builders (`_build_*_view`) now select explicit columns**, matching the
+  `_model_*` builders — no more `SELECT *`/`ecr.*`/`e.*`. A phantom column now raises
+  `UndefinedColumnError` on first call instead of silently degrading to `None`.
+- **The `employees m` manager join is tenant-scoped** (`AND m.org_id = e.org_id`), matching every
+  other join in the file.
+- **Drift-guard test widened** to all four registries (`SHOW_RECORD_TYPES`,
+  `RECORD_REQUIRED_FEATURE`, `_MODEL_BUILDERS`, `_VIEW_BUILDERS`) — a type wired into the enum +
+  feature map but missing from `_VIEW_BUILDERS` (or vice versa) previously passed silently.
+- **New `tests/huume/test_huume_record_view.py`** covers the pure normalization helpers
+  (`_parse_uuid`, `_normalize_json_list`, `_iso`) that every builder leans on — zero coverage
+  before, since `TestShowRecord` deliberately never reaches past the gate/uuid-parse boundary.
+- **`_clamp_incident_days` coerces a digit-string** (`"30"`) instead of silently defaulting to
+  90 — still defaults on genuinely non-numeric input or a `bool` (which `isinstance(_, int)`
+  would otherwise accept).
+- **Panel refocus fixed for a repeat `show_record` on the same id.** `HuumePanel`'s refocus
+  effect keyed only on `record_type`+`record_id`, so asking Huume to reopen a record the admin
+  had since navigated away from was a no-op (identical key). `agent.py` now stamps
+  `huume_record.opened_at` with the turn's `run_id` (a nonce, not a displayed timestamp) on every
+  successful `show_record`, and the panel keys its refocus effect on that instead.
+- Dead `lightMode` ternary and a redundant `Meta` empty-check removed from `RecordViewer.tsx`
+  (the server always fills a meta row's `value`, falling back to `"—"`, so the component only
+  needs to render it).

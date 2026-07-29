@@ -638,7 +638,11 @@ export interface OfferLetterDetail {
 
 export interface HuumeLegal { matter_id: string; title?: string | null }
 
-export interface HuumeRecordRef { record_type: string; record_id: string; label?: string | null }
+/** `opened_at` is a per-stage nonce (a run/step id), not a timestamp to
+ * display — it exists purely so the panel can tell "Huume just re-opened
+ * this same record" apart from "nothing changed", which record_type+
+ * record_id alone can't (re-showing the same record is a no-op key). */
+export interface HuumeRecordRef { record_type: string; record_id: string; label?: string | null; opened_at?: string | null }
 
 export type HuumeRecordChipTone = 'red' | 'orange' | 'amber' | 'emerald' | 'zinc'
 

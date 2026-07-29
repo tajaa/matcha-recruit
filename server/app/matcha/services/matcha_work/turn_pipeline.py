@@ -887,7 +887,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             user_role=current_user.role, history=tc.msg_dicts, current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
-            features=features, integrations=integrations,
+            features=features, integrations=integrations, run_id=run_id,
         ):
             if frame.get("type") == "huume_result":
                 final_result = frame.get("data")

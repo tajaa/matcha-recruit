@@ -66,10 +66,14 @@ def _iso(value: Any) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 async def _model_incident(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+    # No `description` — free-text narrative is exactly where a legal record
+    # names people ("Maria slipped near bay 3"); the structural no-names rule
+    # only holds if the narrative field is excluded too, not just the id
+    # columns. Same reasoning as `onboarding_skill`'s incidents/er_cases topics.
     row = await conn.fetchrow(
         """
         SELECT id, incident_number, title, incident_type, severity, status,
-               occurred_at, location, LEFT(description, 280) AS description
+               occurred_at, location
         FROM ir_incidents
         WHERE id = $1 AND company_id = $2
         """,
@@ -88,15 +92,14 @@ async def _model_incident(conn, company_id: UUID, rid: UUID) -> Optional[dict[st
         "record_status": data.get("status"),
         "occurred_at": _iso(data.get("occurred_at")),
         "location": data.get("location"),
-        "description": data.get("description"),
     }
 
 
 async def _model_er_case(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+    # No `description` — same narrative-exclusion rule as `_model_incident`.
     row = await conn.fetchrow(
         """
-        SELECT id, case_number, title, status, category, outcome, created_at, closed_at,
-               LEFT(description, 280) AS description
+        SELECT id, case_number, title, status, category, outcome, created_at, closed_at
         FROM er_cases
         WHERE id = $1 AND company_id = $2
         """,
@@ -115,7 +118,6 @@ async def _model_er_case(conn, company_id: UUID, rid: UUID) -> Optional[dict[str
         "outcome": data.get("outcome"),
         "created_at": _iso(data.get("created_at")),
         "closed_at": _iso(data.get("closed_at")),
-        "description": data.get("description"),
     }
 
 
@@ -219,7 +221,16 @@ _ER_STATUS_TONE = {"open": "amber", "in_review": "amber", "pending_determination
 
 
 async def _build_incident_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
-    row = await conn.fetchrow("SELECT * FROM ir_incidents WHERE id = $1 AND company_id = $2", rid, company_id)
+    row = await conn.fetchrow(
+        """
+        SELECT id, incident_number, title, description, incident_type, severity, status,
+               occurred_at, location, reported_by_name, witnesses, involved_employee_ids,
+               root_cause, corrective_actions
+        FROM ir_incidents
+        WHERE id = $1 AND company_id = $2
+        """,
+        rid, company_id,
+    )
     if not row:
         return None
     data = dict(row)
@@ -231,7 +242,7 @@ async def _build_incident_view(conn, company_id: UUID, rid: UUID) -> Optional[di
         {"label": "Occurred", "value": _iso(data.get("occurred_at")) or "—"},
         {"label": "Type", "value": (data.get("incident_type") or "—").replace("_", " ").title()},
         {"label": "Location", "value": data.get("location") or "—"},
-        {"label": "Reported by", "value": "Anonymous" if data.get("is_anonymous") else (data.get("reported_by_name") or "—")},
+        {"label": "Reported by", "value": data.get("reported_by_name") or "—"},
     ]
 
     sections = []
@@ -283,7 +294,15 @@ async def _build_incident_view(conn, company_id: UUID, rid: UUID) -> Optional[di
 
 
 async def _build_er_case_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
-    row = await conn.fetchrow("SELECT * FROM er_cases WHERE id = $1 AND company_id = $2", rid, company_id)
+    row = await conn.fetchrow(
+        """
+        SELECT id, case_number, title, description, status, category, outcome,
+               created_at, closed_at, involved_employees
+        FROM er_cases
+        WHERE id = $1 AND company_id = $2
+        """,
+        rid, company_id,
+    )
     if not row:
         return None
     data = dict(row)
@@ -344,9 +363,11 @@ async def _build_er_case_view(conn, company_id: UUID, rid: UUID) -> Optional[dic
 async def _build_employee_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
     row = await conn.fetchrow(
         """
-        SELECT e.*, m.first_name || ' ' || m.last_name AS manager_name
+        SELECT e.id, e.first_name, e.last_name, e.email, e.job_title, e.department,
+               e.work_city, e.work_state, e.start_date, e.employment_type, e.employment_status,
+               m.first_name || ' ' || m.last_name AS manager_name
         FROM employees e
-        LEFT JOIN employees m ON m.id = e.manager_id
+        LEFT JOIN employees m ON m.id = e.manager_id AND m.org_id = e.org_id
         WHERE e.id = $1 AND e.org_id = $2
         """,
         rid, company_id,
@@ -383,7 +404,9 @@ async def _build_employee_view(conn, company_id: UUID, rid: UUID) -> Optional[di
 async def _build_credential_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
     row = await conn.fetchrow(
         """
-        SELECT ecr.*, ct.label AS credential_label, ct.category AS credential_category,
+        SELECT ecr.id, ecr.employee_id, ecr.status, ecr.due_date, ecr.verified_at,
+               ecr.waived_at, ecr.waiver_reason, ecr.notes,
+               ct.label AS credential_label, ct.category AS credential_category,
                e.first_name, e.last_name
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
