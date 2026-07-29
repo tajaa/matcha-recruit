@@ -99,6 +99,39 @@ async def _stamp_clean(conn, *, company_id, incident_id) -> None:
     )
 
 
+async def _stamp_ineligible(conn, *, company_id, incident_id) -> None:
+    """A company without the huume/discipline/etc. flag combo this sweep
+    needs. finding_count = -1 distinguishes this from `_stamp_clean`'s 0
+    (checked, genuinely nothing found) — this incident was never checked at
+    all. Without stamping it, the `NOT EXISTS` prefilter re-selects it every
+    cycle forever; at 100+ closed incidents from non-huume companies (the
+    common case, since huume defaults off) that fills the whole `limit * 4`
+    scan window and an eligible company's incident is never reached."""
+    await conn.execute(
+        """
+        INSERT INTO discipline_policy_sweep_log (company_id, incident_id, thread_id, finding_count)
+        VALUES ($1, $2, NULL, -1)
+        ON CONFLICT (incident_id) DO NOTHING
+        """,
+        company_id, incident_id,
+    )
+
+
+async def _stamp_undelivered(conn, *, company_id, incident_id, finding_count) -> None:
+    """A real finding that couldn't be delivered because the company has no
+    active client user to own the thread. Distinct from `_stamp_clean`
+    (finding_count 0) — stamped here so the incident isn't re-Gemini'd on
+    every sweep forever once a company reaches this state."""
+    await conn.execute(
+        """
+        INSERT INTO discipline_policy_sweep_log (company_id, incident_id, thread_id, finding_count)
+        VALUES ($1, $2, NULL, $3)
+        ON CONFLICT (incident_id) DO NOTHING
+        """,
+        company_id, incident_id, finding_count,
+    )
+
+
 async def _company_client_users(conn, company_id, cache: dict) -> list:
     if company_id in cache:
         return cache[company_id]
@@ -231,7 +264,11 @@ async def _run_discipline_policy_sweep() -> dict:
             ORDER BY i.updated_at ASC
             LIMIT $1
             """,
-            limit * 4,  # scan a wider set than the thread budget — most incidents won't have huume+discipline enabled
+            # Scan wider than the thread budget: most incidents won't have
+            # huume+discipline enabled, and every non-eligible one gets
+            # stamped ineligible below so it drops out of next cycle's scan —
+            # this window is only ever wide on the very first sweep.
+            limit * 4,
         )
 
         checked = 0
@@ -243,6 +280,7 @@ async def _run_discipline_policy_sweep() -> dict:
             if opened >= limit:
                 break
             if not discipline_policy_sweep_enabled(row["enabled_features"], row["signup_source"]):
+                await _stamp_ineligible(conn, company_id=row["company_id"], incident_id=row["id"])
                 continue
 
             incident = dict(row)
@@ -278,6 +316,13 @@ async def _run_discipline_policy_sweep() -> dict:
                     result=result, clients_cache=clients_cache,
                 ):
                     opened += 1
+                else:
+                    # No active client user to own the thread — stamp so this
+                    # incident isn't re-Gemini'd every sweep forever.
+                    await _stamp_undelivered(
+                        conn, company_id=incident["company_id"], incident_id=incident["id"],
+                        finding_count=len(violations),
+                    )
             except _AlreadyStamped:
                 pass
             except Exception:  # noqa: BLE001

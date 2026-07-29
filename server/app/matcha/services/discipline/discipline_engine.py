@@ -242,6 +242,32 @@ def _resolve_lookback(mapping: dict[str, Any], severity: str) -> int:
     return int(mapping["lookback_months_moderate"])
 
 
+def _supersede_candidates(history: list[dict[str, Any]], discipline_type: str) -> list[UUID]:
+    new_rank = LEVEL_RANK.get(discipline_type, 1)
+    return [
+        h["id"] for h in history
+        if LEVEL_RANK.get(h["discipline_type"], 1) <= new_rank
+    ]
+
+
+async def _apply_supersede(conn, supersede_ids: list[UUID], new_id: UUID, actor_user_id: UUID) -> None:
+    if not supersede_ids:
+        return
+    await conn.execute(
+        """
+        UPDATE progressive_discipline
+        SET status = 'escalated', updated_at = NOW()
+        WHERE id = ANY($1::uuid[]) AND status = 'active'
+        """,
+        supersede_ids,
+    )
+    for sid in supersede_ids:
+        await write_audit(
+            conn, sid, actor_user_id, "escalated",
+            details={"superseded_by": str(new_id)},
+        )
+
+
 def _next_level_from_history(active_levels: set[str]) -> tuple[str, bool]:
     """Returns (recommended_level, termination_review_flag).
 
@@ -398,6 +424,12 @@ async def issue_discipline_with_supersede(
     training assignment behind. Direct-issue callers (`approval_status`
     defaulting to `'not_required'`) keep today's behavior exactly: training is
     assigned inside this same transaction, immediately.
+
+    The same deferral applies to the supersede flip: a `pending` draft does
+    NOT escalate the employee's existing active records at insert time — only
+    `approve_record` does, once HR signs off. Flipping it here would mean a
+    record HR later denies has already retired a real active warning, with no
+    path back. `deny_record` therefore has nothing to undo.
     """
     if discipline_type not in VALID_LEVELS:
         raise ValueError(f"Invalid discipline_type: {discipline_type}")
@@ -418,13 +450,10 @@ async def issue_discipline_with_supersede(
             mapping = await get_policy_mapping(conn, company_id, infraction_type)
             lookback = _resolve_lookback(mapping, severity)
 
-            # Find supersede candidates (same employee, active, <= new rank)
+            # Find supersede candidates (same employee, active, <= new rank).
+            # Not applied yet for a pending draft — see docstring.
             history = await fetch_active_history(conn, employee_id)
-            new_rank = LEVEL_RANK.get(discipline_type, 1)
-            supersede_ids = [
-                h["id"] for h in history
-                if LEVEL_RANK.get(h["discipline_type"], 1) <= new_rank
-            ]
+            supersede_ids = _supersede_candidates(history, discipline_type)
             escalated_from = supersede_ids[0] if supersede_ids else None
 
             row = await conn.fetchrow(
@@ -483,21 +512,11 @@ async def issue_discipline_with_supersede(
                         assigned_by=actor_user_id,
                     )
 
-            # Flip superseded actives → escalated
-            if supersede_ids:
-                await conn.execute(
-                    """
-                    UPDATE progressive_discipline
-                    SET status = 'escalated', updated_at = NOW()
-                    WHERE id = ANY($1::uuid[]) AND status = 'active'
-                    """,
-                    supersede_ids,
-                )
-                for sid in supersede_ids:
-                    await write_audit(
-                        conn, sid, actor_user_id, "escalated",
-                        details={"superseded_by": str(new_id)},
-                    )
+            # Flip superseded actives → escalated. Deferred for a pending
+            # draft — `approve_record` recomputes and applies this once HR
+            # signs off, so a denied draft never touches an active record.
+            if approval_status != "pending":
+                await _apply_supersede(conn, supersede_ids, new_id, actor_user_id)
 
             # Audit row for the new record
             await write_audit(
@@ -636,6 +655,15 @@ async def approve_record(
         # _row_to_dict, not dict() — it decodes the compliance_check JSONB, which
         # the advisory-ack stamp below reads.
         record = _row_to_dict(row) or {}
+
+        # The supersede flip deferred at draft time (issue_discipline_with_
+        # supersede) happens now — recomputed against whatever is active on
+        # the employee AT APPROVAL TIME, not what was active when the draft
+        # was staged, since time may have passed between the two.
+        history = await fetch_active_history(conn, record["employee_id"])
+        supersede_ids = _supersede_candidates(history, record["discipline_type"])
+        await _apply_supersede(conn, supersede_ids, discipline_id, actor_user_id)
+
         pending_req = record.get("pending_remedial_requirement_id")
         if pending_req is not None:
             requirement = await conn.fetchrow(
@@ -670,6 +698,20 @@ async def approve_record(
                 discipline_id, ack,
             )
             record["advisory_ack_reason"] = ack
+            # The direct-issue path (issue_discipline_with_supersede) writes an
+            # 'advisories_acknowledged' audit row in the same transaction as
+            # the ack — this path stamped the column with no matching entry in
+            # the immutable trail.
+            await write_audit(
+                conn, discipline_id, actor_user_id, "advisories_acknowledged",
+                details={
+                    "advisory_ack_reason": ack,
+                    "advisory_codes": [
+                        a.get("code")
+                        for a in (record.get("compliance_check") or {}).get("advisories") or []
+                    ],
+                },
+            )
 
         await write_audit(conn, discipline_id, actor_user_id, "approval_approved")
 

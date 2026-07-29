@@ -43,7 +43,7 @@ async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[s
     """Model-facing read tool. Runs the policy check and persists it; returns
     a name-free summary (violation titles + policy ids + citation count +
     summary) — never involved_employee_ids, witnesses, or the raw narrative."""
-    from app.database import get_connection
+    from app.database.pool import connection_or_direct
     from app.matcha.services.discipline.discipline_policy_check import (
         check_incident_against_handbook,
         persist_policy_check,
@@ -54,7 +54,11 @@ async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[s
     except (ValueError, TypeError):
         return {"status": "error", "message": "That incident id doesn't look valid."}
 
-    async with get_connection() as conn:
+    # A raw, non-pooled connection (force_direct=True), not the shared pool —
+    # this holds a live connection across a 60s-timeout Gemini call
+    # (check_incident_against_handbook), and a request-path pooled connection
+    # held that long lets concurrent Huume turns exhaust the pool.
+    async with connection_or_direct(force_direct=True) as conn:
         incident = await conn.fetchrow(
             "SELECT id, title, description, incident_type, severity, incident_number "
             "FROM ir_incidents WHERE id = $1 AND company_id = $2",
@@ -69,6 +73,17 @@ async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[s
         # "your handbook has nothing relevant to this incident".
         from app.core.feature_flags import get_company_features
         features = await get_company_features(company_id, conn=conn)
+        # `tool_declarations()` advertises this tool regardless of the
+        # company's flags (same as the legal/handbook pilot skill tools) —
+        # unlike the staged HR-ops actions, this READ tool had no per-call
+        # re-check at all for `discipline`, only for `handbooks`. Without it,
+        # a company with handbooks but not discipline could run the check and
+        # get findings for a feature it doesn't have.
+        if not features.get("discipline"):
+            return {
+                "status": "module_off",
+                "message": "Discipline isn't enabled for this company.",
+            }
         if not features.get("handbooks"):
             return {
                 "status": "module_off",
@@ -104,9 +119,16 @@ async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[s
 async def list_pending(*, company_id: UUID) -> dict[str, Any]:
     """Model-facing read tool — ids + labels for the HR approval queue."""
     from app.database import get_connection
+    from app.core.feature_flags import get_company_features
     from app.matcha.services.discipline import discipline_engine
 
     async with get_connection() as conn:
+        # Unlike check_incident_policy's `handbooks` check, this tool had no
+        # per-call feature gate at all — `tool_declarations()` advertises it
+        # regardless of the company's flags.
+        features = await get_company_features(company_id, conn=conn)
+        if not features.get("discipline"):
+            return {"status": "module_off", "message": "Discipline isn't enabled for this company."}
         rows = await discipline_engine.list_pending_approval(conn, company_id)
 
     return {
@@ -239,6 +261,8 @@ async def _execute_discipline_from_incident(
                 "SELECT occurred_at FROM ir_incidents WHERE id = $1 AND company_id = $2",
                 incident_id, company_id,
             )
+            if not incident_row:
+                return {"status": "error", "message": "I don't see that incident for this company."}
         occurrence_dates = _resolve_occurrence_dates(action.get("occurrence_dates"), incident_row)
 
         # Deterministic legal gate — same order as hr_pilot_actions'

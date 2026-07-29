@@ -143,50 +143,53 @@ async def upsert_template(
     created_by: Optional[UUID],
 ) -> dict[str, Any]:
     """Insert or update a template. When `is_default=True`, the previous
-    default is cleared FIRST in the same transaction as the caller's — the
-    partial unique index (company_id) WHERE is_default AND is_active rejects
-    a second concurrent default otherwise.
+    default is cleared FIRST in the same transaction as the insert/update
+    below — opened HERE (not left to the caller, which doesn't) — so the
+    partial unique index (company_id) WHERE is_default AND is_active can't
+    reject a second concurrent default, and a failing insert/update can't
+    leave the company with its default cleared and nothing to replace it.
     """
-    if is_default:
-        await conn.execute(
-            """
-            UPDATE company_discipline_templates
-            SET is_default = FALSE, updated_at = NOW()
-            WHERE company_id = $1 AND is_default = TRUE AND id != COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
-            """,
-            company_id, template_id,
-        )
+    async with conn.transaction():
+        if is_default:
+            await conn.execute(
+                """
+                UPDATE company_discipline_templates
+                SET is_default = FALSE, updated_at = NOW()
+                WHERE company_id = $1 AND is_default = TRUE AND id != COALESCE($2, '00000000-0000-0000-0000-000000000000'::uuid)
+                """,
+                company_id, template_id,
+            )
 
-    if template_id is not None:
+        if template_id is not None:
+            row = await conn.fetchrow(
+                """
+                UPDATE company_discipline_templates
+                SET name = $3, infraction_type = $4, discipline_type = $5, body = $6,
+                    is_default = $7, is_active = $8, updated_at = NOW()
+                WHERE id = $1 AND company_id = $2
+                RETURNING id, company_id, name, infraction_type, discipline_type, body,
+                          is_default, is_active, created_by, created_at, updated_at
+                """,
+                template_id, company_id, name, infraction_type, discipline_type, body,
+                is_default, is_active,
+            )
+            if row is None:
+                raise ValueError("Template not found")
+            return dict(row)
+
         row = await conn.fetchrow(
             """
-            UPDATE company_discipline_templates
-            SET name = $3, infraction_type = $4, discipline_type = $5, body = $6,
-                is_default = $7, is_active = $8, updated_at = NOW()
-            WHERE id = $1 AND company_id = $2
+            INSERT INTO company_discipline_templates
+              (company_id, name, infraction_type, discipline_type, body,
+               is_default, is_active, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id, company_id, name, infraction_type, discipline_type, body,
                       is_default, is_active, created_by, created_at, updated_at
             """,
-            template_id, company_id, name, infraction_type, discipline_type, body,
-            is_default, is_active,
+            company_id, name, infraction_type, discipline_type, body,
+            is_default, is_active, created_by,
         )
-        if row is None:
-            raise ValueError("Template not found")
         return dict(row)
-
-    row = await conn.fetchrow(
-        """
-        INSERT INTO company_discipline_templates
-          (company_id, name, infraction_type, discipline_type, body,
-           is_default, is_active, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, company_id, name, infraction_type, discipline_type, body,
-                  is_default, is_active, created_by, created_at, updated_at
-        """,
-        company_id, name, infraction_type, discipline_type, body,
-        is_default, is_active, created_by,
-    )
-    return dict(row)
 
 
 async def deactivate_template(conn, company_id: UUID, template_id: UUID) -> bool:

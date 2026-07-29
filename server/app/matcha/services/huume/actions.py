@@ -115,6 +115,8 @@ _DISCIPLINE_TYPES = frozenset({"verbal_warning", "written_warning", "pip", "fina
 _DISCIPLINE_SEVERITIES = frozenset({"minor", "moderate", "severe", "immediate_written"})
 _DISCIPLINE_INFRACTION_TYPES = frozenset({"attendance", "performance", "safety", "policy_violation"})
 _MIN_DENIAL_REASON_CHARS = 20
+# Mirrors hr_pilot_actions._MAX_OCCURRENCE_DATES.
+_MAX_OCCURRENCE_DATES = 30
 
 # Vocabularies the confirm-turn validators check against. Mirrors of the
 # authoritative Literals — IRIncidentType/IRSeverity (models/ir_incident.py:10-11)
@@ -456,6 +458,22 @@ def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
             if parsed is None:
                 return HuumeVerdict(kind="refuse", message="I couldn't read one of those occurrence dates — give me specific dates.")
             occurrence_dates.append(parsed.isoformat())
+    if len(occurrence_dates) > _MAX_OCCURRENCE_DATES:
+        return HuumeVerdict(
+            kind="refuse",
+            message="That's a lot of dates for one write-up — narrow it to the specific occurrences at issue.",
+        )
+    if incident_id is None and not occurrence_dates:
+        # Only a standalone draft needs this refused here — an incident-sourced
+        # draft falls back to the incident's own occurred_at in
+        # discipline_skill._resolve_occurrence_dates, so it's never empty once
+        # the incident resolves. Without a date here, check_discipline_compliance
+        # has nothing to test against protected leave, so the statutory block
+        # could silently never fire.
+        return HuumeVerdict(
+            kind="refuse",
+            message="On which date(s) did this happen? Give me specific dates so the record is accurate.",
+        )
 
     expected_improvement = str(staged.get("expected_improvement") or "").strip() or None
 

@@ -152,6 +152,37 @@ class TestDisciplineFromIncidentValidation:
         )
         assert verdict.kind == "proceed"
 
+    def test_standalone_draft_without_occurrence_dates_is_refused(self):
+        """Without an incident_id there's no _resolve_occurrence_dates fallback
+        to the incident's own occurred_at — an empty occurrence_dates list
+        would leave check_discipline_compliance nothing to test against
+        protected leave, so the statutory hard block could silently never
+        fire for a standalone attendance write-up."""
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(incident_id=None, occurrence_dates=[]),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "refuse"
+
+    def test_incident_sourced_draft_without_occurrence_dates_proceeds(self):
+        """With an incident_id, the fallback to the incident's occurred_at
+        happens downstream in discipline_skill._resolve_occurrence_dates —
+        an empty list here is fine, it's only the standalone case that's
+        refused."""
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(occurrence_dates=[]),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "proceed"
+
+    def test_too_many_occurrence_dates_refused(self):
+        dates = [f"2026-01-{d:02d}" for d in range(1, 32)]  # 31 > cap of 30
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(occurrence_dates=dates),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "refuse"
+
     def test_invalid_incident_id_refused(self):
         verdict = evaluate_huume_action(
             staged_action=_staged_draft(incident_id="not-a-uuid"), features=_features(), role="client",
@@ -289,6 +320,49 @@ class TestDisciplineSkillExecute:
         # occurrence_dates passed to check_discipline_compliance derived from occurred_at
         _, kwargs = check_mock.await_args
         assert kwargs["occurrence_dates"] == [datetime.date(2026, 7, 1)]
+
+    @pytest.mark.asyncio
+    async def test_from_incident_refuses_when_incident_unresolved_for_company(self, monkeypatch):
+        """A supplied incident_id that doesn't resolve for THIS company (wrong
+        tenant, or simply doesn't exist) must refuse rather than silently
+        writing the unvalidated id as source_incident_id — a foreign-tenant
+        id landing on the record would later let discipline_filing insert the
+        signed letter's storage_path into another company's
+        ir_incident_documents."""
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(side_effect=[
+            {"id": EMP_ID, "first_name": "Jane", "last_name": "Doe"},  # employee lookup
+            None,  # incident lookup — no row for this company_id
+        ])
+
+        def _conn_ctx():
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=conn)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx()))
+        check_mock = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_compliance.check_discipline_compliance", check_mock,
+        )
+        issue_mock = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_engine.issue_discipline_with_supersede", issue_mock,
+        )
+
+        result = await discipline_skill.execute(
+            company_id=uuid4(), actor_user_id=uuid4(),
+            action={
+                "type": "discipline_from_incident", "employee_id": EMP_ID, "incident_id": INCIDENT_ID,
+                "infraction_type": "attendance", "description": "Missed shifts.",
+                "occurrence_dates": [],
+            },
+        )
+
+        assert result["status"] == "error"
+        check_mock.assert_not_awaited()
+        issue_mock.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_from_incident_blocked_by_compliance_gate(self, monkeypatch):
@@ -483,10 +557,13 @@ class TestCheckIncidentPolicyFeatureGate:
             cm.__aexit__ = AsyncMock(return_value=False)
             return cm
 
-        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx()))
+        # check_incident_policy uses a raw non-pooled connection
+        # (connection_or_direct, force_direct=True) rather than the shared
+        # pool — see its docstring — so that's what needs patching here.
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx())
         monkeypatch.setattr(
             "app.core.feature_flags.get_company_features",
-            AsyncMock(return_value={"handbooks": False}),
+            AsyncMock(return_value={"handbooks": False, "discipline": True}),
         )
         check = AsyncMock()
         monkeypatch.setattr(
@@ -497,6 +574,66 @@ class TestCheckIncidentPolicyFeatureGate:
 
         assert result["status"] == "module_off"
         check.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_discipline_off_is_module_off_even_with_handbooks_on(self, monkeypatch):
+        """tool_declarations() advertises this tool regardless of company flags —
+        unlike the staged HR-ops actions it had no per-call `discipline` re-check
+        at all, only `handbooks`. A company with handbooks but not discipline
+        must not be able to run the check."""
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": INCIDENT_ID, "title": "t", "description": "d",
+            "incident_type": "safety", "severity": "high", "incident_number": "IR-1",
+        })
+
+        def _conn_ctx():
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=conn)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx())
+        monkeypatch.setattr(
+            "app.core.feature_flags.get_company_features",
+            AsyncMock(return_value={"handbooks": True, "discipline": False}),
+        )
+        check = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incident_against_handbook", check,
+        )
+
+        result = await discipline_skill.check_incident_policy(company_id=uuid4(), incident_id=INCIDENT_ID)
+
+        assert result["status"] == "module_off"
+        check.assert_not_awaited()
+
+
+class TestListPendingFeatureGate:
+    @pytest.mark.asyncio
+    async def test_discipline_off_is_module_off(self, monkeypatch):
+        conn = MagicMock()
+
+        def _conn_ctx():
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=conn)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx()))
+        monkeypatch.setattr(
+            "app.core.feature_flags.get_company_features",
+            AsyncMock(return_value={"discipline": False}),
+        )
+        list_mock = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_engine.list_pending_approval", list_mock,
+        )
+
+        result = await discipline_skill.list_pending(company_id=uuid4())
+
+        assert result["status"] == "module_off"
+        list_mock.assert_not_awaited()
 
 
 class TestRecordViewParity:

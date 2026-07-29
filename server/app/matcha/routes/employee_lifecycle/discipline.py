@@ -830,7 +830,15 @@ async def signature_webhook(request: Request):
                 conn, record["id"],
                 expected_from=["pending_signature", "pending_meeting", "draft"],
                 to="active",
-            ) or record
+            )
+            if updated is None:
+                # transition_status no-op'd (redelivery, or the record was
+                # already 'active') — re-fetch rather than falling back to
+                # `record`, which was read BEFORE update_signature_status
+                # above wrote signed_pdf_storage_path. Falling back to the
+                # stale row means file_signed_letter sees
+                # signed_pdf_storage_path=None and silently files nothing.
+                updated = await discipline_engine.fetch_record(conn, record["id"]) or record
             await discipline_engine.write_audit(
                 conn, record["id"], None, "signed",
                 details={"envelope_id": envelope_id, "storage_path": storage_path},

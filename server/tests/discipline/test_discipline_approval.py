@@ -264,6 +264,7 @@ class TestApproveDenyRecord:
             return None
 
         conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.fetch = AsyncMock(return_value=[])  # fetch_active_history — no supersede candidates
         conn.execute = AsyncMock(return_value=None)
         conn.transaction = MagicMock(return_value=_noop_transaction())
 
@@ -307,6 +308,7 @@ class TestApproveDenyRecord:
             return None
 
         conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.fetch = AsyncMock(return_value=[])  # fetch_active_history — no supersede candidates
         conn.execute = AsyncMock(return_value=None)
         conn.transaction = MagicMock(return_value=_noop_transaction())
 
@@ -334,6 +336,7 @@ class TestApproveDenyRecord:
         })
 
         conn.fetchrow = AsyncMock(side_effect=lambda q, *a: approved_row if "SET approval_status = 'approved'" in q else None)
+        conn.fetch = AsyncMock(return_value=[])  # fetch_active_history — no supersede candidates
         conn.execute = AsyncMock(return_value=None)
         conn.transaction = MagicMock(return_value=_noop_transaction())
 

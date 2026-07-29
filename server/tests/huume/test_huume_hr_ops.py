@@ -274,6 +274,53 @@ class TestBuildHrOpsStaged:
         assert staged["employee_ids"] == [EMP_ID]
         assert "confirm_id" not in staged   # has a natural id already
 
+    def test_changed_decision_on_confirm_turn_restages_instead_of_executing_stale(self):
+        """The bug: admin stages 'approve' on record X, then on the reply says
+        'no, deny it instead' — the model calls with the SAME record_id but
+        decision='deny'. Matching on record_id alone would return `existing`
+        (the ORIGINAL 'approve' proposal) with confirming=True, silently
+        executing the approve the admin just reversed and discarding the
+        denial reason. A changed decision-bearing field must force a fresh
+        stage instead."""
+        spec = _HR_OPS_TOOL_SPECS["decide_disciplinary_action"]
+        existing = {
+            "type": "discipline_decision", "status": "proposed",
+            "record_id": REQ_ID, "decision": "approve", "reason": None,
+        }
+        staged, confirming = _build_hr_ops_staged(
+            spec, {"record_id": REQ_ID, "decision": "deny", "reason": "Insufficient documentation on file."},
+            existing,
+        )
+        assert confirming is False
+        assert staged["decision"] == "deny"
+        assert staged["reason"] == "Insufficient documentation on file."
+
+    def test_unchanged_decision_on_confirm_turn_still_confirms(self):
+        spec = _HR_OPS_TOOL_SPECS["decide_disciplinary_action"]
+        existing = {
+            "type": "discipline_decision", "status": "proposed",
+            "record_id": REQ_ID, "decision": "approve", "reason": None,
+        }
+        staged, confirming = _build_hr_ops_staged(
+            spec, {"record_id": REQ_ID, "decision": "approve"}, existing,
+        )
+        assert confirming is True
+        assert staged is existing
+
+    def test_free_text_field_drift_on_confirm_turn_still_confirms(self):
+        """Only `decision_fields` (decision/status enums) force a re-stage — a
+        free-text field the model may legitimately rephrase between turns
+        (report_incident/open_er_case have no decision_fields at all) must
+        not spuriously break the confirm match."""
+        spec = _HR_OPS_TOOL_SPECS["report_incident"]
+        existing = _ir()
+        staged, confirming = _build_hr_ops_staged(
+            spec, {"description": "Different wording of the same incident.", "confirm_id": existing["confirm_id"]},
+            existing,
+        )
+        assert confirming is True
+        assert staged is existing
+
 
 class TestRegistry:
     def test_all_hr_ops_tools_declared_and_staged(self):

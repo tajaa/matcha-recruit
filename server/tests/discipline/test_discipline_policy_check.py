@@ -21,8 +21,17 @@ INCIDENT = {
 
 def _fake_corpus():
     return {
-        "sources": {}, "full_text": {"handbook:1": "Sharps must be disposed of in a sharps container."},
-        "index": {"handbook:1": {"title": "Sharps Handling", "summary": "Sharps policy"}},
+        # "source": "existing_handbook" mirrors what handbook_pilot.build_corpus
+        # actually stamps on every index record — _restrict_to_handbook_and_policy
+        # filters on it, so a fixture without it would look like an empty
+        # (law/playbook-only) corpus and short-circuit before Gemini is called.
+        "sources": {
+            "existing_handbook": {"label": "Existing handbook sections", "records": [
+                {"cid": "handbook:1", "title": "Sharps Handling", "summary": "Sharps policy", "ref": None},
+            ]},
+        },
+        "full_text": {"handbook:1": "Sharps must be disposed of in a sharps container."},
+        "index": {"handbook:1": {"title": "Sharps Handling", "summary": "Sharps policy", "source": "existing_handbook"}},
     }
 
 

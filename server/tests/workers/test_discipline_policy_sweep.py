@@ -178,6 +178,12 @@ class _FakeConn:
             for q, _ in self.executed
         )
 
+    def stamped_ineligible(self) -> bool:
+        return any(
+            "INSERT INTO discipline_policy_sweep_log" in q and "NULL, -1" in q
+            for q, _ in self.executed
+        )
+
     def any_ledger_write(self) -> bool:
         return any("discipline_policy_sweep_log" in q for q in self.queries if "INSERT" in q)
 
@@ -245,7 +251,10 @@ class TestSweepControlFlow:
         check = wire(conn)
         await sweep._run_discipline_policy_sweep()
         check.assert_not_awaited()
-        assert not conn.any_ledger_write()
+        # Stamped ineligible (finding_count=-1), not left unstamped — an
+        # unstamped ineligible incident would re-fill the NOT EXISTS scan
+        # window on every cycle and starve companies that ARE eligible.
+        assert conn.stamped_ineligible()
 
     @pytest.mark.asyncio
     async def test_clean_incident_stamps_ledger_without_thread(self, wire):

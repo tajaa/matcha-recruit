@@ -246,6 +246,12 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "match_key": "request_id",
         "mints_confirm_id": False,
         "fields": ("request_id", "decision", "note"),
+        # A changed decision on what looks like the confirm turn must not
+        # silently execute the ORIGINALLY staged decision — see
+        # _build_hr_ops_staged. Not applied to free-text fields like
+        # `note`/`description` elsewhere, which the model may legitimately
+        # rephrase turn to turn without meaning to change the proposal.
+        "decision_fields": ("decision",),
         "staged_label": "Staged: PTO decision",
         "refused_label": "PTO decision refused",
         "done_label": "Applied PTO decision",
@@ -257,6 +263,7 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "match_key": "record_id",
         "mints_confirm_id": False,
         "fields": ("record_id", "decision", "reason"),
+        "decision_fields": ("decision",),
         "staged_label": "Staged: discipline approval decision",
         "refused_label": "Discipline decision refused",
         "done_label": "Discipline decision recorded",
@@ -282,6 +289,24 @@ def _build_hr_ops_staged(spec: dict[str, Any], args: dict[str, Any], existing: A
         and echoed is not None
         and str(existing.get(match_key) or "") == echoed
     )
+    if confirming:
+        # A changed decision-bearing field on the "confirm" turn (e.g. admin
+        # says "no, deny it instead" and the model calls with decision=deny)
+        # must NOT silently execute the ORIGINALLY staged decision just
+        # because match_key still matches — re-stage fresh instead, so the
+        # new decision needs its own confirm turn like any other proposal.
+        # An omitted field on the confirm turn (None/"") is not a change.
+        # Scoped to `decision_fields` (decision/status enums), not every
+        # field in `fields` — a free-text field like description/note may be
+        # legitimately rephrased by the model between turns without the
+        # proposal itself having changed.
+        for field in spec.get("decision_fields") or ():
+            new_value = args.get(field)
+            if new_value in (None, ""):
+                continue
+            if str(existing.get(field) or "") != str(new_value):
+                confirming = False
+                break
     if confirming:
         return existing, True
     staged: dict[str, Any] = {"type": spec["action_type"], "status": "proposed"}

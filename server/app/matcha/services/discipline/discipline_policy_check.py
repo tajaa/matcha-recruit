@@ -78,6 +78,41 @@ Return STRICT JSON, no markdown fence:
 # the point the corpus title becomes the feature's own output.
 _CORPUS_LABEL_PREFIXES = ("Existing policy — ", "Existing section — ")
 
+# handbook_pilot.build_corpus's own source-group keys for these two — every
+# other group (`profile`, `compliance_floor`, `law`, `playbook`,
+# `handbook_audit`, `handbook_freshness`) is grounding for OTHER pilots, not
+# an obligation the company wrote for itself, and must never be citable here
+# as a "policy violation".
+_ALLOWED_SOURCE_GROUPS = ("existing_handbook", "existing_policies")
+
+
+def _restrict_to_handbook_and_policy(corpus: dict[str, Any]) -> dict[str, Any]:
+    """Narrow a handbook_pilot corpus to handbook sections + policies only.
+
+    Filtering the corpus itself (not just prompting around it) means the
+    model literally cannot see or cite `law:`/`playbook:`/`profile`/audit/
+    freshness records — so a jurisdiction statute or the generic industry
+    baseline can never survive `validate_citations` and be persisted as a
+    "policy violation". It also fixes the emptiness check below: without
+    this, `playbook` records make the index non-empty for every company
+    (there's always an industry baseline), so a company with zero handbook
+    content never hit the "nothing on file" branch — it burned a Gemini call
+    and returned a clean result that looked identical to "nothing relevant"."""
+    corpus = corpus or {}
+    sources = {
+        key: group for key, group in (corpus.get("sources") or {}).items()
+        if key in _ALLOWED_SOURCE_GROUPS
+    }
+    index = {
+        cid: rec for cid, rec in (corpus.get("index") or {}).items()
+        if rec.get("source") in _ALLOWED_SOURCE_GROUPS
+    }
+    full_text = {
+        cid: text for cid, text in (corpus.get("full_text") or {}).items()
+        if cid in index
+    }
+    return {"sources": sources, "index": index, "notes": corpus.get("notes") or [], "full_text": full_text}
+
 
 def _clean_title(title: str) -> str:
     for prefix in _CORPUS_LABEL_PREFIXES:
@@ -140,7 +175,7 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
         from ..pilots.handbook_pilot import build_corpus, gather_grounding
 
         grounding = await gather_grounding(conn, company_id, {"scopes": []})
-        corpus = build_corpus(grounding, with_full_text=True)
+        corpus = _restrict_to_handbook_and_policy(build_corpus(grounding, with_full_text=True))
     except Exception:
         logger.exception("[discipline_policy_check] failed to build grounding corpus")
         return _unavailable_result()
@@ -164,25 +199,32 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
             timeout=_GEMINI_TIMEOUT,
         )
         data = _parse_json(getattr(resp, "text", "") or "")
+
+        # Kept inside the same try as the Gemini call: `data` is untrusted
+        # model output (e.g. a malformed `"violations": ["...", ...]` of bare
+        # strings instead of objects), and the docstring promises this
+        # function never raises — the sweep's own except would catch it, but
+        # the Huume `check_incident_policy` tool call does not, so a
+        # malformed response would fail the tool call instead of degrading
+        # to `available: False` like every other bad-response path.
+        raw_violations = (data.get("violations") or [])[:_MAX_VIOLATIONS]
+        for v in raw_violations:
+            if v.get("policy_cid"):
+                v["policy_cid"] = _resolve_cid(str(v["policy_cid"]), index)
+        # validate_citations' contract (services/_shared/citations.py) is
+        # [{"point": str, "cited_ids": [str]}] -> ([{"point", "cited_ids"}], [dropped]).
+        # One entry per violation, its single policy_cid as the sole cited id, so a
+        # violation survives exactly when its cid is in the index.
+        evidence_map = [
+            {"point": str(v.get("reasoning") or ""), "cited_ids": [v["policy_cid"]]}
+            for v in raw_violations
+            if v.get("policy_cid")
+        ]
+        clean_map, dropped = validate_citations(evidence_map, index)
+        clean_cids = {cid for entry in clean_map for cid in entry.get("cited_ids") or []}
     except Exception:
         logger.exception("[discipline_policy_check] Gemini check failed for incident %s", incident.get("id"))
         return _unavailable_result()
-
-    raw_violations = (data.get("violations") or [])[:_MAX_VIOLATIONS]
-    for v in raw_violations:
-        if v.get("policy_cid"):
-            v["policy_cid"] = _resolve_cid(str(v["policy_cid"]), index)
-    # validate_citations' contract (services/_shared/citations.py) is
-    # [{"point": str, "cited_ids": [str]}] -> ([{"point", "cited_ids"}], [dropped]).
-    # One entry per violation, its single policy_cid as the sole cited id, so a
-    # violation survives exactly when its cid is in the index.
-    evidence_map = [
-        {"point": str(v.get("reasoning") or ""), "cited_ids": [v["policy_cid"]]}
-        for v in raw_violations
-        if v.get("policy_cid")
-    ]
-    clean_map, dropped = validate_citations(evidence_map, index)
-    clean_cids = {cid for entry in clean_map for cid in entry.get("cited_ids") or []}
 
     violations = [
         {

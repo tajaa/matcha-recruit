@@ -393,6 +393,17 @@ async def update_discipline_record(
                     status_code=400,
                     detail=f"Invalid status. Must be one of: {sorted(VALID_DISCIPLINE_STATUSES)}",
                 )
+            approval_status = existing.get("approval_status") or "not_required"
+            if approval_status in ("pending", "denied"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This record is awaiting HR approval and cannot have its "
+                        "status changed directly."
+                        if approval_status == "pending"
+                        else "This record was denied by HR and its status cannot be changed."
+                    ),
+                )
             updates.append(f"status = ${idx}")
             values.append(request.status)
             idx += 1
