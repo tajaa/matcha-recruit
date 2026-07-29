@@ -9,6 +9,7 @@ import { api } from '../../../api/client'
 import type {
   DisciplineLevel,
   DisciplineStatus,
+  DisciplineApprovalStatus,
 } from '../../../api/discipline/discipline'
 
 const LEVEL_LABEL: Record<DisciplineLevel, string> = {
@@ -27,6 +28,7 @@ const STATUS_VARIANT: Record<DisciplineStatus, 'success' | 'warning' | 'danger' 
   completed: 'neutral',
   expired: 'neutral',
   escalated: 'danger',
+  denied: 'danger',
 }
 
 const STATUS_LABEL: Record<DisciplineStatus, string> = {
@@ -37,6 +39,14 @@ const STATUS_LABEL: Record<DisciplineStatus, string> = {
   completed: 'Completed',
   expired: 'Expired',
   escalated: 'Escalated',
+  denied: 'Denied',
+}
+
+const APPROVAL_VARIANT: Record<DisciplineApprovalStatus, 'success' | 'warning' | 'danger' | 'neutral'> = {
+  not_required: 'neutral',
+  pending: 'warning',
+  approved: 'success',
+  denied: 'danger',
 }
 
 type EmployeeRow = { id: string; first_name: string | null; last_name: string | null }
@@ -50,6 +60,7 @@ function employeeName(e: EmployeeRow | undefined, fallbackId: string): string {
 export default function Discipline() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<DisciplineStatus | ''>('')
+  const [approvalFilter, setApprovalFilter] = useState<DisciplineApprovalStatus | ''>('')
   const [search, setSearch] = useState('')
   const [showIssue, setShowIssue] = useState(false)
   const [showGuide, setShowGuide] = useState(() => {
@@ -64,6 +75,7 @@ export default function Discipline() {
 
   const { records, loading, error, refetch } = useDisciplineList(
     (statusFilter || undefined) as DisciplineStatus | undefined,
+    (approvalFilter || undefined) as DisciplineApprovalStatus | undefined,
   )
 
   useEffect(() => {
@@ -122,15 +134,28 @@ export default function Discipline() {
           label="Status"
           options={[
             { value: '', label: 'All' },
+            { value: 'draft', label: 'Draft' },
             { value: 'active', label: 'Active' },
             { value: 'pending_meeting', label: 'Pending meeting' },
             { value: 'pending_signature', label: 'Pending signature' },
             { value: 'expired', label: 'Expired' },
             { value: 'escalated', label: 'Escalated' },
             { value: 'completed', label: 'Completed' },
+            { value: 'denied', label: 'Denied' },
           ]}
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as DisciplineStatus | '')}
+        />
+        <Select
+          label="Approval"
+          options={[
+            { value: '', label: 'All' },
+            { value: 'pending', label: 'Pending approval' },
+            { value: 'approved', label: 'Approved' },
+            { value: 'denied', label: 'Denied' },
+          ]}
+          value={approvalFilter}
+          onChange={(e) => setApprovalFilter(e.target.value as DisciplineApprovalStatus | '')}
         />
         <Input
           label="Search"
@@ -163,6 +188,7 @@ export default function Discipline() {
                 <th className="text-left px-4 py-3">Expires</th>
                 <th className="text-left px-4 py-3">Signature</th>
                 <th className="text-left px-4 py-3">Status</th>
+                <th className="text-left px-4 py-3">Approval</th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +219,13 @@ export default function Discipline() {
                   <td className="px-4 py-3 text-zinc-400">{r.signature_status}</td>
                   <td className="px-4 py-3">
                     <Badge variant={STATUS_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    {r.approval_status !== 'not_required' && (
+                      <Badge variant={APPROVAL_VARIANT[r.approval_status]}>
+                        {r.approval_status.charAt(0).toUpperCase() + r.approval_status.slice(1)}
+                      </Badge>
+                    )}
                   </td>
                 </tr>
               ))}

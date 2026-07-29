@@ -15,6 +15,8 @@ export type DisciplineStatus =
   | 'completed'
   | 'expired'
   | 'escalated'
+  | 'denied'
+export type DisciplineApprovalStatus = 'not_required' | 'pending' | 'approved' | 'denied'
 export type DisciplineSignatureStatus =
   | 'pending'
   | 'requested'
@@ -53,6 +55,14 @@ export type DisciplineRecord = {
   advisory_ack_reason: string | null
   situation_narrative: string | null
   remedial_requirement_id: string | null
+  approval_status: DisciplineApprovalStatus
+  approval_requested_at: string | null
+  approved_by: string | null
+  approval_decided_at: string | null
+  denial_reason: string | null
+  source_incident_id: string | null
+  template_id: string | null
+  pending_remedial_requirement_id: string | null
   created_at: string
   updated_at: string
   /** Only present on GET /discipline/records/{id} — the linked training
@@ -196,6 +206,46 @@ export type DisciplinePolicyUpsertInput = {
   notify_grandparent_manager?: boolean
 }
 
+/** Closed vocabulary rendered server-side — see
+ *  discipline_templates.DISCIPLINE_TEMPLATE_PLACEHOLDERS. An unrecognized
+ *  {{token}} survives verbatim in the rendered letter rather than being
+ *  silently blanked. */
+export const DISCIPLINE_TEMPLATE_PLACEHOLDERS = [
+  'employee_name', 'employee_title', 'manager_name', 'company_name', 'issued_date',
+  'infraction_type', 'discipline_type', 'occurrence_dates', 'incident_number',
+  'policy_citations', 'description', 'expected_improvement', 'review_date',
+] as const
+
+export type DisciplineTemplate = {
+  id: string
+  company_id: string
+  name: string
+  infraction_type: string | null
+  discipline_type: DisciplineLevel | null
+  body: string
+  is_default: boolean
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type DisciplineTemplateUpsertInput = {
+  name: string
+  infraction_type?: string | null
+  discipline_type?: DisciplineLevel | null
+  body: string
+  is_default?: boolean
+  is_active?: boolean
+}
+
+export type DisciplineApprover = {
+  user_id: string
+  email: string
+  name: string
+  is_hr_approver: boolean
+}
+
 export const disciplineApi = {
   recommend: (input: DisciplineRecommendInput) =>
     api.post<DisciplineRecommendation>('/discipline/recommend', input),
@@ -219,10 +269,22 @@ export const disciplineApi = {
   issue: (input: DisciplineIssueInput) =>
     api.post<DisciplineRecord>('/discipline/records', input),
 
-  list: (status?: DisciplineStatus) => {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : ''
-    return api.get<DisciplineRecord[]>(`/discipline/records${qs}`)
+  list: (status?: DisciplineStatus, approvalStatus?: DisciplineApprovalStatus) => {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (approvalStatus) params.set('approval_status', approvalStatus)
+    const qs = params.toString()
+    return api.get<DisciplineRecord[]>(`/discipline/records${qs ? `?${qs}` : ''}`)
   },
+
+  pendingApprovals: () => api.get<DisciplineRecord[]>('/discipline/records/pending-approval'),
+
+  approve: (recordId: string) =>
+    api.post<DisciplineRecord>(`/discipline/records/${recordId}/approve`),
+
+  /** Throws ApiError 409 if the record isn't awaiting approval. */
+  deny: (recordId: string, reason: string) =>
+    api.post<DisciplineRecord>(`/discipline/records/${recordId}/deny`, { reason }),
 
   listForEmployee: (employeeId: string) =>
     api.get<DisciplineRecord[]>(`/discipline/records/employee/${employeeId}`),
@@ -257,4 +319,25 @@ export const disciplineApi = {
 
   upsertPolicy: (infractionType: string, body: DisciplinePolicyUpsertInput) =>
     api.put<DisciplinePolicy>(`/discipline/policies/${encodeURIComponent(infractionType)}`, body),
+
+  listTemplates: (includeInactive = false) => {
+    const qs = includeInactive ? '?include_inactive=true' : ''
+    return api.get<DisciplineTemplate[]>(`/discipline/templates${qs}`)
+  },
+
+  createTemplate: (body: DisciplineTemplateUpsertInput) =>
+    api.post<DisciplineTemplate>('/discipline/templates', body),
+
+  updateTemplate: (templateId: string, body: DisciplineTemplateUpsertInput) =>
+    api.put<DisciplineTemplate>(`/discipline/templates/${templateId}`, body),
+
+  deleteTemplate: (templateId: string) =>
+    api.delete<{ ok: boolean }>(`/discipline/templates/${templateId}`),
+
+  listApprovers: () => api.get<DisciplineApprover[]>('/discipline/approvers'),
+
+  setApprover: (userId: string, isHrApprover: boolean) =>
+    api.put<{ user_id: string; is_hr_approver: boolean }>(`/discipline/approvers/${userId}`, {
+      is_hr_approver: isHrApprover,
+    }),
 }

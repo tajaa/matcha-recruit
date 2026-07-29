@@ -8,6 +8,7 @@ const DOC_TYPE_OPTIONS = [
   { value: 'form', label: 'Form' },
   { value: 'statement', label: 'Statement' },
   { value: 'other', label: 'Other' },
+  { value: 'disciplinary', label: 'Disciplinary' },
 ]
 
 export function IRDocumentPanel({ incidentId }: { incidentId: string }) {

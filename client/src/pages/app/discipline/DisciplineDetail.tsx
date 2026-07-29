@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Badge, Button, Card } from '../../../components/ui'
-import { ArrowLeft, Loader2, FileText } from 'lucide-react'
+import { Badge, Button, Card, Textarea, useToast } from '../../../components/ui'
+import { ArrowLeft, Loader2, FileText, ShieldCheck, ShieldX } from 'lucide-react'
 import { useDisciplineRecord } from '../../../hooks/discipline/useDiscipline'
 import SignatureWorkflow from '../../../components/discipline/SignatureWorkflow'
-import { api } from '../../../api/client'
+import { api, ApiError } from '../../../api/client'
 import type {
   DisciplineLevel,
   DisciplineStatus,
@@ -26,7 +26,10 @@ const STATUS_VARIANT: Record<DisciplineStatus, 'success' | 'warning' | 'danger' 
   completed: 'neutral',
   expired: 'neutral',
   escalated: 'danger',
+  denied: 'danger',
 }
+
+const MIN_DENIAL_REASON_CHARS = 20
 
 type EmployeeRow = {
   id: string
@@ -55,9 +58,15 @@ export default function DisciplineDetail() {
     refuse,
     uploadPhysical,
     downloadLetter,
+    approve,
+    deny,
   } = useDisciplineRecord(recordId)
+  const { toast } = useToast()
 
   const [employee, setEmployee] = useState<EmployeeRow | null>(null)
+  const [showDenyForm, setShowDenyForm] = useState(false)
+  const [denyReason, setDenyReason] = useState('')
+  const [decisionBusy, setDecisionBusy] = useState(false)
 
   useEffect(() => {
     if (!record?.employee_id) return
@@ -85,6 +94,33 @@ export default function DisciplineDetail() {
     )
   }
 
+  async function handleApprove() {
+    setDecisionBusy(true)
+    try {
+      await approve()
+      toast('Approved — moving to a meeting.', 'success')
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to approve', 'error')
+    } finally {
+      setDecisionBusy(false)
+    }
+  }
+
+  async function handleDeny() {
+    if (denyReason.trim().length < MIN_DENIAL_REASON_CHARS) return
+    setDecisionBusy(true)
+    try {
+      await deny(denyReason.trim())
+      toast('Denied.', 'success')
+      setShowDenyForm(false)
+      setDenyReason('')
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to deny', 'error')
+    } finally {
+      setDecisionBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
@@ -107,6 +143,82 @@ export default function DisciplineDetail() {
         </div>
         <Badge variant={STATUS_VARIANT[record.status]}>{record.status.replace(/_/g, ' ')}</Badge>
       </div>
+
+      {record.approval_status === 'pending' && (
+        <Card className="p-4 border-amber-800 bg-amber-950/20">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-amber-300">Awaiting HR approval</div>
+              <p className="text-xs text-zinc-400 mt-1">
+                This record was drafted from an incident and has not been issued. Approving
+                schedules the meeting step; denying is terminal — a later decision needs a new
+                record.
+              </p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <Button size="sm" onClick={handleApprove} disabled={decisionBusy}>
+                <ShieldCheck className="w-4 h-4" />
+                <span className="ml-1.5">Approve</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowDenyForm((v) => !v)}
+                disabled={decisionBusy}
+              >
+                <ShieldX className="w-4 h-4" />
+                <span className="ml-1.5">Deny</span>
+              </Button>
+            </div>
+          </div>
+          {showDenyForm && (
+            <div className="mt-3 space-y-2">
+              <Textarea
+                label="Reason for denial (required, min 20 characters)"
+                value={denyReason}
+                onChange={(e) => setDenyReason(e.target.value)}
+                rows={3}
+              />
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="bg-red-700 hover:bg-red-600 text-white"
+                  disabled={decisionBusy || denyReason.trim().length < MIN_DENIAL_REASON_CHARS}
+                  onClick={handleDeny}
+                >
+                  Confirm denial
+                </Button>
+                <span className="text-xs text-zinc-500">
+                  {denyReason.trim().length}/{MIN_DENIAL_REASON_CHARS}
+                </span>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {record.approval_status === 'denied' && (
+        <Card className="p-4 border-red-900 bg-red-950/20">
+          <div className="text-sm font-medium text-red-300">Denied</div>
+          <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">
+            {record.denial_reason || 'No reason recorded.'}
+          </p>
+        </Card>
+      )}
+
+      {record.approval_status === 'approved' && (
+        <Card className="p-3 border-emerald-900 bg-emerald-950/10">
+          <div className="flex items-center gap-2 text-sm text-emerald-300">
+            <ShieldCheck className="w-4 h-4" />
+            Approved
+            {record.approval_decided_at && (
+              <span className="text-zinc-500">
+                on {new Date(record.approval_decided_at).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </Card>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-4">
         <Card className="lg:col-span-2 p-5 space-y-4">

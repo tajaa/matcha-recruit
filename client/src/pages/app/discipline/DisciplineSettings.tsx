@@ -1,12 +1,17 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Card, Input, Select } from '../../../components/ui'
-import { ArrowLeft, Loader2, Save } from 'lucide-react'
-import { useDisciplinePolicies } from '../../../hooks/discipline/useDiscipline'
-import type {
-  DisciplinePolicy,
-  DisciplineSeverity,
+import { Badge, Button, Card, Input, Select, Textarea, Toggle, useToast } from '../../../components/ui'
+import { ArrowLeft, Loader2, Save, Plus, Trash2 } from 'lucide-react'
+import { useDisciplinePolicies, useDisciplineTemplates, useDisciplineApprovers } from '../../../hooks/discipline/useDiscipline'
+import {
+  DISCIPLINE_TEMPLATE_PLACEHOLDERS,
+  type DisciplinePolicy,
+  type DisciplineSeverity,
+  type DisciplineLevel,
+  type DisciplineTemplate,
+  type DisciplineTemplateUpsertInput,
 } from '../../../api/discipline/discipline'
+import { ApiError } from '../../../api/client'
 
 const SEVERITIES: { value: DisciplineSeverity; label: string }[] = [
   { value: 'minor', label: 'Minor' },
@@ -14,6 +19,18 @@ const SEVERITIES: { value: DisciplineSeverity; label: string }[] = [
   { value: 'severe', label: 'Severe' },
   { value: 'immediate_written', label: 'Immediate Written' },
 ]
+
+const LEVELS: { value: DisciplineLevel; label: string }[] = [
+  { value: 'verbal_warning', label: 'Verbal Warning' },
+  { value: 'written_warning', label: 'Written Warning' },
+  { value: 'pip', label: 'PIP' },
+  { value: 'final_warning', label: 'Final Warning' },
+  { value: 'suspension', label: 'Suspension' },
+]
+
+const EMPTY_TEMPLATE_DRAFT: DisciplineTemplateUpsertInput = {
+  name: '', infraction_type: null, discipline_type: null, body: '', is_default: false, is_active: true,
+}
 
 export default function DisciplineSettings() {
   const navigate = useNavigate()
@@ -169,6 +186,238 @@ export default function DisciplineSettings() {
             )
           })}
         </div>
+      )}
+
+      <TemplatesSection />
+      <ApproversSection />
+    </div>
+  )
+}
+
+function TemplatesSection() {
+  const { templates, loading, error, create, update, remove } = useDisciplineTemplates()
+  const { toast } = useToast()
+  const [editingId, setEditingId] = useState<string | 'new' | null>(null)
+  const [draft, setDraft] = useState<DisciplineTemplateUpsertInput>(EMPTY_TEMPLATE_DRAFT)
+  const [busy, setBusy] = useState(false)
+
+  function startEdit(t: DisciplineTemplate) {
+    setEditingId(t.id)
+    setDraft({
+      name: t.name, infraction_type: t.infraction_type, discipline_type: t.discipline_type,
+      body: t.body, is_default: t.is_default, is_active: t.is_active,
+    })
+  }
+
+  function startNew() {
+    setEditingId('new')
+    setDraft(EMPTY_TEMPLATE_DRAFT)
+  }
+
+  async function saveDraft() {
+    setBusy(true)
+    try {
+      if (editingId === 'new') {
+        await create(draft)
+      } else if (editingId) {
+        await update(editingId, draft)
+      }
+      setEditingId(null)
+      toast('Template saved.', 'success')
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to save template', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDelete(t: DisciplineTemplate) {
+    setBusy(true)
+    try {
+      await remove(t.id)
+      toast('Template removed.', 'success')
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to remove template', 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-100">Letter templates</h2>
+          <p className="text-sm text-zinc-500 mt-1">
+            Resolved automatically: exact infraction + level match, then infraction-only, then
+            the company default, else drafted from scratch. Unrecognized placeholders are left
+            in the letter verbatim rather than silently blanked.
+          </p>
+        </div>
+        {editingId === null && (
+          <Button size="sm" onClick={startNew}>
+            <Plus className="w-4 h-4" />
+            <span className="ml-1.5">New template</span>
+          </Button>
+        )}
+      </div>
+
+      {error && <div className="text-sm text-red-400">{error}</div>}
+      {loading ? (
+        <div className="p-8 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {templates.filter((t) => t.is_active || editingId === t.id).map((t) => (
+            <Card key={t.id} className="p-4">
+              {editingId === t.id ? (
+                <TemplateForm draft={draft} setDraft={setDraft} busy={busy} onSave={saveDraft} onCancel={() => setEditingId(null)} />
+              ) : (
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-zinc-100 font-medium flex items-center gap-2">
+                      {t.name}
+                      {t.is_default && <Badge variant="success">Default</Badge>}
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {t.infraction_type || 'any infraction'} · {t.discipline_type || 'any level'}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button size="sm" variant="ghost" onClick={() => startEdit(t)}>Edit</Button>
+                    <Button size="sm" variant="ghost" onClick={() => handleDelete(t)} disabled={busy}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ))}
+          {editingId === 'new' && (
+            <Card className="p-4">
+              <TemplateForm draft={draft} setDraft={setDraft} busy={busy} onSave={saveDraft} onCancel={() => setEditingId(null)} />
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TemplateForm({
+  draft, setDraft, busy, onSave, onCancel,
+}: {
+  draft: DisciplineTemplateUpsertInput
+  setDraft: (d: DisciplineTemplateUpsertInput) => void
+  busy: boolean
+  onSave: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="space-y-3">
+      <div className="grid md:grid-cols-3 gap-3">
+        <Input
+          label="Name"
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+        />
+        <Select
+          label="Infraction type (optional)"
+          options={[
+            { value: '', label: 'Any infraction' },
+            { value: 'attendance', label: 'Attendance' },
+            { value: 'performance', label: 'Performance' },
+            { value: 'safety', label: 'Safety' },
+            { value: 'harassment', label: 'Harassment' },
+            { value: 'policy_violation', label: 'Policy Violation' },
+            { value: 'gross_misconduct', label: 'Gross Misconduct' },
+          ]}
+          value={draft.infraction_type || ''}
+          onChange={(e) => setDraft({ ...draft, infraction_type: e.target.value || null })}
+        />
+        <Select
+          label="Level (optional)"
+          options={[{ value: '', label: 'Any level' }, ...LEVELS]}
+          value={draft.discipline_type || ''}
+          onChange={(e) => setDraft({ ...draft, discipline_type: (e.target.value || null) as DisciplineLevel | null })}
+        />
+      </div>
+      <Textarea
+        label="Body"
+        value={draft.body}
+        onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+        rows={8}
+      />
+      <p className="text-xs text-zinc-500">
+        Placeholders: {DISCIPLINE_TEMPLATE_PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}
+      </p>
+      <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <input
+          type="checkbox"
+          checked={!!draft.is_default}
+          onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
+        />
+        Company default (used when no infraction/level-specific template matches)
+      </label>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={busy || !draft.name.trim() || draft.body.trim().length < 20}
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <span className="ml-1.5">Save</span>
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>
+      </div>
+    </div>
+  )
+}
+
+function ApproversSection() {
+  const { approvers, loading, error, setApprover } = useDisciplineApprovers()
+  const { toast } = useToast()
+  const anyDesignated = approvers.some((a) => a.is_hr_approver)
+
+  async function toggle(userId: string, next: boolean) {
+    try {
+      await setApprover(userId, next)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to update approver', 'error')
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-lg font-semibold text-zinc-100">HR approvers</h2>
+        <p className="text-sm text-zinc-500 mt-1">
+          {anyDesignated
+            ? 'Discipline drafted from an incident routes to whoever is toggled on below.'
+            : 'No approvers designated — every business admin below is asked when a draft needs approval.'}
+        </p>
+      </div>
+      {error && <div className="text-sm text-red-400">{error}</div>}
+      {loading ? (
+        <div className="p-8 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+        </div>
+      ) : (
+        <Card className="divide-y divide-zinc-800">
+          {approvers.map((a) => (
+            <div key={a.user_id} className="flex items-center justify-between gap-3 p-4">
+              <div>
+                <div className="text-zinc-100 text-sm">{a.name || a.email}</div>
+                <div className="text-xs text-zinc-500">{a.email}</div>
+              </div>
+              <Toggle checked={a.is_hr_approver} onChange={(v) => toggle(a.user_id, v)} />
+            </div>
+          ))}
+          {approvers.length === 0 && (
+            <div className="p-4 text-sm text-zinc-500">No business admins found.</div>
+          )}
+        </Card>
       )}
     </div>
   )

@@ -3,14 +3,21 @@ import {
   disciplineApi,
   type DisciplineRecord,
   type DisciplineStatus,
+  type DisciplineApprovalStatus,
   type DisciplineRecommendation,
   type DisciplineRecommendInput,
   type DisciplineIssueInput,
   type DisciplinePolicy,
   type DisciplineAuditEntry,
+  type DisciplineTemplate,
+  type DisciplineTemplateUpsertInput,
+  type DisciplineApprover,
 } from '../../api/discipline/discipline'
 
-export function useDisciplineList(initialStatus: DisciplineStatus | undefined = undefined) {
+export function useDisciplineList(
+  initialStatus: DisciplineStatus | undefined = undefined,
+  approvalStatus: DisciplineApprovalStatus | undefined = undefined,
+) {
   const [records, setRecords] = useState<DisciplineRecord[]>([])
   const [status, setStatus] = useState<DisciplineStatus | undefined>(initialStatus)
   const [loading, setLoading] = useState(true)
@@ -24,7 +31,7 @@ export function useDisciplineList(initialStatus: DisciplineStatus | undefined = 
     setLoading(true)
     setError('')
     try {
-      const rows = await disciplineApi.list(status)
+      const rows = await disciplineApi.list(status, approvalStatus)
       if (id !== reqId.current) return
       setRecords(rows)
     } catch (e) {
@@ -33,7 +40,7 @@ export function useDisciplineList(initialStatus: DisciplineStatus | undefined = 
     } finally {
       if (id === reqId.current) setLoading(false)
     }
-  }, [status])
+  }, [status, approvalStatus])
 
   useEffect(() => { refetch() }, [refetch])
 
@@ -109,6 +116,25 @@ export function useDisciplineRecord(recordId: string | undefined) {
     await disciplineApi.downloadLetter(recordId)
   }, [recordId])
 
+  /** Throws ApiError 409 if the record isn't awaiting approval — caller
+   *  surfaces the message rather than this hook swallowing it, since a 409
+   *  here usually means someone else already decided it. */
+  const approve = useCallback(async () => {
+    if (!recordId) return
+    const updated = await disciplineApi.approve(recordId)
+    setRecord(updated)
+    await refetch()
+    return updated
+  }, [recordId, refetch])
+
+  const deny = useCallback(async (reason: string) => {
+    if (!recordId) return
+    const updated = await disciplineApi.deny(recordId, reason)
+    setRecord(updated)
+    await refetch()
+    return updated
+  }, [recordId, refetch])
+
   return {
     record,
     auditLog,
@@ -120,6 +146,8 @@ export function useDisciplineRecord(recordId: string | undefined) {
     refuse,
     uploadPhysical,
     downloadLetter,
+    approve,
+    deny,
   }
 }
 
@@ -191,4 +219,72 @@ export function useDisciplinePolicies() {
   }, [])
 
   return { policies, loading, error, refetch, upsert }
+}
+
+export function useDisciplineTemplates() {
+  const [templates, setTemplates] = useState<DisciplineTemplate[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const refetch = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const rows = await disciplineApi.listTemplates(true)
+      setTemplates(rows)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load templates')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { refetch() }, [refetch])
+
+  const create = useCallback(async (body: DisciplineTemplateUpsertInput) => {
+    const created = await disciplineApi.createTemplate(body)
+    await refetch()
+    return created
+  }, [refetch])
+
+  const update = useCallback(async (templateId: string, body: DisciplineTemplateUpsertInput) => {
+    const updated = await disciplineApi.updateTemplate(templateId, body)
+    await refetch()
+    return updated
+  }, [refetch])
+
+  const remove = useCallback(async (templateId: string) => {
+    await disciplineApi.deleteTemplate(templateId)
+    await refetch()
+  }, [refetch])
+
+  return { templates, loading, error, refetch, create, update, remove }
+}
+
+export function useDisciplineApprovers() {
+  const [approvers, setApprovers] = useState<DisciplineApprover[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const refetch = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const rows = await disciplineApi.listApprovers()
+      setApprovers(rows)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load approvers')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { refetch() }, [refetch])
+
+  const setApprover = useCallback(async (userId: string, isHrApprover: boolean) => {
+    await disciplineApi.setApprover(userId, isHrApprover)
+    setApprovers((prev) => prev.map((a) => a.user_id === userId ? { ...a, is_hr_approver: isHrApprover } : a))
+  }, [])
+
+  return { approvers, loading, error, refetch, setApprover }
 }
