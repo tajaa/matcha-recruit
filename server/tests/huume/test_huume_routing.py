@@ -58,9 +58,17 @@ class TestHasPendingConfirmable:
     def test_no_action_no_plans_is_not_pending(self):
         assert routing.has_pending_confirmable({}) is False
 
-    def test_active_plan_is_pending(self):
-        for status in ("proposed", "approved", "executing"):
-            assert routing.has_pending_confirmable({"huume_plans": {"offer-1": {"status": status}}}) is True
+    def test_proposed_plan_is_pending(self):
+        assert routing.has_pending_confirmable({"huume_plans": {"offer-1": {"status": "proposed"}}}) is True
+
+    def test_approved_or_executing_plan_is_not_pending(self):
+        # Narrower than actions._ACTIVE_PLAN_STATUSES on purpose: an approved
+        # or still-executing plan already got its "yes" (or is stuck mid-run,
+        # which merge_executed_steps deliberately allows to persist) — it is
+        # not waiting on the admin to confirm anything, so a later bare "ok"
+        # in the thread must not keep routing to the thinking-off lite tier.
+        for status in ("approved", "executing"):
+            assert routing.has_pending_confirmable({"huume_plans": {"offer-1": {"status": status}}}) is False
 
     def test_done_plan_is_not_pending(self):
         assert routing.has_pending_confirmable({"huume_plans": {"offer-1": {"status": "done"}}}) is False
@@ -81,6 +89,22 @@ class TestResolveTier:
 
     def test_confirm_shaped_without_pending_is_not_lite(self):
         assert routing.resolve_tier("yes", current_state={}) != "lite"
+
+    def test_confirm_prefix_on_a_real_question_routes_deep_not_lite(self):
+        # _CONFIRM_RE is a PREFIX match ("^(yes|ok(ay)?|...)\b") with only an
+        # 8-word cap — a discovery/analytical question that happens to open
+        # with a confirm word must still win on its content, even with a
+        # plan staged (the exact shape that used to slip through to lite).
+        state = {"huume_action": {"status": "proposed"}}
+        assert routing.resolve_tier("ok which incidents need disciplinary action?", current_state=state) == "deep"
+        assert routing.resolve_tier("yeah what should we do about the ER case", current_state=state) == "deep"
+
+    def test_approved_plan_no_longer_makes_a_bare_confirm_lite(self):
+        # Companion to has_pending_confirmable's own test: an approved plan
+        # already got its yes, so a later bare "ok" is just an ordinary
+        # short message, not a confirm turn.
+        state = {"huume_plans": {"offer-1": {"status": "approved"}}}
+        assert routing.resolve_tier("ok", current_state=state) != "lite"
 
     def test_intent_hint_routes_deep(self):
         state = {}

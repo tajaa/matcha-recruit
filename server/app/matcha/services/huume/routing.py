@@ -74,14 +74,23 @@ _NARRATIVE_CHARS = 280
 _NARRATIVE_NEWLINES = 2
 
 
+# Deliberately narrower than actions._ACTIVE_PLAN_STATUSES ({"proposed",
+# "approved", "executing"}), which is the right set for "is this plan still
+# live" (actions.py's own resolve/cancel paths). Here the question is "is
+# there something waiting on the admin to SAY YES to" — an approved or
+# executing plan already got its yes (or is stuck mid-run, which
+# merge_executed_steps deliberately allows to persist); reusing the wider set
+# would pin every later short affirmative in the thread to the `lite` tier
+# long after there's nothing left to confirm.
+_CONFIRMABLE_PLAN_STATUSES = {"proposed"}
+
+
 def has_pending_confirmable(current_state: dict[str, Any]) -> bool:
     """True when a staged action or an active onboarding plan is waiting on
     the admin's confirmation — i.e. a short "yes" is a real confirm turn, not
     an empty message that happens to be short. `current_state` is untrusted
     (whatever the caller passed in) so every access is guarded; a malformed
     shape reads as "nothing pending", never raises."""
-    from . import actions  # local: avoids import-order coupling with tools/agent
-
     try:
         action = current_state.get("huume_action")
         if isinstance(action, dict) and action.get("status") == "proposed":
@@ -89,7 +98,7 @@ def has_pending_confirmable(current_state: dict[str, Any]) -> bool:
         plans = current_state.get("huume_plans") or {}
         if isinstance(plans, dict):
             for plan in plans.values():
-                if isinstance(plan, dict) and plan.get("status") in actions._ACTIVE_PLAN_STATUSES:
+                if isinstance(plan, dict) and plan.get("status") in _CONFIRMABLE_PLAN_STATUSES:
                     return True
     except Exception:
         return False
@@ -119,13 +128,20 @@ def resolve_tier(
     """Pure, never raises — any internal error routes to FALLBACK_TIER, the
     same "unsure lands in the middle" rule a routing exception follows.
 
-    Order is load-bearing:
-    1. A short confirm-shaped message with something actually pending -> lite.
-       Without a pending confirmable, "yes" is just a short message (rule 4).
-    2. Any registered intent hint substring-matches the message -> deep. This
+    Order is load-bearing, and deep now outranks confirm — a message that
+    LOOKS like a real request is never treated as a bare "yes", no matter
+    what word it starts with:
+    1. Any registered intent hint substring-matches the message -> deep. This
        is what makes discovery tools "generally" tiered: a new skill declares
        intent_hints and gets routed here with no code change.
-    3. An analytical-shaped question, or a long/narrative message -> deep.
+    2. An analytical-shaped question, or a long/narrative message -> deep.
+    3. A short confirm-shaped message with something actually pending -> lite.
+       Without a pending confirmable, "yes" is just a short message (rule 4).
+       Checked LAST, not first: `_CONFIRM_RE` is a prefix match (`^(yes|
+       ok(ay)?|...)\\b`) plus an 8-word cap, so "ok which incidents need
+       disciplinary action?" would otherwise match it and route to lite —
+       thinking off — for exactly the discovery question deep-tier exists
+       to catch.
     4. Otherwise FALLBACK_TIER.
     """
     try:
@@ -134,9 +150,6 @@ def resolve_tier(
             return FALLBACK_TIER
         lowered = text.lower()
 
-        if len(text.split()) <= _CONFIRM_WORD_MAX and _CONFIRM_RE.match(text) and has_pending_confirmable(current_state):
-            return "lite"
-
         if any(hint in lowered for hint, _tool_name in hint_index):
             return "deep"
 
@@ -144,6 +157,9 @@ def resolve_tier(
             return "deep"
         if len(text) > _NARRATIVE_CHARS or text.count("\n") > _NARRATIVE_NEWLINES:
             return "deep"
+
+        if len(text.split()) <= _CONFIRM_WORD_MAX and _CONFIRM_RE.match(text) and has_pending_confirmable(current_state):
+            return "lite"
 
         return FALLBACK_TIER
     except Exception:

@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 _FRESH_CHECK_CAP = 6          # max fresh Gemini checks in one call
 _BATCH_BUDGET_SECONDS = 100   # bound on the whole fresh-check batch
 _NOT_YET_CHECKED_NUMBERS_CAP = 20  # cap the list; `count` stays exact regardless
+# Only _FRESH_CHECK_CAP (6) rows ever get a fresh Gemini check and only
+# `limit` (<=10) are ever returned, but with no LIMIT a 180-day window on a
+# busy tenant loads full incident description + analysis JSONB for every
+# closed incident in it. Bounds the fetch without changing reported
+# semantics for any realistic tenant.
+_SCAN_ROW_CAP = 200
 _RELEVANCE_RANK = {"violated": 2, "bent": 1, "related": 0}
 
 
@@ -229,9 +235,16 @@ async def find_candidates(
             WHERE i.company_id = $1 AND i.status = 'closed'
               AND i.updated_at > NOW() - ($2 || ' days')::interval
             ORDER BY i.updated_at DESC
+            LIMIT $3
             """,
-            company_id, str(days),
+            company_id, str(days), _SCAN_ROW_CAP,
         )
+        # `not_yet_checked.count` below already reads as "unchecked within the
+        # scanned window", never "every closed incident" — only 30-180 days
+        # of CLOSED incidents are considered in the first place, and the LIMIT
+        # just bounds how much of that window one call loads (full
+        # description + analysis JSONB) when only _FRESH_CHECK_CAP get a
+        # fresh check and `limit` are ever returned.
 
         cached_rows: list[dict[str, Any]] = []
         to_check: list[dict[str, Any]] = []
@@ -246,7 +259,19 @@ async def find_candidates(
                     data = {}
                 if data.get("checked_by") == "discipline_policy_check":
                     is_cached = True
-                    row["matches"] = data.get("matches") or []
+                    # A stored `matches` list is shared with
+                    # _auto_map_policy_violations (the IR analysis tab's
+                    # writer) and persist_policy_check's own merge-over-base,
+                    # so its shape isn't guaranteed forever — keep only dicts
+                    # rather than trusting the JSONB blob, so one malformed
+                    # cached row degrades to "no matches" instead of an
+                    # AttributeError (`.get` on a str) failing the whole scan
+                    # in _rank_candidates below.
+                    cached_matches = data.get("matches")
+                    row["matches"] = (
+                        [m for m in cached_matches if isinstance(m, dict)]
+                        if isinstance(cached_matches, list) else []
+                    )
             if is_cached:
                 cached_rows.append(row)
             else:

@@ -102,6 +102,27 @@ def _citation_records(cids: list[str], index: dict[str, Any]) -> list[dict[str, 
     return out
 
 
+def _law_citation_record(cid: str, rec: dict[str, Any]) -> dict[str, Any]:
+    """Normalize an `er_compliance_grounding` requirement record (title /
+    description / statute_citation / state / category) into the shared
+    citation shape the rest of this module and
+    `components/ui/CitationSources.tsx` use (ref / summary / source_label).
+    Pure; tolerates a missing key rather than raising, since the corpus
+    builder owns that shape and may grow fields."""
+    state = (rec.get("state") or "").strip()
+    category = (rec.get("category") or "").strip().replace("_", " ")
+    label = " · ".join(p for p in (state, category) if p) or "Jurisdiction requirement"
+    return {
+        "cid": cid,
+        "ref": rec.get("title") or cid,
+        "summary": rec.get("description") or "",
+        "when": rec.get("statute_citation") or "",
+        "source": "jurisdiction_requirement",
+        "source_label": label,
+        "source_url": rec.get("source_url"),
+    }
+
+
 def _analysis_headline(data: dict[str, Any]) -> str:
     """Structural 1-line summary of a stored `er_case_analysis` row for
     `case_brief` — a COUNT of whatever the analysis found, never its stored
@@ -296,9 +317,15 @@ async def ask_case(
     # Build the citation index BEFORE releasing the connection's data (the
     # rows are already in memory) — the connection itself is released here,
     # never held across the Gemini call below (ask_matter's own rule).
-    index: dict[str, Any] = dict(law_index or {})
+    #
+    # The case's OWN records, in the shared FE citation shape
+    # (components/ui/CitationSources.tsx: cid/ref/summary/...). Kept separate
+    # from the law records below because only these are rendered into the
+    # "AVAILABLE RECORDS" block — `_law_text` renders the law itself.
+    case_index: dict[str, Any] = {}
     for r in ctx["all_doc_text_rows"]:
-        index[f"ercase:doc-{r['id']}"] = {
+        case_index[f"ercase:doc-{r['id']}"] = {
+            "cid": f"ercase:doc-{r['id']}",
             "ref": r["filename"], "summary": (r["scrubbed_text"] or "")[:_DOC_SUMMARY_CHARS],
             "source": "er_case_document", "source_label": "Case document",
         }
@@ -308,11 +335,24 @@ async def ask_case(
             data = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
         except (ValueError, TypeError):
             data = {}
-        index[f"ercase:analysis-{r['analysis_type']}"] = {
+        cid = f"ercase:analysis-{r['analysis_type']}"
+        case_index[cid] = {
+            "cid": cid,
             "ref": r["analysis_type"].replace("_", " ").title(),
             "summary": _analysis_corpus_summary(data),
             "source": "er_case_analysis", "source_label": "Case analysis",
         }
+
+    # `er_compliance_grounding`'s index records carry title/description/
+    # statute_citation — NOT the ref/summary this module and the citation
+    # renderer use. Normalize on the way in: reading `rec['ref']` off a raw
+    # law record raised KeyError for every company that actually HAS codified
+    # requirements (the exact companies this grounding exists for), and the
+    # `.get()`-based citation builder silently rendered them titleless.
+    index: dict[str, Any] = {
+        cid: _law_citation_record(cid, rec) for cid, rec in (law_index or {}).items()
+    }
+    index.update(case_index)
 
     if not index:
         return {
@@ -322,14 +362,21 @@ async def ask_case(
             "citations": [], "dropped_citations": [], "truncated_grounding": False,
         }
 
-    corpus_lines = [f"[{cid}] {rec['ref']}: {rec['summary']}" for cid, rec in index.items()]
+    corpus_lines = [f"[{cid}] {rec['ref']}: {rec['summary']}" for cid, rec in case_index.items()]
     doc_text = build_document_excerpts(ctx["all_doc_text_rows"], text_key="scrubbed_text")
+    # `_law_text` (not the index) is the only rendering that carries each
+    # obligation's statute citation and the truncation note — dropping it, as
+    # this did originally, meant the jurisdiction grounding the tool
+    # advertises never actually reached the model.
     prompt = f"""{_ASK_RULES}
 
 CASE: {case['title'] or case['case_number']}
 
 AVAILABLE RECORDS
-{chr(10).join(corpus_lines)}
+{chr(10).join(corpus_lines) or '(no case documents or analyses on file)'}
+
+APPLICABLE JURISDICTION REQUIREMENTS
+{_law_text or '(no codified requirements resolved for this company)'}
 
 DOCUMENT TEXT
 {doc_text or '(no document text on file)'}
@@ -357,6 +404,21 @@ QUESTION
             )
         data = _parse_json(getattr(resp, "text", "") or "")
 
+        # `_parse_json` returns {} for BOTH "empty reply" and "unparseable
+        # reply". Falling through with {} would return status ok + an empty
+        # answer, which the model reads as "the records say nothing about
+        # this" and relays as a finding — a formatting failure must surface
+        # as a failure, not as a grounded negative answer.
+        answer = str(data.get("answer") or "").strip()
+        if not answer:
+            logger.warning(
+                "[huume/er_skill] ask_case got an unparseable/answerless reply for case %s", case["id"],
+            )
+            return {
+                "status": "error",
+                "message": "I couldn't read the analysis back for that case — try asking again.",
+            }
+
         # Kept inside the same try as the Gemini call — see
         # discipline_policy_check's identical comment: `data` is untrusted
         # model output, and this function's docstring promises it never
@@ -377,7 +439,7 @@ QUESTION
         "status": "ok",
         "case_id": str(case["id"]),
         "case_number": case["case_number"],
-        "answer": str(data.get("answer") or "").strip()[:4000],
+        "answer": answer[:4000],
         "citations": cited,
         "dropped_citations": dropped,
         "truncated_grounding": bool(law_truncated),

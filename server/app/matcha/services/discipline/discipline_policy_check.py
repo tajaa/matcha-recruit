@@ -337,7 +337,20 @@ async def check_incidents_against_handbook(
                 inc_id, result = task.result()  # _bounded never raises — see above
                 by_id[inc_id] = result
                 if result.get("available"):
-                    await persist_policy_check(conn, incident_id=by_incident[inc_id]["id"], result=result)
+                    try:
+                        await persist_policy_check(conn, incident_id=by_incident[inc_id]["id"], result=result)
+                    except Exception:
+                        # A write failure here (dropped connection after a
+                        # long batch, serialization error, ...) must not
+                        # escape this "never raises" function and discard
+                        # every OTHER already-completed, already-billed
+                        # Gemini result sitting in `by_id`. The check itself
+                        # still succeeded — only the cache write failed — so
+                        # the result is kept and returned uncached; a later
+                        # find_candidates call just re-checks this incident.
+                        logger.exception(
+                            "[discipline_policy_check] persist_policy_check failed for incident %s", inc_id,
+                        )
     finally:
         for task in pending:
             task.cancel()

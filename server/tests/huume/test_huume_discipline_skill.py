@@ -811,6 +811,40 @@ class TestFindCandidates:
         assert result["clean_count"] == 6
 
     @pytest.mark.asyncio
+    async def test_malformed_cached_matches_shape_is_skipped_not_fatal(self, monkeypatch):
+        """Stored `matches` is a JSONB blob two different writers touch
+        (persist_policy_check, _auto_map_policy_violations) — its shape isn't
+        guaranteed. A dict or a list containing a non-dict must degrade that
+        ONE row to "no matches" rather than raising out of _rank_candidates
+        and failing the whole scan."""
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[
+            _incident_row(1, cached_matches={"not": "a list"}),
+            _incident_row(2, cached_matches=[{"relevance": "violated", "confidence": 0.9, "policy_title": "X"}, "not-a-dict"]),
+            _incident_row(3, cached_matches=[{"relevance": "related", "confidence": 0.5, "policy_title": "Y"}]),
+        ])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", AsyncMock(),
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+
+        assert result["status"] == "ok"
+        assert result["cached"] == 3
+        # inc-1 (dict, not list) has zero usable matches -> dropped from
+        # ranked candidates and counted clean, instead of raising. inc-2
+        # keeps its one valid dict match despite the malformed sibling
+        # string entry sitting right next to it. inc-3's real match is
+        # untouched by this guard.
+        by_id = {c["incident_id"]: c for c in result["candidates"]}
+        assert "inc-1" not in by_id
+        assert by_id["inc-2"]["policy_titles"] == ["X"]
+        assert by_id["inc-3"]["policy_titles"] == ["Y"]
+        assert result["clean_count"] == 1  # inc-1 only
+
+    @pytest.mark.asyncio
     async def test_already_disciplined_flagged_not_suppressed(self, monkeypatch):
         conn = MagicMock()
         conn.fetch = AsyncMock(return_value=[

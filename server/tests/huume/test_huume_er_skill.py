@@ -301,3 +301,89 @@ class TestAskCase:
 
         assert result["status"] == "ok"
         genai_call.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_law_index_with_real_shape_is_citable_not_a_crash(self, monkeypatch):
+        """`build_jurisdiction_corpus`'s index records are
+        {requirement_id/state/category/title/description/statute_citation/
+        source_url} — no `ref`/`summary`. Reading `rec['ref']` off one of
+        these directly used to raise KeyError for any company that actually
+        HAS codified requirements. Also asserts `_law_text` (not just the
+        index) reaches the prompt — it's the only rendering carrying the
+        statute citation and truncation note."""
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": CASE_ID, "case_number": "ER-1", "title": "Complaint", "involved_employees": "[]",
+        })
+        conn.fetch = AsyncMock(return_value=[])  # no stored analyses
+        conn.execute = AsyncMock()  # insert_audit_log's write
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        monkeypatch.setattr(
+            "app.matcha.services.er.er_case_context.load_guidance_context",
+            AsyncMock(return_value={"all_doc_text_rows": []}),
+        )
+        law_text = "[jur:req-1] (CA — leave) Paid Sick Leave: Employers must provide... Citation: Lab Code 246"
+        law_index = {
+            "jur:req-1": {
+                "requirement_id": "req-1", "state": "CA", "category": "leave",
+                "title": "Paid Sick Leave", "description": "Employers must provide paid sick leave.",
+                "statute_citation": "Lab Code 246", "source_url": "https://example.test/statute",
+            },
+        }
+        monkeypatch.setattr(
+            "app.matcha.services.er.er_compliance_grounding.build_jurisdiction_corpus",
+            AsyncMock(return_value=(law_text, law_index, False)),
+        )
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "answer": "CA requires paid sick leave for this employee.",
+            "evidence": [{"point": "leave law", "cited_ids": ["jur:req-1"]}],
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        result = await er_skill.ask_case(
+            company_id=uuid4(), actor_user_id=uuid4(), case_id=CASE_ID, state_case_id=None,
+            question="does CA law require paid sick leave here?",
+        )
+
+        assert result["status"] == "ok"
+        assert "jur:req-1" in result["citations"]
+        rec = next(r for r in result["citation_records"] if r["cid"] == "jur:req-1")
+        assert rec["ref"] == "Paid Sick Leave"
+        assert rec["summary"] == "Employers must provide paid sick leave."
+
+        prompt = genai.aio.models.generate_content.await_args.kwargs["contents"]
+        assert law_text in prompt
+
+    @pytest.mark.asyncio
+    async def test_unparseable_reply_is_an_error_not_an_empty_ok(self, monkeypatch):
+        """A reply Gemini returns that isn't valid JSON (prose, a cut-off
+        response, an empty candidate) must not read as a grounded "the
+        records say nothing" — `_parse_json` swallows the parse failure and
+        returns {}, so this must be caught on the `answer` being empty."""
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": CASE_ID, "case_number": "ER-1", "title": "Complaint", "involved_employees": "[]",
+        })
+        conn.fetch = AsyncMock(return_value=[])
+        conn.execute = AsyncMock()
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        monkeypatch.setattr(
+            "app.matcha.services.er.er_case_context.load_guidance_context",
+            AsyncMock(return_value={"all_doc_text_rows": [
+                {"id": "doc-1", "filename": "notes.pdf", "document_type": "other", "scrubbed_text": "Some notes."},
+            ]}),
+        )
+        monkeypatch.setattr(
+            "app.matcha.services.er.er_compliance_grounding.build_jurisdiction_corpus",
+            AsyncMock(return_value=("", {}, False)),
+        )
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp("Sorry, I can't help with that."))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        result = await er_skill.ask_case(
+            company_id=uuid4(), actor_user_id=uuid4(), case_id=CASE_ID, state_case_id=None, question="q?",
+        )
+
+        assert result["status"] == "error"

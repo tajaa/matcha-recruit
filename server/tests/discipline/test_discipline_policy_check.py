@@ -420,3 +420,26 @@ class TestCheckIncidentsAgainstHandbookBatch:
         # Only inc-1's (available) result was persisted — the cutoff didn't
         # discard work that had already completed and been billed.
         assert conn.execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_persist_failure_for_one_incident_does_not_lose_the_batch(self, monkeypatch, patch_grounding):
+        """A DB write failure (dropped connection, serialization error, ...)
+        for one incident's persist must not escape this "never raises"
+        function and discard every OTHER already-completed, already-billed
+        Gemini result sitting in the batch."""
+        genai = MagicMock()
+        ok_resp = _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+        genai.aio.models.generate_content = AsyncMock(return_value=ok_resp)
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        conn = _fake_conn()
+        conn.execute = AsyncMock(side_effect=[RuntimeError("connection dropped"), None])
+
+        incidents = [{**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}]
+        results = await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents, concurrency=1)
+
+        # Both checks succeeded (both Gemini calls returned clean) even
+        # though persisting inc-1's result failed.
+        assert results["inc-1"]["available"] is True
+        assert results["inc-2"]["available"] is True
+        assert conn.execute.await_count == 2
