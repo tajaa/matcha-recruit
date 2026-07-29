@@ -31,7 +31,7 @@ from app.matcha.models.ir.capa import (
     OpenCorrectiveActionsResponse,
 )
 
-from ._shared import _get_incident_with_company_check, log_audit
+from ._shared import _assert_assignable, _get_incident_with_company_check, log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -55,36 +55,6 @@ _CA_FROM = """
 
 # status values that count as "not yet done" for the overdue derivation.
 _OPEN_STATUSES = ("open", "in_progress")
-
-
-async def _assert_assignable(conn, assigned_to, company_id) -> None:
-    """Reject an assigned_to that isn't a user inside the caller's company.
-
-    Without this, any admin could assign an action to an arbitrary user UUID:
-    the read path's COALESCE(cl.name, u.email) would fall through to u.email for
-    a foreign user (the clients join is company-scoped, the users join is not),
-    turning the endpoint into an email-enumeration oracle, and the deadline
-    worker would email that stranger the incident's number, title, and action
-    text. An owner is either a business admin (clients) or an employee whose
-    roster row is linked to a user account (employees.user_id).
-    """
-    if assigned_to is None:
-        return
-    ok = await conn.fetchval(
-        """
-        SELECT EXISTS (
-            SELECT 1 FROM clients WHERE user_id = $1 AND company_id = $2
-            UNION ALL
-            SELECT 1 FROM employees WHERE user_id = $1 AND org_id = $2
-        )
-        """,
-        str(assigned_to), str(company_id),
-    )
-    if not ok:
-        raise HTTPException(
-            status_code=400,
-            detail="assigned_to must be a user in your company",
-        )
 
 
 def _is_overdue(due_date, status: str) -> bool:
@@ -541,7 +511,7 @@ async def list_incident_trainings(
                    r.completed_date, r.source_note,
                    e.first_name, e.last_name
             FROM training_records r
-            JOIN employees e ON e.id = r.employee_id
+            JOIN employees e ON e.id = r.employee_id AND e.org_id = r.company_id
             WHERE r.company_id = $1 AND r.source_type = 'incident' AND r.source_ref = $2
             ORDER BY r.created_at DESC
             """,

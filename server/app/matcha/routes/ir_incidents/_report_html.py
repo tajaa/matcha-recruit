@@ -248,3 +248,76 @@ def _build_incident_report_html(incident, messages, analyses, documents) -> str:
 
     <div class="sub" style="margin-top:28px">Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</div>
 </body></html>"""
+
+
+def _export_location_label(r) -> str:
+    if r["location_name"]:
+        place = ", ".join([p for p in (r["location_city"], r["location_state"]) if p])
+        return f"{r['location_name']}{f' — {place}' if place else ''}"
+    return r["location"] or "—"
+
+
+def _export_fmt_dt(d) -> str:
+    return d.strftime("%Y-%m-%d %H:%M") if d else ""
+
+
+def _build_incidents_export_html(rows, period_label: str, row_limit: int) -> str:
+    """Pure HTML builder for the multi-incident PDF export (crud.py's
+    GET /export). Every interpolated value is HTML-escaped — `rows` come
+    straight off `ir_incidents`/`business_locations`, both tenant-writable,
+    so an incident title or a location name/city/state must never reach the
+    page unescaped."""
+    e = html_lib.escape
+
+    sev_color = {
+        "critical": "#dc2626", "high": "#ea580c",
+        "medium": "#ca8a04", "low": "#16a34a",
+    }
+
+    rows_html = "".join(
+        f"""
+        <tr>
+            <td class="num">{e(r['incident_number'] or '')}</td>
+            <td>{e(r['title'] or '')}</td>
+            <td>{e((r['incident_type'] or '').replace('_', ' ').title())}</td>
+            <td><span class="sev" style="color: {sev_color.get(r['severity'] or '', '#52525b')}">{e((r['severity'] or '').upper())}</span></td>
+            <td>{e((r['status'] or '').replace('_', ' ').title())}</td>
+            <td>{e(_export_location_label(r))}</td>
+            <td class="num">{e(_export_fmt_dt(r['occurred_at']))}</td>
+        </tr>
+        """
+        for r in rows
+    )
+    truncated_note = (
+        f"<p class='note'>Result set capped at {row_limit} rows.</p>"
+        if len(rows) >= row_limit else ""
+    )
+    return f"""
+    <html><head><meta charset="utf-8"><style>
+        @page {{ size: Letter landscape; margin: 0.5in; }}
+        body {{ font-family: -apple-system, Helvetica, Arial, sans-serif; color: #18181b; font-size: 9pt; }}
+        h1 {{ font-size: 16pt; margin: 0 0 4px; }}
+        .meta {{ color: #71717a; font-size: 8pt; margin-bottom: 12px; }}
+        .meta strong {{ color: #18181b; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 8pt; }}
+        th, td {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: top; }}
+        th {{ background: #f4f4f5; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; }}
+        td.num {{ font-family: ui-monospace, "SF Mono", monospace; font-size: 7.5pt; color: #52525b; }}
+        .sev {{ font-weight: 700; font-size: 7pt; }}
+        .note {{ color: #71717a; font-size: 7pt; margin-top: 12px; font-style: italic; }}
+    </style></head><body>
+    <h1>Incident Report</h1>
+    <div class="meta">
+        <strong>{len(rows)}</strong> incident{'s' if len(rows) != 1 else ''} ·
+        Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+        {f' · Period {e(period_label)}' if period_label else ''}
+    </div>
+    <table>
+        <thead>
+            <tr><th>#</th><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Location</th><th>Occurred</th></tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+    {truncated_note}
+    </body></html>
+    """

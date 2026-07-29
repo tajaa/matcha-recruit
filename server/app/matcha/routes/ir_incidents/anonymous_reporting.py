@@ -52,7 +52,7 @@ def _public_report_link(request: Request, token: str) -> str:
 
 
 class LocationLinkCreate(BaseModel):
-    location_id: str = Field(..., min_length=1)
+    location_id: UUID
     # Optional limits — NULL = unlimited uses / never expires.
     max_uses: Optional[int] = Field(None, ge=1)
     expires_at: Optional[datetime] = None
@@ -404,19 +404,34 @@ async def revoke_location_link(
                     row["id"], company_id, row["location_id"], row["token"],
                     row["created_at"], row["use_count"] or 0, str(current_user.id),
                 )
+            # Plain UPDATE, no join — a location whose business_locations row
+            # is gone must not turn a successful revoke into a 500: the prior
+            # `FROM business_locations bl … bl.id = rl.location_id` was an
+            # inner join, so a missing location matched zero rows, `updated`
+            # was None, and _serialize_location_link(None) raised. The revoke
+            # itself (is_active/revoked_at) had already committed by then, so
+            # the caller saw a 500 for a write that had actually succeeded.
             updated = await conn.fetchrow(
                 f"""
-                UPDATE ir_report_links rl
+                UPDATE ir_report_links
                 SET is_active = false, revoked_at = NOW()
-                FROM business_locations bl
-                WHERE rl.id = $1 AND rl.company_id = $2 AND bl.id = rl.location_id
-                RETURNING {_LINK_COLS},
-                          bl.name AS location_name, bl.city, bl.state
+                WHERE id = $1 AND company_id = $2
+                RETURNING {_LINK_COLS.replace('rl.', '')}
                 """,
                 link_id,
                 company_id,
             )
-    return _serialize_location_link(request, updated)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Link not found")
+            loc = await conn.fetchrow(
+                "SELECT name, city, state FROM business_locations WHERE id = $1",
+                updated["location_id"],
+            )
+    merged = dict(updated)
+    merged["location_name"] = loc["name"] if loc else None
+    merged["city"] = loc["city"] if loc else None
+    merged["state"] = loc["state"] if loc else None
+    return _serialize_location_link(request, merged)
 
 
 @router.get("/anonymous-reporting/location-links/{link_id}/history")

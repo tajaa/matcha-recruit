@@ -38,8 +38,9 @@ from app.matcha.models.ir.incident import (
     IRIncidentUpdate,
 )
 
-from ._report_html import _build_incident_report_html
+from ._report_html import _build_incident_report_html, _build_incidents_export_html
 from ._shared import (
+    _assert_assignable,
     _company_filter,
     _gather_incident_people,
     _hydrate_involved_employees,
@@ -356,63 +357,13 @@ async def export_incidents(
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation unavailable on server")
 
-    sev_color = {
-        "critical": "#dc2626", "high": "#ea580c",
-        "medium": "#ca8a04", "low": "#16a34a",
-    }
     period_label = ""
     if from_date or to_date:
         f = from_date.date().isoformat() if from_date else "…"
         t = to_date.date().isoformat() if to_date else "…"
         period_label = f"{f} → {t}"
 
-    rows_html = "".join(
-        f"""
-        <tr>
-            <td class="num">{(r['incident_number'] or '')}</td>
-            <td>{(r['title'] or '').replace('<', '&lt;')}</td>
-            <td>{(r['incident_type'] or '').replace('_', ' ').title()}</td>
-            <td><span class="sev" style="color: {sev_color.get(r['severity'] or '', '#52525b')}">{(r['severity'] or '').upper()}</span></td>
-            <td>{(r['status'] or '').replace('_', ' ').title()}</td>
-            <td>{_loc(r)}</td>
-            <td class="num">{_fmt(r['occurred_at'])}</td>
-        </tr>
-        """
-        for r in rows
-    )
-    truncated_note = (
-        f"<p class='note'>Result set capped at {EXPORT_ROW_LIMIT} rows.</p>"
-        if len(rows) >= EXPORT_ROW_LIMIT else ""
-    )
-    html_str = f"""
-    <html><head><meta charset="utf-8"><style>
-        @page {{ size: Letter landscape; margin: 0.5in; }}
-        body {{ font-family: -apple-system, Helvetica, Arial, sans-serif; color: #18181b; font-size: 9pt; }}
-        h1 {{ font-size: 16pt; margin: 0 0 4px; }}
-        .meta {{ color: #71717a; font-size: 8pt; margin-bottom: 12px; }}
-        .meta strong {{ color: #18181b; }}
-        table {{ width: 100%; border-collapse: collapse; font-size: 8pt; }}
-        th, td {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: top; }}
-        th {{ background: #f4f4f5; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; }}
-        td.num {{ font-family: ui-monospace, "SF Mono", monospace; font-size: 7.5pt; color: #52525b; }}
-        .sev {{ font-weight: 700; font-size: 7pt; }}
-        .note {{ color: #71717a; font-size: 7pt; margin-top: 12px; font-style: italic; }}
-    </style></head><body>
-    <h1>Incident Report</h1>
-    <div class="meta">
-        <strong>{len(rows)}</strong> incident{'s' if len(rows) != 1 else ''} ·
-        Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
-        {f' · Period {period_label}' if period_label else ''}
-    </div>
-    <table>
-        <thead>
-            <tr><th>#</th><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Location</th><th>Occurred</th></tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-    </table>
-    {truncated_note}
-    </body></html>
-    """
+    html_str = _build_incidents_export_html(rows, period_label, EXPORT_ROW_LIMIT)
 
     pdf_bytes = await asyncio.to_thread(lambda: render_pdf(html_str))
     return StreamingResponse(
@@ -705,6 +656,7 @@ async def update_incident(
             param_idx += 1
 
         if incident.assigned_to is not None:
+            await _assert_assignable(conn, incident.assigned_to, company_id)
             updates.append(f"assigned_to = ${param_idx}")
             params.append(str(incident.assigned_to))
             changes["assigned_to"] = str(incident.assigned_to)
@@ -734,6 +686,19 @@ async def update_incident(
             param_idx += 1
 
         if incident.location_id is not None:
+            owns_location = await conn.fetchval(
+                """
+                SELECT 1 FROM business_locations
+                 WHERE id = $1 AND company_id = $2 AND is_active = true
+                """,
+                str(incident.location_id),
+                company_id,
+            )
+            if not owns_location:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Selected location does not belong to your company",
+                )
             updates.append(f"location_id = ${param_idx}")
             params.append(str(incident.location_id))
             changes["location_id"] = str(incident.location_id)

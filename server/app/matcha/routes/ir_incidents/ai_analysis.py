@@ -93,9 +93,12 @@ async def analyze_categorization(
                 confidence=result["confidence"],
                 reasoning=result["reasoning"],
                 generated_at=result["generated_at"],
+                from_cache=True,
             )
 
-        # Run AI analysis with fallback to stale cache on failure
+        # No cache — run AI analysis. Nothing to fall back to here: `cached`
+        # is already known-falsy (the block above returns on a hit), so a
+        # stale-cache branch in this except can never run.
         try:
             analyzer = get_ir_analyzer()
             result = await analyzer.categorize_incident(
@@ -105,17 +108,6 @@ async def analyze_categorization(
                 reported_by=row["reported_by_name"],
             )
         except IRAnalysisError as e:
-            # Gemini failed - try to return stale cache if available
-            if cached:
-                result = _safe_json_loads(cached["analysis_data"])
-                return CategorizationAnalysis(
-                    suggested_type=result["suggested_type"],
-                    confidence=result["confidence"],
-                    reasoning=result["reasoning"],
-                    generated_at=result["generated_at"],
-                    from_cache=True,
-                    cache_reason=str(e),
-                )
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
             raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
@@ -178,9 +170,12 @@ async def analyze_severity(
                 factors=result["factors"],
                 reasoning=result["reasoning"],
                 generated_at=result["generated_at"],
+                from_cache=True,
             )
 
-        # Run AI analysis with fallback to stale cache on failure
+        # No cache — run AI analysis. Nothing to fall back to here: `cached`
+        # is already known-falsy (the block above returns on a hit), so a
+        # stale-cache branch in this except can never run.
         try:
             analyzer = get_ir_analyzer()
             category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
@@ -193,17 +188,6 @@ async def analyze_severity(
                 category_data=category_data,
             )
         except IRAnalysisError as e:
-            # Gemini failed - try to return stale cache if available
-            if cached:
-                result = _safe_json_loads(cached["analysis_data"])
-                return SeverityAnalysis(
-                    suggested_severity=result["suggested_severity"],
-                    factors=result["factors"],
-                    reasoning=result["reasoning"],
-                    generated_at=result["generated_at"],
-                    from_cache=True,
-                    cache_reason=str(e),
-                )
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
             raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
@@ -686,20 +670,8 @@ async def analyze_recommendations(
                 ir_guidance_blurb=ir_guidance_blurb,
             )
         except IRAnalysisError as e:
-            if cached:
-                result_data = _safe_json_loads(cached["analysis_data"])
-                rec = RecommendationsAnalysis(
-                    recommendations=[RecommendationItem(**r) for r in result_data["recommendations"]],
-                    summary=result_data["summary"],
-                    generated_at=result_data["generated_at"],
-                    from_cache=True,
-                    cache_reason=str(e),
-                    training_recommended=bool(result_data.get("training_recommended")),
-                    training_topics=result_data.get("training_topics") or [],
-                )
-                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rec.model_dump(mode='json')})
-                yield "data: [DONE]\n\n"
-                return
+            # `cached` is already known-falsy here — the block above returns
+            # on a hit — so a stale-cache branch in this except can never run.
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
             yield _sse({"type": "error", "message": "Analysis temporarily unavailable. Please try again later."})
             yield "data: [DONE]\n\n"

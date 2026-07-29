@@ -5,14 +5,14 @@ import json
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import get_settings
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.ir.osha import OshaRecordabilityUpdate
 from app.core.services.genai_client import get_genai_client
-from ._shared import _safe_json_loads
+from ._shared import _safe_json_loads, log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ VALID_OSHA_CLASSIFICATIONS = {
 async def update_osha_recordability(
     incident_id: UUID,
     update: OshaRecordabilityUpdate,
+    request: Request,
     current_user=Depends(require_admin_or_client),
 ):
     """Set OSHA recordability determination for an incident."""
@@ -55,43 +56,66 @@ async def update_osha_recordability(
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-        sets = ["osha_recordable = $3"]
+        sets = ["osha_recordable = $3", "updated_at = NOW()"]
         params = [str(incident_id), company_id, update.osha_recordable]
+        changes: dict = {"osha_recordable": update.osha_recordable}
         idx = 4
 
         if update.osha_classification is not None:
             sets.append(f"osha_classification = ${idx}")
             params.append(update.osha_classification)
+            changes["osha_classification"] = update.osha_classification
             idx += 1
         if update.osha_case_number is not None:
             sets.append(f"osha_case_number = ${idx}")
             params.append(update.osha_case_number)
+            changes["osha_case_number"] = update.osha_case_number
             idx += 1
         if update.days_away_from_work is not None:
             sets.append(f"days_away_from_work = ${idx}")
             params.append(update.days_away_from_work)
+            changes["days_away_from_work"] = update.days_away_from_work
             idx += 1
         if update.days_restricted_duty is not None:
             sets.append(f"days_restricted_duty = ${idx}")
             params.append(update.days_restricted_duty)
+            changes["days_restricted_duty"] = update.days_restricted_duty
+            idx += 1
+        if update.date_of_death is not None:
+            sets.append(f"date_of_death = ${idx}")
+            params.append(update.date_of_death)
+            changes["date_of_death"] = update.date_of_death.isoformat()
             idx += 1
         # WC claim depth (wcdeep01).
         if update.wc_claim_type is not None:
             sets.append(f"wc_claim_type = ${idx}")
             params.append(update.wc_claim_type)
+            changes["wc_claim_type"] = update.wc_claim_type
             idx += 1
         if update.post_termination is not None:
             sets.append(f"post_termination = ${idx}")
             params.append(update.post_termination)
+            changes["post_termination"] = update.post_termination
             idx += 1
         if update.return_to_work_date is not None:
             sets.append(f"return_to_work_date = ${idx}")
             params.append(update.return_to_work_date)
+            changes["return_to_work_date"] = update.return_to_work_date.isoformat()
             idx += 1
 
         updated = await conn.fetchrow(
             f"UPDATE ir_incidents SET {', '.join(sets)} WHERE id = $1 AND company_id = $2 RETURNING *",
             *params,
+        )
+        await log_audit(
+            conn,
+            str(incident_id),
+            str(current_user.id),
+            "osha_recordability_updated",
+            "incident",
+            str(incident_id),
+            changes,
+            request.client.host if request.client else None,
         )
         # Recordability set outside the Copilot chain (manual override) still
         # needs the OSHA Privacy Case question. Emit the per-employee privacy

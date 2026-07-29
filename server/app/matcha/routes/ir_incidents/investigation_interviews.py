@@ -450,11 +450,6 @@ async def resend_investigation_interview_invite(
                 invite_token, investigation_interview_id,
             )
 
-        await conn.execute(
-            "UPDATE ir_investigation_interviews SET invite_sent_at = NOW() WHERE id = $1",
-            investigation_interview_id,
-        )
-
         company_row = await conn.fetchrow(
             "SELECT name FROM companies WHERE id = $1", incident["company_id"]
         )
@@ -473,6 +468,15 @@ async def resend_investigation_interview_invite(
         except Exception as e:
             logger.warning("Failed to resend investigation invite email: %s", e)
             raise HTTPException(status_code=502, detail="Failed to send invite email")
+
+        # Only persist the "sent" timestamp once the email is confirmed sent —
+        # the public validator derives INVITE_TOKEN_TTL_DAYS off this, so
+        # stamping it before a send that then fails would silently restart the
+        # token's expiry clock with no invite actually delivered.
+        await conn.execute(
+            "UPDATE ir_investigation_interviews SET invite_sent_at = NOW() WHERE id = $1",
+            investigation_interview_id,
+        )
 
         await log_audit(
             conn, incident_id, current_user.id,

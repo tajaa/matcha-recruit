@@ -232,12 +232,17 @@ async def get_analytics_locations(
                 key = (str(loc_id), label)
 
             bucket = location_map.setdefault(
-                key, {"count": 0, "by_type": {}, "severity_scores": []},
+                key, {"count": 0, "by_type": {}, "severity_score_sum": 0.0},
             )
             cnt = int(row["cnt"] or 0)
             bucket["count"] += cnt
             bucket["by_type"][row["incident_type"]] = bucket["by_type"].get(row["incident_type"], 0) + cnt
-            bucket["severity_scores"].append(float(row["severity_score"] or 0))
+            # Weighted, not a mean-of-means: each (location, type) group's own
+            # AVG must be weighted by its own count before summing, or a
+            # location with many low-severity incidents and one high-severity
+            # type reads as mid-severity — see get_analytics_risk_matrix below
+            # for the same accumulation pattern.
+            bucket["severity_score_sum"] += float(row["severity_score"] or 0) * cnt
 
         sorted_locations = sorted(
             location_map.items(), key=lambda x: x[1]["count"], reverse=True,
@@ -249,8 +254,8 @@ async def get_analytics_locations(
                 count=info["count"],
                 by_type=info["by_type"],
                 avg_severity_score=round(
-                    sum(info["severity_scores"]) / len(info["severity_scores"]), 2,
-                ) if info["severity_scores"] else 0.0,
+                    info["severity_score_sum"] / info["count"], 2,
+                ) if info["count"] else 0.0,
             )
             for (_, label), info in sorted_locations
         ]

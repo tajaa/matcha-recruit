@@ -133,12 +133,11 @@ async def _read_audio_or_400(file: UploadFile) -> bytes:
     """
     if (file.content_type or "").lower() not in _ALLOWED_AUDIO_MIME:
         raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
-    audio = await file.read()
-    if not audio:
-        raise HTTPException(status_code=400, detail="Empty audio upload.")
-    if len(audio) > _MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="Audio too large (max 25MB).")
-    if len(audio) < 12 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+    # Chunked read that rejects AT the cap — a bare `await file.read()` would
+    # materialize the whole body first, which matters most here since this
+    # helper is shared with the unauthenticated public intake/report forms.
+    audio = await read_upload_capped(file, _MAX_AUDIO_BYTES)
+    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
         raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
     return audio
 
@@ -274,50 +273,92 @@ async def log_audit(
     )
 
 
+async def _assert_assignable(conn, assigned_to, company_id) -> None:
+    """Reject an assigned_to that isn't a user inside the caller's company.
+
+    Without this, any admin could assign an action to an arbitrary user UUID:
+    the read path's COALESCE(cl.name, u.email) would fall through to u.email for
+    a foreign user (the clients join is company-scoped, the users join is not),
+    turning the endpoint into an email-enumeration oracle, and the deadline
+    worker would email that stranger the incident's number, title, and action
+    text. An owner is either a business admin (clients) or an employee whose
+    roster row is linked to a user account (employees.user_id). Shared by
+    capa.py (corrective-action owner) and crud.py (incident assigned_to).
+    """
+    if assigned_to is None:
+        return
+    ok = await conn.fetchval(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM clients WHERE user_id = $1 AND company_id = $2
+            UNION ALL
+            SELECT 1 FROM employees WHERE user_id = $1 AND org_id = $2
+        )
+        """,
+        str(assigned_to), str(company_id),
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="assigned_to must be a user in your company",
+        )
+
+
 async def _resolve_employee_refs(
     conn,
     refs: Optional[list[str]],
     company_id: Optional[str],
 ) -> Optional[list[str]]:
-    """Convert a mixed list of employee UUIDs and HR-internal UIDs to UUIDs.
+    """Convert a mixed list of employee UUIDs and HR-internal UIDs to UUIDs,
+    verifying every ref (UUID or UID) against the caller's own roster.
 
     IR-only customers identify involved employees by badge / employee
     number rather than UUID. The form accepts either; persistence
     expects UUIDs (asyncpg array binding for the existing UUID[] column).
-    UIDs are resolved per-company via employees.external_uid; unresolved
-    references are dropped silently with a warning so a typo doesn't
-    block the whole incident submission.
+    Both a bare UUID ref and a UID are resolved per-company (org_id +
+    employees.id / employees.external_uid) — a ref for another company's
+    employee is dropped exactly like a typo'd UID, silently with a
+    warning, so neither blocks the whole incident submission.
     """
     if not refs:
         return None
     out: list[str] = []
+    pending_uuids: list[str] = []
     pending_uids: list[str] = []
     for ref in refs:
         if not ref:
             continue
         try:
             UUID(str(ref))
-            out.append(str(ref))
+            pending_uuids.append(str(ref))
         except (ValueError, TypeError):
             pending_uids.append(str(ref).strip())
-    if pending_uids and company_id:
+    if (pending_uuids or pending_uids) and company_id:
         try:
             rows = await conn.fetch(
                 """
                 SELECT id::text AS id, external_uid
                 FROM employees
-                WHERE org_id = $1 AND external_uid = ANY($2::text[])
+                WHERE org_id = $1 AND (id::text = ANY($2::text[]) OR external_uid = ANY($3::text[]))
                 """,
-                company_id, pending_uids,
+                company_id, pending_uuids, pending_uids,
             )
-            found = {r["external_uid"]: r["id"] for r in rows}
+            valid_ids = {r["id"] for r in rows}
+            found_by_uid = {r["external_uid"]: r["id"] for r in rows if r["external_uid"]}
+            for uuid_ref in pending_uuids:
+                if uuid_ref in valid_ids:
+                    out.append(uuid_ref)
+                else:
+                    logger.warning(
+                        "[IR] employee id %s not in company %s roster — dropped", uuid_ref, company_id,
+                    )
             for uid in pending_uids:
-                if uid in found:
-                    out.append(found[uid])
+                if uid in found_by_uid:
+                    out.append(found_by_uid[uid])
                 else:
                     logger.warning("[IR] unresolved employee UID %s for company %s", uid, company_id)
         except Exception:
-            logger.exception("[IR] employee UID resolution failed for company %s", company_id)
+            logger.exception("[IR] employee ref resolution failed for company %s", company_id)
     return out or None
 
 

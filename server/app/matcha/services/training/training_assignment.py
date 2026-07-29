@@ -138,6 +138,24 @@ async def assign_training(
     if source_type not in VALID_SOURCE_TYPES:
         raise ValueError(f"Invalid source_type: {source_type!r}")
 
+    # This is the single choke point for every training write (IR route,
+    # IR Copilot, huume hr_ops_skill, discipline engine, cadence worker,
+    # schedule rules, new-hire hooks) — callers must not be trusted to have
+    # already scoped `employee_ids` to this company's own roster. Reuse
+    # resolve_audience's org_id + active-employment filter rather than a
+    # second hand-written query; a non-member id is dropped silently (same
+    # "don't block the caller on a bad id" contract as `_resolve_employee_refs`).
+    scoped_ids = await resolve_audience(conn, company_id, employee_ids=employee_ids)
+    dropped = set(employee_ids) - set(scoped_ids)
+    if dropped:
+        logger.warning(
+            "[training] dropped %d employee id(s) not in company %s roster: %s",
+            len(dropped), company_id, dropped,
+        )
+    employee_ids = scoped_ids
+    if not employee_ids:
+        return result
+
     assigned_date = date.today()
     resolved_due_date = due_date
     if resolved_due_date is None and requirement.get("frequency_months"):

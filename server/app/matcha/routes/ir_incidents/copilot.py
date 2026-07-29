@@ -463,7 +463,36 @@ async def accept_copilot_card(
             if card.get("id") != body.card_id:
                 yield _sse({"type": "error", "detail": "Card id mismatch"})
                 return
-            if md.get("accepted"):
+
+            # Claim the card atomically before running any side effects. The
+            # previous `if md.get("accepted"):` was a plain read with no lock,
+            # so two concurrent accepts (double-click, client retry on a slow
+            # SSE stream) both passed the guard and both ran the action body —
+            # duplicate training assignment, duplicate corrective actions,
+            # duplicate transcript events. This conditional UPDATE claims the
+            # card the same way info_requests.py's resend/revoke do: whichever
+            # request's UPDATE actually flips accepted false->true wins, the
+            # other sees zero rows and reports "already accepted". This also
+            # replaces the later "mark the card accepted" write — accepted_at/
+            # accepted_by are stamped here, not after the action runs.
+            accepted_at = datetime.now(timezone.utc)
+            claimed = await conn.fetchrow(
+                """
+                UPDATE ir_incident_ai_messages
+                SET metadata = jsonb_set(
+                    jsonb_set(
+                        jsonb_set(COALESCE(metadata, '{}'::jsonb), '{accepted}', 'true', true),
+                        '{accepted_at}', to_jsonb($3::text), true
+                    ),
+                    '{accepted_by}', to_jsonb($4::text), true
+                )
+                WHERE id = $1 AND incident_id = $2 AND message_type = 'card'
+                  AND COALESCE(metadata->>'accepted', 'false')::boolean = false
+                RETURNING id
+                """,
+                body.message_id, incident_id, accepted_at.isoformat(), str(current_user.id),
+            )
+            if claimed is None:
                 yield _sse({"type": "error", "detail": "Card already accepted"})
                 return
 
@@ -980,16 +1009,6 @@ async def accept_copilot_card(
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})
                     return
-
-                # Mark the card accepted
-                new_md = dict(md)
-                new_md["accepted"] = True
-                new_md["accepted_at"] = datetime.now(timezone.utc).isoformat()
-                new_md["accepted_by"] = str(current_user.id)
-                await conn.execute(
-                    "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
-                    json.dumps(new_md), card_row["id"],
-                )
 
                 event_metadata = {"action": action_type, "card_id": body.card_id, **event_extra}
                 await append_message(

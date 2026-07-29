@@ -357,9 +357,18 @@ async def submit_ita(
     A missing/invalid token yields a clean `not_configured` result, not a 500.
 
     Filing a year twice is refused with 409 unless `resubmit` is set (an amended
-    filing). The check and the API call run under a per-(company, year) advisory
-    lock held for the whole transaction, so a double-click can't slip two
-    filings through the gap between the check and the insert.
+    filing). Three phases, not one long transaction: (1) a locked transaction
+    claims the filing by inserting a `status='pending'` row — the duplicate
+    check above counts `pending` alongside `submitted`/`accepted`, so the row
+    itself blocks a concurrent second filing once the lock releases; (2) the
+    OSHA API call runs with NO connection/lock/pool-slot held, since it is up
+    to three sequential HTTP calls per establishment; (3) a second transaction
+    stamps the outcome. An unexpected exception between (1) and (3) leaves the
+    claim row `status='error'` rather than silently rolling it back — a
+    rollback would erase the "every attempt is recorded" history for exactly
+    the failure mode (a crash) most likely to leave OSHA's side in an unknown
+    state. An interrupted process can strand a `pending` row; resubmit=true
+    still supersedes one, same as an amended filing.
     """
     from app.matcha.services.ir.ir_ita_submission import submit_establishments
 
@@ -368,10 +377,11 @@ async def submit_ita(
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     year = payload.year
+
+    # Phase 1 — locked claim: validate, then reserve the filing slot.
     async with get_connection() as conn, conn.transaction():
-        # Serialize concurrent submits for this (company, year). Held until the
-        # transaction commits — i.e. across the OSHA API call and the history
-        # insert — so the duplicate check below can't race a second request.
+        # Serialize concurrent submits for this (company, year). Held only
+        # across this claim, not the OSHA API call.
         await conn.execute(
             "SELECT pg_advisory_xact_lock(hashtext($1), $2::int)",
             f"ita_submit:{company_id}", year,
@@ -380,15 +390,24 @@ async def submit_ita(
         if not payload.resubmit:
             prior = await conn.fetchrow(
                 """
-                SELECT ita_submission_id, submitted_at
+                SELECT ita_submission_id, submitted_at, status
                 FROM osha_ita_submissions
                 WHERE company_id = $1 AND year = $2
-                  AND status IN ('submitted', 'accepted')
+                  AND status IN ('pending', 'submitted', 'accepted')
                 ORDER BY submitted_at DESC
                 LIMIT 1
                 """,
                 company_id, year,
             )
+            if prior and prior["status"] == "pending":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "filing_in_progress",
+                        "message": f"A filing for {year} is already in flight. Try again shortly.",
+                        "year": year,
+                    },
+                )
             if prior:
                 raise HTTPException(
                     status_code=409,
@@ -439,30 +458,58 @@ async def submit_ita(
         )
         encrypted_token = token_row["api_token"] if token_row else None
 
+        # ita_submission_id is a single column: with multiple establishments we
+        # store the first submission id; the full per-establishment id list +
+        # trace lives in response_payload (stamped in phase 3).
+        claim = await conn.fetchrow(
+            """
+            INSERT INTO osha_ita_submissions
+                (company_id, location_id, year, status, establishment_count, submitted_by)
+            VALUES ($1, NULL, $2, 'pending', $3, $4)
+            RETURNING id
+            """,
+            company_id, year, len(establishments), str(current_user.id),
+        )
+        submission_row_id = claim["id"]
+
+    # Phase 2 — the OSHA API call itself. submit_establishments already
+    # catches httpx/OSHA errors and returns a result for every expected
+    # failure mode; only a genuinely unexpected exception reaches `except`.
+    try:
         result = await submit_establishments(
             encrypted_token, establishments, year, resubmit=payload.resubmit,
         )
+    except Exception as exc:
+        logger.exception("ITA submit crashed for company %s year %s", company_id, year)
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE osha_ita_submissions SET status = 'error', error_detail = $2 WHERE id = $1",
+                submission_row_id, str(exc),
+            )
+            await log_audit(
+                conn, None, str(current_user.id), "osha_ita_submitted",
+                entity_type="osha_ita_submission", entity_id=str(submission_row_id),
+                details={"year": year, "status": "error", "establishment_count": len(establishments)},
+            )
+        raise HTTPException(
+            status_code=500, detail="ITA submission failed unexpectedly — see server logs",
+        ) from exc
 
-        # Persist every attempt (including not_configured) for the filing history.
-        # ita_submission_id is a single column: with multiple establishments we
-        # store the first submission id; the full per-establishment id list +
-        # trace lives in response_payload.
-        row = await conn.fetchrow(
+    # Phase 3 — stamp the outcome.
+    async with get_connection() as conn:
+        await conn.execute(
             """
-            INSERT INTO osha_ita_submissions
-                (company_id, location_id, year, status, ita_submission_id,
-                 establishment_count, response_payload, error_detail, submitted_by)
-            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id
+            UPDATE osha_ita_submissions
+            SET status = $2, ita_submission_id = $3, response_payload = $4, error_detail = $5
+            WHERE id = $1
             """,
-            company_id, year, result.status, result.submission_id,
-            len(establishments),
+            submission_row_id, result.status, result.submission_id,
             json.dumps(result.response) if result.response else None,
-            result.error, str(current_user.id),
+            result.error,
         )
         await log_audit(
             conn, None, str(current_user.id), "osha_ita_submitted",
-            entity_type="osha_ita_submission", entity_id=str(row["id"]),
+            entity_type="osha_ita_submission", entity_id=str(submission_row_id),
             details={"year": year, "status": result.status,
                      "establishment_count": len(establishments)},
         )
