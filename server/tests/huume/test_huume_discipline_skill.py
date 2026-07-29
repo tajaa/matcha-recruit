@@ -11,6 +11,7 @@ safety patterns match nearly every real safety incident — re-running it there
 would refuse the flagship incident->discipline path outright.
 """
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -422,6 +423,47 @@ class TestStageEnrichment:
         enriched = await discipline_skill.stage_enrichment(conn, company_id=uuid4(), staged=staged)
         assert enriched == staged
         assert "employee_name" not in enriched
+
+
+class TestResolveOccurrenceDates:
+    """Found on a live tenant: the preview rendered "conduct occurring on ,"
+    while the filed record carried the incident's own date, because the preview
+    and the executor each derived the dates separately. The letter the admin
+    approved was not the letter that got filed. One helper now, used by both."""
+
+    def test_admin_supplied_dates_win(self):
+        from datetime import date
+        row = {"occurred_at": datetime(2026, 7, 4)}
+        assert discipline_skill._resolve_occurrence_dates(["2026-07-20"], row) == [date(2026, 7, 20)]
+
+    def test_falls_back_to_the_incident_date(self):
+        from datetime import date
+        row = {"occurred_at": datetime(2026, 7, 4, 3, 6)}
+        assert discipline_skill._resolve_occurrence_dates([], row) == [date(2026, 7, 4)]
+
+    def test_no_dates_and_no_incident_is_empty(self):
+        assert discipline_skill._resolve_occurrence_dates(None, None) == []
+
+    def test_accepts_date_objects_as_well_as_iso_strings(self):
+        from datetime import date
+        assert discipline_skill._resolve_occurrence_dates([date(2026, 7, 20)], None) == [date(2026, 7, 20)]
+
+    @pytest.mark.asyncio
+    async def test_preview_carries_the_dates_the_executor_will_file(self):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(side_effect=[
+            {"id": EMP_ID, "first_name": "Jane", "last_name": "Doe", "job_title": "RDA", "manager_id": None},
+            {"id": INCIDENT_ID, "incident_number": "IR-1", "occurred_at": datetime(2026, 7, 4)},
+        ])
+        conn.fetch = AsyncMock(return_value=[])
+        conn.fetchval = AsyncMock(return_value=None)
+
+        enriched = await discipline_skill.stage_enrichment(
+            conn, company_id=uuid4(),
+            staged={"employee_id": EMP_ID, "incident_id": INCIDENT_ID,
+                    "infraction_type": "safety", "description": "d", "occurrence_dates": []},
+        )
+        assert enriched["occurrence_dates"] == ["2026-07-04"]
 
 
 class TestCheckIncidentPolicyFeatureGate:

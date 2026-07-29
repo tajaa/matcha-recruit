@@ -45,7 +45,12 @@ anything here is illegal — a separate deterministic system handles legality.
 You are finding candidate matches for a human to review.
 
 Rules:
-- Cite ONLY corpus records shown to you, using their exact bracketed [cid].
+- Cite ONLY corpus records shown to you, and copy the id inside the brackets
+  VERBATIM — including the prefix before the colon. A record shown as
+  [policy:0f6af555-bc1c-408c-944a-7218e879b5b3] is cited as
+  "policy:0f6af555-bc1c-408c-944a-7218e879b5b3", NOT as
+  "0f6af555-bc1c-408c-944a-7218e879b5b3". An id that doesn't match a record
+  exactly is dropped and the finding disappears with it.
 - A finding with no supporting [cid] will be dropped before anyone sees it —
   don't bother proposing one.
 - confidence is your own calibrated 0.0-1.0 estimate that the incident
@@ -56,12 +61,50 @@ Rules:
 Return STRICT JSON, no markdown fence:
 {
   "violations": [
-    {"policy_cid": "<cid>", "policy_title": "<title>", "relevance": "violated|bent|related",
+    {"policy_cid": "<the full bracketed id, prefix included>", "policy_title": "<title>",
+     "relevance": "violated|bent|related",
      "confidence": 0.0, "reasoning": "<why>", "relevant_excerpt": "<short quote or null>"}
   ],
   "summary": "<one or two sentences>"
 }
 """
+
+
+# The corpus renders a record's display name with a provenance label in front
+# ("Existing policy — Sharps Handling", "Existing section — PPE"), which is right
+# for a citation footer and wrong everywhere this check's output travels: the
+# title ends up verbatim in a disciplinary LETTER ("POLICY IMPLICATED: Existing
+# policy — Sharps Handling") and in the sweep's briefing. Stripped once here, at
+# the point the corpus title becomes the feature's own output.
+_CORPUS_LABEL_PREFIXES = ("Existing policy — ", "Existing section — ")
+
+
+def _clean_title(title: str) -> str:
+    for prefix in _CORPUS_LABEL_PREFIXES:
+        if title.startswith(prefix):
+            return title[len(prefix):].strip()
+    return title
+
+
+def _resolve_cid(cid: str, index: dict[str, Any]) -> str:
+    """Repair a corpus id the model returned without its namespace prefix.
+
+    Observed live: the corpus renders `[policy:<uuid>]` and the model answers
+    with the bare `<uuid>`. The citation gate then correctly drops it, and the
+    incident persists as `no_matching_policies` — reading as CLEAN when the
+    model actually found the right policies. That is a silent wrong answer on a
+    legal record, so it gets repaired here rather than left to prompt luck.
+
+    This does NOT weaken the anti-hallucination gate. A bare id is only rewritten
+    when EXACTLY ONE real index key ends with `:<id>` — the id still has to have
+    come from the corpus, and an ambiguous or unknown one is returned untouched
+    for `validate_citations` to drop.
+    """
+    if cid in index:
+        return cid
+    suffix = f":{cid}"
+    matches = [key for key in index if key.endswith(suffix)]
+    return matches[0] if len(matches) == 1 else cid
 
 
 def _check_prompt(corpus: dict[str, Any], incident: dict[str, Any]) -> str:
@@ -126,6 +169,9 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
         return _unavailable_result()
 
     raw_violations = (data.get("violations") or [])[:_MAX_VIOLATIONS]
+    for v in raw_violations:
+        if v.get("policy_cid"):
+            v["policy_cid"] = _resolve_cid(str(v["policy_cid"]), index)
     # validate_citations' contract (services/_shared/citations.py) is
     # [{"point": str, "cited_ids": [str]}] -> ([{"point", "cited_ids"}], [dropped]).
     # One entry per violation, its single policy_cid as the sole cited id, so a
@@ -141,7 +187,9 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
     violations = [
         {
             "policy_cid": v["policy_cid"],
-            "policy_title": v.get("policy_title") or index.get(v["policy_cid"], {}).get("title") or v["policy_cid"],
+            "policy_title": _clean_title(
+                str(v.get("policy_title") or index.get(v["policy_cid"], {}).get("title") or v["policy_cid"])
+            ),
             "relevance": v.get("relevance") if v.get("relevance") in ("violated", "bent", "related") else "related",
             "confidence": max(0.0, min(1.0, float(v.get("confidence") or 0))),
             "reasoning": str(v.get("reasoning") or "")[:2000],

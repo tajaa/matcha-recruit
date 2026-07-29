@@ -158,6 +158,74 @@ class TestCheckIncidentAgainstHandbook:
         genai_call.assert_not_called()
 
 
+class TestCidRepair:
+    """Found running this against a live tenant: the corpus renders
+    `[policy:<uuid>]` and Gemini answered with the bare `<uuid>`. The gate
+    correctly dropped both citations, every finding went with them, and the
+    incident persisted as `no_matching_policies` — reading as CLEAN while the
+    model had in fact identified the two right policies. A silent wrong answer
+    on a legal record, so the prefix is repaired rather than left to prompt luck.
+    """
+
+    INDEX = {
+        "policy:75ff0df2": {"title": "Sharps Handling"},
+        "handbook:aaaa1111": {"title": "PPE"},
+        "law:ca-sharps": {"title": "CA sharps rule"},
+    }
+
+    def test_bare_id_is_repaired_to_its_prefixed_cid(self):
+        assert dpc._resolve_cid("75ff0df2", self.INDEX) == "policy:75ff0df2"
+
+    def test_already_correct_cid_is_untouched(self):
+        assert dpc._resolve_cid("policy:75ff0df2", self.INDEX) == "policy:75ff0df2"
+
+    def test_unknown_id_is_left_for_the_gate_to_drop(self):
+        """The repair must not become a way in for an invented id."""
+        assert dpc._resolve_cid("totally-made-up", self.INDEX) == "totally-made-up"
+
+    def test_ambiguous_bare_id_is_refused(self):
+        """Same uuid under two namespaces: guessing one would be a citation the
+        model never made."""
+        index = {"policy:dupe": {}, "handbook:dupe": {}}
+        assert dpc._resolve_cid("dupe", index) == "dupe"
+
+    @pytest.mark.asyncio
+    async def test_bare_ids_survive_the_full_path(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "violations": [{
+                "policy_cid": "1",  # the corpus record is `handbook:1` — prefix dropped
+                "policy_title": "Sharps Handling", "relevance": "violated",
+                "confidence": 0.9, "reasoning": "sharps left loose",
+            }],
+            "summary": "match",
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert result["citations"] == ["handbook:1"]
+        assert result["dropped_citations"] == []
+        assert len(result["violations"]) == 1
+
+
+class TestTitleCleaning:
+    """The corpus labels a record "Existing policy — X" for its citation footer.
+    That title travels into a disciplinary LETTER and the sweep briefing, where
+    it read "POLICY IMPLICATED: Existing policy — Sharps Handling"."""
+
+    def test_strips_the_corpus_provenance_label(self):
+        assert dpc._clean_title("Existing policy — Sharps Handling") == "Sharps Handling"
+        assert dpc._clean_title("Existing section — PPE") == "PPE"
+
+    def test_leaves_an_ordinary_title_alone(self):
+        assert dpc._clean_title("Sharps Handling") == "Sharps Handling"
+
+    def test_does_not_eat_an_em_dash_inside_a_real_title(self):
+        title = "Sharps Handling — Bloodborne Pathogen Exposure Control"
+        assert dpc._clean_title(title) == title
+
+
 class TestPersistPolicyCheck:
     @pytest.mark.asyncio
     async def test_preserves_policy_mapping_reader_contract(self):

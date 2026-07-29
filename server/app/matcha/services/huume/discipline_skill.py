@@ -19,6 +19,26 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
+def _resolve_occurrence_dates(staged_dates: Any, incident_row: Any) -> list[date]:
+    """The conduct dates for a draft: what the admin gave, else the source
+    incident's own `occurred_at`. Pure.
+
+    Shared by `stage_enrichment` (preview) and `execute` (the filed record) on
+    purpose — when each derived them separately the preview rendered "conduct
+    occurring on ," while the record was stamped with the incident date, so the
+    letter the admin approved was not the letter that got filed. These dates are
+    also what `check_discipline_compliance` tests against protected leave, so
+    they have to be real either way.
+    """
+    dates: list[date] = []
+    for d in staged_dates or []:
+        dates.append(d if isinstance(d, date) else date.fromisoformat(str(d)))
+    if dates:
+        return dates
+    occurred_at = incident_row["occurred_at"] if incident_row else None
+    return [occurred_at.date()] if occurred_at else []
+
+
 async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[str, Any]:
     """Model-facing read tool. Runs the policy check and persists it; returns
     a name-free summary (violation titles + policy ids + citation count +
@@ -139,11 +159,18 @@ async def stage_enrichment(conn, *, company_id: UUID, staged: dict[str, Any]) ->
 
         incident = None
         citations: list[str] = []
+        occurrence_dates = list(staged.get("occurrence_dates") or [])
         if staged.get("incident_id"):
             incident = await conn.fetchrow(
-                "SELECT id, incident_number FROM ir_incidents WHERE id = $1 AND company_id = $2",
+                "SELECT id, incident_number, occurred_at FROM ir_incidents WHERE id = $1 AND company_id = $2",
                 UUID(staged["incident_id"]), company_id,
             )
+            # Same fallback the executor applies (_resolve_occurrence_dates), so the
+            # preview the admin approves is the letter that actually gets filed. Left
+            # out, the preview read "conduct occurring on ," while the record was
+            # stamped with the incident's own date.
+            occurrence_dates = _resolve_occurrence_dates(occurrence_dates, incident)
+            enriched["occurrence_dates"] = [str(d) for d in occurrence_dates]
             existing = await conn.fetchval(
                 "SELECT analysis_data FROM ir_incident_analysis WHERE incident_id = $1 AND analysis_type = 'policy_mapping'",
                 UUID(staged["incident_id"]),
@@ -159,7 +186,7 @@ async def stage_enrichment(conn, *, company_id: UUID, staged: dict[str, Any]) ->
                 record_fields={
                     "infraction_type": staged["infraction_type"],
                     "discipline_type": staged.get("discipline_type"),
-                    "occurrence_dates": staged.get("occurrence_dates") or [],
+                    "occurrence_dates": occurrence_dates,
                     "description": staged.get("description"),
                     "expected_improvement": staged.get("expected_improvement"),
                     "issued_date": date.today().isoformat(),
@@ -206,14 +233,13 @@ async def _execute_discipline_from_incident(
         if not employee:
             return {"status": "error", "message": "I don't see that employee for this company."}
 
-        occurrence_dates = [date.fromisoformat(d) for d in (action.get("occurrence_dates") or [])]
-        if not occurrence_dates and incident_id:
+        incident_row = None
+        if incident_id:
             incident_row = await conn.fetchrow(
                 "SELECT occurred_at FROM ir_incidents WHERE id = $1 AND company_id = $2",
                 incident_id, company_id,
             )
-            if incident_row and incident_row["occurred_at"]:
-                occurrence_dates = [incident_row["occurred_at"].date()]
+        occurrence_dates = _resolve_occurrence_dates(action.get("occurrence_dates"), incident_row)
 
         # Deterministic legal gate — same order as hr_pilot_actions'
         # _execute_discipline_draft: a block is a hard refusal, no override.
