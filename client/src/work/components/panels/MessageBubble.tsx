@@ -4,6 +4,7 @@ import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 import HuumeStepTimeline from './HuumeStepTimeline'
+import HuumeAvatar from './HuumeAvatar'
 import CitationSources, { numberCitations } from '../../../components/ui/CitationSources'
 import { safeUrl } from './markdownToHtml'
 
@@ -66,9 +67,14 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   const lm = isProjectThread ? false : lightMode
   const divider  = isProjectThread ? 'border-[#333]' : lm ? 'border-zinc-200' : 'border-zinc-800'
   const metaText = isProjectThread ? 'text-[#6a737d]' : lm ? 'text-zinc-400' : 'text-zinc-500'
+  // Per-message, not thread-level (`huume_mode`) — a message keeps its own
+  // origin regardless of whether Huume was later turned off, and a thread
+  // that had Huume on before this message existed must not get badged.
+  const isHuume = m.role === 'assistant' && !!m.metadata?.huume_run_id
 
   return (
-    <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} ${isHuume ? 'items-start gap-2' : ''}`}>
+      {isHuume && <HuumeAvatar size="sm" lightMode={lm} />}
       <div
         className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
           m.role === 'user'
@@ -116,6 +122,11 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
           })()
         ) : m.role === 'assistant' ? (
           <>
+            {isHuume && (
+              <div className={`not-prose text-[10px] font-medium uppercase tracking-wide mb-1 ${lm ? 'text-orange-600' : 'text-orange-400'}`}>
+                Huume
+              </div>
+            )}
             {m.metadata?.huume_event && HUUME_EVENT_STRIP[m.metadata.huume_event] && (() => {
               const ev = HUUME_EVENT_STRIP[m.metadata.huume_event]!
               const Icon = ev.icon

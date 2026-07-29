@@ -1,5 +1,7 @@
 import type { ChannelMember } from '../../api/channels'
 
+export { detectMentionToken } from '../../utils/mentions'
+
 // @-mention rendering — splits message content into plain-text + mention-chip
 // nodes. Server stamps `mentioned_user_ids` on the broadcast payload so we can
 // confirm a handle resolved to a real channel member; unresolved `@foo`
@@ -54,24 +56,4 @@ export function renderMessageContent(
   }
   if (lastIdx < content.length) parts.push(content.slice(lastIdx))
   return parts
-}
-
-export function detectMentionToken(
-  value: string,
-  caret: number,
-): { query: string; tokenStart: number } | null {
-  // Look back from caret to find the active @-token. A token starts at @ and
-  // is preceded by start-of-string or whitespace. Stops at first whitespace.
-  let i = caret - 1
-  while (i >= 0 && !/\s/.test(value[i])) {
-    if (value[i] === '@') {
-      const before = i === 0 ? '' : value[i - 1]
-      if (i === 0 || /\s/.test(before)) {
-        return { query: value.slice(i + 1, caret), tokenStart: i + 1 }
-      }
-      return null
-    }
-    i--
-  }
-  return null
 }

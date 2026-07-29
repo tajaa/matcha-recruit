@@ -11,6 +11,16 @@ import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS } from './cons
 import { useThreadCollaboration } from './useThreadCollaboration'
 import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
 import { useToast } from '../../../components/ui'
+import { detectMentionToken } from '../../utils/mentions'
+
+// @-mention source list for the composer. v1 has exactly one entry (Huume);
+// a second agent later is a new row here + a branch in applyHuumeMention's
+// caller, not a new subsystem.
+export interface MentionMatch {
+  key: 'huume'
+  label: string
+  description: string
+}
 
 export function useThreadController() {
   const { me, hasFeature } = useMe()
@@ -22,6 +32,10 @@ export function useThreadController() {
   const [messages, setMessages] = useState<MWMessage[]>([])
   const { appendOptimistic, reconcileById } = useOptimisticMessages(setMessages)
   const [input, setInput] = useState('')
+  // @-mention dropdown state (matches ChannelView/useChannelView's shape).
+  // mentionCursor is the index right after '@' — where the query text starts.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionCursor, setMentionCursor] = useState(0)
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
   const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
@@ -334,7 +348,101 @@ export function useThreadController() {
     }
   }
 
+  // Autocomplete candidates for the active @-token. Empty when no token is
+  // open, or the company doesn't have huume — @ offers nothing in that case.
+  const mentionMatches: MentionMatch[] = (() => {
+    if (mentionQuery === null || !hasFeature('huume')) return []
+    if (!'huume'.startsWith(mentionQuery.toLowerCase())) return []
+    return [{
+      key: 'huume', label: 'Huume',
+      description: 'Agentic assistant — offers, onboarding plans, HR-ops actions',
+    }]
+  })()
+
+  // Removes the "@huume" token at [atIndex, tokenEnd) from `value` and turns
+  // Huume mode on. `@huume` is a UI gesture only — it never reaches the
+  // model as text (per "strip it", the token was chosen over keeping it as
+  // a rendered chip so the sent message reads as plain prose). Guarded on
+  // the current value because handleModeToggle *flips* — calling it when
+  // huume_mode is already true would silently turn Huume back off.
+  function stripMentionAndActivateHuume(value: string, atIndex: number, tokenEnd: number) {
+    const head = value.slice(0, atIndex)
+    const tail = value.slice(tokenEnd)
+    setInput(head + tail)
+    setMentionQuery(null)
+    if (!modeValue('huume')) {
+      handleModeToggle('huume')
+    }
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (!ta) return
+      ta.focus()
+      ta.setSelectionRange(head.length, head.length)
+    })
+  }
+
+  // Dropdown-driven pick (click, Enter, Tab) — uses the tracked
+  // mentionCursor/mentionQuery rather than re-deriving from the live
+  // textarea value.
+  function applyHuumeMention() {
+    if (mentionQuery === null) return
+    stripMentionAndActivateHuume(input, mentionCursor - 1, mentionCursor + mentionQuery.length)
+  }
+
+  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const value = e.target.value
+    const caret = e.target.selectionStart ?? value.length
+
+    if (hasFeature('huume')) {
+      // Typed-through completion, case 1: caret sits right after a
+      // just-finished "@huume" with no trailing space yet — consume
+      // immediately rather than waiting for Enter/Tab, so typing the word
+      // out behaves the same as picking it from the dropdown.
+      const active = detectMentionToken(value, caret)
+      if (active && active.query.toLowerCase() === 'huume') {
+        stripMentionAndActivateHuume(value, active.tokenStart - 1, caret)
+        return
+      }
+      // Case 2: a space was just typed after "@huume" — detectMentionToken
+      // no longer sees an active token (it stops at whitespace), so check
+      // the tail of the string directly for a token immediately before the
+      // caret, bounded by start-of-string or whitespace before the '@'.
+      const before = value.slice(0, caret)
+      if (before.slice(-7).toLowerCase() === '@huume ') {
+        const atIndex = before.length - 7
+        const prevChar = atIndex === 0 ? '' : before[atIndex - 1]
+        if (atIndex === 0 || /\s/.test(prevChar)) {
+          stripMentionAndActivateHuume(value, atIndex, atIndex + 6)
+          return
+        }
+      }
+    }
+
+    setInput(value)
+    const token = detectMentionToken(value, caret)
+    if (token && token.query.length <= 32 && /^[A-Za-z0-9._-]*$/.test(token.query)) {
+      setMentionQuery(token.query)
+      setMentionCursor(token.tokenStart)
+    } else {
+      setMentionQuery(null)
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
+    // When the mention dropdown is open, Tab/Enter selects the match and
+    // Escape closes it — same contract as ChannelView's composer.
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        applyHuumeMention()
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionQuery(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -389,6 +497,7 @@ export function useThreadController() {
     thread, setThread,
     messages, setMessages,
     input, setInput,
+    mentionQuery, mentionMatches, applyHuumeMention, handleInputChange,
     streaming,
     loading,
     lightMode,

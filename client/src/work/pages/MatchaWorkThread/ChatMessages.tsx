@@ -1,6 +1,7 @@
 import { Loader2 } from 'lucide-react'
 import MessageBubble from '../../components/panels/MessageBubble'
 import HuumeStepTimeline from '../../components/panels/HuumeStepTimeline'
+import HuumeAvatar from '../../components/panels/HuumeAvatar'
 import { addProjectSection } from '../../api/matchaWork'
 import SkillGrid from './SkillGrid'
 import type { ThreadTheme } from './theme'
@@ -71,7 +72,8 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
       ))}
 
       {streaming && (
-        <div className="flex justify-start">
+        <div className={`flex justify-start ${thread?.huume_mode ? 'items-start gap-2' : ''}`}>
+          {thread?.huume_mode && <HuumeAvatar size="sm" lightMode={lightMode} />}
           <div className={`${th.streamBg} rounded-lg px-4 py-2.5 max-w-[85%]`}>
             <div className="flex items-center gap-2">
               <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
