@@ -1,5 +1,4 @@
 import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass, ShieldAlert, KanbanSquare, Search } from 'lucide-react'
-import TaskBoard from '../components/shell/TaskBoard'
 import { THREAD_MODE_TOGGLES } from '../components/panels/constants'
 import OnboardingWizard from '../components/shell/OnboardingWizard'
 import { useMatchaWorkList } from './useMatchaWorkList'
@@ -33,7 +32,6 @@ export default function MatchaWorkList() {
     base,
     navigate,
     channels,
-    taskBoard,
     loading,
     creating,
     showTypePicker,
@@ -51,16 +49,10 @@ export default function MatchaWorkList() {
     matchedProjects,
     matchedChannels,
     matchedThreads,
-    openTaskCount,
     handleCreate,
     handleCreateProject,
     handlePin,
     handleArchive,
-    handleTaskCreate,
-    handleTaskComplete,
-    handleTaskUncomplete,
-    handleTaskDismiss,
-    handleTaskDelete,
   } = useMatchaWorkList()
 
   return (
@@ -102,25 +94,6 @@ export default function MatchaWorkList() {
       </header>
 
       <div className="space-y-3">
-
-      {/* Your tasks — the dashboard focal point, like desktop's "Assigned to me".
-          Always rendered (not gated on a count): TaskBoard hosts the only
-          create-task input and the completed list, so hiding it at zero would
-          leave no way to add a first task or reopen a finished one. */}
-      {!searching && (
-        <Card title={openTaskCount > 0 ? `Your tasks · ${openTaskCount}` : 'Your tasks'}>
-          <TaskBoard
-            autoItems={taskBoard?.auto_items ?? []}
-            manualItems={taskBoard?.manual_items ?? []}
-            dismissedIds={taskBoard?.dismissed_ids ?? []}
-            onCreateTask={handleTaskCreate}
-            onCompleteTask={handleTaskComplete}
-            onUncompleteTask={handleTaskUncomplete}
-            onDismiss={handleTaskDismiss}
-            onDeleteTask={handleTaskDelete}
-          />
-        </Card>
-      )}
 
       {/* Workspaces — kanban board, notes and files live inside each */}
       {matchedProjects.length > 0 && (

@@ -3,7 +3,7 @@ import {
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
-import { CalendarClock, BarChart3, HeartPulse, Sparkles } from 'lucide-react'
+import { CalendarClock, BarChart3, HeartPulse, Sparkles, LayoutDashboard } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -20,6 +20,10 @@ import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 // this tier includes legible. Feature-gated items still drop out individually,
 // and SidebarShell hides a group once every child is filtered away.
 const nav: (NavItem | NavGroup)[] = [
+  // `/app` (the index route) renders the Dashboard — the "Your tasks" board
+  // (credential/incident/training/compliance deadlines) lives there. This
+  // sidebar had no link to it at all before now.
+  { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
   {
     label: 'Safety',
     defaultOpen: true,

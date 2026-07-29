@@ -24,6 +24,7 @@ from app.core.feature_flags import (
     ALL_FEATURES,
     BUILTIN_TIER_META,
     assert_feature_allowed,
+    assert_feature_dependencies,
     merge_company_features,
 )
 from app.core.services.feature_beta import load_beta_features, set_beta_status
@@ -263,6 +264,13 @@ async def toggle_company_feature(
             # signup_source, so returning the raw stored dict here made a
             # tier-forced-off toggle look like it took effect until refresh.
             new_effective = merge_company_features(features, row["signup_source"])
+            try:
+                assert_feature_dependencies(new_effective)
+            except ValueError as e:
+                # Transaction rolls back on the raise below (still inside the
+                # `async with conn.transaction():` block above) — the UPDATE
+                # a few lines up never commits.
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
             await record_feature_changes(
                 conn, company_id, old_effective, new_effective,
                 source="admin_toggle", actor_user_id=current_user.id,
@@ -1026,6 +1034,16 @@ async def admin_change_tier(
                 )
             except ValueError as e:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+        # Same reasoning as the beta-gate loop just above: a tier preset can
+        # in principle enable a flag that needs another one (none of the
+        # built-in presets currently do — huume/werk_lite aren't in any tier
+        # overlay — but this stays honest if that changes). Validate the
+        # merged/effective shape, since that's what actually gates routes.
+        try:
+            assert_feature_dependencies(merge_company_features(preset, body.tier))
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
         # Paid tiers whose paid gate is established via Stripe checkout,
         # keyed to the flag name each one's webhook flips (incidents for

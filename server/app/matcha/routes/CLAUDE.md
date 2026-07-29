@@ -34,12 +34,12 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employee_lifecycle/training.py` | `/training` | Training programs + completions (1,138 lines) |
 | `employee_lifecycle/i9.py` | `/i9` | I-9 verification |
 | `employee_lifecycle/cobra.py` | `/cobra` | COBRA admin |
-| `dashboard/` | `/dashboard` | Cross-feature dashboard aggregation — **package** (split 2026-07-26, 14 routes; see `dashboard/CLAUDE.md`). `matcha_work/workspace.py` lazily re-imports `_UPCOMING_SOURCES` / `_apply_company_filter` / `_severity_from_days` / `UpcomingItem` from it |
+| `dashboard/` | `/dashboard` | Cross-feature dashboard aggregation — **package** (split 2026-07-26, 20 routes as of the 2026-07-28 task-board move; see `dashboard/CLAUDE.md`). Ungated (no `require_feature` at the mount) — the global manual-task board (`tasks.py`) lives here specifically so it's visible to every tenant, not just `matcha_work` companies |
 | `broker/brokers/` | `/brokers` | HR broker admin — **split-router package** (J7, 2026-07-20): `_models.py` (9 models), `_shared.py` (15 helpers + status consts, `__all__`-gated), `client_setups.py` / `reporting.py` / `tokens.py` / `team.py` / `risk_alerts.py`; `__init__.py` aggregates into `router` (re-exported as `brokers_router`). 25 routes |
 | `broker/portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `integrations/provisioning/` | `/provisioning` | Google Workspace + Slack + HRIS (Gusto/Finch) auto-provision — **split-router package** (J7, 2026-07-20): `_models.py` (16 Pydantic models), `_shared.py` (json/bool/comma + `_run_payload`), `google.py`, `slack.py`, `runs.py`, `hris.py`; `__init__.py` aggregates the four sub-routers into one `router`. All routes carry full paths so mount order is cosmetic. 29 routes |
-| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`; plus the unprefixed `tutor_sessions_router` sibling it exports but does not include) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
+| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`; plus the unprefixed `tutor_sessions_router` sibling it exports but does not include) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 198 routes as of the 2026-07-28 task-board move; see `matcha_work/CLAUDE.md`) |
 | `work/journals.py` | `/journals` | Matcha-work journals |
 | `work/billing.py` | (multiple) | Stripe billing + token packs |
 | `work/notifications.py` | `/notifications` | Matcha-work notifications |

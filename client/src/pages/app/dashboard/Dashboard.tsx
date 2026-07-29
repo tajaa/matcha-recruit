@@ -6,10 +6,15 @@ import { Button } from '../../../components/ui'
 import { useMe } from '../../../hooks/useMe'
 import { isIrOnlyTier } from '../../../utils/tier'
 import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../../api/dashboard/dashboard'
+import {
+  fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask,
+  type TaskBoardResponse,
+} from '../../../api/dashboard/tasks'
 
 import {
   ProfileBanner,
   GettingStarted,
+  TaskBoard,
   FlagsTable,
 } from '../../../components/dashboard'
 
@@ -24,6 +29,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [flagsData, setFlagsData] = useState<DashboardFlagsResponse | null>(null)
   const [flagsRefreshing, setFlagsRefreshing] = useState(false)
+  const [taskBoard, setTaskBoard] = useState<TaskBoardResponse | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -38,8 +44,54 @@ export default function Dashboard() {
     Promise.allSettled([
       fetchDashboardStats().then(setStats).catch(() => setStats(null)),
       fetchDashboardFlags().then(setFlagsData).catch(() => setFlagsData(null)),
+      fetchTaskBoard().then(setTaskBoard).catch(() => setTaskBoard(null)),
     ]).finally(() => setLoading(false))
   }, [meLoading, irOnly])
+
+  // TaskBoard card callbacks — ported verbatim from work/pages/useMatchaWorkList.ts.
+  async function handleTaskCreate(body: { title: string; description?: string; due_date?: string; priority?: string }) {
+    const newTask = await createTask(body)
+    // The card renders even before the board has loaded (or if the
+    // fetch failed), so seed a board on null rather than bailing —
+    // otherwise the task is created server-side but stays invisible
+    // until a reload.
+    setTaskBoard((prev) => prev
+      ? { ...prev, manual_items: [newTask, ...prev.manual_items], total: prev.total + 1 }
+      : { auto_items: [], manual_items: [newTask], dismissed_ids: [], total: 1 })
+  }
+
+  async function handleTaskComplete(id: string) {
+    await updateTask(id, { status: 'completed' })
+    setTaskBoard((prev) => prev ? {
+      ...prev,
+      manual_items: prev.manual_items.map((t) => t.id === id ? { ...t, status: 'completed' } : t),
+    } : prev)
+  }
+
+  async function handleTaskUncomplete(id: string) {
+    await updateTask(id, { status: 'pending' })
+    setTaskBoard((prev) => prev ? {
+      ...prev,
+      manual_items: prev.manual_items.map((t) => t.id === id ? { ...t, status: 'pending', completed_at: null } : t),
+    } : prev)
+  }
+
+  async function handleTaskDismiss(category: string, sourceId: string) {
+    await dismissAutoTask(category, sourceId)
+    setTaskBoard((prev) => prev ? {
+      ...prev,
+      dismissed_ids: [...prev.dismissed_ids, `${category}:${sourceId}`],
+    } : prev)
+  }
+
+  async function handleTaskDelete(id: string) {
+    await deleteTask(id)
+    setTaskBoard((prev) => prev ? {
+      ...prev,
+      manual_items: prev.manual_items.filter((t) => t.id !== id),
+      total: prev.total - 1,
+    } : prev)
+  }
 
   if (meLoading || loading) {
     return <p className="text-sm text-zinc-500">Loading...</p>
@@ -96,6 +148,27 @@ export default function Dashboard() {
             enabledFeatures={enabledFeatures}
           />
         )}
+
+        {/* Your tasks — cross-domain overdue/upcoming feed (credentials,
+            incidents, training, compliance) + manual tasks. Always rendered
+            (not gated on a count): TaskBoard hosts the only create-task
+            input and the completed list, so hiding it at zero would leave
+            no way to add a first task or reopen a finished one. */}
+        <div className="mb-6 rounded-lg border border-white/[0.06] bg-zinc-900/40 p-5">
+          <h2 className="mb-3 text-sm font-medium text-zinc-100">
+            Your tasks{taskBoard && taskBoard.total > 0 ? ` · ${taskBoard.total}` : ''}
+          </h2>
+          <TaskBoard
+            autoItems={taskBoard?.auto_items ?? []}
+            manualItems={taskBoard?.manual_items ?? []}
+            dismissedIds={taskBoard?.dismissed_ids ?? []}
+            onCreateTask={handleTaskCreate}
+            onCompleteTask={handleTaskComplete}
+            onUncompleteTask={handleTaskUncomplete}
+            onDismiss={handleTaskDismiss}
+            onDeleteTask={handleTaskDelete}
+          />
+        </div>
 
         {/* Quick setup nudge */}
         {hasZeroEmployees && hasZeroPolicies && (

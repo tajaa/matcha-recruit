@@ -660,3 +660,37 @@ def assert_feature_allowed(
             f"'{feature}' is in beta — it can only be enabled for test companies "
             "until it's moved to ready."
         )
+
+
+# Flags that are useless without another flag also being on. `huume`'s routes
+# are gated on BOTH `matcha_work` and `huume` (the huume.py routes sit inside
+# the matcha_work package, whose aggregator carries require_feature
+# ("matcha_work")) — nothing previously stopped an admin from flipping huume
+# on alone, which grants nothing reachable. `werk_lite` needs `matcha_work`
+# too (its boards are matcha-work projects — see the werk_lite flag's row in
+# root CLAUDE.md) but was never enforced either.
+FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
+    "huume": ("matcha_work",),
+    "werk_lite": ("matcha_work",),
+}
+
+
+def assert_feature_dependencies(features: dict[str, bool]) -> None:
+    """Raise ValueError if `features` (a complete desired-state dict, e.g.
+    from `merge_company_features` with one or more keys overlaid) enables a
+    flag without its prerequisite, or disables a prerequisite while a
+    dependent flag is still on. Takes the whole dict rather than a single
+    (feature, enabled) pair — a caller writing several flags at once (a tier
+    preset, a broker's preconfigured_features) must not spuriously fail on
+    intra-batch ordering, e.g. enabling huume and matcha_work in the same
+    request.
+    """
+    for feature, requires in FEATURE_REQUIRES.items():
+        if not features.get(feature):
+            continue
+        missing = [r for r in requires if not features.get(r)]
+        if missing:
+            raise ValueError(
+                f"'{feature}' requires {', '.join(f'{m!r}' for m in missing)} "
+                "to be enabled first."
+            )

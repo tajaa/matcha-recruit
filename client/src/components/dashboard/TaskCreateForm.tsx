@@ -33,11 +33,11 @@ export default function TaskCreateForm({ onSubmit, onCancel }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="border border-w-line rounded-lg p-4 bg-w-surface/50 space-y-3"
+      className="border border-white/[0.06] rounded-lg p-4 bg-zinc-900/40 space-y-3"
     >
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-w-text">New Task</span>
-        <button type="button" onClick={onCancel} className="text-w-dim hover:text-w-text">
+        <span className="text-sm font-medium text-zinc-100">New Task</span>
+        <button type="button" onClick={onCancel} className="text-zinc-500 hover:text-zinc-200">
           <X size={14} />
         </button>
       </div>
@@ -48,7 +48,7 @@ export default function TaskCreateForm({ onSubmit, onCancel }: Props) {
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Task title..."
         autoFocus
-        className="w-full px-3 py-2 bg-w-surface2 border border-w-line rounded-md text-sm text-w-text placeholder-w-faint outline-none focus:border-w-line"
+        className="w-full px-3 py-2 bg-zinc-900/60 border border-white/[0.06] rounded-md text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-white/[0.15]"
       />
 
       <div className="flex items-center gap-3">
@@ -56,13 +56,13 @@ export default function TaskCreateForm({ onSubmit, onCancel }: Props) {
           type="date"
           value={dueDate}
           onChange={(e) => setDueDate(e.target.value)}
-          className="px-3 py-1.5 bg-w-surface2 border border-w-line rounded-md text-xs text-w-text outline-none focus:border-w-line"
+          className="px-3 py-1.5 bg-zinc-900/60 border border-white/[0.06] rounded-md text-xs text-zinc-100 outline-none focus:border-white/[0.15]"
         />
 
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value)}
-          className="px-3 py-1.5 bg-w-surface2 border border-w-line rounded-md text-xs text-w-text outline-none focus:border-w-line"
+          className="px-3 py-1.5 bg-zinc-900/60 border border-white/[0.06] rounded-md text-xs text-zinc-100 outline-none focus:border-white/[0.15]"
         >
           <option value="low">Low</option>
           <option value="medium">Medium</option>
@@ -74,14 +74,14 @@ export default function TaskCreateForm({ onSubmit, onCancel }: Props) {
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 text-xs text-w-dim hover:text-w-text transition-colors"
+            className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!title.trim() || submitting}
-            className="px-4 py-1.5 text-xs font-medium bg-w-accent hover:bg-w-accent-hi text-white rounded-md transition-colors disabled:opacity-50"
+            className="px-4 py-1.5 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition-colors disabled:opacity-50"
           >
             {submitting ? 'Adding...' : 'Add Task'}
           </button>

@@ -50,7 +50,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
       werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
-      huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat)',
+      huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat) — needs Matcha Work too',
     },
   },
   {
@@ -80,3 +80,15 @@ export const FEATURE_LABELS: Record<string, string> = Object.fromEntries(
 )
 
 export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
+
+/**
+ * Mirrors backend `FEATURE_REQUIRES` (server/app/core/feature_flags.py) —
+ * flags that do nothing without another flag also being on. The backend is
+ * the real gate (`assert_feature_dependencies`, checked on every write);
+ * this copy only drives the admin toggle grid's disabled-state + tooltip so
+ * the UI doesn't let an admin stage a dead configuration in the first place.
+ */
+export const FEATURE_REQUIRES: Record<string, string[]> = {
+  huume: ['matcha_work'],
+  werk_lite: ['matcha_work'],
+}

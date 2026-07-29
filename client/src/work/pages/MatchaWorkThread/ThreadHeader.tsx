@@ -22,7 +22,7 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel }: ThreadHeaderP
   } = c
 
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
+    <div className={`flex flex-wrap items-center gap-3 px-4 py-3 border-b ${th.border}`}>
       <Link to={base} className={`${th.backArrow} transition-colors`}>
         <ArrowLeft size={18} />
       </Link>
@@ -91,24 +91,37 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel }: ThreadHeaderP
         </div>
       )}
 
-      {!isIndividual && THREAD_MODE_TOGGLES.filter((m) => !m.feature || hasFeature(m.feature)).map((m) => {
-        const active = modeValue(m.key)
-        const Icon = m.icon
-        return (
-          <button
-            key={m.key}
-            onClick={() => handleModeToggle(m.key)}
-            disabled={togglingMode === m.key}
-            title={active ? m.tipOn : m.tipOff}
-            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
-              active ? m.onClass : th.modeOff
-            }`}
-          >
-            <Icon size={12} />
-            {m.label}
-          </button>
-        )
-      })}
+      {(() => {
+        // Huume replaces the WHOLE turn when it's on (services/matcha_work/
+        // turn_pipeline.py: _run_huume_dispatch short-circuits before
+        // _inject_mode_contexts ever runs) — every other mode's context
+        // injection is skipped, not just the ones covering similar ground.
+        // Dim the rest and say so, rather than let them look independently
+        // live while they're actually inert for the turn.
+        const huumeActive = modeValue('huume')
+        return !isIndividual && THREAD_MODE_TOGGLES.filter((m) => !m.feature || hasFeature(m.feature)).map((m) => {
+          const active = modeValue(m.key)
+          const inertWhileHuume = huumeActive && m.key !== 'huume'
+          const Icon = m.icon
+          const tip = inertWhileHuume
+            ? `${active ? m.tipOn : m.tipOff} — Huume is on, so this has no effect this turn.`
+            : (active ? m.tipOn : m.tipOff)
+          return (
+            <button
+              key={m.key}
+              onClick={() => handleModeToggle(m.key)}
+              disabled={togglingMode === m.key}
+              title={tip}
+              className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+                active ? m.onClass : th.modeOff
+              } ${inertWhileHuume ? 'opacity-40' : ''}`}
+            >
+              <Icon size={12} />
+              {m.label}
+            </button>
+          )
+        })
+      })()}
 
       <button
         onClick={() => setAgentMode(!agentMode)}

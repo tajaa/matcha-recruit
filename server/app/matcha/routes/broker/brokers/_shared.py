@@ -13,6 +13,7 @@ from pydantic import BaseModel, EmailStr, Field
 from app.config import get_settings
 from app.core.feature_flags import (
     assert_feature_allowed,
+    assert_feature_dependencies,
     default_company_features_json,
     merge_company_features,
 )
@@ -85,6 +86,16 @@ def _normalize_feature_toggles(
         except ValueError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
         normalized[key] = enabled
+
+    # `normalized` is the complete initial feature set for a brand-new
+    # tenant (this only runs at client-setup creation, never a partial
+    # update against an existing company), so it's safe to validate as a
+    # whole desired-state dict. Inert today (huume/werk_lite aren't in
+    # KNOWN_FEATURES above), but keeps this path honest if that changes.
+    try:
+        assert_feature_dependencies(normalized)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return normalized
 def _to_dict(value) -> dict:
     if isinstance(value, dict):

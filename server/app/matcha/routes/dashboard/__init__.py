@@ -20,9 +20,11 @@ from .escalated_queries import router as _escalated_queries_router
 router.include_router(_escalated_queries_router)
 from .sidebar_badges import router as _sidebar_badges_router
 router.include_router(_sidebar_badges_router)
+from .tasks import router as _tasks_router
+router.include_router(_tasks_router)
 
-# External re-exports — routes/matcha_work/workspace.py:468 lazily does
-#   from app.matcha.routes.dashboard import _UPCOMING_SOURCES, _apply_company_filter,
-#       _severity_from_days, UpcomingItem
+# External re-exports — kept for any external caller still importing these
+# by package name (the workspace.py lazy cross-import that used to need this
+# was removed 2026-07-28 when the task board moved into this package).
 from .upcoming import _UPCOMING_SOURCES, _apply_company_filter, _severity_from_days  # noqa: F401
 from app.matcha.models.dashboard import UpcomingItem  # noqa: F401

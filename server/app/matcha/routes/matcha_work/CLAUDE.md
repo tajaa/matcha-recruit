@@ -29,7 +29,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | `task_history.py` | Task history timeline, weekly board replay, project activity feed (+ `_serialize_history_row` / `_serialize_activity_row`) | 4 |
 | `task_files.py` | Attachments scoped to one kanban task (ownership via `_shared._verify_task_belongs_to_project`) | 3 |
 | `research_tasks.py` | Research tasks — HTTP shape + the 3 SSE streams. **Persistence lives in `services/research_task_service.py`**; storage is a list under the `research_tasks` key of the `mw_projects.project_data` JSONB blob (no table, no migration) — response shapes are consumed directly by `client/src/work/api/matchaWork/research.ts`, so they are byte-frozen | 9 |
-| `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage, global (non-project) manual task board. **Holds 1 order-sensitive route pair** (see below) | 17 |
+| `workspace.py` | Cross-project home surface: open-tasks/recent-activity feeds, per-user Gmail email agent, entitlements/usage. The global (non-project) manual task board moved to `routes/dashboard/tasks.py` (2026-07-28) — see that package's CLAUDE.md — so this no longer holds an order-sensitive route pair | 11 |
 | `elements.py` | Project elements (context-repo bindings) CRUD + repo-snapshot sync + files/folders/notes | 12 |
 | `github.py` | Commit scan/suggestions, GitHub connection/sync/scan-commits (**owns `public_router`** for the push webhook) | 10 + 1 public |
 | `collaboration.py` | Discussion channel, project collaborators, invites, admin-user search, thread collaborators | 13 |
@@ -39,7 +39,7 @@ The "204 routes / 203 after the 2026-07-09 deletion of the dead non-streaming `P
 | `messaging.py` | Just the HTTP layer now (~220 ln): `send_message_stream` wires a `TurnContext` and calls into `services/matcha_work/turn_pipeline.py`'s stages. Its non-streaming twin was deleted 2026-07-09 — quota-bypass/wrong-tenant/crash-after-billing drift, zero callers. The pipeline itself (`TurnContext` + `_run_quota_gate` → `_prepare_attachments` → `_run_hard_stop_gates` → `_run_huume_dispatch` → `_inject_mode_contexts` → `_generate_turn` → `_audit_and_persist`, plus RAG-context/compliance-gap-detection/thread-file-attachment-meta helpers) moved to `services/matcha_work/turn_pipeline.py` (refactor round 2, stage 5 — it had zero routes of its own). Mode dispatch is registry-driven: a generic loop over `services/matcha_work_modes.THREAD_MODES` injects each active mode's context (node, benefits, legal, risk, training); compliance + payer are `custom_dispatch=True` and keep bespoke blocks (reasoning-chain statuses + conditional RAG; payer prompt-swap path) | 1 |
 | `threads.py` | Remainder: create/logo/handbook-upload (a thin shell — the audit itself is `services/matcha_work/matcha_work_handbook_upload.run_handbook_upload`, moved out in refactor round 2 stage 5 along with ~450 lines of comments orphaned by the 2026-07-03 split), list/get, versions/revert/finalize/save-draft, PDF/proxy, archive/unarchive, review-requests + signatures + presentation, title/pin, mode toggles — the registry-driven `POST /threads/{id}/modes/{mode_key}` + 3 legacy aliases (`/node-mode`, `/compliance-mode`, `/payer-mode`) (**owns `public_router`** for public review routes) | 25 + 2 public |
 | `huume.py` | Huume plan approve/execute — `POST /threads/{id}/huume/plan/approve` (flip named/all `proposed` steps to `approved`) + `.../plan/execute` (run every `approved` step, idempotent). Plans are keyed by `offer_id` (a thread may onboard several candidates at once); both routes take an optional `offer_id` in the body and fall back to "the sole active plan" via `actions.resolve_plan_offer_id`, 400ing with the candidate list when more than one is active and none was named. `/plan/execute` delegates to `services/huume/store.execute_plan_locked` — the same per-`(thread_id, offer_id)` advisory-locked path the chat tool's `execute_approved_steps` uses, so a UI-button execute and a chat-driven execute for the same candidate can't race. `require_feature("huume")` on top of the package gate. See root CLAUDE.md's `huume` flag row for the full picture — the agent loop itself lives in `services/huume/`, not this package (only the REST counterpart to its chat-driven `execute_approved_steps`/`cancel_staged` tools does; `cancel_staged` has no REST twin, chat-only) | 2 |
-| **Total** | | **204 routes** (+ 4 public) |
+| **Total** | | **198 routes** (+ 4 public) — was 204 before the 6-route task-board move to `routes/dashboard/tasks.py` (2026-07-28) |
 
 ## Three routers
 
@@ -57,11 +57,12 @@ The package exposes **three** routers from `__init__.py`:
 
 ## Order-sensitive routes (Starlette matches in registration order)
 
-Three same-method overlapping route pairs exist. Each pair lives entirely within **one** submodule, in its original relative order — moving one half without the other would break matching:
+Two same-method overlapping route pairs exist. Each pair lives entirely within **one** submodule, in its original relative order — moving one half without the other would break matching:
 
 1. `PUT /projects/{project_id}/sections/reorder` **before** `PUT /projects/{project_id}/sections/{section_id}` — both in `sections.py`.
 2. `PUT /threads/{thread_id}/project/sections/reorder` **before** `PUT /threads/{thread_id}/project/sections/{section_id}` — both in `sections.py` (the legacy thread-scoped project group).
-3. `DELETE /tasks/{task_id}` **before** `DELETE /tasks/dismiss` — both in `workspace.py`. **`task_id` uses a plain (non-UUID-converter) path param, so `DELETE /tasks/dismiss` is already shadowed today** — any `/tasks/dismiss` DELETE matches `/tasks/{task_id}` first and 422s on UUID coercion. This is pre-existing behavior from before the split; not fixed here.
+
+A third pair (`DELETE /tasks/{task_id}` vs `DELETE /tasks/dismiss`) used to live in `workspace.py` and was shadowed the same way (`task_id` is a plain, non-UUID-converter path param). It moved with the rest of the task board to `routes/dashboard/tasks.py` (2026-07-28) and was fixed there — `/tasks/dismiss` is now registered first.
 
 **Don't reorder within a submodule** if it changes the relative position of either pair. Include order **between** submodules in `__init__.py` is free — no other route shares both method and an overlapping path pattern with anything in a different submodule (verified exhaustively against the full route dump at every phase of the split).
 

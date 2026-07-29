@@ -26,7 +26,7 @@ export const THREAD_MODE_TOGGLES: {
   { key: 'risk', label: 'Risk', icon: Gauge, onClass: 'bg-indigo-600 text-white hover:bg-indigo-500', badgeClass: 'bg-indigo-700 text-indigo-200', tipOn: 'Risk ON — risk index, coverage & contract verdicts', tipOff: 'Risk OFF', feature: 'risk_profile' },
   { key: 'training', label: 'Training', icon: GraduationCap, onClass: 'bg-teal-600 text-white hover:bg-teal-500', badgeClass: 'bg-teal-700 text-teal-200', tipOn: 'Training ON — programs, credentials & OSHA currency', tipOff: 'Training OFF', feature: 'training' },
   { key: 'hr_pilot', label: 'HR Pilot', icon: LifeBuoy, onClass: 'bg-fuchsia-600 text-white hover:bg-fuchsia-500', badgeClass: 'bg-fuchsia-700 text-fuchsia-200', tipOn: 'HR Pilot ON — grounded in your handbook & policies; sensitive topics route to corporate HR', tipOff: 'HR Pilot OFF', feature: 'hr_pilot' },
-  { key: 'huume', label: 'Huume', icon: Bot, onClass: 'bg-orange-600 text-white hover:bg-orange-500', badgeClass: 'bg-orange-700 text-orange-200', tipOn: 'Huume ON — agentic assistant: drafts offers, stages hiring plans, and (when enabled) runs Legal Pilot and Handbook Pilot from chat — waits for your approval before it acts', tipOff: 'Huume OFF', feature: 'huume' },
+  { key: 'huume', label: 'Huume', icon: Bot, onClass: 'bg-orange-600 text-white hover:bg-orange-500', badgeClass: 'bg-orange-700 text-orange-200', tipOn: 'Huume ON — agentic assistant: drafts offers, stages hiring plans, and (when enabled) runs Legal Pilot and Handbook Pilot from chat — waits for your approval before it acts. Handles the whole turn itself, so every other mode below is inert while this is on', tipOff: 'Huume OFF', feature: 'huume' },
 ]
 
 export const MODEL_OPTIONS = [

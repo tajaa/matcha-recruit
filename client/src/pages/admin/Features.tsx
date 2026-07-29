@@ -3,7 +3,7 @@ import { useAsync } from '../../hooks/useAsync'
 import { ToggleLeft, Search, Loader2, Settings2 } from 'lucide-react'
 import { Badge, Button, Input, Modal, Select, Toggle, useToast, LABEL } from '../../components/ui'
 import { api } from '../../api/client'
-import { FEATURE_GROUPS, FEATURE_LABELS, FEATURE_KEYS } from '../../data/featureCatalog'
+import { FEATURE_GROUPS, FEATURE_LABELS, FEATURE_KEYS, FEATURE_REQUIRES } from '../../data/featureCatalog'
 
 
 type CompanyFeatures = {
@@ -362,11 +362,21 @@ export default function Features() {
                       // what's stored — toggling it here is a no-op at read
                       // time, so don't offer a toggle that lies.
                       const tierForced = prov?.bucket === 'tier_forced' || forcedOff
+                      // A flag that needs another flag on first (huume needs
+                      // matcha_work) — only blocks turning it ON; already-on
+                      // stays togglable off. Mirrors backend
+                      // assert_feature_dependencies, which is the real gate.
+                      const missingPrereqs = !on
+                        ? (FEATURE_REQUIRES[key] ?? []).filter((r) => !selected.enabled_features[r])
+                        : []
+                      const missingPrereq = missingPrereqs.length > 0
                       const title = lockedOn
                         ? `${FEATURE_LABELS[key]} — beta, test accounts only`
-                        : provHint
-                          ? `${FEATURE_LABELS[key]} — ${provHint}`
-                          : FEATURE_LABELS[key]
+                        : missingPrereq
+                          ? `${FEATURE_LABELS[key]} — needs ${missingPrereqs.map((r) => FEATURE_LABELS[r] ?? r).join(', ')} enabled first`
+                          : provHint
+                            ? `${FEATURE_LABELS[key]} — ${provHint}`
+                            : FEATURE_LABELS[key]
                       return (
                         <div key={key} className="flex items-center gap-3">
                           <span
@@ -383,7 +393,7 @@ export default function Features() {
                           </span>
                           <Toggle
                             checked={on}
-                            disabled={busy || lockedOn || tierForced}
+                            disabled={busy || lockedOn || tierForced || missingPrereq}
                             onChange={(v) => toggle(selected.id, key, v)}
                             size="sm"
                           />

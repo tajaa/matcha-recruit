@@ -22,13 +22,19 @@ _EXPECTED_ROUTES = {
     ("/upcoming", ("GET",)),
     ("/wage-gap/details", ("GET",)),
     ("/wage-gap/export.csv", ("GET",)),
+    ("/tasks/dismiss", ("POST",)),
+    ("/tasks/dismiss", ("DELETE",)),
+    ("/tasks", ("GET",)),
+    ("/tasks", ("POST",)),
+    ("/tasks/{task_id}", ("PATCH",)),
+    ("/tasks/{task_id}", ("DELETE",)),
 }
 
 
 def test_route_table_matches_pre_split_snapshot():
     routes = {(r.path, tuple(sorted(r.methods))) for r in dashboard.router.routes}
     assert routes == _EXPECTED_ROUTES
-    assert len(dashboard.router.routes) == 14
+    assert len(dashboard.router.routes) == 20
 
 
 def test_workspace_lazy_import_contract():

@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import type { UpcomingItem } from '../../../types/dashboard'
-import type { ManualTask } from '../../api/matchaWork'
+import type { TaskBoardAutoItem, ManualTask } from '../../api/dashboard/tasks'
 import TaskSection from './TaskSection'
 import TaskCreateForm from './TaskCreateForm'
 
@@ -56,7 +55,7 @@ function priorityToSeverity(p: string): string {
 }
 
 interface Props {
-  autoItems: UpcomingItem[]
+  autoItems: TaskBoardAutoItem[]
   manualItems: ManualTask[]
   dismissedIds: string[]
   onCreateTask: (body: { title: string; description?: string; due_date?: string; priority?: string }) => Promise<void>
@@ -74,25 +73,19 @@ export default function TaskBoard({
   // Filter out dismissed auto items
   const dismissedSet = new Set(dismissedIds)
   const filteredAuto: UnifiedTask[] = autoItems
-    .filter((item) => {
-      const sid = (item as unknown as Record<string, unknown>).source_id as string || ''
-      return !dismissedSet.has(`${item.category}:${sid}`)
-    })
-    .map((item, i) => {
-      const sid = (item as unknown as Record<string, unknown>).source_id as string || ''
-      return {
-        id: `auto-${item.category}-${i}`,
-        source: 'auto' as const,
-        source_id: sid,
-        category: item.category,
-        title: item.title,
-        subtitle: item.subtitle,
-        date: item.date,
-        days_until: item.days_until,
-        severity: item.severity,
-        link: item.link,
-      }
-    })
+    .filter((item) => !dismissedSet.has(`${item.category}:${item.source_id || ''}`))
+    .map((item, i) => ({
+      id: `auto-${item.category}-${i}`,
+      source: 'auto' as const,
+      source_id: item.source_id,
+      category: item.category,
+      title: item.title,
+      subtitle: item.subtitle,
+      date: item.date,
+      days_until: item.days_until,
+      severity: item.severity,
+      link: item.link,
+    }))
 
   // Pending manual tasks
   const pendingManual: UnifiedTask[] = manualItems
@@ -121,12 +114,12 @@ export default function TaskBoard({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-w-dim">
+        <span className="text-xs text-zinc-500">
           {totalCount} item{totalCount !== 1 ? 's' : ''} across all horizons
         </span>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-w-accent hover:bg-w-accent-hi text-white transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
         >
           <Plus size={14} />
           New Task
@@ -174,7 +167,7 @@ export default function TaskBoard({
           onUncomplete={onUncompleteTask}
           onDismiss={onDismiss}
           onDelete={onDeleteTask}
-          accent="text-w-dim"
+          accent="text-zinc-500"
         />
       )}
     </div>

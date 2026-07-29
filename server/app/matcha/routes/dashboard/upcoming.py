@@ -47,7 +47,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND ca.deadline IS NOT NULL
               AND ca.deadline::date <= $2
         """,
-        "link": "/app/matcha/compliance",
+        "link": "/app/compliance",
     },
     # Credential expirations
     {
@@ -70,7 +70,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND x.expiry_date IS NOT NULL
               AND x.expiry_date::date <= $2
         """,
-        "link": "/app/matcha/employees",
+        "link": "/app/employees",
     },
     # Training due dates
     {
@@ -87,7 +87,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND tr.due_date IS NOT NULL
               AND tr.due_date::date <= $2
         """,
-        "link": "/app/matcha/training",
+        "link": "/app/training",
     },
     # COBRA deadlines
     {
@@ -108,7 +108,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND x.deadline IS NOT NULL
               AND x.deadline::date <= $2
         """,
-        "link": "/app/matcha/cobra",
+        "link": "",
     },
     # Stale policies (updated_at older than 180 days → deadline = updated_at + 180d)
     {
@@ -123,7 +123,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND p.status = 'active'
               AND (p.updated_at + INTERVAL '180 days')::date <= $2
         """,
-        "link": "/app/matcha/policies/{id}",
+        "link": "/app/policies",
     },
     # Open IR incidents (age tracking — deadline = created_at, so days_until is negative = how old)
     {
@@ -137,7 +137,7 @@ _UPCOMING_SOURCES: list[dict] = [
             WHERE ({company_filter})
               AND i.status IN ('reported', 'investigating', 'action_required')
         """,
-        "link": "/app/ir/incidents/{id}",
+        "link": "/app/ir/{id}",
     },
     # Open ER cases
     {
@@ -151,7 +151,7 @@ _UPCOMING_SOURCES: list[dict] = [
             WHERE ({company_filter})
               AND ec.status NOT IN ('closed', 'resolved')
         """,
-        "link": "/app/matcha/er-copilot/{id}",
+        "link": "/app/er-copilot/{id}",
     },
     # I-9 expirations
     {
@@ -171,7 +171,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND x.expiry IS NOT NULL
               AND x.expiry::date <= $2
         """,
-        "link": "/app/matcha/i9",
+        "link": "",
     },
     # Separation agreement deadlines
     {
@@ -192,7 +192,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND x.deadline IS NOT NULL
               AND x.deadline::date <= $2
         """,
-        "link": "/app/matcha/separations",
+        "link": "",
     },
     # Onboarding tasks
     {
@@ -209,7 +209,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND eot.due_date IS NOT NULL
               AND eot.due_date::date <= $2
         """,
-        "link": "/app/matcha/onboarding",
+        "link": "/app/onboarding",
     },
     # Upcoming legislation — passed/signed laws about to take effect for this company's locations
     {
@@ -225,7 +225,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND ul.expected_effective_date IS NOT NULL
               AND ul.expected_effective_date::date <= $2
         """,
-        "link": "/app/matcha/compliance",
+        "link": "/app/compliance",
     },
     # Compliance requirement expirations — requirements with an expiration date approaching
     {
@@ -244,7 +244,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND cr.expiration_date IS NOT NULL
               AND cr.expiration_date::date <= $2
         """,
-        "link": "/app/matcha/compliance",
+        "link": "/app/compliance",
     },
     # Upcoming compliance requirement effective dates — new rules about to take effect
     {
@@ -264,7 +264,7 @@ _UPCOMING_SOURCES: list[dict] = [
               AND cr.effective_date::date > CURRENT_DATE
               AND cr.effective_date::date <= $2
         """,
-        "link": "/app/matcha/compliance",
+        "link": "/app/compliance",
     },
 ]
 
