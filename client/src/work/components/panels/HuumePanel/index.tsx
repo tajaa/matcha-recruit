@@ -9,6 +9,7 @@ import ActionDocViewer from './ActionDocViewer'
 import PlanViewer from './PlanViewer'
 import HandbookDraftsViewer from './HandbookDraftsViewer'
 import LegalMatterViewer from './LegalMatterViewer'
+import RecordViewer, { recordIcon } from './RecordViewer'
 
 interface HuumePanelProps {
   state: Record<string, unknown>
@@ -34,6 +35,7 @@ function tabLabel(a: HuumeArtifact): { icon: React.ReactNode; label: string } {
     case 'action': return { icon: actionIcon(a.action.type, 12), label: a.action.type.replace(/_/g, ' ') }
     case 'handbook': return { icon: <BookOpen size={12} />, label: `Handbook (${a.pendingDrafts.length})` }
     case 'legal': return { icon: <Scale size={12} />, label: a.title ?? 'Legal' }
+    case 'record': return { icon: recordIcon(a.recordType), label: a.label ?? a.recordType.replace(/_/g, ' ') }
   }
 }
 
@@ -50,6 +52,14 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+
+  // A newly-opened record wins focus (the whole point of "show it to me" is
+  // that the panel jumps to it). Declared before the proposed-action effect
+  // below so a simultaneous staged action still wins if both change at once.
+  const recordKey = huume.record ? `record:${huume.record.record_type}:${huume.record.record_id}` : null
+  useEffect(() => {
+    if (recordKey) setSelectedKey(recordKey)
+  }, [recordKey])
 
   // A newly-staged proposed action must win over whatever tab the user
   // happens to have open — otherwise the ConfirmBar can ask the user to
@@ -92,7 +102,7 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
                   : lightMode ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
               }`}
             >
-              {icon} {label}
+              {icon} <span className="max-w-[140px] truncate">{label}</span>
             </button>
           )
         })}
@@ -116,8 +126,8 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
           <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
             <Send size={20} className={lightMode ? 'text-zinc-300' : 'text-zinc-700'} />
             <p className={`text-sm ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
-              Ask Huume to draft an offer, stage an onboarding plan, or work with Legal or Handbook
-              Pilot — what it produces shows up here for review.
+              Ask Huume to draft an offer, stage an onboarding plan, work with Legal or Handbook
+              Pilot, or show you a record — what it produces shows up here for review.
             </p>
           </div>
         )}
@@ -144,6 +154,12 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
         )}
         {active?.kind === 'legal' && (
           <LegalMatterViewer key={active.key} matterId={active.matterId} lightMode={lightMode} streaming={streaming} />
+        )}
+        {active?.kind === 'record' && (
+          <RecordViewer
+            key={active.key} threadId={threadId} recordType={active.recordType} recordId={active.recordId}
+            lightMode={lightMode} streaming={streaming}
+          />
         )}
       </div>
 

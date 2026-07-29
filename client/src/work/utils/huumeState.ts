@@ -1,5 +1,5 @@
 import type {
-  HuumeAction, HuumeActionSendOffer, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlan, HuumePlans,
+  HuumeAction, HuumeActionSendOffer, HuumeHandbook, HuumeLegal, HuumeOffer, HuumePlan, HuumePlans, HuumeRecordRef,
 } from '../types'
 
 export interface HuumeState {
@@ -8,6 +8,7 @@ export interface HuumeState {
   action?: HuumeAction
   legal?: HuumeLegal
   handbook?: HuumeHandbook
+  record?: HuumeRecordRef
 }
 
 /** The one place `current_state`'s untyped Huume keys get cast. The server
@@ -21,12 +22,13 @@ export function getHuumeState(state: Record<string, unknown> | null | undefined)
     action: state.huume_action as HuumeAction | undefined,
     legal: state.huume_legal as HuumeLegal | undefined,
     handbook: state.huume_handbook as HuumeHandbook | undefined,
+    record: state.huume_record as HuumeRecordRef | undefined,
   }
 }
 
 /** True when anything Huume-related is staged/tracked in this thread. */
 export function hasHuumeContent(h: HuumeState): boolean {
-  return Object.keys(h.plans).length > 0 || !!h.offer || !!h.action || !!h.legal
+  return Object.keys(h.plans).length > 0 || !!h.offer || !!h.action || !!h.legal || !!h.record
     || !!(h.handbook && h.handbook.pending_drafts?.length > 0)
 }
 
@@ -56,6 +58,7 @@ export type HuumeArtifact =
   | { kind: 'action'; key: string; action: Exclude<HuumeAction, HuumeActionSendOffer> }
   | { kind: 'handbook'; key: string; sessionId: string; pendingDrafts: HuumeHandbook['pending_drafts'] }
   | { kind: 'legal'; key: string; matterId: string; title?: string | null }
+  | { kind: 'record'; key: string; recordType: string; recordId: string; label?: string | null }
 
 /** Ordered artifact list for the right panel's tabs.
  * Order: offer(s), one per plan (state-key order), the staged non-offer
@@ -102,6 +105,13 @@ export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
 
   if (h.legal) {
     artifacts.push({ kind: 'legal', key: `legal:${h.legal.matter_id}`, matterId: h.legal.matter_id, title: h.legal.title })
+  }
+
+  if (h.record) {
+    artifacts.push({
+      kind: 'record', key: `record:${h.record.record_type}:${h.record.record_id}`,
+      recordType: h.record.record_type, recordId: h.record.record_id, label: h.record.label,
+    })
   }
 
   return artifacts

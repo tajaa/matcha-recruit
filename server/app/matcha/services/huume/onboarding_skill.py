@@ -99,11 +99,12 @@ def build_onboarding_plan(
 
 async def lookup_context(
     *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
+    days: Optional[int] = None,
 ) -> dict[str, Any]:
     """Agent-facing tool wrapper — opens its own connection."""
     from app.database import get_connection
     async with get_connection() as conn:
-        return await _lookup_context_impl(conn, company_id=company_id, topic=topic, query=query, features=features)
+        return await _lookup_context_impl(conn, company_id=company_id, topic=topic, query=query, features=features, days=days)
 
 
 # topic -> feature flag gating it. Absent from this dict = no extra gate
@@ -116,6 +117,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "employee": "employees",
     "schedule": "employee_schedule",
     "incidents": "incidents",
+    "er_cases": "er_copilot",
     "pto_leave": "employees",
     "policies": "handbooks",
     "discipline": "discipline",
@@ -144,9 +146,22 @@ _OPEN_ALERT_STATUSES = ("unread", "read")
 # this module must not pull in a Celery-worker module.
 _SIGNATURE_STALE_DAYS = 7
 
+_INCIDENT_LOOKBACK_DEFAULT_DAYS = 90
+_INCIDENT_LOOKBACK_MAX_DAYS = 365
+
+
+def _clamp_incident_days(days: Optional[int]) -> int:
+    """Model-supplied window, clamped to a sane range. A bad/missing value
+    (None, 0, negative, huge) degrades to the default rather than erroring —
+    this backs a chat lookup, not a form field."""
+    if not isinstance(days, int) or days <= 0:
+        return _INCIDENT_LOOKBACK_DEFAULT_DAYS
+    return min(days, _INCIDENT_LOOKBACK_MAX_DAYS)
+
 
 async def _lookup_context_impl(
     conn, *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
+    days: Optional[int] = None,
 ) -> dict[str, Any]:
     """Read-only grounding lookup for a handful of topics. Never raises —
     degrades to an empty/estimate result so a lookup failure doesn't kill
@@ -214,7 +229,7 @@ async def _lookup_context_impl(
         if topic == "credentials":
             rows = await conn.fetch(
                 """
-                SELECT e.first_name, e.last_name, ct.label AS credential_label, ecr.status, ecr.due_date
+                SELECT ecr.id, e.first_name, e.last_name, ct.label AS credential_label, ecr.status, ecr.due_date
                 FROM employee_credential_requirements ecr
                 JOIN employees e ON e.id = ecr.employee_id
                 JOIN credential_types ct ON ct.id = ecr.credential_type_id
@@ -276,19 +291,70 @@ async def _lookup_context_impl(
             )
             return {"topic": "schedule", "upcoming_shifts": [dict(r) for r in rows]}
         if topic == "incidents":
-            # Counts only — never select involved_employee_ids or free-text
-            # fields; this is a legal record, same rule as hr_pilot_corpus's
-            # incident: group.
-            rows = await conn.fetch(
+            # Detail, but never named individuals — no involved_employee_ids,
+            # witnesses, or reporter identity, same rule as hr_pilot_corpus's
+            # incident: group. show_record (the side-panel tool) fetches the
+            # fuller record separately, gated on the admin's own auth, not
+            # the model.
+            window_days = _clamp_incident_days(days)
+            counts = await conn.fetch(
                 """
                 SELECT incident_type, severity, COUNT(*) AS count
                 FROM ir_incidents
-                WHERE company_id = $1 AND occurred_at > NOW() - INTERVAL '90 days'
+                WHERE company_id = $1 AND occurred_at > NOW() - ($2 || ' days')::interval
                 GROUP BY incident_type, severity
                 """,
+                company_id, str(window_days),
+            )
+            detail_rows = await conn.fetch(
+                """
+                SELECT id, incident_number, title, incident_type, severity, status,
+                       occurred_at, location, LEFT(description, 280) AS description
+                FROM ir_incidents
+                WHERE company_id = $1 AND occurred_at > NOW() - ($2 || ' days')::interval
+                  AND ($3::text IS NULL
+                       OR incident_number ILIKE '%' || $3 || '%'
+                       OR title ILIKE '%' || $3 || '%'
+                       OR description ILIKE '%' || $3 || '%'
+                       OR incident_type ILIKE '%' || $3 || '%')
+                ORDER BY occurred_at DESC LIMIT 21
+                """,
+                company_id, str(window_days), query,
+            )
+            truncated = len(detail_rows) > 20
+            result: dict[str, Any] = {
+                "topic": "incidents",
+                "window_days": window_days,
+                "counts_by_type_and_severity": [dict(r) for r in counts],
+                "incidents": [dict(r) for r in detail_rows[:20]],
+            }
+            if truncated:
+                result["note"] = "More incidents exist in this window than shown — narrow with query or a smaller days window."
+            return result
+        if topic == "er_cases":
+            # Titles/status only — never description or involved_employees,
+            # same legal-record rule as the incidents topic. show_record
+            # ('er_case', id) is how the admin sees the fuller record, via
+            # their own auth in the side panel.
+            counts = await conn.fetch(
+                "SELECT status, COUNT(*) FROM er_cases WHERE company_id = $1 GROUP BY status",
                 company_id,
             )
-            return {"topic": "incidents", "last_90_days_by_type_and_severity": [dict(r) for r in rows]}
+            rows = await conn.fetch(
+                """
+                SELECT id, case_number, title, status, category, outcome, created_at
+                FROM er_cases
+                WHERE company_id = $1
+                  AND ($2::text IS NULL OR case_number ILIKE '%' || $2 || '%' OR title ILIKE '%' || $2 || '%')
+                ORDER BY created_at DESC LIMIT 20
+                """,
+                company_id, query,
+            )
+            return {
+                "topic": "er_cases",
+                "counts_by_status": {r["status"]: r["count"] for r in counts},
+                "cases": [dict(r) for r in rows],
+            }
         if topic == "pto_leave":
             pto_rows = await conn.fetch(
                 """

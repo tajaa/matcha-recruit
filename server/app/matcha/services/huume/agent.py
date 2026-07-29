@@ -45,7 +45,7 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, handbook_skill, legal_skill, onboarding_skill, store
+from . import actions, handbook_skill, legal_skill, onboarding_skill, record_view, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -365,9 +365,29 @@ async def run_huume_turn(
             if name == "lookup_context":
                 result = await onboarding_skill.lookup_context(
                     company_id=company_id, topic=str(args.get("topic") or ""), query=args.get("query"),
-                    features=features,
+                    features=features, days=args.get("days"),
                 )
                 step = recorder.record(tool=name, kind="read", label=f"Looked up {args.get('topic')}", status="ok")
+                return _json_safe(result), step
+
+            if name == "show_record":
+                result = await record_view.show_record_for_model(
+                    company_id=company_id, record_type=str(args.get("record_type") or ""),
+                    record_id=str(args.get("record_id") or ""), features=features,
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_record"] = {
+                        "record_type": result["record_type"],
+                        "record_id": result["record_id"],
+                        "label": result.get("label"),
+                    }
+                step = recorder.record(
+                    tool=name, kind="read",
+                    label=(f"Opened {result['record_type'].replace('_', ' ')}: {result.get('label')}" if ok else "Could not open record"),
+                    status="ok" if ok else ("rejected" if result.get("status") in ("refused", "not_found") else "error"),
+                    detail=result.get("message"),
+                )
                 return _json_safe(result), step
 
             if name == "draft_offer_letter":

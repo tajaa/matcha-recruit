@@ -25,9 +25,13 @@ from google.genai import types
 
 LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
-    "employee", "training_status", "schedule", "incidents",
+    "employee", "training_status", "schedule", "incidents", "er_cases",
     "pto_leave", "policies", "discipline", "compliance", "documents",
 )
+
+# record_type values show_record accepts — the single source both the tool
+# schema's enum and record_view.py's dispatch table read from.
+SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential")
 
 
 @dataclass(frozen=True)
@@ -57,21 +61,40 @@ TOOLS: tuple[HuumeTool, ...] = (
         "templates, connected integrations (Google Workspace/Slack), new-hire "
         "training rules, prior offers, one employee's detail record, "
         "company-wide training completion/overdue status, the published "
-        "schedule for the next 7 days, recent incident counts by type/severity "
-        "(never named individuals — that's a legal record), credential/license "
-        "expirations, upcoming approved PTO/leave plus PENDING PTO requests "
-        "awaiting a decision, active policy titles, discipline record counts "
-        "by status (never narrative details), open compliance requirement "
-        "counts by category, or documents still awaiting employee signature. "
-        "Call this before "
-        "drafting an offer if you're unsure whether the candidate already has "
-        "one, or before building a plan to check what integrations are "
-        "actually connected.",
+        "schedule for the next 7 days, recent incidents — counts by "
+        "type/severity plus a per-incident list (id, number, type, severity, "
+        "status, date, location, a short description snippet — never named "
+        "individuals, that's a legal record), ER (employment-relations) case "
+        "counts by status plus a recent list (id, case number, title, status, "
+        "category, outcome — never the description or involved employees), "
+        "credential/license expirations, upcoming approved PTO/leave plus "
+        "PENDING PTO requests awaiting a decision, active policy titles, "
+        "discipline record counts by status (never narrative details), open "
+        "compliance requirement counts by category, or documents still "
+        "awaiting employee signature. Call this before drafting an offer if "
+        "you're unsure whether the candidate already has one, or before "
+        "building a plan to check what integrations are actually connected. "
+        "Use show_record with an id from a list here (incident/er_case/"
+        "employee/credential) to open that record in the admin's side panel.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
             "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email."),
+            "days": types.Schema(type=types.Type.INTEGER, description="Lookback window in days for topic='incidents'. Default 90, max 365."),
         },
         required=["topic"],
+    ),
+    _tool(
+        "show_record", "read",
+        "Open a specific record in the admin's side panel for review — use "
+        "when the admin asks to see/view/open/inspect a record. record_type: "
+        "incident (ids from lookup_context topic='incidents'), er_case "
+        "(topic='er_cases'), employee (topic='roster' or 'employee'), "
+        "credential (topic='credentials'). Never guess an id.",
+        properties={
+            "record_type": types.Schema(type=types.Type.STRING, enum=list(SHOW_RECORD_TYPES)),
+            "record_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["record_type", "record_id"],
     ),
     _tool(
         "draft_offer_letter", "write",

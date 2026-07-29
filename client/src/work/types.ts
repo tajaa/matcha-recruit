@@ -638,6 +638,25 @@ export interface OfferLetterDetail {
 
 export interface HuumeLegal { matter_id: string; title?: string | null }
 
+export interface HuumeRecordRef { record_type: string; record_id: string; label?: string | null }
+
+export type HuumeRecordChipTone = 'red' | 'orange' | 'amber' | 'emerald' | 'zinc'
+
+/** Server-normalized view of whatever `show_record` staged — one shape for
+ * any record type (incident, er_case, employee, credential, …), rendered by
+ * a single generic `RecordViewer`. Adding a record type is a backend-only
+ * change as long as it fits this shape. */
+export interface HuumeRecordView {
+  record_type: string
+  record_id: string
+  title: string
+  subtitle?: string | null
+  chips: { label: string; tone: HuumeRecordChipTone }[]
+  meta: { label: string; value: string }[]
+  sections: { label: string; body?: string | null; items?: string[] | null }[]
+  link: string
+}
+
 export interface HuumeHandbook {
   session_id: string
   pending_drafts: { draft_id: string; kind?: string; title?: string }[]

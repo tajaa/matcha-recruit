@@ -19,6 +19,7 @@ describe('getHuumeState', () => {
       huume_action: { type: 'send_offer', offer_id: 'offer-1', status: 'proposed' },
       huume_legal: { matter_id: 'matter-1', title: 'Test matter' },
       huume_handbook: { session_id: 'sess-1', pending_drafts: [{ draft_id: 'd1' }] },
+      huume_record: { record_type: 'incident', record_id: 'rec-1', label: 'IR-2026-004' },
     }
     const h = getHuumeState(state)
     expect(h.plans).toEqual(state.huume_plans)
@@ -26,6 +27,7 @@ describe('getHuumeState', () => {
     expect(h.action).toEqual(state.huume_action)
     expect(h.legal).toEqual(state.huume_legal)
     expect(h.handbook).toEqual(state.huume_handbook)
+    expect(h.record).toEqual(state.huume_record)
   })
 })
 
@@ -44,6 +46,10 @@ describe('hasHuumeContent', () => {
 
   it('is true when a legal matter is present', () => {
     expect(hasHuumeContent({ plans: {}, legal: { matter_id: 'm1' } })).toBe(true)
+  })
+
+  it('is true when a record is open', () => {
+    expect(hasHuumeContent({ plans: {}, record: { record_type: 'incident', record_id: 'r1' } })).toBe(true)
   })
 
   it('is true when only an offer is present', () => {
@@ -160,7 +166,7 @@ describe('deriveHuumeArtifacts', () => {
     expect(result).toEqual([])
   })
 
-  it('orders offer, plan, action, handbook, legal', () => {
+  it('orders offer, plan, action, handbook, legal, record', () => {
     const action: HuumeAction = { type: 'ir_report', status: 'proposed', confirm_id: 'c1' }
     const result = deriveHuumeArtifacts({
       plans: { o1: plan },
@@ -168,8 +174,14 @@ describe('deriveHuumeArtifacts', () => {
       action,
       handbook: { session_id: 's1', pending_drafts: [{ draft_id: 'd1' }] },
       legal: { matter_id: 'm1' },
+      record: { record_type: 'incident', record_id: 'r1', label: 'IR-2026-004' },
     })
-    expect(result.map((a) => a.kind)).toEqual(['offer', 'plan', 'action', 'handbook', 'legal'])
+    expect(result.map((a) => a.kind)).toEqual(['offer', 'plan', 'action', 'handbook', 'legal', 'record'])
+  })
+
+  it('yields a record artifact keyed record:<type>:<id>', () => {
+    const result = deriveHuumeArtifacts({ plans: {}, record: { record_type: 'er_case', record_id: 'r1', label: 'ER-2026-002' } })
+    expect(result).toEqual([{ kind: 'record', key: 'record:er_case:r1', recordType: 'er_case', recordId: 'r1', label: 'ER-2026-002' }])
   })
 })
 

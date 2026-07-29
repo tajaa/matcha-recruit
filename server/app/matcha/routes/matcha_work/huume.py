@@ -10,6 +10,11 @@ be onboarding several candidates at once — both routes accept an optional
 resolve_plan_offer_id`, the same resolver the chat tool path uses), 400ing
 with the candidate list when more than one plan is active and no id was given.
 
+Also owns `GET .../huume/record` — the panel-facing counterpart to the chat
+tool `show_record`: fetches the normalized record view (`services/huume/
+record_view.py`) under the admin's own auth, re-checking that record type's
+own feature flag on top of the mount's huume/matcha_work gates.
+
 Mounted at `/matcha-work` (this package's prefix) alongside every other
 matcha_work route — `require_feature("huume")` on top of the package's own
 `require_feature("matcha_work")` gate, matching the offer/action dispatch's
@@ -22,13 +27,13 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import require_admin_or_client, require_feature
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
-from app.matcha.services.huume import actions as huume_actions, store as huume_store
+from app.matcha.services.huume import actions as huume_actions, record_view, store as huume_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_feature("huume"))])
@@ -134,3 +139,31 @@ async def execute_huume_plan(
         logger.warning("huume: failed to post plan-execution summary message for thread %s", thread_id, exc_info=True)
 
     return {"plan": exec_result.plan, "summary": summary, "offer_id": offer_id}
+
+
+@router.get("/threads/{thread_id}/huume/record")
+async def get_huume_record(
+    thread_id: UUID,
+    record_type: str = Query(...),
+    record_id: str = Query(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Panel-facing fetch for `show_record` — the admin's own auth, not the
+    model's. Re-checks the record type's own feature flag (the mount only
+    gates `huume`+`matcha_work`), since a flag flipped off after Huume staged
+    a record must not leave it fetchable from the panel."""
+    thread = await _get_owned_thread(thread_id, current_user)
+    company_id = thread["company_id"]
+
+    required = record_view.RECORD_REQUIRED_FEATURE.get(record_type)
+    if required is None:
+        raise HTTPException(status_code=404, detail="Unknown record type")
+
+    features, _ = await huume_store.get_thread_features_and_integrations(company_id)
+    if not features.get(required):
+        raise HTTPException(status_code=403, detail=f"'{required}' isn't enabled for this company.")
+
+    view = await record_view.get_record_view(company_id=company_id, record_type=record_type, record_id=record_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return view

@@ -118,6 +118,14 @@ def build_state_block(current_state: dict[str, Any]) -> str:
             f"use it when no matter_id is passed."
         )
 
+    record = current_state.get("huume_record")
+    if isinstance(record, dict) and record.get("record_id"):
+        lines.append(
+            f"- A {str(record.get('record_type') or 'record').replace('_', ' ')} record "
+            f"\"{record.get('label') or 'untitled'}\" (record_id={record['record_id']}) "
+            f"is open in the side panel."
+        )
+
     handbook = current_state.get("huume_handbook")
     if isinstance(handbook, dict) and handbook.get("session_id"):
         pending = [d for d in (handbook.get("pending_drafts") or []) if isinstance(d, dict)]
