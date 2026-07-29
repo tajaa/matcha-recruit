@@ -857,10 +857,15 @@ async def _run_huume_dispatch(tc: TurnContext):
     # Per-company turn cap — GeminiRateLimiter guards the platform's Gemini
     # quota, not a tenant's own usage. A Huume turn costs up to 8 model calls
     # plus whatever the pilot tools spend, and (unlike handbook_pilot_chat's
-    # 40/hr) previously had no tenant limit at all.
+    # 40/hr) previously had no tenant limit at all. Kept at 60/hr — the
+    # original 60/hr hit was `show_record` taking one id per call, forcing a
+    # turn per record; that's now a single batched call (`record_view`'s
+    # `_MODEL_BATCH_BUILDERS`), so the symptom that justified the 200/hr raise
+    # is gone and the wider cap would only enlarge a runaway loop's blast
+    # radius for no remaining benefit.
     try:
         from app.core.services.redis_cache import check_rate_limit
-        await check_rate_limit(str(company_id), "huume_turn", 200, 3600)
+        await check_rate_limit(str(company_id), "huume_turn", 60, 3600)
     except HTTPException:
         yield _sse_data({"type": "error", "message": "Huume is being used a lot right now — try again in a bit."})
         tc.terminated = True
@@ -929,10 +934,12 @@ async def _run_huume_dispatch(tc: TurnContext):
         tc.current_state = thread.get("current_state")
         tc.current_version = thread.get("version")
 
-    # The loop may have written huume_plans mid-turn (build/execute/cancel,
-    # via `store.update_huume_plan`/`execute_plan_locked`) rather than
+    # The loop may have written huume_plans (build/execute/cancel, via
+    # `store.update_huume_plan`/`execute_plan_locked`) and/or huume_records
+    # (show_record, via `store.update_huume_records`) mid-turn rather than
     # through state_updates/apply_update above — re-read so the `complete`
-    # frame (and the plan card it drives) reflects those writes too.
+    # frame (and the plan card / record tabs it drives) reflects those
+    # writes too.
     try:
         fresh = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
         if fresh:

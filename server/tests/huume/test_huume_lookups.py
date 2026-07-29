@@ -17,6 +17,7 @@ from app.matcha.services.huume.record_view import (
     MAX_OPEN_RECORDS,
     RECORD_REQUIRED_FEATURE,
     merge_open_records,
+    remove_open_record,
     show_records_for_model,
 )
 from app.matcha.services.huume.tools import SHOW_RECORD_TYPES
@@ -168,10 +169,14 @@ class TestShowRecords:
         result = _run(show_records_for_model(
             company_id="c1", record_type="incident", record_ids=ids, features={"incidents": True},
         ))
-        # Every id is garbage, so it's still "not_found" overall, but the
-        # not_found list must be capped, not the full 13 — proving the
-        # truncation ran before the loop.
-        assert len(result.get("not_found") or []) <= MAX_OPEN_RECORDS
+        # Every id is garbage, so it's still "not_found" overall, and the
+        # not_found list must be EXACTLY the cap (not the full 13) — proving
+        # the truncation ran before the loop, not just that the loop stopped
+        # early. Also asserts the top-level not_found/note aren't dropped by
+        # the "nothing resolved" early return.
+        assert result["status"] == "not_found"
+        assert len(result["not_found"]) == MAX_OPEN_RECORDS
+        assert str(MAX_OPEN_RECORDS) in result["note"]
 
     def test_every_record_type_is_registered_in_all_four_places(self):
         # A record type wired into the enum + feature map but missing from
@@ -215,6 +220,29 @@ class TestMergeOpenRecords:
         current = [{"record_type": "incident", "record_id": "x"}]
         result = merge_open_records(current, [{"record_type": "employee", "record_id": "x"}])
         assert len(result) == 2
+
+
+class TestRemoveOpenRecord:
+    def test_removes_matching_entry(self):
+        current = [
+            {"record_type": "incident", "record_id": "r1"},
+            {"record_type": "incident", "record_id": "r2"},
+        ]
+        result = remove_open_record(current, record_type="incident", record_id="r1")
+        assert [r["record_id"] for r in result] == ["r2"]
+
+    def test_missing_entry_is_a_no_op(self):
+        current = [{"record_type": "incident", "record_id": "r1"}]
+        result = remove_open_record(current, record_type="incident", record_id="not-there")
+        assert result == current
+
+    def test_same_id_different_type_is_untouched(self):
+        current = [{"record_type": "incident", "record_id": "x"}, {"record_type": "employee", "record_id": "x"}]
+        result = remove_open_record(current, record_type="incident", record_id="x")
+        assert result == [{"record_type": "employee", "record_id": "x"}]
+
+    def test_non_list_current_state_is_empty(self):
+        assert remove_open_record(None, record_type="incident", record_id="x") == []
 
 
 class TestClampIncidentDays:

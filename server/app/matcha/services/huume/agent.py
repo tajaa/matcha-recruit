@@ -313,11 +313,11 @@ async def run_huume_turn(
     every turn. Omit only for callers (e.g. tests) with no cheaper source.
 
     `run_id`: the dispatcher's `huume_runs` row id for this turn, stamped
-    onto `huume_record.opened_at` on a successful `show_record` — a nonce
-    the frontend uses to refocus the panel on a repeat show_record for the
-    SAME record (record_type+record_id alone is an unchanged key then).
-    Optional so existing test callers with no run row don't need updating;
-    `huume_record.opened_at` is simply absent in that case.
+    onto each entry's `opened_at` in `current_state.huume_records` on a
+    successful `show_record` — a nonce the frontend uses to refocus the panel
+    on a repeat show_record for the SAME record (record_type+record_id alone
+    is an unchanged key then). Optional so existing test callers with no run
+    row don't need updating; `opened_at` is simply absent in that case.
     """
     rate_limiter = GeminiRateLimiter()
     recorder = _StepRecorder()
@@ -380,7 +380,10 @@ async def run_huume_turn(
 
             if name == "show_record":
                 record_type = str(args.get("record_type") or "")
-                record_ids = [str(r) for r in (args.get("record_ids") or []) if str(r).strip()]
+                raw_ids = args.get("record_ids")
+                if not isinstance(raw_ids, list):
+                    raw_ids = [raw_ids] if raw_ids not in (None, "") else []
+                record_ids = [str(r) for r in raw_ids if str(r).strip()]
                 result = await record_view.show_records_for_model(
                     company_id=company_id, record_type=record_type, record_ids=record_ids, features=features,
                 )

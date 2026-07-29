@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { buildThreadTheme } from './MatchaWorkThread/theme'
@@ -37,8 +37,19 @@ export default function MatchaWorkThread() {
   // user closed it; the panel reappears the moment that identity changes
   // (a new/re-shown record, a newly staged action, a different thread).
   const [dismissedToken, setDismissedToken] = useState<string | null>(null)
+  // Toggling the header pill off→on doesn't change any artifact identity
+  // (huume_mode is a plain boolean column, untouched by apply_update/version
+  // bumps) — without this, re-enabling Huume mode with a `proposed` plan
+  // still staged would leave the panel dismissed and its approve/execute
+  // buttons unreachable.
+  const prevHuumeModeRef = useRef(thread?.huume_mode)
+  useEffect(() => {
+    if (thread?.huume_mode && !prevHuumeModeRef.current) setDismissedToken(null)
+    prevHuumeModeRef.current = thread?.huume_mode
+  }, [thread?.huume_mode])
   const huumeToken = [
     threadId,
+    thread?.version ?? '',
     ...deriveHuumeArtifacts(huume).map((a) => a.key),
     huume.records?.[huume.records.length - 1]?.opened_at ?? '',
   ].join('|')

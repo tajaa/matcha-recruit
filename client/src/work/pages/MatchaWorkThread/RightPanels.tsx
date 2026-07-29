@@ -136,11 +136,14 @@ export default function RightPanels({
             // streaming (see HuumePanel's streaming prop).
             if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
           }}
-          onRecordClosed={() => {
-            // The DELETE route already returns the updated list, but the
-            // panel only holds `current_state` via `thread` — refetch the
-            // same way onExecuted does so `huume_records` reflects it.
-            if (threadId) getThread(threadId).then(t => { setThread(t) }).catch(() => {})
+          onRecordClosed={(records) => {
+            // The DELETE route already returns the updated working set —
+            // merge it straight into current_state instead of refetching
+            // the whole thread (messages included) for one JSONB key.
+            setThread((prev) => prev ? {
+              ...prev,
+              current_state: { ...prev.current_state, huume_records: records },
+            } : prev)
           }}
         />
       )}

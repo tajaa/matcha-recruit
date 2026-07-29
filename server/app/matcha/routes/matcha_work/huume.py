@@ -59,14 +59,17 @@ class ExecutePlanRequest(BaseModel):
     )
 
 
-async def _get_owned_thread(thread_id: UUID, current_user: CurrentUser) -> dict:
+async def _get_owned_thread(thread_id: UUID, current_user: CurrentUser) -> tuple[dict, UUID]:
+    """Returns (thread, caller_company_id) — the caller's own company_id is
+    already resolved here, so callers that need to compare it against the
+    thread's company_id (cross-tenant collaborator check) don't re-fetch it."""
     from app.matcha.dependencies import get_client_company_id
 
-    company_id = await get_client_company_id(current_user)
-    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    caller_company_id = await get_client_company_id(current_user)
+    thread = await doc_svc.get_thread(thread_id, caller_company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    return thread
+    return thread, caller_company_id
 
 
 def _resolve_offer_id(current_state: dict, requested: Optional[str]) -> str:
@@ -88,7 +91,7 @@ async def approve_huume_plan(
 ):
     """Flip named (or all proposed) plan steps to `approved`. Does not
     execute anything — see /plan/execute."""
-    thread = await _get_owned_thread(thread_id, current_user)
+    thread, _ = await _get_owned_thread(thread_id, current_user)
     offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 
     def mutator(current_plan):
@@ -118,7 +121,7 @@ async def execute_huume_plan(
     execute_approved_steps handler uses, under a per-(thread, offer)
     advisory lock, so a chat-driven execute and a UI-button execute for the
     same candidate can never race and clobber each other's results."""
-    thread = await _get_owned_thread(thread_id, current_user)
+    thread, _ = await _get_owned_thread(thread_id, current_user)
     company_id = thread["company_id"]
     offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 
@@ -154,9 +157,7 @@ async def get_huume_record(
     model's. Re-checks the record type's own feature flag (the mount only
     gates `huume`+`matcha_work`), since a flag flipped off after Huume staged
     a record must not leave it fetchable from the panel."""
-    from app.matcha.dependencies import get_client_company_id
-
-    thread = await _get_owned_thread(thread_id, current_user)
+    thread, caller_company_id = await _get_owned_thread(thread_id, current_user)
     company_id = thread["company_id"]
 
     # _get_owned_thread's access check (doc_svc.get_thread) also admits
@@ -165,7 +166,7 @@ async def get_huume_record(
     # records scoped to the THREAD's company, not the caller's. Without this,
     # an outside-tenant collaborator could pass any record_id and read
     # another tenant's incident narratives, witnesses, and employee PII.
-    if await get_client_company_id(current_user) != company_id:
+    if caller_company_id != company_id:
         raise HTTPException(status_code=404, detail="Thread not found")
 
     required = record_view.RECORD_REQUIRED_FEATURE.get(record_type)
@@ -193,18 +194,15 @@ async def close_huume_record(
     (`current_state.huume_records`) — the `×` on a record tab. No feature
     re-check: removing a stale entry must stay possible even after the
     record type's flag has been flipped off."""
-    from app.matcha.dependencies import get_client_company_id
-
-    thread = await _get_owned_thread(thread_id, current_user)
+    thread, caller_company_id = await _get_owned_thread(thread_id, current_user)
     company_id = thread["company_id"]
-    if await get_client_company_id(current_user) != company_id:
+    if caller_company_id != company_id:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    def mutator(current: list) -> list:
-        return [r for r in current if not (isinstance(r, dict) and r.get("record_type") == record_type and r.get("record_id") == record_id)]
-
     try:
-        records = await huume_store.update_huume_records(thread_id, mutator)
+        records = await huume_store.update_huume_records(
+            thread_id, lambda current: record_view.remove_open_record(current, record_type=record_type, record_id=record_id),
+        )
     except ValueError:
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"records": records}

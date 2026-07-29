@@ -686,12 +686,8 @@ async def build_plan_for_offer(*, company_id: UUID, offer_id: str) -> dict[str, 
         if offer["status"] != "accepted":
             return {"status": "error", "message": f"This offer is {offer['status']}, not accepted — the plan can only be built after acceptance."}
 
-        from app.core.feature_flags import merge_company_features
-        company_row = await conn.fetchrow("SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id)
-        features = merge_company_features(
-            dict(company_row["enabled_features"] or {}) if company_row else {},
-            company_row["signup_source"] if company_row else None,
-        )
+        from app.core.feature_flags import get_company_features
+        features = await get_company_features(company_id, conn=conn)
 
         integ_rows = await conn.fetch("SELECT provider FROM integration_connections WHERE company_id = $1", company_id)
         integrations = {r["provider"]: True for r in integ_rows}

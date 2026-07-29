@@ -9,9 +9,9 @@ interface RecordViewerProps {
   recordType: string
   recordId: string
   lightMode?: boolean
-  /** True while Huume is streaming a turn. `huume_record` carries a
-   * `{record_type, record_id, label, opened_at}` reference, never the view
-   * itself — so refetch on each true→false edge, same reasoning as
+  /** True while Huume is streaming a turn. Each `huume_records` entry
+   * carries a `{record_type, record_id, label, opened_at}` reference, never
+   * the view itself — so refetch on each true→false edge, same reasoning as
    * LegalMatterViewer. */
   streaming?: boolean
 }

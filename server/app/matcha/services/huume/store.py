@@ -53,20 +53,32 @@ async def complete_run(*, run_id: UUID, status: str, model_calls: int, token_usa
         )
 
 
-async def update_huume_plan(
-    thread_id: UUID, offer_id: str, mutator: Callable[[Optional[dict]], Optional[dict]],
-) -> Optional[dict]:
-    """Row-locked read-modify-write of `current_state.huume_plans[offer_id]`.
+def _coerce_current_state(raw_state: Any) -> dict:
+    if isinstance(raw_state, str):
+        return json.loads(raw_state) if raw_state else {}
+    return dict(raw_state or {})
+
+
+async def _locked_state_update(
+    thread_id: UUID, mutate: Callable[[dict], Any], *, snapshot_summary: Optional[str] = None,
+) -> Any:
+    """Row-locked read-modify-write of `mw_threads.current_state` — shared by
+    `update_huume_plan`/`update_huume_records`, which need the identical FOR
+    UPDATE read, str/dict jsonb coercion, and version bump and previously
+    each hand-rolled it. `mutate(state)` mutates `state` in place and returns
+    whatever the caller wants back.
 
     `apply_update` (matcha_work_document) merges top-level keys only — two
-    concurrent writers each doing their own `apply_update({"huume_plans": {...}})`
-    would race on a read-then-write with no lock in between. This holds
-    `mw_threads` FOR UPDATE for the whole read-mutate-write so the approve
-    and execute routes (and the agent loop's own plan-building tool) can't
-    clobber each other's step-status edits, and only ever touch the one
-    offer's key — never the whole `huume_plans` dict.
+    concurrent writers each doing their own `apply_update({...})` would race
+    on a read-then-write with no lock in between. This holds `mw_threads`
+    FOR UPDATE for the whole read-mutate-write instead.
 
-    `mutator` returning `None` deletes the key (used by cancel_staged).
+    `snapshot_summary`: pass a string to also record this write in
+    `mw_document_versions` (the user-visible revert history); omit to skip
+    it. Plan writes are real document changes and get one; record-panel
+    open/close is viewport churn, not a document change worth a snapshot —
+    an 8-record session would otherwise bury the real history under a dozen
+    no-op entries.
     """
     async with get_connection() as conn:
         async with conn.transaction():
@@ -76,74 +88,67 @@ async def update_huume_plan(
             )
             if row is None:
                 raise ValueError("Thread not found")
-            raw_state = row["current_state"]
-            if isinstance(raw_state, str):
-                state = json.loads(raw_state) if raw_state else {}
-            else:
-                state = dict(raw_state or {})
-
-            plans = dict(state.get("huume_plans") or {})
-            current_plan = plans.get(offer_id)
-            new_plan = mutator(current_plan)
-            if new_plan is None:
-                plans.pop(offer_id, None)
-            else:
-                plans[offer_id] = new_plan
-            state["huume_plans"] = plans
+            state = _coerce_current_state(row["current_state"])
+            result = mutate(state)
             new_version = row["version"] + 1
+            encoded = json.dumps(state, default=str)
 
             await conn.execute(
                 "UPDATE mw_threads SET current_state = $1, version = $2, updated_at = NOW() WHERE id = $3",
-                json.dumps(state, default=str), new_version, thread_id,
+                encoded, new_version, thread_id,
             )
-            await conn.execute(
-                "INSERT INTO mw_document_versions (thread_id, version, state_json, diff_summary) "
-                "VALUES ($1, $2, $3, $4) ON CONFLICT (thread_id, version) DO NOTHING",
-                thread_id, new_version, json.dumps(state, default=str), "Huume plan updated",
-            )
-            return new_plan
+            if snapshot_summary is not None:
+                await conn.execute(
+                    "INSERT INTO mw_document_versions (thread_id, version, state_json, diff_summary) "
+                    "VALUES ($1, $2, $3, $4) ON CONFLICT (thread_id, version) DO NOTHING",
+                    thread_id, new_version, encoded, snapshot_summary,
+                )
+            return result
+
+
+async def update_huume_plan(
+    thread_id: UUID, offer_id: str, mutator: Callable[[Optional[dict]], Optional[dict]],
+) -> Optional[dict]:
+    """Row-locked read-modify-write of `current_state.huume_plans[offer_id]`
+    — only ever touches the one offer's key, never the whole `huume_plans`
+    dict, so the approve/execute routes and the agent loop's own
+    plan-building tool can't clobber each other's step-status edits.
+
+    `mutator` returning `None` deletes the key (used by cancel_staged).
+    """
+    def _mutate(state: dict) -> Optional[dict]:
+        plans = dict(state.get("huume_plans") or {})
+        current_plan = plans.get(offer_id)
+        new_plan = mutator(current_plan)
+        if new_plan is None:
+            plans.pop(offer_id, None)
+        else:
+            plans[offer_id] = new_plan
+        state["huume_plans"] = plans
+        return new_plan
+
+    return await _locked_state_update(thread_id, _mutate, snapshot_summary="Huume plan updated")
 
 
 async def update_huume_records(
     thread_id: UUID, mutator: Callable[[list], list],
 ) -> list:
     """Row-locked read-modify-write of `current_state.huume_records` — the
-    open-record working set. Same hazard as `update_huume_plan`: there are
-    two writers (the chat tool's `show_record` and the panel's close
-    button), and `apply_update` merges top-level keys wholesale with no lock
-    between read and write, so a concurrent close and a concurrent open
-    could otherwise clobber each other."""
-    async with get_connection() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                "SELECT current_state, version FROM mw_threads WHERE id = $1 FOR UPDATE",
-                thread_id,
-            )
-            if row is None:
-                raise ValueError("Thread not found")
-            raw_state = row["current_state"]
-            if isinstance(raw_state, str):
-                state = json.loads(raw_state) if raw_state else {}
-            else:
-                state = dict(raw_state or {})
+    open-record working set. Same concurrency hazard as `update_huume_plan`:
+    there are two writers (the chat tool's `show_record` and the panel's
+    close button), and `apply_update` merges top-level keys wholesale with no
+    lock between read and write, so a concurrent close and a concurrent open
+    could otherwise clobber each other. No `snapshot_summary` — see
+    `_locked_state_update`'s docstring for why."""
+    def _mutate(state: dict) -> list:
+        current_records = state.get("huume_records") or []
+        if not isinstance(current_records, list):
+            current_records = []
+        new_records = mutator(current_records)
+        state["huume_records"] = new_records
+        return new_records
 
-            current_records = state.get("huume_records") or []
-            if not isinstance(current_records, list):
-                current_records = []
-            new_records = mutator(current_records)
-            state["huume_records"] = new_records
-            new_version = row["version"] + 1
-
-            await conn.execute(
-                "UPDATE mw_threads SET current_state = $1, version = $2, updated_at = NOW() WHERE id = $3",
-                json.dumps(state, default=str), new_version, thread_id,
-            )
-            await conn.execute(
-                "INSERT INTO mw_document_versions (thread_id, version, state_json, diff_summary) "
-                "VALUES ($1, $2, $3, $4) ON CONFLICT (thread_id, version) DO NOTHING",
-                thread_id, new_version, json.dumps(state, default=str), "Huume records updated",
-            )
-            return new_records
+    return await _locked_state_update(thread_id, _mutate)
 
 
 async def execute_plan_locked(

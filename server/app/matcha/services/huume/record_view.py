@@ -87,128 +87,152 @@ def merge_open_records(current: list, new: list[dict[str, Any]]) -> list[dict[st
     return [by_key[k] for k in order]
 
 
+def remove_open_record(current: list, *, record_type: str, record_id: str) -> list[dict[str, Any]]:
+    """Pure. Inverse of `merge_open_records` — drops one entry from the
+    `current_state.huume_records` working set (the panel tab's `×`), keyed
+    the same way (`record_type`, `record_id`)."""
+    if not isinstance(current, list):
+        return []
+    return [r for r in current if not (isinstance(r, dict) and r.get("record_type") == record_type and r.get("record_id") == record_id)]
+
+
 # ---------------------------------------------------------------------------
 # Model-facing summaries — minimal, name-free for legal records
 # ---------------------------------------------------------------------------
 
-async def _model_incident(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+async def _model_incidents_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
     # No `description` — free-text narrative is exactly where a legal record
     # names people ("Maria slipped near bay 3"); the structural no-names rule
     # only holds if the narrative field is excluded too, not just the id
     # columns. Same reasoning as `onboarding_skill`'s incidents/er_cases topics.
-    row = await conn.fetchrow(
+    if not rids:
+        return {}
+    rows = await conn.fetch(
         """
         SELECT id, incident_number, title, incident_type, severity, status,
                occurred_at, location
         FROM ir_incidents
-        WHERE id = $1 AND company_id = $2
+        WHERE id = ANY($1::uuid[]) AND company_id = $2
         """,
-        rid, company_id,
+        rids, company_id,
     )
-    if not row:
-        return None
-    data = dict(row)
-    return {
-        "record_id": str(data["id"]),
-        "label": f"{data.get('incident_number')} — {data.get('title')}",
-        "incident_number": data.get("incident_number"),
-        "title": data.get("title"),
-        "incident_type": data.get("incident_type"),
-        "severity": data.get("severity"),
-        "record_status": data.get("status"),
-        "occurred_at": _iso(data.get("occurred_at")),
-        "location": data.get("location"),
-    }
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": f"{data.get('incident_number')} — {data.get('title')}",
+            "incident_number": data.get("incident_number"),
+            "title": data.get("title"),
+            "incident_type": data.get("incident_type"),
+            "severity": data.get("severity"),
+            "record_status": data.get("status"),
+            "occurred_at": _iso(data.get("occurred_at")),
+            "location": data.get("location"),
+        }
+    return out
 
 
-async def _model_er_case(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
-    # No `description` — same narrative-exclusion rule as `_model_incident`.
-    row = await conn.fetchrow(
+async def _model_er_cases_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    # No `description` — same narrative-exclusion rule as the incident batch.
+    if not rids:
+        return {}
+    rows = await conn.fetch(
         """
         SELECT id, case_number, title, status, category, outcome, created_at, closed_at
         FROM er_cases
-        WHERE id = $1 AND company_id = $2
+        WHERE id = ANY($1::uuid[]) AND company_id = $2
         """,
-        rid, company_id,
+        rids, company_id,
     )
-    if not row:
-        return None
-    data = dict(row)
-    return {
-        "record_id": str(data["id"]),
-        "label": f"{data.get('case_number')} — {data.get('title')}",
-        "case_number": data.get("case_number"),
-        "title": data.get("title"),
-        "record_status": data.get("status"),
-        "category": data.get("category"),
-        "outcome": data.get("outcome"),
-        "created_at": _iso(data.get("created_at")),
-        "closed_at": _iso(data.get("closed_at")),
-    }
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": f"{data.get('case_number')} — {data.get('title')}",
+            "case_number": data.get("case_number"),
+            "title": data.get("title"),
+            "record_status": data.get("status"),
+            "category": data.get("category"),
+            "outcome": data.get("outcome"),
+            "created_at": _iso(data.get("created_at")),
+            "closed_at": _iso(data.get("closed_at")),
+        }
+    return out
 
 
-async def _model_employee(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+async def _model_employees_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
     # Names are fine here — the roster/employee lookup topics already return
     # them; this isn't a legal record.
-    row = await conn.fetchrow(
+    if not rids:
+        return {}
+    rows = await conn.fetch(
         """
         SELECT id, first_name, last_name, email, job_title, employment_status, start_date, work_state
         FROM employees
-        WHERE id = $1 AND org_id = $2
+        WHERE id = ANY($1::uuid[]) AND org_id = $2
         """,
-        rid, company_id,
+        rids, company_id,
     )
-    if not row:
-        return None
-    data = dict(row)
-    name = f"{data.get('first_name')} {data.get('last_name')}".strip()
-    return {
-        "record_id": str(data["id"]),
-        "label": name,
-        "first_name": data.get("first_name"),
-        "last_name": data.get("last_name"),
-        "email": data.get("email"),
-        "job_title": data.get("job_title"),
-        "employment_status": data.get("employment_status"),
-        "start_date": _iso(data.get("start_date")),
-        "work_state": data.get("work_state"),
-    }
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        name = f"{data.get('first_name')} {data.get('last_name')}".strip()
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": name,
+            "first_name": data.get("first_name"),
+            "last_name": data.get("last_name"),
+            "email": data.get("email"),
+            "job_title": data.get("job_title"),
+            "employment_status": data.get("employment_status"),
+            "start_date": _iso(data.get("start_date")),
+            "work_state": data.get("work_state"),
+        }
+    return out
 
 
-async def _model_credential(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
-    row = await conn.fetchrow(
+async def _model_credentials_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    if not rids:
+        return {}
+    rows = await conn.fetch(
         """
         SELECT ecr.id, ecr.status, ecr.due_date, ecr.verified_at, ecr.waived_at,
                e.first_name, e.last_name, ct.label AS credential_label
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id AND e.org_id = $2
         JOIN credential_types ct ON ct.id = ecr.credential_type_id
-        WHERE ecr.id = $1
+        WHERE ecr.id = ANY($1::uuid[])
         """,
-        rid, company_id,
+        rids, company_id,
     )
-    if not row:
-        return None
-    data = dict(row)
-    name = f"{data.get('first_name')} {data.get('last_name')}".strip()
-    return {
-        "record_id": str(data["id"]),
-        "label": f"{data.get('credential_label')} — {name}",
-        "credential_label": data.get("credential_label"),
-        "employee_name": name,
-        "record_status": data.get("status"),
-        "due_date": _iso(data.get("due_date")),
-        "verified_at": _iso(data.get("verified_at")),
-        "waived_at": _iso(data.get("waived_at")),
-    }
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        name = f"{data.get('first_name')} {data.get('last_name')}".strip()
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": f"{data.get('credential_label')} — {name}",
+            "credential_label": data.get("credential_label"),
+            "employee_name": name,
+            "record_status": data.get("status"),
+            "due_date": _iso(data.get("due_date")),
+            "verified_at": _iso(data.get("verified_at")),
+            "waived_at": _iso(data.get("waived_at")),
+        }
+    return out
 
 
-_MODEL_BUILDERS = {
-    "incident": _model_incident,
-    "er_case": _model_er_case,
-    "employee": _model_employee,
-    "credential": _model_credential,
+_MODEL_BATCH_BUILDERS = {
+    "incident": _model_incidents_batch,
+    "er_case": _model_er_cases_batch,
+    "employee": _model_employees_batch,
+    "credential": _model_credentials_batch,
 }
+# Kept for the record-type-parity test (SHOW_RECORD_TYPES == _MODEL_BUILDERS
+# == ... == _VIEW_BUILDERS) — same key set as _MODEL_BATCH_BUILDERS.
+_MODEL_BUILDERS = _MODEL_BATCH_BUILDERS
 
 
 async def show_records_for_model(
@@ -219,8 +243,8 @@ async def show_records_for_model(
     Resolves every id it can; a partial hit (some ids found, some not) is
     still `status: "ok"` with `not_found` listing what didn't resolve — only
     a request where NOTHING resolves is `not_found` as the top-level status."""
-    builder = _MODEL_BUILDERS.get(record_type)
-    if builder is None:
+    batch_builder = _MODEL_BATCH_BUILDERS.get(record_type)
+    if batch_builder is None:
         return {"status": "error", "message": f"Unknown record type '{record_type}'."}
     required = RECORD_REQUIRED_FEATURE[record_type]
     if not (features or {}).get(required):
@@ -248,18 +272,24 @@ async def show_records_for_model(
         from app.database import get_connection
         try:
             async with get_connection() as conn:
-                for record_id, rid in valid:
-                    summary = await builder(conn, company_id, rid)
-                    if summary is None:
-                        not_found.append(record_id)
-                    else:
-                        records.append(summary)
+                found_by_id = await batch_builder(conn, company_id, [rid for _, rid in valid])
+            for record_id, rid in valid:
+                summary = found_by_id.get(rid)
+                if summary is None:
+                    not_found.append(record_id)
+                else:
+                    records.append(summary)
         except Exception:
             logger.exception("huume show_records failed record_type=%s company=%s", record_type, company_id)
             return {"status": "error", "message": "Could not load those records."}
 
     if not records:
-        return {"status": "not_found", "message": "None of those record ids were found."}
+        result = {"status": "not_found", "message": "None of those record ids were found."}
+        if not_found:
+            result["not_found"] = not_found
+        if note:
+            result["note"] = note
+        return result
 
     result: dict[str, Any] = {"status": "ok", "record_type": record_type, "records": records}
     if not_found:

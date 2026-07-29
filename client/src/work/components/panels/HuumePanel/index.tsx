@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileSignature, PlayCircle, BookOpen, Scale, Send, X } from 'lucide-react'
-import type { HuumeOffer, HuumePlan } from '../../../types'
+import type { HuumeOffer, HuumePlan, HuumeRecordRef } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
 import { actionIcon } from '../../../utils/huumeActionMeta'
 import { closeHuumeRecord } from '../../../api/matchaWork/huume'
+import { useToast } from '../../../../components/ui'
 import ConfirmBar from './ConfirmBar'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
@@ -20,10 +21,11 @@ interface HuumePanelProps {
   onStateUpdate: (offerId: string, plan: HuumePlan) => void
   onSendChat?: (text: string) => void
   onExecuted?: () => void
-  /** Called after a record tab's × successfully closes it server-side —
-   * the caller refetches the thread so `current_state.huume_records`
-   * reflects the removal (same refetch shape as `onExecuted`). */
-  onRecordClosed?: () => void
+  /** Called after a record tab's × successfully closes it server-side, with
+   * the updated working set the DELETE response already returned — the
+   * caller merges it straight into `current_state.huume_records` rather
+   * than refetching the whole thread. */
+  onRecordClosed?: (records: HuumeRecordRef[]) => void
   /** Closes the panel WITHOUT touching `huume_mode` — that stays a separate
    * action on the ThreadHeader pill. Every message keeps routing through
    * Huume (tools, grounding, the panel-worthy output) whether or not the
@@ -55,6 +57,7 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * (offer letter, staged action, onboarding plan, handbook draft, legal
  * memo) with one docked confirm bar for whatever needs a decision. */
 export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onRecordClosed, onDismiss }: HuumePanelProps) {
+  const { toast } = useToast()
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -72,9 +75,24 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
   const lastRecord = huume.records?.[huume.records.length - 1]
   const recordKey = lastRecord ? `record:${lastRecord.record_type}:${lastRecord.record_id}` : null
   const recordFocusToken = lastRecord ? `${recordKey}:${lastRecord.opened_at ?? ''}` : null
+  // Per-record `opened_at` last seen — NOT just the last-in-array's token.
+  // Closing an unrelated background tab shrinks the array and can change
+  // which record is now last, which would otherwise change `recordFocusToken`
+  // and steal focus from whatever the user was actually viewing even though
+  // nothing was newly shown. Only refocus when the now-last record's OWN
+  // `opened_at` actually advanced since we last saw it — true for a genuine
+  // new/re-shown record, false when it merely became last via a removal.
+  const seenOpenedAtRef = useRef<Map<string, string>>(new Map())
   useEffect(() => {
-    if (recordKey) setSelectedKey(recordKey)
-  }, [recordFocusToken, recordKey])
+    if (recordKey && lastRecord) {
+      const previouslySeen = seenOpenedAtRef.current.get(recordKey)
+      const currentOpenedAt = lastRecord.opened_at ?? ''
+      if (previouslySeen !== currentOpenedAt) setSelectedKey(recordKey)
+    }
+    const next = new Map<string, string>()
+    for (const r of huume.records ?? []) next.set(`record:${r.record_type}:${r.record_id}`, r.opened_at ?? '')
+    seenOpenedAtRef.current = next
+  }, [recordFocusToken, recordKey, huume.records])
 
   // A newly-staged proposed action — or a plan with steps awaiting
   // approval — must win over whatever tab the user happens to have open,
@@ -138,8 +156,10 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
                     e.stopPropagation()
                     setClosingRecordKey(a.key)
                     try {
-                      await closeHuumeRecord(threadId, a.recordType, a.recordId)
-                      onRecordClosed?.()
+                      const { records } = await closeHuumeRecord(threadId, a.recordType, a.recordId)
+                      onRecordClosed?.(records)
+                    } catch {
+                      toast('Could not close that record — try again.', 'error')
                     } finally {
                       setClosingRecordKey(null)
                     }
