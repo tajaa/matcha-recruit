@@ -5,15 +5,43 @@ prompt and the actual declarations can drift (same rule Merlin's
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 
-from .tools import TOOLS
+from .tools import TOOLS, HuumeTool
 
 
 def _tools_text() -> str:
     lines = []
     for t in TOOLS:
         lines.append(f"- {t.name} ({t.kind}): {t.declaration.description}")
+    return "\n".join(lines)
+
+
+def build_discovery_block(tools: Iterable[HuumeTool]) -> str:
+    """Generated "## Broad questions" section: one line per `discovery=True`
+    tool, built from its own `intent_hints` — so a future skill teaches the
+    model to use it by declaring the tool, not by hand-writing a paragraph
+    here (the same tools.py-is-the-single-source rule `_tools_text` follows).
+
+    Returns "" when there are no discovery tools registered — an empty
+    section header would read as "there's nothing broad to ask", which is
+    worse than the section being absent.
+    """
+    discovery_tools = [t for t in tools if t.discovery]
+    if not discovery_tools:
+        return ""
+
+    lines = ["## Broad questions"]
+    for t in discovery_tools:
+        hints = ", ".join(f'"{h}"' for h in t.intent_hints) or "a broad question in its domain"
+        lines.append(f"- Questions like {hints} → call {t.name} FIRST, then show_record for anyone named, then act.")
+    lines.append("")
+    lines.append(
+        "These tools name NOBODY by design — open a record with show_record to see who's involved. "
+        "If a result reports a nonzero not_yet_checked (or an equivalent bounded-scan count), say so "
+        "plainly — a bounded scan is not the same as having covered everything, and reporting it as "
+        "complete would be a wrong answer with no visible error."
+    )
     return "\n".join(lines)
 
 
@@ -239,6 +267,8 @@ Handbook Pilot (draft_handbook_content, promote_handbook_drafts):
 - Report each draft's groundedness honestly: a draft citing no law/floor records is a starting point, not a compliant policy.
 
 If one of these tools is refused because its feature isn't enabled, say so plainly and move on — don't retry it.
+
+{build_discovery_block(TOOLS)}
 
 ## Tools available to you
 

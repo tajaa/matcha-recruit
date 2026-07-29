@@ -11,6 +11,7 @@ import pytest
 from google.genai import types
 
 from app.matcha.services.huume import agent, routing
+from app.matcha.services.huume.prompt import build_discovery_block, build_system_prompt
 from app.matcha.services.huume.tools import TOOLS
 
 
@@ -92,6 +93,22 @@ class TestHintIndex:
 
     def test_build_hint_index_is_pure_and_matches_module_constant(self):
         assert routing.build_hint_index(TOOLS) == routing.HINT_INDEX
+
+
+class TestDiscoveryBlock:
+    def test_every_discovery_tool_named_in_block(self):
+        block = build_discovery_block(TOOLS)
+        for t in TOOLS:
+            if t.discovery:
+                assert t.name in block
+
+    def test_no_discovery_tools_returns_empty(self):
+        assert build_discovery_block([]) == ""
+
+    def test_block_is_present_in_full_system_prompt(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-29")
+        assert "## Broad questions" in prompt
+        assert "find_discipline_candidates" in prompt
 
 
 class TestThinkingConfig:
