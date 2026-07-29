@@ -7,7 +7,7 @@ import RenameInput from './RenameInput'
 interface Props {
   channels: ChannelSummary[]
   channelsOpen: boolean
-  setChannelsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  onToggle: () => void
   filter: string
   totalChannelUnread: number
   canCreate: boolean
@@ -22,7 +22,7 @@ interface Props {
 export default function ChannelsSection({
   channels,
   channelsOpen,
-  setChannelsOpen,
+  onToggle,
   filter,
   totalChannelUnread,
   canCreate,
@@ -36,7 +36,7 @@ export default function ChannelsSection({
   return (
     <div className="mt-2">
       <button
-        onClick={() => setChannelsOpen(!channelsOpen)}
+        onClick={onToggle}
         className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
       >
         <span className="flex items-center gap-1.5">

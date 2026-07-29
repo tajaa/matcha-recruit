@@ -7,7 +7,7 @@ import RenameInput from './RenameInput'
 interface Props {
   projects: MWProject[]
   projectsOpen: boolean
-  setProjectsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  onToggle: () => void
   filter: string
   isPersonal: boolean
   base: string
@@ -21,7 +21,7 @@ interface Props {
 export default function ProjectsSection({
   projects,
   projectsOpen,
-  setProjectsOpen,
+  onToggle,
   filter,
   isPersonal,
   base,
@@ -34,7 +34,7 @@ export default function ProjectsSection({
   return (
     <div className="mt-1">
       <button
-        onClick={() => setProjectsOpen(!projectsOpen)}
+        onClick={onToggle}
         className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
       >
         <span className="flex items-center gap-1.5">

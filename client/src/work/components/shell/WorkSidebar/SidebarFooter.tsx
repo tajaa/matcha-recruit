@@ -1,4 +1,4 @@
-import { Mail, LogOut, Users, CreditCard, Sparkles } from 'lucide-react'
+import { Mail, MailOpen, LogOut, Users, CreditCard, Sparkles } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 
 interface Props {
@@ -89,6 +89,17 @@ export default function SidebarFooter({
         >
           <CreditCard size={14} strokeWidth={1.6} />
           Billing
+        </button>
+        <button
+          onClick={() => navigate(`${base}/email`)}
+          className={`flex-1 flex flex-col items-center gap-0.5 py-1.5 rounded-md text-[10px] font-medium transition-colors ${
+            isActive(`${base}/email`)
+              ? 'bg-w-surface2 text-white'
+              : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+          }`}
+        >
+          <MailOpen size={14} strokeWidth={1.6} />
+          Email
         </button>
       </div>
 

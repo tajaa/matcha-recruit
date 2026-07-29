@@ -238,8 +238,14 @@ export default function WorkLayout() {
         {/* Mobile Sidebar Container */}
         <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:hidden flex ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="flex-1 w-full overflow-hidden bg-w-surface border-r border-w-line">
-            {/* Always pass open=true to the sidebar on mobile so it's fully expanded */}
-            <SidebarComp open={true} onToggle={() => {}} />
+            {/* Mount only while the drawer is open — previously always-mounted
+                (just translated off-screen), so the sidebar's own data hook
+                fetched everything twice and ran two parallel inbox-poll
+                intervals for the lifetime of the page. The wrapper div above
+                stays mounted unconditionally so its transform transition
+                still animates the slide in/out; only the (fully expanded)
+                sidebar content mounts fresh each time the drawer opens. */}
+            {mobileMenuOpen && <SidebarComp open={true} onToggle={() => {}} />}
           </div>
           {/* Only mount the close button while the drawer is actually open.
               It sits OUTSIDE the drawer's box (-right-12), but the drawer only

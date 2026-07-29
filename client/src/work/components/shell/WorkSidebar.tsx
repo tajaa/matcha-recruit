@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, MailOpen } from 'lucide-react'
+import { PanelLeftClose, Home, Search } from 'lucide-react'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
-import { createProjectNew, startPersonalCheckout } from '../../api/matchaWork'
+import { createProjectNew, createThread, startPersonalCheckout } from '../../api/matchaWork'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../panels/HiringClientPickerModal'
@@ -14,13 +14,12 @@ import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurf
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 import type { Props } from './WorkSidebar/types'
 import { useSidebarData } from './WorkSidebar/useSidebarData'
-import { useOpenTabs } from './WorkSidebar/useOpenTabs'
+import { useSectionState } from './WorkSidebar/useSectionState'
 import { useSidebarRename } from './WorkSidebar/useSidebarRename'
 import CollapsedRail from './WorkSidebar/CollapsedRail'
-import SidebarTabs from './WorkSidebar/SidebarTabs'
 import ChannelsSection from './WorkSidebar/ChannelsSection'
 import ProjectsSection from './WorkSidebar/ProjectsSection'
-import ThreadsSection from './WorkSidebar/ThreadsSection'
+import ChatsSection from './WorkSidebar/ChatsSection'
 import SidebarFooter from './WorkSidebar/SidebarFooter'
 import ProjectTypePickerModal from './WorkSidebar/ProjectTypePickerModal'
 
@@ -47,16 +46,42 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [showHiringClientPicker, setShowHiringClientPicker] = useState(false)
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
 
-  const [channelsOpen, setChannelsOpen] = useState(false)
-  const [projectsOpen, setProjectsOpen] = useState(false)
-  const [threadsOpen, setThreadsOpen] = useState(false)
+  const sections = useSectionState(base)
   const [upgrading, setUpgrading] = useState(false)
   const [filter, setFilter] = useState('')
 
-  const { openTabs, closeTab, openTabPath } = useOpenTabs(base, location.pathname, channels, projects, threads)
-
   // Inline rename state
   const rename = useSidebarRename({ setChannels, setProjects, setThreads })
+
+  async function handleNewChat() {
+    try {
+      const res = await createThread()
+      setThreads((prev) => [
+        {
+          id: res.id,
+          title: res.title,
+          status: res.status,
+          task_type: res.task_type,
+          is_pinned: res.is_pinned,
+          node_mode: res.node_mode,
+          compliance_mode: res.compliance_mode,
+          payer_mode: res.payer_mode,
+          benefits_mode: res.benefits_mode,
+          legal_mode: res.legal_mode,
+          risk_mode: res.risk_mode,
+          training_mode: res.training_mode,
+          hr_pilot_mode: res.hr_pilot_mode,
+          huume_mode: res.huume_mode,
+          collaborator_count: 0,
+          version: res.version,
+          created_at: res.created_at,
+          updated_at: res.created_at,
+        },
+        ...prev,
+      ])
+      navigate(`${base}/${res.id}`)
+    } catch {}
+  }
 
   async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting' = 'general') {
     setShowProjectTypePicker(false)
@@ -151,9 +176,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         pendingConnections={pendingConnections}
         inboxUnread={inboxUnread}
         inboxPath={inboxPath}
-        setChannelsOpen={setChannelsOpen}
-        setProjectsOpen={setProjectsOpen}
-        setThreadsOpen={setThreadsOpen}
+        openChannels={() => sections.open('channels')}
+        openProjects={() => sections.open('projects')}
+        openChats={() => sections.open('chats')}
       />
     )
   }
@@ -164,9 +189,6 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       <aside className="w-56 bg-w-surface border-r border-w-line flex flex-col shrink-0 overflow-hidden">
         {/* Brand */}
         <div className="flex items-center gap-2 px-3 py-3">
-          <div className="w-6 h-6 rounded-md bg-w-accent/15 text-w-accent flex items-center justify-center text-[10px] font-bold shrink-0">
-            {brand.replace('-', ' ').split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-          </div>
           <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-w-text">{brand.replace('-', ' ')}</span>
           <button
             onClick={onToggle}
@@ -202,34 +224,24 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             />
           </div>
 
-          {/* Tabs — recently/currently opened items, browser-tab style */}
-          <SidebarTabs
-            openTabs={openTabs}
+          {/* Chats */}
+          <ChatsSection
+            threads={threads}
+            chatsOpen={sections.chats}
+            onToggle={() => sections.toggle('chats')}
+            onNewChat={handleNewChat}
+            filter={filter}
             base={base}
             navigate={navigate}
             isActive={isActive}
-            openTabPath={openTabPath}
-            closeTab={closeTab}
+            rename={rename}
           />
-
-          {/* Email */}
-          <button
-            onClick={() => navigate(`${base}/email`)}
-            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              location.pathname === `${base}/email`
-                ? 'bg-w-surface2 text-white font-medium'
-                : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-            }`}
-          >
-            <MailOpen size={14} strokeWidth={1.6} />
-            Email
-          </button>
 
           {/* Channels */}
           <ChannelsSection
             channels={channels}
-            channelsOpen={channelsOpen}
-            setChannelsOpen={setChannelsOpen}
+            channelsOpen={sections.channels}
+            onToggle={() => sections.toggle('channels')}
             filter={filter}
             totalChannelUnread={totalChannelUnread}
             canCreate={canCreate}
@@ -244,8 +256,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           {mwBetaLite && (
             <ProjectsSection
               projects={projects}
-              projectsOpen={projectsOpen}
-              setProjectsOpen={setProjectsOpen}
+              projectsOpen={sections.projects}
+              onToggle={() => sections.toggle('projects')}
               filter={filter}
               isPersonal={isPersonal}
               base={base}
@@ -255,18 +267,6 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               rename={rename}
             />
           )}
-
-          {/* Threads */}
-          <ThreadsSection
-            threads={threads}
-            threadsOpen={threadsOpen}
-            setThreadsOpen={setThreadsOpen}
-            filter={filter}
-            base={base}
-            navigate={navigate}
-            isActive={isActive}
-            rename={rename}
-          />
         </nav>
 
         {/* Footer: Inbox + User profile + Logout */}

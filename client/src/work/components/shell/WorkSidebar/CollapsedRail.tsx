@@ -12,9 +12,9 @@ interface Props {
   pendingConnections: number
   inboxUnread: number
   inboxPath: string
-  setChannelsOpen: React.Dispatch<React.SetStateAction<boolean>>
-  setProjectsOpen: React.Dispatch<React.SetStateAction<boolean>>
-  setThreadsOpen: React.Dispatch<React.SetStateAction<boolean>>
+  openChannels: () => void
+  openProjects: () => void
+  openChats: () => void
 }
 
 // ─── Collapsed: icon rail ───
@@ -29,9 +29,9 @@ export default function CollapsedRail({
   pendingConnections,
   inboxUnread,
   inboxPath,
-  setChannelsOpen,
-  setProjectsOpen,
-  setThreadsOpen,
+  openChannels,
+  openProjects,
+  openChats,
 }: Props) {
   return (
     <aside className="w-12 bg-w-surface border-r border-w-line flex flex-col items-center py-2 gap-1 shrink-0">
@@ -61,7 +61,7 @@ export default function CollapsedRail({
       </button>
 
       <button
-        onClick={() => { onToggle(); setChannelsOpen(true) }}
+        onClick={() => { onToggle(); openChannels() }}
         className={`relative p-2 rounded-lg transition-colors ${pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
         title="Channels"
       >
@@ -75,7 +75,7 @@ export default function CollapsedRail({
 
       {mwBetaLite && (
         <button
-          onClick={() => { onToggle(); setProjectsOpen(true) }}
+          onClick={() => { onToggle(); openProjects() }}
           className={`p-2 rounded-lg transition-colors ${pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Projects"
         >
@@ -84,9 +84,9 @@ export default function CollapsedRail({
       )}
 
       <button
-        onClick={() => { onToggle(); setThreadsOpen(true) }}
+        onClick={() => { onToggle(); openChats() }}
         className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(pathname) && !pathname.includes('/channels/') && !pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Threads"
+        title="Chats"
       >
         <MessageSquare size={16} />
       </button>
