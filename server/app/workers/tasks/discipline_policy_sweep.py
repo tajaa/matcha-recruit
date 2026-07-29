@@ -88,13 +88,6 @@ def build_finding_briefing(incident: dict, result: dict) -> tuple[str, str]:
     return title, "\n".join(lines)
 
 
-async def _already_checked(conn, incident_id) -> bool:
-    row = await conn.fetchval(
-        "SELECT 1 FROM discipline_policy_sweep_log WHERE incident_id = $1", incident_id,
-    )
-    return row is not None
-
-
 async def _stamp_clean(conn, *, company_id, incident_id) -> None:
     await conn.execute(
         """
@@ -123,6 +116,26 @@ async def _company_client_users(conn, company_id, cache: dict) -> list:
     return users
 
 
+async def _hr_notify_user_ids(conn, company_id, all_clients: list) -> list:
+    """Who gets told a policy match was found: the company's DESIGNATED HR
+    approvers (clients.is_hr_approver), falling back to every client user when
+    nobody is designated. Same resolution rule as
+    discipline_notifications._designated_approver_user_ids — a finding is an
+    approval-queue event, so it must not be broadcast wider than the approval
+    request that follows it."""
+    rows = await conn.fetch(
+        """
+        SELECT u.id
+        FROM clients c JOIN users u ON u.id = c.user_id
+        WHERE c.company_id = $1 AND u.role = 'client' AND u.is_active = true
+          AND c.is_hr_approver = true
+        """,
+        company_id,
+    )
+    designated = [r["id"] for r in rows]
+    return designated or all_clients
+
+
 async def _open_thread(conn, *, company_id, incident, result, clients_cache) -> bool:
     """Open a pre-briefed Huume thread for this finding, in one transaction
     with the ledger stamp. Returns True if a thread was opened."""
@@ -130,6 +143,7 @@ async def _open_thread(conn, *, company_id, incident, result, clients_cache) -> 
     if not clients:
         return False
     owner_user_id = clients[0]
+    recipients = await _hr_notify_user_ids(conn, company_id, clients)
 
     title, body = build_finding_briefing(incident, result)
     violations = result.get("violations") or []
@@ -156,7 +170,7 @@ async def _open_thread(conn, *, company_id, incident, result, clients_cache) -> 
         )
         await conn.execute("UPDATE mw_threads SET updated_at = NOW() WHERE id = $1", thread_id)
 
-        for user_id in clients:
+        for user_id in recipients:
             await conn.execute(
                 """
                 INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
@@ -178,10 +192,10 @@ async def _open_thread(conn, *, company_id, incident, result, clients_cache) -> 
             company_id, incident["id"], thread_id, len(violations),
         )
         if stamped is None:
-            # Concurrent run beat us to this incident between the caller's
-            # _already_checked check and here — roll the whole unit back
-            # rather than leave a duplicate thread with no ledger row to
-            # suppress the next run.
+            # A concurrent run beat us to this incident between the scan's
+            # NOT EXISTS prefilter and here — roll the whole unit back rather
+            # than leave a duplicate thread with no ledger row to suppress the
+            # next run.
             raise _AlreadyStamped(str(incident["id"]))
     return True
 

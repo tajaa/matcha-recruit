@@ -164,22 +164,31 @@ async def create_er_copilot(conn):
                 signature_envelope_id VARCHAR(255),
                 signed_pdf_storage_path VARCHAR(500),
                 meeting_held_at TIMESTAMPTZ,
-                -- from discipcomp01 (deterministic leave-overlap compliance gate)
-                occurrence_dates JSONB DEFAULT '[]',
+                -- from discipcomp01 (deterministic leave-overlap compliance gate).
+                -- occurrence_dates MUST be DATE[] to match discipcomp01 — the engine
+                -- writes a list of date objects through a $n::date[] cast, so a JSONB
+                -- column here breaks every discipline write on a bootstrap-only DB.
+                occurrence_dates DATE[] NOT NULL DEFAULT '{}',
                 compliance_check JSONB,
                 advisory_ack_reason TEXT,
                 situation_narrative TEXT,
                 -- from trainint01 (remedial training provenance)
-                remedial_requirement_id UUID REFERENCES training_requirements(id) ON DELETE SET NULL,
+                -- NOTE: no REFERENCES on the training_requirements / ir_incidents columns
+                -- below. create_er_copilot is the 3rd bootstrap module; create_incidents
+                -- is the 4th and create_training the 14th (see bootstrap/__init__.py —
+                -- the call order is load-bearing), so an inline FK to either table fails
+                -- a fresh init_db() with UndefinedTableError. The real FKs are installed
+                -- by trainint01 / discipapp01 on any migrated database.
+                remedial_requirement_id UUID,
                 -- from discipapp01 (incident-triggered discipline + HR approval)
                 approval_status VARCHAR(20) NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required', 'pending', 'approved', 'denied')),
                 approval_requested_at TIMESTAMPTZ,
                 approved_by UUID REFERENCES users(id),
                 approval_decided_at TIMESTAMPTZ,
                 denial_reason TEXT,
-                source_incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
+                source_incident_id UUID,
                 template_id UUID REFERENCES company_discipline_templates(id) ON DELETE SET NULL,
-                pending_remedial_requirement_id UUID REFERENCES training_requirements(id) ON DELETE SET NULL,
+                pending_remedial_requirement_id UUID,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -253,11 +262,13 @@ async def create_er_copilot(conn):
         # Discipline policy sweep dedupe ledger (Celery discipline_policy_sweep task).
         # One row per incident, ever — thread_id NULL means "checked, nothing found",
         # which must also be stamped or a clean incident gets re-Gemini'd every cycle.
+        # incident_id carries no FK here for the same ordering reason as above:
+        # ir_incidents does not exist yet when this module runs. discipapp01 installs it.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS discipline_policy_sweep_log (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-                incident_id UUID NOT NULL UNIQUE REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                incident_id UUID NOT NULL UNIQUE,
                 thread_id UUID,
                 finding_count INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

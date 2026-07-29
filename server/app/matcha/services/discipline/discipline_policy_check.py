@@ -126,15 +126,17 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
         return _unavailable_result()
 
     raw_violations = (data.get("violations") or [])[:_MAX_VIOLATIONS]
-    # Build an evidence_map shape validate_citations can gate: one entry per
-    # violation, keyed on its own policy_cid.
+    # validate_citations' contract (services/_shared/citations.py) is
+    # [{"point": str, "cited_ids": [str]}] -> ([{"point", "cited_ids"}], [dropped]).
+    # One entry per violation, its single policy_cid as the sole cited id, so a
+    # violation survives exactly when its cid is in the index.
     evidence_map = [
-        {"cid": v.get("policy_cid"), "claim": v.get("reasoning") or ""}
+        {"point": str(v.get("reasoning") or ""), "cited_ids": [v["policy_cid"]]}
         for v in raw_violations
         if v.get("policy_cid")
     ]
     clean_map, dropped = validate_citations(evidence_map, index)
-    clean_cids = {e["cid"] for e in clean_map}
+    clean_cids = {cid for entry in clean_map for cid in entry.get("cited_ids") or []}
 
     violations = [
         {

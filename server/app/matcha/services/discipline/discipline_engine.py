@@ -583,6 +583,19 @@ async def transition_status(
 
 # ── Approval workflow ───────────────────────────────────────────────────
 
+def _has_advisories(compliance_check: Any) -> bool:
+    """Whether a frozen compliance verdict carried advisories. Pure, tolerant of
+    the raw JSONB string in case a caller passes an un-decoded row."""
+    if isinstance(compliance_check, str):
+        try:
+            compliance_check = json.loads(compliance_check)
+        except (json.JSONDecodeError, ValueError):
+            return False
+    if not isinstance(compliance_check, dict):
+        return False
+    return bool(compliance_check.get("advisories"))
+
+
 async def approve_record(
     conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID,
 ) -> Optional[dict[str, Any]]:
@@ -591,8 +604,14 @@ async def approve_record(
       1. Guarded UPDATE approval_status 'pending' -> 'approved' (tenant + state
          checked in the WHERE; None on a wrong company/state — the caller 409s).
       2. Assign any staged remedial training (GAP-2: deferred at draft time,
-         assigned now that HR has signed off) and copy the requirement id
-         from pending_remedial_requirement_id into remedial_requirement_id.
+         assigned now that HR has signed off), MOVE the requirement id from
+         pending_remedial_requirement_id into remedial_requirement_id (the
+         pending column is cleared — a record can't be both staged and assigned),
+         and stamp advisory_ack_reason when the frozen compliance verdict carried
+         advisories. The direct-issue route 409s until HR types an ack reason;
+         on this path HR approval IS the acknowledgment, so the column stops
+         being NULL on exactly the records that had something to acknowledge.
+         Denial deliberately leaves it NULL — nothing was acknowledged.
       3. transition_status(draft -> pending_meeting) — passes the guard above
          because approval_status is now 'approved'. Approval IS the issue step.
       4. write_audit('approval_approved') + write_audit('issued').
@@ -614,7 +633,9 @@ async def approve_record(
         if not row:
             return None
 
-        record = dict(row)
+        # _row_to_dict, not dict() — it decodes the compliance_check JSONB, which
+        # the advisory-ack stamp below reads.
+        record = _row_to_dict(row) or {}
         pending_req = record.get("pending_remedial_requirement_id")
         if pending_req is not None:
             requirement = await conn.fetchrow(
@@ -634,9 +655,21 @@ async def approve_record(
                     assigned_by=actor_user_id,
                 )
             await conn.execute(
-                "UPDATE progressive_discipline SET remedial_requirement_id = $2 WHERE id = $1",
+                "UPDATE progressive_discipline "
+                "SET remedial_requirement_id = $2, pending_remedial_requirement_id = NULL "
+                "WHERE id = $1",
                 discipline_id, pending_req,
             )
+            record["remedial_requirement_id"] = pending_req
+            record["pending_remedial_requirement_id"] = None
+
+        if _has_advisories(record.get("compliance_check")) and not (record.get("advisory_ack_reason") or "").strip():
+            ack = f"Acknowledged by HR approval (user {actor_user_id})."
+            await conn.execute(
+                "UPDATE progressive_discipline SET advisory_ack_reason = $2 WHERE id = $1",
+                discipline_id, ack,
+            )
+            record["advisory_ack_reason"] = ack
 
         await write_audit(conn, discipline_id, actor_user_id, "approval_approved")
 

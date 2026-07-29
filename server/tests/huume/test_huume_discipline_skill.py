@@ -4,8 +4,11 @@ executors, and the record_view/agent wiring for the fifth show_record type.
 
     cd server && ./venv/bin/python -m pytest tests/huume/test_huume_discipline_skill.py -q
 
-discipline_from_incident DOES re-run the hard-stop classifier (unlike
-ir_report/er_case) — it's a discipline write-up, same rule as discipline_draft.
+discipline_from_incident re-runs the hard-stop classifier ONLY on a STANDALONE
+draft. With an incident_id the content already reached the company through its
+sanctioned legal-record channel (the ir_report asymmetry), and the classifier's
+safety patterns match nearly every real safety incident — re-running it there
+would refuse the flagship incident->discipline path outright.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -97,15 +100,49 @@ class TestDisciplineFromIncidentValidation:
         )
         assert verdict.kind == "refuse"
 
-    def test_hard_stop_reruns_on_confirm(self):
+    def test_hard_stop_reruns_on_confirm_for_a_standalone_draft(self):
         verdict = evaluate_huume_action(
             staged_action=_staged_draft(
+                incident_id=None,
                 infraction_type="policy_violation",
                 description="Employee filed a complaint alleging discrimination by a coworker.",
             ),
             features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
         )
         assert verdict.kind == "refuse"
+
+    def test_incident_sourced_safety_narrative_proceeds(self):
+        """The carve-out that makes the skill usable: an incident is already the
+        company's filed legal record of this conduct, and an approver reviews the
+        write-up before anything issues. Without it the supervisor-surface
+        workplace_safety patterns (`injury`, `accident`, `bleeding`, `OSHA`)
+        refuse nearly every real safety incident's own narrative."""
+        narrative = "Employee removed the machine guard; the resulting accident caused an injury to a coworker."
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(infraction_type="safety", description=narrative),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "proceed"
+
+    def test_same_narrative_standalone_is_refused(self):
+        narrative = "Employee removed the machine guard; the resulting accident caused an injury to a coworker."
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(incident_id=None, infraction_type="safety", description=narrative),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "refuse"
+
+    def test_severity_vocabulary_matches_the_engine(self):
+        """A narrower set here silently downgrades the record: an unrecognized
+        severity becomes None and then the executor's "moderate" default."""
+        from app.matcha.services.discipline.discipline_engine import VALID_SEVERITIES
+        assert actions._DISCIPLINE_SEVERITIES == set(VALID_SEVERITIES)
+        verdict = evaluate_huume_action(
+            staged_action=_staged_draft(severity="immediate_written"),
+            features=_features(), role="client", thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert verdict.kind == "proceed"
+        assert verdict.action["severity"] == "immediate_written"
 
     def test_ordinary_attendance_narrative_is_not_hard_stopped(self):
         verdict = evaluate_huume_action(
@@ -330,6 +367,94 @@ class TestDisciplineSkillExecute:
 
         assert result["status"] == "created"
         assert len(result["bg_tasks"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_decision_label_reads_denied_not_denyd(self, monkeypatch):
+        conn = MagicMock()
+
+        def _conn_ctx():
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=conn)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx()))
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_engine.deny_record",
+            AsyncMock(return_value={"id": RECORD_ID, "approval_status": "denied"}),
+        )
+
+        result = await discipline_skill.execute(
+            company_id=uuid4(), actor_user_id=uuid4(),
+            action={"type": "discipline_decision", "record_id": RECORD_ID, "decision": "deny", "reason": "x" * 25},
+        )
+        assert result["record_label"] == "Discipline decision — denied"
+
+
+class TestStageEnrichment:
+    """The staged dict the Huume panel renders. employee_name is display-only —
+    the executor always uses employee_id — but without it every banner reads
+    "Stage disciplinary action for employee"."""
+
+    @pytest.mark.asyncio
+    async def test_adds_employee_name_for_display(self):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": EMP_ID, "first_name": "Jane", "last_name": "Doe",
+            "job_title": "RDA", "manager_id": None,
+        })
+        conn.fetch = AsyncMock(return_value=[])       # no templates
+        conn.fetchval = AsyncMock(return_value=None)
+
+        enriched = await discipline_skill.stage_enrichment(
+            conn, company_id=uuid4(),
+            staged={"employee_id": EMP_ID, "infraction_type": "attendance",
+                    "description": "Missed shifts.", "incident_id": None},
+        )
+        assert enriched["employee_name"] == "Jane Doe"
+
+    @pytest.mark.asyncio
+    async def test_unknown_employee_returns_the_staged_dict_untouched(self):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value=None)
+        staged = {"employee_id": EMP_ID, "infraction_type": "attendance", "description": "d"}
+
+        enriched = await discipline_skill.stage_enrichment(conn, company_id=uuid4(), staged=staged)
+        assert enriched == staged
+        assert "employee_name" not in enriched
+
+
+class TestCheckIncidentPolicyFeatureGate:
+    @pytest.mark.asyncio
+    async def test_handbooks_off_is_module_off_not_a_clean_result(self, monkeypatch):
+        """Three-state: without a corpus there is nothing to check against, and an
+        empty violations list would read as "your handbook has nothing relevant"."""
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": INCIDENT_ID, "title": "t", "description": "d",
+            "incident_type": "safety", "severity": "high", "incident_number": "IR-1",
+        })
+
+        def _conn_ctx():
+            cm = MagicMock()
+            cm.__aenter__ = AsyncMock(return_value=conn)
+            cm.__aexit__ = AsyncMock(return_value=False)
+            return cm
+
+        monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx()))
+        monkeypatch.setattr(
+            "app.core.feature_flags.get_company_features",
+            AsyncMock(return_value={"handbooks": False}),
+        )
+        check = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incident_against_handbook", check,
+        )
+
+        result = await discipline_skill.check_incident_policy(company_id=uuid4(), incident_id=INCIDENT_ID)
+
+        assert result["status"] == "module_off"
+        check.assert_not_awaited()
 
 
 class TestRecordViewParity:

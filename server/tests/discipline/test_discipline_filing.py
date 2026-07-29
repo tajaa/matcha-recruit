@@ -5,6 +5,7 @@ second signed letter), and filing never raises.
     cd server && ./venv/bin/python -m pytest tests/discipline/test_discipline_filing.py -q
 """
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -23,7 +24,8 @@ def _record(**overrides):
         "id": RECORD_ID, "company_id": COMPANY_ID, "employee_id": EMPLOYEE_ID,
         "discipline_type": "written_warning", "issued_date": "2026-07-28",
         "signed_pdf_storage_path": "s3://bucket/discipline-signed.pdf",
-        "signature_completed_at": "2026-07-29T00:00:00Z",
+        # tz-AWARE, exactly as asyncpg hands back a TIMESTAMPTZ column
+        "signature_completed_at": datetime(2026, 7, 29, tzinfo=timezone.utc),
         "source_incident_id": None,
     }
     base.update(overrides)
@@ -56,6 +58,24 @@ class TestFileSignedLetter:
         assert args[0] == COMPANY_ID  # org_id positional
         assert args[1] == EMPLOYEE_ID
         assert args[2] == filing.signed_letter_doc_type(RECORD_ID)
+
+    @pytest.mark.asyncio
+    async def test_signed_at_uses_now_not_a_tz_aware_param(self):
+        """employee_documents.signed_at is a naive TIMESTAMP; the discipline
+        record's signature_completed_at is TIMESTAMPTZ. Binding the latter to the
+        former raises inside asyncpg, and file_signed_letter swallows everything —
+        so the row would silently never be written. NOW() is the only safe form."""
+        conn = MagicMock()
+        conn.execute = AsyncMock(return_value=None)
+        conn.fetchval = AsyncMock(return_value=None)
+
+        await filing.file_signed_letter(conn, _record())
+
+        query, *args = conn.execute.await_args.args
+        assert "NOW()" in query
+        assert not any(
+            isinstance(a, datetime) and a.tzinfo is not None for a in args
+        ), "no tz-aware datetime may be bound into the naive signed_at column"
 
     @pytest.mark.asyncio
     async def test_incident_row_only_when_source_incident_set(self):

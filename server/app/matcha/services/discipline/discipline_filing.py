@@ -60,10 +60,19 @@ async def _file_employee_document(conn, record: dict[str, Any]) -> None:
     title = f"Disciplinary action — {discipline_type} ({issued_date})" if issued_date else f"Disciplinary action — {discipline_type}"
 
     # Tenant column on employee_documents is org_id, not company_id.
+    #
+    # signed_at is written with NOW(), NOT the record's signature_completed_at.
+    # progressive_discipline.signature_completed_at is TIMESTAMPTZ (asyncpg hands
+    # back a tz-AWARE datetime) while employee_documents.signed_at is a naive
+    # TIMESTAMP — encoding one into the other raises inside asyncpg, and because
+    # this whole module never raises, the failure would surface only as a log line
+    # and no document row would ever be filed. Every other writer of this column
+    # (employee_portal/documents.py, offer_letters.py) uses NOW() for the same
+    # reason. The exact signature timestamp stays on the discipline record.
     await conn.execute(
         """
         INSERT INTO employee_documents (org_id, employee_id, doc_type, title, storage_path, status, signed_at)
-        VALUES ($1, $2, $3, $4, $5, 'signed', $6)
+        VALUES ($1, $2, $3, $4, $5, 'signed', NOW())
         ON CONFLICT (employee_id, doc_type) WHERE status IN ('pending_signature', 'signed') DO NOTHING
         """,
         record["company_id"],
@@ -71,7 +80,6 @@ async def _file_employee_document(conn, record: dict[str, Any]) -> None:
         signed_letter_doc_type(record["id"]),
         title,
         storage_path,
-        record.get("signature_completed_at"),
     )
 
 

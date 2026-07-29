@@ -275,6 +275,74 @@ class TestApproveDenyRecord:
         assert result["status"] == "pending_meeting"
         assert result["approval_status"] == "approved"
 
+        # The staged column is CLEARED as the id moves across — a record must not
+        # read as both "training staged" and "training assigned".
+        moves = [
+            c.args for c in conn.execute.await_args_list
+            if "remedial_requirement_id" in c.args[0]
+        ]
+        assert len(moves) == 1
+        assert "pending_remedial_requirement_id = NULL" in moves[0][0]
+
+    @pytest.mark.asyncio
+    async def test_approve_stamps_advisory_ack_when_the_verdict_had_advisories(self, monkeypatch):
+        """POST /records 409s until HR types an ack reason. On the approval path HR
+        approval IS the acknowledgment, so the column must not stay NULL on exactly
+        the records that carried advisories."""
+        conn = MagicMock()
+        monkeypatch.setattr(f"{MOD}._assign_training", AsyncMock())
+
+        approved_row = {c.strip(): None for c in discipline_engine.RECORD_COLUMNS.split(",")}
+        approved_row.update({
+            "id": NEW_ID, "company_id": COMPANY_ID, "employee_id": EMPLOYEE_ID,
+            "discipline_type": "verbal_warning", "approval_status": "approved", "status": "draft",
+            "pending_remedial_requirement_id": None, "advisory_ack_reason": None,
+            "compliance_check": {"blocks": [], "advisories": [{"detail": "recent protected leave"}]},
+            "occurrence_dates": [],
+        })
+
+        async def fetchrow(query, *args):
+            if "SET approval_status = 'approved'" in query:
+                return approved_row
+            return None
+
+        conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.execute = AsyncMock(return_value=None)
+        conn.transaction = MagicMock(return_value=_noop_transaction())
+
+        await discipline_engine.approve_record(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        )
+
+        acks = [c.args for c in conn.execute.await_args_list if "advisory_ack_reason" in c.args[0]]
+        assert len(acks) == 1
+        query, discipline_id, ack = acks[0]
+        assert discipline_id == NEW_ID
+        assert str(ACTOR_ID) in ack
+
+    @pytest.mark.asyncio
+    async def test_approve_does_not_stamp_ack_without_advisories(self, monkeypatch):
+        conn = MagicMock()
+        monkeypatch.setattr(f"{MOD}._assign_training", AsyncMock())
+
+        approved_row = {c.strip(): None for c in discipline_engine.RECORD_COLUMNS.split(",")}
+        approved_row.update({
+            "id": NEW_ID, "company_id": COMPANY_ID, "employee_id": EMPLOYEE_ID,
+            "discipline_type": "verbal_warning", "approval_status": "approved", "status": "draft",
+            "pending_remedial_requirement_id": None, "advisory_ack_reason": None,
+            "compliance_check": {"blocks": [], "advisories": []}, "occurrence_dates": [],
+        })
+
+        conn.fetchrow = AsyncMock(side_effect=lambda q, *a: approved_row if "SET approval_status = 'approved'" in q else None)
+        conn.execute = AsyncMock(return_value=None)
+        conn.transaction = MagicMock(return_value=_noop_transaction())
+
+        await discipline_engine.approve_record(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        )
+
+        assert not [c for c in conn.execute.await_args_list if "advisory_ack_reason" in c.args[0]]
+
 
 class TestListRecordsApprovalFilter:
     @pytest.mark.asyncio

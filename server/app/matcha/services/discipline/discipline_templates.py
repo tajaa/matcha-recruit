@@ -39,10 +39,17 @@ def resolve_template(
     if not candidates:
         return None
 
+    def _sort_key(t: dict[str, Any]) -> tuple[int, Any]:
+        # (has_timestamp, timestamp) — rows with no timestamp at all sort last
+        # rather than seeding a `datetime > str` TypeError into max().
+        stamp = t.get("updated_at") or t.get("created_at")
+        return (1, stamp) if stamp is not None else (0, None)
+
     def _newest(rows: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
         if not rows:
             return None
-        return max(rows, key=lambda t: t.get("updated_at") or t.get("created_at") or "")
+        stamped = [t for t in rows if _sort_key(t)[0]]
+        return max(stamped, key=_sort_key) if stamped else rows[0]
 
     exact = [
         t for t in candidates
@@ -85,7 +92,8 @@ def render_template(body: str, values: dict[str, Optional[str]]) -> tuple[str, l
             return match.group(0)
         value = values.get(token)
         if value is None or value == "":
-            missing.append(token)
+            if token not in missing:      # a token repeated in the body is ONE missing field
+                missing.append(token)
             return ""
         return str(value)
 

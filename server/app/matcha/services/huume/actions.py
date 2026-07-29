@@ -109,7 +109,10 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
 # rather than hr_pilot_actions or hr_ops_skill (see execute_huume_action).
 _DISCIPLINE_SKILL_ACTIONS = frozenset({"discipline_from_incident", "discipline_decision"})
 _DISCIPLINE_TYPES = frozenset({"verbal_warning", "written_warning", "pip", "final_warning", "suspension"})
-_DISCIPLINE_SEVERITIES = frozenset({"minor", "moderate", "severe"})
+# Mirrors discipline_engine.VALID_SEVERITIES exactly — a narrower set here is
+# silently lossy: an unrecognized value becomes None and then the executor's
+# "moderate" default, downgrading the record without telling anyone.
+_DISCIPLINE_SEVERITIES = frozenset({"minor", "moderate", "severe", "immediate_written"})
 _DISCIPLINE_INFRACTION_TYPES = frozenset({"attendance", "performance", "safety", "policy_violation"})
 _MIN_DENIAL_REASON_CHARS = 20
 
@@ -406,11 +409,17 @@ def _validate_pto_decision(staged: dict[str, Any]) -> HuumeVerdict:
 
 
 def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
-    """Confirm-turn validation for a staged incident-triggered discipline
-    draft. Unlike _validate_ir_report/_validate_er_case, this DOES re-run the
-    hard-stop classifier: the content here is a discipline write-up (the same
-    reasoning as discipline_draft), not an incident narrative being filed
-    through its sanctioned channel."""
+    """Confirm-turn validation for a staged incident-triggered discipline draft.
+
+    Hard-stop asymmetry, deliberate: the classifier re-runs ONLY on a STANDALONE
+    draft (no incident_id). A draft sourced from a filed incident describes
+    content that already reached the company through its sanctioned legal-record
+    channel — the same reasoning `_validate_ir_report` relies on — and the
+    supervisor-surface workplace_safety patterns (`injur*`, `accident`,
+    `bleeding`, `hospital`, `OSHA`) match nearly every real safety incident's own
+    narrative, so re-running the gate there would refuse the flagship
+    incident->discipline path outright. Standalone drafts keep the full hard
+    stop, identical to `discipline_draft`."""
     employee_id = staged.get("employee_id")
     if not _is_uuid(employee_id):
         return HuumeVerdict(
@@ -450,14 +459,18 @@ def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
 
     expected_improvement = str(staged.get("expected_improvement") or "").strip() or None
 
-    gate_text = " ".join([infraction_type, description, str(expected_improvement or "")])
-    from app.matcha.services.pilots.hr_pilot_escalation import classify_message
-    gate = classify_message(gate_text)
-    if gate.hard_stop:
-        return HuumeVerdict(
-            kind="refuse",
-            message=gate.notice or "This needs to go to corporate HR rather than being filed here.",
-        )
+    if incident_id is None:
+        # Standalone draft only — see the docstring for why an incident-sourced
+        # one is exempt. Gate text is the narrative fields only, never the
+        # infraction_type label.
+        gate_text = " ".join([description, str(expected_improvement or "")])
+        from app.matcha.services.pilots.hr_pilot_escalation import classify_message
+        gate = classify_message(gate_text)
+        if gate.hard_stop:
+            return HuumeVerdict(
+                kind="refuse",
+                message=gate.notice or "This needs to go to corporate HR rather than being filed here.",
+            )
 
     return HuumeVerdict(kind="proceed", message="", action={
         "type": "discipline_from_incident",

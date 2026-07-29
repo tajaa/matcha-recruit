@@ -43,6 +43,21 @@ async def check_incident_policy(*, company_id: UUID, incident_id: str) -> dict[s
         if not incident:
             return {"status": "not_found", "message": "I don't see that incident for this company."}
 
+        # Three-state, same idiom as hr_pilot_corpus: module OFF is a distinct
+        # answer from "on and found nothing". Without `handbooks` there is no
+        # corpus to check against, and an empty result would otherwise read as
+        # "your handbook has nothing relevant to this incident".
+        from app.core.feature_flags import get_company_features
+        features = await get_company_features(company_id, conn=conn)
+        if not features.get("handbooks"):
+            return {
+                "status": "module_off",
+                "message": (
+                    "Handbooks aren't enabled for this company, so there's nothing to check "
+                    "the incident against — this isn't a clean result, it's no corpus."
+                ),
+            }
+
         result = await check_incident_against_handbook(conn, company_id=company_id, incident=dict(incident))
         if not result.get("available"):
             return {"status": "error", "message": "The policy check is unavailable right now — try again shortly."}
@@ -107,6 +122,13 @@ async def stage_enrichment(conn, *, company_id: UUID, staged: dict[str, Any]) ->
         )
         if not employee:
             return enriched
+
+        # Display-only. The executor always uses employee_id; this exists so the
+        # panel's banner and doc viewer can name the person instead of rendering
+        # the literal word "employee".
+        enriched["employee_name"] = " ".join(
+            p for p in (employee["first_name"], employee["last_name"]) if p
+        ).strip() or None
 
         templates = await discipline_templates.list_templates(conn, company_id)
         template = discipline_templates.resolve_template(
@@ -283,6 +305,6 @@ async def _execute_discipline_decision(
         "status": "created",
         "message": f"{verb} the discipline record.",
         "record_id": str(updated["id"]),
-        "record_label": f"Discipline decision — {decision}d",
+        "record_label": f"Discipline decision — {verb.lower()}",
         "bg_tasks": [(_notify, (updated,), {})],
     }

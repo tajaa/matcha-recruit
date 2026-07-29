@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card, Textarea, useToast } from '../../../components/ui'
 import { ArrowLeft, Loader2, FileText, ShieldCheck, ShieldX } from 'lucide-react'
-import { useDisciplineRecord } from '../../../hooks/discipline/useDiscipline'
+import { useDisciplineApprovers, useDisciplineRecord } from '../../../hooks/discipline/useDiscipline'
 import SignatureWorkflow from '../../../components/discipline/SignatureWorkflow'
 import { api, ApiError } from '../../../api/client'
 import type {
@@ -64,6 +64,13 @@ export default function DisciplineDetail() {
   const { toast } = useToast()
 
   const [employee, setEmployee] = useState<EmployeeRow | null>(null)
+  // The approvers list is the only place a user id maps to a name here. It
+  // covers business admins (role='client'); a platform admin who approved
+  // simply doesn't resolve, and the banner degrades to the date alone.
+  const { approvers } = useDisciplineApprovers()
+  const approverName = record?.approved_by
+    ? approvers.find((a) => a.user_id === record.approved_by)?.name ?? null
+    : null
   const [showDenyForm, setShowDenyForm] = useState(false)
   const [denyReason, setDenyReason] = useState('')
   const [decisionBusy, setDecisionBusy] = useState(false)
@@ -211,6 +218,7 @@ export default function DisciplineDetail() {
           <div className="flex items-center gap-2 text-sm text-emerald-300">
             <ShieldCheck className="w-4 h-4" />
             Approved
+            {approverName && <span className="text-zinc-400">by {approverName}</span>}
             {record.approval_decided_at && (
               <span className="text-zinc-500">
                 on {new Date(record.approval_decided_at).toLocaleDateString()}

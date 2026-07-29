@@ -57,8 +57,12 @@ class TestCheckIncidentAgainstHandbook:
             }],
             "summary": "Likely sharps-handling violation.",
         })))
+        # NOTE: validate_citations is deliberately NOT patched here or below. It was,
+        # and the fake matched a contract the real function doesn't have ({"cid"} instead
+        # of {"point", "cited_ids"}), so both citation tests passed against code that
+        # raised KeyError the moment the model returned a violation. The real gate is
+        # pure and DB-free — there is nothing to fake.
         monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
-        monkeypatch.setattr(f"{MOD}.validate_citations", lambda evidence_map, index: (evidence_map, []))
 
         result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
 
@@ -80,18 +84,39 @@ class TestCheckIncidentAgainstHandbook:
         })))
         monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
 
-        def fake_validate(evidence_map, index):
-            clean = [e for e in evidence_map if e["cid"] in index]
-            dropped = [e["cid"] for e in evidence_map if e["cid"] not in index]
-            return clean, dropped
-
-        monkeypatch.setattr(f"{MOD}.validate_citations", fake_validate)
-
         result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
 
         assert len(result["violations"]) == 1
         assert result["violations"][0]["policy_cid"] == "handbook:1"
         assert "handbook:bogus" in result["dropped_citations"]
+        assert result["citations"] == ["handbook:1"]
+
+    @pytest.mark.asyncio
+    async def test_evidence_map_matches_validate_citations_contract(self, monkeypatch, patch_grounding):
+        """Pins the shape handed to the shared gate. The gate reads item['cited_ids']
+        and returns entries keyed on point/cited_ids — a {'cid': ...} map silently
+        drops every citation and then KeyErrors on the way out."""
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "violations": [{"policy_cid": "handbook:1", "policy_title": "Real",
+                            "relevance": "related", "confidence": 0.5, "reasoning": "ok"}],
+            "summary": "one",
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        real = dpc.validate_citations
+        seen = {}
+
+        def spy(evidence_map, index):
+            seen["map"] = evidence_map
+            return real(evidence_map, index)   # delegates to the REAL gate
+
+        monkeypatch.setattr(f"{MOD}.validate_citations", spy)
+
+        result = await dpc.check_incident_against_handbook(MagicMock(), company_id="c1", incident=INCIDENT)
+
+        assert seen["map"] == [{"point": "ok", "cited_ids": ["handbook:1"]}]
+        assert len(result["violations"]) == 1
 
     @pytest.mark.asyncio
     async def test_gemini_failure_degrades_available_false(self, monkeypatch, patch_grounding):
