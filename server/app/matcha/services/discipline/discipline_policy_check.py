@@ -221,24 +221,30 @@ async def _check_one(corpus: dict[str, Any], incident: dict[str, Any]) -> dict[s
         ]
         clean_map, dropped = validate_citations(evidence_map, index)
         clean_cids = {cid for entry in clean_map for cid in entry.get("cited_ids") or []}
+
+        # Kept inside the same try: `v.get("confidence")` is untrusted model
+        # output too (e.g. a string like "high" instead of a number) —
+        # shaping the response is not exempt from the "never raises" promise
+        # just because citation validation already succeeded. A single
+        # malformed field here used to escape uncaught and (in the batch
+        # path) take down every other incident's result with it.
+        violations = [
+            {
+                "policy_cid": v["policy_cid"],
+                "policy_title": _clean_title(
+                    str(v.get("policy_title") or index.get(v["policy_cid"], {}).get("title") or v["policy_cid"])
+                ),
+                "relevance": v.get("relevance") if v.get("relevance") in ("violated", "bent", "related") else "related",
+                "confidence": max(0.0, min(1.0, float(v.get("confidence") or 0))),
+                "reasoning": str(v.get("reasoning") or "")[:2000],
+                "relevant_excerpt": v.get("relevant_excerpt"),
+            }
+            for v in raw_violations
+            if v.get("policy_cid") in clean_cids
+        ]
     except Exception:
         logger.exception("[discipline_policy_check] Gemini check failed for incident %s", incident.get("id"))
         return _unavailable_result()
-
-    violations = [
-        {
-            "policy_cid": v["policy_cid"],
-            "policy_title": _clean_title(
-                str(v.get("policy_title") or index.get(v["policy_cid"], {}).get("title") or v["policy_cid"])
-            ),
-            "relevance": v.get("relevance") if v.get("relevance") in ("violated", "bent", "related") else "related",
-            "confidence": max(0.0, min(1.0, float(v.get("confidence") or 0))),
-            "reasoning": str(v.get("reasoning") or "")[:2000],
-            "relevant_excerpt": v.get("relevant_excerpt"),
-        }
-        for v in raw_violations
-        if v.get("policy_cid") in clean_cids
-    ]
 
     return {
         "violations": violations,
@@ -268,38 +274,73 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
 
 async def check_incidents_against_handbook(
     conn, *, company_id: UUID, incidents: list[dict[str, Any]], concurrency: int = 3,
+    budget_seconds: Optional[float] = None,
 ) -> dict[str, dict[str, Any]]:
     """Batch check: builds the corpus ONCE for the whole batch (the expensive
     part is per-company, not per-incident) instead of the N grounding builds
     a naive loop over `check_incident_against_handbook` would pay for.
 
     `_check_one` calls run concurrently under a semaphore (safe — no `conn`
-    use inside), then each available result is persisted SEQUENTIALLY on the
-    caller's single `conn` (asyncpg connections aren't concurrency-safe).
+    use inside); each result is persisted as it lands (SEQUENTIALLY, on the
+    caller's single `conn` — asyncpg connections aren't concurrency-safe),
+    not batched up after every task finishes.
+
+    `budget_seconds`, if given, bounds the WHOLE batch. This is deliberately
+    an INTERNAL deadline rather than the caller wrapping this call in
+    `asyncio.wait_for`: cancelling this coroutine from the outside would
+    cancel it mid-persist-loop and throw away every already-completed (and
+    already-billed) Gemini check along with the ones still running. Instead,
+    once the budget expires, whatever has already completed and been
+    persisted is returned; any incident whose task hadn't finished yet is
+    simply ABSENT from the returned dict — the caller (Huume's
+    `find_candidates`) already treats a missing id as "not yet checked", not
+    a failure, so this needs no special-casing there.
 
     Never raises: a corpus-build failure degrades EVERY incident to
     `_unavailable_result()`; a single incident's Gemini failure degrades only
-    that incident, the rest of the batch is unaffected.
+    that incident (defense in depth: `_bounded` below is also guarded, in
+    case a future `_check_one` change reintroduces something that raises).
 
-    Returns `{str(incident["id"]): result}`.
+    Returns `{str(incident["id"]): result}` — a subset of the input ids when
+    `budget_seconds` cuts the batch off early.
     """
     corpus = await _build_check_corpus(conn, company_id)
     if corpus is None:
         return {str(inc["id"]): _unavailable_result() for inc in incidents}
 
     sem = asyncio.Semaphore(max(1, concurrency))
+    by_incident = {str(inc["id"]): inc for inc in incidents}
 
-    async def _bounded(inc: dict[str, Any]) -> dict[str, Any]:
+    async def _bounded(inc: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        inc_id = str(inc["id"])
         async with sem:
-            return await _check_one(corpus, inc)
+            try:
+                return inc_id, await _check_one(corpus, inc)
+            except Exception:
+                logger.exception("[discipline_policy_check] _check_one raised unexpectedly for incident %s", inc_id)
+                return inc_id, _unavailable_result()
 
-    results = await asyncio.gather(*(_bounded(inc) for inc in incidents))
-    by_id = {str(inc["id"]): result for inc, result in zip(incidents, results)}
+    loop = asyncio.get_event_loop()
+    deadline = None if budget_seconds is None else loop.time() + budget_seconds
+    pending = {asyncio.ensure_future(_bounded(inc)) for inc in incidents}
+    by_id: dict[str, dict[str, Any]] = {}
 
-    for inc in incidents:
-        result = by_id[str(inc["id"])]
-        if result.get("available"):
-            await persist_policy_check(conn, incident_id=inc["id"], result=result)
+    try:
+        while pending:
+            wait_timeout = None if deadline is None else max(0.0, deadline - loop.time())
+            if wait_timeout == 0.0:
+                break
+            done, pending = await asyncio.wait(pending, timeout=wait_timeout, return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                break  # budget expired with nothing new finished
+            for task in done:
+                inc_id, result = task.result()  # _bounded never raises — see above
+                by_id[inc_id] = result
+                if result.get("available"):
+                    await persist_policy_check(conn, incident_id=by_incident[inc_id]["id"], result=result)
+    finally:
+        for task in pending:
+            task.cancel()
 
     return by_id
 

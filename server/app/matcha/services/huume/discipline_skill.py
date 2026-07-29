@@ -11,18 +11,20 @@ existing HR-ops drain already implements.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services.ai_usage import feature_scope
+
 logger = logging.getLogger(__name__)
 
 # Discovery batch (find_candidates) tuning.
 _FRESH_CHECK_CAP = 6          # max fresh Gemini checks in one call
 _BATCH_BUDGET_SECONDS = 100   # bound on the whole fresh-check batch
+_NOT_YET_CHECKED_NUMBERS_CAP = 20  # cap the list; `count` stays exact regardless
 _RELEVANCE_RANK = {"violated": 2, "bent": 1, "related": 0}
 
 
@@ -256,14 +258,18 @@ async def find_candidates(
         fresh_rows: list[dict[str, Any]] = []
         not_yet_checked = list(overflow)
         if fresh_batch:
-            try:
-                batch_results = await asyncio.wait_for(
-                    check_incidents_against_handbook(conn, company_id=company_id, incidents=fresh_batch),
-                    timeout=_BATCH_BUDGET_SECONDS,
+            # `budget_seconds` is an INTERNAL deadline inside
+            # check_incidents_against_handbook, not an external
+            # asyncio.wait_for around this call — wrapping it externally
+            # would cancel the batch mid-persist-loop and discard every
+            # already-completed (and already-billed) Gemini check along
+            # with the ones still in flight. A result missing from
+            # `batch_results` because the budget expired is handled the
+            # same way as one that failed: folded into not_yet_checked below.
+            with feature_scope("matcha.huume.discipline_batch"):
+                batch_results = await check_incidents_against_handbook(
+                    conn, company_id=company_id, incidents=fresh_batch, budget_seconds=_BATCH_BUDGET_SECONDS,
                 )
-            except asyncio.TimeoutError:
-                batch_results = {}
-                logger.warning("[huume/discipline_skill] find_candidates batch check timed out (company=%s)", company_id)
 
             for row in fresh_batch:
                 result = batch_results.get(str(row["id"]))
@@ -299,7 +305,10 @@ async def find_candidates(
         "clean_count": clean_count,
         "not_yet_checked": {
             "count": len(not_yet_checked),
-            "incident_numbers": [r.get("incident_number") for r in not_yet_checked],
+            # Capped independently of `count` — a busy tenant's first scan
+            # can leave hundreds unchecked, and the full list adds nothing
+            # the count doesn't already say plainly.
+            "incident_numbers": [r.get("incident_number") for r in not_yet_checked[:_NOT_YET_CHECKED_NUMBERS_CAP]],
         },
     }
 

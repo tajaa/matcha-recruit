@@ -27,7 +27,13 @@ from google.genai import types
 
 from .tools import TOOLS, HuumeTool
 
-_FLASH = "gemini-3.6-flash"
+# Public — agent.py's own `_MODEL` alias reads this (kept there, not
+# re-literaled, so MODEL_PRICING lookups and any other "the model Huume
+# uses" reference track this catalog). Leading underscore would make that a
+# private-name reach-through; every other module-level name in this file
+# that outside code reads (TIERS, FALLBACK_TIER, HINT_INDEX, ...) is public
+# for the same reason.
+FLASH = "gemini-3.6-flash"
 
 
 @dataclass(frozen=True)
@@ -39,9 +45,9 @@ class HuumeTier:
 
 
 TIERS: dict[str, HuumeTier] = {
-    "lite":     HuumeTier(_FLASH, "none", _FLASH, "none"),
-    "standard": HuumeTier(_FLASH, None,   _FLASH, None),
-    "deep":     HuumeTier(_FLASH, "high", _FLASH, "low"),
+    "lite":     HuumeTier(FLASH, "none", FLASH, "none"),
+    "standard": HuumeTier(FLASH, None,   FLASH, None),
+    "deep":     HuumeTier(FLASH, "high", FLASH, "low"),
 }
 # Merlin's own rule: an unsure or failed routing decision lands in the
 # middle, never the cheap tier — the cheap tier is only for turns the

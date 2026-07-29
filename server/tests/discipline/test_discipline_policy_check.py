@@ -4,6 +4,7 @@ adjudicates; citation-gated; never raises.
     cd server && ./venv/bin/python -m pytest tests/discipline/test_discipline_policy_check.py -q
 """
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
@@ -356,4 +357,66 @@ class TestCheckIncidentsAgainstHandbookBatch:
 
         # persist_policy_check calls conn.execute once per available result —
         # the unavailable incident must not get a row written for it.
+        assert conn.execute.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_malformed_confidence_degrades_only_that_incident(self, monkeypatch, patch_grounding):
+        """A malformed `confidence` field (untrusted model output — e.g. a
+        string instead of a number) used to raise OUTSIDE _check_one's try,
+        which asyncio.gather (no return_exceptions) propagated out of the
+        whole batch, taking every other incident's already-good result down
+        with it. Must degrade only the one incident now."""
+        genai = MagicMock()
+        ok_resp = _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+        bad_resp = _fake_resp(json.dumps({
+            "violations": [{
+                "policy_cid": "handbook:1", "policy_title": "Sharps Handling",
+                "relevance": "violated", "confidence": "high", "reasoning": "not a number",
+            }],
+            "summary": "bad",
+        }))
+        genai.aio.models.generate_content = AsyncMock(side_effect=[ok_resp, bad_resp, ok_resp])
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        incidents = [
+            {**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}, {**INCIDENT, "id": "inc-3"},
+        ]
+        conn = _fake_conn()
+        results = await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents, concurrency=1)
+
+        available = {k: r["available"] for k, r in results.items()}
+        assert available == {"inc-1": True, "inc-2": False, "inc-3": True}
+
+    @pytest.mark.asyncio
+    async def test_budget_seconds_returns_and_persists_partial_batch(self, monkeypatch, patch_grounding):
+        """`budget_seconds` must be an INTERNAL deadline: a slow incident past
+        the budget is left out of the result (never cancelled mid-persist),
+        and whatever already completed is both returned AND persisted — not
+        thrown away because the whole call would otherwise look "timed out"
+        to an external asyncio.wait_for."""
+        call_count = 0
+
+        async def _generate(*, model, contents):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+            await asyncio.sleep(10)  # never resolves within the test's budget
+            return _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(side_effect=_generate)
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        incidents = [{**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}]
+        conn = _fake_conn()
+
+        results = await dpc.check_incidents_against_handbook(
+            conn, company_id="c1", incidents=incidents, concurrency=2, budget_seconds=0.05,
+        )
+
+        assert results.get("inc-1", {}).get("available") is True
+        assert "inc-2" not in results  # budget expired before its task finished
+        # Only inc-1's (available) result was persisted — the cutoff didn't
+        # discard work that had already completed and been billed.
         assert conn.execute.await_count == 1

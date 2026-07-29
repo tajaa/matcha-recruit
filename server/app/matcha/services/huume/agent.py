@@ -53,15 +53,20 @@ logger = logging.getLogger(__name__)
 
 # Kept as an alias (not re-literaled) so MODEL_PRICING lookups and any other
 # existing reference to "the model Huume uses" track routing.py's catalog —
-# every tier's planner/executor model is _FLASH today.
-_MODEL = routing._FLASH
+# every tier's planner/executor model is routing.FLASH today.
+_MODEL = routing.FLASH
 _MAX_MODEL_CALLS = 8
-# 240s, not the 150s the loop launched with: the pilot tools (ask_legal_pilot /
+# 300s, not the 150s the loop launched with: the pilot tools (ask_legal_pilot /
 # draft_handbook_content / generate_legal_packet) each embed their own
 # 90s-capped Gemini call, and a 150s budget could force-finish the turn before
 # the model gets one call to report a result it already paid for. The bound
 # still exists to stop runaway loops, not to race a single grounded analysis.
-_WALL_CLOCK_SECONDS = 240.0
+# Raised again from 240s when find_discipline_candidates landed: its batch
+# check is internally bounded at 100s (discipline_skill._BATCH_BUDGET_SECONDS)
+# — the single heaviest tool call in the loop today — and 240s left too
+# little room for the model to still report the result afterward, especially
+# on a deep-tier turn thinking hard across multiple model calls.
+_WALL_CLOCK_SECONDS = 300.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
 # Per-message cap in history — one long pilot answer in an earlier turn
@@ -193,9 +198,16 @@ def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[
 
 def _last_user_text(history: list[dict[str, Any]]) -> str:
     """The last user turn's raw text, for tier routing — `""` if there is
-    none. Pure; never raises on a malformed history entry."""
+    none. Pure; never raises on a malformed history entry.
+
+    Matches `role == "user"` explicitly rather than `role != "assistant"` —
+    matcha-work message roles are "user"/"assistant" only today, so the two
+    forms agree in practice, but a routing function should route on what a
+    user turn actually IS, not on what it happens not to be; a future role
+    (e.g. a genuine "system" notice) should not silently start driving tier
+    selection just because it isn't "assistant"."""
     for msg in reversed(history or []):
-        if msg.get("role") != "assistant":
+        if msg.get("role") == "user":
             return str(msg.get("content") or "")
     return ""
 

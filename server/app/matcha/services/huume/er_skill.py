@@ -27,12 +27,14 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from app.config import get_settings
+from app.core.services.ai_usage import feature_scope
+
 from .._shared.citations import _parse_json, validate_citations
 from .._shared.gemini import _genai
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-flash-preview"
 _GEMINI_TIMEOUT = 60
 _DOC_LIST_CAP = 20
 _DOC_SUMMARY_CHARS = 200
@@ -101,9 +103,30 @@ def _citation_records(cids: list[str], index: dict[str, Any]) -> list[dict[str, 
 
 
 def _analysis_headline(data: dict[str, Any]) -> str:
+    """Structural 1-line summary of a stored `er_case_analysis` row for
+    `case_brief` — a COUNT of whatever the analysis found, never its stored
+    free text. `case_brief`'s own contract (and its tool description) is
+    name-free: analysis rows are model-authored prose over this case's
+    documents (timeline, discrepancies, retaliation risk) and routinely name
+    the parties involved. Do NOT reuse this for `ask_case`'s grounding
+    corpus — that tool is the admin-facing, `er_copilot`-gated deep read and
+    is SUPPOSED to see real analysis content; use
+    `_analysis_corpus_summary` there instead. Pure."""
+    if not isinstance(data, dict):
+        return "Analysis on file."
+    for key, value in data.items():
+        if isinstance(value, list) and value:
+            return f"{len(value)} {key.replace('_', ' ')} on file."
+    return "Analysis on file."
+
+
+def _analysis_corpus_summary(data: dict[str, Any]) -> str:
     """Best-effort 1-line summary of a stored `er_case_analysis` row for
-    `case_brief` — the analyzer's per-type JSON shape isn't rigidly fixed,
-    so this degrades gracefully rather than assuming a schema. Pure."""
+    `ask_case`'s grounding corpus — unlike `_analysis_headline`, this is
+    allowed to (and meant to) carry real analysis content, since answering
+    "what did the timeline analysis find?" is the entire point of the tool.
+    The analyzer's per-type JSON shape isn't rigidly fixed, so this degrades
+    gracefully rather than assuming a schema. Pure."""
     if not isinstance(data, dict):
         return "Analysis on file."
     summary = data.get("summary") or data.get("overview")
@@ -165,7 +188,15 @@ async def case_brief(*, company_id: UUID, case_id: str) -> dict[str, Any]:
         }
 
     created_at = case["created_at"]
-    open_days = (datetime.now(timezone.utc) - created_at).days if created_at else None
+    open_days = None
+    if created_at:
+        # er_cases.created_at is a naive TIMESTAMP column (no tz) — asyncpg
+        # hands back a naive datetime, which can't be subtracted from an
+        # aware `now()`. Assume UTC, the column's actual write-time zone
+        # (every writer uses `datetime.now(timezone.utc)` / DB `NOW()` under
+        # UTC session settings).
+        aware_created_at = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        open_days = (datetime.now(timezone.utc) - aware_created_at).days
 
     return {
         "status": "ok",
@@ -217,6 +248,7 @@ async def ask_case(
     excerpts + stored analyses + jurisdiction requirements. Never raises —
     degrades to `{"status": "error", ...}` on any Gemini/grounding failure,
     same idiom as `discipline_policy_check`/`legal_skill.ask_matter`."""
+    from app.core.services.audit_log import insert_audit_log
     from app.database import get_connection
     from app.matcha.services.er import er_compliance_grounding
     from app.matcha.services.er.er_case_context import (
@@ -231,6 +263,17 @@ async def ask_case(
         case, err = await _resolve_case(conn, company_id, case_id, state_case_id)
         if err:
             return {"status": "error", "message": err}
+
+        # A grounded AI read over an ER case's own documents/analyses is a
+        # records-sensitive action on the same surface `/er/cases` audit-logs
+        # every analysis run on (see routes/er_copilot/analysis.py's
+        # `log_audit` calls) — leaving nothing behind here just because the
+        # request came from chat would be a silent gap in that trail.
+        await insert_audit_log(
+            conn, table="er_audit_log", id_column="case_id", id_value=case["id"],
+            user_id=actor_user_id, action="huume_ask_er_copilot", entity_type="er_case",
+            entity_id=case["id"], details={"via": "huume", "question": question[:500]},
+        )
 
         try:
             ctx = await load_guidance_context(conn, case["id"], case)
@@ -267,7 +310,7 @@ async def ask_case(
             data = {}
         index[f"ercase:analysis-{r['analysis_type']}"] = {
             "ref": r["analysis_type"].replace("_", " ").title(),
-            "summary": _analysis_headline(data),
+            "summary": _analysis_corpus_summary(data),
             "source": "er_case_analysis", "source_label": "Case analysis",
         }
 
@@ -295,11 +338,23 @@ QUESTION
 {question}
 """
 
+    # Same model `build_er_analyzer()` resolves for the standalone ER
+    # Copilot page (settings.analysis_model) — a hardcoded literal here would
+    # let the two surfaces silently diverge on model. Deliberately NOT
+    # routed through ERAnalyzer._generate_content_async itself: that method
+    # retries same-model on timeout and falls back across models, up to
+    # 2x its own 120s call timeout BEFORE trying a fallback — worse-case
+    # latency Huume's shared per-turn wall clock (300s across every tool
+    # call in the turn) can't absorb. Single bounded attempt instead, same
+    # shape as discipline_policy_check's and legal_defense's own Gemini
+    # calls from inside the Huume/pilot-bridge tools.
+    model = get_settings().analysis_model
     try:
-        resp = await asyncio.wait_for(
-            _genai().aio.models.generate_content(model=MODEL, contents=prompt),
-            timeout=_GEMINI_TIMEOUT,
-        )
+        with feature_scope("matcha.huume.er_copilot"):
+            resp = await asyncio.wait_for(
+                _genai().aio.models.generate_content(model=model, contents=prompt),
+                timeout=_GEMINI_TIMEOUT,
+            )
         data = _parse_json(getattr(resp, "text", "") or "")
 
         # Kept inside the same try as the Gemini call — see

@@ -768,6 +768,26 @@ class TestFindCandidates:
         assert result["candidates"][0]["policy_titles"] == ["New"]
 
     @pytest.mark.asyncio
+    async def test_batch_budget_is_passed_internally_not_wrapped_externally(self, monkeypatch):
+        """`_BATCH_BUDGET_SECONDS` must reach check_incidents_against_handbook
+        as its own `budget_seconds` kwarg — NOT via an external
+        asyncio.wait_for around the call, which would cancel the batch
+        mid-persist-loop and discard every already-completed check on a
+        timeout (see discipline_policy_check's own test for that behavior)."""
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[_incident_row(1)])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        batch_mock = AsyncMock(return_value={"inc-1": {"available": True, "violations": []}})
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", batch_mock,
+        )
+
+        await discipline_skill.find_candidates(company_id=uuid4())
+
+        assert batch_mock.await_args.kwargs["budget_seconds"] == discipline_skill._BATCH_BUDGET_SECONDS
+
+    @pytest.mark.asyncio
     async def test_over_cap_reports_not_yet_checked(self, monkeypatch):
         conn = MagicMock()
         rows = [_incident_row(i) for i in range(1, 9)]  # 8 unchecked, cap is 6

@@ -15,6 +15,39 @@ from app.matcha.services.huume.prompt import build_discovery_block, build_system
 from app.matcha.services.huume.tools import TOOLS
 
 
+class TestLastUserText:
+    """`agent._last_user_text` — feeds `routing.resolve_tier`. Matches
+    `role == "user"` explicitly, not `role != "assistant"`, so a future
+    non-user/non-assistant role (a genuine system notice) can't silently
+    start driving tier selection."""
+
+    def test_picks_the_last_user_message(self):
+        history = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ]
+        assert agent._last_user_text(history) == "second"
+
+    def test_trailing_assistant_message_is_skipped(self):
+        history = [
+            {"role": "user", "content": "which incidents need discipline?"},
+            {"role": "assistant", "content": "Here's what I found."},
+        ]
+        assert agent._last_user_text(history) == "which incidents need discipline?"
+
+    def test_non_user_non_assistant_role_is_not_picked_up(self):
+        history = [
+            {"role": "user", "content": "real question"},
+            {"role": "system", "content": "Offer accepted by candidate."},
+        ]
+        assert agent._last_user_text(history) == "real question"
+
+    def test_empty_history_is_empty_string(self):
+        assert agent._last_user_text([]) == ""
+        assert agent._last_user_text(None) == ""
+
+
 class TestHasPendingConfirmable:
     def test_staged_action_is_pending(self):
         assert routing.has_pending_confirmable({"huume_action": {"status": "proposed"}}) is True

@@ -6,6 +6,7 @@ citation-gated answer.
 """
 
 import json
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -77,13 +78,22 @@ class TestCaseBrief:
         conn.fetchrow = AsyncMock(return_value={
             "id": CASE_ID, "case_number": "ER-2026-07-AB12", "title": "Workplace complaint",
             "status": "open", "category": "harassment",
-            "created_at": None,
+            # er_cases.created_at is a naive TIMESTAMP column — asyncpg hands
+            # back a naive datetime (no tzinfo), the actual shape open_days
+            # must handle. A None fixture here would skip the arithmetic
+            # entirely and hide a naive/aware TypeError.
+            "created_at": datetime(2026, 6, 1),
             "involved_employees": json.dumps([{"employee_id": EMP_ID, "role": "complainant"}]),
         })
         conn.fetch = AsyncMock(side_effect=[
             [{"id": "doc-1", "filename": "statement.pdf", "document_type": "email"}],  # documents
-            [{"analysis_type": "timeline", "analysis_data": json.dumps({"summary": "3 events found."}),
-              "generated_at": None}],  # analyses
+            # summary/events text names the complainant on purpose — the
+            # stored analysis is model-authored prose over the case, and
+            # case_brief's headline must never copy it verbatim.
+            [{"analysis_type": "timeline", "analysis_data": json.dumps({
+                "summary": "3 events found involving Maria Chen.",
+                "events": [{"desc": "e1"}, {"desc": "e2"}, {"desc": "e3"}],
+            }), "generated_at": None}],  # analyses
         ])
         conn.fetchval = AsyncMock(return_value=2)  # notes_count
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
@@ -92,15 +102,28 @@ class TestCaseBrief:
 
         assert result["status"] == "ok"
         assert result["involved_count"] == 1
-        assert result["analyses"]["timeline"]["headline"] == "3 events found."
+        assert result["analyses"]["timeline"]["headline"] == "3 events on file."
         assert result["notes_count"] == 2
+        assert isinstance(result["open_days"], int) and result["open_days"] >= 0
 
         encoded = json.dumps(result)
         assert EMP_ID not in encoded  # no employee ids leak into the model-facing payload
         assert "complainant" not in encoded
+        assert "Maria Chen" not in encoded  # stored analysis free text must not leak either
 
 
 class TestAskCase:
+    @pytest.fixture(autouse=True)
+    def _stub_settings(self, monkeypatch):
+        # ask_case resolves its model via get_settings().analysis_model (same
+        # source build_er_analyzer uses for the standalone ER Copilot page) —
+        # settings aren't loaded in the unit test process, so every test in
+        # this class needs this stubbed regardless of whether it reaches the
+        # Gemini call.
+        settings = MagicMock()
+        settings.analysis_model = "gemini-3-flash-preview"
+        monkeypatch.setattr(f"{MOD}.get_settings", lambda: settings)
+
     @pytest.mark.asyncio
     async def test_no_case_id_anywhere_is_an_error(self, monkeypatch):
         conn = MagicMock()
@@ -127,6 +150,7 @@ class TestAskCase:
             "involved_employees": "[]",
         })
         conn.fetch = AsyncMock(return_value=[])  # analysis_rows
+        conn.execute = AsyncMock()  # insert_audit_log's write
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(
             "app.matcha.services.er.er_case_context.load_guidance_context",
@@ -155,6 +179,7 @@ class TestAskCase:
         conn.fetch = AsyncMock(return_value=[
             {"analysis_type": "timeline", "analysis_data": json.dumps({"summary": "ok"}), "generated_at": None},
         ])
+        conn.execute = AsyncMock()  # insert_audit_log's write
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(
             "app.matcha.services.er.er_case_context.load_guidance_context",
@@ -193,6 +218,7 @@ class TestAskCase:
             "id": CASE_ID, "case_number": "ER-1", "title": "Complaint", "involved_employees": "[]",
         })
         conn.fetch = AsyncMock(return_value=[])
+        conn.execute = AsyncMock()  # insert_audit_log's write
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(
             "app.matcha.services.er.er_case_context.load_guidance_context",
@@ -227,6 +253,7 @@ class TestAskCase:
             "id": CASE_ID, "case_number": "ER-1", "title": "Complaint", "involved_employees": "[]",
         })
         conn.fetch = AsyncMock(return_value=[])
+        conn.execute = AsyncMock()  # insert_audit_log's write
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(
             "app.matcha.services.er.er_case_context.load_guidance_context",
@@ -255,6 +282,7 @@ class TestAskCase:
             "id": CASE_ID, "case_number": "ER-1", "title": "Complaint", "involved_employees": "[]",
         })
         conn.fetch = AsyncMock(return_value=[])  # no analyses
+        conn.execute = AsyncMock()  # insert_audit_log's write
         monkeypatch.setattr("app.database.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(
             "app.matcha.services.er.er_case_context.load_guidance_context",
