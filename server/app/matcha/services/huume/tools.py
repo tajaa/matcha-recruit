@@ -31,7 +31,7 @@ LOOKUP_TOPICS = (
 
 # record_type values show_record accepts — the single source both the tool
 # schema's enum and record_view.py's dispatch table read from.
-SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential")
+SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "discipline")
 
 
 @dataclass(frozen=True)
@@ -291,6 +291,68 @@ TOOLS: tuple[HuumeTool, ...] = (
             "note": types.Schema(type=types.Type.STRING, description="Optional note recorded with the decision."),
         },
         required=["request_id", "decision"],
+    ),
+    # ---- Incident-triggered discipline skill (feature `discipline`) ---------
+    _tool(
+        "check_incident_policy", "read",
+        "Check a CLOSED incident's narrative against the company's handbook "
+        "and active policies for candidate policy violations, with citations. "
+        "Read-only — it reports possible matches, it never decides discipline "
+        "level or legality. Call this before draft_disciplinary_action when "
+        "the admin wants to know what an incident implicates.",
+        properties={"incident_id": types.Schema(type=types.Type.STRING)},
+        required=["incident_id"],
+    ),
+    _tool(
+        "draft_disciplinary_action", "staged",
+        "Stage a disciplinary action, optionally from a specific incident. "
+        "This STAGES it for the admin's confirmation — nothing is created "
+        "until they confirm on a LATER turn (pass confirm_id back exactly as "
+        "given). Unlike draft_discipline, a filed record here goes to HR "
+        "APPROVAL first — it is NOT issued directly. Takes employee_id, "
+        "never a name — call lookup_context first. NEVER for safety, "
+        "harassment, discrimination, or other legal/leave topics — route "
+        "those to corporate HR instead of drafting them.",
+        properties={
+            "employee_id": types.Schema(type=types.Type.STRING),
+            "incident_id": types.Schema(type=types.Type.STRING, description="Source incident, if any."),
+            "infraction_type": types.Schema(type=types.Type.STRING, enum=["attendance", "performance", "safety", "policy_violation"]),
+            "severity": types.Schema(type=types.Type.STRING, enum=["minor", "moderate", "severe"]),
+            "discipline_type": types.Schema(type=types.Type.STRING, enum=["verbal_warning", "written_warning", "pip", "final_warning", "suspension"]),
+            "occurrence_dates": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="ISO date(s) YYYY-MM-DD when the conduct occurred. Defaults to the incident's own date when omitted and incident_id is given.",
+            ),
+            "description": types.Schema(type=types.Type.STRING, description="Factual account of what happened, in the admin's words."),
+            "expected_improvement": types.Schema(type=types.Type.STRING),
+            "template_id": types.Schema(type=types.Type.STRING, description="Optional letter template id. Omit to let the server resolve the best match, or draft from scratch."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state' to file it.",
+            ),
+        },
+        required=["employee_id", "infraction_type", "description"],
+    ),
+    _tool(
+        "decide_disciplinary_action", "staged",
+        "Approve or deny a discipline record that is pending HR approval. "
+        "This STAGES the decision for the admin's confirmation; nothing "
+        "changes until they confirm on a LATER turn. Denial REQUIRES a "
+        "written reason (at least 20 characters) — it becomes part of the "
+        "legal record. Call list_pending_approvals first if you don't "
+        "already have the record_id.",
+        properties={
+            "record_id": types.Schema(type=types.Type.STRING),
+            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny"]),
+            "reason": types.Schema(type=types.Type.STRING, description="Required when decision='deny' — at least 20 characters."),
+        },
+        required=["record_id", "decision"],
+    ),
+    _tool(
+        "list_pending_approvals", "read",
+        "List this company's discipline records awaiting HR approval, with "
+        "their ids, employee, infraction type, and how long they've been "
+        "waiting.",
     ),
     # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
     _tool(

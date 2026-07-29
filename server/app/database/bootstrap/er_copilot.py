@@ -103,7 +103,40 @@ async def create_er_copilot(conn):
             ADD COLUMN IF NOT EXISTS pre_termination_check_id UUID
         """)
 
+        # Discipline letter templates — created before progressive_discipline
+        # so that table's template_id FK can reference it directly.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS company_discipline_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                name VARCHAR(255) NOT NULL,
+                infraction_type VARCHAR(64),
+                discipline_type VARCHAR(30),
+                body TEXT NOT NULL,
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_by UUID REFERENCES users(id),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_company_discipline_templates_default
+            ON company_discipline_templates(company_id) WHERE is_default AND is_active
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_company_discipline_templates_company
+            ON company_discipline_templates(company_id) WHERE is_active
+        """)
+
         # Progressive Discipline table
+        # NOTE: this CREATE is the fresh-DB source of truth; it must include
+        # every column later migrations added, or a bootstrap-only DB breaks
+        # on the first discipline read (discipline_engine.RECORD_COLUMNS
+        # selects columns this CREATE used to omit: occurrence_dates,
+        # compliance_check, advisory_ack_reason, situation_narrative,
+        # remedial_requirement_id — backfilled here alongside the
+        # incident-triggered-discipline columns from migration discipapp01).
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS progressive_discipline (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -115,7 +148,7 @@ async def create_er_copilot(conn):
                 description TEXT,
                 expected_improvement TEXT,
                 review_date DATE,
-                status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'pending_meeting', 'pending_signature', 'active', 'completed', 'expired', 'escalated')),
+                status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'pending_meeting', 'pending_signature', 'active', 'completed', 'expired', 'escalated', 'denied')),
                 outcome_notes TEXT,
                 documents JSONB DEFAULT '[]',
                 infraction_type VARCHAR(64) NOT NULL DEFAULT 'unspecified',
@@ -131,6 +164,22 @@ async def create_er_copilot(conn):
                 signature_envelope_id VARCHAR(255),
                 signed_pdf_storage_path VARCHAR(500),
                 meeting_held_at TIMESTAMPTZ,
+                -- from discipcomp01 (deterministic leave-overlap compliance gate)
+                occurrence_dates JSONB DEFAULT '[]',
+                compliance_check JSONB,
+                advisory_ack_reason TEXT,
+                situation_narrative TEXT,
+                -- from trainint01 (remedial training provenance)
+                remedial_requirement_id UUID REFERENCES training_requirements(id) ON DELETE SET NULL,
+                -- from discipapp01 (incident-triggered discipline + HR approval)
+                approval_status VARCHAR(20) NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required', 'pending', 'approved', 'denied')),
+                approval_requested_at TIMESTAMPTZ,
+                approved_by UUID REFERENCES users(id),
+                approval_decided_at TIMESTAMPTZ,
+                denial_reason TEXT,
+                source_incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
+                template_id UUID REFERENCES company_discipline_templates(id) ON DELETE SET NULL,
+                pending_remedial_requirement_id UUID REFERENCES training_requirements(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -151,6 +200,14 @@ async def create_er_copilot(conn):
             CREATE INDEX IF NOT EXISTS idx_progressive_discipline_signature_envelope
             ON progressive_discipline(signature_envelope_id)
             WHERE signature_envelope_id IS NOT NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_progressive_discipline_approval
+            ON progressive_discipline(company_id, approval_status) WHERE approval_status = 'pending'
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_progressive_discipline_source_incident
+            ON progressive_discipline(source_incident_id) WHERE source_incident_id IS NOT NULL
         """)
 
         # Discipline Policy Mapping (per-company config powering escalation engine)
@@ -191,6 +248,20 @@ async def create_er_copilot(conn):
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_discipline_audit_log_discipline
             ON discipline_audit_log(discipline_id, created_at DESC)
+        """)
+
+        # Discipline policy sweep dedupe ledger (Celery discipline_policy_sweep task).
+        # One row per incident, ever — thread_id NULL means "checked, nothing found",
+        # which must also be stamped or a clean incident gets re-Gemini'd every cycle.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discipline_policy_sweep_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                incident_id UUID NOT NULL UNIQUE REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                thread_id UUID,
+                finding_count INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
         """)
 
         # Agency Charges table

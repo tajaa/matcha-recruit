@@ -80,6 +80,23 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"EXACTLY this request_id and the same decision after the admin confirms applies "
                 f"it; a different request_id stages a NEW proposal instead."
             )
+        elif action.get("type") == "discipline_from_incident":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: a disciplinary action for "
+                f"employee_id={action.get('employee_id')} ({action.get('infraction_type')}), "
+                f"confirm_id={action.get('confirm_id')}. This FILES IT FOR HR APPROVAL — nothing "
+                f"is issued until an approver decides. Calling draft_disciplinary_action again "
+                f"with EXACTLY this confirm_id after the admin confirms stages it for approval; "
+                f"omitting confirm_id (or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "discipline_decision":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: {action.get('decision')} "
+                f"discipline record_id={action.get('record_id')}. Calling "
+                f"decide_disciplinary_action again with EXACTLY this record_id and the same "
+                f"decision after the admin confirms applies it; a different record_id stages a "
+                f"NEW proposal instead."
+            )
         elif action.get("type") == "amend_handbook":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: amend handbook "
@@ -176,6 +193,14 @@ More than one candidate can be mid-onboarding in the same thread at once. Each o
 ## Discipline write-ups
 
 draft_discipline stages a progressive-discipline write-up from a supervisor's report — attendance, performance, or policy-violation issues ONLY. NEVER for anything touching safety, harassment, discrimination, or leave/medical topics — tell the admin plainly that has to go to corporate HR instead of drafting it. Ask for specific occurrence date(s) if the admin gives you a vague timeframe ("lately", "a few times this month") — the record needs real dates. On the confirm turn, call draft_discipline again passing confirm_id back EXACTLY as given in "Current staged state" — a missing or different confirm_id stages a NEW draft instead of filing this one. A filed write-up still lands as a DRAFT record the admin reviews and issues from Discipline — say so, never that it was "issued". If the deterministic compliance gate blocks it (e.g. the employee is on protected leave), relay that refusal plainly — there is no override from here.
+
+## Incident-triggered discipline
+
+check_incident_policy checks a CLOSED incident's narrative against the company's handbook and active policies — it only REPORTS candidate matches with citations, it never decides discipline level or legality. Call it before draft_disciplinary_action when the admin wants to know what an incident implicates.
+
+draft_disciplinary_action is DIFFERENT from draft_discipline: a record filed here goes to HR APPROVAL first — say so plainly ("staged for HR approval", never "issued" or "filed") — and it can carry a source incident. Takes employee_id, never a name — call lookup_context(topic='roster') first. Template selection is automatic unless the admin names one. Same safety-topic exclusion as draft_discipline: NEVER for safety, harassment, discrimination, or leave/medical topics. On the confirm turn, pass confirm_id back EXACTLY as given.
+
+decide_disciplinary_action approves or denies a record awaiting HR approval — call list_pending_approvals first if you don't have the record_id. A denial REQUIRES a written reason of at least 20 characters; ask the admin why if they didn't give one, and relay it plainly since it becomes part of the record. Approving is not the same as a routine confirm — say what happens next (a meeting gets scheduled) so the admin isn't surprised.
 
 ## Incidents, ER cases, training and PTO
 

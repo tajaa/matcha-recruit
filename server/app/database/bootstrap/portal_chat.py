@@ -231,7 +231,8 @@ async def create_portal_chat(conn):
                 ('legislation_watch', 'Legislation Watch (RSS)', 'Monitor RSS feeds from state DOL/legislature sites for upcoming legislation.', false, 0),
                 ('pattern_recognition', 'Pattern Recognition', 'Detect coordinated legislative changes across jurisdictions.', false, 0),
                 ('discipline_expiry', 'Discipline Expiry Sweep', 'Flips active discipline records past expires_at to expired and writes audit rows.', false, 10000),
-                ('ir_deadline_alerts', 'IR Deadline & SLA Alerts', 'Nudges owners on overdue corrective actions, stale critical incidents, unclassified OSHA recordables, and the OSHA 8/24hr emergency window.', false, 200)
+                ('ir_deadline_alerts', 'IR Deadline & SLA Alerts', 'Nudges owners on overdue corrective actions, stale critical incidents, unclassified OSHA recordables, and the OSHA 8/24hr emergency window.', false, 200),
+                ('discipline_policy_sweep', 'Incident Policy-Check Sweep', 'Checks closed incidents against the company handbook and opens a pre-briefed Huume thread on a finding. One Gemini call per incident; default off.', false, 25)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

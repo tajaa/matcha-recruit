@@ -99,8 +99,12 @@ RECORD_COLUMNS = """
     signature_envelope_id, signed_pdf_storage_path,
     meeting_held_at, occurrence_dates, compliance_check,
     advisory_ack_reason, situation_narrative, remedial_requirement_id,
+    approval_status, approval_requested_at, approved_by, approval_decided_at,
+    denial_reason, source_incident_id, template_id, pending_remedial_requirement_id,
     created_at, updated_at
 """
+
+VALID_APPROVAL_STATUSES = ("not_required", "pending", "approved", "denied")
 
 
 # ── Policy mapping ──────────────────────────────────────────────────────
@@ -376,12 +380,24 @@ async def issue_discipline_with_supersede(
     compliance_check: Optional[dict[str, Any]] = None,
     advisory_ack_reason: Optional[str] = None,
     remedial_requirement_id: Optional[UUID] = None,
+    approval_status: str = "not_required",
+    source_incident_id: Optional[UUID] = None,
+    template_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
     """Insert new record, flip prior actives to escalated, write audit log.
 
     `compliance_check` is the verdict from `discipline_compliance` at issue time.
     The caller is responsible for refusing to call this at all when the verdict
     contains blocks — the engine records the verdict, it does not enforce it.
+
+    `approval_status='pending'` (the incident-triggered discipline skill) defers
+    remedial training: a `remedial_requirement_id` is STAGED onto
+    `pending_remedial_requirement_id` instead of being assigned here, and is
+    only assigned by `approve_record` once HR approves. This is enforced HERE,
+    not by trusting every caller to remember it — a denied record must leave no
+    training assignment behind. Direct-issue callers (`approval_status`
+    defaulting to `'not_required'`) keep today's behavior exactly: training is
+    assigned inside this same transaction, immediately.
     """
     if discipline_type not in VALID_LEVELS:
         raise ValueError(f"Invalid discipline_type: {discipline_type}")
@@ -389,6 +405,13 @@ async def issue_discipline_with_supersede(
         raise ValueError(f"Invalid severity: {severity}")
     if override_level and not (override_reason and len(override_reason.strip()) >= 20):
         raise ValueError("override_reason must be at least 20 characters when override_level is true")
+    if approval_status not in VALID_APPROVAL_STATUSES:
+        raise ValueError(f"Invalid approval_status: {approval_status}")
+
+    defer_remedial = approval_status == "pending" and remedial_requirement_id is not None
+    pending_remedial_requirement_id = remedial_requirement_id if defer_remedial else None
+    insert_remedial_requirement_id = None if defer_remedial else remedial_requirement_id
+    approval_requested_at = datetime.now(timezone.utc) if approval_status == "pending" else None
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -412,14 +435,17 @@ async def issue_discipline_with_supersede(
                     status, documents, infraction_type, severity, lookback_months,
                     expires_at, escalated_from_id, override_level, override_reason,
                     signature_status, occurrence_dates, situation_narrative,
-                    compliance_check, advisory_ack_reason, remedial_requirement_id
+                    compliance_check, advisory_ack_reason, remedial_requirement_id,
+                    approval_status, approval_requested_at, source_incident_id,
+                    template_id, pending_remedial_requirement_id
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     'draft', $9::jsonb, $10, $11, $12::int,
                     ($4::date)::timestamptz + make_interval(months => $12::int),
                     $13, $14, $15, 'pending',
-                    $16::date[], $17, $18::jsonb, $19, $20
+                    $16::date[], $17, $18::jsonb, $19, $20,
+                    $21, $22, $23, $24, $25
                 )
                 RETURNING {RECORD_COLUMNS}
                 """,
@@ -432,16 +458,18 @@ async def issue_discipline_with_supersede(
                 situation_narrative,
                 json.dumps(compliance_check) if compliance_check is not None else None,
                 advisory_ack_reason,
-                remedial_requirement_id,
+                insert_remedial_requirement_id,
+                approval_status, approval_requested_at, source_incident_id,
+                template_id, pending_remedial_requirement_id,
             )
 
             new_id = row["id"]
 
-            if remedial_requirement_id is not None:
+            if insert_remedial_requirement_id is not None:
                 requirement = await conn.fetchrow(
                     "SELECT id, title, training_type, frequency_months "
                     "FROM training_requirements WHERE id = $1 AND company_id = $2",
-                    remedial_requirement_id, company_id,
+                    insert_remedial_requirement_id, company_id,
                 )
                 if requirement:
                     await _assign_training(
@@ -519,7 +547,16 @@ async def transition_status(
     conn, discipline_id: UUID, *, expected_from: list[str], to: str,
     extra_sets: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
-    """Idempotent-friendly status flip. Returns updated row or None if no-op."""
+    """Idempotent-friendly status flip. Returns updated row or None if no-op.
+
+    Single choke point for the approval-bypass guard: no status transition may
+    advance a record whose approval is still 'pending' or was 'denied' — every
+    one of the 6 callsites in routes/employee_lifecycle/discipline.py (create,
+    meeting-held, signature/refuse, upload-physical, both webhook branches)
+    goes through this function, so the guard closes the bypass everywhere at
+    once rather than needing to be repeated at each call site. A legacy
+    ('not_required') or already-'approved' record passes unchanged.
+    """
     extra_sql = ""
     extra_values: list[Any] = []
     if extra_sets:
@@ -536,11 +573,125 @@ async def transition_status(
         UPDATE progressive_discipline
         SET status = $2, updated_at = NOW(){extra_sql}
         WHERE id = $1 AND status = ANY($3::text[])
+          AND COALESCE(approval_status, 'not_required') NOT IN ('pending', 'denied')
         RETURNING {RECORD_COLUMNS}
         """,
         discipline_id, to, expected_from, *extra_values,
     )
     return _row_to_dict(row) if row else None
+
+
+# ── Approval workflow ───────────────────────────────────────────────────
+
+async def approve_record(
+    conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID,
+) -> Optional[dict[str, Any]]:
+    """Approve a pending discipline record. One transaction:
+
+      1. Guarded UPDATE approval_status 'pending' -> 'approved' (tenant + state
+         checked in the WHERE; None on a wrong company/state — the caller 409s).
+      2. Assign any staged remedial training (GAP-2: deferred at draft time,
+         assigned now that HR has signed off) and copy the requirement id
+         from pending_remedial_requirement_id into remedial_requirement_id.
+      3. transition_status(draft -> pending_meeting) — passes the guard above
+         because approval_status is now 'approved'. Approval IS the issue step.
+      4. write_audit('approval_approved') + write_audit('issued').
+
+    Returns the transitioned record, or None if the record wasn't pending (or
+    didn't belong to this company).
+    """
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            f"""
+            UPDATE progressive_discipline
+            SET approval_status = 'approved', approved_by = $3, approval_decided_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
+            RETURNING {RECORD_COLUMNS}
+            """,
+            discipline_id, company_id, actor_user_id,
+        )
+        if not row:
+            return None
+
+        record = dict(row)
+        pending_req = record.get("pending_remedial_requirement_id")
+        if pending_req is not None:
+            requirement = await conn.fetchrow(
+                "SELECT id, title, training_type, frequency_months "
+                "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                pending_req, company_id,
+            )
+            if requirement:
+                await _assign_training(
+                    conn,
+                    company_id,
+                    dict(requirement),
+                    [record["employee_id"]],
+                    source_type="discipline",
+                    source_ref=discipline_id,
+                    source_note=f"Remedial training from discipline record {discipline_id}",
+                    assigned_by=actor_user_id,
+                )
+            await conn.execute(
+                "UPDATE progressive_discipline SET remedial_requirement_id = $2 WHERE id = $1",
+                discipline_id, pending_req,
+            )
+
+        await write_audit(conn, discipline_id, actor_user_id, "approval_approved")
+
+        transitioned = await transition_status(
+            conn, discipline_id, expected_from=["draft"], to="pending_meeting",
+        )
+        await write_audit(
+            conn, discipline_id, actor_user_id, "issued",
+            details={"discipline_type": record["discipline_type"]},
+        )
+        return transitioned or await fetch_record(conn, discipline_id)
+
+
+async def deny_record(
+    conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID, reason: str,
+) -> Optional[dict[str, Any]]:
+    """Deny a pending discipline record. Terminal — no un-deny path; changing
+    course means issuing a NEW record, so the audit trail shows both the
+    denial and (if it happens) the later separate decision to discipline.
+
+    A direct guarded UPDATE, not transition_status — once denied,
+    transition_status's guard correctly refuses every other transition on
+    this record forever, which is also what a plain `deny_record` re-call
+    would hit (returns None, no double-audit).
+    """
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            f"""
+            UPDATE progressive_discipline
+            SET approval_status = 'denied', status = 'denied', denial_reason = $4,
+                approved_by = $3, approval_decided_at = NOW(), updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
+            RETURNING {RECORD_COLUMNS}
+            """,
+            discipline_id, company_id, actor_user_id, reason,
+        )
+        if not row:
+            return None
+        await write_audit(
+            conn, discipline_id, actor_user_id, "approval_denied", details={"reason": reason},
+        )
+        return _row_to_dict(row)
+
+
+async def list_pending_approval(conn, company_id: UUID) -> list[dict[str, Any]]:
+    rows = await conn.fetch(
+        f"""
+        SELECT {RECORD_COLUMNS}
+        FROM progressive_discipline
+        WHERE company_id = $1 AND approval_status = 'pending'
+        ORDER BY approval_requested_at ASC, created_at ASC
+        """,
+        company_id,
+    )
+    return [_row_to_dict(r) for r in rows]
 
 
 async def update_signature_status(
@@ -669,30 +820,30 @@ async def list_records_for_employee(conn, employee_id: UUID) -> list[dict[str, A
 
 
 async def list_records_for_company(
-    conn, company_id: UUID, *, status_filter: Optional[str] = None, limit: int = 200,
+    conn, company_id: UUID, *,
+    status_filter: Optional[str] = None,
+    approval_filter: Optional[str] = None,
+    limit: int = 200,
 ) -> list[dict[str, Any]]:
+    conditions = ["company_id = $1"]
+    params: list[Any] = [company_id]
     if status_filter:
-        rows = await conn.fetch(
-            f"""
-            SELECT {RECORD_COLUMNS}
-            FROM progressive_discipline
-            WHERE company_id = $1 AND status = $2
-            ORDER BY issued_date DESC, created_at DESC
-            LIMIT $3
-            """,
-            company_id, status_filter, limit,
-        )
-    else:
-        rows = await conn.fetch(
-            f"""
-            SELECT {RECORD_COLUMNS}
-            FROM progressive_discipline
-            WHERE company_id = $1
-            ORDER BY issued_date DESC, created_at DESC
-            LIMIT $2
-            """,
-            company_id, limit,
-        )
+        params.append(status_filter)
+        conditions.append(f"status = ${len(params)}")
+    if approval_filter:
+        params.append(approval_filter)
+        conditions.append(f"approval_status = ${len(params)}")
+    params.append(limit)
+    rows = await conn.fetch(
+        f"""
+        SELECT {RECORD_COLUMNS}
+        FROM progressive_discipline
+        WHERE {' AND '.join(conditions)}
+        ORDER BY issued_date DESC, created_at DESC
+        LIMIT ${len(params)}
+        """,
+        *params,
+    )
     return [_row_to_dict(r) for r in rows]
 
 

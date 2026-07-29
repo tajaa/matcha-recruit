@@ -476,10 +476,32 @@ async def _lookup_context_impl(
                 """,
                 company_id,
             )
+            # Pending-approval records carry ids — decide_disciplinary_action
+            # takes an id, never a name, so this is the lookup that feeds it.
+            pending_approval = await conn.fetch(
+                """
+                SELECT id, discipline_type, infraction_type, approval_requested_at
+                FROM progressive_discipline
+                WHERE company_id = $1 AND approval_status = 'pending'
+                ORDER BY approval_requested_at ASC LIMIT 20
+                """,
+                company_id,
+            )
             return {
                 "topic": "discipline",
                 "counts_by_status": {r["status"]: r["count"] for r in counts},
                 "upcoming_reviews": [dict(r) for r in upcoming_reviews],
+                "pending_approval": [
+                    {
+                        "record_id": str(r["id"]),
+                        "discipline_type": r["discipline_type"],
+                        "infraction_type": r["infraction_type"],
+                        "approval_requested_at": (
+                            r["approval_requested_at"].isoformat() if r["approval_requested_at"] else None
+                        ),
+                    }
+                    for r in pending_approval
+                ],
             }
         if topic == "compliance":
             rows = await conn.fetch(

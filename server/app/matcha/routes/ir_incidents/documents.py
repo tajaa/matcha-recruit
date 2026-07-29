@@ -45,7 +45,7 @@ async def upload_document(
         if not incident:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-    valid_types = ["photo", "form", "statement", "other"]
+    valid_types = ["photo", "form", "statement", "other", "disciplinary"]
     if document_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid document type. Must be one of: {valid_types}")
 

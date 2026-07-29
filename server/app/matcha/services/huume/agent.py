@@ -45,7 +45,7 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, handbook_skill, legal_skill, onboarding_skill, record_view, store
+from . import actions, discipline_skill, handbook_skill, legal_skill, onboarding_skill, record_view, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -250,6 +250,17 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "refused_label": "PTO decision refused",
         "done_label": "Applied PTO decision",
         "failed_label": "PTO decision not applied",
+        "done_status": "decided",
+    },
+    "decide_disciplinary_action": {
+        "action_type": "discipline_decision",
+        "match_key": "record_id",
+        "mints_confirm_id": False,
+        "fields": ("record_id", "decision", "reason"),
+        "staged_label": "Staged: discipline approval decision",
+        "refused_label": "Discipline decision refused",
+        "done_label": "Discipline decision recorded",
+        "failed_label": "Discipline decision not recorded",
         "done_status": "decided",
     },
 }
@@ -468,6 +479,79 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name == "check_incident_policy":
+                result = await discipline_skill.check_incident_policy(
+                    company_id=company_id, incident_id=str(args.get("incident_id") or ""),
+                )
+                step = recorder.record(
+                    tool=name, kind="read",
+                    label="Checked incident against policy" if result.get("status") == "ok" else "Could not check incident policy",
+                    status="ok" if result.get("status") == "ok" else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "list_pending_approvals":
+                result = await discipline_skill.list_pending(company_id=company_id)
+                step = recorder.record(tool=name, kind="read", label="Listed pending discipline approvals", status="ok")
+                return _json_safe(result), step
+
+            if name == "draft_disciplinary_action":
+                # Same shape as draft_discipline just below — a server-minted
+                # confirm_id plays the role offer_id plays for send_offer,
+                # since nothing is written to the DB until confirm.
+                existing = pre_turn_action
+                confirm_id = str(args.get("confirm_id") or "").strip() or None
+                confirming = (
+                    isinstance(existing, dict) and existing.get("type") == "discipline_from_incident"
+                    and existing.get("status") == "proposed"
+                    and confirm_id is not None and existing.get("confirm_id") == confirm_id
+                )
+                if confirming:
+                    staged = existing
+                else:
+                    staged = {
+                        "type": "discipline_from_incident", "status": "proposed", "confirm_id": uuid4().hex[:8],
+                        "employee_id": args.get("employee_id"), "incident_id": args.get("incident_id"),
+                        "infraction_type": args.get("infraction_type"), "severity": args.get("severity"),
+                        "discipline_type": args.get("discipline_type"),
+                        "occurrence_dates": list(args.get("occurrence_dates") or []),
+                        "description": args.get("description"), "expected_improvement": args.get("expected_improvement"),
+                        "template_id": args.get("template_id"),
+                    }
+                    if isinstance(staged.get("employee_id"), str) and staged.get("infraction_type") and staged.get("description"):
+                        try:
+                            from app.database import get_connection
+                            async with get_connection() as conn:
+                                staged = await discipline_skill.stage_enrichment(conn, company_id=company_id, staged=staged)
+                        except Exception:
+                            logger.warning("huume: draft_disciplinary_action stage_enrichment failed", exc_info=True)
+                verdict = actions.evaluate_huume_action(
+                    staged_action=staged, features=features, role=user_role,
+                    thread_huume_mode=True, this_turn_staged_new=not confirming,
+                )
+                if verdict.kind == "stage":
+                    state_updates["huume_action"] = staged
+                    step = recorder.record(tool=name, kind="staged", label="Staged: disciplinary action from incident", status="ok", detail=verdict.message)
+                    return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
+                if not verdict.ok:
+                    step = recorder.record(tool=name, kind="staged", label="Disciplinary action refused", status="rejected", detail=verdict.message)
+                    return {"status": "refused", "message": verdict.message}, step
+                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                filed = result.get("status") == "created"
+                state_updates["huume_action"] = {**staged, "status": "filed" if filed else "failed"}
+                for _bg in (result.pop("bg_tasks", None) or []):
+                    try:
+                        _fn, _args, _kwargs = _bg
+                        await _fn(*_args, **_kwargs)
+                    except Exception:
+                        logger.warning("huume: draft_disciplinary_action bg task failed", exc_info=True)
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Staged disciplinary action for HR approval" if filed else "Disciplinary action not staged",
+                    status="ok" if filed else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
             if name == "draft_discipline":
                 # No natural persisted id like offer_id exists at stage time
                 # (nothing is written to the DB until confirm) — a server-
@@ -610,6 +694,10 @@ async def run_huume_turn(
                         cancel_msg = "Cancelled — that offer will not be sent."
                     elif staged.get("type") == "amend_handbook":
                         cancel_msg = "Cancelled — that handbook will not be amended."
+                    elif staged.get("type") == "discipline_from_incident":
+                        cancel_msg = "Cancelled — that disciplinary action will not be filed."
+                    elif staged.get("type") == "discipline_decision":
+                        cancel_msg = "Cancelled — no approval decision was recorded."
                     else:
                         cancel_msg = "Cancelled — that write-up will not be filed."
                     return {"status": "ok", "message": cancel_msg}, step

@@ -100,7 +100,18 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "training_assign": "training",
     "pto_decision": "time_off",
     "amend_handbook": "handbook_pilot",
+    "discipline_from_incident": "discipline",
+    "discipline_decision": "discipline",
 }
+
+# discipline_from_incident / discipline_decision — the incident-triggered
+# discipline skill's two staged action types, routed to discipline_skill.py
+# rather than hr_pilot_actions or hr_ops_skill (see execute_huume_action).
+_DISCIPLINE_SKILL_ACTIONS = frozenset({"discipline_from_incident", "discipline_decision"})
+_DISCIPLINE_TYPES = frozenset({"verbal_warning", "written_warning", "pip", "final_warning", "suspension"})
+_DISCIPLINE_SEVERITIES = frozenset({"minor", "moderate", "severe"})
+_DISCIPLINE_INFRACTION_TYPES = frozenset({"attendance", "performance", "safety", "policy_violation"})
+_MIN_DENIAL_REASON_CHARS = 20
 
 # Vocabularies the confirm-turn validators check against. Mirrors of the
 # authoritative Literals — IRIncidentType/IRSeverity (models/ir_incident.py:10-11)
@@ -209,6 +220,12 @@ def evaluate_huume_action(
 
     if action_type == "pto_decision":
         return _validate_pto_decision(staged_action)
+
+    if action_type == "discipline_from_incident":
+        return _validate_discipline_from_incident(staged_action)
+
+    if action_type == "discipline_decision":
+        return _validate_discipline_decision(staged_action)
 
     if action_type == "amend_handbook":
         # No field validation needed beyond "there's a target" — ownership,
@@ -385,6 +402,104 @@ def _validate_pto_decision(staged: dict[str, Any]) -> HuumeVerdict:
         "request_id": str(request_id),
         "decision": decision,
         "note": note,
+    })
+
+
+def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged incident-triggered discipline
+    draft. Unlike _validate_ir_report/_validate_er_case, this DOES re-run the
+    hard-stop classifier: the content here is a discipline write-up (the same
+    reasoning as discipline_draft), not an incident narrative being filed
+    through its sanctioned channel."""
+    employee_id = staged.get("employee_id")
+    if not _is_uuid(employee_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the employee's id — look it up with lookup_context(topic='roster') first.",
+        )
+
+    infraction_type = str(staged.get("infraction_type") or "").strip().lower()
+    if infraction_type not in _DISCIPLINE_INFRACTION_TYPES:
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need an infraction type (attendance, performance, safety, or policy_violation).",
+        )
+
+    description = str(staged.get("description") or "").strip()
+    if not description:
+        return HuumeVerdict(kind="refuse", message="There's no factual account of what happened to draft from.")
+
+    incident_id = staged.get("incident_id")
+    if incident_id is not None and not _is_uuid(incident_id):
+        return HuumeVerdict(kind="refuse", message="That incident id doesn't look valid.")
+
+    severity = str(staged.get("severity") or "").strip().lower()
+    discipline_type = str(staged.get("discipline_type") or "").strip().lower()
+    template_id = staged.get("template_id")
+    if template_id is not None and not _is_uuid(template_id):
+        template_id = None
+
+    raw_dates = staged.get("occurrence_dates")
+    occurrence_dates: list[str] = []
+    if isinstance(raw_dates, (list, tuple)):
+        for value in raw_dates:
+            parsed = _parse_iso_date(value)
+            if parsed is None:
+                return HuumeVerdict(kind="refuse", message="I couldn't read one of those occurrence dates — give me specific dates.")
+            occurrence_dates.append(parsed.isoformat())
+
+    expected_improvement = str(staged.get("expected_improvement") or "").strip() or None
+
+    gate_text = " ".join([infraction_type, description, str(expected_improvement or "")])
+    from app.matcha.services.pilots.hr_pilot_escalation import classify_message
+    gate = classify_message(gate_text)
+    if gate.hard_stop:
+        return HuumeVerdict(
+            kind="refuse",
+            message=gate.notice or "This needs to go to corporate HR rather than being filed here.",
+        )
+
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "discipline_from_incident",
+        "employee_id": str(employee_id),
+        "incident_id": str(incident_id) if incident_id else None,
+        "infraction_type": infraction_type,
+        "severity": severity if severity in _DISCIPLINE_SEVERITIES else None,
+        "discipline_type": discipline_type if discipline_type in _DISCIPLINE_TYPES else None,
+        "occurrence_dates": occurrence_dates,
+        "description": description,
+        "expected_improvement": expected_improvement,
+        "template_id": str(template_id) if template_id else None,
+        "confirm_id": staged.get("confirm_id"),
+    })
+
+
+def _validate_discipline_decision(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for approving/denying a pending discipline
+    record. Denial requires a reason of at least _MIN_DENIAL_REASON_CHARS —
+    mirrors DenyRequest in routes/employee_lifecycle/discipline.py."""
+    record_id = staged.get("record_id")
+    if not _is_uuid(record_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the discipline record's id — look it up with list_pending_approvals first.",
+        )
+    decision = str(staged.get("decision") or "").strip().lower()
+    if decision not in ("approve", "deny"):
+        return HuumeVerdict(kind="refuse", message="Tell me whether to approve or deny it.")
+
+    reason = str(staged.get("reason") or "").strip()
+    if decision == "deny" and len(reason) < _MIN_DENIAL_REASON_CHARS:
+        return HuumeVerdict(
+            kind="refuse",
+            message=f"A denial needs a written reason of at least {_MIN_DENIAL_REASON_CHARS} characters — ask the admin why.",
+        )
+
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "discipline_decision",
+        "record_id": str(record_id),
+        "decision": decision,
+        "reason": reason or None,
     })
 
 
@@ -626,6 +741,11 @@ async def execute_huume_action(
         # a report deliberately. Same underlying *_core writers, though.
         from app.matcha.services.huume import hr_ops_skill
         return await hr_ops_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    if action.get("type") in _DISCIPLINE_SKILL_ACTIONS:
+        from app.matcha.services.huume import discipline_skill
+        return await discipline_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     return {"status": "error", "message": "Unsupported action."}

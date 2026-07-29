@@ -35,6 +35,7 @@ RECORD_REQUIRED_FEATURE: dict[str, str] = {
     "er_case": "er_copilot",
     "employee": "employees",
     "credential": "credential_templates",
+    "discipline": "discipline",
 }
 
 # Working-set cap on the side panel — also the per-call cap on show_record,
@@ -224,11 +225,46 @@ async def _model_credentials_batch(conn, company_id: UUID, rids: list[UUID]) -> 
     return out
 
 
+async def _model_disciplines_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    # No `description`/`expected_improvement`/`denial_reason` — same
+    # narrative-exclusion rule as the incident/er_case batches: a discipline
+    # record's free-text fields are exactly where a legal record names
+    # people and what they did. No employee name either.
+    if not rids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT id, discipline_type, infraction_type, severity, status,
+               approval_status, issued_date, review_date
+        FROM progressive_discipline
+        WHERE id = ANY($1::uuid[]) AND company_id = $2
+        """,
+        rids, company_id,
+    )
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        level = (data.get("discipline_type") or "").replace("_", " ").title()
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": f"{level} — {data.get('infraction_type')}",
+            "discipline_type": data.get("discipline_type"),
+            "infraction_type": data.get("infraction_type"),
+            "severity": data.get("severity"),
+            "record_status": data.get("status"),
+            "approval_status": data.get("approval_status"),
+            "issued_date": _iso(data.get("issued_date")),
+            "review_date": _iso(data.get("review_date")),
+        }
+    return out
+
+
 _MODEL_BATCH_BUILDERS = {
     "incident": _model_incidents_batch,
     "er_case": _model_er_cases_batch,
     "employee": _model_employees_batch,
     "credential": _model_credentials_batch,
+    "discipline": _model_disciplines_batch,
 }
 # Kept for the record-type-parity test (SHOW_RECORD_TYPES == _MODEL_BUILDERS
 # == ... == _VIEW_BUILDERS) — same key set as _MODEL_BATCH_BUILDERS.
@@ -541,11 +577,74 @@ async def _build_credential_view(conn, company_id: UUID, rid: UUID) -> Optional[
     }
 
 
+_DISCIPLINE_STATUS_TONE = {
+    "draft": "zinc", "pending_meeting": "amber", "pending_signature": "amber",
+    "active": "emerald", "completed": "emerald", "expired": "zinc",
+    "escalated": "orange", "denied": "red",
+}
+
+
+async def _build_discipline_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+    row = await conn.fetchrow(
+        """
+        SELECT pd.id, pd.discipline_type, pd.infraction_type, pd.severity, pd.status,
+               pd.approval_status, pd.issued_date, pd.review_date, pd.description,
+               pd.expected_improvement, pd.denial_reason, pd.source_incident_id,
+               e.first_name, e.last_name
+        FROM progressive_discipline pd
+        JOIN employees e ON e.id = pd.employee_id AND e.org_id = $2
+        WHERE pd.id = $1 AND pd.company_id = $2
+        """,
+        rid, company_id,
+    )
+    if not row:
+        return None
+    data = dict(row)
+    status = data.get("status") or "draft"
+    level = (data.get("discipline_type") or "").replace("_", " ").title()
+    employee_name = f"{data.get('first_name')} {data.get('last_name')}".strip()
+
+    chips = [{"label": status.replace("_", " ").title(), "tone": _DISCIPLINE_STATUS_TONE.get(status, "zinc")}]
+    approval_status = data.get("approval_status")
+    if approval_status and approval_status != "not_required":
+        chips.append({
+            "label": f"Approval: {approval_status}",
+            "tone": {"pending": "amber", "approved": "emerald", "denied": "red"}.get(approval_status, "zinc"),
+        })
+
+    meta = [
+        {"label": "Employee", "value": employee_name or "—"},
+        {"label": "Infraction", "value": (data.get("infraction_type") or "—").replace("_", " ").title()},
+        {"label": "Severity", "value": (data.get("severity") or "—").title()},
+        {"label": "Issued", "value": _iso(data.get("issued_date")) or "—"},
+        {"label": "Review date", "value": _iso(data.get("review_date")) or "—"},
+    ]
+    sections = []
+    if data.get("description"):
+        sections.append({"label": "Description", "body": data["description"]})
+    if data.get("expected_improvement"):
+        sections.append({"label": "Expected improvement", "body": data["expected_improvement"]})
+    if data.get("denial_reason"):
+        sections.append({"label": "Denial reason", "body": data["denial_reason"]})
+
+    return {
+        "record_type": "discipline",
+        "record_id": str(data["id"]),
+        "title": f"{level} — {employee_name}",
+        "subtitle": (data.get("infraction_type") or "").replace("_", " ").title(),
+        "chips": chips,
+        "meta": meta,
+        "sections": sections,
+        "link": f"/app/discipline/{data['id']}",
+    }
+
+
 _VIEW_BUILDERS = {
     "incident": _build_incident_view,
     "er_case": _build_er_case_view,
     "employee": _build_employee_view,
     "credential": _build_credential_view,
+    "discipline": _build_discipline_view,
 }
 
 

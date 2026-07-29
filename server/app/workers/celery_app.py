@@ -38,6 +38,7 @@ celery_app = Celery(
         "app.workers.tasks.healthcare_research",
         "app.workers.tasks.research_browse",
         "app.workers.tasks.discipline_expiry",
+        "app.workers.tasks.discipline_policy_sweep",
         "app.workers.tasks.auto_archive",
         "app.workers.tasks.newsletter_scheduler",
         "app.workers.tasks.hr_news_fetch",
@@ -253,6 +254,13 @@ def on_worker_ready(**kwargs):
         run_discipline_expiry.delay()
     else:
         print("[Worker] Discipline expiry scheduler is disabled, skipping.")
+
+    from app.workers.tasks.discipline_policy_sweep import run_discipline_policy_sweep
+
+    if _is_scheduler_enabled("discipline_policy_sweep"):
+        run_discipline_policy_sweep.delay()
+    else:
+        print("[Worker] Discipline policy sweep scheduler is disabled, skipping.")
 
     from app.workers.tasks.grievance_deadline_alerts import run_grievance_deadline_alerts
 

@@ -24,7 +24,9 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.matcha.services.discipline import discipline_ai
 from app.matcha.services.discipline import discipline_compliance
 from app.matcha.services.discipline import discipline_engine
+from app.matcha.services.discipline import discipline_filing
 from app.matcha.services.discipline import discipline_notifications
+from app.matcha.services.discipline import discipline_templates
 from app.matcha.services.discipline.discipline_pdf import render_discipline_letter
 from app.matcha.services.signature_provider import (
     get_signature_provider,
@@ -88,6 +90,28 @@ class PolicyUpsertRequest(BaseModel):
     lookback_months_severe: int = Field(12, ge=1, le=120)
     auto_to_written: bool = False
     notify_grandparent_manager: bool = True
+
+
+class DenyRequest(BaseModel):
+    # >=20 mirrors the only existing long-reason floor, override_reason
+    # (discipline_engine.py — override_level requires >=20 chars) — NOT
+    # RefuseRequest's min_length=1, which is a different, unrelated field.
+    reason: str = Field(..., min_length=20)
+
+
+class TemplateUpsertRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    infraction_type: Optional[str] = None
+    discipline_type: Optional[str] = Field(
+        None, pattern="^(verbal_warning|written_warning|pip|final_warning|suspension)$"
+    )
+    body: str = Field(..., min_length=20)
+    is_default: bool = False
+    is_active: bool = True
+
+
+class ApproverToggleRequest(BaseModel):
+    is_hr_approver: bool
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -390,6 +414,7 @@ async def list_for_employee(
 @router.get("/records")
 async def list_for_company(
     status: Optional[str] = None,
+    approval_status: Optional[str] = None,
     current_user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
@@ -397,9 +422,81 @@ async def list_for_company(
         raise HTTPException(status_code=403, detail="No company associated with this account")
     async with get_connection() as conn:
         records = await discipline_engine.list_records_for_company(
-            conn, company_id, status_filter=status,
+            conn, company_id, status_filter=status, approval_filter=approval_status,
         )
     return [_serialize_record(r) for r in records]
+
+
+# NOTE: this static-path route MUST be declared before GET /records/{discipline_id}
+# below — FastAPI matches routes in registration order, and {discipline_id}
+# would otherwise swallow "pending-approval" as a (malformed) UUID path param.
+@router.get("/records/pending-approval")
+async def list_pending_approval_records(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        records = await discipline_engine.list_pending_approval(conn, company_id)
+    return [_serialize_record(r) for r in records]
+
+
+@router.post("/records/{discipline_id}/approve")
+async def approve_record(
+    discipline_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Approve a discipline record awaiting HR approval. Any business admin
+    may call this — the `is_hr_approver` designation shapes who gets
+    NOTIFIED of a pending request, it is not an authorization boundary."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        updated = await discipline_engine.approve_record(
+            conn, discipline_id=discipline_id, company_id=company_id, actor_user_id=current_user.id,
+        )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Record is not awaiting approval")
+
+    try:
+        await discipline_notifications.dispatch(
+            record=updated, action="discipline_approved",
+            audience="manager_only", skip_user_id=current_user.id,
+        )
+    except Exception:
+        logger.exception("[discipline] notification dispatch failed for discipline_approved")
+
+    return _serialize_record(updated)
+
+
+@router.post("/records/{discipline_id}/deny")
+async def deny_record(
+    discipline_id: UUID,
+    body: DenyRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        updated = await discipline_engine.deny_record(
+            conn, discipline_id=discipline_id, company_id=company_id,
+            actor_user_id=current_user.id, reason=body.reason,
+        )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Record is not awaiting approval")
+
+    try:
+        await discipline_notifications.dispatch(
+            record=updated, action="discipline_denied",
+            audience="hr_only", skip_user_id=current_user.id,
+        )
+    except Exception:
+        logger.exception("[discipline] notification dispatch failed for discipline_denied")
+
+    return _serialize_record(updated)
 
 
 @router.get("/records/{discipline_id}")
@@ -614,6 +711,8 @@ async def upload_physical_signature(
             conn, discipline_id, current_user.id, "physical_uploaded",
             details={"storage_path": storage_path},
         )
+        if updated:
+            await discipline_filing.file_signed_letter(conn, updated)
 
     try:
         await discipline_notifications.dispatch(
@@ -736,6 +835,7 @@ async def signature_webhook(request: Request):
                 conn, record["id"], None, "signed",
                 details={"envelope_id": envelope_id, "storage_path": storage_path},
             )
+            await discipline_filing.file_signed_letter(conn, updated)
 
         try:
             await discipline_notifications.dispatch(record=updated, action="discipline_signed")
@@ -797,3 +897,118 @@ async def upsert_policy(
             conn, company_id, infraction_type, body.model_dump(),
         )
     return _serialize_record(row)
+
+
+# ── Letter templates ─────────────────────────────────────────────────────
+
+@router.get("/templates")
+async def list_templates(
+    include_inactive: bool = False,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        rows = await discipline_templates.list_templates(conn, company_id, include_inactive=include_inactive)
+    return [_serialize_record(r) for r in rows]
+
+
+@router.post("/templates")
+async def create_template(
+    body: TemplateUpsertRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        row = await discipline_templates.upsert_template(
+            conn, company_id, template_id=None, created_by=current_user.id, **body.model_dump(),
+        )
+    return _serialize_record(row)
+
+
+@router.put("/templates/{template_id}")
+async def update_template(
+    template_id: UUID,
+    body: TemplateUpsertRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        try:
+            row = await discipline_templates.upsert_template(
+                conn, company_id, template_id=template_id, created_by=current_user.id, **body.model_dump(),
+            )
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Template not found")
+    return _serialize_record(row)
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Soft delete — is_active=false, is_default=false."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        ok = await discipline_templates.deactivate_template(conn, company_id, template_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"ok": True}
+
+
+# ── HR approvers ──────────────────────────────────────────────────────────
+
+@router.get("/approvers")
+async def list_approvers(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """The company's business-admin users, with their is_hr_approver flag.
+    Discipline-approval-request notifications go to whoever has this flag
+    set; when nobody has it set, every one of these users is notified
+    instead (see discipline_notifications._designated_approver_user_ids)."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT u.id AS user_id, u.email, c.name, c.is_hr_approver
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.company_id = $1 AND u.role = 'client' AND u.is_active = TRUE
+            ORDER BY c.name
+            """,
+            company_id,
+        )
+    return [_serialize_record(dict(r)) for r in rows]
+
+
+@router.put("/approvers/{user_id}")
+async def set_approver(
+    user_id: UUID,
+    body: ApproverToggleRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE clients SET is_hr_approver = $3
+            WHERE user_id = $1 AND company_id = $2
+            RETURNING user_id, is_hr_approver
+            """,
+            user_id, company_id, body.is_hr_approver,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found in this company")
+    return _serialize_record(dict(row))

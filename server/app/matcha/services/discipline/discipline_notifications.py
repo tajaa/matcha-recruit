@@ -25,26 +25,23 @@ _TITLES = {
     "discipline_signed": "Discipline Signed",
     "discipline_refused": "Refused to Sign",
     "discipline_physical_uploaded": "Signed PDF Uploaded",
+    "discipline_approval_requested": "Discipline Approval Requested",
+    "discipline_approved": "Discipline Approved",
+    "discipline_denied": "Discipline Denied",
 }
 
+_AUDIENCES = ("all", "hr_only", "manager_only")
 
-async def _resolve_recipients(
-    conn,
-    record: dict[str, Any],
-    *,
-    notify_grandparent: bool,
-) -> list[dict[str, Any]]:
-    """Build the recipient set for a discipline notification.
 
-    Returns a list of {user_id, kind} dicts. Each user_id is a Matcha
-    `users.id` (not employees.id) — so we can deliver via existing
-    mw_notifications tooling.
+async def _resolve_manager_chain(
+    conn, employee_id: UUID, *, notify_grandparent: bool,
+) -> tuple[list[UUID], list[UUID]]:
+    """Direct manager (employees.manager_id → employees.id) → user_id via
+    employee email match, plus the grandparent manager when requested.
+    Returns (manager_user_ids, grandparent_user_ids) — either may be empty
+    when the chain doesn't resolve (manager_id is sparse — bulk upload is the
+    only writer today) or the manager's email has no matching users row.
     """
-    employee_id = record["employee_id"]
-    company_id = record["company_id"]
-    issuer_id = record["issued_by"]
-
-    # Direct manager (employees.manager_id → employees.id) → user_id via employee email match
     manager_user_ids: list[UUID] = []
     grandparent_user_ids: list[UUID] = []
     try:
@@ -93,11 +90,12 @@ async def _resolve_recipients(
             "[discipline_notifications] manager-chain lookup failed for employee %s — skipping",
             employee_id,
         )
+    return manager_user_ids, grandparent_user_ids
 
-    # HR users — issuer + any other 'client' role linked to the company via the clients table
-    hr_user_ids: set[UUID] = {issuer_id} if issuer_id else set()
+
+async def _all_client_user_ids(conn, company_id: UUID) -> set[UUID]:
     try:
-        hr_rows = await conn.fetch(
+        rows = await conn.fetch(
             """
             SELECT u.id
             FROM users u
@@ -106,25 +104,106 @@ async def _resolve_recipients(
             """,
             company_id,
         )
-        for r in hr_rows:
-            hr_user_ids.add(r["id"])
+        return {r["id"] for r in rows}
     except Exception:
         logger.exception("[discipline_notifications] HR user lookup failed")
+        return set()
+
+
+async def _designated_approver_user_ids(conn, company_id: UUID) -> set[UUID]:
+    """clients.is_hr_approver=TRUE users. Falls back to every active
+    'client' user when a company has designated nobody — the approval queue
+    must never dead-end just because no one opted in to the toggle."""
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT u.id
+            FROM users u
+            JOIN clients c ON c.user_id = u.id
+            WHERE c.company_id = $1 AND u.role = 'client' AND u.is_active = TRUE
+              AND c.is_hr_approver = TRUE
+            """,
+            company_id,
+        )
+        designated = {r["id"] for r in rows}
+    except Exception:
+        logger.exception("[discipline_notifications] HR approver lookup failed")
+        designated = set()
+    if designated:
+        return designated
+    return await _all_client_user_ids(conn, company_id)
+
+
+async def _resolve_recipients(
+    conn,
+    record: dict[str, Any],
+    *,
+    notify_grandparent: bool,
+    audience: str = "all",
+) -> list[dict[str, Any]]:
+    """Build the recipient set for a discipline notification.
+
+    Returns a list of {user_id, kind} dicts. Each user_id is a Matcha
+    `users.id` (not employees.id) — so we can deliver via existing
+    mw_notifications tooling.
+
+    `audience`:
+      - "all" (default): today's exact set — direct manager + optional
+        grandparent + issuer + every active company 'client' user. The 5
+        pre-existing actions all use this; unchanged.
+      - "hr_only": designated approvers only (falls back to every active
+        client user when none designated). NEVER includes the manager — the
+        manager must not learn of a draft that may be denied.
+      - "manager_only": the manager chain only. When NO manager resolves
+        (manager_id is sparse — only bulk upload populates it today, and an
+        unresolvable email is silently dropped), falls back to the hr_only
+        set so an approved letter doesn't notify nobody.
+    """
+    if audience not in _AUDIENCES:
+        raise ValueError(f"Invalid audience: {audience}")
+
+    employee_id = record["employee_id"]
+    company_id = record["company_id"]
+    issuer_id = record["issued_by"]
 
     recipients: list[dict[str, Any]] = []
     seen: set[UUID] = set()
+
+    def _add(uid: UUID, kind: str) -> None:
+        if uid not in seen:
+            recipients.append({"user_id": uid, "kind": kind})
+            seen.add(uid)
+
+    if audience == "hr_only":
+        for uid in await _designated_approver_user_ids(conn, company_id):
+            _add(uid, "hr")
+        return recipients
+
+    manager_user_ids, grandparent_user_ids = await _resolve_manager_chain(
+        conn, employee_id, notify_grandparent=notify_grandparent,
+    )
+
+    if audience == "manager_only":
+        if not manager_user_ids:
+            for uid in await _designated_approver_user_ids(conn, company_id):
+                _add(uid, "hr")
+            return recipients
+        for uid in manager_user_ids:
+            _add(uid, "direct_manager")
+        for uid in grandparent_user_ids:
+            _add(uid, "grandparent_manager")
+        return recipients
+
+    # audience == "all"
+    hr_user_ids: set[UUID] = {issuer_id} if issuer_id else set()
+    hr_user_ids |= await _all_client_user_ids(conn, company_id)
+
     for uid in manager_user_ids:
-        if uid not in seen:
-            recipients.append({"user_id": uid, "kind": "direct_manager"})
-            seen.add(uid)
+        _add(uid, "direct_manager")
     for uid in grandparent_user_ids:
-        if uid not in seen:
-            recipients.append({"user_id": uid, "kind": "grandparent_manager"})
-            seen.add(uid)
+        _add(uid, "grandparent_manager")
     for uid in hr_user_ids:
-        if uid not in seen:
-            recipients.append({"user_id": uid, "kind": "hr"})
-            seen.add(uid)
+        _add(uid, "hr")
     return recipients
 
 
@@ -141,6 +220,13 @@ def _build_body(record: dict[str, Any], action: str, employee_name: Optional[str
         return f"{name} refused to sign the {level} record. The warning remains active."
     if action == "discipline_physical_uploaded":
         return f"A physically-signed copy of the {level} for {name} has been uploaded."
+    if action == "discipline_approval_requested":
+        return f"A {level} for {name} needs HR approval before it can be issued."
+    if action == "discipline_approved":
+        return f"The {level} for {name} was approved and is now moving to a meeting."
+    if action == "discipline_denied":
+        reason = record.get("denial_reason") or ""
+        return f"The proposed {level} for {name} was denied.{(' Reason: ' + reason) if reason else ''}"
     return ""
 
 
@@ -150,12 +236,17 @@ async def dispatch(
     action: str,
     notify_grandparent: bool = True,
     skip_user_id: Optional[UUID] = None,
+    audience: str = "all",
 ) -> None:
     """Send notifications for a discipline state transition.
 
-    `action` must be one of the keys in `_TITLES`.
+    `action` must be one of the keys in `_TITLES` — unknown actions are
+    logged and dropped, so the 3 approval-workflow keys above are mandatory,
+    not cosmetic.
     `skip_user_id` skips a single recipient (useful for the actor who
     just performed the action — they don't need to notify themselves).
+    `audience` — see `_resolve_recipients`. Defaults to "all", the behavior
+    every pre-existing action already relies on.
     """
     title = _TITLES.get(action)
     if not title:
@@ -174,7 +265,7 @@ async def dispatch(
         employee_name = emp_row["name"] if emp_row else None
 
         recipients = await _resolve_recipients(
-            conn, record, notify_grandparent=notify_grandparent
+            conn, record, notify_grandparent=notify_grandparent, audience=audience,
         )
 
     body = _build_body(record, action, employee_name)

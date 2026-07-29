@@ -290,6 +290,9 @@ async def create_identity(conn):
                 name VARCHAR(255) NOT NULL,
                 phone VARCHAR(50),
                 job_title VARCHAR(100),
+                -- Discipline HR-approval audience designation (discipapp01). Shapes
+                -- notification targeting only, never authorization.
+                is_hr_approver BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)

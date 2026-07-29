@@ -63,7 +63,7 @@ async def create_incidents(conn):
             CREATE TABLE IF NOT EXISTS ir_incident_documents (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
-                document_type VARCHAR(50) NOT NULL CHECK (document_type IN ('photo', 'form', 'statement', 'other')),
+                document_type VARCHAR(50) NOT NULL CHECK (document_type IN ('photo', 'form', 'statement', 'other', 'disciplinary')),
                 filename VARCHAR(255) NOT NULL,
                 file_path VARCHAR(500) NOT NULL,
                 mime_type VARCHAR(100),
