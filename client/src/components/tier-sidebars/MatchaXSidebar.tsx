@@ -3,7 +3,7 @@ import {
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
-import { CalendarClock, BarChart3, HeartPulse } from 'lucide-react'
+import { CalendarClock, BarChart3, HeartPulse, Sparkles } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -54,6 +54,18 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
       { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
       { to: '/app/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
+    ],
+  },
+  {
+    label: 'AI',
+    defaultOpen: true,
+    // matcha_work isn't in the matcha_x tier overlay — it's an admin-granted
+    // add-on (see feature panel), so this only lights up for companies that
+    // were toggled on explicitly. Huume itself has no separate nav entry:
+    // it's a thread-mode toggle inside a matcha-work thread, already gated
+    // on 'huume' in THREAD_MODE_TOGGLES (work/components/panels/constants.ts).
+    items: [
+      { to: '/work', icon: Sparkles, label: 'Matcha-Work', feature: 'matcha_work' },
     ],
   },
   {
