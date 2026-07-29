@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { buildThreadTheme } from './MatchaWorkThread/theme'
@@ -8,12 +9,12 @@ import ChatMessages from './MatchaWorkThread/ChatMessages'
 import ChatComposer from './MatchaWorkThread/ChatComposer'
 import RightPanels from './MatchaWorkThread/RightPanels'
 import HuumeActionCard from '../components/panels/HuumeActionCard'
-import { getHuumeState, shouldShowHuumePanel } from '../utils/huumeState'
+import { getHuumeState, shouldShowHuumePanel, deriveHuumeArtifacts } from '../utils/huumeState'
 
 export default function MatchaWorkThread() {
   const c = useThreadController()
   const {
-    base, thread, streaming, loading, lightMode, error, pdfUrl, agentMode,
+    base, thread, threadId, streaming, loading, lightMode, error, pdfUrl, agentMode,
     showTutorSetup, tutorDismissed, mobileView, complianceMode, locations, locationsUnavailable,
   } = c
 
@@ -28,9 +29,22 @@ export default function MatchaWorkThread() {
   const isLanguageTutor = thread?.task_type === 'language_tutor'
   const showLanguageTutorPanel = !tutorDismissed && (isLanguageTutor || showTutorSetup)
   const huume = getHuumeState(thread?.current_state)   // banner below needs huume.action
+
+  // The panel's × closes it without disabling Huume mode (turning the mode
+  // off stays on the ThreadHeader pill) — so dismissal has to be "hide THIS
+  // content" rather than a persisted flag, or new Huume output could never
+  // reopen the panel. `dismissedToken` snapshots what was showing when the
+  // user closed it; the panel reappears the moment that identity changes
+  // (a new/re-shown record, a newly staged action, a different thread).
+  const [dismissedToken, setDismissedToken] = useState<string | null>(null)
+  const huumeToken = [
+    threadId,
+    ...deriveHuumeArtifacts(huume).map((a) => a.key),
+    huume.records?.[huume.records.length - 1]?.opened_at ?? '',
+  ].join('|')
   const showHuumePanel = shouldShowHuumePanel({
     huumeMode: !!thread?.huume_mode, state: thread?.current_state, pdfUrl, agentMode,
-  })
+  }) && dismissedToken !== huumeToken
   const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || showHuumePanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
@@ -96,6 +110,7 @@ export default function MatchaWorkThread() {
           showProjectPanel={showProjectPanel}
           showLanguageTutorPanel={showLanguageTutorPanel}
           showHuumePanel={showHuumePanel}
+          onDismissHuumePanel={() => setDismissedToken(huumeToken)}
         />
       )}
     </div>

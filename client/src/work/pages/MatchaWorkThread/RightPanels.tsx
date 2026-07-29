@@ -17,16 +17,19 @@ interface RightPanelsProps {
   showProjectPanel: boolean
   showLanguageTutorPanel: boolean
   showHuumePanel: boolean
+  /** Hides the Huume panel without touching `huume_mode` — see the
+   * dismissal-token comment in `MatchaWorkThread.tsx`. */
+  onDismissHuumePanel: () => void
 }
 
 // Right panels — visible on desktop always, on mobile via toggle
 export default function RightPanels({
   c, showPresentationPanel, showResumeBatchPanel, showInventoryPanel, showProjectPanel, showLanguageTutorPanel, showHuumePanel,
+  onDismissHuumePanel,
 }: RightPanelsProps) {
   const {
     mobileView, thread, threadId, handleEditSlide, lightMode, streaming,
     setThread, setError, setMessages, agentMode, pdfUrl, setShowTutorSetup, setTutorDismissed, handleSend,
-    handleModeToggle, togglingMode,
   } = c
 
   return (
@@ -114,8 +117,7 @@ export default function RightPanels({
           threadId={threadId!}
           lightMode={lightMode}
           streaming={streaming}
-          onToggleOff={() => handleModeToggle('huume')}
-          togglingOff={togglingMode === 'huume'}
+          onDismiss={onDismissHuumePanel}
           onSendChat={(text) => handleSend(text)}
           onStateUpdate={(offerId, plan) => {
             setThread((prev) => prev ? {

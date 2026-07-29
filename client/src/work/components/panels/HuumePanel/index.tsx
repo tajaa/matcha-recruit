@@ -24,13 +24,14 @@ interface HuumePanelProps {
    * the caller refetches the thread so `current_state.huume_records`
    * reflects the removal (same refetch shape as `onExecuted`). */
   onRecordClosed?: () => void
-  /** Turns Huume mode off for the thread (same action as the header pill) —
-   * the panel's own gate (`shouldShowHuumePanel`) requires `huume_mode`, so
-   * this is also how the panel closes itself. There's no separate
-   * dismiss-without-toggling-off state: leaving huume_mode on with the
-   * panel hidden would keep consuming every turn with nothing to review it. */
-  onToggleOff?: () => void
-  togglingOff?: boolean
+  /** Closes the panel WITHOUT touching `huume_mode` — that stays a separate
+   * action on the ThreadHeader pill. Every message keeps routing through
+   * Huume (tools, grounding, the panel-worthy output) whether or not the
+   * panel is visible; hiding it costs nothing, unlike disabling the mode,
+   * which silently drops the thread onto the generic assistant with no
+   * indicator (the bug this replaced: the panel's × used to call
+   * handleModeToggle('huume')). */
+  onDismiss?: () => void
 }
 
 function tabLabel(a: HuumeArtifact): { icon: React.ReactNode; label: string } {
@@ -53,7 +54,7 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * Confirm/Cancel for whatever was staged. This renders the actual document
  * (offer letter, staged action, onboarding plan, handbook draft, legal
  * memo) with one docked confirm bar for whatever needs a decision. */
-export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onRecordClosed, onToggleOff, togglingOff }: HuumePanelProps) {
+export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onRecordClosed, onDismiss }: HuumePanelProps) {
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -153,13 +154,12 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
             </div>
           )
         })}
-        {onToggleOff && (
+        {onDismiss && (
           <button
             type="button"
-            onClick={onToggleOff}
-            disabled={togglingOff}
-            title="Turn Huume off for this thread"
-            className={`ml-auto shrink-0 p-1 rounded transition-colors disabled:opacity-50 ${
+            onClick={onDismiss}
+            title="Close panel"
+            className={`ml-auto shrink-0 p-1 rounded transition-colors ${
               lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
             }`}
           >
