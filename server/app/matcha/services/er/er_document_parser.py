@@ -173,10 +173,17 @@ class ERDocumentParser:
             if not line:
                 continue
 
-            # Try to match speaker patterns
+            # Try to match speaker patterns. No re.IGNORECASE here: the first
+            # pattern's `[A-Z]` anchor is deliberately case-sensitive (a
+            # capitalized name), and case-folding it made ordinary prose like
+            # "note: the meeting ran long" match as a speaker turn — on an
+            # interview transcript that's a legal record, a false speaker
+            # attribution also silently re-attributes everything that follows
+            # it. Patterns that DO want case-insensitivity (Q:/A:, the named
+            # roles) already list both cases or are single letters.
             matched = False
             for pattern in self.SPEAKER_PATTERNS:
-                match = re.match(pattern, line, re.IGNORECASE)
+                match = re.match(pattern, line)
                 if match:
                     # Save previous speaker's turn
                     if current_speaker and current_text_parts:
@@ -255,21 +262,28 @@ class ERDocumentParser:
         current_chunk = ""
         current_line_start = 0
         line_count = 0
+        # Running true offset into `text` (not derived from emitted chunk
+        # content, which double-counts the overlap prefix and drops the
+        # "\n\n" separators — and re-joining every prior chunk on each
+        # append was also O(n^2) over the document).
+        char_offset = 0
 
         for para in paragraphs:
             para = para.strip()
             if not para:
+                char_offset += 2  # the "\n\n" separator this split consumed
                 continue
 
             para_lines = para.count("\n") + 1
 
             # If adding this paragraph would exceed chunk size, save current chunk
             if len(current_chunk) + len(para) > chunk_size and current_chunk:
+                chunk_start = char_offset - len(current_chunk)
                 chunks.append({
                     "content": current_chunk.strip(),
                     "line_start": current_line_start,
                     "line_end": line_count,
-                    "char_start": len("".join(c["content"] for c in chunks)),
+                    "char_start": chunk_start,
                 })
 
                 # Start new chunk with overlap from previous
@@ -285,6 +299,7 @@ class ERDocumentParser:
                     current_chunk = para
 
             line_count += para_lines
+            char_offset += len(para) + 2
 
         # Don't forget the last chunk
         if current_chunk:
@@ -292,7 +307,7 @@ class ERDocumentParser:
                 "content": current_chunk.strip(),
                 "line_start": current_line_start,
                 "line_end": line_count,
-                "char_start": len("".join(c["content"] for c in chunks)),
+                "char_start": char_offset - len(current_chunk),
             })
 
         # Add chunk indices

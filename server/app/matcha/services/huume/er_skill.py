@@ -297,7 +297,7 @@ async def ask_case(
         )
 
         try:
-            ctx = await load_guidance_context(conn, case["id"], case)
+            ctx = await load_guidance_context(conn, case["id"], case, company_id)
             involved_ids = [
                 e["employee_id"] for e in normalize_json_list(case["involved_employees"])
                 if isinstance(e, dict) and e.get("employee_id")

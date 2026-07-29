@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 from typing import Optional, Any, AsyncIterator, Callable
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_json import parse_model_json
+from app.matcha.services.er.er_case_context import (
+    ER_DOC_PER_DOC_CHAR_CAP,
+    ER_DOC_TOTAL_CHAR_CAP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -729,38 +734,51 @@ class ERAnalyzer:
         raise RuntimeError("No Gemini model candidates were available for ER analysis")
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
-        """Parse JSON from LLM response, handling markdown code blocks and preamble text."""
-        text = text.strip()
+        """Parse JSON from an LLM response into a dict.
 
-        # Remove markdown code blocks
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-
-        if text.endswith("```"):
-            text = text[:-3]
-
-        text = text.strip()
-
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Fallback: locate the outermost {...} JSON object in case of
-            # preamble text or trailing content surrounding the JSON.
-            start = text.find("{")
-            end = text.rfind("}")
-            if start != -1 and end > start:
-                return json.loads(text[start : end + 1])
-            raise
+        Delegates fence-stripping/cleanup to the shared `parse_model_json`
+        (handles Python-literal rewrites and a balanced-span fallback that
+        this module's from-scratch version didn't). Raises `ValueError` if
+        the model didn't return a JSON *object* — every caller immediately
+        keys into the result (`result["generated_at"] = ...`), so a bare
+        array/string/null response must fail loudly here rather than at an
+        unrelated subscript deeper in the caller.
+        """
+        _unparsed = object()
+        parsed = parse_model_json(text, default=_unparsed)
+        if parsed is _unparsed:
+            raise ValueError(f"ER analyzer: could not parse JSON from model response: {text[:200]!r}")
+        if not isinstance(parsed, dict):
+            raise ValueError(f"ER analyzer: expected a JSON object from model response, got {type(parsed).__name__}")
+        return parsed
 
     def _format_documents_for_prompt(self, documents: list[dict]) -> str:
-        """Format document list for inclusion in prompt."""
+        """Format document list for inclusion in prompt, capped at
+        ER_DOC_TOTAL_CHAR_CAP total / ER_DOC_PER_DOC_CHAR_CAP per document —
+        the same budget `er_case_context.build_document_excerpts` enforces on
+        the guidance path. Without this, a case with dozens of uploaded
+        documents concatenates every full `scrubbed_text` with no limit and
+        can exceed Gemini's context window, failing the analysis outright.
+        """
         parts = []
+        total = 0
         for doc in documents:
+            text = doc.get("text") or ""
+            remaining = ER_DOC_TOTAL_CHAR_CAP - total
+            if remaining <= 0:
+                parts.append(f"--- Document: {doc['filename']} (ID: {doc['id']}) ---")
+                parts.append(f"Type: {doc['document_type']}")
+                parts.append("[omitted, prompt size cap reached]")
+                parts.append("")
+                continue
+            cap = min(ER_DOC_PER_DOC_CHAR_CAP, remaining)
+            excerpt = text[:cap]
+            if len(text) > cap:
+                excerpt += f"\n[truncated after {cap} chars]"
+            total += len(excerpt)
             parts.append(f"--- Document: {doc['filename']} (ID: {doc['id']}) ---")
             parts.append(f"Type: {doc['document_type']}")
-            parts.append(f"Content:\n{doc['text']}")
+            parts.append(f"Content:\n{excerpt}")
             parts.append("")
         return "\n".join(parts)
 
@@ -944,11 +962,14 @@ class ERAnalyzer:
         Returns:
             Dict with summary + cards payload.
         """
-        analyses_completed = evidence_overview.pop("analyses_completed", {})
+        analyses_completed = evidence_overview.get("analyses_completed", {})
+        evidence_overview_for_prompt = {
+            k: v for k, v in evidence_overview.items() if k != "analyses_completed"
+        }
         prompt = SUGGESTED_GUIDANCE_PROMPT.format(
             case_info=json.dumps(case_info, indent=2),
             intake_context=json.dumps(intake_context or {}, indent=2),
-            evidence_overview=json.dumps(evidence_overview, indent=2),
+            evidence_overview=json.dumps(evidence_overview_for_prompt, indent=2),
             analysis_results=json.dumps(analysis_results, indent=2),
             document_excerpts=document_excerpts or "(No document text available yet)",
             analyses_completed=json.dumps(analyses_completed, indent=2),
@@ -960,6 +981,55 @@ class ERAnalyzer:
         result = self._parse_json_response(text)
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
+
+    def _build_outcome_prompt(
+        self,
+        case_info: dict,
+        analysis_summary: str,
+        policy_findings: str,
+        precedent_stats: dict,
+        healthcare_context: dict | None,
+        determination_confidence: float | None,
+        jurisdiction_requirements: str,
+    ) -> str:
+        """Shared prompt assembly for `generate_outcome_analysis` and its
+        streaming twin — was duplicated verbatim between the two, so a change
+        to the grounding rule, the confidence threshold, or the calibration
+        wording had to be applied in both places (and easily wasn't).
+        """
+        prompt = OUTCOME_ANALYSIS_PROMPT.format(
+            case_info=json.dumps(case_info, indent=2, default=str),
+            analysis_summary=analysis_summary or "No analysis summary available.",
+            policy_findings=policy_findings or "No policy findings available.",
+            precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
+        )
+        if jurisdiction_requirements:
+            prompt += _grounding_block(jurisdiction_requirements)
+        if healthcare_context:
+            specialties = healthcare_context.get("specialties")
+            specialties_str = ", ".join(specialties) if specialties else "general healthcare"
+            prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
+        if determination_confidence is not None:
+            prompt += (
+                f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
+                "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
+            )
+            if determination_confidence >= 0.80:
+                prompt += (
+                    "MANDATORY CALIBRATION (EVIDENCE READINESS >= 80%):\n"
+                    "- The investigation has been certified as sufficiently complete.\n"
+                    "- You MUST NOT recommend 'case closure due to insufficient evidence' or any outcome "
+                    "whose action_label or reasoning says evidence is insufficient, lacking, or needs gathering.\n"
+                    "- At least one outcome MUST have confidence 'high'.\n"
+                    "- If the evidence genuinely doesn't support a specific allegation, use determination "
+                    "'unsubstantiated' with 'no_action' — NOT 'inconclusive' with 'insufficient evidence'.\n"
+                )
+            else:
+                prompt += (
+                    "NOTE: Evidence readiness is below 80%, so outcomes reflecting incomplete "
+                    "investigation (e.g., 'gather more evidence') are acceptable.\n"
+                )
+        return prompt
 
     async def generate_outcome_analysis(
         self,
@@ -984,38 +1054,10 @@ class ERAnalyzer:
             Dict with outcomes list and case_summary.
         """
         try:
-            prompt = OUTCOME_ANALYSIS_PROMPT.format(
-                case_info=json.dumps(case_info, indent=2, default=str),
-                analysis_summary=analysis_summary or "No analysis summary available.",
-                policy_findings=policy_findings or "No policy findings available.",
-                precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
+            prompt = self._build_outcome_prompt(
+                case_info, analysis_summary, policy_findings, precedent_stats,
+                healthcare_context, determination_confidence, jurisdiction_requirements,
             )
-            if jurisdiction_requirements:
-                prompt += _grounding_block(jurisdiction_requirements)
-            if healthcare_context:
-                specialties = healthcare_context.get("specialties")
-                specialties_str = ", ".join(specialties) if specialties else "general healthcare"
-                prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
-            if determination_confidence is not None:
-                prompt += (
-                    f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
-                    "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
-                )
-                if determination_confidence >= 0.80:
-                    prompt += (
-                        "MANDATORY CALIBRATION (EVIDENCE READINESS >= 80%):\n"
-                        "- The investigation has been certified as sufficiently complete.\n"
-                        "- You MUST NOT recommend 'case closure due to insufficient evidence' or any outcome "
-                        "whose action_label or reasoning says evidence is insufficient, lacking, or needs gathering.\n"
-                        "- At least one outcome MUST have confidence 'high'.\n"
-                        "- If the evidence genuinely doesn't support a specific allegation, use determination "
-                        "'unsubstantiated' with 'no_action' — NOT 'inconclusive' with 'insufficient evidence'.\n"
-                    )
-                else:
-                    prompt += (
-                        "NOTE: Evidence readiness is below 80%, so outcomes reflecting incomplete "
-                        "investigation (e.g., 'gather more evidence') are acceptable.\n"
-                    )
             text = await self._generate_content_async(prompt)
             result = self._parse_json_response(text)
             result["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -1056,38 +1098,10 @@ class ERAnalyzer:
         on_status(msg) when it detects the AI entering a new JSON section.
         """
         try:
-            prompt = OUTCOME_ANALYSIS_PROMPT.format(
-                case_info=json.dumps(case_info, indent=2, default=str),
-                analysis_summary=analysis_summary or "No analysis summary available.",
-                policy_findings=policy_findings or "No policy findings available.",
-                precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
+            prompt = self._build_outcome_prompt(
+                case_info, analysis_summary, policy_findings, precedent_stats,
+                healthcare_context, determination_confidence, jurisdiction_requirements,
             )
-            if jurisdiction_requirements:
-                prompt += _grounding_block(jurisdiction_requirements)
-            if healthcare_context:
-                specialties = healthcare_context.get("specialties")
-                specialties_str = ", ".join(specialties) if specialties else "general healthcare"
-                prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
-            if determination_confidence is not None:
-                prompt += (
-                    f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
-                    "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
-                )
-                if determination_confidence >= 0.80:
-                    prompt += (
-                        "MANDATORY CALIBRATION (EVIDENCE READINESS >= 80%):\n"
-                        "- The investigation has been certified as sufficiently complete.\n"
-                        "- You MUST NOT recommend 'case closure due to insufficient evidence' or any outcome "
-                        "whose action_label or reasoning says evidence is insufficient, lacking, or needs gathering.\n"
-                        "- At least one outcome MUST have confidence 'high'.\n"
-                        "- If the evidence genuinely doesn't support a specific allegation, use determination "
-                        "'unsubstantiated' with 'no_action' — NOT 'inconclusive' with 'insufficient evidence'.\n"
-                    )
-                else:
-                    prompt += (
-                        "NOTE: Evidence readiness is below 80%, so outcomes reflecting incomplete "
-                        "investigation (e.g., 'gather more evidence') are acceptable.\n"
-                    )
 
             accumulated = ""
             fired_phases: set[str] = set()

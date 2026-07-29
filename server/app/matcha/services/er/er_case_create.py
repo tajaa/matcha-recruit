@@ -48,7 +48,7 @@ async def create_case_core(
     await log_audit(
         conn,
         str(row["id"]),
-        created_by or str(row["id"]),
+        created_by,
         "case_created",
         "case",
         str(row["id"]),

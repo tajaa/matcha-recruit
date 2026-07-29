@@ -12,7 +12,7 @@ import asyncio
 import logging
 import math
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -109,12 +109,31 @@ def _score_temporal_recency(current: dict, candidate: dict) -> float:
     if isinstance(created, str):
         created = datetime.fromisoformat(created.replace("Z", "+00:00"))
 
-    now = datetime.utcnow()
-    # Handle timezone-aware datetimes
-    if created.tzinfo is not None:
-        created = created.replace(tzinfo=None)
+    now = datetime.now(timezone.utc)
+    # Normalize to aware UTC: a naive timestamp is assumed already UTC, an
+    # offset-aware one is converted rather than having its offset discarded
+    # (a bare .replace(tzinfo=None) would silently misdate by the offset).
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    else:
+        created = created.astimezone(timezone.utc)
     days_old = max(0, (now - created).days)
     return math.exp(-days_old / 365.0)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a semantic-score field to float, tolerating an explicit JSON
+    null (a routine shape — the prompt invites 0.0/omission for unscoreable
+    candidates, and some models emit null instead) or a non-numeric string.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
 
 
 def _parse_intake_context(val: Any) -> dict:
@@ -372,7 +391,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
             case_id,
         )
     if not row:
-        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.now(timezone.utc).isoformat(), "from_cache": False}}
         return
 
     current = dict(row)
@@ -384,13 +403,13 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
             current["intake_context"] = {}
 
     company_id = current.get("company_id")
-    lookback = datetime.utcnow() - timedelta(days=LOOKBACK_MONTHS * 30)
+    lookback = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_MONTHS * 30)
 
     yield {"type": "phase", "step": "querying_history", "message": "Querying case history..."}
 
     if not company_id:
         yield {"type": "phase", "step": "no_history", "message": "No company context for case"}
-        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.now(timezone.utc).isoformat(), "from_cache": False}}
         return
 
     historical = await conn.fetch(
@@ -416,7 +435,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
 
     if not historical:
         yield {"type": "phase", "step": "no_history", "message": "No historical cases found"}
-        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.now(timezone.utc).isoformat(), "from_cache": False}}
         return
 
     yield {"type": "phase", "step": "structural_scoring", "message": f"Phase 1: Structural scoring ({len(historical)} candidates)..."}
@@ -435,7 +454,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
 
     if not top:
         yield {"type": "phase", "step": "no_matches", "message": "No structurally similar cases found"}
-        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        yield {"type": "result", "data": {"matches": [], "pattern_summary": None, "outcome_distribution": {}, "generated_at": datetime.now(timezone.utc).isoformat(), "from_cache": False}}
         return
 
     yield {"type": "phase", "step": "semantic_enrichment", "message": f"Phase 2: Semantic enrichment ({len(top)} candidates)..."}
@@ -510,8 +529,8 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
         cand_id = str(cand["id"])
         sem = semantic_lookup.get(cand_id, {})
 
-        text_sim = float(sem.get("text_similarity", 0.0))
-        inv_sim = float(sem.get("investigation_pattern_similarity", 0.0))
+        text_sim = _safe_float(sem.get("text_similarity"))
+        inv_sim = _safe_float(sem.get("investigation_pattern_similarity"))
         common_factors = sem.get("common_factors", [])
         relevance_note = sem.get("relevance_note")
 
@@ -564,7 +583,16 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
         })
 
     matches.sort(key=lambda x: x["similarity_score"], reverse=True)
-    matches = [m for m in matches if m["similarity_score"] >= SIMILARITY_MIN_SCORE]
+    if semantic_lookup:
+        matches = [m for m in matches if m["similarity_score"] >= SIMILARITY_MIN_SCORE]
+    else:
+        # Phase 2 (semantic enrichment) failed entirely — run_semantic_enrichment's
+        # fail-soft contract returns empty scores, so text/investigation similarity
+        # are 0.0 for every candidate and the structural-only ceiling (~0.55) can
+        # still clear SIMILARITY_MIN_SCORE (0.50) only for a near-perfect match.
+        # Fall back to the structural threshold so a realistic strong structural
+        # match isn't dropped just because Gemini was unavailable.
+        matches = [m for m in matches if m["similarity_score"] >= STRUCTURAL_THRESHOLD]
     matches = matches[:FINAL_KEEP]
 
     # Build outcome distribution across matches
@@ -578,7 +606,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
         "matches": matches,
         "pattern_summary": semantic_result.get("pattern_summary"),
         "outcome_distribution": outcome_dist,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "from_cache": False,
     }
     yield {"type": "result", "data": result}

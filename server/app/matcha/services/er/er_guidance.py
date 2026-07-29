@@ -54,7 +54,7 @@ def _normalize_guidance_action(
         valid_analysis_types = DEFAULT_VALID_ANALYSIS_TYPES
 
     action_type = "open_tab"
-    label = "Open Timeline"
+    label = None
     tab = "timeline"
     analysis_type = None
     search_query = None
@@ -91,7 +91,12 @@ def _normalize_guidance_action(
                 "analysis_type": None,
                 "search_query": None,
             }
-        tab = analysis_type
+        # analysis_type's vocabulary (DEFAULT_VALID_ANALYSIS_TYPES) is wider than
+        # tab's (DEFAULT_VALID_TABS) — e.g. "similar_cases" has no matching tab —
+        # so only adopt it as the tab when it's actually a valid one; otherwise
+        # keep whatever tab was already resolved (caller-supplied or "timeline").
+        if analysis_type in valid_tabs:
+            tab = analysis_type
         if not label:
             label = "Run Analysis"
 

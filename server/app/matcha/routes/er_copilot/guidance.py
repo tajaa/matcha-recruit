@@ -119,7 +119,7 @@ async def generate_suggested_guidance(
             ["timeline", "discrepancies", "policy_check"],
         )
 
-        ctx = await _load_guidance_context(conn, case_id, case_row)
+        ctx = await _load_guidance_context(conn, case_id, case_row, company_id)
         enriched_employees = ctx["enriched_employees"]
         evidence_rows = ctx["evidence_rows"]
         transcript_rows = ctx["transcript_rows"]
@@ -353,7 +353,7 @@ async def generate_suggested_guidance_stream(
             ["timeline", "discrepancies", "policy_check"],
         )
 
-        ctx = await _load_guidance_context(conn, case_id, case_row)
+        ctx = await _load_guidance_context(conn, case_id, case_row, company_id)
         enriched_employees_s = ctx["enriched_employees"]
         evidence_rows = ctx["evidence_rows"]
         transcript_rows = ctx["transcript_rows"]
@@ -578,7 +578,7 @@ async def generate_outcome_analysis_stream(
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        involved_parties = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
+        involved_parties = await _resolve_involved_parties(conn, case_row.get("involved_employees"), company_id)
         try:
             corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))
@@ -865,7 +865,7 @@ async def generate_outcome_analysis(
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        involved_parties_ns = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
+        involved_parties_ns = await _resolve_involved_parties(conn, case_row.get("involved_employees"), company_id)
         try:
             corpus_text, corpus_index, _truncated = await er_compliance_grounding.build_jurisdiction_corpus(
                 conn, company_id, _involved_employee_ids(case_row.get("involved_employees"))

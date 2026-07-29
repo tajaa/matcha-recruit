@@ -38,14 +38,26 @@ async def build_er_packet(conn, case_id: UUID, company_id) -> dict | None:
         case_id,
     )
     analyses = await conn.fetch(
-        "SELECT analysis_type, analysis_data, generated_at FROM er_case_analysis WHERE case_id = $1",
+        """
+        SELECT analysis_type, analysis_data, generated_at
+        FROM er_case_analysis WHERE case_id = $1
+        ORDER BY generated_at DESC
+        """,
         case_id,
     )
+    # A case can be re-analyzed after new evidence, leaving multiple rows per
+    # analysis_type — keep only the newest per type (first-seen, since the
+    # query is DESC-ordered) so the packet never renders a superseded
+    # determination. Same idiom as er_precedent.py's analysis_lookup dedupe.
+    latest_analyses: dict = {}
+    for a in analyses:
+        if a["analysis_type"] not in latest_analyses:
+            latest_analyses[a["analysis_type"]] = _loads(a["analysis_data"])
     return {
         "case": dict(case),
         "notes": [dict(n) for n in notes],
         "documents": [dict(d) for d in docs],
-        "analyses": {a["analysis_type"]: _loads(a["analysis_data"]) for a in analyses},
+        "analyses": latest_analyses,
     }
 
 

@@ -71,11 +71,15 @@ def build_document_excerpts(rows, *, text_key: str) -> str:
     return "\n\n".join(parts)
 
 
-async def resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
+async def resolve_involved_parties(conn, raw_employees: Any, company_id) -> list[dict]:
     """Resolve involved_employees JSONB into name+role dicts for Gemini context.
 
     Skips malformed entries (non-dict, missing/invalid employee_id) instead of
-    raising — legacy rows predate Pydantic validation on this JSONB.
+    raising — legacy rows predate Pydantic validation on this JSONB. Scoped to
+    `company_id` (employees.org_id) the same way `er_compliance_grounding.
+    _resolve_states` scopes its identical lookup — otherwise an
+    `involved_employees` entry carrying another tenant's employee id resolves
+    that tenant's real name into this case's UI and Gemini prompt.
     """
     involved = normalize_json_list(raw_employees)
     if not involved:
@@ -92,8 +96,9 @@ async def resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
     if not parties:
         return []
     rows = await conn.fetch(
-        "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[])",
+        "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[]) AND org_id::text = $2::text",
         [p[0] for p in parties],
+        str(company_id),
     )
     name_map = {
         str(r["id"]): (f"{r['first_name'] or ''} {r['last_name'] or ''}".strip() or "Unknown")
@@ -105,7 +110,7 @@ async def resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
     ]
 
 
-async def load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any]:
+async def load_guidance_context(conn, case_id: UUID, case_row, company_id) -> dict[str, Any]:
     """Single-round-trip context load shared by the suggested-guidance endpoints
     (and, via the Huume ER bridge, `ask_er_copilot`).
 
@@ -113,7 +118,7 @@ async def load_guidance_context(conn, case_id: UUID, case_row) -> dict[str, Any]
     views only differ by filter) with one, and replaces an inline per-employee
     N+1 lookup with the batched `resolve_involved_parties`.
     """
-    enriched_employees = await resolve_involved_parties(conn, case_row["involved_employees"])
+    enriched_employees = await resolve_involved_parties(conn, case_row["involved_employees"], company_id)
 
     doc_rows = await conn.fetch(
         """

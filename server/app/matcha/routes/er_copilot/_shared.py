@@ -46,7 +46,7 @@ from app.matcha.services.er.er_case_create import create_case_core  # noqa: F401
 async def log_audit(
     conn,
     case_id: Optional[str],
-    user_id: str,
+    user_id: Optional[str],
     action: str,
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
