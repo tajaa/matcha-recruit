@@ -30,13 +30,26 @@ class TestBuildStateBlock:
         block = build_state_block(state)
         assert "offer-2" in block and "accepted" in block
 
-    def test_huume_record_pointer_rendered(self):
-        state = {"huume_record": {"record_type": "er_case", "record_id": "rec-1", "label": "ER-2026-002 — Complaint"}}
+    def test_huume_records_pointer_rendered(self):
+        state = {"huume_records": [{"record_type": "er_case", "record_id": "rec-1", "label": "ER-2026-002 — Complaint"}]}
         block = build_state_block(state)
-        assert "rec-1" in block and "ER-2026-002" in block and "er case" in block
+        assert "rec-1" in block and "ER-2026-002" in block and "er_case" in block
 
-    def test_huume_record_absent_when_not_staged(self):
+    def test_huume_records_renders_every_open_record(self):
+        state = {"huume_records": [
+            {"record_type": "incident", "record_id": "rec-1", "label": "IR-1"},
+            {"record_type": "employee", "record_id": "rec-2", "label": "Jane Doe"},
+        ]}
+        block = build_state_block(state)
+        assert "rec-1" in block and "rec-2" in block and "IR-1" in block and "Jane Doe" in block
+        assert "(2)" in block
+
+    def test_huume_records_absent_when_not_staged(self):
         block = build_state_block({"huume_offer": {"offer_id": "offer-2", "status": "accepted"}})
+        assert "record_id" not in block
+
+    def test_huume_records_empty_list_is_absent(self):
+        block = build_state_block({"huume_records": []})
         assert "record_id" not in block
 
     def test_renders_two_plans_with_step_statuses(self):

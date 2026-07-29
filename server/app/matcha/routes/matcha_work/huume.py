@@ -13,7 +13,9 @@ with the candidate list when more than one plan is active and no id was given.
 Also owns `GET .../huume/record` — the panel-facing counterpart to the chat
 tool `show_record`: fetches the normalized record view (`services/huume/
 record_view.py`) under the admin's own auth, re-checking that record type's
-own feature flag on top of the mount's huume/matcha_work gates.
+own feature flag on top of the mount's huume/matcha_work gates. And
+`DELETE .../huume/record` — drops one entry from the open-record working
+set (`current_state.huume_records`), the `×` on a panel tab.
 
 Mounted at `/matcha-work` (this package's prefix) alongside every other
 matcha_work route — `require_feature("huume")` on top of the package's own
@@ -178,3 +180,31 @@ async def get_huume_record(
     if view is None:
         raise HTTPException(status_code=404, detail="Record not found")
     return view
+
+
+@router.delete("/threads/{thread_id}/huume/record")
+async def close_huume_record(
+    thread_id: UUID,
+    record_type: str = Query(...),
+    record_id: str = Query(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Drop one entry from the panel's open-record working set
+    (`current_state.huume_records`) — the `×` on a record tab. No feature
+    re-check: removing a stale entry must stay possible even after the
+    record type's flag has been flipped off."""
+    from app.matcha.dependencies import get_client_company_id
+
+    thread = await _get_owned_thread(thread_id, current_user)
+    company_id = thread["company_id"]
+    if await get_client_company_id(current_user) != company_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    def mutator(current: list) -> list:
+        return [r for r in current if not (isinstance(r, dict) and r.get("record_type") == record_type and r.get("record_id") == record_id)]
+
+    try:
+        records = await huume_store.update_huume_records(thread_id, mutator)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"records": records}

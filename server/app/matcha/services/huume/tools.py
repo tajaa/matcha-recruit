@@ -85,16 +85,22 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "show_record", "read",
-        "Open a specific record in the admin's side panel for review — use "
-        "when the admin asks to see/view/open/inspect a record. record_type: "
+        "Open one or more records in the admin's side panel for review — use "
+        "whenever the admin asks to see/show/open/pull up/look at specific "
+        "records. Pass EVERY id they asked about in a single call (up to 8). "
+        "Strongly prefer this over describing records in chat: the panel is "
+        "where the admin reads and keeps them, not your reply. record_type: "
         "incident (ids from lookup_context topic='incidents'), er_case "
         "(topic='er_cases'), employee (topic='roster' or 'employee'), "
         "credential (topic='credentials'). Never guess an id.",
         properties={
             "record_type": types.Schema(type=types.Type.STRING, enum=list(SHOW_RECORD_TYPES)),
-            "record_id": types.Schema(type=types.Type.STRING),
+            "record_ids": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="One or more ids of the SAME record_type, from a prior lookup_context call.",
+            ),
         },
-        required=["record_type", "record_id"],
+        required=["record_type", "record_ids"],
     ),
     _tool(
         "draft_offer_letter", "write",

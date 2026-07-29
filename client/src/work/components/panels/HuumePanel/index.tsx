@@ -3,6 +3,7 @@ import { FileSignature, PlayCircle, BookOpen, Scale, Send, X } from 'lucide-reac
 import type { HuumeOffer, HuumePlan } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
 import { actionIcon } from '../../../utils/huumeActionMeta'
+import { closeHuumeRecord } from '../../../api/matchaWork/huume'
 import ConfirmBar from './ConfirmBar'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
@@ -19,6 +20,10 @@ interface HuumePanelProps {
   onStateUpdate: (offerId: string, plan: HuumePlan) => void
   onSendChat?: (text: string) => void
   onExecuted?: () => void
+  /** Called after a record tab's × successfully closes it server-side —
+   * the caller refetches the thread so `current_state.huume_records`
+   * reflects the removal (same refetch shape as `onExecuted`). */
+  onRecordClosed?: () => void
   /** Turns Huume mode off for the thread (same action as the header pill) —
    * the panel's own gate (`shouldShowHuumePanel`) requires `huume_mode`, so
    * this is also how the panel closes itself. There's no separate
@@ -48,31 +53,36 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * Confirm/Cancel for whatever was staged. This renders the actual document
  * (offer letter, staged action, onboarding plan, handbook draft, legal
  * memo) with one docked confirm bar for whatever needs a decision. */
-export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onToggleOff, togglingOff }: HuumePanelProps) {
+export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onRecordClosed, onToggleOff, togglingOff }: HuumePanelProps) {
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [closingRecordKey, setClosingRecordKey] = useState<string | null>(null)
 
-  // A newly-opened record wins focus (the whole point of "show it to me" is
-  // that the panel jumps to it). Declared before the proposed-action effect
-  // below so a simultaneous staged action still wins if both change at once.
-  // Keyed on `opened_at` (not just record_type/record_id) so re-asking
-  // Huume to show the SAME record after navigating away still refocuses —
-  // record_type+record_id alone is identical to the previous stage and
-  // wouldn't re-trigger the effect.
-  const recordKey = huume.record ? `record:${huume.record.record_type}:${huume.record.record_id}` : null
-  const recordFocusToken = huume.record ? `${recordKey}:${huume.record.opened_at ?? ''}` : null
+  // The most-recently-opened record wins focus (the whole point of "show it
+  // to me" is that the panel jumps to it) — `merge_open_records` appends on
+  // the server, so the LAST entry is always the newest show_record call.
+  // Declared before the proposed-action effect below so a simultaneous
+  // staged action still wins if both change at once. Keyed on `opened_at`
+  // (not just record_type/record_id) so re-asking Huume to show a record
+  // that's already open — but not already last, or already focused — still
+  // refocuses: a plain position-based key can be unchanged when the entry
+  // was already last, which `opened_at` (a fresh nonce every call) is not.
+  const lastRecord = huume.records?.[huume.records.length - 1]
+  const recordKey = lastRecord ? `record:${lastRecord.record_type}:${lastRecord.record_id}` : null
+  const recordFocusToken = lastRecord ? `${recordKey}:${lastRecord.opened_at ?? ''}` : null
   useEffect(() => {
     if (recordKey) setSelectedKey(recordKey)
   }, [recordFocusToken, recordKey])
 
   // A newly-staged proposed action — or a plan with steps awaiting
   // approval — must win over whatever tab the user happens to have open,
-  // and over a stale `huume_record` (which is never cleared, so an old
-  // show_record from days ago would otherwise keep re-winning focus on
-  // every mount ahead of a plan that actually needs review). Declared
-  // after the record effect above so it runs later in the same commit and
-  // takes priority when both fire together (e.g. on mount).
+  // and over a stale open record (entries are never cleared except by an
+  // explicit close, so an old show_record from days ago would otherwise
+  // keep re-winning focus on every mount ahead of a plan that actually
+  // needs review). Declared after the record effect above so it runs later
+  // in the same commit and takes priority when both fire together (e.g. on
+  // mount).
   const proposedPlanArtifact = artifacts.find((a) => a.kind === 'plan' && a.plan.status === 'proposed')
   const proposedTargetKey = huume.action?.status === 'proposed'
     ? defaultArtifactKey(artifacts, huume.action)
@@ -98,22 +108,49 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
             {STATUS_CHIP[huume.offer.status] ?? huume.offer.status}
           </span>
         )}
-        {artifacts.length > 1 && artifacts.map((a) => {
+        {(artifacts.length > 1 || artifacts.some((a) => a.kind === 'record')) && artifacts.map((a) => {
           const { icon, label } = tabLabel(a)
           const isActive = a.key === activeKey
+          const closing = closingRecordKey === a.key
           return (
-            <button
+            <div
               key={a.key}
-              type="button"
-              onClick={() => setSelectedKey(a.key)}
-              className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium capitalize ${
+              className={`flex items-center gap-0.5 rounded text-[11px] font-medium capitalize ${
                 isActive
                   ? 'bg-orange-600 text-white'
                   : lightMode ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
               }`}
             >
-              {icon} <span className="max-w-[140px] truncate">{label}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => setSelectedKey(a.key)}
+                className="flex items-center gap-1 rounded py-1 pl-2 pr-1"
+              >
+                {icon} <span className="max-w-[140px] truncate">{label}</span>
+              </button>
+              {a.kind === 'record' && (
+                <button
+                  type="button"
+                  disabled={closing}
+                  title="Close"
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    setClosingRecordKey(a.key)
+                    try {
+                      await closeHuumeRecord(threadId, a.recordType, a.recordId)
+                      onRecordClosed?.()
+                    } finally {
+                      setClosingRecordKey(null)
+                    }
+                  }}
+                  className={`rounded-r p-1 mr-0.5 disabled:opacity-50 ${
+                    isActive ? 'hover:bg-orange-700' : lightMode ? 'hover:bg-zinc-200' : 'hover:bg-zinc-700'
+                  }`}
+                >
+                  <X size={11} />
+                </button>
+              )}
+            </div>
           )
         })}
         {onToggleOff && (

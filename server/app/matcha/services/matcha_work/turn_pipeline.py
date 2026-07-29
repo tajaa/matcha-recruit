@@ -860,7 +860,7 @@ async def _run_huume_dispatch(tc: TurnContext):
     # 40/hr) previously had no tenant limit at all.
     try:
         from app.core.services.redis_cache import check_rate_limit
-        await check_rate_limit(str(company_id), "huume_turn", 60, 3600)
+        await check_rate_limit(str(company_id), "huume_turn", 200, 3600)
     except HTTPException:
         yield _sse_data({"type": "error", "message": "Huume is being used a lot right now — try again in a bit."})
         tc.terminated = True

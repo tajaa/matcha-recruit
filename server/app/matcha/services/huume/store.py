@@ -104,6 +104,48 @@ async def update_huume_plan(
             return new_plan
 
 
+async def update_huume_records(
+    thread_id: UUID, mutator: Callable[[list], list],
+) -> list:
+    """Row-locked read-modify-write of `current_state.huume_records` — the
+    open-record working set. Same hazard as `update_huume_plan`: there are
+    two writers (the chat tool's `show_record` and the panel's close
+    button), and `apply_update` merges top-level keys wholesale with no lock
+    between read and write, so a concurrent close and a concurrent open
+    could otherwise clobber each other."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT current_state, version FROM mw_threads WHERE id = $1 FOR UPDATE",
+                thread_id,
+            )
+            if row is None:
+                raise ValueError("Thread not found")
+            raw_state = row["current_state"]
+            if isinstance(raw_state, str):
+                state = json.loads(raw_state) if raw_state else {}
+            else:
+                state = dict(raw_state or {})
+
+            current_records = state.get("huume_records") or []
+            if not isinstance(current_records, list):
+                current_records = []
+            new_records = mutator(current_records)
+            state["huume_records"] = new_records
+            new_version = row["version"] + 1
+
+            await conn.execute(
+                "UPDATE mw_threads SET current_state = $1, version = $2, updated_at = NOW() WHERE id = $3",
+                json.dumps(state, default=str), new_version, thread_id,
+            )
+            await conn.execute(
+                "INSERT INTO mw_document_versions (thread_id, version, state_json, diff_summary) "
+                "VALUES ($1, $2, $3, $4) ON CONFLICT (thread_id, version) DO NOTHING",
+                thread_id, new_version, json.dumps(state, default=str), "Huume records updated",
+            )
+            return new_records
+
+
 async def execute_plan_locked(
     *,
     thread_id: UUID,
@@ -178,19 +220,20 @@ async def get_thread_integrations(company_id: UUID) -> dict[str, bool]:
 async def get_thread_features_and_integrations(company_id: UUID) -> tuple[dict[str, Any], dict[str, bool]]:
     """Live-reload company features + connected integrations — called at
     every plan-step evaluation/execute so a flag flip or a newly-connected
-    integration is picked up without a stale in-memory copy."""
-    from app.core.feature_flags import merge_company_features
+    integration is picked up without a stale in-memory copy.
+
+    Delegates to `get_company_features` for the features half rather than
+    hand-rolling the query — asyncpg hands `enabled_features` back as a
+    plain `str` (no jsonb codec is registered anywhere in this app), and
+    `get_company_features`/`merge_company_features` already handle that.
+    A prior version here did `dict(row["enabled_features"] or {})` directly,
+    which iterates the JSON string's characters and raises."""
+    from app.core.feature_flags import get_company_features
 
     async with get_connection() as conn:
-        company_row = await conn.fetchrow(
-            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id,
-        )
+        features = await get_company_features(company_id, conn=conn)
         integ_rows = await conn.fetch(
             "SELECT provider FROM integration_connections WHERE company_id = $1", company_id,
         )
-    features = merge_company_features(
-        dict(company_row["enabled_features"] or {}) if company_row else {},
-        company_row["signup_source"] if company_row else None,
-    )
     integrations = {r["provider"]: True for r in integ_rows}
     return features, integrations

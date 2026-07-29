@@ -379,29 +379,43 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "show_record":
-                result = await record_view.show_record_for_model(
-                    company_id=company_id, record_type=str(args.get("record_type") or ""),
-                    record_id=str(args.get("record_id") or ""), features=features,
+                record_type = str(args.get("record_type") or "")
+                record_ids = [str(r) for r in (args.get("record_ids") or []) if str(r).strip()]
+                result = await record_view.show_records_for_model(
+                    company_id=company_id, record_type=record_type, record_ids=record_ids, features=features,
                 )
                 ok = result.get("status") == "ok"
+                n = len(result.get("records") or [])
                 step = recorder.record(
                     tool=name, kind="read",
-                    label=(f"Opened {result['record_type'].replace('_', ' ')}: {result.get('label')}" if ok else "Could not open record"),
+                    label=(f"Opened {n} {record_type.replace('_', ' ')} record{'s' if n != 1 else ''}" if ok else "Could not open record(s)"),
                     status="ok" if ok else ("rejected" if result.get("status") in ("refused", "not_found") else "error"),
                     detail=result.get("message"),
                 )
                 if ok:
-                    state_updates["huume_record"] = {
-                        "record_type": result["record_type"],
-                        "record_id": result["record_id"],
-                        "label": result.get("label"),
-                        # A per-turn nonce, not a timestamp to display — lets
-                        # the panel tell "re-opened the same record" apart
-                        # from "nothing changed", since record_type+record_id
-                        # alone is an unchanged key on a repeat show_record
-                        # for the same id in a later turn.
-                        "opened_at": str(run_id) if run_id else None,
-                    }
+                    # Locked mid-turn write, NOT state_updates — there are now
+                    # two writers of huume_records (this tool and the panel's
+                    # close button), and apply_update's wholesale top-level
+                    # merge has no lock between a concurrent read and write.
+                    # Same reasoning as plan writes going through
+                    # store.update_huume_plan instead of state_updates.
+                    entries = [
+                        {
+                            "record_type": result["record_type"],
+                            "record_id": r["record_id"],
+                            "label": r.get("label"),
+                            # A per-turn nonce, not a timestamp to display —
+                            # lets the panel tell "re-opened the same record"
+                            # apart from "nothing changed", since
+                            # record_type+record_id alone is an unchanged key
+                            # on a repeat show_record for the same id.
+                            "opened_at": str(run_id) if run_id else None,
+                        }
+                        for r in result["records"]
+                    ]
+                    await store.update_huume_records(
+                        thread_id, lambda current, _entries=entries: record_view.merge_open_records(current, _entries),
+                    )
                 return _json_safe(result), step
 
             if name == "draft_offer_letter":

@@ -214,3 +214,60 @@ mismatches plus several hardening gaps. Fixed in the same PR:
 - Dead `lightMode` ternary and a redundant `Meta` empty-check removed from `RecordViewer.tsx`
   (the server always fills a meta row's `value`, falling back to `"—"`, so the component only
   needs to render it).
+
+## v2 — plural working set + the 500 + prompt fix (`matcha/huume-v2.1`)
+
+Live testing after merge surfaced three failures at once, screenshotted by the user: asking
+Huume "show me the 3 high severity ones" got the incidents typed out in chat (never the panel),
+a follow-up panel fetch 500'd, and a busy testing session hit the 60/hr Huume rate limit.
+
+**1. The 500 — `store.get_thread_features_and_integrations`.** asyncpg hands
+`companies.enabled_features` back as a plain `str` on every code path in this app (no jsonb
+codec is registered anywhere), and this function did
+`dict(company_row["enabled_features"] or {})` directly — which iterates the JSON string's
+characters and raises `ValueError: dictionary update sequence element #0 has length 1; 2 is
+required`. Pre-existing and latent since the function was written (the identical bug sits on the
+plan-execute route too); the chat turn path never hit it because `turn_pipeline.py` gets
+`features` from the correctly-defensive `get_company_features()` and only calls this function's
+integrations half. The new `GET .../huume/record` route was simply the first caller to reach it
+from a browser. Fixed by delegating to `get_company_features(company_id, conn=conn)` instead of
+hand-rolling the query.
+
+**2. The model narrated instead of showing.** `show_record`'s tool description said to use it
+when the admin asks to see a record, but the system prompt's own "How to work" bullet told the
+model to "report the facts [lookup_context] returns plainly" with no carve-out for records the
+admin asked to *see* — so it followed the instruction it was actually given. Added a "Showing
+records — use the side panel, not the chat" prompt section with an explicit rule (call
+`show_record` with every id in one call; reply is one line, no record contents) and a
+cross-reference from the `lookup_context` bullet.
+
+**3. Plural records — the actual UX fix.** `show_record` took one id; the admin asked for three.
+Per the user's confirmed preference, the panel now **accumulates** an open-record working set
+instead of showing one record at a time:
+
+- `show_record(record_type, record_ids)` — up to 8 ids per call.
+- `record_view.show_records_for_model` resolves every id it can (a partial hit is still `"ok"`
+  with a `not_found` list); pre-parses UUIDs *before* opening a connection so an all-garbage
+  batch short-circuits to `not_found` without touching the DB (needed for the gate tests to stay
+  DB-free — the naive per-id-inside-the-loop version broke this).
+- `record_view.merge_open_records` (pure) — append, dedupe-and-refocus a repeat `show_record` on
+  an already-open id (moves it to the end), cap at `MAX_OPEN_RECORDS = 8` dropping from the
+  front.
+- `current_state.huume_records` (a list) replaces the singular `huume_record`. Two writers now
+  exist (the chat tool, the panel's new close button), so writes go through a new
+  `store.update_huume_records` — row-locked read-modify-write, same hazard `update_huume_plan`'s
+  docstring documents (`apply_update`'s wholesale top-level merge has no lock between a
+  concurrent read and write).
+- New `DELETE /threads/{id}/huume/record` closes one tab (no feature re-check — closing a stale
+  entry must survive a flag flip).
+- `HuumePanel/index.tsx`: tab strip renders whenever a record is open (not just when
+  `artifacts.length > 1`, since a single open record still needs its own close control); each
+  record tab gets an inline `×`; the auto-focus effect keys off the **last** entry (newest, since
+  `merge_open_records` appends) instead of a single slot.
+- Rate limit `huume_turn` 60/hr → 200/hr/company (`turn_pipeline.py`).
+
+Tests: new `tests/huume/test_huume_store.py` (regression for the 500 — mocks `get_connection` to
+return `enabled_features` as a **string**, proving the old code would have raised);
+`TestShowRecords`/`TestMergeOpenRecords` in `test_huume_lookups.py`; `test_huume_prompt.py`'s
+record-pointer tests reworked for the list. 252 backend huume tests pass; 37 frontend
+`huumeState.test.ts` tests pass; `tsc --noEmit` clean.

@@ -118,12 +118,15 @@ def build_state_block(current_state: dict[str, Any]) -> str:
             f"use it when no matter_id is passed."
         )
 
-    record = current_state.get("huume_record")
-    if isinstance(record, dict) and record.get("record_id"):
+    records = current_state.get("huume_records") or []
+    open_records = [r for r in records if isinstance(r, dict) and r.get("record_id")]
+    if open_records:
+        records_text = "; ".join(
+            f"{r.get('record_type')} \"{r.get('label') or 'untitled'}\" (record_id={r['record_id']})"
+            for r in open_records
+        )
         lines.append(
-            f"- A {str(record.get('record_type') or 'record').replace('_', ' ')} record "
-            f"\"{record.get('label') or 'untitled'}\" (record_id={record['record_id']}) "
-            f"is open in the side panel."
+            f"- Records open in the side panel ({len(open_records)}): {records_text}."
         )
 
     handbook = current_state.get("huume_handbook")
@@ -180,6 +183,14 @@ report_incident files into the company's IR log and open_er_case opens an invest
 
 assign_training and decide_pto_request take IDS, never names. Call lookup_context (topic='training' for the requirement catalog, topic='roster' for employee ids, topic='pto_leave' for pending requests and their ids) first and use exactly what it returns — if you can't find the id, ask the admin rather than guessing one. A denial needs a reason for the record; ask for one if the admin didn't give it.
 
+## Showing records — use the side panel, not the chat
+
+When the admin asks to see, show, open, pull up, or look at specific records — incidents, ER cases, employees, credentials — call show_record with EVERY id they asked about in ONE call. The record opens in the side panel beside the chat, which is where they read it and where it stays while they keep working.
+
+Do NOT write the records out in your reply instead. Listing each record's fields in chat is the exact failure this tool exists to prevent: it buries the conversation and forces the admin to scroll back to find what they were working on. After calling show_record, your reply is one short line — "Opened the 3 high-severity incidents in the panel." — and nothing more about their contents. If some ids didn't resolve, say so in that same short line; don't fall back to describing the ones that did.
+
+show_record takes ids, never names or descriptions. Call lookup_context first to find them — never guess or infer an id.
+
 ## Changing your mind
 
 If the admin says to hold off, cancel, or start over, call cancel_staged rather than leaving a stale proposal sitting there — voids whichever action is pending, or discards a plan that hasn't started executing yet (one already executing or done can't be un-done from here).
@@ -208,7 +219,7 @@ If one of these tools is refused because its feature isn't enabled, say so plain
 
 ## How to work
 
-- Use lookup_context to ground yourself before drafting or acting — check for an existing offer/employee before creating a duplicate, and check integrations before promising Google Workspace or Slack provisioning. It also answers general questions (an employee's status, training/credential lapses, this week's schedule, recent incident counts) — report the facts it returns plainly; never invent a number it didn't give you, and never treat a lookup result as policy or legal advice.
+- Use lookup_context to ground yourself before drafting or acting — check for an existing offer/employee before creating a duplicate, and check integrations before promising Google Workspace or Slack provisioning. It also answers general questions (an employee's status, training/credential lapses, this week's schedule, recent incident counts) — report the facts it returns plainly; never invent a number it didn't give you, and never treat a lookup result as policy or legal advice. But when the admin asked to SEE specific records, not just hear about them, open them with show_record instead of retyping their fields into your reply — see "Showing records" above.
 - draft_offer_letter creates a DRAFT only — it is never sent by itself. Confirm the key terms (name, email, position, salary, start date) with the admin before drafting if they gave you incomplete information; ask rather than inventing a value.
 - Only call send_offer once the draft has a real candidate_email and the admin has given you what you need. It stages — do not treat it as sent.
 - build_onboarding_plan requires the offer to be status='accepted' — check_offer_status first if you're not sure.

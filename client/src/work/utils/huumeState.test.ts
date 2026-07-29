@@ -4,12 +4,14 @@ import type { HuumeAction, HuumePlan } from '../types'
 
 describe('getHuumeState', () => {
   it('returns empty plans for null/undefined state', () => {
-    expect(getHuumeState(null)).toEqual({ plans: {} })
-    expect(getHuumeState(undefined)).toEqual({ plans: {} })
+    expect(getHuumeState(null)).toEqual({ plans: {}, records: [] })
+    expect(getHuumeState(undefined)).toEqual({ plans: {}, records: [] })
   })
 
   it('returns empty plans for an empty object', () => {
-    expect(getHuumeState({})).toEqual({ plans: {} })
+    expect(getHuumeState({})).toEqual({
+      plans: {}, records: [], offer: undefined, action: undefined, legal: undefined, handbook: undefined,
+    })
   })
 
   it('round-trips every key when present', () => {
@@ -19,7 +21,7 @@ describe('getHuumeState', () => {
       huume_action: { type: 'send_offer', offer_id: 'offer-1', status: 'proposed' },
       huume_legal: { matter_id: 'matter-1', title: 'Test matter' },
       huume_handbook: { session_id: 'sess-1', pending_drafts: [{ draft_id: 'd1' }] },
-      huume_record: { record_type: 'incident', record_id: 'rec-1', label: 'IR-2026-004' },
+      huume_records: [{ record_type: 'incident', record_id: 'rec-1', label: 'IR-2026-004' }],
     }
     const h = getHuumeState(state)
     expect(h.plans).toEqual(state.huume_plans)
@@ -27,7 +29,12 @@ describe('getHuumeState', () => {
     expect(h.action).toEqual(state.huume_action)
     expect(h.legal).toEqual(state.huume_legal)
     expect(h.handbook).toEqual(state.huume_handbook)
-    expect(h.record).toEqual(state.huume_record)
+    expect(h.records).toEqual(state.huume_records)
+  })
+
+  it('defaults records to [] when huume_records is absent or not an array', () => {
+    expect(getHuumeState({}).records).toEqual([])
+    expect(getHuumeState({ huume_records: 'not-an-array' }).records).toEqual([])
   })
 })
 
@@ -49,7 +56,11 @@ describe('hasHuumeContent', () => {
   })
 
   it('is true when a record is open', () => {
-    expect(hasHuumeContent({ plans: {}, record: { record_type: 'incident', record_id: 'r1' } })).toBe(true)
+    expect(hasHuumeContent({ plans: {}, records: [{ record_type: 'incident', record_id: 'r1' }] })).toBe(true)
+  })
+
+  it('is false when records is an empty array', () => {
+    expect(hasHuumeContent({ plans: {}, records: [] })).toBe(false)
   })
 
   it('is true when only an offer is present', () => {
@@ -174,14 +185,26 @@ describe('deriveHuumeArtifacts', () => {
       action,
       handbook: { session_id: 's1', pending_drafts: [{ draft_id: 'd1' }] },
       legal: { matter_id: 'm1' },
-      record: { record_type: 'incident', record_id: 'r1', label: 'IR-2026-004' },
+      records: [{ record_type: 'incident', record_id: 'r1', label: 'IR-2026-004' }],
     })
     expect(result.map((a) => a.kind)).toEqual(['offer', 'plan', 'action', 'handbook', 'legal', 'record'])
   })
 
   it('yields a record artifact keyed record:<type>:<id>', () => {
-    const result = deriveHuumeArtifacts({ plans: {}, record: { record_type: 'er_case', record_id: 'r1', label: 'ER-2026-002' } })
+    const result = deriveHuumeArtifacts({ plans: {}, records: [{ record_type: 'er_case', record_id: 'r1', label: 'ER-2026-002' }] })
     expect(result).toEqual([{ kind: 'record', key: 'record:er_case:r1', recordType: 'er_case', recordId: 'r1', label: 'ER-2026-002' }])
+  })
+
+  it('yields one artifact per open record, in list order', () => {
+    const result = deriveHuumeArtifacts({
+      plans: {},
+      records: [
+        { record_type: 'incident', record_id: 'r1', label: 'IR-1' },
+        { record_type: 'incident', record_id: 'r2', label: 'IR-2' },
+        { record_type: 'employee', record_id: 'e1', label: 'Jane Doe' },
+      ],
+    })
+    expect(result.map((a) => a.key)).toEqual(['record:incident:r1', 'record:incident:r2', 'record:employee:e1'])
   })
 })
 

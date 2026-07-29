@@ -14,8 +14,10 @@ from app.matcha.services.huume.onboarding_skill import (
 from app.matcha.services.huume.record_view import (
     _MODEL_BUILDERS,
     _VIEW_BUILDERS,
+    MAX_OPEN_RECORDS,
     RECORD_REQUIRED_FEATURE,
-    show_record_for_model,
+    merge_open_records,
+    show_records_for_model,
 )
 from app.matcha.services.huume.tools import SHOW_RECORD_TYPES
 
@@ -110,46 +112,66 @@ class TestLookupGating:
         assert result.get("error") == "lookup failed"
 
 
-class TestShowRecord:
+class TestShowRecords:
     def test_incident_off_refused(self):
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="incident", record_id="not-even-a-uuid", features={"incidents": False},
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="incident", record_ids=["not-even-a-uuid"], features={"incidents": False},
         ))
         assert result["status"] == "refused"
 
     def test_er_case_off_refused(self):
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="er_case", record_id="not-even-a-uuid", features={"er_copilot": False},
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="er_case", record_ids=["not-even-a-uuid"], features={"er_copilot": False},
         ))
         assert result["status"] == "refused"
 
     def test_employee_off_refused(self):
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="employee", record_id="not-even-a-uuid", features={"employees": False},
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="employee", record_ids=["not-even-a-uuid"], features={"employees": False},
         ))
         assert result["status"] == "refused"
 
     def test_credential_off_refused(self):
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="credential", record_id="not-even-a-uuid", features={"credential_templates": False},
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="credential", record_ids=["not-even-a-uuid"], features={"credential_templates": False},
         ))
         assert result["status"] == "refused"
 
     def test_unknown_type_is_error_even_with_flags_on(self):
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="widget", record_id="x",
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="widget", record_ids=["x"],
             features={"incidents": True, "er_copilot": True, "employees": True, "credential_templates": True},
         ))
         assert result["status"] == "error"
 
-    def test_bad_uuid_short_circuits_to_not_found(self):
+    def test_empty_ids_is_error(self):
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="incident", record_ids=[], features={"incidents": True},
+        ))
+        assert result["status"] == "error"
+
+    def test_all_bad_uuids_short_circuits_to_not_found(self):
         # incidents=True clears the gate; the malformed-UUID guard fires
-        # before any query is attempted, so conn=None never matters here —
-        # show_record_for_model opens its own connection only past that point.
-        result = _run(show_record_for_model(
-            company_id="c1", record_type="incident", record_id="not-even-a-uuid", features={"incidents": True},
+        # before any query is attempted for each id, so conn=None never
+        # matters here — show_records_for_model opens a connection only
+        # once at least one id needs a real lookup.
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="incident", record_ids=["not-a-uuid", "also-not"], features={"incidents": True},
         ))
         assert result["status"] == "not_found"
+
+    def test_over_cap_truncates_with_a_note(self):
+        # All garbage ids, so no DB connection is ever opened — this proves
+        # the truncation happens before the per-id loop, not just that the
+        # loop stops early.
+        ids = [f"not-a-uuid-{i}" for i in range(MAX_OPEN_RECORDS + 5)]
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="incident", record_ids=ids, features={"incidents": True},
+        ))
+        # Every id is garbage, so it's still "not_found" overall, but the
+        # not_found list must be capped, not the full 13 — proving the
+        # truncation ran before the loop.
+        assert len(result.get("not_found") or []) <= MAX_OPEN_RECORDS
 
     def test_every_record_type_is_registered_in_all_four_places(self):
         # A record type wired into the enum + feature map but missing from
@@ -161,6 +183,38 @@ class TestShowRecord:
             == set(_MODEL_BUILDERS)
             == set(_VIEW_BUILDERS)
         )
+
+
+class TestMergeOpenRecords:
+    def test_appends_to_empty(self):
+        result = merge_open_records([], [{"record_type": "incident", "record_id": "r1"}])
+        assert result == [{"record_type": "incident", "record_id": "r1"}]
+
+    def test_appends_new_entries(self):
+        current = [{"record_type": "incident", "record_id": "r1"}]
+        result = merge_open_records(current, [{"record_type": "incident", "record_id": "r2"}])
+        assert [r["record_id"] for r in result] == ["r1", "r2"]
+
+    def test_reshowing_an_open_record_moves_it_to_the_end(self):
+        current = [
+            {"record_type": "incident", "record_id": "r1"},
+            {"record_type": "incident", "record_id": "r2"},
+        ]
+        result = merge_open_records(current, [{"record_type": "incident", "record_id": "r1", "label": "updated"}])
+        assert [r["record_id"] for r in result] == ["r2", "r1"]
+        assert result[-1]["label"] == "updated"
+
+    def test_caps_at_max_dropping_from_the_front(self):
+        current = [{"record_type": "incident", "record_id": f"r{i}"} for i in range(MAX_OPEN_RECORDS)]
+        result = merge_open_records(current, [{"record_type": "incident", "record_id": "new"}])
+        assert len(result) == MAX_OPEN_RECORDS
+        assert result[-1]["record_id"] == "new"
+        assert result[0]["record_id"] == "r1"  # r0 dropped
+
+    def test_different_record_types_with_the_same_id_are_distinct(self):
+        current = [{"record_type": "incident", "record_id": "x"}]
+        result = merge_open_records(current, [{"record_type": "employee", "record_id": "x"}])
+        assert len(result) == 2
 
 
 class TestClampIncidentDays:

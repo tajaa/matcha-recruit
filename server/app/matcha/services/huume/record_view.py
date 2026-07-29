@@ -2,7 +2,7 @@
 
 Two audiences, two builders per record type, kept structurally separate:
 
-- `_model_*` — what the LLM sees (via `show_record_for_model`). Legal records
+- `_model_*` — what the LLM sees (via `show_records_for_model`). Legal records
   (incident, er_case) stay name-free here — no involved_employee_ids,
   witnesses, or reporter identity — same rule as `onboarding_skill`'s
   `incidents`/`er_cases` lookup topics. This is a chat message; it must not
@@ -37,6 +37,10 @@ RECORD_REQUIRED_FEATURE: dict[str, str] = {
     "credential": "credential_templates",
 }
 
+# Working-set cap on the side panel — also the per-call cap on show_record,
+# so a single wildly over-broad request can't blow past it either.
+MAX_OPEN_RECORDS = 8
+
 
 def _parse_uuid(value: Any) -> Optional[UUID]:
     try:
@@ -59,6 +63,28 @@ def _normalize_json_list(raw_value: Any) -> list:
 
 def _iso(value: Any) -> Optional[str]:
     return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
+
+
+def merge_open_records(current: list, new: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pure. Appends `new` entries onto the `current_state.huume_records`
+    working set, deduped on `(record_type, record_id)` — a re-show of an
+    already-open record MOVES it to the end (so it wins focus) rather than
+    duplicating the tab. Caps at `MAX_OPEN_RECORDS`, dropping from the front
+    (oldest first) so the most recently shown records always survive."""
+    if not isinstance(current, list):
+        current = []
+    by_key = {(r.get("record_type"), r.get("record_id")): r for r in current if isinstance(r, dict)}
+    order = [(r.get("record_type"), r.get("record_id")) for r in current if isinstance(r, dict)]
+
+    for entry in new:
+        key = (entry.get("record_type"), entry.get("record_id"))
+        if key in by_key:
+            order.remove(key)
+        by_key[key] = entry
+        order.append(key)
+
+    order = order[-MAX_OPEN_RECORDS:]
+    return [by_key[k] for k in order]
 
 
 # ---------------------------------------------------------------------------
@@ -185,30 +211,62 @@ _MODEL_BUILDERS = {
 }
 
 
-async def show_record_for_model(
-    *, company_id: UUID, record_type: str, record_id: str, features: Optional[dict[str, Any]] = None,
+async def show_records_for_model(
+    *, company_id: UUID, record_type: str, record_ids: list[str], features: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Agent-facing tool wrapper for `show_record`. Never raises — degrades
-    to a status the model can relay, same contract as `lookup_context`."""
+    to a status the model can relay, same contract as `lookup_context`.
+    Resolves every id it can; a partial hit (some ids found, some not) is
+    still `status: "ok"` with `not_found` listing what didn't resolve — only
+    a request where NOTHING resolves is `not_found` as the top-level status."""
     builder = _MODEL_BUILDERS.get(record_type)
     if builder is None:
         return {"status": "error", "message": f"Unknown record type '{record_type}'."}
     required = RECORD_REQUIRED_FEATURE[record_type]
     if not (features or {}).get(required):
         return {"status": "refused", "message": f"'{required}' isn't enabled for this company."}
-    rid = _parse_uuid(record_id)
-    if rid is None:
-        return {"status": "not_found", "message": "That doesn't look like a valid record id."}
-    from app.database import get_connection
-    try:
-        async with get_connection() as conn:
-            summary = await builder(conn, company_id, rid)
-    except Exception:
-        logger.exception("huume show_record failed record_type=%s record_id=%s company=%s", record_type, record_id, company_id)
-        return {"status": "error", "message": "Could not load that record."}
-    if summary is None:
-        return {"status": "not_found", "message": "No record with that id was found."}
-    return {"status": "ok", "record_type": record_type, **summary}
+    if not record_ids:
+        return {"status": "error", "message": "No record ids were given."}
+
+    note = None
+    if len(record_ids) > MAX_OPEN_RECORDS:
+        note = f"Only the first {MAX_OPEN_RECORDS} of {len(record_ids)} ids were opened — ask for the rest separately."
+        record_ids = record_ids[:MAX_OPEN_RECORDS]
+
+    records: list[dict[str, Any]] = []
+    not_found: list[str] = []
+
+    # Parse before opening a connection — a batch of entirely garbage ids
+    # (the common case in a gate test, and a real possibility if the model
+    # hallucinates) should short-circuit to not_found the same way the
+    # single-id path does, never touching the DB.
+    parsed = [(record_id, _parse_uuid(record_id)) for record_id in record_ids]
+    not_found.extend(record_id for record_id, rid in parsed if rid is None)
+    valid = [(record_id, rid) for record_id, rid in parsed if rid is not None]
+
+    if valid:
+        from app.database import get_connection
+        try:
+            async with get_connection() as conn:
+                for record_id, rid in valid:
+                    summary = await builder(conn, company_id, rid)
+                    if summary is None:
+                        not_found.append(record_id)
+                    else:
+                        records.append(summary)
+        except Exception:
+            logger.exception("huume show_records failed record_type=%s company=%s", record_type, company_id)
+            return {"status": "error", "message": "Could not load those records."}
+
+    if not records:
+        return {"status": "not_found", "message": "None of those record ids were found."}
+
+    result: dict[str, Any] = {"status": "ok", "record_type": record_type, "records": records}
+    if not_found:
+        result["not_found"] = not_found
+    if note:
+        result["note"] = note
+    return result
 
 
 # ---------------------------------------------------------------------------

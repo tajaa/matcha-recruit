@@ -8,27 +8,34 @@ export interface HuumeState {
   action?: HuumeAction
   legal?: HuumeLegal
   handbook?: HuumeHandbook
-  record?: HuumeRecordRef
+  /** The panel's open-record working set — accumulates across turns (see
+   * `merge_open_records` server-side) rather than replacing on each
+   * show_record call, so asking Huume to show three things in a row keeps
+   * all three tabs open instead of only the last one. Optional (like the
+   * other Huume state slices) — `getHuumeState` always fills it in as `[]`
+   * when absent; test-constructed states may simply omit it. */
+  records?: HuumeRecordRef[]
 }
 
 /** The one place `current_state`'s untyped Huume keys get cast. The server
  * owns these shapes (services/huume/ writes them); an absent key just means
  * the feature hasn't been used in this thread yet. */
 export function getHuumeState(state: Record<string, unknown> | null | undefined): HuumeState {
-  if (!state) return { plans: {} }
+  if (!state) return { plans: {}, records: [] }
+  const rawRecords = state.huume_records
   return {
     plans: (state.huume_plans as HuumePlans | undefined) ?? {},
     offer: state.huume_offer as HuumeOffer | undefined,
     action: state.huume_action as HuumeAction | undefined,
     legal: state.huume_legal as HuumeLegal | undefined,
     handbook: state.huume_handbook as HuumeHandbook | undefined,
-    record: state.huume_record as HuumeRecordRef | undefined,
+    records: Array.isArray(rawRecords) ? (rawRecords as HuumeRecordRef[]) : [],
   }
 }
 
 /** True when anything Huume-related is staged/tracked in this thread. */
 export function hasHuumeContent(h: HuumeState): boolean {
-  return Object.keys(h.plans).length > 0 || !!h.offer || !!h.action || !!h.legal || !!h.record
+  return Object.keys(h.plans).length > 0 || !!h.offer || !!h.action || !!h.legal || (h.records?.length ?? 0) > 0
     || !!(h.handbook && h.handbook.pending_drafts?.length > 0)
 }
 
@@ -107,10 +114,10 @@ export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
     artifacts.push({ kind: 'legal', key: `legal:${h.legal.matter_id}`, matterId: h.legal.matter_id, title: h.legal.title })
   }
 
-  if (h.record) {
+  for (const record of h.records ?? []) {
     artifacts.push({
-      kind: 'record', key: `record:${h.record.record_type}:${h.record.record_id}`,
-      recordType: h.record.record_type, recordId: h.record.record_id, label: h.record.label,
+      kind: 'record', key: `record:${record.record_type}:${record.record_id}`,
+      recordType: record.record_type, recordId: record.record_id, label: record.label,
     })
   }
 
