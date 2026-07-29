@@ -25,7 +25,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
 | `intake/inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
 | `employee_lifecycle/accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
-| `employee_lifecycle/discipline.py` | `/discipline` | Progressive discipline workflow + signatures |
+| `employee_lifecycle/discipline.py` | `/discipline` | Progressive discipline workflow + signatures + HR-approval workflow (pending-approval queue, approve/deny), letter templates CRUD, HR-approver designation (`clients.is_hr_approver`) — see root CLAUDE.md's Discipline module entry |
 | `risk_assessment.py` | `/risk-assessment` | Risk-assessment dashboard data (849 lines) |
 | `pilots/analysis.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
 | `employee_lifecycle/pre_termination.py` | `/pre-termination` | Pre-term review packets (985 lines) |
