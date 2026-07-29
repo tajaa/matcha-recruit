@@ -66,6 +66,53 @@ class CappePublicReview(BaseModel):
     created_at: datetime
 
 
+# --- Discover directory ------------------------------------------------------
+
+class CappeDirectoryEntry(BaseModel):
+    """One directory card.
+
+    This shape IS the public allowlist for the whole tenant base — the directory
+    is the one endpoint that returns many sites at once, so every field here is
+    published for every listed business simultaneously. Deliberately absent:
+    contact email (a one-request spam harvest), account id, plan, and anything
+    else from `cappe_accounts` beyond the business/personal badge.
+    """
+    slug: str
+    name: str
+    url: str                                  # the site's own public address
+    category: Optional[str] = None
+    category_label: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    blurb: Optional[str] = None
+    logo_url: Optional[str] = None
+    account_type: str = "business"            # business | personal (card badge)
+    city: Optional[str] = None
+    region: Optional[str] = None
+    distance_km: Optional[float] = None       # only when the caller sent lat/lng
+    rating: Optional[float] = None            # shown, never sorted on — see the route
+    review_count: int = 0
+    published_at: Optional[datetime] = None
+
+
+class CappeDirectoryPage(BaseModel):
+    entries: list[CappeDirectoryEntry] = Field(default_factory=list)
+    # Clamped to the route's anti-enumeration depth cap, so this is "results you
+    # can reach", not "sites we have".
+    total: int = 0
+    next_offset: Optional[int] = None         # None = no more reachable results
+
+
+class CappeDirectoryCategory(BaseModel):
+    slug: str
+    label: str
+    count: int = 0
+
+
+class CappeDirectoryCategories(BaseModel):
+    categories: list[CappeDirectoryCategory] = Field(default_factory=list)
+    total: int = 0
+
+
 __all__ = [
     "CappePublicSite",
     "CappePublicLocation",
@@ -73,4 +120,8 @@ __all__ = [
     "CappePublicBooking",
     "CappePublicThread",
     "CappePublicReview",
+    "CappeDirectoryEntry",
+    "CappeDirectoryPage",
+    "CappeDirectoryCategory",
+    "CappeDirectoryCategories",
 ]

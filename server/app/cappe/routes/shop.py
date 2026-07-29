@@ -24,6 +24,7 @@ from ..models.cappe import (
     CappeStockAdjust,
 )
 from ._shared import fetch_option_groups, get_owned_site, loads, loads_list
+from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment
 
 router = APIRouter()
@@ -150,6 +151,9 @@ async def create_product(
             )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
         groups = await fetch_option_groups(conn, [row["id"]])
+        # Product names are indexed at weight D, so "cold brew" finds the cafe
+        # that sells it even when its name and blurb say neither word.
+        await refresh_site_search(conn, site_id)
     return _product_row(row, groups.get(row["id"]))
 
 
@@ -207,6 +211,7 @@ async def update_product(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
             await _replace_option_groups(conn, site_id, product_id, body.option_groups)
         groups = await fetch_option_groups(conn, [product_id])
+        await refresh_site_search(conn, site_id)
     return _product_row(row, groups.get(product_id))
 
 
@@ -219,6 +224,8 @@ async def delete_product(
         result = await conn.execute(
             "DELETE FROM cappe_products WHERE id = $1 AND site_id = $2", product_id, site_id
         )
+        if not result.endswith(" 0"):
+            await refresh_site_search(conn, site_id)
     if result.endswith(" 0"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 

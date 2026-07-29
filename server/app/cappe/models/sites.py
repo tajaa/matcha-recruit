@@ -108,10 +108,43 @@ class CappeSite(BaseModel):
     tax_rate_bps: int = 0
     tax_label: str = "Tax"
     receipt_prefix: Optional[str] = None
+    # Discover directory. `listed` is the tenant's own opt-out; the platform-side
+    # `directory_blocked` takedown is deliberately NOT exposed here — a suspended
+    # listing must not be un-suspendable from the tenant's own settings page.
+    listed: bool = True
+    directory_category: Optional[str] = None
+    directory_tags: list[str] = Field(default_factory=list)
+    directory_blurb: Optional[str] = None
+    directory_confirmed_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
     page_count: Optional[int] = None
+
+
+class CappeDirectoryListing(BaseModel):
+    """The tenant's own view of how they appear in Discover."""
+    listed: bool = True
+    category: Optional[str] = None
+    category_label: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    blurb: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    # False when the listing is incomplete — the directory's quality gate hides
+    # a site with no category or blurb, and the UI must be able to say why
+    # rather than leaving the tenant wondering where they are.
+    visible: bool = False
+    blocked: bool = False               # read-only; platform takedown
+    categories: list[dict[str, str]] = Field(default_factory=list)   # the fixed taxonomy
+
+
+class CappeDirectoryListingUpdate(BaseModel):
+    """PATCH semantics: only fields actually sent are written, so a UI that
+    edits the blurb alone can't blank the tags."""
+    listed: Optional[bool] = None
+    category: Optional[str] = Field(default=None, max_length=60)
+    tags: Optional[list[str]] = None
+    blurb: Optional[str] = Field(default=None, max_length=200)
 
 
 # --- Pages ------------------------------------------------------------------
@@ -184,6 +217,8 @@ __all__ = [
     "CappeReadinessItem",
     "CappeReadiness",
     "CappeSite",
+    "CappeDirectoryListing",
+    "CappeDirectoryListingUpdate",
     "CappePageCreate",
     "CappePageUpdate",
     "CappePagePreview",

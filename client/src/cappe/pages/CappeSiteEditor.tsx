@@ -6,6 +6,7 @@ import { useCappeSiteEditor } from './CappeSiteEditor/useCappeSiteEditor'
 import { EditorHeader } from './CappeSiteEditor/EditorHeader'
 import { SettingsSection } from './CappeSiteEditor/SettingsSection'
 import { BusinessInfoSection } from './CappeSiteEditor/BusinessInfoSection'
+import { DirectorySection } from './CappeSiteEditor/DirectorySection'
 import { DesignSection } from './CappeSiteEditor/DesignSection'
 import { PagesSection } from './CappeSiteEditor/PagesSection'
 
@@ -56,6 +57,9 @@ export default function CappeSiteEditor() {
         saving={s.saving}
         onSave={s.save}
       />
+
+      {/* Discover directory listing */}
+      <DirectorySection siteId={s.siteId || ''} />
 
       {/* Business info, social, SEO */}
       <BusinessInfoSection

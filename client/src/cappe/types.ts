@@ -65,10 +65,81 @@ export type CappeSite = {
   tax_rate_bps?: number | null
   tax_label?: string | null
   receipt_prefix?: string | null
+  listed?: boolean
+  directory_category?: string | null
+  directory_tags?: string[]
+  directory_blurb?: string | null
+  directory_confirmed_at?: string | null
   published_at: string | null
   created_at: string
   updated_at: string
   page_count?: number | null
+}
+
+// --- Discover directory ------------------------------------------------------
+// (CappeAccountType is already declared at the top of this file — reused here.)
+
+/** One public directory card. Mirrors the backend's response allowlist exactly
+ *  (models/public.py:CappeDirectoryEntry) — there is deliberately no contact
+ *  email or account id in this shape. */
+export type CappeDirectoryEntry = {
+  slug: string
+  name: string
+  url: string
+  category: string | null
+  category_label: string | null
+  tags: string[]
+  blurb: string | null
+  logo_url: string | null
+  account_type: CappeAccountType
+  city: string | null
+  region: string | null
+  distance_km: number | null
+  rating: number | null
+  review_count: number
+  published_at: string | null
+}
+
+export type CappeDirectoryPage = {
+  entries: CappeDirectoryEntry[]
+  /** Clamped server-side to the anti-enumeration depth cap — "results you can
+   *  reach", not "sites we have". */
+  total: number
+  next_offset: number | null
+}
+
+export type CappeDirectoryCategory = { slug: string; label: string; count: number }
+
+export type CappeDirectoryCategories = {
+  categories: CappeDirectoryCategory[]
+  total: number
+}
+
+/** The owner-side view of their own listing. */
+export type CappeDirectoryListing = {
+  listed: boolean
+  category: string | null
+  category_label: string | null
+  tags: string[]
+  blurb: string | null
+  confirmed_at: string | null
+  /** False when the listing is incomplete or blocked — the UI explains why
+   *  rather than leaving the tenant wondering where they are. */
+  visible: boolean
+  blocked: boolean
+  categories: { slug: string; label: string }[]
+}
+
+export type CappeDirectoryQuery = {
+  q?: string
+  category?: string
+  type?: CappeAccountType | 'all'
+  lat?: number
+  lng?: number
+  radius_km?: number
+  sort?: 'relevance' | 'newest' | 'distance'
+  offset?: number
+  limit?: number
 }
 
 export type CappeDomainSearchResult = {

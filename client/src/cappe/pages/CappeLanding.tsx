@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ShoppingBag, CalendarClock, Mail, ClipboardList, PenLine, BarChart3 } from 'lucide-react'
+import { fetchCappeDirectory } from '../api'
+import DirectoryCard from '../components/DirectoryCard'
+import type { CappeDirectoryEntry } from '../types'
 
 // Gummfit landing — dark, type-led, one electric accent. Fraunces (display) +
 // Roboto Flex (body) are loaded globally; visuals are pure CSS (no imagery).
@@ -68,6 +71,63 @@ function Reveal({ children, delay = 0, className = '' }: { children: ReactNode; 
       className={`transition-[opacity,transform] duration-[900ms] ease-[cubic-bezier(.2,.7,.2,1)] ${shown ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0'} ${className}`}>
       {children}
     </div>
+  )
+}
+
+/** Live strip of real published sites.
+ *
+ *  The pitch on this page is "build here and get found", so the proof has to be
+ *  actual businesses, not a mock. Renders nothing at all when the directory is
+ *  empty or unreachable — an empty "Discover" section would undercut the claim
+ *  it exists to make, and this is marketing copy, not a dashboard. */
+function DiscoverStrip() {
+  const [entries, setEntries] = useState<CappeDirectoryEntry[]>([])
+  const [total, setTotal] = useState(0)
+
+  useEffect(() => {
+    fetchCappeDirectory({ limit: 6, sort: 'newest' })
+      .then((page) => { setEntries(page.entries); setTotal(page.total) })
+      .catch(() => setEntries([]))
+  }, [])
+
+  if (entries.length === 0) return null
+
+  return (
+    <section className="border-b py-28 sm:py-36" style={{ borderColor: LINE }}>
+      <div className={WRAP}>
+        <Reveal>
+          <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.3em]" style={{ color: ACCENT }}>
+            Discover
+          </div>
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <div>
+              <h2 className="max-w-[18ch] tracking-tight" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(2.2rem,5.5vw,4.5rem)', lineHeight: 1.0 }}>
+                You’re not just <span className="italic" style={{ color: ACCENT }}>online.</span>
+              </h2>
+              <p className="mt-6 max-w-lg text-lg leading-relaxed" style={{ color: MUTED }}>
+                Every site published here lands in a directory people actually search.
+                {total > 6 ? ` ${total} businesses so far` : ' The newest ones'} — shops,
+                studios, and people you can hire directly.
+              </p>
+            </div>
+            <Link
+              to="/cappe/discover"
+              className="shrink-0 rounded-full border px-5 py-2.5 text-sm transition-colors hover:text-white"
+              style={{ borderColor: LINE, color: MUTED }}
+            >
+              Browse all →
+            </Link>
+          </div>
+        </Reveal>
+        <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {entries.map((entry, idx) => (
+            <Reveal key={entry.slug} delay={idx * 70}>
+              <DirectoryCard entry={entry} />
+            </Reveal>
+          ))}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -141,6 +201,7 @@ export default function CappeLanding() {
           Gummfit<span style={{ color: ACCENT }}>.</span>
         </span>
         <div className="flex items-center gap-7 text-sm">
+          <Link to="/cappe/discover" className="transition-colors hover:text-white" style={{ color: MUTED }}>Discover</Link>
           <Link to="/cappe/templates" className="hidden transition-colors hover:text-white sm:block" style={{ color: MUTED }}>Templates</Link>
           <Link to="/cappe/login" className="transition-colors hover:text-white" style={{ color: MUTED }}>Sign in</Link>
           <Link to="/cappe/website-setup" className="rounded-full px-5 py-2.5 font-medium transition-all hover:brightness-110" style={{ background: ACCENT, color: '#10120A' }}>
@@ -190,6 +251,9 @@ export default function CappeLanding() {
           ))}
         </div>
       </div>
+
+      {/* discover — live directory strip */}
+      <DiscoverStrip />
 
       {/* everything included — feature grid */}
       <section className="border-b py-28 sm:py-36" style={{ borderColor: LINE }}>

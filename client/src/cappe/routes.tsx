@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import CappeLayout from './layout/CappeLayout'
 import CappeLanding from './pages/CappeLanding'
+import CappeDiscover from './pages/CappeDiscover'
 import CappeSignup from './pages/CappeSignup'
 import CappeLogin from './pages/CappeLogin'
 import CappeVerify from './pages/CappeVerify'
@@ -42,6 +43,10 @@ export default function CappeRoutes() {
       <Routes>
         {/* Public marketing landing — unlinked from any nav (hidden) for now. */}
         <Route index element={<CappeLanding />} />
+        {/* Public directory of published sites. Deliberately OUTSIDE the
+            CappeLayout gate: it is browsed by visitors with no account, and its
+            data comes from the unauthenticated /public/directory endpoints. */}
+        <Route path="discover" element={<CappeDiscover />} />
         <Route path="website-setup" element={<CappeSignup />} />
         <Route path="login" element={<CappeLogin />} />
         <Route path="verify" element={<CappeVerify />} />

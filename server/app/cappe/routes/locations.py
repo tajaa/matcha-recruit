@@ -5,22 +5,81 @@ NULLABLE location_id; a site with no locations behaves as a single-location site
 A location's own address / hours / timezone drive its booking widget + map/hours.
 """
 import json
+import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from ...core.services.geo import geocode_address
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappeLocation, CappeLocationCreate, CappeLocationUpdate
+from ..services.directory import refresh_site_search
 from ._shared import get_owned_site, loads_list
 from .render import invalidate_render_cache
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _LOC_COLS = (
-    "id, site_id, name, address, lat, lng, timezone, hours, contact_phone, "
+    "id, site_id, name, address, lat, lng, city, region, timezone, hours, contact_phone, "
     "contact_email, is_default, active, sort_order, created_at, updated_at"
 )
+
+
+async def _geocode_location(site_id: UUID, location_id: UUID) -> None:
+    """Background: resolve a location's free-text address to coordinates + city.
+
+    `lat`/`lng` have always been OPTIONAL HAND-TYPED fields on the location
+    form, used only to draw a map embed — so they are null for nearly every
+    site. Discover's "near me" reads them, which means without this the radius
+    filter would match almost nothing.
+
+    Runs after the response and NEVER holds a connection across the Census
+    call: `geocode_address` is an external HTTP request with its own ~12s
+    timeout, and the pool (`max_size=10`, shared by matcha + cappe + tellus)
+    would otherwise be pinned for that whole window per location saved — a
+    Census slowdown becomes backend-wide connection starvation, not just a slow
+    background task. Swallows everything: a failed geocode costs the site its
+    distance sort, not its location.
+
+    Owner-typed vs. geocoder-written coordinates are told apart by
+    `geocoded_at`, not just nullness: on a first save (`geocoded_at IS NULL`)
+    an owner-supplied lat/lng is authoritative and only NULL slots get filled.
+    Once WE have written it (`geocoded_at IS NOT NULL`), a later address edit
+    re-fires this and must overwrite — otherwise an owner who moves from
+    Portland to Seattle keeps Portland's coordinates forever (the city/region
+    text updates, but "near me" still anchors on the old point) because they
+    are no longer NULL.
+    """
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT address, geocoded_at FROM cappe_locations WHERE id = $1 AND site_id = $2",
+                location_id, site_id,
+            )
+        if row is None or not (row["address"] or "").strip():
+            return
+        was_geocoded_by_us = row["geocoded_at"] is not None
+        result = await geocode_address(row["address"])
+        if result is None:
+            return
+        async with get_connection() as conn:
+            await conn.execute(
+                """UPDATE cappe_locations
+                      SET lat = CASE WHEN $7 OR lat IS NULL THEN $3 ELSE lat END,
+                          lng = CASE WHEN $7 OR lng IS NULL THEN $4 ELSE lng END,
+                          city = $5, region = $6, geocoded_at = NOW(), updated_at = NOW()
+                    WHERE id = $1 AND site_id = $2""",
+                location_id, site_id,
+                result["lat"], result["lng"], result["city"], result["region"],
+                was_geocoded_by_us,
+            )
+            # City/region are indexed at weight D, so "coffee portland" works.
+            await refresh_site_search(conn, site_id)
+    except Exception:  # noqa: BLE001 - best-effort, post-response
+        logger.warning("cappe: geocode failed for location %s", location_id, exc_info=True)
 
 
 def _row(r) -> dict:
@@ -51,7 +110,10 @@ async def list_locations(site_id: UUID, account: CappeAccount = Depends(require_
 
 @router.post("/sites/{site_id}/locations", response_model=CappeLocation, status_code=status.HTTP_201_CREATED)
 async def create_location(
-    site_id: UUID, body: CappeLocationCreate, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID,
+    body: CappeLocationCreate,
+    background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
@@ -71,12 +133,14 @@ async def create_location(
             if is_default:
                 await _clear_other_defaults(conn, site_id, row["id"])
     await invalidate_render_cache(site_id)
+    background.add_task(_geocode_location, site_id, row["id"])
     return _row(row)
 
 
 @router.put("/sites/{site_id}/locations/{location_id}", response_model=CappeLocation)
 async def update_location(
     site_id: UUID, location_id: UUID, body: CappeLocationUpdate,
+    background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
     async with get_connection() as conn:
@@ -111,6 +175,10 @@ async def update_location(
             if body.is_default:
                 await _clear_other_defaults(conn, site_id, location_id)
     await invalidate_render_cache(site_id)
+    # Only a changed address needs re-resolving; every other edit leaves the
+    # coordinates (and the city we derived from them) correct.
+    if body.address is not None:
+        background.add_task(_geocode_location, site_id, location_id)
     return _row(row)
 
 

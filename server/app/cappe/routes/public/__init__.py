@@ -15,6 +15,7 @@ from . import (
     blog,
     booking_selfserve,
     bookings,
+    directory,
     forms,
     messages,
     newsletter,
@@ -26,6 +27,9 @@ from ._common import _validate_intake  # noqa: F401  (test_cappe_offerings impor
 
 router = APIRouter()
 router.include_router(site.router)
+# Discover — the ONE endpoint here that returns many sites at once. It carries
+# its own rate-limit bucket and depth cap; see the module docstring.
+router.include_router(directory.router)
 router.include_router(shop.router)
 router.include_router(newsletter.router)
 router.include_router(forms.router)
