@@ -21,22 +21,35 @@ from uuid import UUID, uuid4
 
 import pytest
 
-# Stub heavyweight optional deps before importing app code
+# Stub heavyweight optional deps before importing app code — but ONLY when
+# they aren't already loaded for real. In a full test-suite run, other files
+# import the real google.genai SDK first, and mutating its real
+# GenerateContentConfig/Tool/etc. attributes to no-op lambdas here is a
+# process-global change with no teardown: every OTHER test that constructs a
+# real GenerateContentConfig after this module is collected (e.g. Huume's
+# agent loop) then gets `None` back and fails with an unrelated-looking
+# AttributeError. Only stub — and only mutate — modules this file itself
+# just inserted as bare placeholders.
+_STUBBED_NOW: set[str] = set()
 for _name in ("google", "google.genai", "google.genai.types", "bleach",
               "audioop_lts", "audioop", "stripe"):
     if _name not in sys.modules:
         sys.modules[_name] = ModuleType(_name)
+        _STUBBED_NOW.add(_name)
 
-_genai = sys.modules["google.genai"]
-_genai.Client = object
-_genai.types = sys.modules["google.genai.types"]
-_gt = sys.modules["google.genai.types"]
-_gt.Tool = lambda **kw: None
-_gt.GoogleSearch = lambda **kw: None
-_gt.GenerateContentConfig = lambda **kw: None
-_bleach = sys.modules["bleach"]
-_bleach.clean = lambda text, **kw: text
-_bleach.linkify = lambda text, **kw: text
+if "google.genai" in _STUBBED_NOW:
+    _genai = sys.modules["google.genai"]
+    _genai.Client = object
+    _genai.types = sys.modules["google.genai.types"]
+if "google.genai.types" in _STUBBED_NOW:
+    _gt = sys.modules["google.genai.types"]
+    _gt.Tool = lambda **kw: None
+    _gt.GoogleSearch = lambda **kw: None
+    _gt.GenerateContentConfig = lambda **kw: None
+if "bleach" in _STUBBED_NOW:
+    _bleach = sys.modules["bleach"]
+    _bleach.clean = lambda text, **kw: text
+    _bleach.linkify = lambda text, **kw: text
 
 
 class _FakeConn:
