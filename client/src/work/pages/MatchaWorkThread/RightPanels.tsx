@@ -26,6 +26,7 @@ export default function RightPanels({
   const {
     mobileView, thread, threadId, handleEditSlide, lightMode, streaming,
     setThread, setError, setMessages, agentMode, pdfUrl, setShowTutorSetup, setTutorDismissed, handleSend,
+    handleModeToggle, togglingMode,
   } = c
 
   return (
@@ -113,6 +114,8 @@ export default function RightPanels({
           threadId={threadId!}
           lightMode={lightMode}
           streaming={streaming}
+          onToggleOff={() => handleModeToggle('huume')}
+          togglingOff={togglingMode === 'huume'}
           onSendChat={(text) => handleSend(text)}
           onStateUpdate={(offerId, plan) => {
             setThread((prev) => prev ? {
