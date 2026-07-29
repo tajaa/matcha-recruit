@@ -25,7 +25,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from .._shared.citations import _parse_json, validate_citations
@@ -160,26 +160,25 @@ COMPANY POLICY / HANDBOOK CORPUS
 """
 
 
-async def check_incident_against_handbook(conn, *, company_id: UUID, incident: dict[str, Any]) -> dict[str, Any]:
-    """Check `incident` against the company's handbook + active policies.
-
-    `incident` needs: id, title, description, incident_type, severity
-    (occurred_at is not read here — it's the caller's job to pass real
-    occurrence_dates through to the discipline compliance gate downstream).
-
-    Never raises. A Gemini outage or malformed response degrades to
-    `{"available": False, ...}` — the caller (sweep or Huume tool) must treat
-    that as "couldn't check", never as "checked, nothing found".
-    """
+async def _build_check_corpus(conn, company_id: UUID) -> Optional[dict[str, Any]]:
+    """Build (and restrict) the company's handbook+policy corpus once. `None`
+    on any grounding failure — callers treat that as `_unavailable_result()`.
+    Split out of `check_incident_against_handbook` so a batch of incidents can
+    share ONE corpus build instead of paying for grounding per incident."""
     try:
         from ..pilots.handbook_pilot import build_corpus, gather_grounding
 
         grounding = await gather_grounding(conn, company_id, {"scopes": []})
-        corpus = _restrict_to_handbook_and_policy(build_corpus(grounding, with_full_text=True))
+        return _restrict_to_handbook_and_policy(build_corpus(grounding, with_full_text=True))
     except Exception:
         logger.exception("[discipline_policy_check] failed to build grounding corpus")
-        return _unavailable_result()
+        return None
 
+
+async def _check_one(corpus: dict[str, Any], incident: dict[str, Any]) -> dict[str, Any]:
+    """Run the check for one incident against an already-built `corpus`. No
+    `conn` — safe to run concurrently under a semaphore in the batch path.
+    Never raises; degrades to `_unavailable_result()`."""
     index = corpus.get("index") or {}
     if not index:
         return {
@@ -248,6 +247,61 @@ async def check_incident_against_handbook(conn, *, company_id: UUID, incident: d
         "summary": str(data.get("summary") or "").strip()[:1000],
         "available": True,
     }
+
+
+async def check_incident_against_handbook(conn, *, company_id: UUID, incident: dict[str, Any]) -> dict[str, Any]:
+    """Check `incident` against the company's handbook + active policies.
+
+    `incident` needs: id, title, description, incident_type, severity
+    (occurred_at is not read here — it's the caller's job to pass real
+    occurrence_dates through to the discipline compliance gate downstream).
+
+    Never raises. A Gemini outage or malformed response degrades to
+    `{"available": False, ...}` — the caller (sweep or Huume tool) must treat
+    that as "couldn't check", never as "checked, nothing found".
+    """
+    corpus = await _build_check_corpus(conn, company_id)
+    if corpus is None:
+        return _unavailable_result()
+    return await _check_one(corpus, incident)
+
+
+async def check_incidents_against_handbook(
+    conn, *, company_id: UUID, incidents: list[dict[str, Any]], concurrency: int = 3,
+) -> dict[str, dict[str, Any]]:
+    """Batch check: builds the corpus ONCE for the whole batch (the expensive
+    part is per-company, not per-incident) instead of the N grounding builds
+    a naive loop over `check_incident_against_handbook` would pay for.
+
+    `_check_one` calls run concurrently under a semaphore (safe — no `conn`
+    use inside), then each available result is persisted SEQUENTIALLY on the
+    caller's single `conn` (asyncpg connections aren't concurrency-safe).
+
+    Never raises: a corpus-build failure degrades EVERY incident to
+    `_unavailable_result()`; a single incident's Gemini failure degrades only
+    that incident, the rest of the batch is unaffected.
+
+    Returns `{str(incident["id"]): result}`.
+    """
+    corpus = await _build_check_corpus(conn, company_id)
+    if corpus is None:
+        return {str(inc["id"]): _unavailable_result() for inc in incidents}
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _bounded(inc: dict[str, Any]) -> dict[str, Any]:
+        async with sem:
+            return await _check_one(corpus, inc)
+
+    results = await asyncio.gather(*(_bounded(inc) for inc in incidents))
+    by_id = {str(inc["id"]): result for inc, result in zip(incidents, results)}
+
+    for inc in incidents:
+        result = by_id[str(inc["id"])]
+        if result.get("available"):
+            await persist_policy_check(conn, incident_id=inc["id"], result=result)
+
+    return by_id
 
 
 def _unavailable_result() -> dict[str, Any]:

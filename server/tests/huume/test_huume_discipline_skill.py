@@ -657,3 +657,173 @@ class TestRecordViewParity:
         assert "employee_name" not in summary
         assert "description" not in summary
         assert "denial_reason" not in summary
+
+
+def _conn_ctx(conn):
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=conn)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
+def _incident_row(n, *, cached_matches=None, already_disciplined=False):
+    row = {
+        "id": f"inc-{n}", "incident_number": f"IR-{n}", "severity": "high",
+        "incident_type": "safety", "occurred_at": datetime(2026, 7, 1),
+        "title": f"Incident {n}", "description": "Something happened.",
+        "analysis_data": None, "already_disciplined": already_disciplined,
+    }
+    if cached_matches is not None:
+        import json
+        row["analysis_data"] = json.dumps({"checked_by": "discipline_policy_check", "matches": cached_matches})
+    return row
+
+
+class TestRankCandidates:
+    def test_drops_zero_match_rows(self):
+        rows = [{"matches": []}, {"matches": [{"relevance": "related", "confidence": 0.5}]}]
+        assert len(discipline_skill._rank_candidates(rows)) == 1
+
+    def test_empty_input(self):
+        assert discipline_skill._rank_candidates([]) == []
+
+    def test_relevance_outranks_confidence(self):
+        low_conf_violated = {"matches": [{"relevance": "violated", "confidence": 0.3}]}
+        high_conf_related = {"matches": [{"relevance": "related", "confidence": 0.9}]}
+        ranked = discipline_skill._rank_candidates([high_conf_related, low_conf_violated])
+        assert ranked[0] is low_conf_violated
+
+    def test_tie_on_relevance_broken_by_confidence(self):
+        a = {"matches": [{"relevance": "bent", "confidence": 0.4}]}
+        b = {"matches": [{"relevance": "bent", "confidence": 0.8}]}
+        ranked = discipline_skill._rank_candidates([a, b])
+        assert ranked[0] is b
+
+
+class TestFindCandidates:
+    @pytest.mark.asyncio
+    async def test_module_off_discipline(self, monkeypatch):
+        conn = MagicMock()
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr(
+            "app.core.feature_flags.get_company_features",
+            AsyncMock(return_value={"discipline": False, "handbooks": True}),
+        )
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+        assert result["status"] == "module_off"
+        conn.fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_module_off_handbooks(self, monkeypatch):
+        conn = MagicMock()
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr(
+            "app.core.feature_flags.get_company_features",
+            AsyncMock(return_value={"discipline": True, "handbooks": False}),
+        )
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+        assert result["status"] == "module_off"
+        assert "no corpus" in result["message"].lower() or "not enabled" in result["message"].lower() or "aren't enabled" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_cached_rows_skip_gemini(self, monkeypatch):
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[
+            _incident_row(1, cached_matches=[{"relevance": "violated", "confidence": 0.9, "policy_title": "Sharps Handling"}]),
+        ])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        batch_mock = AsyncMock()
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", batch_mock,
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+
+        assert result["status"] == "ok"
+        assert result["cached"] == 1
+        assert result["checked"] == 1
+        batch_mock.assert_not_awaited()
+        assert result["candidates"][0]["incident_number"] == "IR-1"
+        assert result["candidates"][0]["policy_titles"] == ["Sharps Handling"]
+
+    @pytest.mark.asyncio
+    async def test_recheck_forces_fresh_even_when_cached(self, monkeypatch):
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[
+            _incident_row(1, cached_matches=[{"relevance": "related", "confidence": 0.4, "policy_title": "Old"}]),
+        ])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        batch_mock = AsyncMock(return_value={"inc-1": {"available": True, "violations": [
+            {"relevance": "violated", "confidence": 0.95, "policy_title": "New"},
+        ]}})
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", batch_mock,
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4(), recheck=True)
+
+        batch_mock.assert_awaited_once()
+        assert result["candidates"][0]["policy_titles"] == ["New"]
+
+    @pytest.mark.asyncio
+    async def test_over_cap_reports_not_yet_checked(self, monkeypatch):
+        conn = MagicMock()
+        rows = [_incident_row(i) for i in range(1, 9)]  # 8 unchecked, cap is 6
+        conn.fetch = AsyncMock(return_value=rows)
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        batch_mock = AsyncMock(return_value={
+            f"inc-{i}": {"available": True, "violations": []} for i in range(1, 7)
+        })
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", batch_mock,
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4(), limit=10)
+
+        # Only the first 6 were ever passed to the batch checker.
+        checked_ids = set(batch_mock.await_args.kwargs["incidents"][i]["id"] for i in range(len(batch_mock.await_args.kwargs["incidents"])))
+        assert checked_ids == {f"inc-{i}" for i in range(1, 7)}
+        assert result["not_yet_checked"]["count"] == 2
+        assert set(result["not_yet_checked"]["incident_numbers"]) == {"IR-7", "IR-8"}
+        assert result["clean_count"] == 6
+
+    @pytest.mark.asyncio
+    async def test_already_disciplined_flagged_not_suppressed(self, monkeypatch):
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[
+            _incident_row(1, cached_matches=[{"relevance": "violated", "confidence": 0.9, "policy_title": "X"}], already_disciplined=True),
+        ])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", AsyncMock(),
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+
+        assert len(result["candidates"]) == 1
+        assert result["candidates"][0]["already_disciplined"] is True
+
+    @pytest.mark.asyncio
+    async def test_payload_is_name_free(self, monkeypatch):
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[
+            _incident_row(1, cached_matches=[{"relevance": "violated", "confidence": 0.9, "policy_title": "Sharps"}]),
+        ])
+        monkeypatch.setattr("app.database.pool.connection_or_direct", lambda **kw: _conn_ctx(conn))
+        monkeypatch.setattr("app.core.feature_flags.get_company_features", AsyncMock(return_value=_features(handbooks=True)))
+        monkeypatch.setattr(
+            "app.matcha.services.discipline.discipline_policy_check.check_incidents_against_handbook", AsyncMock(),
+        )
+
+        result = await discipline_skill.find_candidates(company_id=uuid4())
+
+        import json
+        encoded = json.dumps(result)
+        assert "description" not in encoded
+        assert "Something happened" not in encoded
+        assert "involved_employee_ids" not in encoded
+        assert "Incident 1" not in encoded  # the incident's own `title` field, never copied in

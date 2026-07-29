@@ -39,9 +39,19 @@ class HuumeTool:
     name: str
     kind: str  # read | write | staged | finish
     declaration: types.FunctionDeclaration
+    # `discovery=True` marks a "which X need attention?" batch entry point —
+    # prompt.build_discovery_block and routing.resolve_tier both read this
+    # registry so a new skill gets prompt teaching + deep-tier routing by
+    # declaring the tool, with no harness edits. `intent_hints` are lowercase
+    # phrases that mean "the user wants THIS tool" for the same two readers.
+    discovery: bool = False
+    intent_hints: tuple[str, ...] = ()
 
 
-def _tool(name: str, kind: str, description: str, *, properties: dict | None = None, required: list[str] | None = None) -> HuumeTool:
+def _tool(
+    name: str, kind: str, description: str, *, properties: dict | None = None,
+    required: list[str] | None = None, discovery: bool = False, intent_hints: tuple[str, ...] = (),
+) -> HuumeTool:
     return HuumeTool(
         name=name,
         kind=kind,
@@ -50,6 +60,8 @@ def _tool(name: str, kind: str, description: str, *, properties: dict | None = N
             description=description,
             parameters=types.Schema(type=types.Type.OBJECT, properties=properties or {}, required=required or []),
         ),
+        discovery=discovery,
+        intent_hints=tuple(h.lower() for h in intent_hints),
     )
 
 
@@ -294,6 +306,28 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     # ---- Incident-triggered discipline skill (feature `discipline`) ---------
     _tool(
+        "find_discipline_candidates", "read",
+        "Scan recently-closed incidents for candidate policy violations, "
+        "ranked by severity — the answer to 'which incidents need "
+        "disciplinary action?' or 'did anyone break policy?'. Cached-first: "
+        "incidents already checked (by this tool, check_incident_policy, or "
+        "the nightly sweep) cost nothing to re-report; unchecked ones get a "
+        "bounded fresh check. Names NOBODY — use show_record to open an "
+        "incident and see who was involved. If not_yet_checked is nonzero, "
+        "say plainly that the scan was bounded — never imply it covered "
+        "every closed incident.",
+        properties={
+            "days": types.Schema(type=types.Type.INTEGER, description="Lookback window over closed incidents, in days. Default 30, max 180."),
+            "limit": types.Schema(type=types.Type.INTEGER, description="Max candidates to return, ranked. Default 5, max 10."),
+            "recheck": types.Schema(type=types.Type.BOOLEAN, description="Re-run the check on already-checked incidents too. Default false."),
+        },
+        discovery=True,
+        intent_hints=(
+            "which incidents", "need discipline", "need disciplinary action", "disciplinary action",
+            "broke policy", "broke a policy", "policy violation", "policy violations", "require a write-up",
+        ),
+    ),
+    _tool(
         "check_incident_policy", "read",
         "Check a CLOSED incident's narrative against the company's handbook "
         "and active policies for candidate policy violations, with citations. "
@@ -353,6 +387,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "List this company's discipline records awaiting HR approval, with "
         "their ids, employee, infraction type, and how long they've been "
         "waiting.",
+        discovery=True,
+        intent_hints=("pending approvals", "awaiting approval", "waiting for approval", "approval queue"),
     ),
     # ---- Legal Pilot skill (feature `legal_defense`) -------------------------
     _tool(

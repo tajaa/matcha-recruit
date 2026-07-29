@@ -504,6 +504,27 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name == "find_discipline_candidates":
+                try:
+                    days = int(args.get("days") or 30)
+                except (TypeError, ValueError):
+                    days = 30
+                try:
+                    limit = int(args.get("limit") or 5)
+                except (TypeError, ValueError):
+                    limit = 5
+                result = await discipline_skill.find_candidates(
+                    company_id=company_id, days=days, limit=limit, recheck=bool(args.get("recheck")),
+                )
+                ok = result.get("status") == "ok"
+                n = len(result.get("candidates") or []) if ok else 0
+                step = recorder.record(
+                    tool=name, kind="read",
+                    label=f"Scanned closed incidents — {n} with possible policy matches" if ok else "Could not scan incidents",
+                    status="ok" if ok else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
             if name == "check_incident_policy":
                 result = await discipline_skill.check_incident_policy(
                     company_id=company_id, incident_id=str(args.get("incident_id") or ""),

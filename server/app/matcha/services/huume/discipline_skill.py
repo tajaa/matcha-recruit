@@ -11,12 +11,19 @@ existing HR-ops drain already implements.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# Discovery batch (find_candidates) tuning.
+_FRESH_CHECK_CAP = 6          # max fresh Gemini checks in one call
+_BATCH_BUDGET_SECONDS = 100   # bound on the whole fresh-check batch
+_RELEVANCE_RANK = {"violated": 2, "bent": 1, "related": 0}
 
 
 def _resolve_occurrence_dates(staged_dates: Any, incident_row: Any) -> list[date]:
@@ -144,6 +151,156 @@ async def list_pending(*, company_id: UUID) -> dict[str, Any]:
             }
             for r in rows
         ],
+    }
+
+
+def _rank_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pure. `rows` = [{..., 'matches': [{'relevance', 'confidence', ...}, ...]}].
+    Drops rows with no matches, then sorts by (max relevance rank, max
+    confidence) descending — a single 'violated' match at low confidence
+    still outranks several 'related' matches at high confidence, since
+    `relevance` is the model's own severity judgment and `confidence` only
+    disambiguates within it."""
+    kept = [r for r in rows if r.get("matches")]
+
+    def _key(row: dict[str, Any]) -> tuple[int, float]:
+        matches = row["matches"]
+        return (
+            max(_RELEVANCE_RANK.get(m.get("relevance"), 0) for m in matches),
+            max(float(m.get("confidence") or 0) for m in matches),
+        )
+
+    kept.sort(key=_key, reverse=True)
+    return kept
+
+
+async def find_candidates(
+    *, company_id: UUID, days: int = 30, limit: int = 5, recheck: bool = False,
+) -> dict[str, Any]:
+    """Model-facing discovery tool: "which closed incidents implicate
+    discipline?" answered in ONE call instead of one check_incident_policy
+    call per incident (serial, 60s-Gemini-each, and tool calls in a turn run
+    sequentially against an 8-call/240s budget — a 10-incident scan would
+    force-finish partway and the partial result would read as the answer).
+
+    Cached-first: any incident already checked (by this tool, a prior
+    check_incident_policy call, or the Celery discipline_policy_sweep — they
+    all persist to the same `policy_mapping` analysis row) is reported at
+    zero Gemini cost. Only the remainder gets a fresh check, capped at
+    `_FRESH_CHECK_CAP` and time-boxed at `_BATCH_BUDGET_SECONDS` — whatever's
+    left over is reported as `not_yet_checked`, NEVER folded into "nothing
+    found". Name-free by construction: no description, title, or involved-
+    party id is ever copied into the returned payload — that's what
+    show_record is for.
+    """
+    from app.database.pool import connection_or_direct
+    from app.core.feature_flags import get_company_features
+    from app.matcha.services.discipline.discipline_policy_check import check_incidents_against_handbook
+
+    days = min(max(int(days or 30), 1), 180)
+    limit = min(max(int(limit or 5), 1), 10)
+
+    async with connection_or_direct(force_direct=True) as conn:
+        features = await get_company_features(company_id, conn=conn)
+        if not features.get("discipline"):
+            return {"status": "module_off", "message": "Discipline isn't enabled for this company."}
+        if not features.get("handbooks"):
+            return {
+                "status": "module_off",
+                "message": (
+                    "Handbooks aren't enabled for this company, so there's nothing to check "
+                    "closed incidents against — this isn't a clean scan, it's no corpus."
+                ),
+            }
+
+        rows = await conn.fetch(
+            """
+            SELECT i.id, i.incident_number, i.severity, i.incident_type, i.occurred_at,
+                   i.title, i.description,
+                   a.analysis_data,
+                   EXISTS (
+                       SELECT 1 FROM progressive_discipline pd WHERE pd.source_incident_id = i.id
+                   ) AS already_disciplined
+            FROM ir_incidents i
+            LEFT JOIN ir_incident_analysis a
+                   ON a.incident_id = i.id AND a.analysis_type = 'policy_mapping'
+            WHERE i.company_id = $1 AND i.status = 'closed'
+              AND i.updated_at > NOW() - ($2 || ' days')::interval
+            ORDER BY i.updated_at DESC
+            """,
+            company_id, str(days),
+        )
+
+        cached_rows: list[dict[str, Any]] = []
+        to_check: list[dict[str, Any]] = []
+        for r in rows:
+            row = dict(r)
+            analysis = row.get("analysis_data")
+            is_cached = False
+            if analysis and not recheck:
+                try:
+                    data = json.loads(analysis) if isinstance(analysis, str) else dict(analysis)
+                except (ValueError, TypeError):
+                    data = {}
+                if data.get("checked_by") == "discipline_policy_check":
+                    is_cached = True
+                    row["matches"] = data.get("matches") or []
+            if is_cached:
+                cached_rows.append(row)
+            else:
+                to_check.append(row)
+
+        fresh_batch = to_check[:_FRESH_CHECK_CAP]
+        overflow = to_check[_FRESH_CHECK_CAP:]
+
+        fresh_rows: list[dict[str, Any]] = []
+        not_yet_checked = list(overflow)
+        if fresh_batch:
+            try:
+                batch_results = await asyncio.wait_for(
+                    check_incidents_against_handbook(conn, company_id=company_id, incidents=fresh_batch),
+                    timeout=_BATCH_BUDGET_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                batch_results = {}
+                logger.warning("[huume/discipline_skill] find_candidates batch check timed out (company=%s)", company_id)
+
+            for row in fresh_batch:
+                result = batch_results.get(str(row["id"]))
+                if result is None or not result.get("available"):
+                    not_yet_checked.append(row)
+                    continue
+                row["matches"] = result.get("violations") or []
+                fresh_rows.append(row)
+
+    checked_rows = cached_rows + fresh_rows
+    clean_count = sum(1 for r in checked_rows if not r.get("matches"))
+    ranked = _rank_candidates(checked_rows)[:limit]
+
+    return {
+        "status": "ok",
+        "candidates": [
+            {
+                "incident_id": str(row["id"]),
+                "incident_number": row.get("incident_number"),
+                "occurred_at": row["occurred_at"].isoformat() if row.get("occurred_at") else None,
+                "severity": row.get("severity"),
+                "policy_titles": [m.get("policy_title") for m in row["matches"] if m.get("policy_title")],
+                "top_relevance": max(
+                    row["matches"], key=lambda m: _RELEVANCE_RANK.get(m.get("relevance"), 0)
+                ).get("relevance"),
+                "top_confidence": max(float(m.get("confidence") or 0) for m in row["matches"]),
+                "already_disciplined": bool(row.get("already_disciplined")),
+            }
+            for row in ranked
+        ],
+        "checked": len(checked_rows),
+        "cached": len(cached_rows),
+        "clean_count": clean_count,
+        "not_yet_checked": {
+            "count": len(not_yet_checked),
+            "incident_numbers": [r.get("incident_number") for r in not_yet_checked],
+        },
     }
 
 

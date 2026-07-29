@@ -280,3 +280,80 @@ class TestPersistPolicyCheck:
         _, _, payload_json = conn.execute.await_args.args
         payload = json.loads(payload_json)
         assert payload["statute_states"] == ["CA"]
+
+
+def _fake_conn():
+    conn = MagicMock()
+    conn.fetchval = AsyncMock(return_value=None)
+    conn.execute = AsyncMock(return_value=None)
+    return conn
+
+
+class TestCheckIncidentsAgainstHandbookBatch:
+    """find_discipline_candidates' batch path: one corpus build for the whole
+    batch, per-incident failure isolation, and a total-corpus-failure
+    fallback — all `check_incident_against_handbook`'s single-incident path
+    doesn't need to care about."""
+
+    @pytest.mark.asyncio
+    async def test_batch_builds_corpus_once(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        genai.aio.models.generate_content = AsyncMock(return_value=_fake_resp(json.dumps({
+            "violations": [], "summary": "clean",
+        })))
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        incidents = [
+            {**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}, {**INCIDENT, "id": "inc-3"},
+        ]
+        conn = _fake_conn()
+        results = await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents)
+
+        assert patch_grounding.build_corpus.call_count == 1
+        assert set(results.keys()) == {"inc-1", "inc-2", "inc-3"}
+        assert genai.aio.models.generate_content.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_batch_one_gemini_failure_degrades_only_that_incident(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        ok_resp = _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+        genai.aio.models.generate_content = AsyncMock(side_effect=[ok_resp, RuntimeError("timeout"), ok_resp])
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        incidents = [
+            {**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}, {**INCIDENT, "id": "inc-3"},
+        ]
+        conn = _fake_conn()
+        results = await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents, concurrency=1)
+
+        available = {k: r["available"] for k, r in results.items()}
+        assert available == {"inc-1": True, "inc-2": False, "inc-3": True}
+
+    @pytest.mark.asyncio
+    async def test_batch_corpus_failure_degrades_all(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.matcha.services.pilots.handbook_pilot.gather_grounding",
+            AsyncMock(side_effect=RuntimeError("db down")),
+        )
+        incidents = [{**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}]
+        conn = _fake_conn()
+
+        results = await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents)
+
+        assert all(r == {"violations": [], "citations": [], "dropped_citations": [], "summary": "", "available": False}
+                   for r in results.values())
+
+    @pytest.mark.asyncio
+    async def test_only_available_results_are_persisted(self, monkeypatch, patch_grounding):
+        genai = MagicMock()
+        ok_resp = _fake_resp(json.dumps({"violations": [], "summary": "clean"}))
+        genai.aio.models.generate_content = AsyncMock(side_effect=[ok_resp, RuntimeError("boom")])
+        monkeypatch.setattr(f"{MOD}._genai", MagicMock(return_value=genai))
+
+        incidents = [{**INCIDENT, "id": "inc-1"}, {**INCIDENT, "id": "inc-2"}]
+        conn = _fake_conn()
+        await dpc.check_incidents_against_handbook(conn, company_id="c1", incidents=incidents, concurrency=1)
+
+        # persist_policy_check calls conn.execute once per available result —
+        # the unavailable incident must not get a row written for it.
+        assert conn.execute.await_count == 1
