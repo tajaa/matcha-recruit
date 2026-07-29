@@ -1,4 +1,4 @@
-import { FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages, CalendarClock, ShieldAlert } from 'lucide-react'
+import { FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages, CalendarClock, ShieldAlert, Search, ListChecks, HeartHandshake } from 'lucide-react'
 
 export const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 export const RESUME_MAX_SIZE = 10 * 1024 * 1024
@@ -32,6 +32,9 @@ export const HUUME_SKILLS = [
   { id: 'huume_whos_out', icon: CalendarClock, label: "Who's out", desc: 'PTO & leave this week', prompt: "Who's out on PTO or leave this week?", requiresCompany: true },
   { id: 'huume_writeup', icon: ShieldAlert, label: 'Write-up', desc: 'Stage a discipline draft', prompt: 'Draft a discipline write-up for ', requiresCompany: true },
   { id: 'huume_handbook', icon: BookOpen, label: 'Handbook draft', desc: 'Draft a policy via Handbook Pilot', prompt: 'Draft a handbook policy about ', requiresCompany: true },
+  { id: 'huume_policy_scan', icon: Search, label: 'Policy scan', desc: 'Which incidents need discipline?', prompt: 'Which closed incidents need disciplinary action?', requiresCompany: true },
+  { id: 'huume_approvals', icon: ListChecks, label: 'Approval queue', desc: 'Discipline awaiting HR sign-off', prompt: 'Show me discipline records pending HR approval.', requiresCompany: true },
+  { id: 'huume_er', icon: HeartHandshake, label: 'ER situation', desc: 'Ask about an employee-relations case', prompt: 'I have an employee relations issue — a coworker keeps undermining a teammate in front of the rest of the team. What should I do?', requiresCompany: true },
 ] as const
 
 export const PERSONAL_SKILLS = [
