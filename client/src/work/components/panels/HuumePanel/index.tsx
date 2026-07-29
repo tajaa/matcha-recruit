@@ -66,12 +66,17 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
     if (recordKey) setSelectedKey(recordKey)
   }, [recordFocusToken, recordKey])
 
-  // A newly-staged proposed action must win over whatever tab the user
-  // happens to have open — otherwise the ConfirmBar can ask the user to
-  // confirm/cancel a document the visible tab isn't even showing. Only
-  // fires when the *target* of the proposal changes (new id), so freely
-  // navigating tabs while the SAME proposal is still pending is untouched.
-  const proposedTargetKey = huume.action?.status === 'proposed' ? defaultArtifactKey(artifacts, huume.action) : null
+  // A newly-staged proposed action — or a plan with steps awaiting
+  // approval — must win over whatever tab the user happens to have open,
+  // and over a stale `huume_record` (which is never cleared, so an old
+  // show_record from days ago would otherwise keep re-winning focus on
+  // every mount ahead of a plan that actually needs review). Declared
+  // after the record effect above so it runs later in the same commit and
+  // takes priority when both fire together (e.g. on mount).
+  const proposedPlanArtifact = artifacts.find((a) => a.kind === 'plan' && a.plan.status === 'proposed')
+  const proposedTargetKey = huume.action?.status === 'proposed'
+    ? defaultArtifactKey(artifacts, huume.action)
+    : proposedPlanArtifact?.key ?? null
   useEffect(() => {
     if (proposedTargetKey) setSelectedKey(proposedTargetKey)
   }, [proposedTargetKey])

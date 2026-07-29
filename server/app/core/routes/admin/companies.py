@@ -25,6 +25,7 @@ from app.core.feature_flags import (
     BUILTIN_TIER_META,
     assert_feature_allowed,
     assert_feature_dependencies,
+    feature_dependency_violations,
     merge_company_features,
 )
 from app.core.services.feature_beta import load_beta_features, set_beta_status
@@ -264,13 +265,23 @@ async def toggle_company_feature(
             # signup_source, so returning the raw stored dict here made a
             # tier-forced-off toggle look like it took effect until refresh.
             new_effective = merge_company_features(features, row["signup_source"])
-            try:
-                assert_feature_dependencies(new_effective)
-            except ValueError as e:
+            # Only reject a violation this toggle actually introduces — a
+            # company that was already in a violating state (e.g. huume on
+            # without matcha_work, possible before FEATURE_REQUIRES existed)
+            # must not have every UNRELATED toggle 400 with an error naming
+            # a flag the admin never touched.
+            old_violations = feature_dependency_violations(old_effective)
+            new_violations = feature_dependency_violations(new_effective)
+            introduced = {f: m for f, m in new_violations.items() if f not in old_violations}
+            if introduced:
+                feature, missing = next(iter(introduced.items()))
                 # Transaction rolls back on the raise below (still inside the
                 # `async with conn.transaction():` block above) — the UPDATE
                 # a few lines up never commits.
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"'{feature}' requires {', '.join(f'{m!r}' for m in missing)} to be enabled first.",
+                )
             await record_feature_changes(
                 conn, company_id, old_effective, new_effective,
                 source="admin_toggle", actor_user_id=current_user.id,

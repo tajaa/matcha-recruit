@@ -310,9 +310,14 @@ async def _lookup_context_impl(
                 SELECT incident_type, severity, COUNT(*) AS count
                 FROM ir_incidents
                 WHERE company_id = $1 AND occurred_at > NOW() - ($2 || ' days')::interval
+                  AND ($3::text IS NULL
+                       OR incident_number ILIKE '%' || $3 || '%'
+                       OR title ILIKE '%' || $3 || '%'
+                       OR description ILIKE '%' || $3 || '%'
+                       OR incident_type ILIKE '%' || $3 || '%')
                 GROUP BY incident_type, severity
                 """,
-                company_id, str(window_days),
+                company_id, str(window_days), query,
             )
             detail_rows = await conn.fetch(
                 """

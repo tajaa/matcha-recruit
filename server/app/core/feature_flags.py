@@ -675,6 +675,21 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
 }
 
 
+def feature_dependency_violations(features: dict[str, bool]) -> dict[str, tuple[str, ...]]:
+    """Return {feature: missing_prereqs} for every FEATURE_REQUIRES entry
+    that's on without its prerequisite(s) — the whole set, not just the
+    first hit, so a caller can diff two states (e.g. before/after a single
+    toggle) and tell a pre-existing violation from one it just introduced."""
+    violations: dict[str, tuple[str, ...]] = {}
+    for feature, requires in FEATURE_REQUIRES.items():
+        if not features.get(feature):
+            continue
+        missing = tuple(r for r in requires if not features.get(r))
+        if missing:
+            violations[feature] = missing
+    return violations
+
+
 def assert_feature_dependencies(features: dict[str, bool]) -> None:
     """Raise ValueError if `features` (a complete desired-state dict, e.g.
     from `merge_company_features` with one or more keys overlaid) enables a
@@ -685,12 +700,9 @@ def assert_feature_dependencies(features: dict[str, bool]) -> None:
     intra-batch ordering, e.g. enabling huume and matcha_work in the same
     request.
     """
-    for feature, requires in FEATURE_REQUIRES.items():
-        if not features.get(feature):
-            continue
-        missing = [r for r in requires if not features.get(r)]
-        if missing:
-            raise ValueError(
-                f"'{feature}' requires {', '.join(f'{m!r}' for m in missing)} "
-                "to be enabled first."
-            )
+    violations = feature_dependency_violations(features)
+    for feature, missing in violations.items():
+        raise ValueError(
+            f"'{feature}' requires {', '.join(f'{m!r}' for m in missing)} "
+            "to be enabled first."
+        )

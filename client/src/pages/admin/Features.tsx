@@ -370,13 +370,25 @@ export default function Features() {
                         ? (FEATURE_REQUIRES[key] ?? []).filter((r) => !selected.enabled_features[r])
                         : []
                       const missingPrereq = missingPrereqs.length > 0
+                      // The reverse direction: this key is itself a
+                      // prerequisite (e.g. matcha_work for huume) — block
+                      // turning it OFF while a dependent is still on, same
+                      // as the backend would reject it.
+                      const blockingDependents = on
+                        ? Object.entries(FEATURE_REQUIRES)
+                            .filter(([dep, reqs]) => reqs.includes(key) && !!selected.enabled_features[dep])
+                            .map(([dep]) => dep)
+                        : []
+                      const blockedByDependent = blockingDependents.length > 0
                       const title = lockedOn
                         ? `${FEATURE_LABELS[key]} — beta, test accounts only`
                         : missingPrereq
                           ? `${FEATURE_LABELS[key]} — needs ${missingPrereqs.map((r) => FEATURE_LABELS[r] ?? r).join(', ')} enabled first`
-                          : provHint
-                            ? `${FEATURE_LABELS[key]} — ${provHint}`
-                            : FEATURE_LABELS[key]
+                          : blockedByDependent
+                            ? `${FEATURE_LABELS[key]} — disable ${blockingDependents.map((r) => FEATURE_LABELS[r] ?? r).join(', ')} first`
+                            : provHint
+                              ? `${FEATURE_LABELS[key]} — ${provHint}`
+                              : FEATURE_LABELS[key]
                       return (
                         <div key={key} className="flex items-center gap-3">
                           <span
@@ -393,7 +405,7 @@ export default function Features() {
                           </span>
                           <Toggle
                             checked={on}
-                            disabled={busy || lockedOn || tierForced || missingPrereq}
+                            disabled={busy || lockedOn || tierForced || missingPrereq || blockedByDependent}
                             onChange={(v) => toggle(selected.id, key, v)}
                             size="sm"
                           />

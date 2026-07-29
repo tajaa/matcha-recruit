@@ -152,8 +152,19 @@ async def get_huume_record(
     model's. Re-checks the record type's own feature flag (the mount only
     gates `huume`+`matcha_work`), since a flag flipped off after Huume staged
     a record must not leave it fetchable from the panel."""
+    from app.matcha.dependencies import get_client_company_id
+
     thread = await _get_owned_thread(thread_id, current_user)
     company_id = thread["company_id"]
+
+    # _get_owned_thread's access check (doc_svc.get_thread) also admits
+    # thread/project collaborators from OTHER companies — fine for chat
+    # access, but this endpoint returns incident/ER/employee/credential
+    # records scoped to the THREAD's company, not the caller's. Without this,
+    # an outside-tenant collaborator could pass any record_id and read
+    # another tenant's incident narratives, witnesses, and employee PII.
+    if await get_client_company_id(current_user) != company_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
 
     required = record_view.RECORD_REQUIRED_FEATURE.get(record_type)
     if required is None:

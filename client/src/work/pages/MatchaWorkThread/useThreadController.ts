@@ -170,6 +170,7 @@ export function useThreadController() {
     if (!threadId || !content || streaming || togglingMode) return
 
     setInput('')
+    setMentionQuery(null)
     setStreaming(true)
     setError('')
 
@@ -352,6 +353,7 @@ export function useThreadController() {
   // open, or the company doesn't have huume — @ offers nothing in that case.
   const mentionMatches: MentionMatch[] = (() => {
     if (mentionQuery === null || !hasFeature('huume')) return []
+    if (mentionQuery.length === 0) return []
     if (!'huume'.startsWith(mentionQuery.toLowerCase())) return []
     return [{
       key: 'huume', label: 'Huume',
