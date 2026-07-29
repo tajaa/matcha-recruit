@@ -65,8 +65,8 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
 
   const lm = isProjectThread ? false : lightMode
-  const divider  = isProjectThread ? 'border-[#333]' : lm ? 'border-zinc-200' : 'border-zinc-800'
-  const metaText = isProjectThread ? 'text-[#6a737d]' : lm ? 'text-zinc-400' : 'text-zinc-500'
+  const divider  = 'border-w-line'
+  const metaText = 'text-w-faint'
   // Per-message, not thread-level (`huume_mode`) — a message keeps its own
   // origin regardless of whether Huume was later turned off, and a thread
   // that had Huume on before this message existed must not get badged.
@@ -78,16 +78,10 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
       <div
         className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
           m.role === 'user'
-            ? isProjectThread
-              ? 'bg-[#2a2d2e] text-[#d4d4d4] whitespace-pre-wrap'
-              : lm
-                ? 'bg-zinc-200 text-zinc-900 whitespace-pre-wrap'
-                : 'bg-zinc-700 text-white whitespace-pre-wrap'
-            : isProjectThread
-              ? 'bg-[#252526] text-[#d4d4d4] border border-[#333] prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
-              : lm
-                ? 'bg-zinc-50 text-zinc-800 border border-zinc-200 prose prose-sm prose-zinc max-w-none overflow-x-auto'
-              : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
+            ? 'bg-w-surface2 text-w-text whitespace-pre-wrap'
+            : lm
+              ? 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-zinc max-w-none overflow-x-auto'
+              : 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
         {m.role === 'user' && (m.content.startsWith('[Resume uploaded:') || m.content.startsWith('[Resume batch:') || m.content.startsWith('[Inventory batch:')) ? (

@@ -14,7 +14,7 @@ export default function JurisdictionBar({ complianceMode, locationsUnavailable, 
   return (
     <>
       {complianceMode && locationsUnavailable && locations.length === 0 && (
-        <div className={`px-4 py-2 border-b ${th.border} ${th.jurisdBar} text-[11px] text-zinc-500`}>
+        <div className={`px-4 py-2 border-b ${th.border} ${th.jurisdBar} text-[11px] text-w-faint`}>
           Compliance locations unavailable — check your plan or contact support.
         </div>
       )}

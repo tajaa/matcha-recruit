@@ -92,6 +92,21 @@ html[data-app-shell-bg="werk"] {
   background-image: radial-gradient(115% 75% at 50% 0%, #17171A 0%, var(--color-w-bg) 58%);
 }
 
+/* Thread-page-local light mode — independent of the app-wide `data-theme`
+   toggle below. Thread light/dark is a separate per-thread preference (see
+   `mw-chat-theme` in useThreadController.ts), applied as this class on the
+   chat pane root rather than on <html>, so it composes with the werk `w-*`
+   tokens the thread interior consumes without touching the rest of the app. */
+.mw-light {
+  --color-w-bg: #f7f7f8;
+  --color-w-surface: #ffffff;
+  --color-w-surface2: #f1f1f3;
+  --color-w-line: #e4e4e7;
+  --color-w-text: #18181b;
+  --color-w-dim: #71717a;
+  --color-w-faint: #a1a1aa;
+}
+
 /* Noir marketing landing (pages/Home) sets this while mounted — same idea as
    data-app-shell-bg: overscroll bounce shows noir instead of a white flash,
    and in-page anchor jumps (the hero scroll cue) glide instead of teleporting. */

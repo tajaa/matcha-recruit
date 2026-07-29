@@ -36,30 +36,26 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
       {/* Input */}
       <div className={`px-4 py-3 border-t ${th.border} pb-[env(safe-area-inset-bottom)]`}>
         {isFinalized ? (
-          <div className="text-center text-sm text-zinc-500 py-2">
+          <div className="text-center text-sm text-w-faint py-2">
             This thread has been finalized.
           </div>
         ) : isArchived ? (
-          <div className="text-center text-sm text-zinc-500 py-2">
+          <div className="text-center text-sm text-w-faint py-2">
             This thread has been archived.
           </div>
         ) : (
           <>
             {huumeOn && thread && (
               <div className="flex items-center gap-1.5 mb-2">
-                <div className={`flex items-center gap-1.5 pl-1.5 pr-1 py-1 rounded-full border ${
-                  lightMode ? 'bg-orange-50 border-orange-300' : 'bg-orange-950/30 border-orange-800/60'
-                }`}>
+                <div className="flex items-center gap-1.5 pl-1.5 pr-1 py-1 rounded-full border bg-w-accent/10 border-w-accent/30">
                   <HuumeAvatar size="sm" lightMode={lightMode} />
-                  <span className={`text-xs font-medium ${lightMode ? 'text-orange-700' : 'text-orange-300'}`}>Huume</span>
+                  <span className="text-xs font-medium text-w-accent">Huume</span>
                   <button
                     type="button"
                     onClick={() => handleModeToggle('huume')}
                     disabled={togglingHuume}
                     title="Turn Huume off for this thread"
-                    className={`p-0.5 rounded-full transition-colors disabled:opacity-50 ${
-                      lightMode ? 'text-orange-400 hover:text-orange-700 hover:bg-orange-100' : 'text-orange-500 hover:text-orange-200 hover:bg-orange-900/40'
-                    }`}
+                    className="p-0.5 rounded-full transition-colors disabled:opacity-50 text-w-accent/70 hover:text-w-accent hover:bg-w-accent/10"
                   >
                     {togglingHuume ? <Loader2 size={11} className="animate-spin" /> : <X size={11} />}
                   </button>
@@ -83,20 +79,14 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                 onClick={() => fileInputRef.current?.click()}
                 disabled={inputDisabled}
                 title="Upload files (resumes, invoices, spreadsheets)"
-                className={`p-3 rounded-lg transition-colors disabled:opacity-40 ${
-                  lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-                }`}
+                className="p-3 rounded-lg transition-colors disabled:opacity-40 text-w-dim hover:text-w-text hover:bg-w-surface2"
               >
                 <Paperclip size={16} />
               </button>
               <div className="flex-1 relative">
                 {mentionQuery !== null && mentionMatches.length > 0 && (
-                  <div className={`absolute bottom-full left-0 mb-1 w-full max-w-xs rounded-lg shadow-xl z-20 overflow-hidden border ${
-                    lightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-700'
-                  }`}>
-                    <div className={`px-2 py-1 text-[10px] uppercase tracking-wide border-b ${
-                      lightMode ? 'text-zinc-400 border-zinc-200' : 'text-zinc-500 border-zinc-700'
-                    }`}>
+                  <div className="absolute bottom-full left-0 mb-1 w-full max-w-xs rounded-lg shadow-xl z-20 overflow-hidden border bg-w-surface border-w-line">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wide border-b text-w-faint border-w-line">
                       Mention an agent
                     </div>
                     {mentionMatches.map((m) => (
@@ -104,14 +94,12 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                         key={m.key}
                         type="button"
                         onMouseDown={(e) => { e.preventDefault(); applyHuumeMention() }}
-                        className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${
-                          lightMode ? 'hover:bg-zinc-100' : 'hover:bg-zinc-800'
-                        }`}
+                        className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-w-surface2"
                       >
                         <HuumeAvatar size="sm" lightMode={lightMode} />
                         <span className="min-w-0 flex-1">
-                          <span className={`block font-medium ${lightMode ? 'text-zinc-800' : 'text-zinc-100'}`}>{m.label}</span>
-                          <span className={`block text-[11px] truncate ${lightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>{m.description}</span>
+                          <span className="block font-medium text-w-text">{m.label}</span>
+                          <span className="block text-[11px] truncate text-w-faint">{m.description}</span>
                         </span>
                       </button>
                     ))}
@@ -133,14 +121,14 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                   rows={1}
                   disabled={inputDisabled}
                   className={`w-full text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px] ${th.textarea} ${
-                    huumeOn ? 'ring-2 ring-orange-500/50' : ''
+                    huumeOn ? 'ring-2 ring-w-accent/50' : ''
                   }`}
                 />
               </div>
               <button
                 onClick={() => handleSend()}
                 disabled={inputDisabled || !input.trim() || togglingHuume}
-                className="p-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-emerald-600"
+                className="p-3 bg-w-accent hover:bg-w-accent-hi text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-w-accent"
               >
                 {streaming ? (
                   <Loader2 size={16} className="animate-spin" />

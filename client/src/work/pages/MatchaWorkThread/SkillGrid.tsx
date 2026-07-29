@@ -3,8 +3,6 @@ import type { ThreadTheme } from './theme'
 
 interface SkillGridProps {
   isIndividual: boolean
-  isProject: boolean
-  lightMode: boolean
   th: ThreadTheme
   huumeMode: boolean
   setInput: (v: string) => void
@@ -14,12 +12,12 @@ interface SkillGridProps {
 }
 
 export default function SkillGrid({
-  isIndividual, isProject, lightMode, th, huumeMode, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
+  isIndividual, th, huumeMode, setInput, textareaRef, setShowTutorSetup, setTutorDismissed,
 }: SkillGridProps) {
   const skills = huumeMode && !isIndividual ? HUUME_SKILLS : isIndividual ? PERSONAL_SKILLS : HR_SKILLS
   return (
     <div className="flex flex-col items-center justify-center h-full px-4">
-      <p className={`text-sm font-medium mb-4 ${isProject ? 'text-[#e8e8e8]' : th.emptyText}`}>
+      <p className={`text-sm font-medium mb-4 ${th.emptyText}`}>
         What would you like to work on?
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-md w-full">
@@ -39,17 +37,11 @@ export default function SkillGrid({
                   textareaRef.current?.focus()
                 }
               }}
-              className={`flex flex-col items-center gap-1.5 rounded-lg px-3 py-3 text-center transition-colors ${
-                isProject
-                  ? 'bg-[#252526] hover:bg-[#2a2d2e] text-[#d4d4d4]'
-                  : lightMode
-                    ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-600'
-                    : 'bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-400'
-              }`}
+              className="flex flex-col items-center gap-1.5 rounded-lg px-3 py-3 text-center transition-colors bg-w-surface2 hover:bg-w-line text-w-dim"
             >
-              <Icon size={16} className={isProject ? 'text-[#ce9178]' : 'text-emerald-500'} />
+              <Icon size={16} className="text-w-accent" />
               <span className="text-[11px] font-medium">{skill.label}</span>
-              <span className={`text-[9px] leading-tight ${isProject ? 'text-[#6a737d]' : lightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+              <span className="text-[9px] leading-tight text-w-faint">
                 {'dropHint' in skill ? skill.dropHint : skill.desc}
               </span>
             </button>

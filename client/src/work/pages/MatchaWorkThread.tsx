@@ -63,12 +63,12 @@ export default function MatchaWorkThread() {
 
   // Project threads always use the dark editor theme; others respect lightMode
   const lm = isProject ? false : lightMode
-  const th = buildThreadTheme(isProject, lm)
+  const th = buildThreadTheme()
 
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-49px)]">
-        <Loader2 className="animate-spin text-zinc-500" size={24} />
+        <Loader2 className="animate-spin text-w-dim" size={24} />
       </div>
     )
   }
@@ -77,7 +77,7 @@ export default function MatchaWorkThread() {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-49px)] gap-4">
         <p className="text-red-400">{error}</p>
-        <Link to={base} className="text-sm text-zinc-400 hover:text-white">
+        <Link to={base} className="text-sm text-w-dim hover:text-w-text">
           Back to threads
         </Link>
       </div>
@@ -87,7 +87,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`${mobileView === 'panel' && hasRightPanel ? 'hidden md:flex' : 'flex'} flex-col ${hasRightPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`${mobileView === 'panel' && hasRightPanel ? 'hidden md:flex' : 'flex'} flex-col ${hasRightPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg} ${lm ? 'mw-light' : ''}`}>
         <ThreadHeader c={c} th={th} lm={lm} hasRightPanel={hasRightPanel} />
 
         <JurisdictionBar

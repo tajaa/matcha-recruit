@@ -48,8 +48,6 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
       {messages.length === 0 && (
         <SkillGrid
           isIndividual={isIndividual}
-          isProject={isProject}
-          lightMode={lightMode}
           th={th}
           huumeMode={!!thread?.huume_mode}
           setInput={setInput}
