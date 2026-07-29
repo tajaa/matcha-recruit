@@ -45,13 +45,16 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, discipline_skill, handbook_skill, legal_skill, onboarding_skill, record_view, store
+from . import actions, discipline_skill, handbook_skill, legal_skill, onboarding_skill, record_view, routing, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.6-flash"
+# Kept as an alias (not re-literaled) so MODEL_PRICING lookups and any other
+# existing reference to "the model Huume uses" track routing.py's catalog —
+# every tier's planner/executor model is _FLASH today.
+_MODEL = routing._FLASH
 _MAX_MODEL_CALLS = 8
 # 240s, not the 150s the loop launched with: the pilot tools (ask_legal_pilot /
 # draft_handbook_content / generate_legal_packet) each embed their own
@@ -186,6 +189,15 @@ def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[
             else:
                 contents.append(types.Content(role="user", parts=[types.Part(text=f"[Attached file(s)]\n{joined}")]))
     return contents
+
+
+def _last_user_text(history: list[dict[str, Any]]) -> str:
+    """The last user turn's raw text, for tier routing — `""` if there is
+    none. Pure; never raises on a malformed history entry."""
+    for msg in reversed(history or []):
+        if msg.get("role") != "assistant":
+            return str(msg.get("content") or "")
+    return ""
 
 
 def _json_safe(value: Any) -> Any:
@@ -958,15 +970,32 @@ async def run_huume_turn(
             step = recorder.record(tool=name, kind="write", label=f"{name} failed", status="error", detail="unexpected error")
             return {"error": "unexpected error"}, step
 
+    tier_name = routing.resolve_tier(_last_user_text(history), current_state=current_state)
+    tier = routing.TIERS[tier_name]
+
     client = get_genai_client()
-    config = types.GenerateContentConfig(
-        tools=[types.Tool(function_declarations=tool_declarations())],
-        system_instruction=build_system_prompt(
-            company_name=company_name or "your company", today=date.today().isoformat(),
-            state_block=build_state_block(current_state),
-        ),
+    _system_instruction = build_system_prompt(
+        company_name=company_name or "your company", today=date.today().isoformat(),
+        state_block=build_state_block(current_state),
+    )
+    _tools_arg = [types.Tool(function_declarations=tool_declarations())]
+    # Two configs, same tools + system prompt — only ThinkingConfig differs.
+    # Call 1 (the model's first read of the turn) uses the planner
+    # model/thinking; calls 2..N (tool-result follow-ups) use the executor's.
+    # A deep turn thinks hard once to plan, then executes at low thinking —
+    # a lite (confirm) turn skips thinking on every call.
+    planner_config = types.GenerateContentConfig(
+        tools=_tools_arg, system_instruction=_system_instruction,
+        thinking_config=routing.thinking_config(tier.planner_thinking),
+    )
+    executor_config = types.GenerateContentConfig(
+        tools=_tools_arg, system_instruction=_system_instruction,
+        thinking_config=routing.thinking_config(tier.executor_thinking),
     )
     contents = _to_contents(history, attachment_texts)
+
+    if tier_name == "deep":
+        yield {"type": "status", "message": "Thinking hard…"}
 
     try:
         while True:
@@ -976,12 +1005,15 @@ async def run_huume_turn(
                 break
 
             await rate_limiter.check_limit("huume", "agent")
+            is_first_call = model_calls == 0
             model_calls += 1
+            call_model = tier.planner_model if is_first_call else tier.executor_model
+            call_config = planner_config if is_first_call else executor_config
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK_SECONDS - elapsed()))
             try:
                 with feature_scope("matcha.huume.loop"):
                     response = await asyncio.wait_for(
-                        client.aio.models.generate_content(model=_MODEL, contents=contents, config=config),
+                        client.aio.models.generate_content(model=call_model, contents=contents, config=call_config),
                         timeout=call_timeout,
                     )
             finally:
@@ -1099,7 +1131,8 @@ async def run_huume_turn(
     if not final_message:
         final_message = "I wasn't able to finish that — nothing was changed." if not recorder.steps else "Done for now — see the steps above."
 
-    total_usage["model"] = _MODEL
+    total_usage["model"] = tier.planner_model
+    total_usage["tier"] = tier_name
     total_usage["estimated"] = False
 
     result_data: dict[str, Any] = {
