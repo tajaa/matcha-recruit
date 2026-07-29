@@ -602,6 +602,38 @@ export interface HuumeActionAmendHandbook {
   handbook_title?: string | null
 }
 
+/** Incident-triggered discipline draft — distinct from HuumeActionDiscipline
+ * ('discipline_draft'): a record staged here goes to HR APPROVAL, it is never
+ * issued directly. employee_id/incident_id are ids, never names (the backend
+ * takes ids only); employee_name is enrichment-only, added at stage time for
+ * display, never sent back on confirm. */
+export interface HuumeActionDisciplineFromIncident {
+  type: 'discipline_from_incident'
+  status: 'proposed' | 'filed' | 'failed' | 'cancelled'
+  confirm_id: string
+  employee_id: string
+  employee_name?: string
+  incident_id?: string | null
+  infraction_type: string
+  severity?: string
+  discipline_type?: string
+  occurrence_dates?: string[]
+  description?: string
+  expected_improvement?: string
+  template_id?: string | null
+  template_name?: string | null
+  rendered_preview?: string | null
+  missing_fields?: string[]
+}
+
+export interface HuumeActionDisciplineDecision {
+  type: 'discipline_decision'
+  status: 'proposed' | 'decided' | 'failed' | 'cancelled'
+  record_id: string
+  decision?: 'approve' | 'deny'
+  reason?: string | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -615,6 +647,8 @@ export type HuumeAction =
   | HuumeActionTrainingAssign
   | HuumeActionPtoDecision
   | HuumeActionAmendHandbook
+  | HuumeActionDisciplineFromIncident
+  | HuumeActionDisciplineDecision
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */

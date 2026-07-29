@@ -36,6 +36,10 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return `PTO ${action.decision === 'deny' ? 'Denial' : 'Approval'}`
     case 'amend_handbook':
       return `Amend Handbook${action.handbook_title ? ` — ${action.handbook_title}` : ''}`
+    case 'discipline_from_incident':
+      return `Disciplinary Action${action.infraction_type ? ` — ${action.infraction_type}` : ''}${action.employee_name ? ` · ${action.employee_name}` : ''}`
+    case 'discipline_decision':
+      return `Discipline ${action.decision === 'deny' ? 'Denial' : 'Approval'}`
   }
 }
 
@@ -130,6 +134,48 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Sections/policies" value={action.draft_ids?.length} />
           </div>
           <p className="text-[11px] opacity-60">This edits the live handbook's sections in place — confirm before proceeding.</p>
+        </>
+      )}
+
+      {action.type === 'discipline_from_incident' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Employee" value={action.employee_name} />
+            <Meta label="Severity" value={action.severity ?? 'moderate'} />
+            <Meta label="Level" value={action.discipline_type} />
+            <Meta label="Occurred" value={action.occurrence_dates?.join(', ')} />
+            <Meta label="Template" value={action.template_name} />
+          </div>
+          <Prose>{action.description}</Prose>
+          {action.expected_improvement && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide opacity-50">Expected improvement</div>
+              <Prose>{action.expected_improvement}</Prose>
+            </div>
+          )}
+          {action.rendered_preview && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide opacity-50">Letter preview</div>
+              <Prose>{action.rendered_preview}</Prose>
+            </div>
+          )}
+          {!!action.missing_fields?.length && (
+            <div className={`flex items-start gap-1.5 text-[11px] px-2 py-1.5 rounded border w-fit ${chipRed}`}>
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>Missing on file: {action.missing_fields.join(', ')} — the letter will read generically for these.</span>
+            </div>
+          )}
+          <p className="text-[11px] opacity-60">This goes to HR approval — nothing is issued until an approver decides.</p>
+        </>
+      )}
+
+      {action.type === 'discipline_decision' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Record" value={action.record_id} />
+            <Meta label="Decision" value={action.decision === 'deny' ? 'Deny' : 'Approve'} />
+          </div>
+          <Prose>{action.reason}</Prose>
         </>
       )}
     </div>

@@ -19,6 +19,8 @@ function idOf(action: HuumeAction): string {
     case 'training_assign': return action.requirement_id
     case 'pto_decision': return action.request_id
     case 'amend_handbook': return action.target_handbook_id
+    case 'discipline_from_incident': return action.confirm_id
+    case 'discipline_decision': return action.record_id
   }
 }
 
