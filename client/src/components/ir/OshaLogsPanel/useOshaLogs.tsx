@@ -22,12 +22,18 @@ export function useOshaLogs() {
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [locations, setLocations] = useState<BusinessLocation[]>([])
+  // Distinct from `locations.length === 0` (which reads as "no establishments
+  // configured yet") — a failed fetchLocations() must not send a tenant with
+  // real locations off to "add a location under Compliance" instead of retry.
+  const [locationsError, setLocationsError] = useState(false)
   const [locationId, setLocationId] = useState<string>('')
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [summary, setSummary] = useState<Summary300A | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   // Confidential privacy-case names (revealed on demand; audit-logged server-side).
   const [privacyNames, setPrivacyNames] = useState<PrivacyCaseRow[] | null>(null)
+  const [privacyError, setPrivacyError] = useState<string | null>(null)
   const [revealing, setRevealing] = useState(false)
 
   // 300A manual / certification form state
@@ -59,37 +65,55 @@ export function useOshaLogs() {
   >(null)
   const [attestChecked, setAttestChecked] = useState(false)
   const [attestBusy, setAttestBusy] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   function promptExport(label: string, preview: ReactNode, run: () => Promise<void>) {
     setAttestChecked(false)
+    setExportError(null)
     setAttestExport({ label, preview, run })
   }
 
   async function confirmExport() {
     if (!attestExport) return
     setAttestBusy(true)
+    setExportError(null)
     try {
       await attestExport.run()
       setAttestExport(null)
-    } catch {
-      // download helper already swallows; keep the modal open on failure.
+    } catch (e) {
+      // api.download / api.post both throw ApiError on failure (they do not
+      // swallow) — surface it and keep the modal open so attestChecked isn't
+      // silently stuck true against a click that never actually exported.
+      setExportError(e instanceof Error ? e.message : 'Export failed')
     } finally {
       setAttestBusy(false)
     }
   }
 
-  // Load establishments once.
-  useEffect(() => {
+  function loadLocations() {
+    setLocationsError(false)
     fetchLocations()
       .then((locs) => {
         const active = locs.filter((l) => l.is_active)
         setLocations(active)
         if (active.length > 0) setLocationId((prev) => prev || active[0].id)
       })
-      .catch(() => {})
+      .catch(() => setLocationsError(true))
+  }
+
+  // Load establishments once.
+  useEffect(() => {
+    loadLocations()
     loadItaState()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Bumped by retryLoad() to re-run the effect below without changing
+  // year/locationId (a plain no-op setState wouldn't retrigger the effect).
+  const [reloadKey, setReloadKey] = useState(0)
+  function retryLoad() {
+    setReloadKey((k) => k + 1)
+  }
 
   // Load the 300 log + 300A summary whenever year or establishment changes.
   useEffect(() => {
@@ -98,10 +122,14 @@ export function useOshaLogs() {
       return
     }
     setLoading(true)
+    setLoadError(null)
     setItaProblems(null)
     setPrivacyNames(null)
+    setPrivacyError(null)
     Promise.allSettled([
-      api.get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}`).then(setEntries),
+      api
+        .get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}&location_id=${locationId}`)
+        .then(setEntries),
       api
         .get<Summary300A>(`/ir/incidents/osha/300a?year=${year}&location_id=${locationId}`)
         .then((s) => {
@@ -112,8 +140,21 @@ export function useOshaLogs() {
           setCertTitle(s.certified_title ?? '')
           setCertDate(s.certified_date ?? '')
         }),
-    ]).finally(() => setLoading(false))
-  }, [year, locationId])
+    ])
+      .then((results) => {
+        if (results.some((r) => r.status === 'rejected')) {
+          // A previous year's/establishment's rows must never keep rendering
+          // under the NEW year/location's label just because allSettled
+          // absorbed the rejection — wipe both, not just the failed one, since
+          // the two requests are presented together as one establishment/year
+          // view.
+          setEntries([])
+          setSummary(null)
+          setLoadError('Could not load OSHA log data for this year/establishment. Try again.')
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [year, locationId, reloadKey])
 
   // The actual download runs only after the attestation modal is confirmed, so
   // every path carries &attested=true (the backend gate + audit). Must go
@@ -122,7 +163,7 @@ export function useOshaLogs() {
   function runCsv(type: '300' | '300a') {
     const path =
       type === '300'
-        ? `/ir/incidents/osha/300-log/csv?year=${year}&attested=true`
+        ? `/ir/incidents/osha/300-log/csv?year=${year}&location_id=${locationId}&attested=true`
         : `/ir/incidents/osha/300a/csv?year=${year}&location_id=${locationId}&attested=true`
     const filename =
       type === '300' ? `osha_300_log_${year}.csv` : `osha_300a_summary_${year}.csv`
@@ -254,11 +295,17 @@ export function useOshaLogs() {
 
   async function revealConfidentialNames() {
     setRevealing(true)
+    setPrivacyError(null)
     try {
-      const rows = await api.get<PrivacyCaseRow[]>(`/ir/incidents/osha/privacy-cases?year=${year}`)
+      const rows = await api.get<PrivacyCaseRow[]>(
+        `/ir/incidents/osha/privacy-cases?year=${year}&location_id=${locationId}`,
+      )
       setPrivacyNames(rows)
-    } catch {
-      setPrivacyNames([])
+    } catch (e) {
+      // Leave privacyNames null (not []) on failure — [] is a real answer
+      // ("no privacy cases on file") and must not be indistinguishable from
+      // "the fetch failed". Null keeps the Reveal button available to retry.
+      setPrivacyError(e instanceof Error ? e.message : 'Could not load privacy-case names')
     } finally {
       setRevealing(false)
     }
@@ -280,13 +327,18 @@ export function useOshaLogs() {
     year,
     setYear,
     locations,
+    locationsError,
+    retryLocations: loadLocations,
     locationId,
     setLocationId,
     entries,
     summary,
     loading,
+    loadError,
+    retryLoad,
     privacyNames,
     setPrivacyNames,
+    privacyError,
     revealing,
     hours,
     setHours,
@@ -315,6 +367,7 @@ export function useOshaLogs() {
     attestChecked,
     setAttestChecked,
     attestBusy,
+    exportError,
     confirmExport,
     save300a,
     exportIta,

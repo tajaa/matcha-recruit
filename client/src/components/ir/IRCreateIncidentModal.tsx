@@ -147,11 +147,35 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
     }
   }, [open])
 
+  // The modal stays mounted across opens (controlled by `open`), so a
+  // cancelled dictation/typed draft must not survive to the NEXT, unrelated
+  // incident — including its verbatim voice_transcript, which is attached to
+  // whichever incident is submitted next as if it were evidence for THAT one.
+  // Shared by both a successful submit and a Cancel/close so the two paths
+  // can't drift (a prior version only reset on success).
+  function resetFormState() {
+    setForm(EMPTY_FORM)
+    setSubmitError(null)
+    setVoiceTranscript(null)
+    setVoiceMsg(null)
+    setVoiceHint(null)
+    setLocationMissing(false)
+  }
+
+  function handleClose() {
+    resetFormState()
+    onClose()
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setSubmitError(null)
     if (!form.location_id) {
       setSubmitError('Pick a location for this incident.')
+      return
+    }
+    if (!form.date_text.trim()) {
+      setSubmitError('Add when this happened.')
       return
     }
     if (!form.description.trim()) {
@@ -176,8 +200,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         involved_employee_ids: form.involved_employee_ids,
         category_data: voiceTranscript ? { voice_transcript: voiceTranscript } : undefined,
       })
-      setForm(EMPTY_FORM)
-      setVoiceTranscript(null)
+      resetFormState()
       onCreated(created)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to submit incident'
@@ -188,7 +211,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Report an incident">
+    <Modal open={open} onClose={handleClose} title="Report an incident">
       <p className="-mt-2 mb-5 text-[13px] text-zinc-400">
         Capture what happened — Intelligent Theme Analysis categorizes the rest after you submit.
       </p>
@@ -353,8 +376,8 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
 
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
         <div className="flex justify-end gap-2 border-t border-white/[0.06] pt-4">
-          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving || !form.location_id}>
+          <Button variant="ghost" type="button" onClick={handleClose}>Cancel</Button>
+          <Button type="submit" disabled={saving || !form.location_id || !form.date_text.trim()}>
             {saving ? 'Submitting…' : 'Submit report'}
           </Button>
         </div>

@@ -1,17 +1,21 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import type { TooltipContentProps, TooltipPayloadEntry } from 'recharts'
 import type { WcQuarter } from './IRWcMetricsCard'
 
-function ChartTooltip({ active, payload, label }: any) {
+function ChartTooltip({ active, payload, label }: Partial<TooltipContentProps<number, string>>) {
   if (!active || !payload || payload.length === 0) return null
   const lostDays = payload[0]?.payload?.lost_days ?? 0
   return (
     <div className="bg-zinc-900 border border-white/10 px-4 py-3 shadow-xl text-xs rounded-lg min-w-[160px]">
       <div className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest mb-2">{label}</div>
-      {payload.filter((p: any) => p.value > 0).reverse().map((entry: any) => (
-        <div key={entry.dataKey} className="flex items-center justify-between gap-6">
+      {payload
+        .filter((p: TooltipPayloadEntry<number, string>) => (p.value ?? 0) > 0)
+        .reverse()
+        .map((entry: TooltipPayloadEntry<number, string>) => (
+        <div key={String(entry.dataKey)} className="flex items-center justify-between gap-6">
           <span className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-            <span className="text-zinc-400 capitalize">{(entry.name || entry.dataKey).replace(/_/g, ' ')}</span>
+            <span className="text-zinc-400 capitalize">{String(entry.name ?? entry.dataKey ?? '').replace(/_/g, ' ')}</span>
           </span>
           <span className="font-mono text-zinc-200">{entry.value}</span>
         </div>

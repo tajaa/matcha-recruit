@@ -57,8 +57,10 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
         state: state.trim().toUpperCase(),
         zipcode: zipcode.trim(),
       })
-      // Reset address-specific fields; keep `name` as a sensible default
-      // for the next entry (most companies have one of each named site).
+      // Reset every field, including `name` — most companies name each site
+      // uniquely (e.g. "Warehouse A" vs "Warehouse B"), so carrying the last
+      // name forward as the next entry's default would be wrong far more
+      // often than it would help.
       setAddress('')
       setCity('')
       setState('')

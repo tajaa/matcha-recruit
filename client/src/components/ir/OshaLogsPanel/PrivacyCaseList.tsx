@@ -8,6 +8,7 @@ interface PrivacyCaseListProps {
   entries: LogEntry[]
   privacyNames: PrivacyCaseRow[] | null
   setPrivacyNames: (rows: PrivacyCaseRow[] | null) => void
+  privacyError: string | null
   revealConfidentialNames: () => void
   revealing: boolean
 }
@@ -20,6 +21,7 @@ export function PrivacyCaseList({
   entries,
   privacyNames,
   setPrivacyNames,
+  privacyError,
   revealConfidentialNames,
   revealing,
 }: PrivacyCaseListProps) {
@@ -45,6 +47,9 @@ export function PrivacyCaseList({
           </Button>
         )}
       </div>
+      {privacyError && (
+        <p className="text-[12px] text-red-300 mt-3">{privacyError}</p>
+      )}
       {privacyNames !== null &&
         (privacyNames.length === 0 ? (
           <p className="text-[12px] text-zinc-500 mt-3">No privacy-case names to show.</p>

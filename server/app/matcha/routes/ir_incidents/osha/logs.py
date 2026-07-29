@@ -189,14 +189,30 @@ async def _hydrate_case_emp_map(conn, company_id, rows, cases_by_incident) -> di
 @router.get("/osha/300-log", response_model=list[Osha300LogEntry])
 async def get_osha_300_log(
     year: int = Query(..., description="Calendar year for the 300 log"),
+    location_id: UUID = Query(..., description="business_locations.id — the 300 log is per establishment (29 CFR 1904.30)"),
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate OSHA 300 log for a given year."""
+    """Generate OSHA 300 log for a given year, scoped to one establishment.
+
+    OSHA requires a SEPARATE 300 log per establishment — this must never fall
+    back to a company-wide query (that was the bug: a company with sites A/B/C
+    got A+B+C's recordables under whichever establishment was selected). An
+    incident with no location_id assigned can't be attributed to any
+    establishment and will not appear in any per-location log; that is a
+    data-entry gap on the incident, not something this endpoint can resolve.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     async with get_connection() as conn:
+        owns_location = await conn.fetchval(
+            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not owns_location:
+            raise HTTPException(status_code=404, detail="Location not found")
+
         rows = await conn.fetch(
             """
             SELECT
@@ -221,11 +237,13 @@ async def get_osha_300_log(
                 ON e.email = i.reported_by_email
                 AND e.org_id = i.company_id
             WHERE i.company_id = $1
+              AND i.location_id = $2
               AND i.osha_recordable = true
-              AND EXTRACT(YEAR FROM i.occurred_at) = $2
+              AND EXTRACT(YEAR FROM i.occurred_at) = $3
             ORDER BY i.occurred_at
             """,
             company_id,
+            location_id,
             year,
         )
         cases_by_incident = await fetch_osha_case_rows_for(conn, [r["id"] for r in rows])
@@ -267,17 +285,20 @@ async def get_osha_300_log(
 @router.get("/osha/300-log/csv")
 async def get_osha_300_log_csv(
     year: int = Query(..., description="Calendar year for the 300 log CSV"),
+    location_id: UUID = Query(..., description="business_locations.id — the 300 log is per establishment (29 CFR 1904.30)"),
     attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
 ):
-    """Export OSHA 300 log as CSV for a given year."""
+    """Export OSHA 300 log as CSV for a given year, scoped to one establishment."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with user")
     async with get_connection() as conn:
-        await _attest_export(conn, current_user, form="300_log", year=year, attested=attested)
+        await _attest_export(
+            conn, current_user, form="300_log", year=year, attested=attested, location_id=location_id,
+        )
 
-    entries = await get_osha_300_log(year=year, current_user=current_user)
+    entries = await get_osha_300_log(year=year, location_id=location_id, current_user=current_user)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -314,13 +335,17 @@ async def get_osha_300_log_csv(
 @router.get("/osha/privacy-cases", response_model=list[OshaPrivacyCaseEntry])
 async def get_osha_privacy_cases(
     year: int = Query(..., description="Calendar year for the privacy-case reference list"),
+    location_id: UUID = Query(..., description="business_locations.id — resolves names for that establishment's 300 log"),
     current_user=Depends(require_admin_or_client),
 ):
     """Confidential OSHA Privacy Case reference list (29 CFR 1904.29(b)(9)).
 
     Resolves each masked 300-log row's case number back to the REAL employee
-    name. Company-scoped, admin/client-gated, and every access is written to the
-    IR audit log. Never exposed on the public 300 log / CSV / 301 form.
+    name. Scoped to the same establishment as the 300 log it resolves against —
+    otherwise a case number shown on one location's log could resolve against a
+    privacy-case entry from a different location. Company-scoped, admin/client-
+    gated, and every access is written to the IR audit log. Never exposed on
+    the public 300 log / CSV / 301 form.
     """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -346,11 +371,13 @@ async def get_osha_privacy_cases(
                 ON e.email = i.reported_by_email
                 AND e.org_id = i.company_id
             WHERE i.company_id = $1
+              AND i.location_id = $2
               AND i.osha_recordable = true
-              AND EXTRACT(YEAR FROM i.occurred_at) = $2
+              AND EXTRACT(YEAR FROM i.occurred_at) = $3
             ORDER BY i.occurred_at
             """,
             company_id,
+            location_id,
             year,
         )
         cases_by_incident = await fetch_osha_case_rows_for(conn, [r["id"] for r in rows])

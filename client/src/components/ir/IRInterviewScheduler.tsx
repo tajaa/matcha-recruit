@@ -19,6 +19,12 @@ export function IRInterviewScheduler({ incidentId, witnesses }: Props) {
   const [rows, setRows] = useState<InvestigationInterviewCreate[]>([])
   const [msg, setMsg] = useState('')
   const [scheduling, setScheduling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [cancelingId, setCancelingId] = useState<string | null>(null)
+  const [resendingId, setResendingId] = useState<string | null>(null)
+  // Distinct from resendingId — a completed send with no acknowledgment was
+  // indistinguishable from a click that never registered.
+  const [resentId, setResentId] = useState<string | null>(null)
 
   const fetchInterviews = useCallback(async () => {
     setLoading(true)
@@ -42,6 +48,7 @@ export function IRInterviewScheduler({ incidentId, witnesses }: Props) {
     const valid = rows.filter((r) => r.interviewee_name.trim() && r.interviewee_role)
     if (valid.length === 0) return
     setScheduling(true)
+    setError(null)
     try {
       const payload = valid.map((r) => ({
         interviewee_name: r.interviewee_name.trim(),
@@ -53,21 +60,44 @@ export function IRInterviewScheduler({ incidentId, witnesses }: Props) {
       await api.post(`/ir/incidents/${incidentId}/investigation-interviews/batch`, payload)
       setRows([])
       setMsg('')
-      fetchInterviews()
-    } finally { setScheduling(false) }
+      await fetchInterviews()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to schedule interviews')
+    } finally {
+      setScheduling(false)
+    }
   }
 
   async function cancel(id: string) {
-    await api.delete(`/ir/incidents/${incidentId}/investigation-interviews/${id}`)
-    setInterviews((prev) => prev.filter((i) => i.id !== id))
+    setCancelingId(id)
+    setError(null)
+    try {
+      await api.delete(`/ir/incidents/${incidentId}/investigation-interviews/${id}`)
+      setInterviews((prev) => prev.filter((i) => i.id !== id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to cancel interview')
+    } finally {
+      setCancelingId(null)
+    }
   }
 
   async function resend(id: string) {
-    await api.post(`/ir/incidents/${incidentId}/investigation-interviews/${id}/resend-invite`)
+    setResendingId(id)
+    setError(null)
+    try {
+      await api.post(`/ir/incidents/${incidentId}/investigation-interviews/${id}/resend-invite`)
+      setResentId(id)
+      setTimeout(() => setResentId((cur) => (cur === id ? null : cur)), 3000)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to resend invite')
+    } finally {
+      setResendingId(null)
+    }
   }
 
   return (
     <div className="space-y-5">
+      {error && <p className="text-sm text-red-400">{error}</p>}
       {loading ? (
         <p className="text-sm text-zinc-500">Loading interviews...</p>
       ) : interviews.length === 0 ? (
@@ -86,10 +116,24 @@ export function IRInterviewScheduler({ incidentId, witnesses }: Props) {
                 </div>
                 <div className="flex items-center gap-2">
                   {iv.status === 'pending' && iv.interviewee_email && (
-                    <button type="button" onClick={() => resend(iv.id)} className="text-xs text-zinc-500 hover:text-zinc-300">Resend</button>
+                    <button
+                      type="button"
+                      onClick={() => resend(iv.id)}
+                      disabled={resendingId === iv.id}
+                      className="text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+                    >
+                      {resendingId === iv.id ? 'Resending…' : resentId === iv.id ? 'Sent ✓' : 'Resend'}
+                    </button>
                   )}
                   {iv.status === 'pending' && (
-                    <button type="button" onClick={() => cancel(iv.id)} className="text-xs text-zinc-600 hover:text-red-400">Cancel</button>
+                    <button
+                      type="button"
+                      onClick={() => cancel(iv.id)}
+                      disabled={cancelingId === iv.id}
+                      className="text-xs text-zinc-600 hover:text-red-400 disabled:opacity-50"
+                    >
+                      {cancelingId === iv.id ? 'Canceling…' : 'Cancel'}
+                    </button>
                   )}
                 </div>
               </div>

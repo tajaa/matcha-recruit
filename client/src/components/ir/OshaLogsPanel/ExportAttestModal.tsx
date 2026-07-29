@@ -9,6 +9,7 @@ interface ExportAttestModalProps {
   attestChecked: boolean
   setAttestChecked: (v: boolean) => void
   attestBusy: boolean
+  exportError: string | null
   confirmExport: () => void
 }
 
@@ -20,6 +21,7 @@ export function ExportAttestModal({
   attestChecked,
   setAttestChecked,
   attestBusy,
+  exportError,
   confirmExport,
 }: ExportAttestModalProps) {
   return (
@@ -41,6 +43,12 @@ export function ExportAttestModal({
           {attestExport?.preview}
         </div>
         <p className="text-[13px] text-zinc-300 leading-relaxed">{EXPORT_DISCLAIMER}</p>
+        {exportError && (
+          <div className="flex items-start gap-2 text-red-300 text-[13px]">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            {exportError}
+          </div>
+        )}
         <label className="flex items-start gap-2.5 cursor-pointer">
           <input
             type="checkbox"

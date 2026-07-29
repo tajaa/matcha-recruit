@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { relativeTime } from '../../utils/format'
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { api } from '../../api/client'
@@ -93,20 +93,34 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     return p.toString()
   }
 
+  // Monotonic request ids — switching location/days fires a new fetch with no
+  // cancellation of the previous one. risk-insights in particular is
+  // Gemini-backed and can take many seconds (longer still with
+  // regenerate=true), so a slow response for the OLD filter can land after a
+  // fast one for the NEW filter and overwrite it — the header would show the
+  // new selection while the themes/hotspots described the old one. Same
+  // pattern as useCopilotPanel.ts's reqId guard.
+  const matrixReqIdRef = useRef(0)
+  const insightsReqIdRef = useRef(0)
+
   async function loadMatrix() {
+    const id = ++matrixReqIdRef.current
     setMatrixLoading(true)
     setMatrixError(null)
     try {
       const res = await api.get<IRRiskMatrix>(`/ir/incidents/analytics/risk-matrix?${buildMatrixQs()}`)
+      if (id !== matrixReqIdRef.current) return
       setMatrix(res)
     } catch (e) {
+      if (id !== matrixReqIdRef.current) return
       setMatrixError(e instanceof Error ? e.message : 'Failed to load risk matrix')
     } finally {
-      setMatrixLoading(false)
+      if (id === matrixReqIdRef.current) setMatrixLoading(false)
     }
   }
 
   async function loadInsights(opts?: { regenerate?: boolean }) {
+    const id = ++insightsReqIdRef.current
     setInsightsLoading(true)
     setInsightsError(null)
     try {
@@ -115,11 +129,13 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
       p.set('days', days)
       if (opts?.regenerate) p.set('regenerate', 'true')
       const res = await api.get<IRRiskInsights>(`/ir/incidents/analytics/risk-insights?${p.toString()}`)
+      if (id !== insightsReqIdRef.current) return
       setInsights(res)
     } catch (e) {
+      if (id !== insightsReqIdRef.current) return
       setInsightsError(e instanceof Error ? e.message : 'Failed to load risk insights')
     } finally {
-      setInsightsLoading(false)
+      if (id === insightsReqIdRef.current) setInsightsLoading(false)
     }
   }
 

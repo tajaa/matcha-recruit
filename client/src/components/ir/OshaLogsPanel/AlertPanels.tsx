@@ -1,6 +1,26 @@
 import { AlertTriangle } from 'lucide-react'
+import { Button } from '../../ui'
 import { missingLabel } from './constants'
 import type { ItaProblem, Summary300A } from './types'
+
+// Generic "the fetch failed" banner — distinct in color/wording from the
+// amber advisory panels below (those are "review this", this is "we
+// couldn't load your data"), with an optional retry action.
+export function LoadErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="bg-red-500/[0.06] border border-red-500/20 rounded-lg p-4 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-red-300 text-sm">
+        <AlertTriangle size={15} className="shrink-0" />
+        {message}
+      </div>
+      {onRetry && (
+        <Button size="sm" variant="ghost" onClick={onRetry}>
+          Retry
+        </Button>
+      )}
+    </div>
+  )
+}
 
 // ITA validation errors
 export function ItaValidationErrors({ itaProblems }: { itaProblems: ItaProblem[] | null }) {

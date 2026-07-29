@@ -32,7 +32,10 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
   const Icon = isIncrease ? TrendingUp : isDecrease ? TrendingDown : DollarSign
 
   const swingPts = Math.abs(mod_swing) * 100  // mod_swing 0.18 → 18 points
-  const ratio = metrics.benchmark && metrics.trir
+  // metrics.trir === 0 is a real (and the best possible) TRIR value, not a
+  // "no data" sentinel — a truthy check on trir would silently drop the
+  // sector-median comparison for exactly the tenant with zero recordables.
+  const ratio = metrics.benchmark && metrics.trir != null
     ? (metrics.trir / metrics.benchmark.trir).toFixed(2)
     : null
 

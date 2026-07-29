@@ -1,4 +1,5 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
+import type { TooltipContentProps } from 'recharts'
 import type { IRAnalyticsSummary } from '../../../types/ir'
 
 const SLICES = [
@@ -8,7 +9,7 @@ const SLICES = [
   { key: 'low',      label: 'Low',      color: '#10b981' },
 ] as const
 
-function DonutTooltip({ active, payload }: any) {
+function DonutTooltip({ active, payload }: Partial<TooltipContentProps<number, string>>) {
   if (!active || !payload || payload.length === 0) return null
   const p = payload[0]
   return (

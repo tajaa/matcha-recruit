@@ -12,6 +12,10 @@ import { DEFAULT_BRAND } from './constants'
 export function useAnonymousReporting() {
   const [status, setStatus] = useState<AnonymousStatus | null>(null)
   const [loading, setLoading] = useState(false)
+  // Surfaced action failures — generate/disable/revoke previously swallowed
+  // every error, so e.g. a failed revoke of a leaked token left the row
+  // rendered as still-active with no indication the click did nothing.
+  const [actionError, setActionError] = useState<string | null>(null)
 
   // Per-location magic links (attributed intake at /intake/:token)
   const [locations, setLocations] = useState<LocationRow[]>([])
@@ -53,19 +57,25 @@ export function useAnonymousReporting() {
 
   async function generateLink() {
     setLoading(true)
+    setActionError(null)
     try {
       const res = await api.post<{ link: string }>('/ir/incidents/anonymous-reporting/generate')
       setStatus({ enabled: true, link: res.link, used: false, last_used_at: null })
-    } catch { /* ignore */ }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to generate the link')
+    }
     finally { setLoading(false) }
   }
 
   async function disable() {
     setLoading(true)
+    setActionError(null)
     try {
       await api.delete('/ir/incidents/anonymous-reporting/disable')
       setStatus({ enabled: false })
-    } catch { /* ignore */ }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to disable the link')
+    }
     finally { setLoading(false) }
   }
 
@@ -74,12 +84,22 @@ export function useAnonymousReporting() {
   async function generateForLocation(locationId: string, withLimits = false) {
     if (!locationId) return
     setGenLoading(true)
+    setActionError(null)
     try {
       const body: { location_id: string; max_uses?: number; expires_at?: string } = { location_id: locationId }
       if (withLimits) {
         const m = parseInt(genMaxUses, 10)
         if (!Number.isNaN(m) && m > 0) body.max_uses = m
-        if (genExpiry) body.expires_at = new Date(genExpiry).toISOString()
+        if (genExpiry) {
+          // `<input type="date">` yields 'YYYY-MM-DD'; `new Date(str)` parses
+          // date-only strings as UTC MIDNIGHT of that day, so in every US
+          // timezone the link died the evening BEFORE the picked date. Build
+          // end-of-day in the browser's OWN local timezone instead — "expires
+          // Aug 1" should mean the link is still good through all of Aug 1
+          // for the person who set it.
+          const [y, m2, d] = genExpiry.split('-').map(Number)
+          body.expires_at = new Date(y, m2 - 1, d, 23, 59, 59, 999).toISOString()
+        }
       }
       const link = await api.post<LocationLink>(
         '/ir/incidents/anonymous-reporting/location-links',
@@ -95,19 +115,26 @@ export function useAnonymousReporting() {
       setPickLoc('')
       setGenMaxUses('')
       setGenExpiry('')
-    } catch { /* ignore */ }
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to generate the location link')
+    }
     finally { setGenLoading(false) }
   }
 
   // Soft revoke — the row stays (now inactive) so it can be regenerated and
   // keeps its history; patch it in place from the returned link.
   async function revokeLink(id: string) {
+    setActionError(null)
     try {
       const updated = await api.delete<LocationLink>(`/ir/incidents/anonymous-reporting/location-links/${id}`)
       setLinks((prev) => prev.map((l) => (l.id === id ? updated : l)))
       setQrOpen((q) => (q === id ? null : q))
       setHistData((prev) => { const next = { ...prev }; delete next[id]; return next })
-    } catch { /* ignore */ }
+    } catch (e) {
+      // Without this, a failed revoke of a leaked token left the row
+      // rendered active/green with no indication the click did nothing.
+      setActionError(e instanceof Error ? e.message : 'Failed to revoke the link')
+    }
   }
 
   async function toggleHistory(id: string) {
@@ -160,7 +187,7 @@ export function useAnonymousReporting() {
   }, [linkQuery, inactiveLinks.length])
 
   return {
-    status, loading, generateLink, disable,
+    status, loading, actionError, setActionError, generateLink, disable,
     locations, links, pickLoc, setPickLoc,
     genMaxUses, setGenMaxUses, genExpiry, setGenExpiry, genLoading, generateForLocation,
     qrOpen, setQrOpen, histOpen, histData, toggleHistory, revokeLink, downloadPoster,

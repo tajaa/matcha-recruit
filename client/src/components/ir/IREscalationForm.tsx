@@ -30,12 +30,40 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
   })
   const [escalating, setEscalating] = useState(false)
   const [error, setError] = useState('')
+  // Set once the ER case POST succeeds — from then on the "Escalate" button
+  // must never reappear, or a failed link-back lets the user create a SECOND
+  // ER case for the same incident with the first orphaned.
+  const [createdErCaseId, setCreatedErCaseId] = useState<string | null>(null)
+  const [linking, setLinking] = useState(false)
+  const [linkError, setLinkError] = useState('')
 
   if (incident.er_case_id) {
     return (
       <a href={`/app/er-copilot/${incident.er_case_id}`}>
         <Button variant="ghost" size="sm" className="w-full">View ER Case</Button>
       </a>
+    )
+  }
+
+  // ER case exists (POST succeeded) but the link-back to this incident
+  // hasn't landed yet. Never fall through to the "Escalate" button here —
+  // that reappearing is exactly what let a failed link-back create a
+  // duplicate ER case for the same incident.
+  if (createdErCaseId) {
+    return (
+      <Card className="p-4 space-y-2">
+        <p className="text-xs text-red-400">
+          {linkError || 'Linking this incident to the ER case…'}
+        </p>
+        <div className="flex justify-end gap-2">
+          <a href={`/app/er-copilot/${createdErCaseId}`}>
+            <Button variant="ghost" size="sm">Open ER case anyway</Button>
+          </a>
+          <Button size="sm" disabled={linking} onClick={() => linkBack(createdErCaseId)}>
+            {linking ? 'Retrying…' : 'Retry linking'}
+          </Button>
+        </div>
+      </Card>
     )
   }
 
@@ -54,6 +82,22 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
     )
   }
 
+  async function linkBack(erCaseId: string) {
+    setLinking(true)
+    setLinkError('')
+    try {
+      await api.put(`/ir/incidents/${incidentId}`, { er_case_id: erCaseId })
+      onEscalated(erCaseId)
+    } catch (err) {
+      // incident.er_case_id is still null server-side, so the "Escalate"
+      // button would otherwise reappear next time this incident loads —
+      // offer retry/skip instead of silently letting that happen.
+      setLinkError(err instanceof Error ? err.message : 'Failed to link this incident to the ER case')
+    } finally {
+      setLinking(false)
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setEscalating(true)
@@ -64,9 +108,8 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
         description: form.description || null,
         category: form.category,
       })
-      // Link incident back — best-effort, don't block navigation
-      api.put(`/ir/incidents/${incidentId}`, { er_case_id: res.id }).catch(() => {})
-      onEscalated(res.id)
+      setCreatedErCaseId(res.id)
+      await linkBack(res.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create ER case')
     } finally {

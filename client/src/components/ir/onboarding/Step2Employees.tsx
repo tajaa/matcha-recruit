@@ -10,6 +10,7 @@ export default function Step2Employees({ onDone }: { onDone: () => void }) {
   const [uid, setUid] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
 
@@ -36,6 +37,22 @@ export default function Step2Employees({ onDone }: { onDone: () => void }) {
       setError(e instanceof Error ? e.message : 'Failed to add employee')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  // GET /employees/bulk-upload/template is Depends(require_admin_or_client) —
+  // a bare <a href> navigation sends no Authorization header and 401s. Go
+  // through api.download (JWT header), same as useOshaLogs.tsx does for its
+  // OSHA CSV/PDF downloads.
+  async function handleDownloadTemplate() {
+    setDownloadingTemplate(true)
+    setError(null)
+    try {
+      await api.download('/employees/bulk-upload/template', 'employee-bulk-upload-template.csv')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to download template')
+    } finally {
+      setDownloadingTemplate(false)
     }
   }
 
@@ -91,9 +108,14 @@ export default function Step2Employees({ onDone }: { onDone: () => void }) {
           Required columns: email, first_name, last_name. Optional: uid, work_state, job_title, department.
         </p>
         <div className="flex items-center gap-3">
-          <a href="/api/employees/bulk-upload/template" className="text-xs text-emerald-500 hover:text-emerald-400 underline">
-            Download template
-          </a>
+          <button
+            type="button"
+            onClick={handleDownloadTemplate}
+            disabled={downloadingTemplate}
+            className="text-xs text-emerald-500 hover:text-emerald-400 underline disabled:opacity-50"
+          >
+            {downloadingTemplate ? 'Downloading…' : 'Download template'}
+          </button>
           <label className="flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 cursor-pointer">
             <Upload className="w-4 h-4" />
             <span>{uploading ? 'Uploading...' : 'Upload CSV'}</span>

@@ -102,7 +102,6 @@ function rateLabel(value: number | null, median: number): string {
   if (value === null) return ''
   if (value === 0) return 'no recordables'
   const ratio = value / median
-  if (ratio < 0.75) return `${Math.round((1 - ratio) * 100)}% below median`
   if (ratio < 1) return `${Math.round((1 - ratio) * 100)}% below median`
   if (ratio < 1.05) return 'at median'
   return `${Math.round((ratio - 1) * 100)}% above median`

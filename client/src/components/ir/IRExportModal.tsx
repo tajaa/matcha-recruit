@@ -42,14 +42,36 @@ function formatLocationLabel(loc: LocationRow): string {
   return name || place || loc.id.slice(0, 8)
 }
 
+// Local calendar day as 'YYYY-MM-DD' — NOT `.toISOString().slice(0, 10)`,
+// which reads the UTC date. West of UTC (every US timezone) that silently
+// pre-fills tomorrow's date on any evening visit.
+function toLocalDateOnlyString(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return toLocalDateOnlyString(new Date())
 }
 
 function daysAgoISO(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+  return toLocalDateOnlyString(d)
+}
+
+// Parse a `<input type="date">` value ('YYYY-MM-DD') as a LOCAL calendar day.
+// `new Date(str)` parses a date-only string as UTC MIDNIGHT, which is the
+// evening before in every US timezone — mixing that with a later local-time
+// `.setHours()` mutation (as this file used to) shifts the from-boundary
+// earlier and truncates the to-boundary to the middle of the picked day.
+function localDateBoundary(dateStr: string, endOfDay: boolean): Date {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return endOfDay
+    ? new Date(y, m - 1, d, 23, 59, 59, 999)
+    : new Date(y, m - 1, d, 0, 0, 0, 0)
 }
 
 export function IRExportModal({ open, onClose }: Props) {
@@ -90,12 +112,8 @@ export function IRExportModal({ open, onClose }: Props) {
     try {
       const params = new URLSearchParams()
       params.set('format', format)
-      if (fromDate) params.set('from_date', new Date(fromDate).toISOString())
-      if (toDate) {
-        const end = new Date(toDate)
-        end.setHours(23, 59, 59, 999)
-        params.set('to_date', end.toISOString())
-      }
+      if (fromDate) params.set('from_date', localDateBoundary(fromDate, false).toISOString())
+      if (toDate) params.set('to_date', localDateBoundary(toDate, true).toISOString())
       if (incidentType) params.set('incident_type', incidentType)
       if (severity) params.set('severity', severity)
       if (status) params.set('status', status)

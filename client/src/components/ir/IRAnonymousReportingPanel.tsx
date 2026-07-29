@@ -12,6 +12,15 @@ export function IRAnonymousReportingPanel() {
         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Anonymous Reporting</span>
       </div>
       <div className="p-5 space-y-5">
+        {s.actionError && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-[12px] text-red-300">
+            {s.actionError}
+            <button type="button" onClick={() => s.setActionError(null)} className="text-red-400/70 hover:text-red-300">
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Company-wide anonymous link */}
         <CompanyWideSection
           status={s.status}

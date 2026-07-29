@@ -17,6 +17,7 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
   const [uploading, setUploading] = useState(false)
   const [docType, setDocType] = useState('other')
   const [openError, setOpenError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const fetchDocs = useCallback(async () => {
     setLoading(true)
@@ -29,20 +30,36 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
 
   async function handleUpload(files: File[]) {
     setUploading(true)
-    try {
-      for (const file of files) {
+    setActionError(null)
+    // Per-file catch — a rejected api.upload used to throw out of the whole
+    // loop, aborting every FOLLOWING file and skipping fetchDocs(), so a
+    // partially-uploaded evidence set silently read as fully uploaded.
+    const failed: string[] = []
+    for (const file of files) {
+      try {
         const fd = new FormData()
         fd.append('file', file)
         fd.append('document_type', docType)
         await api.upload(`/ir/incidents/${incidentId}/documents`, fd)
+      } catch {
+        failed.push(file.name)
       }
-      fetchDocs()
-    } finally { setUploading(false) }
+    }
+    await fetchDocs()
+    setUploading(false)
+    if (failed.length > 0) {
+      setActionError(`Failed to upload: ${failed.join(', ')}`)
+    }
   }
 
   async function handleDelete(docId: string) {
-    await api.delete(`/ir/incidents/${incidentId}/documents/${docId}`)
-    setDocs((prev) => prev.filter((d) => d.id !== docId))
+    setActionError(null)
+    try {
+      await api.delete(`/ir/incidents/${incidentId}/documents/${docId}`)
+      setDocs((prev) => prev.filter((d) => d.id !== docId))
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to delete document')
+    }
   }
 
   // Documents live in the private bucket, so there is no durable URL to render —
@@ -70,6 +87,7 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
         </FileUpload>
       </div>
       {openError && <p className="text-sm text-red-400">{openError}</p>}
+      {actionError && <p className="text-sm text-red-400">{actionError}</p>}
       {loading ? (
         <p className="text-sm text-zinc-500">Loading documents...</p>
       ) : docs.length === 0 ? (
@@ -89,7 +107,7 @@ export function IRDocumentPanel({ incidentId }: { incidentId: string }) {
                 <div className="flex items-center gap-2 mt-0.5">
                   <Badge variant="neutral">{doc.document_type}</Badge>
                   {doc.uploaded_via === 'magic_link' && <Badge variant="neutral">via magic link</Badge>}
-                  {doc.file_size && <span className="text-[11px] text-zinc-600">{Math.round(doc.file_size / 1024)} KB</span>}
+                  {doc.file_size != null && <span className="text-[11px] text-zinc-600">{Math.round(doc.file_size / 1024)} KB</span>}
                 </div>
               </div>
               <button type="button" onClick={() => handleDelete(doc.id)}

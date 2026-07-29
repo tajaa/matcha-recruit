@@ -2,7 +2,7 @@ import { Loader2 } from 'lucide-react'
 import { useOshaLogs } from './OshaLogsPanel/useOshaLogs'
 import { OshaToolbar } from './OshaLogsPanel/OshaToolbar'
 import { ItaFilingPanel } from './OshaLogsPanel/ItaFilingPanel'
-import { ItaValidationErrors, DataQualityWarnings } from './OshaLogsPanel/AlertPanels'
+import { ItaValidationErrors, DataQualityWarnings, LoadErrorBanner } from './OshaLogsPanel/AlertPanels'
 import { Summary300ACards } from './OshaLogsPanel/Summary300ACards'
 import { Summary300AForm } from './OshaLogsPanel/Summary300AForm'
 import { PrivacyCaseList } from './OshaLogsPanel/PrivacyCaseList'
@@ -17,6 +17,18 @@ export function OshaLogsPanel() {
       <div className="flex justify-center py-12">
         <Loader2 className="animate-spin text-zinc-500" size={20} />
       </div>
+    )
+  }
+
+  // Distinguish "couldn't check whether you have locations" from "you truly
+  // have none" — the former told a tenant with real establishments to go add
+  // one, with no retry affordance.
+  if (osha.locationsError) {
+    return (
+      <LoadErrorBanner
+        message="Could not load your business locations."
+        onRetry={osha.retryLocations}
+      />
     )
   }
 
@@ -60,6 +72,8 @@ export function OshaLogsPanel() {
         itaSubmissions={osha.itaSubmissions}
       />
 
+      {osha.loadError && <LoadErrorBanner message={osha.loadError} onRetry={osha.retryLoad} />}
+
       <ItaValidationErrors itaProblems={osha.itaProblems} />
 
       <DataQualityWarnings summary={osha.summary} />
@@ -88,6 +102,7 @@ export function OshaLogsPanel() {
         entries={osha.entries}
         privacyNames={osha.privacyNames}
         setPrivacyNames={osha.setPrivacyNames}
+        privacyError={osha.privacyError}
         revealConfidentialNames={osha.revealConfidentialNames}
         revealing={osha.revealing}
       />
@@ -100,6 +115,7 @@ export function OshaLogsPanel() {
         attestChecked={osha.attestChecked}
         setAttestChecked={osha.setAttestChecked}
         attestBusy={osha.attestBusy}
+        exportError={osha.exportError}
         confirmExport={osha.confirmExport}
       />
     </div>

@@ -108,13 +108,20 @@ export default function IRCopilotPanel(props: Props) {
             {currentCards.map((c) => {
               const mid = cardsByMessageId.get(c.id) || ''
               const accepted = acceptedCardIds.has(c.id)
+              // A card streamed in via SSE lands in `currentCards` before the
+              // post-stream refresh() repopulates `messages` (the source of
+              // cardsByMessageId), so `mid` is '' for a real window. Treat
+              // that as busy too — otherwise Accept/Skip are clickable and
+              // post message_id: '' (the route requires a UUID → 422) against
+              // a card that becomes perfectly valid a moment later.
+              const pendingId = mid === ''
               return (
                 <IRCopilotCard
                   key={c.id}
                   messageId={mid}
                   card={c}
                   accepted={accepted}
-                  busy={busyCardMessageId === mid}
+                  busy={busyCardMessageId === mid || pendingId}
                   onAccept={handleAccept}
                   onSkip={(id) => void handleSkip(id, c.id)}
                   onOpenDocuments={onOpenDocuments}

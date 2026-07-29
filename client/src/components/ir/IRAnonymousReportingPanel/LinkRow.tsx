@@ -28,7 +28,7 @@ export function LinkRow({
   downloadPoster,
 }: LinkRowProps) {
   return (
-    <div key={l.id} className={`bg-zinc-950/60 border rounded-lg p-3 space-y-2 ${l.status === 'active' ? 'border-white/10' : 'border-red-500/20'}`}>
+    <div className={`bg-zinc-950/60 border rounded-lg p-3 space-y-2 ${l.status === 'active' ? 'border-white/10' : 'border-red-500/20'}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-zinc-200">{l.location_label}</span>
         <span className={`text-[10px] uppercase tracking-widest font-mono ${STATUS_STYLE[l.status]}`}>{l.status}</span>
