@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react'
-import { FileText, Package, PlusCircle, FileSignature, PlayCircle } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+import { FileText, Package, PlusCircle, FileSignature, PlayCircle, ChevronDown, ChevronRight } from 'lucide-react'
 import Markdown from 'react-markdown'
-import type { MWMessage } from '../../types'
+import type { MWMessage, ComplianceGap } from '../../types'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 import HuumeStepTimeline from './HuumeStepTimeline'
 import HuumeAvatar from './HuumeAvatar'
@@ -46,6 +46,15 @@ function extractPenalties(reasoning: MWMessage['metadata']): { category: string;
   return results
 }
 
+// Hoisted out of the render so the disclosure summary and the rendered list
+// share one filtered count instead of computing it twice.
+function extractPolicyGaps(reasoning: MWMessage['metadata']): ComplianceGap[] {
+  if (!reasoning?.compliance_gaps) return []
+  const refCats = new Set(reasoning.referenced_categories ?? [])
+  if (refCats.size === 0) return []
+  return reasoning.compliance_gaps.filter((g) => refCats.has(g.category))
+}
+
 const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode, isProjectThread, onAddToProject }: {
   message: MWMessage
   lightMode?: boolean
@@ -63,6 +72,8 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
     <Markdown>{cited.text}</Markdown>
   ), [cited.text])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
+  const policyGaps = useMemo(() => extractPolicyGaps(m.metadata), [m.metadata])
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   const lm = isProjectThread ? false : lightMode
   const divider  = 'border-w-line'
@@ -71,6 +82,26 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   // origin regardless of whether Huume was later turned off, and a thread
   // that had Huume on before this message existed must not get badged.
   const isHuume = m.role === 'assistant' && !!m.metadata?.huume_run_id
+
+  // One quiet disclosure line instead of stacking every metadata section —
+  // most messages have none of these and render nothing extra at all.
+  const hasReasoning = !!(m.metadata?.compliance_reasoning && (m.metadata.referenced_categories?.length || m.metadata.ai_reasoning_steps?.length))
+  const affectedCount = m.metadata?.affected_employees?.length ?? 0
+  const thresholdCount = m.metadata?.threshold_status?.length ?? 0
+  const payerStaffCount = m.metadata?.payer_affected_staff?.length ?? 0
+  const payerSourceCount = m.metadata?.payer_sources?.length ?? 0
+  const citationCount = cited.ordered.length
+  const stepCount = m.metadata?.huume_steps?.length ?? 0
+  const detailParts: string[] = []
+  if (hasReasoning) detailParts.push('reasoning')
+  if (affectedCount > 0) detailParts.push(`${affectedCount} affected`)
+  if (policyGaps.length > 0) detailParts.push(`${policyGaps.length} policy gap${policyGaps.length !== 1 ? 's' : ''}`)
+  if (penalties.length > 0) detailParts.push(`${penalties.length} enforcement risk${penalties.length !== 1 ? 's' : ''}`)
+  if (thresholdCount > 0) detailParts.push(`${thresholdCount} threshold${thresholdCount !== 1 ? 's' : ''}`)
+  if (payerStaffCount > 0) detailParts.push(`${payerStaffCount} payer staff`)
+  if (payerSourceCount > 0) detailParts.push(`${payerSourceCount} payer source${payerSourceCount !== 1 ? 's' : ''}`)
+  if (citationCount > 0) detailParts.push(`${citationCount} citation${citationCount !== 1 ? 's' : ''}`)
+  if (stepCount > 0) detailParts.push(`${stepCount} step${stepCount !== 1 ? 's' : ''}`)
 
   return (
     <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} ${isHuume ? 'items-start gap-2' : ''}`}>
@@ -142,12 +173,24 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                 Add to Project
               </button>
             )}
-            {m.metadata?.compliance_reasoning && (m.metadata.referenced_categories?.length || m.metadata.ai_reasoning_steps?.length) && (
+            {detailParts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((v) => !v)}
+                className={`mt-2 pt-2 border-t ${divider} w-full flex items-center gap-1 text-[11px] ${metaText} hover:opacity-80 transition-opacity`}
+              >
+                {detailsOpen ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
+                <span className="truncate text-left">{detailParts.join(' · ')}</span>
+              </button>
+            )}
+            {detailsOpen && (
+            <>
+            {hasReasoning && (
               <ComplianceReasoningPanel
-                locations={m.metadata.compliance_reasoning}
-                aiSteps={m.metadata.ai_reasoning_steps}
-                referencedCategories={m.metadata.referenced_categories}
-                referencedLocations={m.metadata.referenced_locations}
+                locations={m.metadata!.compliance_reasoning!}
+                aiSteps={m.metadata?.ai_reasoning_steps}
+                referencedCategories={m.metadata?.referenced_categories}
+                referencedLocations={m.metadata?.referenced_locations}
               />
             )}
             {m.metadata?.affected_employees && m.metadata.affected_employees.length > 0 && (
@@ -170,18 +213,13 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                 </div>
               </div>
             )}
-            {m.metadata?.compliance_gaps && (() => {
-              const refCats = new Set(m.metadata.referenced_categories ?? [])
-              if (refCats.size === 0) return null
-              const filtered = m.metadata.compliance_gaps.filter(g => refCats.has(g.category))
-              if (filtered.length === 0) return null
-              return (
+            {policyGaps.length > 0 && (
               <div className={`mt-2 pt-2 border-t ${divider}`}>
                 <span className={`text-[10px] ${lm ? 'text-amber-600' : 'text-amber-500/80'} uppercase tracking-wide`}>
-                  Policy Gaps ({filtered.length})
+                  Policy Gaps ({policyGaps.length})
                 </span>
                 <div className="mt-1 space-y-1">
-                  {filtered.map((g, i) => (
+                  {policyGaps.map((g, i) => (
                     <div key={i} className={`text-[11px] px-2 py-1 rounded border ${
                       lm
                         ? 'text-amber-700 bg-amber-50 border-amber-300'
@@ -199,7 +237,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
                   ))}
                 </div>
               </div>
-              )})()}
+            )}
             {penalties.length > 0 && (
               <div className={`mt-2 pt-2 border-t ${divider}`}>
                 <span className={`text-[10px] ${lm ? 'text-red-500' : 'text-red-400/70'} uppercase tracking-wide`}>
@@ -296,6 +334,8 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
             />
             {m.metadata?.huume_steps && (
               <HuumeStepTimeline steps={m.metadata.huume_steps} lightMode={isProjectThread ? false : lm} />
+            )}
+            </>
             )}
           </>
         ) : (

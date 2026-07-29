@@ -17,11 +17,12 @@ interface HuumeActionCardProps {
 }
 
 /** Slim chat-bottom strip between the message list and composer (visible on
- * mobile too). The full staged-action review now lives in the Huume right
- * panel (HuumePanel/ConfirmBar + ActionDocViewer/OfferLetterViewer) — this
- * component only ever renders the banner. */
+ * mobile too) — the ONLY place Confirm/Cancel renders for a staged action.
+ * The Huume right panel (ActionDocViewer/OfferLetterViewer) shows the full
+ * document plus a passive status line, but never its own actionable
+ * buttons, so a staged action can't be double-confirmed from two places. */
 export default function HuumeActionCard({ action, lightMode, streaming, onSendChat }: HuumeActionCardProps) {
-  const cardBg = lightMode ? 'bg-orange-50 border-orange-200 text-orange-900' : 'bg-orange-950/30 border-orange-900/50 text-orange-100'
+  const cardBg = 'bg-w-accent/10 border-w-accent/30 text-w-accent'
   const chipRed = lightMode ? 'bg-red-50 text-red-700 border-red-300' : 'bg-red-950/40 text-red-300 border-red-800'
 
   if (action.status === 'cancelled') return null
@@ -46,7 +47,7 @@ export default function HuumeActionCard({ action, lightMode, streaming, onSendCh
         type="button"
         disabled={streaming || !onSendChat}
         onClick={() => onSendChat?.('confirm')}
-        className="text-[11px] font-medium px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+        className="text-[11px] font-medium px-2 py-1 rounded bg-w-accent hover:bg-w-accent-hi disabled:opacity-40 disabled:cursor-not-allowed text-white"
       >
         Confirm
       </button>
@@ -54,7 +55,7 @@ export default function HuumeActionCard({ action, lightMode, streaming, onSendCh
         type="button"
         disabled={streaming || !onSendChat}
         onClick={() => onSendChat?.('cancel')}
-        className="text-[11px] font-medium px-2 py-1 rounded border border-orange-700 text-orange-300 hover:bg-orange-950/40 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="text-[11px] font-medium px-2 py-1 rounded border border-w-accent/40 text-w-accent hover:bg-w-accent/10 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         Cancel
       </button>

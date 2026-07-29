@@ -2,10 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileSignature, PlayCircle, BookOpen, Scale, Send, X } from 'lucide-react'
 import type { HuumeOffer, HuumePlan, HuumeRecordRef } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
-import { actionIcon } from '../../../utils/huumeActionMeta'
+import { actionIcon, bannerLabel } from '../../../utils/huumeActionMeta'
 import { closeHuumeRecord } from '../../../api/matchaWork/huume'
 import { useToast } from '../../../../components/ui'
-import ConfirmBar from './ConfirmBar'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
 import PlanViewer from './PlanViewer'
@@ -19,7 +18,6 @@ interface HuumePanelProps {
   lightMode?: boolean
   streaming?: boolean
   onStateUpdate: (offerId: string, plan: HuumePlan) => void
-  onSendChat?: (text: string) => void
   onExecuted?: () => void
   /** Called after a record tab's × successfully closes it server-side, with
    * the updated working set the DELETE response already returned — the
@@ -55,8 +53,10 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * HuumePlanCard, which showed only a status chip, a raw offer UUID, and
  * Confirm/Cancel for whatever was staged. This renders the actual document
  * (offer letter, staged action, onboarding plan, handbook draft, legal
- * memo) with one docked confirm bar for whatever needs a decision. */
-export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onSendChat, onExecuted, onRecordClosed, onDismiss }: HuumePanelProps) {
+ * memo), with a passive status line for anything awaiting a decision —
+ * the actionable Confirm/Cancel lives only in the chat strip
+ * (HuumeActionCard) now, so there's exactly one place a click can fire it. */
+export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss }: HuumePanelProps) {
   const { toast } = useToast()
   const huume = getHuumeState(state)
   const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
@@ -231,7 +231,10 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
       </div>
 
       {huume.action?.status === 'proposed' && (
-        <ConfirmBar action={huume.action} lightMode={lightMode} streaming={streaming} onSendChat={onSendChat} />
+        <div className="flex items-center gap-1.5 border-t border-w-line px-3 py-2 text-[11px] text-w-dim">
+          {actionIcon(huume.action.type)}
+          <span className="truncate">Awaiting your confirmation in chat — {bannerLabel(huume.action)}</span>
+        </div>
       )}
     </div>
   )

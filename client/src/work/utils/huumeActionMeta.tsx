@@ -4,8 +4,7 @@ import type { HuumeAction } from '../types'
 /** Terminal status -> the past-tense chip. Keyed by type because each staged
  * action writes its own done word (see _HR_OPS_TOOL_SPECS in agent.py);
  * 'failed'/'cancelled' are handled before this map is consulted. Shared by
- * the chat banner (HuumeActionCard), the panel's ConfirmBar, and
- * ActionDocViewer. */
+ * the chat banner (HuumeActionCard) and ActionDocViewer. */
 export const DONE_LABELS: Record<string, Record<string, string>> = {
   send_offer: { sent: 'Offer sent' },
   discipline_draft: { filed: 'Write-up filed' },
@@ -18,7 +17,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   discipline_decision: { decided: 'Approval decision recorded' },
 }
 
-/** One-line summary for the banner strip / the panel's docked ConfirmBar. */
+/** One-line summary for the chat banner strip / the panel's passive status line. */
 export function bannerLabel(action: HuumeAction): string {
   switch (action.type) {
     case 'send_offer':

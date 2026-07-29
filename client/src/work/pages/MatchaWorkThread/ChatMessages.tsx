@@ -78,7 +78,7 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
               <span className={`text-sm ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
             </div>
             {pendingHuumeSteps.length > 0 && (
-              <HuumeStepTimeline steps={pendingHuumeSteps} lightMode={lightMode} />
+              <HuumeStepTimeline steps={pendingHuumeSteps} lightMode={lightMode} live />
             )}
           </div>
         </div>

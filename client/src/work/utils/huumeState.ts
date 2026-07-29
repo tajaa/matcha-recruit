@@ -78,7 +78,7 @@ export type HuumeArtifact =
  * staged `send_offer` for a DIFFERENT offer than the last-drafted one (e.g.
  * draft A → send A → draft B → send_offer(offer_id=A) again) gets its own
  * artifact rather than being silently dropped — otherwise the panel would
- * render B's letter while ConfirmBar confirms sending A. */
+ * render B's letter while the chat strip confirms sending A. */
 export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
   const artifacts: HuumeArtifact[] = []
 
