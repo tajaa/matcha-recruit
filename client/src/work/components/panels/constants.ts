@@ -10,7 +10,7 @@ export const THREAD_MODE_TOGGLES: {
   key: MWModeKey
   label: string
   icon: typeof Database
-  onClass: string
+  desc: string
   badgeClass: string
   tipOn: string
   tipOff: string
@@ -18,15 +18,15 @@ export const THREAD_MODE_TOGGLES: {
   // in the backend registry, which 403s the toggle. Undefined = ungated.
   feature?: string
 }[] = [
-  { key: 'node', label: 'Node', icon: Database, onClass: 'bg-purple-600 text-white hover:bg-purple-500', badgeClass: 'bg-purple-700 text-purple-200', tipOn: 'Node ON — query employees, policies, handbooks', tipOff: 'Node OFF' },
-  { key: 'compliance', label: 'Compliance', icon: Shield, onClass: 'bg-cyan-600 text-white hover:bg-cyan-500', badgeClass: 'bg-cyan-700 text-cyan-200', tipOn: 'Compliance ON — jurisdiction requirements injected', tipOff: 'Compliance OFF' },
-  { key: 'payer', label: 'Payer', icon: Stethoscope, onClass: 'bg-emerald-600 text-white hover:bg-emerald-500', badgeClass: 'bg-emerald-700 text-emerald-200', tipOn: 'Payer ON — Medicare NCD/LCD search active', tipOff: 'Payer OFF' },
-  { key: 'benefits', label: 'Benefits', icon: HeartPulse, onClass: 'bg-rose-600 text-white hover:bg-rose-500', badgeClass: 'bg-rose-700 text-rose-200', tipOn: 'Benefits ON — roster, eligibility gaps, renewal risk', tipOff: 'Benefits OFF', feature: 'benefits_admin' },
-  { key: 'legal', label: 'Legal', icon: Scale, onClass: 'bg-amber-600 text-white hover:bg-amber-500', badgeClass: 'bg-amber-700 text-amber-200', tipOn: 'Legal ON — legal matters register injected', tipOff: 'Legal OFF', feature: 'legal_defense' },
-  { key: 'risk', label: 'Risk', icon: Gauge, onClass: 'bg-indigo-600 text-white hover:bg-indigo-500', badgeClass: 'bg-indigo-700 text-indigo-200', tipOn: 'Risk ON — risk index, coverage & contract verdicts', tipOff: 'Risk OFF', feature: 'risk_profile' },
-  { key: 'training', label: 'Training', icon: GraduationCap, onClass: 'bg-teal-600 text-white hover:bg-teal-500', badgeClass: 'bg-teal-700 text-teal-200', tipOn: 'Training ON — programs, credentials & OSHA currency', tipOff: 'Training OFF', feature: 'training' },
-  { key: 'hr_pilot', label: 'HR Pilot', icon: LifeBuoy, onClass: 'bg-fuchsia-600 text-white hover:bg-fuchsia-500', badgeClass: 'bg-fuchsia-700 text-fuchsia-200', tipOn: 'HR Pilot ON — grounded in your handbook & policies; sensitive topics route to corporate HR', tipOff: 'HR Pilot OFF', feature: 'hr_pilot' },
-  { key: 'huume', label: 'Huume', icon: Bot, onClass: 'bg-orange-600 text-white hover:bg-orange-500', badgeClass: 'bg-orange-700 text-orange-200', tipOn: 'Huume ON — agentic assistant: drafts offers, stages hiring plans, and (when enabled) runs Legal Pilot and Handbook Pilot from chat — waits for your approval before it acts. Handles the whole turn itself, so every other mode below is inert while this is on', tipOff: 'Huume OFF', feature: 'huume' },
+  { key: 'node', label: 'Node', icon: Database, desc: 'Query employees, policies, handbooks', badgeClass: 'bg-purple-700 text-purple-200', tipOn: 'Node ON — query employees, policies, handbooks', tipOff: 'Node OFF' },
+  { key: 'compliance', label: 'Compliance', icon: Shield, desc: 'Jurisdiction requirements injected', badgeClass: 'bg-cyan-700 text-cyan-200', tipOn: 'Compliance ON — jurisdiction requirements injected', tipOff: 'Compliance OFF' },
+  { key: 'payer', label: 'Payer', icon: Stethoscope, desc: 'Medicare NCD/LCD search active', badgeClass: 'bg-emerald-700 text-emerald-200', tipOn: 'Payer ON — Medicare NCD/LCD search active', tipOff: 'Payer OFF' },
+  { key: 'benefits', label: 'Benefits', icon: HeartPulse, desc: 'Roster, eligibility gaps, renewal risk', badgeClass: 'bg-rose-700 text-rose-200', tipOn: 'Benefits ON — roster, eligibility gaps, renewal risk', tipOff: 'Benefits OFF', feature: 'benefits_admin' },
+  { key: 'legal', label: 'Legal', icon: Scale, desc: 'Legal matters register injected', badgeClass: 'bg-amber-700 text-amber-200', tipOn: 'Legal ON — legal matters register injected', tipOff: 'Legal OFF', feature: 'legal_defense' },
+  { key: 'risk', label: 'Risk', icon: Gauge, desc: 'Risk index, coverage & contract verdicts', badgeClass: 'bg-indigo-700 text-indigo-200', tipOn: 'Risk ON — risk index, coverage & contract verdicts', tipOff: 'Risk OFF', feature: 'risk_profile' },
+  { key: 'training', label: 'Training', icon: GraduationCap, desc: 'Programs, credentials & OSHA currency', badgeClass: 'bg-teal-700 text-teal-200', tipOn: 'Training ON — programs, credentials & OSHA currency', tipOff: 'Training OFF', feature: 'training' },
+  { key: 'hr_pilot', label: 'HR Pilot', icon: LifeBuoy, desc: 'Grounded in your handbook & policies; sensitive topics route to corporate HR', badgeClass: 'bg-fuchsia-700 text-fuchsia-200', tipOn: 'HR Pilot ON — grounded in your handbook & policies; sensitive topics route to corporate HR', tipOff: 'HR Pilot OFF', feature: 'hr_pilot' },
+  { key: 'huume', label: 'Huume', icon: Bot, desc: 'Agentic assistant: drafts offers, stages hiring plans, runs Legal & Handbook Pilot from chat', badgeClass: 'bg-orange-700 text-orange-200', tipOn: 'Huume ON — agentic assistant: drafts offers, stages hiring plans, and (when enabled) runs Legal Pilot and Handbook Pilot from chat — waits for your approval before it acts. Handles the whole turn itself, so every other mode below is inert while this is on', tipOff: 'Huume OFF', feature: 'huume' },
 ]
 
 export const MODEL_OPTIONS = [
