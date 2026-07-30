@@ -258,6 +258,275 @@ class CappeStripe:
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Invalid Stripe webhook: {exc}") from exc
 
+    # ── Catalog: Products + Prices on the PLATFORM account ────────────────
+    async def ensure_product(self, *, code: str, name: str, description: Optional[str] = None) -> str:
+        """Create the Stripe Product backing a plan/add-on. Returns its id."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.Product.create(
+                name=name,
+                description=description or None,
+                metadata={"product": "cappe", "cappe_code": code},
+            )
+
+        try:
+            return (await asyncio.to_thread(_create))["id"]
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create Stripe product: {exc}") from exc
+
+    async def ensure_price(
+        self,
+        *,
+        product_id: str,
+        unit_amount_cents: int,
+        currency: str,
+        interval: str,
+        lookup_key: Optional[str] = None,
+    ) -> str:
+        """Create a Price. `interval` is 'month' | 'year' | 'once'.
+
+        Stripe Prices are IMMUTABLE in `unit_amount`, so changing a price means
+        creating a new one — never editing. `lookup_key` is unique per account
+        on Stripe's side, which makes a re-run of the seed script error rather
+        than silently minting a duplicate.
+        """
+        self._ensure_key()
+
+        def _create():
+            kwargs: dict[str, Any] = {
+                "product": product_id,
+                "unit_amount": int(unit_amount_cents),
+                "currency": (currency or "usd").lower(),
+                "metadata": {"product": "cappe"},
+            }
+            if interval in ("month", "year"):
+                kwargs["recurring"] = {"interval": interval}
+            if lookup_key:
+                kwargs["lookup_key"] = lookup_key
+            return stripe.Price.create(**kwargs)
+
+        try:
+            return (await asyncio.to_thread(_create))["id"]
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create Stripe price: {exc}") from exc
+
+    async def archive_price(self, price_id: str) -> None:
+        """Deactivate a superseded Price. Best-effort: an orphaned active Price
+        charges nobody, so a failure here must not fail the admin's edit."""
+        self._ensure_key()
+
+        def _archive():
+            return stripe.Price.modify(price_id, active=False)
+
+        try:
+            await asyncio.to_thread(_archive)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to archive price: {exc}") from exc
+
+    # ── Customers + subscription checkout ─────────────────────────────────
+    async def ensure_customer(self, *, email: str, account_id: str) -> str:
+        """Create a Stripe Customer for a Cappe account. Returns its id."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.Customer.create(
+                email=email or None,
+                metadata={"product": "cappe", "cappe_account_id": account_id},
+            )
+
+        try:
+            return (await asyncio.to_thread(_create))["id"]
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create Stripe customer: {exc}") from exc
+
+    async def create_subscription_checkout_session(
+        self,
+        *,
+        customer_id: str,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+        metadata: dict[str, str],
+        intro_price_id: Optional[str] = None,
+        trial_days: Optional[int] = None,
+    ):
+        """Subscription Checkout on OUR platform account.
+
+        The $1-for-30-days intro is `trial_period_days` + the one-time $1 as
+        `subscription_data.add_invoice_items`. It cannot be an extra entry in
+        `line_items`: Checkout REJECTS non-recurring prices in subscription
+        mode. It is also not a coupon — a coupon's `amount_off` is itself
+        immutable and derived from the standard price, so every admin price edit
+        would force a matching new coupon.
+
+        `customer_creation` is deliberately absent: it is not valid in
+        subscription mode (Stripe always creates/uses a Customer), which is why
+        the caller resolves `customer_id` first.
+        """
+        self._ensure_key()
+
+        def _create():
+            sub_data: dict[str, Any] = {"metadata": metadata}
+            if trial_days and intro_price_id:
+                sub_data["trial_period_days"] = int(trial_days)
+                sub_data["add_invoice_items"] = [{"price": intro_price_id}]
+                # No card on file at trial end ⇒ cancel rather than silently
+                # leaving an unpaid subscription entitled.
+                sub_data["trial_settings"] = {
+                    "end_behavior": {"missing_payment_method": "cancel"}
+                }
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                customer=customer_id,
+                line_items=[{"price": price_id, "quantity": 1}],
+                subscription_data=sub_data,
+                payment_method_collection="always",
+                success_url=success_url,
+                cancel_url=cancel_url,
+                metadata=metadata,
+                allow_promotion_codes=False,
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create subscription checkout: {exc}") from exc
+
+    async def retrieve_subscription(self, subscription_id: str):
+        """Fetch a subscription with its items+prices expanded. Subscription
+        state is always read back from Stripe rather than inferred from a
+        Checkout Session — the session alone does not carry item ids."""
+        self._ensure_key()
+
+        def _get():
+            return stripe.Subscription.retrieve(
+                subscription_id, expand=["items.data.price"]
+            )
+
+        try:
+            return await asyncio.to_thread(_get)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to retrieve subscription: {exc}") from exc
+
+    async def change_subscription_price(
+        self,
+        *,
+        subscription_id: str,
+        item_id: str,
+        new_price_id: str,
+        proration_behavior: str = "always_invoice",
+        anchor_now: bool = False,
+        end_trial: bool = False,
+    ):
+        """Move the plan item to a different Price (tier or interval change)."""
+        self._ensure_key()
+
+        def _modify():
+            kwargs: dict[str, Any] = {
+                "items": [{"id": item_id, "price": new_price_id}],
+                "proration_behavior": proration_behavior,
+                "payment_behavior": "pending_if_incomplete",
+            }
+            if anchor_now:
+                kwargs["billing_cycle_anchor"] = "now"
+            if end_trial:
+                # Upgrading mid-intro should start paying now, not ride the $1
+                # trial at the higher tier.
+                kwargs["trial_end"] = "now"
+            return stripe.Subscription.modify(subscription_id, **kwargs)
+
+        try:
+            return await asyncio.to_thread(_modify)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to change subscription price: {exc}") from exc
+
+    async def add_subscription_item(
+        self, *, subscription_id: str, price_id: str, quantity: int
+    ):
+        """Add an add-on item. Invoices immediately so provisioning is paid for
+        before it happens."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.SubscriptionItem.create(
+                subscription=subscription_id,
+                price=price_id,
+                quantity=int(quantity),
+                proration_behavior="always_invoice",
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to add subscription item: {exc}") from exc
+
+    async def set_item_quantity(self, *, item_id: str, quantity: int, invoice_now: bool):
+        """Change an add-on quantity.
+
+        Increases invoice now; decreases only create prorations — billing a
+        decrease immediately generates a $0/negative invoice that confuses
+        people, so the credit sits on the customer balance instead.
+        """
+        self._ensure_key()
+
+        def _modify():
+            return stripe.SubscriptionItem.modify(
+                item_id,
+                quantity=int(quantity),
+                proration_behavior="always_invoice" if invoice_now else "create_prorations",
+            )
+
+        try:
+            return await asyncio.to_thread(_modify)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to set item quantity: {exc}") from exc
+
+    async def remove_subscription_item(self, item_id: str):
+        self._ensure_key()
+
+        def _delete():
+            return stripe.SubscriptionItem.delete(
+                item_id, proration_behavior="create_prorations"
+            )
+
+        try:
+            return await asyncio.to_thread(_delete)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to remove subscription item: {exc}") from exc
+
+    async def cancel_subscription(self, subscription_id: str, *, at_period_end: bool = True):
+        """Cancel at the period boundary (default) or immediately."""
+        self._ensure_key()
+
+        def _cancel():
+            if at_period_end:
+                return stripe.Subscription.modify(
+                    subscription_id, cancel_at_period_end=True
+                )
+            return stripe.Subscription.delete(subscription_id)
+
+        try:
+            return await asyncio.to_thread(_cancel)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to cancel subscription: {exc}") from exc
+
+    async def create_billing_portal_session(self, *, customer_id: str, return_url: str):
+        """Hosted portal for card updates, invoices and receipts — rather than
+        rebuilding those surfaces. Plan switching stays on our own endpoints so
+        the catalog remains authoritative."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.billing_portal.Session.create(
+                customer=customer_id, return_url=return_url
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create portal session: {exc}") from exc
+
 
 _cappe_stripe: Optional[CappeStripe] = None
 

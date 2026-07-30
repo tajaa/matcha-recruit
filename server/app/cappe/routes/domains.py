@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -27,7 +28,14 @@ import dns.resolver
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 
+from app.core.services.stripe_events import (
+    CONSUMER_CAPPE_PLATFORM,
+    claim_stripe_event,
+    release_stripe_event,
+)
+
 from ...config import get_settings
+from ..services.billing import dispatch_billing_event
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
@@ -503,9 +511,19 @@ async def tls_authorize(domain: str = Query(..., max_length=255)):
 # ── Platform webhook (domain purchases; OUR account, no event.account) ─────
 @router.post("/domains/webhook")
 async def domains_webhook(request: Request, background: BackgroundTasks):
-    """Stripe PLATFORM webhook for domain purchases. On checkout.session.completed
-    for a 'cappe_domain' session: mark the row registering + kick off Porkbun
-    registration. Distinct endpoint/secret from the Connect storefront webhook."""
+    """Stripe PLATFORM webhook — the single endpoint for everything charged to
+    OUR account: domain purchases AND subscription billing.
+
+    One endpoint, one secret. Two endpoints would mean two `whsec_` values and
+    an event-type split configured in the Stripe dashboard, where an unticked
+    checkbox silently drops subscription events with no local signal. (The path
+    is named for domains only because that is what it originally carried and
+    what is already registered in Stripe; renaming it is a follow-up that has to
+    be coordinated with the dashboard.)
+
+    Distinct endpoint/secret from the Connect storefront webhook, which carries
+    the tenants' own sales.
+    """
     payload = await request.body()
     signature = request.headers.get("stripe-signature", "")
     cs = get_cappe_stripe()
@@ -514,10 +532,25 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
     except CappeStripeError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    if event.get("type") == "checkout.session.completed":
-        obj = event.get("data", {}).get("object", {}) or {}
-        meta = obj.get("metadata") or {}
-        if meta.get("type") == "cappe_domain":
+    event_id = event.get("id") or ""
+    event_type = event.get("type") or ""
+    obj = event.get("data", {}).get("object", {}) or {}
+    meta = obj.get("metadata") or {}
+    event_at = (
+        datetime.fromtimestamp(int(event["created"]), tz=timezone.utc)
+        if event.get("created") else None
+    )
+
+    # Dedupe under our OWN consumer key. Core's webhook handles invoice.* and
+    # customer.subscription.* on this same Stripe account; a globally-keyed
+    # ledger would let whichever endpoint claimed first silently starve the other.
+    if event_id and not await claim_stripe_event(
+        event_id, event_type, consumer=CONSUMER_CAPPE_PLATFORM
+    ):
+        return {"received": True, "status": "duplicate"}
+
+    try:
+        if event_type == "checkout.session.completed" and meta.get("type") == "cappe_domain":
             try:
                 did = UUID(str(meta.get("domain_id")))
             except (ValueError, TypeError):
@@ -537,8 +570,20 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
                 if row is not None:
                     background.add_task(finalize_domain_registration, did)
                     logger.info("cappe domain %s paid; registering", did)
+            return {"received": True}
 
-    return {"received": True}
+        # Everything else that could be ours: subscription billing. The handler
+        # resolves the subscription against our own tables and returns
+        # "ignored" for anything it does not own (i.e. Matcha's), so an event
+        # belonging to another product 200s instead of being retried forever.
+        async with get_connection() as conn:
+            result = await dispatch_billing_event(conn, event_type, obj, event_at)
+        return {"received": True, **result}
+    except Exception:
+        # Release the claim so Stripe's retry can re-process; without this a
+        # transient failure would permanently strand a paid customer.
+        await release_stripe_event(event_id, consumer=CONSUMER_CAPPE_PLATFORM)
+        raise
 
 
 # ── Registration finalizer (background; runs after the webhook 200) ────────

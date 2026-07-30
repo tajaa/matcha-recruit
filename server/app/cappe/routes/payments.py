@@ -15,6 +15,8 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
+from app.core.services.stripe_events import CONSUMER_CAPPE_CONNECT, claim_stripe_event
+
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
@@ -119,6 +121,17 @@ async def payments_webhook(request: Request, background: BackgroundTasks):
 
     etype = event.get("type")
     obj = event.get("data", {}).get("object", {}) or {}
+    event_id = event.get("id") or ""
+
+    # Explicit event dedupe, under this endpoint's own consumer key. The order
+    # UPDATE below is already guarded by `AND status = 'pending'`, but that only
+    # protects the order row — `issue_receipt_for_paid_order` re-runs on a retry
+    # and re-emails the customer. That it mostly doesn't today is accidental,
+    # not designed.
+    if event_id and not await claim_stripe_event(
+        event_id, etype or "", consumer=CONSUMER_CAPPE_CONNECT
+    ):
+        return {"received": True, "status": "duplicate"}
 
     if etype == "checkout.session.completed":
         meta = obj.get("metadata") or {}

@@ -5,9 +5,13 @@ never passes through matcha's require_feature chain (Cappe has no company /
 feature flags). Auth is per-endpoint via require_cappe_account; the auth,
 templates, and public sub-routers are intentionally unauthenticated.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ..dependencies import require_cappe_platform_admin
+
+from .admin_billing import router as admin_billing_router
 from .auth import router as auth_router
+from .billing import router as billing_router
 from .blog import router as blog_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
@@ -41,9 +45,22 @@ cappe_router.include_router(public_router)
 # per-route; /payments/webhook is public (Stripe-signature verified).
 cappe_router.include_router(payments_router)
 
-# Domain reselling: /domains/* gate on require_cappe_account per-route;
-# /domains/webhook (platform Stripe) + /tls/authorize (Caddy ask) are public.
+# Domain reselling: /domains/* gate on require_cappe_account per-route.
+# /domains/webhook is the single PLATFORM Stripe endpoint — it carries domain
+# purchases AND subscription billing (see its docstring) — and /tls/authorize
+# (Caddy ask) is public.
 cappe_router.include_router(domains_router)
+
+# Tenant billing: plan catalog, subscribe, portal, add-ons, cancel. Each route
+# gates on require_cappe_account.
+cappe_router.include_router(billing_router)
+
+# Platform-staff admin: plan catalog, prices, take rates, comps. Gated at the
+# MOUNT rather than per-route, so a new endpoint added to that module cannot
+# accidentally ship ungated.
+cappe_router.include_router(
+    admin_billing_router, dependencies=[Depends(require_cappe_platform_admin)]
+)
 
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).
 cappe_router.include_router(sites_router)

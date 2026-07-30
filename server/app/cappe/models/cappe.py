@@ -5,6 +5,7 @@ permanent shim re-exporting everything so the ~26 files that import
 `app.cappe.models.cappe` directly need no changes.
 """
 from .auth import *  # noqa: F401,F403
+from .billing import *  # noqa: F401,F403
 from .sites import *  # noqa: F401,F403
 from .shop import *  # noqa: F401,F403
 from .bookings import *  # noqa: F401,F403

@@ -39,6 +39,8 @@ server/scripts/*_research.md
 
 # Uploads
 server/uploads/
+# Local upload temp dir (candidate resumes etc.) — real user files, never commit.
+server/app/uploads/
 
 # OS
 .DS_Store

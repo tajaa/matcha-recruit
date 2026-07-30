@@ -1,0 +1,340 @@
+"""Cappe tenant billing — plan catalog, subscribe, portal, add-ons, cancel.
+
+Charges land on OUR platform Stripe account (this is our revenue), never on the
+tenant's connected account — that one is only for their own storefront sales.
+"""
+import logging
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from ...database import get_connection
+from ..dependencies import require_cappe_account
+from ..models.cappe import (
+    CappeAccount,
+    CappeAddon,
+    CappeAddonQuantityRequest,
+    CappeCancelRequest,
+    CappeCatalog,
+    CappeCheckoutRequest,
+    CappeCheckoutResponse,
+    CappePlan,
+    CappePlanPrice,
+    CappePortalRequest,
+    CappePortalResponse,
+    CappeSubscription,
+    CappeSubscriptionAddon,
+)
+from ..services import billing as billing_svc
+from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+def _prices_for(rows, code: str) -> list[CappePlanPrice]:
+    return [
+        CappePlanPrice(
+            interval=r["interval"],
+            unit_amount_cents=r["unit_amount_cents"],
+            currency=r["currency"],
+            # Nothing is purchasable until the seed script mints the Stripe
+            # Price; surfacing that beats a checkout that 400s.
+            purchasable=bool(r["stripe_price_id"]),
+        )
+        for r in rows
+        if r["product_code"] == code and r["role"] == "standard"
+    ]
+
+
+@router.get("/billing/catalog", response_model=CappeCatalog)
+async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
+    """The purchasable lineup, plus whether THIS account can still claim the $1."""
+    async with get_connection() as conn:
+        products = await conn.fetch(
+            "SELECT * FROM cappe_billing_products WHERE status = 'active' ORDER BY sort_order, code"
+        )
+        prices = await conn.fetch(
+            "SELECT * FROM cappe_billing_prices WHERE is_current AND active"
+        )
+        intro_ok = await billing_svc.intro_eligible(conn, account.id)
+
+    intro_by_code = {
+        r["product_code"]: r for r in prices if r["role"] == "intro"
+    }
+    plans, addons = [], []
+    for p in products:
+        if p["kind"] == "plan":
+            intro = intro_by_code.get(p["code"])
+            plans.append(CappePlan(
+                code=p["code"], name=p["name"], description=p["description"],
+                status=p["status"], sort_order=p["sort_order"],
+                can_sell=p["can_sell"], platform_fee_bps=p["platform_fee_bps"],
+                allowed_fulfillment=list(p["allowed_fulfillment"] or []),
+                site_limit=p["site_limit"],
+                mailbox_quota_included=p["mailbox_quota_included"],
+                premium_design=p["premium_design"],
+                features=p["features"] if isinstance(p["features"], dict) else {},
+                prices=_prices_for(prices, p["code"]),
+                intro_price_cents=intro["unit_amount_cents"] if intro else None,
+                intro_days=intro["intro_days"] if intro else None,
+            ))
+        else:
+            addons.append(CappeAddon(
+                code=p["code"], name=p["name"], description=p["description"],
+                unit_label=p["unit_label"], max_quantity=p["max_quantity"],
+                prices=_prices_for(prices, p["code"]),
+            ))
+    return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
+
+
+@router.get("/billing/subscription", response_model=CappeSubscription | None)
+async def get_subscription(account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        sub = await billing_svc.current_subscription(conn, account.id)
+        if not sub:
+            return None
+        addons = await billing_svc.subscription_addons(conn, sub["id"])
+    return CappeSubscription(
+        plan_code=sub["plan_code"], plan_name=sub.get("plan_name"),
+        interval=sub["interval"], status=sub["status"], source=sub["source"],
+        current_period_end=sub["current_period_end"], trial_end=sub["trial_end"],
+        cancel_at_period_end=sub["cancel_at_period_end"],
+        comped_until=sub["comped_until"],
+        addons=[
+            CappeSubscriptionAddon(
+                code=a["product_code"], name=a["name"],
+                unit_label=a["unit_label"], quantity=a["quantity"],
+            )
+            for a in addons
+        ],
+    )
+
+
+@router.post("/billing/checkout", response_model=CappeCheckoutResponse)
+async def start_checkout(
+    body: CappeCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Subscribe to a plan. The $1 intro is applied by the SERVER when the
+    account has never had a subscription — never on client request."""
+    async with get_connection() as conn:
+        product = await conn.fetchrow(
+            "SELECT code, name, status, kind FROM cappe_billing_products WHERE code = $1",
+            body.plan_code,
+        )
+        if product is None or product["kind"] != "plan":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan")
+        if product["status"] != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That plan is no longer available.",
+            )
+
+        existing = await billing_svc.current_subscription(conn, account.id)
+        if existing and existing["source"] == "stripe":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You already have an active subscription. Change your plan instead.",
+            )
+
+        price = await billing_svc.resolve_price(conn, body.plan_code, body.interval)
+        if price is None or not price["stripe_price_id"]:
+            # The catalog row exists but its Stripe Price was never minted.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Billing is not configured for this plan yet.",
+            )
+
+        intro_applied = False
+        intro_price_id = None
+        intro_days = None
+        if await billing_svc.intro_eligible(conn, account.id):
+            intro = await billing_svc.resolve_price(
+                conn, body.plan_code, "once", role="intro"
+            )
+            if intro and intro["stripe_price_id"]:
+                intro_applied = True
+                intro_price_id = intro["stripe_price_id"]
+                intro_days = intro["intro_days"]
+
+        customer_id = await billing_svc.get_or_create_customer(
+            conn, account.id, account.email
+        )
+
+    try:
+        session = await get_cappe_stripe().create_subscription_checkout_session(
+            customer_id=customer_id,
+            price_id=price["stripe_price_id"],
+            intro_price_id=intro_price_id,
+            trial_days=intro_days,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            metadata={
+                "type": "cappe_subscription",
+                "account_id": str(account.id),
+                "plan_code": body.plan_code,
+                "intro": "1" if intro_applied else "0",
+            },
+        )
+    except CappeStripeError as exc:
+        logger.error("cappe: subscription checkout failed for %s: %s", account.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not start checkout"
+        ) from exc
+
+    url = session.get("url")
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not start checkout"
+        )
+    return CappeCheckoutResponse(checkout_url=url, intro_applied=intro_applied)
+
+
+@router.post("/billing/portal", response_model=CappePortalResponse)
+async def open_portal(
+    body: CappePortalRequest, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Stripe's hosted portal for cards, invoices and receipts."""
+    async with get_connection() as conn:
+        customer_id = await conn.fetchval(
+            "SELECT stripe_customer_id FROM cappe_accounts WHERE id = $1", account.id
+        )
+    if not customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No billing account yet — subscribe first.",
+        )
+    try:
+        session = await get_cappe_stripe().create_billing_portal_session(
+            customer_id=customer_id, return_url=body.return_url
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not open billing portal"
+        ) from exc
+    return CappePortalResponse(portal_url=session["url"])
+
+
+@router.post("/billing/addons", response_model=CappeSubscription)
+async def set_addon_quantity(
+    body: CappeAddonQuantityRequest, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Set how many units of an add-on (e.g. private-email mailboxes) to carry.
+
+    The add-on rides the SAME subscription as an extra item, so there is one
+    invoice and one dunning state. Its interval must match the parent's, which
+    is why the price is resolved from the subscription's own interval.
+    """
+    async with get_connection() as conn:
+        sub = await billing_svc.current_subscription(conn, account.id)
+        if not sub or sub["source"] != "stripe":
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="Add-ons require an active paid subscription.",
+            )
+        addon = await conn.fetchrow(
+            "SELECT code, name, max_quantity FROM cappe_billing_products "
+            "WHERE code = $1 AND kind = 'addon' AND status = 'active'",
+            body.addon_code,
+        )
+        if addon is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown add-on")
+        if body.quantity > addon["max_quantity"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Maximum {addon['max_quantity']} per account.",
+            )
+
+        item = await conn.fetchrow(
+            "SELECT stripe_item_id, quantity FROM cappe_subscription_items "
+            "WHERE subscription_id = $1 AND product_code = $2",
+            sub["id"], body.addon_code,
+        )
+        price = await billing_svc.resolve_price(conn, body.addon_code, sub["interval"])
+        if price is None or not price["stripe_price_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Billing is not configured for this add-on yet.",
+            )
+        stripe_sub_id = sub["stripe_subscription_id"]
+
+    cs = get_cappe_stripe()
+    try:
+        if item is None:
+            if body.quantity > 0:
+                await cs.add_subscription_item(
+                    subscription_id=stripe_sub_id,
+                    price_id=price["stripe_price_id"],
+                    quantity=body.quantity,
+                )
+        elif body.quantity == 0:
+            await cs.remove_subscription_item(item["stripe_item_id"])
+        else:
+            await cs.set_item_quantity(
+                item_id=item["stripe_item_id"],
+                quantity=body.quantity,
+                # Only bill immediately when they're buying MORE; a decrease
+                # credits the next invoice instead of issuing a negative one.
+                invoice_now=body.quantity > int(item["quantity"]),
+            )
+        fresh = await cs.retrieve_subscription(stripe_sub_id)
+    except CappeStripeError as exc:
+        logger.error("cappe: add-on change failed for %s: %s", account.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not update add-on"
+        ) from exc
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await billing_svc.sync_subscription(
+                conn, account_id=account.id, subscription=fresh
+            )
+        sub = await billing_svc.current_subscription(conn, account.id)
+        addons = await billing_svc.subscription_addons(conn, sub["id"]) if sub else []
+
+    return CappeSubscription(
+        plan_code=sub["plan_code"], plan_name=sub.get("plan_name"),
+        interval=sub["interval"], status=sub["status"], source=sub["source"],
+        current_period_end=sub["current_period_end"], trial_end=sub["trial_end"],
+        cancel_at_period_end=sub["cancel_at_period_end"],
+        comped_until=sub["comped_until"],
+        addons=[
+            CappeSubscriptionAddon(
+                code=a["product_code"], name=a["name"],
+                unit_label=a["unit_label"], quantity=a["quantity"],
+            )
+            for a in addons
+        ],
+    )
+
+
+@router.post("/billing/cancel")
+async def cancel(
+    body: CappeCancelRequest, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Cancel at the period boundary by default — they keep what they paid for
+    until it runs out. Entitlements drop when Stripe sends the deletion event,
+    not here."""
+    async with get_connection() as conn:
+        sub = await billing_svc.current_subscription(conn, account.id)
+    if not sub or sub["source"] != "stripe" or not sub["stripe_subscription_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription"
+        )
+    try:
+        await get_cappe_stripe().cancel_subscription(
+            sub["stripe_subscription_id"], at_period_end=body.at_period_end
+        )
+    except CappeStripeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not cancel"
+        ) from exc
+
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE cappe_subscriptions SET cancel_at_period_end = $1, updated_at = NOW() "
+            "WHERE id = $2",
+            body.at_period_end, sub["id"],
+        )
+    return {"status": "ok", "at_period_end": body.at_period_end}
