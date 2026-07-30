@@ -259,6 +259,26 @@ async def add_message(
 MAX_PENDING_STAGED_ACTIONS = 10
 
 
+async def lock_conversation_actions(conn, conversation_id: UUID) -> list[dict[str, Any]]:
+    """`SELECT staged_actions ... FOR UPDATE`, decoded, with NO transaction of
+    its own — unlike `mutate_staged_actions`, the caller must already be
+    inside `conn.transaction()` and must keep it open across its own
+    `execute_setup_action` write and a following `mutate_staged_actions` call,
+    so the two-phase "is this still proposed / run the write / flip the
+    status" sequence is one atomic unit. Without this, two concurrent
+    confirmations (a REST Approve click racing a chat "yes, go ahead") can
+    both pass the proposed-status check and both perform the underlying
+    write — `mutate_staged_actions`'s own lock only serializes the STATUS
+    flip, not the row it's a status for."""
+    row = await conn.fetchrow(
+        "SELECT staged_actions FROM cappe_merlin_conversations WHERE id = $1 FOR UPDATE",
+        conversation_id,
+    )
+    if row is None:
+        return []
+    return loads_list(row["staged_actions"]) if row["staged_actions"] is not None else []
+
+
 async def mutate_staged_actions(
     conn, conversation_id: UUID, fn
 ) -> list[dict[str, Any]]:

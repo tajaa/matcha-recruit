@@ -36,6 +36,7 @@ from ....core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from ....database import get_connection
 from ..entitlements import resolve_entitlements
 from ..readiness import compute_readiness
+from ..render_cache import invalidate_site_render_cache
 from . import store as merlin_store
 from .agent_stream import _sse
 from .catalog import MODEL_TIERS
@@ -60,7 +61,13 @@ _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
 
 _LINK_TARGETS = frozenset({
-    "shop", "subscribers", "campaigns", "bookings", "settings", "design", "pages", "billing", "publish",
+    # settings/design/pages all resolve to sections of the SAME dashboard
+    # page (see SetupMerlinPanel.linkHref's default case) — no dead link.
+    # There is no cappe billing/upgrade page today (confirmed: the only
+    # Stripe checkout in cappe is domain purchase), so 'billing' is
+    # deliberately NOT offered — the promo entitlement refusal states the
+    # upgrade requirement in words instead of a button that goes nowhere.
+    "shop", "subscribers", "campaigns", "bookings", "settings", "design", "pages", "publish",
 })
 
 
@@ -179,6 +186,11 @@ async def run_setup_agent(
     results_log: list[dict[str, Any]] = []
     final_message: Optional[str] = None
     final_links: list[dict[str, str]] = []
+    # Readiness as of the LAST successful execute this turn (chat-confirm
+    # path) — carried in the result frame so the panel can refresh the
+    # SetupGuide/pages list without a REST round trip, the same event the
+    # Approve button's own response already provides.
+    latest_readiness: Optional[dict[str, Any]] = None
 
     model_calls = 0
     started = time.monotonic()
@@ -210,10 +222,16 @@ async def run_setup_agent(
         return {"staged": True, "action_id": entry["id"], "summary": entry["summary"]}, entry
 
     async def do_execute_staged_action(args: dict[str, Any]) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+        nonlocal latest_readiness
         action_id = str(args.get("action_id") or "")
-        async with get_connection() as conn:
-            convo = await merlin_store.get_owned_conversation(conn, conversation_id, account.id)
-            entry = find_entry(convo.get("staged_actions"), action_id)
+        # Whole confirm — re-check, write, status flip — inside ONE
+        # transaction holding a row lock the entire time (see
+        # `merlin_store.lock_conversation_actions`'s docstring): a chat "yes,
+        # go ahead" racing a REST Approve click for the same action must not
+        # both perform the write.
+        async with get_connection() as conn, conn.transaction():
+            locked_actions = await merlin_store.lock_conversation_actions(conn, conversation_id)
+            entry = find_entry(locked_actions, action_id)
             if entry is None:
                 return {"error": "no staged action with that id"}, None
             entitlements = await resolve_entitlements(account.plan, conn=conn)
@@ -228,6 +246,12 @@ async def run_setup_agent(
                 conn, conversation_id, apply_outcome(action_id, outcome)
             )
             readiness = await compute_readiness(conn, site["id"], site)
+        if outcome["ok"]:
+            # Same event the REST approve route invalidates on — see that
+            # route's comment for why this lives in services/render_cache.py
+            # rather than routes/render.py.
+            await invalidate_site_render_cache(site["id"])
+            latest_readiness = readiness
         results_log.append({"ok": outcome["ok"], "summary": outcome["message"]})
         return (
             {"executed": outcome["ok"], "message": outcome["message"], "readiness_ready": readiness.get("ready")},
@@ -312,13 +336,13 @@ async def run_setup_agent(
                     payload, entry = await do_stage_action(args)
                     if entry is not None:
                         yield {"type": "staged_action", "action": entry}
-                    record_step({"kind": "stage", "label": payload.get("summary") or payload.get("reason") or "Staged"})
+                    yield record_step({"kind": "stage", "label": payload.get("summary") or payload.get("reason") or "Staged"})
                 elif name == "execute_staged_action":
                     yield {"type": "status", "message": "Making that change…"}
                     payload, entry = await do_execute_staged_action(args)
                     if entry is not None:
                         yield {"type": "staged_action", "action": entry}
-                    record_step({"kind": "execute", "label": payload.get("message") or payload.get("reason") or "Executed"})
+                    yield record_step({"kind": "execute", "label": payload.get("message") or payload.get("reason") or "Executed"})
                 else:
                     payload = {"error": f"unknown tool '{name}'"}
 
@@ -346,6 +370,7 @@ async def run_setup_agent(
             "tier": "regular",
             "steps": steps,
             "results": results_log,
+            "readiness": latest_readiness,
         },
     }
 

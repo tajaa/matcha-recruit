@@ -95,3 +95,18 @@ def test_prompt_includes_recent_products():
     prompt = build_setup_prompt(ctx)
     assert "Coaching session" in prompt
     assert "$50.00" in prompt
+
+
+def test_prompt_states_nothing_staged_when_queue_is_empty():
+    prompt = build_setup_prompt(_BASE_CONTEXT)
+    assert "nothing is currently staged" in prompt
+
+
+def test_prompt_lists_a_pending_staged_action_with_its_id():
+    ctx = {**_BASE_CONTEXT, "staged_actions": [
+        {"id": "aaaaaaaa-1111-1111-1111-111111111111", "type": "create_page", "summary": "Create an About page", "status": "proposed"},
+    ]}
+    prompt = build_setup_prompt(ctx)
+    assert "aaaaaaaa-1111-1111-1111-111111111111" in prompt
+    assert "Create an About page" in prompt
+    assert "nothing is currently staged" not in prompt

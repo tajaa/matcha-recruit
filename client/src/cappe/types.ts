@@ -742,3 +742,28 @@ export type CappeStylePreset = {
   data: Record<string, unknown>
   created_at: string
 }
+
+// --- Merlin setup concierge (dashboard) --------------------------------------
+
+export type CappeSetupActionStatus = 'proposed' | 'executed' | 'dismissed' | 'blocked'
+
+export type CappeSetupAction = {
+  id: string
+  type: string
+  summary: string
+  payload: Record<string, unknown>
+  status: CappeSetupActionStatus
+  result?: Record<string, unknown> | null
+  message?: string | null
+  created_at: string
+  executed_at?: string | null
+}
+
+export type CappeSetupLink = { target: string; label: string }
+
+export type CappeSetupConversationSummary = {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}

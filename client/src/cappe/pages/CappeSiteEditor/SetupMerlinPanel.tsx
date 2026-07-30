@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, Loader2, Sparkles, X, XCircle } from 'lucide-react'
 import { useCappeMe } from '../../hooks/useCappeMe'
-import type { CappeReadiness, CappeSite } from '../../types'
-import { useSetupMerlin, type SetupAction, type SetupLink } from './useSetupMerlin'
+import type { CappeReadiness, CappeSetupAction, CappeSetupLink, CappeSite } from '../../types'
+import { useSetupMerlin } from './useSetupMerlin'
 
 interface SetupMerlinPanelProps {
   site: CappeSite
@@ -40,7 +40,7 @@ function linkHref(siteId: string, target: string): string {
 }
 
 function ActionCard({ action, onApprove, onDismiss, busy }: {
-  action: SetupAction
+  action: CappeSetupAction
   onApprove: () => void
   onDismiss: () => void
   busy: boolean
@@ -95,7 +95,10 @@ function ActionCard({ action, onApprove, onDismiss, busy }: {
 
 export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: SetupMerlinPanelProps) {
   const { account } = useCappeMe()
-  const merlin = useSetupMerlin(site.id)
+  // Fires on the REST approve path too (handleApprove, below) — this callback
+  // is the ONE place a chat-confirmed execute (no REST round trip) also
+  // reaches the dashboard's SetupGuide/pages refresh.
+  const merlin = useSetupMerlin(site.id, onSiteChanged)
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [busyActionId, setBusyActionId] = useState<string | null>(null)
@@ -110,7 +113,7 @@ export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: S
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [merlin.messages, merlin.stagedActions, merlin.liveStatus])
+  }, [merlin.messages, merlin.stagedActions, merlin.liveStatus, merlin.liveSteps])
 
   async function handleApprove(actionId: string) {
     setBusyActionId(actionId)
@@ -196,7 +199,7 @@ export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: S
             </div>
             {m.role === 'assistant' && m.links && m.links.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {m.links.map((l: SetupLink) =>
+                {m.links.map((l: CappeSetupLink) =>
                   l.target === 'publish' ? (
                     <button
                       key={l.target}
@@ -219,6 +222,14 @@ export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: S
             )}
           </div>
         ))}
+
+        {merlin.liveSteps.length > 0 && (
+          <div className="space-y-0.5">
+            {merlin.liveSteps.map((s, i) => (
+              <div key={i} className="text-[11px] text-zinc-600">✓ {s.label}</div>
+            ))}
+          </div>
+        )}
 
         {merlin.liveStatus && (
           <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">

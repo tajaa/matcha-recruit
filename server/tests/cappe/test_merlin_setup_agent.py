@@ -132,9 +132,27 @@ class _NoopLimiter:
 
 # --- fakes (DB side) ----------------------------------------------------------
 
+class _FakeTxn:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_a):
+        return False
+
+
+class _FakeConnHandle:
+    """Everything DB-shaped this loop touches is monkeypatched at the
+    `merlin_store`/`resolve_entitlements`/etc. level, so this handle only
+    needs to satisfy `async with get_connection() as conn, conn.transaction():`
+    — the row-locked-transaction shape `do_execute_staged_action` now uses."""
+
+    def transaction(self):
+        return _FakeTxn()
+
+
 class _FakeConnCtx:
     async def __aenter__(self):
-        return "FAKE_CONN"
+        return _FakeConnHandle()
 
     async def __aexit__(self, *_a):
         return False
@@ -156,6 +174,9 @@ def patched(monkeypatch):
     async def _fake_get_owned_conversation(conn, conversation_id, account_id):
         return {"staged_actions": store["actions"]}
 
+    async def _fake_lock_conversation_actions(conn, conversation_id):
+        return store["actions"]
+
     async def _fake_resolve_entitlements(plan, *, conn=None):
         return entitlements_by_plan.get(plan, FREE)
 
@@ -171,9 +192,11 @@ def patched(monkeypatch):
     monkeypatch.setattr(setup_agent, "get_connection", lambda: _FakeConnCtx())
     monkeypatch.setattr(setup_agent.merlin_store, "mutate_staged_actions", _fake_mutate)
     monkeypatch.setattr(setup_agent.merlin_store, "get_owned_conversation", _fake_get_owned_conversation)
+    monkeypatch.setattr(setup_agent.merlin_store, "lock_conversation_actions", _fake_lock_conversation_actions)
     monkeypatch.setattr(setup_agent, "resolve_entitlements", _fake_resolve_entitlements)
     monkeypatch.setattr(setup_agent, "execute_setup_action", _fake_execute_setup_action)
     monkeypatch.setattr(setup_agent, "compute_readiness", _fake_compute_readiness)
+    monkeypatch.setattr(setup_agent, "invalidate_site_render_cache", lambda *_a, **_k: asyncio.sleep(0))
     monkeypatch.setattr(setup_agent, "GeminiRateLimiter", lambda: _NoopLimiter())
 
     def _run(script, *, preexisting=None, account=None, **overrides):

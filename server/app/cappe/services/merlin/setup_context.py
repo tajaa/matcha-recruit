@@ -14,6 +14,7 @@ import json
 from typing import Any, Optional
 
 from ..common import loads
+from ..design_gate import is_premium_plan
 from ..entitlements import Entitlements, resolve_entitlements
 from ..readiness import compute_readiness
 from .setup_actions import SETUP_ACTIONS, SETUP_PAGE_PRESETS
@@ -21,10 +22,17 @@ from .setup_actions import SETUP_ACTIONS, SETUP_PAGE_PRESETS
 _MAX_PRODUCTS_LISTED = 10
 
 
-async def build_setup_context(conn, site: dict[str, Any], account: Any) -> dict[str, Any]:
+async def build_setup_context(
+    conn, site: dict[str, Any], account: Any, staged_actions: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """Everything the concierge's prompt needs, read fresh every turn — this
     surface has no client-resent snapshot to fall back on, so a DB read here
-    is the only way it ever sees what changed since the last message."""
+    is the only way it ever sees what changed since the last message.
+
+    `staged_actions` is the calling conversation's own queue (already decoded
+    by `store.get_owned_conversation`/`store.lock_conversation_actions`) — not
+    re-fetched here, since the caller already has it and passing it through
+    avoids a second read of the same row mid-request."""
     site_id = site["id"]
     entitlements = await resolve_entitlements(account.plan, conn=conn)
     readiness = await compute_readiness(conn, site_id, site)
@@ -69,13 +77,16 @@ async def build_setup_context(conn, site: dict[str, Any], account: Any) -> dict[
         "plan": account.plan,
         "plan_name": entitlements.plan_name,
         "allowed_fulfillment": sorted(entitlements.allowed_fulfillment),
-        "is_premium": entitlements.plan_code in ("pro", "business", "creator"),
+        "is_premium": is_premium_plan(account.plan),
         "readiness": readiness,
         "pages": pages,
         "products": [dict(r) for r in product_rows],
         "product_count": product_count or 0,
         "booking_type_count": booking_type_count or 0,
         "subscriber_count": subscriber_count or 0,
+        "staged_actions": [
+            e for e in (staged_actions or []) if isinstance(e, dict) and e.get("status") == "proposed"
+        ],
         "promo_bar_enabled": bool((promos.get("bar") or {}).get("enabled")),
         "promo_popup_enabled": bool((promos.get("popup") or {}).get("enabled")),
     }
@@ -131,6 +142,23 @@ def _readiness_text(readiness: dict[str, Any]) -> str:
     return "Readiness — still missing: " + "; ".join(str(m) for m in missing)
 
 
+def _staged_state_text(staged_actions: list[dict[str, Any]]) -> str:
+    """The staged-action queue, id-per-line, every turn — so `execute_staged_action`
+    has a real id to call with on a LATER turn (not just the one that staged
+    it, which is structurally refused) and the model doesn't re-propose
+    something already pending. Mirrors matcha Huume's `build_state_block`:
+    silence must never be ambiguous, so the empty case says so explicitly
+    rather than omitting the section."""
+    if not staged_actions:
+        return "Staged actions: nothing is currently staged."
+    lines = [f'- id={e.get("id")}: {e.get("summary")}' for e in staged_actions]
+    return (
+        "Staged actions awaiting the user's confirmation (call execute_staged_action with one of "
+        "these ids ONLY after the user confirms it on a message after it was staged):\n"
+        + "\n".join(lines)
+    )
+
+
 def _account_type_guidance(account_type: str) -> str:
     if account_type == "personal":
         return (
@@ -159,6 +187,7 @@ def build_setup_prompt(context: dict[str, Any]) -> str:
             f"Promo banners {'are' if context.get('is_premium') else 'are NOT'} available on this plan."
         ),
         _readiness_text(context.get("readiness") or {}),
+        _staged_state_text(context.get("staged_actions") or []),
     ]
 
     pages = context.get("pages") or []

@@ -47,6 +47,12 @@ def upgrade() -> None:
         ON cappe_merlin_conversations(site_id, kind, updated_at DESC)
         """
     )
+    # No IF NOT EXISTS for ADD CONSTRAINT in Postgres — drop-then-add so a
+    # rerun after a partial failure (this statement ran, a later one didn't)
+    # doesn't abort the whole upgrade on a duplicate-constraint error.
+    op.execute(
+        "ALTER TABLE cappe_merlin_conversations DROP CONSTRAINT IF EXISTS ck_cappe_merlin_convo_scope"
+    )
     op.execute(
         """
         ALTER TABLE cappe_merlin_conversations

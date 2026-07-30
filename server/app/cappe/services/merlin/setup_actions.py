@@ -446,8 +446,8 @@ def _gate_set_promo(payload: dict[str, Any], entitlements: Entitlements, plan: s
     if is_premium_plan(plan):
         return None
     return (
-        "Promo banners are a Pro/Business/Creator feature. Upgrade to turn one on — "
-        "I can leave this staged so it's ready the moment you do."
+        "Promo banners are a Pro/Business/Creator feature — your plan can't turn one on. "
+        "Upgrade first, then ask me again and I'll set it up."
     )
 
 
@@ -679,14 +679,15 @@ def apply_outcome(entry_id: str, outcome: dict[str, Any]) -> Callable[[list[dict
     """`outcome` is `execute_setup_action`'s return value.
 
     Only applies while the entry is still 'proposed' — same guard
-    `dismiss_entry` uses. `evaluate_setup_execute`'s idempotency check runs
-    BEFORE `execute_setup_action`'s DB write, outside this function's lock
-    (`store.mutate_staged_actions`'s `FOR UPDATE`), so two concurrent
-    confirmations (a chat message and a REST click racing) could both pass
-    that check and both perform the underlying write. This guard is what
-    actually closes the race: only the write that reaches this closure while
-    the row is still 'proposed' — inside the lock — sticks; whoever loses
-    silently no-ops instead of re-marking an already-settled entry."""
+    `dismiss_entry` uses. The real race guard is upstream of this function:
+    both confirm callers (`routes/merlin_setup.py:_apply_action_outcome`,
+    `services/merlin/setup_agent.py:do_execute_staged_action`) now hold a
+    `merlin_store.lock_conversation_actions` row lock for the ENTIRE
+    check-write-flip sequence, inside one transaction — so a second
+    concurrent confirmation blocks on the lock and, once it acquires it,
+    re-reads a status that is no longer 'proposed' and refuses before this
+    closure ever runs twice for the same entry. This `status == 'proposed'`
+    check is a defense-in-depth idempotency guard, not the sole race guard."""
     def _fn(current: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         for e in current:

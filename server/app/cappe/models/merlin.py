@@ -154,13 +154,12 @@ class CappeMerlinSetupRequest(BaseModel):
     """One turn to the dashboard setup concierge. Unlike
     `CappeMerlinChatRequest` there is no page snapshot — the site itself,
     fetched server-side in `services/merlin/setup_context.py`, is the
-    context — so this carries only the conversational surface: which
-    conversation, what the user said, and a client-resent fallback transcript
-    for the same reason `CappeMerlinChatRequest.history` exists (the very
-    first turn of a new conversation, or a client that raced a deploy)."""
+    context. No client-resent history either (unlike the page editor's
+    `CappeMerlinChatRequest.history`): the route always loads the real
+    transcript from `merlin_store.load_history` before building the prompt,
+    so a client-supplied one would just be ignored dead weight."""
     conversation_id: Optional[UUID] = None
     message: str = Field(min_length=1, max_length=2000)
-    history: list[CappeMerlinHistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 class CappeMerlinResultsUpdate(BaseModel):

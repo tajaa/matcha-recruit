@@ -18,14 +18,10 @@ import time
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
-from ...core.services.redis_cache import (
-    cache_delete_pattern,
-    cache_get,
-    cache_set,
-    get_redis_cache,
-)
+from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from ...database import get_connection
 from ..services.render import render_site_html
+from ..services.render_cache import invalidate_site_render_cache
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
 
 router = APIRouter()
@@ -175,10 +171,13 @@ async def _resolve_published_site(conn, host: str | None):
 
 async def invalidate_render_cache(site_id) -> None:
     """Drop cached rendered HTML for a site + reset the custom-domain host
-    cache. Called by owner CRUD (site/page mutations, publish, delete)."""
-    redis = get_redis_cache()
-    if redis:
-        await cache_delete_pattern(redis, f"cappe:render:{site_id}:")
+    cache. Called by owner CRUD (site/page mutations, publish, delete).
+
+    The Redis half now lives in `services/render_cache.py` so a services/
+    caller (the setup concierge's chat-confirm path) can invalidate the
+    rendered-HTML cache without importing routes/ — this wrapper stays the
+    public name because `_host_cache` below is route-local state."""
+    await invalidate_site_render_cache(site_id)
     _host_cache.clear()
 
 

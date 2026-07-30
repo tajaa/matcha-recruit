@@ -105,7 +105,7 @@ async def merlin_setup_agent(
         )
         history = await merlin_store.load_history(conn, conversation["id"])
         await merlin_store.add_message(conn, conversation["id"], role="user", content=body.message)
-        context = await build_setup_context(conn, site, account)
+        context = await build_setup_context(conn, site, account, conversation.get("staged_actions"))
 
     return StreamingResponse(
         stream_setup_turn(
@@ -138,33 +138,44 @@ async def get_setup_conversation(
 async def _apply_action_outcome(
     conn, *, conversation, site, account: CappeAccount, action_id: str, this_turn_staged_ids,
 ) -> CappeSetupActionResult:
-    entry = find_entry(conversation.get("staged_actions"), action_id)
-    if entry is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staged action not found")
+    """Runs the whole confirm — re-check, write, status flip — inside ONE
+    transaction holding a row lock on the conversation the entire time (see
+    `merlin_store.lock_conversation_actions`'s docstring). Two concurrent
+    confirmations for the same action now serialize: the second to acquire
+    the lock re-reads a status that is no longer 'proposed' and refuses,
+    instead of both performing the write."""
+    async with conn.transaction():
+        locked_actions = await merlin_store.lock_conversation_actions(conn, conversation["id"])
+        entry = find_entry(locked_actions, action_id)
+        if entry is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staged action not found")
 
-    entitlements = await resolve_entitlements(account.plan, conn=conn)
-    verdict = evaluate_setup_execute(
-        entry, entitlements=entitlements, plan=account.plan, this_turn_staged_ids=this_turn_staged_ids,
-    )
-    if verdict.kind == "refuse":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=verdict.message)
-    if verdict.kind == "blocked":
-        outcome = {"ok": False, "status": "blocked", "message": verdict.message}
-    else:
-        outcome = await execute_setup_action(conn, site, account, entry)
+        entitlements = await resolve_entitlements(account.plan, conn=conn)
+        verdict = evaluate_setup_execute(
+            entry, entitlements=entitlements, plan=account.plan, this_turn_staged_ids=this_turn_staged_ids,
+        )
+        if verdict.kind == "refuse":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=verdict.message)
+        if verdict.kind == "blocked":
+            outcome = {"ok": False, "status": "blocked", "message": verdict.message}
+        else:
+            outcome = await execute_setup_action(conn, site, account, entry)
 
-    updated = await merlin_store.mutate_staged_actions(
-        conn, conversation["id"], apply_outcome(action_id, outcome)
-    )
+        updated = await merlin_store.mutate_staged_actions(
+            conn, conversation["id"], apply_outcome(action_id, outcome)
+        )
+        if outcome["ok"]:
+            await merlin_store.add_message(
+                conn, conversation["id"], role="assistant", content=outcome["message"],
+            )
+        readiness = await compute_readiness(conn, site["id"], site)
+
     if outcome["ok"]:
         # Products/pages/promos all reach a rendered page — cache invalidation
-        # is deliberately done HERE (routes/-layer), not inside
-        # setup_actions.execute — services/ must never import routes/render.py.
+        # runs after the transaction commits, and lives in this routes-layer
+        # function (not inside setup_actions.execute) because services/ must
+        # never import routes/render.py.
         await invalidate_render_cache(site["id"])
-        await merlin_store.add_message(
-            conn, conversation["id"], role="assistant", content=outcome["message"],
-        )
-    readiness = await compute_readiness(conn, site["id"], site)
     return {"action": find_entry(updated, action_id), "message": outcome["message"], "readiness": readiness}
 
 
@@ -180,6 +191,8 @@ async def execute_setup_staged_action(
     `evaluate_setup_execute`'s status/idempotency check applies."""
     async with get_connection() as conn:
         conversation = await merlin_store.get_owned_conversation(conn, conversation_id, account.id)
+        if conversation.get("kind") != "setup":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         site = await get_owned_site(conn, conversation["site_id"], account.id)
         return await _apply_action_outcome(
             conn, conversation=conversation, site=site, account=account,
@@ -196,6 +209,8 @@ async def dismiss_setup_staged_action(
 ):
     async with get_connection() as conn:
         convo = await merlin_store.get_owned_conversation(conn, conversation_id, account.id)
+        if convo.get("kind") != "setup":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         updated = await merlin_store.mutate_staged_actions(conn, conversation_id, dismiss_entry(action_id))
         messages = await merlin_store.get_messages(conn, conversation_id)
     return {**convo, "staged_actions": updated, "messages": messages}
