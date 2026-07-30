@@ -49,7 +49,11 @@ def title_from_message(message: str) -> str:
 
 
 async def list_conversations(conn, page_id: UUID, account_id: UUID) -> list[dict[str, Any]]:
-    """A page's conversations, most-recently-used first."""
+    """A page's conversations, most-recently-used first.
+
+    `kind` is not filtered on here — it doesn't need to be. Setup-kind rows
+    always carry `page_id IS NULL` (enforced by `ck_cappe_merlin_convo_scope`),
+    so `WHERE page_id = $1` already excludes them from every page's list."""
     rows = await conn.fetch(
         """
         SELECT id, title, created_at, updated_at
@@ -63,6 +67,21 @@ async def list_conversations(conn, page_id: UUID, account_id: UUID) -> list[dict
     return [dict(r) for r in rows]
 
 
+async def list_site_setup_conversations(conn, site_id: UUID, account_id: UUID) -> list[dict[str, Any]]:
+    """A site's setup-concierge conversations, most-recently-used first."""
+    rows = await conn.fetch(
+        """
+        SELECT id, title, created_at, updated_at
+        FROM cappe_merlin_conversations
+        WHERE site_id = $1 AND account_id = $2 AND kind = 'setup'
+        ORDER BY updated_at DESC
+        """,
+        site_id,
+        account_id,
+    )
+    return [dict(r) for r in rows]
+
+
 async def get_owned_conversation(conn, conversation_id: UUID, account_id: UUID) -> dict[str, Any]:
     """Fetch a conversation row or raise 404 — the ownership gate for every
     conversation-addressed route. Imported lazily-safe (HTTPException here
@@ -71,7 +90,7 @@ async def get_owned_conversation(conn, conversation_id: UUID, account_id: UUID) 
 
     row = await conn.fetchrow(
         """
-        SELECT id, account_id, site_id, page_id, title, created_at, updated_at
+        SELECT id, account_id, site_id, page_id, kind, staged_actions, title, created_at, updated_at
         FROM cappe_merlin_conversations
         WHERE id = $1 AND account_id = $2
         """,
@@ -82,21 +101,30 @@ async def get_owned_conversation(conn, conversation_id: UUID, account_id: UUID) 
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
         )
-    return dict(row)
+    d = dict(row)
+    d["staged_actions"] = loads_list(d["staged_actions"]) if d["staged_actions"] is not None else None
+    return d
 
 
 async def create_conversation(
-    conn, *, account_id: UUID, site_id: UUID, page_id: UUID, title: Optional[str] = None
+    conn,
+    *,
+    account_id: UUID,
+    site_id: UUID,
+    page_id: Optional[UUID],
+    kind: str = "page",
+    title: Optional[str] = None,
 ) -> dict[str, Any]:
     row = await conn.fetchrow(
         """
-        INSERT INTO cappe_merlin_conversations (account_id, site_id, page_id, title)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO cappe_merlin_conversations (account_id, site_id, page_id, kind, title)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id, title, created_at, updated_at
         """,
         account_id,
         site_id,
         page_id,
+        kind,
         (title or "New conversation")[:_TITLE_MAX],
     )
     return dict(row)
@@ -222,3 +250,53 @@ async def add_message(
     for key in ("results", "steps", "attachments", "ops"):
         m[key] = loads_list(m[key]) if m[key] is not None else None
     return m
+
+
+# Cap on PENDING (status='proposed') staged actions per setup conversation.
+# A concierge chat that never gets confirmed shouldn't grow this column
+# without bound — the oldest proposed entry is pruned, not the newest, since
+# the user is more likely to be about to act on something just staged.
+MAX_PENDING_STAGED_ACTIONS = 10
+
+
+async def mutate_staged_actions(
+    conn, conversation_id: UUID, fn
+) -> list[dict[str, Any]]:
+    """Row-locked read-modify-write of a setup conversation's staged-action
+    queue. `fn(list[dict]) -> list[dict]` is pure — it receives the current
+    entries and returns the next state; this function owns the lock, the
+    JSONB (de)serialization, and the pending-count cap.
+
+    The lock is a `SELECT ... FOR UPDATE` inside this function's own
+    transaction (nested transactions are savepoints in asyncpg, so calling
+    this from within an already-open transaction is safe) — it exists so a
+    chat-driven `stage_action`/`execute_staged_action` call and a REST
+    approve/dismiss click for the same conversation can't race and clobber
+    each other's view of the queue, mirroring matcha Huume's
+    `store.execute_plan_locked` advisory-lock pattern (reimplemented here,
+    not imported — cappe does not depend on matcha code).
+    """
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT staged_actions FROM cappe_merlin_conversations WHERE id = $1 FOR UPDATE",
+            conversation_id,
+        )
+        current = loads_list(row["staged_actions"]) if row and row["staged_actions"] is not None else []
+        next_state = fn(current)
+
+        proposed = [e for e in next_state if isinstance(e, dict) and e.get("status") == "proposed"]
+        if len(proposed) > MAX_PENDING_STAGED_ACTIONS:
+            drop_ids = {
+                e.get("id")
+                for e in sorted(proposed, key=lambda e: e.get("created_at") or "")[
+                    : len(proposed) - MAX_PENDING_STAGED_ACTIONS
+                ]
+            }
+            next_state = [e for e in next_state if e.get("id") not in drop_ids]
+
+        await conn.execute(
+            "UPDATE cappe_merlin_conversations SET staged_actions = $2, updated_at = NOW() WHERE id = $1",
+            conversation_id,
+            json.dumps(next_state),
+        )
+        return next_state

@@ -146,7 +146,7 @@ export function ImageInput({ value, onChange }: { value: unknown; onChange: (v: 
 export function VideoInput({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
   const siteId = useContext(SiteCtx)
   const { account } = useCappeMe()
-  const premium = account?.plan === 'pro' || account?.plan === 'business'
+  const premium = account?.plan === 'pro' || account?.plan === 'business' || account?.plan === 'creator'
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)

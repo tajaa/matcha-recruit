@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { Loader2, ArrowLeft } from 'lucide-react'
 import SetupGuide from '../components/SetupGuide'
 import { cappeSiteHost } from '../host'
@@ -9,9 +9,11 @@ import { BusinessInfoSection } from './CappeSiteEditor/BusinessInfoSection'
 import { DirectorySection } from './CappeSiteEditor/DirectorySection'
 import { DesignSection } from './CappeSiteEditor/DesignSection'
 import { PagesSection } from './CappeSiteEditor/PagesSection'
+import { SetupMerlinPanel } from './CappeSiteEditor/SetupMerlinPanel'
 
 export default function CappeSiteEditor() {
   const s = useCappeSiteEditor()
+  const location = useLocation()
 
   if (s.loading) {
     return (
@@ -89,6 +91,16 @@ export default function CappeSiteEditor() {
       <button onClick={s.deleteSite} className="text-sm text-red-400 hover:text-red-300">
         Delete site
       </button>
+
+      <SetupMerlinPanel
+        site={s.site}
+        autoOpen={Boolean((location.state as { fromOnboarding?: boolean } | null)?.fromOnboarding) || s.site.status !== 'published'}
+        onSiteChanged={() => {
+          s.bumpSetupRefresh()
+          s.reloadPages()
+        }}
+        onPublish={s.publish}
+      />
     </div>
   )
 }

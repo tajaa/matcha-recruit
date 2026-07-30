@@ -50,7 +50,7 @@ export default function CappeOnboardingWizard() {
           })
         navigate(`/cappe/sites/${site.id}/locations`, { replace: true })
       } else {
-        navigate(`/cappe/sites/${site.id}`, { replace: true })
+        navigate(`/cappe/sites/${site.id}`, { replace: true, state: { fromOnboarding: true } })
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create your site. Try again.')

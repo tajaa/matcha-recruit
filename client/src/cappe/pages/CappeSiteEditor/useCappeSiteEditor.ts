@@ -155,11 +155,26 @@ export function useCappeSiteEditor() {
     }
   }
 
+  function bumpSetupRefresh() {
+    setSetupRefresh((n) => n + 1)
+  }
+
+  async function reloadPages() {
+    if (!siteId) return
+    try {
+      const p = await cappeApi.get<CappePage[]>(`/sites/${siteId}/pages`)
+      setPages(p)
+    } catch {
+      // Best-effort — the next natural reload (e.g. opening Pages) still recovers.
+    }
+  }
+
   return {
     siteId, site, pages, loading, error, notice,
     name, setName, subdomain, setSubdomain, logo, setLogo, timezone, setTimezone,
     biz, setBiz, saving, themeBusy, publishing, setupRefresh,
     newPageTitle, setNewPageTitle, addingPage,
     save, applyTheme, publish, addPage, addPreset, deletePage, deleteSite,
+    bumpSetupRefresh, reloadPages,
   }
 }

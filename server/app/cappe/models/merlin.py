@@ -111,8 +111,35 @@ class CappeMerlinStoredMessage(BaseModel):
     created_at: datetime
 
 
+class CappeSetupActionEntry(BaseModel):
+    """One proposed/executed setup-concierge action, stored in the setup
+    conversation's `staged_actions` JSONB column (migration zzzzcappe27).
+    Timestamps are ISO strings, not `datetime` — `store.mutate_staged_actions`
+    round-trips these through `json.dumps`, so the shape here matches what is
+    actually on the wire rather than what asyncpg would decode from a real
+    column."""
+    id: str
+    type: str
+    summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["proposed", "executed", "dismissed", "blocked"] = "proposed"
+    result: Optional[dict[str, Any]] = None
+    message: Optional[str] = None
+    created_at: str
+    executed_at: Optional[str] = None
+
+
+class CappeSetupActionResult(BaseModel):
+    action: CappeSetupActionEntry
+    message: str
+    readiness: dict[str, Any]
+
+
 class CappeMerlinConversationDetail(CappeMerlinConversation):
     messages: list[CappeMerlinStoredMessage] = Field(default_factory=list)
+    # Only ever populated for kind='setup' conversations.
+    kind: str = "page"
+    staged_actions: Optional[list[CappeSetupActionEntry]] = None
 
 
 class CappeMerlinConversationCreate(BaseModel):
@@ -121,6 +148,19 @@ class CappeMerlinConversationCreate(BaseModel):
 
 class CappeMerlinConversationUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=120)
+
+
+class CappeMerlinSetupRequest(BaseModel):
+    """One turn to the dashboard setup concierge. Unlike
+    `CappeMerlinChatRequest` there is no page snapshot — the site itself,
+    fetched server-side in `services/merlin/setup_context.py`, is the
+    context — so this carries only the conversational surface: which
+    conversation, what the user said, and a client-resent fallback transcript
+    for the same reason `CappeMerlinChatRequest.history` exists (the very
+    first turn of a new conversation, or a client that raced a deploy)."""
+    conversation_id: Optional[UUID] = None
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[CappeMerlinHistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 class CappeMerlinResultsUpdate(BaseModel):
@@ -147,4 +187,7 @@ __all__ = [
     "CappeMerlinConversationCreate",
     "CappeMerlinConversationUpdate",
     "CappeMerlinResultsUpdate",
+    "CappeSetupActionEntry",
+    "CappeSetupActionResult",
+    "CappeMerlinSetupRequest",
 ]

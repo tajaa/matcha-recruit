@@ -6,7 +6,7 @@ import { arr, str } from './valueHelpers'
 
 export function usePremium(): boolean {
   const { account } = useCappeMe()
-  return account?.plan === 'pro' || account?.plan === 'business'
+  return account?.plan === 'pro' || account?.plan === 'business' || account?.plan === 'creator'
 }
 
 export function PremiumLock({ children }: { children: ReactNode }) {

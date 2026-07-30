@@ -20,6 +20,7 @@ from .domains import router as domains_router
 from .forms import router as forms_router
 from .locations import router as locations_router
 from .merlin import router as merlin_router
+from .merlin_setup import router as merlin_setup_router
 from .messages import router as messages_router
 from .newsletter import router as newsletter_router
 from .pages import router as pages_router
@@ -76,6 +77,7 @@ cappe_router.include_router(discounts_router)
 cappe_router.include_router(reviews_router)
 cappe_router.include_router(rider_router)
 cappe_router.include_router(merlin_router)
+cappe_router.include_router(merlin_setup_router)
 cappe_router.include_router(messages_router)
 cappe_router.include_router(clients_router)
 cappe_router.include_router(blog_router)
