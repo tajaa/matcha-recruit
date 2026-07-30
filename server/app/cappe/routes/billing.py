@@ -432,8 +432,14 @@ async def cancel(
     body: CappeCancelRequest, account: CappeAccount = Depends(require_cappe_account)
 ):
     """Cancel at the period boundary by default — they keep what they paid for
-    until it runs out. Entitlements drop when Stripe sends the deletion event,
-    not here."""
+    until it runs out, and that path stays webhook-driven (entitlements drop
+    when Stripe sends the deletion event, not here).
+
+    An IMMEDIATE cancel (`at_period_end=False`) is different: Stripe deletes
+    the subscription synchronously, so local state drops the tier right here
+    too, rather than waiting on webhook delivery to catch up — see
+    `billing_svc.cancel_immediately`.
+    """
     async with get_connection() as conn:
         sub = await billing_svc.current_subscription(conn, account.id)
     if not sub or sub["source"] != "stripe" or not sub["stripe_subscription_id"]:
@@ -450,9 +456,15 @@ async def cancel(
         ) from exc
 
     async with get_connection() as conn:
-        await conn.execute(
-            "UPDATE cappe_subscriptions SET cancel_at_period_end = $1, updated_at = NOW() "
-            "WHERE id = $2",
-            body.at_period_end, sub["id"],
-        )
+        async with conn.transaction():
+            if body.at_period_end:
+                await conn.execute(
+                    "UPDATE cappe_subscriptions SET cancel_at_period_end = true, "
+                    "updated_at = NOW() WHERE id = $1",
+                    sub["id"],
+                )
+            else:
+                await billing_svc.cancel_immediately(
+                    conn, subscription_id=sub["id"], account_id=account.id
+                )
     return {"status": "ok", "at_period_end": body.at_period_end}

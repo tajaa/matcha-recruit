@@ -474,6 +474,26 @@ async def sync_subscription(
     return sub_id
 
 
+async def cancel_immediately(conn, *, subscription_id: UUID, account_id: UUID) -> None:
+    """Mark a subscription canceled and drop the account's tier right now.
+
+    For an `at_period_end=False` cancel, Stripe deletes the subscription
+    synchronously — but local state does not have to wait on the
+    `customer.subscription.deleted` webhook to catch up with that. Webhook
+    delivery can lag seconds to minutes, during which `resolve_entitlements`
+    would keep granting the paid tier for a subscription Stripe has already
+    torn down. Deferred (`at_period_end=True`) cancellation is unaffected —
+    the customer keeps what they paid for until the period actually ends, so
+    that path stays webhook-driven.
+    """
+    await conn.execute(
+        "UPDATE cappe_subscriptions SET status = 'canceled', canceled_at = NOW(), "
+        "cancel_at_period_end = false, updated_at = NOW() WHERE id = $1",
+        subscription_id,
+    )
+    await _materialize_plan(conn, account_id, FREE_PLAN_CODE)
+
+
 async def _account_for_subscription(conn, stripe_sub_id: str) -> Optional[UUID]:
     return await conn.fetchval(
         "SELECT account_id FROM cappe_subscriptions WHERE stripe_subscription_id = $1",

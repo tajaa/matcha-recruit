@@ -141,3 +141,31 @@ class TestHandleCheckoutCompletedGuards:
 
         assert result == {"status": "ok"}
         mock_sync.assert_awaited_once()
+
+
+class TestCancelImmediately:
+    """An at_period_end=False cancel deletes the subscription in Stripe
+    synchronously. Local state must drop the tier in the same call rather than
+    waiting on customer.subscription.deleted to arrive — that can lag seconds
+    to minutes, during which resolve_entitlements would keep granting the paid
+    tier for a subscription Stripe has already torn down."""
+
+    @pytest.mark.asyncio
+    async def test_marks_canceled_and_drops_to_free(self):
+        import uuid as uuid_mod
+
+        sub_id = uuid_mod.uuid4()
+        account_id = uuid_mod.uuid4()
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock()
+
+        with patch.object(billing_svc, "_materialize_plan", new_callable=AsyncMock) as mock_mat:
+            await billing_svc.cancel_immediately(
+                mock_conn, subscription_id=sub_id, account_id=account_id
+            )
+
+        update_sql = mock_conn.execute.call_args_list[0].args[0]
+        assert "status = 'canceled'" in update_sql
+        assert "canceled_at = NOW()" in update_sql
+        assert "cancel_at_period_end = false" in update_sql
+        mock_mat.assert_awaited_once_with(mock_conn, account_id, billing_svc.FREE_PLAN_CODE)
