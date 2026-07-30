@@ -68,7 +68,16 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
     plans, addons = [], []
     for p in products:
         if p["kind"] == "plan":
-            intro = intro_by_code.get(p["code"])
+            # Only surface the intro if its Stripe Price actually exists —
+            # `_prices_for` already withholds `purchasable` for un-minted
+            # standard prices, but intro_price_cents/intro_days carried no such
+            # flag. Before the seed script has run, the catalog would advertise
+            # "$1 for 30 days" while start_checkout silently drops the intro
+            # (its own stripe_price_id check) and charges full price — the
+            # customer sees a different amount on Stripe's page than the one
+            # they clicked.
+            intro_row = intro_by_code.get(p["code"])
+            intro = intro_row if intro_row and intro_row["stripe_price_id"] else None
             plans.append(CappePlan(
                 code=p["code"], name=p["name"], description=p["description"],
                 status=p["status"], sort_order=p["sort_order"],
@@ -119,6 +128,30 @@ async def _subscription_response(account_id) -> CappeSubscription | None:
 @router.get("/billing/subscription", response_model=CappeSubscription | None)
 async def get_subscription(account: CappeAccount = Depends(require_cappe_account)):
     return await _subscription_response(account.id)
+
+
+async def _subscription_response_or_409(account_id) -> CappeSubscription:
+    """For the two mutating endpoints below, whose `response_model` is the
+    non-Optional `CappeSubscription` — they just applied a real, billed Stripe
+    mutation, so returning `null` (or letting FastAPI's own `ResponseValidation
+    Error` 500 the request) would report a failure for a change that actually
+    succeeded and was already charged.
+
+    A live subscription can genuinely be gone here — an add-on change that
+    pushes the subscription to `canceled`, or a `customer.subscription.deleted`
+    landing between the mutation and this read — so surface that explicitly as
+    409 rather than a validation crash.
+    """
+    result = await _subscription_response(account_id)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "The change was applied, but the subscription is no longer active — "
+                "it may have just been cancelled. Refresh and check your billing status."
+            ),
+        )
+    return result
 
 
 @router.post("/billing/checkout", response_model=CappeCheckoutResponse)
@@ -303,7 +336,7 @@ async def set_addon_quantity(
             await billing_svc.sync_subscription(
                 conn, account_id=account.id, subscription=fresh
             )
-    return await _subscription_response(account.id)
+    return await _subscription_response_or_409(account.id)
 
 
 @router.post("/billing/change-plan", response_model=CappeSubscription)
@@ -391,7 +424,7 @@ async def change_plan(
             await billing_svc.sync_subscription(
                 conn, account_id=account.id, subscription=fresh
             )
-    return await _subscription_response(account.id)
+    return await _subscription_response_or_409(account.id)
 
 
 @router.post("/billing/cancel")

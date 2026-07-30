@@ -251,11 +251,32 @@ async def create_price(
 
     cs = get_cappe_stripe()
     lookup_key = f"cappe_{code}_{body.role}_{body.interval}_{str(pending_id).replace('-', '')[:12]}"
-    try:
-        if not stripe_product_id:
+
+    if not stripe_product_id:
+        try:
             stripe_product_id = await cs.ensure_product(
                 code=code, name=product["name"], description=product["description"]
             )
+        except CappeStripeError as exc:
+            async with get_connection() as conn:
+                await conn.execute("DELETE FROM cappe_billing_prices WHERE id = $1", pending_id)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Stripe: {exc}"
+            ) from exc
+        # Persisted immediately, separate from the price attempt below. If a
+        # freshly-minted Product's Price then fails, the product id must
+        # already be on the row — otherwise the next retry sees
+        # stripe_product_id IS NULL again and mints ANOTHER Stripe Product,
+        # leaking one per failed attempt with the catalog eventually pointing
+        # at whichever one happened to win.
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE cappe_billing_products SET stripe_product_id = $1, updated_at = NOW() "
+                "WHERE code = $2 AND stripe_product_id IS NULL",
+                stripe_product_id, code,
+            )
+
+    try:
         stripe_price_id = await cs.ensure_price(
             product_id=stripe_product_id,
             unit_amount_cents=body.unit_amount_cents,
@@ -273,11 +294,6 @@ async def create_price(
 
     async with get_connection() as conn:
         async with conn.transaction():
-            await conn.execute(
-                "UPDATE cappe_billing_products SET stripe_product_id = $1, updated_at = NOW() "
-                "WHERE code = $2 AND stripe_product_id IS NULL",
-                stripe_product_id, code,
-            )
             superseded = await conn.fetch(
                 """
                 UPDATE cappe_billing_prices

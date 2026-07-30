@@ -111,10 +111,13 @@ unchanged — `subtotal_cents`, tax excluded.
 - **`cappe_admin_audit`** — these are runtime-editable money knobs.
 - **`cappe_accounts`** gains account-level `stripe_customer_id` (there was none —
   only a per-domain one on `cappe_domains`, so a domain buyer who subscribed
-  would have got a second `cus_`), `is_platform_admin`, `plan_override_until`,
-  and **swaps the `plan` CHECK for an FK** to the catalog — an admin-editable
-  lineup must not need a migration per tier, and the FK makes a plan value with
-  no entitlement row unwritable.
+  would have got a second `cus_`), `is_platform_admin`, and **swaps the `plan`
+  CHECK for an FK** to the catalog — an admin-editable lineup must not need a
+  migration per tier, and the FK makes a plan value with no entitlement row
+  unwritable. (An initial revision also added `plan_override_until` as a
+  mirror for the comp-expiry sweep; removed in review — the sweep drives
+  entirely off `cappe_subscriptions.comped_until` and never read it, the same
+  inert-knob shape as `premium_design` below.)
 
 **No Stripe API calls in the migration.** `migrate-prod.sh` rehearses the whole
 upgrade against live rows and rolls it back; a rehearsal that created real Stripe

@@ -241,7 +241,12 @@ def upgrade() -> None:
         "ALTER TABLE cappe_accounts ADD COLUMN IF NOT EXISTS "
         "is_platform_admin BOOLEAN NOT NULL DEFAULT false"
     )
-    op.execute("ALTER TABLE cappe_accounts ADD COLUMN IF NOT EXISTS plan_override_until TIMESTAMPTZ")
+    # NOTE: no plan_override_until column. An earlier revision added one meant
+    # to give the comp-expiry sweep a cheap predicate — but the sweep
+    # (expire_lapsed_comps) drives entirely off cappe_subscriptions.comped_until
+    # and never touched it, so it was a second, disagreeing source of truth for
+    # nothing. Same shape as the premium_design column removed elsewhere in this
+    # PR: dropped rather than wired, since comped_until already does the job.
 
     # Adopt the Stripe Customer a domain purchase already created, so a
     # domain-buyer who later subscribes does not end up with a second `cus_`.
@@ -297,37 +302,37 @@ def upgrade() -> None:
         (
             'free', 'plan', 'Free', 'Build and publish a site.', 'active', 0,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], 1,
-            0, , '{}'::jsonb, 'unit', 100
+            0, '{}'::jsonb, 'unit', 100
         ),
         (
             'creator', 'plan', 'Creator',
             'For solo professionals selling their time.', 'active', 1,
             true, 300, ARRAY['service', 'booking']::TEXT[], NULL,
-            0, , '{"rider": true}'::jsonb, 'unit', 100
+            0, '{"rider": true}'::jsonb, 'unit', 100
         ),
         (
             'business', 'plan', 'Business',
             'Sell services, physical and digital products.', 'active', 2,
             true, 150, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, , '{}'::jsonb, 'unit', 100
+            0, '{}'::jsonb, 'unit', 100
         ),
         (
             'pro', 'plan', 'Pro (legacy)',
             'Retired tier. Honoured for existing accounts, not purchasable.', 'legacy', 90,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, , '{"rider": true}'::jsonb, 'unit', 100
+            0, '{"rider": true}'::jsonb, 'unit', 100
         ),
         (
             'hosting', 'plan', 'Hosting (legacy)',
             'Retired tier. Honoured for existing accounts, not purchasable.', 'legacy', 91,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, , '{}'::jsonb, 'unit', 100
+            0, '{}'::jsonb, 'unit', 100
         ),
         (
             'mailbox', 'addon', 'Private email',
             'A mailbox on your own domain, billed per mailbox.', 'active', 10,
             false, 0, '{}'::TEXT[], NULL,
-            0, , '{}'::jsonb, 'mailbox', 50
+            0, '{}'::jsonb, 'mailbox', 50
         )
         ON CONFLICT (code) DO NOTHING
         """
@@ -423,7 +428,6 @@ def downgrade() -> None:
     op.execute("ALTER TABLE cappe_accounts ALTER COLUMN plan TYPE VARCHAR(20)")
 
     op.execute("DROP INDEX IF EXISTS uq_cappe_accounts_stripe_customer")
-    op.execute("ALTER TABLE cappe_accounts DROP COLUMN IF EXISTS plan_override_until")
     op.execute("ALTER TABLE cappe_accounts DROP COLUMN IF EXISTS is_platform_admin")
     op.execute("ALTER TABLE cappe_accounts DROP COLUMN IF EXISTS stripe_customer_id")
 

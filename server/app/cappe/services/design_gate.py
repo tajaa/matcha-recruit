@@ -25,8 +25,12 @@ from typing import Any
 
 # Every PAID plan gets premium design — a customer paying monthly and still
 # hitting a locked control in the editor is the classic builder churn complaint.
-# 'creator' is the new solo tier; 'pro'/'hosting' are legacy codes kept so
-# existing accounts don't silently lose what they already have.
+# 'creator' is the new solo tier; 'pro' is the one legacy code kept, matching
+# its pre-catalog entitlement, so an existing Pro account doesn't silently lose
+# what it already has. 'hosting' — also a legacy, still-paid plan (seeded
+# status='legacy' in zzzzcappe26) — is deliberately NOT here: it never carried
+# premium design before this catalog existed either, so leaving it out
+# preserves its entitlement rather than changing it.
 #
 # THIS SET IS THE SINGLE SOURCE OF TRUTH, deliberately — premium design is not
 # a per-plan column in the billing catalog. It is consulted from ~12 call sites,
