@@ -23,6 +23,26 @@ candidate for ON CONFLICT inference.
 ON CONFLICT ... DO NOTHING at the app layer makes a WS cmid-retry replay of
 the triggering message a no-op rather than a duplicate event.
 
+`clarify_message_id` + `clarification_rounds` back conversational clarification:
+when the classifier can't confidently categorize an event it asks a follow-up
+question (posted as the SAME system message the confirmation rides on), and
+stamps `clarify_message_id` = that message's id — "a Huume question is
+outstanding" for this event. A channel member's reply to that message
+(`reply_to_id` naming it) is folded into the event via
+`services/ems/event_intake.py:apply_refinement`. `uniq_ems_events_clarify` is
+the atomic-claim key: `channels_ws.py:_bg_ems_clarify` does
+`UPDATE ems_events SET clarify_message_id = NULL WHERE clarify_message_id =
+$reply_uuid AND status = 'logged'` — the partial unique index is what makes
+"look up the event by the question message id" a single indexed probe rather
+than a table scan, and its uniqueness is what guarantees at most one event is
+ever waiting on a given message.
+
+NOTE: this migration is amended in place (added AFTER the branch's first pass
+shipped, before ever being applied to any database — see the EMS conversational-
+clarification plan) rather than following up with an `ems02`, on the same
+"unreleased feature, no back-compat needed" logic the huume keyed-plan reshape
+used. Once `ems01` has been applied anywhere, amend-in-place is no longer safe.
+
 NOTE: the alembic history on this branch has multiple leaves; `down_revision`
 is set to `handbookpilot02`, a verified head at authoring time. Confirm the
 correct head for your environment before `alembic upgrade`.
@@ -73,6 +93,12 @@ def upgrade():
             dismissed_by UUID REFERENCES users(id),
             dismissed_at TIMESTAMPTZ,
             token_usage JSONB,
+            -- Conversational clarification (see module docstring). NULL =
+            -- no question outstanding. Referencing channel_messages is safe
+            -- here: that table (and this column's own migration ordering)
+            -- predates this one.
+            clarify_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
+            clarification_rounds SMALLINT NOT NULL DEFAULT 0,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
@@ -85,6 +111,10 @@ def upgrade():
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS uniq_ems_events_message "
         "ON ems_events(message_id) WHERE message_id IS NOT NULL"
+    )
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uniq_ems_events_clarify "
+        "ON ems_events(clarify_message_id) WHERE clarify_message_id IS NOT NULL"
     )
 
     op.execute(

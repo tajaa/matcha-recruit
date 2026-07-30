@@ -32,7 +32,10 @@ _EVENT_SELECT = f"""
            ev.title, ev.category, ev.severity_hint, ev.doc, ev.narrative,
            ev.incident_recommendation, ev.incident_reasoning,
            ev.suggested_incident_type, ev.suggested_severity,
-           ev.status, ev.incident_id, ev.created_at, ev.updated_at
+           ev.status, ev.incident_id,
+           (ev.clarify_message_id IS NOT NULL AND ev.status = 'logged') AS awaiting_reply,
+           ev.clarification_rounds,
+           ev.created_at, ev.updated_at
     FROM ems_events ev
     LEFT JOIN channels ch ON ch.id = ev.channel_id
     LEFT JOIN users u ON u.id = ev.reporter_user_id
@@ -155,12 +158,23 @@ async def update_event(
             params.append(value)
             set_parts.append(f"{column} = ${len(params)}")
 
+        classification_edited = bool({"title", "category", "doc"} & sent)
         if "title" in sent:
             _set("title", body.title)
         if "category" in sent:
             _set("category", body.category)
         if "doc" in sent:
             _set("doc", json.dumps(body.doc or {}))
+        if classification_edited:
+            # An admin's manual edit must win over a clarify answer that
+            # arrives later — apply_refinement only rewrites classification
+            # columns WHERE status='logged', not WHERE clarify_message_id IS
+            # NULL, so a still-outstanding question would otherwise let a
+            # stale reply silently overwrite this edit. Disarming it here
+            # leaves the question as a dangling system-message pill (a
+            # reply to it just falls through apply_refinement's atomic
+            # claim as a miss) rather than a race the admin can lose.
+            set_parts.append("clarify_message_id = NULL")
         if dismiss_requested:
             _set("status", "dismissed")
             _set("dismissed_by", current_user.id)

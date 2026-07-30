@@ -1,4 +1,4 @@
-import { FileText, Trash2 } from 'lucide-react'
+import { FileText, Reply, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { renderMessageContent } from './mentions'
 
@@ -10,6 +10,15 @@ interface MessageListProps {
   canModerate: boolean
   members: ChannelMember[]
   onDelete: (msg: ChannelMessage) => void
+  onReply: (msg: ChannelMessage) => void
+}
+
+function ReplyPreviewStub({ preview }: { preview: NonNullable<ChannelMessage['reply_preview']> }) {
+  return (
+    <div className="mb-0.5 pl-2 border-l-2 border-w-line text-xs text-w-dim truncate">
+      <span className="font-medium">{preview.sender_name}</span> {preview.content}
+    </div>
+  )
 }
 
 export default function MessageList({
@@ -20,6 +29,7 @@ export default function MessageList({
   canModerate,
   members,
   onDelete,
+  onReply,
 }: MessageListProps) {
   return (
     <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
@@ -36,16 +46,30 @@ export default function MessageList({
 
         // System (Huume) messages have no sender and the backend 403s any
         // edit/delete/react attempt on them — render a distinct centered row
-        // with none of those affordances rather than a chat bubble.
+        // with none of those affordances EXCEPT reply, which is how a Huume
+        // clarification question gets answered (see channels_ws.py
+        // _bg_ems_clarify — it fires on any reply whose reply_to_id names an
+        // outstanding ems_events.clarify_message_id). This branch returns
+        // early and has no `group` wrapper, so the button is always visible
+        // rather than hover-revealed like the delete button below.
         if (msg.message_type === 'system') {
           return (
-            <div key={rowKey} className="flex justify-center my-2">
-              <span className="max-w-[85%] text-center text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-full px-3 py-1.5">
+            <div key={rowKey} className="flex justify-center items-center gap-1.5 my-2">
+              <span className="max-w-[85%] text-center text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-full px-3 py-1.5 whitespace-pre-wrap">
                 {msg.content}
                 <span className="ml-1.5 text-w-faint">
                   {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </span>
+              {!msg.pending && (
+                <button
+                  onClick={() => onReply(msg)}
+                  className="text-w-faint hover:text-w-text shrink-0"
+                  title="Reply"
+                >
+                  <Reply size={12} />
+                </button>
+              )}
             </div>
           )
         }
@@ -79,6 +103,7 @@ export default function MessageList({
                   </span>
                 </div>
               )}
+              {!isDeleted && msg.reply_preview && <ReplyPreviewStub preview={msg.reply_preview} />}
               {isDeleted ? (
                 <p className="text-xs italic text-w-dim">
                   {msg.deleted_by === msg.sender_id
@@ -135,14 +160,25 @@ export default function MessageList({
               </div>
             )}
             </div>
-            {canDelete && (
-              <button
-                onClick={() => onDelete(msg)}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-w-dim hover:text-red-400 shrink-0 self-start mt-0.5"
-                title={isOwn ? 'Delete message' : 'Delete as moderator'}
-              >
-                <Trash2 size={13} />
-              </button>
+            {!isDeleted && (
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0 self-start mt-0.5">
+                <button
+                  onClick={() => onReply(msg)}
+                  className="text-w-dim hover:text-w-text"
+                  title="Reply"
+                >
+                  <Reply size={13} />
+                </button>
+                {canDelete && (
+                  <button
+                    onClick={() => onDelete(msg)}
+                    className="text-w-dim hover:text-red-400"
+                    title={isOwn ? 'Delete message' : 'Delete as moderator'}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )

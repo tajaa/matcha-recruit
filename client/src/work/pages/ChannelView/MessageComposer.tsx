@@ -1,5 +1,5 @@
-import { Send, Loader2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
-import type { ChannelMember } from '../../api/channels'
+import { CornerUpLeft, Send, Loader2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
+import type { ChannelMember, ChannelMessage } from '../../api/channels'
 import { handleFromEmail } from './mentions'
 
 interface MessageComposerProps {
@@ -16,6 +16,8 @@ interface MessageComposerProps {
   channelName: string | undefined
   onSend: () => void
   uploading: boolean
+  replyTo: ChannelMessage | null
+  onClearReply: () => void
 }
 
 export default function MessageComposer({
@@ -32,9 +34,27 @@ export default function MessageComposer({
   channelName,
   onSend,
   uploading,
+  replyTo,
+  onClearReply,
 }: MessageComposerProps) {
   return (
     <div className="px-4 py-3 border-t border-w-line shrink-0">
+      {/* Reply target */}
+      {replyTo && (
+        <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded-md bg-w-surface2 border border-w-line text-xs text-w-dim">
+          <CornerUpLeft size={11} className="shrink-0" />
+          <span className="truncate">
+            Replying to{' '}
+            <span className="text-w-text">
+              {replyTo.message_type === 'system' ? 'Huume' : replyTo.sender_name}
+            </span>
+            : {replyTo.content}
+          </span>
+          <button onClick={onClearReply} className="ml-auto text-w-dim hover:text-w-text shrink-0">
+            <X size={10} />
+          </button>
+        </div>
+      )}
       {/* Pending file previews */}
       {pendingFiles.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-2">

@@ -134,6 +134,7 @@ export class ChannelSocket extends BaseSocket {
     content: string,
     attachments?: { url: string; filename: string; content_type: string; size: number }[],
     clientMessageId?: string,
+    replyToId?: string,
   ) {
     this.send({
       type: 'message',
@@ -141,6 +142,7 @@ export class ChannelSocket extends BaseSocket {
       content,
       ...(attachments?.length ? { attachments } : {}),
       ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
+      ...(replyToId ? { reply_to_id: replyToId } : {}),
     })
   }
 

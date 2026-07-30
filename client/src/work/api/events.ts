@@ -32,6 +32,10 @@ export interface EmsEvent {
   suggested_severity: string | null
   status: EmsEventStatus
   incident_id: string | null
+  // True while Huume has posted a follow-up question in-channel that hasn't
+  // been answered yet (ems_events.clarify_message_id IS NOT NULL server-side).
+  awaiting_reply: boolean
+  clarification_rounds: number
   created_at: string
   updated_at: string
 }

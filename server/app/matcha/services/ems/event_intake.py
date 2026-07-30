@@ -10,6 +10,12 @@ entry point.
 Gemini failure must never lose the report: on any classify failure this
 still inserts the event with `category='uncategorized'` and the raw message
 as `narrative` — documentation must survive an AI outage.
+
+Conversational clarification: when the classifier flags `needs_clarification`,
+the caller (channels_ws.py) posts the question alongside the confirmation and
+arms `ems_events.clarify_message_id`. A channel member's threaded reply to
+that message is folded back in via `apply_refinement` — see that function and
+`compose_refinement_content`/`should_ask_again`/`question_text` below.
 """
 
 import json
@@ -101,7 +107,14 @@ def _build_classify_prompt(content: str, context: list[dict]) -> str:
         "property damage/hazard, a guest incident with a complaint/refund, "
         "or a conduct concern; false for routine operational/equipment "
         "notes), "
-        '"incident_reasoning": str (1 sentence explaining the recommendation)}'
+        '"incident_reasoning": str (1 sentence explaining the recommendation), '
+        '"needs_clarification": bool (true ONLY if the category is genuinely '
+        "ambiguous or a critical detail for the chosen category is missing — "
+        "e.g. a safety event with no who/injury, a behavioral event with no "
+        "who. Never ask about routine operational/equipment notes), "
+        '"clarify_question": str|null (ONE short question that would resolve '
+        "it, asked directly to the reporter; null when needs_clarification "
+        "is false)}"
     )
 
 
@@ -122,6 +135,12 @@ def _parse_model_json(raw: str) -> dict:
     incident_recommendation = bool(data.get("incident_recommendation"))
     incident_reasoning = str(data.get("incident_reasoning") or "").strip()[:500] or None
 
+    # Empty/missing question forces needs_clarification False — a model that
+    # says "true" but gives nothing to ask is not a real clarification
+    # request, and question_text() would otherwise render a bare "❓ ".
+    clarify_question = str(data.get("clarify_question") or "").strip()[:300] or None
+    needs_clarification = bool(data.get("needs_clarification")) and clarify_question is not None
+
     return {
         "title": title or None,
         "category": category,
@@ -129,6 +148,8 @@ def _parse_model_json(raw: str) -> dict:
         "doc": doc,
         "incident_recommendation": incident_recommendation,
         "incident_reasoning": incident_reasoning,
+        "needs_clarification": needs_clarification,
+        "clarify_question": clarify_question,
     }
 
 
@@ -164,6 +185,54 @@ def _confirmation_text(event_row: dict) -> str:
     return f"\U0001F4CB Logged **{label}** event (visible to HR admins in Events){suffix}."
 
 
+_MAX_CLARIFY_ROUNDS = 2
+
+
+def compose_refinement_content(narrative: str, question: str, answer: str) -> str:
+    """Combined text re-fed through classify_event when a clarify answer
+    arrives — reuses the full prompt/parse/IR-suggestion/fallback path
+    rather than a bespoke merge-in-place."""
+    return f"{narrative}\n\n[Huume asked]: {question}\n[Reply]: {answer}"
+
+
+def should_ask_again(classified: dict, rounds: int) -> bool:
+    """Ask another follow-up? Capped at _MAX_CLARIFY_ROUNDS questions total
+    for one event (the intake question counts as the first round, but
+    doesn't increment `clarification_rounds` itself — only an answer does).
+    `rounds` is the count of ANSWERED rounds before this one (apply_refinement
+    increments it), so rounds=0 means "the intake question is the only one
+    asked so far" — one round used, _MAX_CLARIFY_ROUNDS-1 more allowed."""
+    return bool(classified.get("needs_clarification")) and rounds < _MAX_CLARIFY_ROUNDS - 1
+
+
+_QUESTION_MARKER = "\n\U0001F914 "  # "\n❓ "
+_QUESTION_SUFFIX = " — reply to this message to add details."
+
+
+def question_text(confirmation: str, question: str) -> str:
+    """Append a follow-up question to a Huume confirmation/update message.
+    Public (not `_`-prefixed) — channels_ws.py calls it directly when
+    posting the system message a reply will answer."""
+    return f"{confirmation}{_QUESTION_MARKER}{question}{_QUESTION_SUFFIX}"
+
+
+def extract_question(pill_content: str) -> str:
+    """Recover the raw clarify question from a rendered question_text()
+    pill — the inverse operation. channels_ws.py reads the outstanding
+    question back off the system message's own stored content (there's no
+    separate column for it) before re-feeding it through
+    compose_refinement_content(); without stripping the confirmation
+    preamble and the "reply to this message" instruction, both would leak
+    into the refinement prompt as if the reporter had said them."""
+    idx = pill_content.find(_QUESTION_MARKER)
+    if idx == -1:
+        return pill_content
+    question = pill_content[idx + len(_QUESTION_MARKER):]
+    if question.endswith(_QUESTION_SUFFIX):
+        question = question[: -len(_QUESTION_SUFFIX)]
+    return question
+
+
 _FALLBACK_CLASSIFICATION = {
     "title": None,
     "category": categories.FALLBACK_KEY,
@@ -173,6 +242,9 @@ _FALLBACK_CLASSIFICATION = {
     "incident_reasoning": None,
     "suggested_incident_type": None,
     "suggested_severity": None,
+    "needs_clarification": False,  # never ask a question during a Gemini outage
+    "clarify_question": None,
+    "model_ok": False,
 }
 
 
@@ -195,7 +267,20 @@ async def classify_event(content: str, context: list[dict]) -> dict:
                 temperature=0.2, response_mime_type="application/json", max_output_tokens=800,
             ),
         )
-        classified = {**_FALLBACK_CLASSIFICATION, **_parse_model_json(resp.text)}
+        parsed = _parse_model_json(resp.text)
+        # A response that parses as valid JSON but carries none of the
+        # expected keys (e.g. "{}") normalizes to category=FALLBACK_KEY via
+        # categories.normalize_category — which the six-category few-shot
+        # prompt never asks the model to choose on purpose (see
+        # categories.py). That combination only happens on a degenerate
+        # parse, so model_ok must be False here too — apply_refinement's
+        # "never downgrade an already-classified event back to
+        # 'uncategorized'" guarantee otherwise only covers real exceptions,
+        # not a successful-but-empty parse.
+        classified = {
+            **_FALLBACK_CLASSIFICATION, **parsed,
+            "model_ok": parsed["category"] != categories.FALLBACK_KEY,
+        }
     except Exception:
         logger.warning("EMS: classify failed, logging as uncategorized", exc_info=True)
 
@@ -261,6 +346,87 @@ async def persist_event(
         json.dumps({"category": event_row["category"], "channel_id": str(channel_id)}),
     )
     return event_row, _confirmation_text(event_row)
+
+
+_REFINEMENT_RETURNING = """
+    RETURNING id, company_id, channel_id, message_id, reporter_user_id,
+              title, category, severity_hint, doc, narrative,
+              incident_recommendation, incident_reasoning,
+              suggested_incident_type, suggested_severity,
+              status, clarification_rounds, created_at, updated_at
+"""
+
+
+async def apply_refinement(
+    conn,
+    *,
+    event_id: UUID,
+    company_id: UUID,
+    answer: str,
+    classified: dict,
+    answered_by: UUID,
+) -> Optional[dict]:
+    """Fold a clarify answer into a still-logged event.
+
+    Always appends the answer to `narrative` — documentation survives even
+    when classification fails. The classification fields (title/category/
+    severity_hint/doc/incident_*) are rewritten ONLY when
+    classified["model_ok"] — a Gemini failure during refinement must not
+    downgrade an already-classified event back to 'uncategorized'; it only
+    records that the reporter answered.
+
+    Guarded WHERE status = 'logged': a promoted/dismissed event is never
+    rewritten. Returns the updated row (with the POST-increment
+    clarification_rounds, for should_ask_again) or None on that guard miss
+    — the caller (channels_ws.py:_bg_ems_clarify) treats None as "ignore,
+    the event moved on since the question was asked."
+    """
+    appended = f"\n\nFollow-up: {answer[:_MAX_NARRATIVE_CHARS]}"
+
+    if classified.get("model_ok"):
+        row = await conn.fetchrow(
+            f"""
+            UPDATE ems_events
+            SET narrative = narrative || $3,
+                title = $4, category = $5, severity_hint = $6, doc = $7::jsonb,
+                incident_recommendation = $8, incident_reasoning = $9,
+                suggested_incident_type = $10, suggested_severity = $11,
+                clarification_rounds = clarification_rounds + 1,
+                updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND status = 'logged'
+            {_REFINEMENT_RETURNING}
+            """,
+            event_id, company_id, appended,
+            classified["title"], classified["category"], classified["severity_hint"],
+            json.dumps(classified["doc"]),
+            classified["incident_recommendation"], classified["incident_reasoning"],
+            classified.get("suggested_incident_type"), classified.get("suggested_severity"),
+        )
+    else:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE ems_events
+            SET narrative = narrative || $3,
+                clarification_rounds = clarification_rounds + 1,
+                updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND status = 'logged'
+            {_REFINEMENT_RETURNING}
+            """,
+            event_id, company_id, appended,
+        )
+    if row is None:
+        return None
+
+    event_row = dict(row)
+    await conn.execute(
+        """
+        INSERT INTO ems_event_audit_log (event_id, user_id, action, details)
+        VALUES ($1, $2, 'clarified', $3::jsonb)
+        """,
+        event_id, answered_by,
+        json.dumps({"category": event_row["category"], "model_ok": bool(classified.get("model_ok"))}),
+    )
+    return event_row
 
 
 async def create_event_from_message(

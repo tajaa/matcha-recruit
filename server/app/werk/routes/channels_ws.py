@@ -73,6 +73,84 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
         logger.warning("channel->project Files sync failed", exc_info=True)
 
 
+def _system_message_payload(channel_id_str: str, sys_row) -> dict:
+    """Broadcast payload for a persisted EMS/Huume system message — shared by
+    _bg_ems_intake and _bg_ems_clarify so the 17-key WS message shape (every
+    field a normal ChannelMessage carries, so the client's single dispatcher
+    handles both identically) isn't duplicated."""
+    return {
+        "id": str(sys_row["id"]),
+        "channel_id": channel_id_str,
+        "sender_id": None,
+        "sender_name": "Huume",
+        "sender_avatar_url": None,
+        "content": sys_row["content"],
+        "attachments": [],
+        "reply_to_id": None,
+        "reply_preview": None,
+        "reactions": [],
+        "created_at": sys_row["created_at"].isoformat(),
+        "edited_at": None,
+        "mentioned_user_ids": [],
+        "client_message_id": None,
+        "message_type": sys_row["message_type"],
+    }
+
+
+async def _insert_system_message(conn, channel_id_str: str, content: str):
+    """INSERT one message_type='system' channel_messages row. Shared by
+    _bg_ems_intake and _bg_ems_clarify."""
+    return await conn.fetchrow(
+        """
+        INSERT INTO channel_messages (channel_id, sender_id, content, message_type)
+        VALUES ($1, NULL, $2, 'system')
+        RETURNING id, channel_id, content, message_type, created_at
+        """,
+        UUID(channel_id_str), content,
+    )
+
+
+async def _ems_company_gate(conn, channel_id_str: str):
+    """Company/is_personal/`ems`-flag lookup for _bg_ems_intake, keyed on the
+    channel (that's all intake has). Returns the company_id UUID, or None if
+    the caller should silently no-op (personal company, or `ems` not
+    enabled)."""
+    row = await conn.fetchrow(
+        """
+        SELECT ch.company_id, comp.is_personal, comp.enabled_features,
+               comp.signup_source
+        FROM channels ch
+        JOIN companies comp ON comp.id = ch.company_id
+        WHERE ch.id = $1
+        """,
+        UUID(channel_id_str),
+    )
+    if not row or row["is_personal"]:
+        return None
+    from app.core.feature_flags import merge_company_features
+    merged = merge_company_features(row["enabled_features"], row["signup_source"])
+    if not merged.get("ems"):
+        return None
+    return row["company_id"]
+
+
+async def _ems_flag_enabled(conn, company_id) -> bool:
+    """Same is_personal/`ems`-flag check as _ems_company_gate, keyed on a
+    company_id already in hand (_bg_ems_clarify has one from the claimed
+    ems_events row — no need to re-derive it via a channel join). Re-checked
+    at answer time in case the flag was toggled off between question and
+    answer."""
+    row = await conn.fetchrow(
+        "SELECT is_personal, enabled_features, signup_source FROM companies WHERE id = $1",
+        company_id,
+    )
+    if not row or row["is_personal"]:
+        return False
+    from app.core.feature_flags import merge_company_features
+    merged = merge_company_features(row["enabled_features"], row["signup_source"])
+    return bool(merged.get("ems"))
+
+
 async def _bg_ems_intake(
     channel_id_str: str, message_id_str: str, reporter_user_id_str: str, content: str,
 ) -> None:
@@ -87,37 +165,28 @@ async def _bg_ems_intake(
     retry), and the pool is capped at 10 connections
     (app/database/pool.py). Holding a pooled connection across that would
     let a handful of concurrent @huume messages starve every other request
-    in the backend, not just EMS."""
+    in the backend, not just EMS.
+
+    Conversational clarification: when the classifier flags
+    needs_clarification, the confirmation message ALSO carries the follow-up
+    question, and ems_events.clarify_message_id is stamped to that message's
+    id — a reply to it is picked up by _bg_ems_clarify below."""
     try:
         # werk -> matcha.services: lazy in-function import per the
         # documented werk/matcha boundary rule (CLAUDE.md).
         from app.matcha.services.ems.event_intake import (
-            classify_event, gather_intake_context, persist_event,
+            classify_event, gather_intake_context, persist_event, question_text,
         )
 
         async with get_connection() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT ch.company_id, comp.is_personal, comp.enabled_features,
-                       comp.signup_source
-                FROM channels ch
-                JOIN companies comp ON comp.id = ch.company_id
-                WHERE ch.id = $1
-                """,
-                UUID(channel_id_str),
-            )
-            if not row or row["is_personal"]:
-                return
-            from app.core.feature_flags import merge_company_features
-            merged = merge_company_features(row["enabled_features"], row["signup_source"])
-            if not merged.get("ems"):
+            company_id = await _ems_company_gate(conn, channel_id_str)
+            if company_id is None:
                 return
             try:
-                await check_rate_limit(str(row["company_id"]), "ems_event", 30, 3600)
+                await check_rate_limit(str(company_id), "ems_event", 30, 3600)
             except HTTPException:
                 return  # over the hourly limit: skip silently, message already sent
 
-            company_id = row["company_id"]
             context = await gather_intake_context(
                 conn, UUID(channel_id_str), UUID(message_id_str),
             )
@@ -137,33 +206,132 @@ async def _bg_ems_intake(
             if event_row is None:
                 return  # dedupe hit (ON CONFLICT on message_id) — nothing to confirm
 
-            sys_row = await conn.fetchrow(
-                """
-                INSERT INTO channel_messages (channel_id, sender_id, content, message_type)
-                VALUES ($1, NULL, $2, 'system')
-                RETURNING id, channel_id, content, message_type, created_at
-                """,
-                UUID(channel_id_str), confirmation,
-            )
-        await broadcast_system_message(channel_id_str, {
-            "id": str(sys_row["id"]),
-            "channel_id": channel_id_str,
-            "sender_id": None,
-            "sender_name": "Huume",
-            "sender_avatar_url": None,
-            "content": sys_row["content"],
-            "attachments": [],
-            "reply_to_id": None,
-            "reply_preview": None,
-            "reactions": [],
-            "created_at": sys_row["created_at"].isoformat(),
-            "edited_at": None,
-            "mentioned_user_ids": [],
-            "client_message_id": None,
-            "message_type": sys_row["message_type"],
-        })
+            ask = classified.get("needs_clarification") and classified.get("clarify_question")
+            message_text = question_text(confirmation, classified["clarify_question"]) if ask else confirmation
+            sys_row = await _insert_system_message(conn, channel_id_str, message_text)
+            if ask:
+                # Arm the pending question: a reply to THIS system message
+                # is the answer _bg_ems_clarify is waiting for.
+                await conn.execute(
+                    "UPDATE ems_events SET clarify_message_id = $1 WHERE id = $2",
+                    sys_row["id"], event_row["id"],
+                )
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
         logger.exception("EMS intake failed for message %s", message_id_str)
+
+
+async def _bg_ems_clarify(
+    channel_id_str: str, reply_to_id_str: str, answerer_user_id_str: str, content: str,
+) -> None:
+    """Fold a reply-to-a-Huume-question into its EMS event. Off the send hot
+    path, top-level except, fire-and-forget — same rules as _bg_ems_intake.
+    Called on EVERY new message that replies to something (see the
+    is_new_message and reply_uuid trigger below); the atomic claim UPDATE
+    below is what makes an ordinary reply (the overwhelmingly common case) a
+    single no-op indexed probe rather than a false-positive clarify.
+
+    Two separate get_connection() blocks — never holds a pooled connection
+    across the refinement Gemini calls, same reasoning as _bg_ems_intake."""
+    try:
+        from app.matcha.services.ems.event_intake import (
+            apply_refinement, classify_event, compose_refinement_content,
+            extract_question, gather_intake_context, question_text, should_ask_again,
+        )
+        from app.matcha.services.ems import categories
+
+        reply_uuid = UUID(reply_to_id_str)
+        sys_row = None  # set inside whichever branch below actually posts a reply
+
+        async with get_connection() as conn:
+            # Atomic claim: first reply to this question wins. Ordinary
+            # replies (not answering a Huume question) miss here and we
+            # return — no company/flag/rate-limit/Gemini work wasted on the
+            # common case of "just a normal reply to a normal message".
+            claimed = await conn.fetchrow(
+                """
+                UPDATE ems_events SET clarify_message_id = NULL
+                WHERE clarify_message_id = $1 AND status = 'logged'
+                RETURNING id, company_id, narrative, clarification_rounds
+                """,
+                reply_uuid,
+            )
+            if claimed is None:
+                return
+            company_id = claimed["company_id"]
+
+            if not await _ems_flag_enabled(conn, company_id):
+                return  # ems (or the company) was disabled between question and answer
+
+            rate_limited = False
+            try:
+                await check_rate_limit(str(company_id), "ems_event", 30, 3600)
+            except HTTPException:
+                rate_limited = True
+
+            if rate_limited:
+                # Over the hourly limit: fold the answer in deterministically
+                # (no Gemini, no new question) — documentation still lands.
+                updated = await apply_refinement(
+                    conn, event_id=claimed["id"], company_id=company_id,
+                    answer=content, classified={"model_ok": False},
+                    answered_by=UUID(answerer_user_id_str),
+                )
+                if updated is not None:
+                    sys_row = await _insert_system_message(
+                        conn, channel_id_str,
+                        f"\U0001F4CB Updated **{categories.category_label(updated['category'])}** event — thanks.",
+                    )
+            else:
+                question_row = await conn.fetchrow(
+                    "SELECT content FROM channel_messages WHERE id = $1", reply_uuid,
+                )
+                # The question's own text isn't stored on a dedicated column —
+                # it's recovered from the rendered system-message pill, which
+                # also carries the confirmation preamble and the "reply to
+                # this message" instruction. extract_question() strips both
+                # so neither leaks into the refinement prompt as if the
+                # reporter had said them.
+                question = extract_question(question_row["content"]) if question_row else ""
+                context = await gather_intake_context(conn, UUID(channel_id_str), reply_uuid)
+
+        if sys_row is not None:
+            # Rate-limited path already posted its reply above, on the
+            # connection that's now closed — broadcast outside it, same as
+            # every other branch, and stop here (no Gemini call to make).
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return
+        if rate_limited:
+            return  # apply_refinement returned None — promote/dismiss race
+
+        # No connection held across the Gemini call.
+        refinement_content = compose_refinement_content(claimed["narrative"], question, content)
+        classified = await classify_event(refinement_content, context)
+
+        async with get_connection() as conn:
+            updated = await apply_refinement(
+                conn, event_id=claimed["id"], company_id=company_id,
+                answer=content, classified=classified,
+                answered_by=UUID(answerer_user_id_str),
+            )
+            if updated is None:
+                return  # promote/dismiss race — silently ignored
+
+            ask_again = should_ask_again(classified, claimed["clarification_rounds"])
+            if ask_again:
+                text = question_text("\U0001F4CB Updated the event.", classified["clarify_question"])
+            else:
+                text = f"\U0001F4CB Updated **{categories.category_label(updated['category'])}** event — thanks."
+            sys_row = await _insert_system_message(conn, channel_id_str, text)
+            if ask_again:
+                await conn.execute(
+                    "UPDATE ems_events SET clarify_message_id = $1 WHERE id = $2",
+                    sys_row["id"], updated["id"],
+                )
+
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+    except Exception:
+        logger.exception("EMS clarify failed for reply to message %s", reply_to_id_str)
 
 
 async def _notify_channel_members(
@@ -876,6 +1044,23 @@ async def channel_websocket(
                             ch_uuid, user.id,
                         )
                         if is_member:
+                            if reply_uuid:
+                                # Cross-channel/bogus reply targets are dropped
+                                # silently rather than trusted: without this, a
+                                # crafted payload could quote any message UUID in
+                                # any tenant (the rp preview query below is
+                                # unscoped, so its content would leak into this
+                                # broadcast), and a nonexistent UUID would hit the
+                                # reply_to_id FK and raise past this except-free
+                                # INSERT, killing the WS receive loop. Runs only
+                                # on the is_member path — a non-member's send is
+                                # dropped below without touching the DB again.
+                                reply_target_ok = await conn.fetchval(
+                                    "SELECT EXISTS(SELECT 1 FROM channel_messages WHERE id = $1 AND channel_id = $2)",
+                                    reply_uuid, ch_uuid,
+                                )
+                                if not reply_target_ok:
+                                    reply_uuid = None
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -980,6 +1165,21 @@ async def channel_websocket(
                             if is_new_message and "huume" in mention_handles:
                                 _spawn_bg(_bg_ems_intake(
                                     str(ch_uuid), str(row["id"]), str(user.id), row["content"],
+                                ))
+
+                            # EMS clarify: a reply to an outstanding Huume
+                            # question folds the answer into its event.
+                            # _bg_ems_clarify's claim-UPDATE no-ops for
+                            # ordinary replies (one partial-unique-index
+                            # probe on ems_events.clarify_message_id), so
+                            # it's safe to fire on every new reply. Uses
+                            # row["reply_to_id"] (post channel-scope
+                            # validation above), not the raw parsed
+                            # reply_uuid, so a dropped bogus/cross-channel
+                            # target can't trigger it either.
+                            if is_new_message and row["reply_to_id"]:
+                                _spawn_bg(_bg_ems_clarify(
+                                    str(ch_uuid), str(row["reply_to_id"]), str(user.id), row["content"],
                                 ))
 
                             await manager.broadcast_message(room_key, {

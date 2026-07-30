@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle2, ExternalLink, Hash, Loader2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, Hash, HelpCircle, Loader2, XCircle } from 'lucide-react'
 import { EMS_CATEGORY_LABELS, type EmsEvent } from '../../api/events'
 
 interface EventDetailProps {
@@ -77,6 +77,12 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
           <div className="flex items-center gap-2 rounded-lg border border-w-line bg-w-surface2 px-4 py-3 text-sm text-w-dim">
             <XCircle className="w-4 h-4 shrink-0" />
             Dismissed — no further action.
+          </div>
+        )}
+        {event.status === 'logged' && event.awaiting_reply && (
+          <div className="flex items-center gap-2 rounded-lg border border-w-line bg-w-surface2 px-4 py-3 text-sm text-w-dim">
+            <HelpCircle className="w-4 h-4 shrink-0" />
+            Huume asked a follow-up in the channel — awaiting reply.
           </div>
         )}
 

@@ -42,6 +42,9 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     pendingFiles,
     setPendingFiles,
     uploading,
+    replyTo,
+    setReplyTo,
+    handleReply,
     mentionQuery,
     mentionMatches,
     inputTextareaRef,
@@ -180,6 +183,7 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
             canModerate={canModerate}
             members={channel?.members ?? []}
             onDelete={handleDeleteMessage}
+            onReply={handleReply}
           />
 
           {/* Typing indicator */}
@@ -204,6 +208,8 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
             channelName={channel?.name}
             onSend={handleSend}
             uploading={uploading}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(null)}
           />
         </div>
 

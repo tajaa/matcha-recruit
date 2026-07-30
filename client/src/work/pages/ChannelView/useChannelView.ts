@@ -54,6 +54,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   const [showAddMembers, setShowAddMembers] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [replyTo, setReplyTo] = useState<ChannelMessage | null>(null)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [mentionCursor, setMentionCursor] = useState(0)
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null)
@@ -113,6 +114,15 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
+
+  // A reply target from a previous channel must not survive a channel
+  // switch — sendMessage would carry a foreign-channel reply_to_id, which
+  // the server silently drops (see channels_ws.py's reply_uuid channel-scope
+  // check), so the message posts unthreaded while the composer still showed
+  // "Replying to…".
+  useEffect(() => {
+    setReplyTo(null)
+  }, [channelId])
 
   // Load channel data
   useEffect(() => {
@@ -195,6 +205,14 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         edited_at: null,
         client_message_id: cmid,
         pending: true,
+        reply_to_id: replyTo?.id ?? null,
+        reply_preview: replyTo
+          ? {
+              id: replyTo.id,
+              sender_name: replyTo.message_type === 'system' ? 'Huume' : replyTo.sender_name,
+              content: replyTo.content,
+            }
+          : null,
       }
       // Loopback-race guard: WS echo may arrive before this append; skip if a
       // message with our cmid is already present.
@@ -205,8 +223,14 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         if (nearBottom) setTimeout(scrollToBottom, 50)
       }
     }
-    socketRef.current?.sendMessage(channelId, content, attachments, cmid)
+    socketRef.current?.sendMessage(channelId, content, attachments, cmid, replyTo?.id)
     setInput('')
+    setReplyTo(null)
+  }
+
+  function handleReply(msg: ChannelMessage) {
+    setReplyTo(msg)
+    inputTextareaRef.current?.focus()
   }
 
   // Autocomplete candidates for the active @-token. Empty when no token open.
@@ -358,6 +382,9 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     pendingFiles,
     setPendingFiles,
     uploading,
+    replyTo,
+    setReplyTo,
+    handleReply,
     mentionQuery,
     mentionMatches,
     inputTextareaRef,

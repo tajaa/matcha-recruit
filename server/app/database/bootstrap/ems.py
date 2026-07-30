@@ -1,4 +1,9 @@
-"""bootstrap.ems — ems_events + ems_event_audit_log (mirrors alembic/versions/ems01_event_management.py)."""
+"""bootstrap.ems — ems_events + ems_event_audit_log (mirrors alembic/versions/ems01_event_management.py).
+
+clarify_message_id / clarification_rounds / uniq_ems_events_clarify back
+conversational clarification — see that migration's docstring for the full
+explanation of the atomic-claim index.
+"""
 
 
 async def create_ems(conn):
@@ -26,6 +31,8 @@ async def create_ems(conn):
             dismissed_by UUID REFERENCES users(id),
             dismissed_at TIMESTAMPTZ,
             token_usage JSONB,
+            clarify_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
+            clarification_rounds SMALLINT NOT NULL DEFAULT 0,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
@@ -37,6 +44,10 @@ async def create_ems(conn):
     await conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_ems_events_message
         ON ems_events(message_id) WHERE message_id IS NOT NULL
+    """)
+    await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uniq_ems_events_clarify
+        ON ems_events(clarify_message_id) WHERE clarify_message_id IS NOT NULL
     """)
 
     await conn.execute("""

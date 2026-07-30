@@ -66,6 +66,17 @@ export interface ChannelReaction {
   count: number
 }
 
+/** Quoted preview of the message a reply points at. Server always includes
+ *  this on a message whose reply_to_id resolves to a real, same-channel
+ *  target (see channels_ws.py's reply_uuid channel-scope check) — sender_name
+ *  falls back to 'Huume' server-side when the target is a system message. */
+export interface ReplyPreview {
+  id: string
+  sender_name: string
+  content: string
+  attachments?: ChannelAttachment[]
+}
+
 export interface ChannelMessage {
   id: string
   channel_id: string
@@ -83,6 +94,11 @@ export interface ChannelMessage {
   edited_at: string | null
   deleted_at?: string | null
   deleted_by?: string | null
+  /** Message this one is threaded as a reply to. Server accepts this on send
+   * and echoes it back on every broadcast/REST fetch alongside reply_preview
+   * — see channels_ws.py:reply_to_id / channels.py:_MSG_SELECT. */
+  reply_to_id?: string | null
+  reply_preview?: ReplyPreview | null
   /** User IDs that the server resolved from @mentions in `content`. Optional —
    * older REST-fetched messages from before the mention pipeline shipped will
    * not have this field; renderers should treat absence as "no mentions

@@ -26,6 +26,8 @@ class EmsEventOut(BaseModel):
     suggested_severity: Optional[str] = None
     status: Literal["logged", "promoted", "dismissed"]
     incident_id: Optional[UUID] = None
+    awaiting_reply: bool = False
+    clarification_rounds: int = 0
     created_at: datetime
     updated_at: datetime
 
