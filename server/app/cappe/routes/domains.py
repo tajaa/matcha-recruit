@@ -576,8 +576,9 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
         # resolves the subscription against our own tables and returns
         # "ignored" for anything it does not own (i.e. Matcha's), so an event
         # belonging to another product 200s instead of being retried forever.
-        async with get_connection() as conn:
-            result = await dispatch_billing_event(conn, event_type, obj, event_at)
+        # It takes no connection — it opens its own around each Stripe call so
+        # a slow round-trip never pins one from the pool.
+        result = await dispatch_billing_event(event_type, obj, event_at)
         return {"received": True, **result}
     except Exception:
         # Release the claim so Stripe's retry can re-process; without this a

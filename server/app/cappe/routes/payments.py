@@ -15,7 +15,11 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from app.core.services.stripe_events import CONSUMER_CAPPE_CONNECT, claim_stripe_event
+from app.core.services.stripe_events import (
+    CONSUMER_CAPPE_CONNECT,
+    claim_stripe_event,
+    release_stripe_event,
+)
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -133,6 +137,19 @@ async def payments_webhook(request: Request, background: BackgroundTasks):
     ):
         return {"received": True, "status": "duplicate"}
 
+    try:
+        return await _handle_connect_event(etype, obj, event, background)
+    except Exception:
+        # Release the claim so Stripe's retry can re-process. Without this, a
+        # transient failure between the claim and the order UPDATE (a pool
+        # timeout, a DB blip) is permanent: the retry sees the claim, returns
+        # "duplicate", and the order stays `pending` forever with no receipt —
+        # while the customer has already been charged.
+        await release_stripe_event(event_id, consumer=CONSUMER_CAPPE_CONNECT)
+        raise
+
+
+async def _handle_connect_event(etype, obj, event, background) -> dict:
     if etype == "checkout.session.completed":
         meta = obj.get("metadata") or {}
         order_id = meta.get("order_id")

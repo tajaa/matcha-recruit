@@ -73,7 +73,6 @@ def upgrade() -> None:
                        <@ ARRAY['physical', 'digital', 'service', 'booking']::TEXT[]),
             site_limit INTEGER,                       -- NULL = unlimited
             mailbox_quota_included INTEGER NOT NULL DEFAULT 0,
-            premium_design BOOLEAN NOT NULL DEFAULT false,
             features JSONB NOT NULL DEFAULT '{}'::jsonb,
 
             -- Add-on shape (meaningful on kind='addon').
@@ -139,16 +138,10 @@ def upgrade() -> None:
                 CHECK (source IN ('stripe', 'comp')),
             comped_until TIMESTAMPTZ,
             comp_reason TEXT,
-            current_period_start TIMESTAMPTZ,
             current_period_end TIMESTAMPTZ,
             trial_end TIMESTAMPTZ,
             cancel_at_period_end BOOLEAN NOT NULL DEFAULT false,
             canceled_at TIMESTAMPTZ,
-            -- Downgrades defer to the period boundary.
-            pending_plan_code VARCHAR(40) REFERENCES cappe_billing_products(code),
-            pending_price_id UUID REFERENCES cappe_billing_prices(id),
-            pending_effective_at TIMESTAMPTZ,
-            intro_price_id UUID REFERENCES cappe_billing_prices(id),
             latest_invoice_id VARCHAR(64),
             -- Out-of-order delivery guard; see the module docstring.
             stripe_event_at TIMESTAMPTZ,
@@ -235,6 +228,14 @@ def upgrade() -> None:
     )
 
     # ── cappe_accounts: billing identity + platform admin ─────────────────
+    # Widen `plan` to match `cappe_billing_products.code`. The FK below is legal
+    # across VARCHAR(20)→VARCHAR(40), so nothing complains at migration time —
+    # but the catalog could then hold a code the denormalized column cannot
+    # store, and any attempt to GRANT that plan (_materialize_plan, grant_comp,
+    # the subscription webhook) would raise "value too long". A subscription to
+    # such a plan would fail inside the webhook and Stripe would retry forever
+    # while the customer is billed.
+    op.execute("ALTER TABLE cappe_accounts ALTER COLUMN plan TYPE VARCHAR(40)")
     op.execute("ALTER TABLE cappe_accounts ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(64)")
     op.execute(
         "ALTER TABLE cappe_accounts ADD COLUMN IF NOT EXISTS "
@@ -290,43 +291,43 @@ def upgrade() -> None:
         INSERT INTO cappe_billing_products (
             code, kind, name, description, status, sort_order,
             can_sell, platform_fee_bps, allowed_fulfillment, site_limit,
-            mailbox_quota_included, premium_design, features,
+            mailbox_quota_included, features,
             unit_label, max_quantity
         ) VALUES
         (
             'free', 'plan', 'Free', 'Build and publish a site.', 'active', 0,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], 1,
-            0, false, '{}'::jsonb, 'unit', 100
+            0, , '{}'::jsonb, 'unit', 100
         ),
         (
             'creator', 'plan', 'Creator',
             'For solo professionals selling their time.', 'active', 1,
             true, 300, ARRAY['service', 'booking']::TEXT[], NULL,
-            0, true, '{"rider": true}'::jsonb, 'unit', 100
+            0, , '{"rider": true}'::jsonb, 'unit', 100
         ),
         (
             'business', 'plan', 'Business',
             'Sell services, physical and digital products.', 'active', 2,
             true, 150, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, true, '{}'::jsonb, 'unit', 100
+            0, , '{}'::jsonb, 'unit', 100
         ),
         (
             'pro', 'plan', 'Pro (legacy)',
             'Retired tier. Honoured for existing accounts, not purchasable.', 'legacy', 90,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, true, '{"rider": true}'::jsonb, 'unit', 100
+            0, , '{"rider": true}'::jsonb, 'unit', 100
         ),
         (
             'hosting', 'plan', 'Hosting (legacy)',
             'Retired tier. Honoured for existing accounts, not purchasable.', 'legacy', 91,
             true, 200, ARRAY['physical', 'digital', 'service', 'booking']::TEXT[], NULL,
-            0, false, '{}'::jsonb, 'unit', 100
+            0, , '{}'::jsonb, 'unit', 100
         ),
         (
             'mailbox', 'addon', 'Private email',
             'A mailbox on your own domain, billed per mailbox.', 'active', 10,
             false, 0, '{}'::TEXT[], NULL,
-            0, false, '{}'::jsonb, 'mailbox', 50
+            0, , '{}'::jsonb, 'mailbox', 50
         )
         ON CONFLICT (code) DO NOTHING
         """
@@ -385,8 +386,27 @@ def upgrade() -> None:
         """
     )
 
+    # ── Comp expiry sweep (seeded disabled, like every other scheduled task) ──
+    # comped_until is only meaningful if something acts on it; without this the
+    # comped tier stays materialized on cappe_accounts.plan forever.
+    op.execute(
+        """
+        INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+        VALUES (
+            'cappe_comp_expiry',
+            'Cappe Comp Expiry',
+            'Returns Cappe accounts whose comped plan has passed comped_until back to '
+            'the free plan. Skips accounts that have since started paying. Default off.',
+            false,
+            1
+        )
+        ON CONFLICT (task_key) DO NOTHING
+        """
+    )
+
 
 def downgrade() -> None:
+    op.execute("DELETE FROM scheduler_settings WHERE task_key = 'cappe_comp_expiry'")
     op.execute("ALTER TABLE cappe_accounts DROP CONSTRAINT IF EXISTS fk_cappe_accounts_plan")
     # Any account on a tier the old CHECK did not know about must be folded back
     # before the narrower constraint can be restored.
@@ -400,6 +420,7 @@ def downgrade() -> None:
             CHECK (plan IN ('free', 'hosting', 'pro', 'business'))
         """
     )
+    op.execute("ALTER TABLE cappe_accounts ALTER COLUMN plan TYPE VARCHAR(20)")
 
     op.execute("DROP INDEX IF EXISTS uq_cappe_accounts_stripe_customer")
     op.execute("ALTER TABLE cappe_accounts DROP COLUMN IF EXISTS plan_override_until")

@@ -80,7 +80,6 @@ class Entitlements:
     allowed_fulfillment: frozenset[str]
     site_limit: Optional[int]  # None = unlimited
     mailbox_quota_included: int
-    premium_design: bool
     features: dict[str, Any] = field(default_factory=dict)
 
     def has(self, feature: str) -> bool:
@@ -116,9 +115,6 @@ def _legacy_fallback(plan_code: str) -> Entitlements:
         allowed_fulfillment=ALL_FULFILLMENT,
         site_limit=1 if plan_code == "free" else None,
         mailbox_quota_included=0,
-        # Mirrors design_gate.PREMIUM_PLANS so a fallback can't silently revoke
-        # premium design from an account that has it today.
-        premium_design=str(plan_code or "").lower() in {"pro", "business", "creator"},
         features={"rider": str(plan_code or "").lower() in {"pro", "creator"}},
     )
 
@@ -153,7 +149,7 @@ async def get_catalog(*, conn=None, force: bool = False) -> dict[str, dict]:
                 """
                 SELECT code, kind, name, status, can_sell, platform_fee_bps,
                        allowed_fulfillment, site_limit, mailbox_quota_included,
-                       premium_design, features, unit_label, max_quantity,
+                       features, unit_label, max_quantity,
                        sort_order, stripe_product_id
                   FROM cappe_billing_products
                 """
@@ -170,15 +166,30 @@ async def get_catalog(*, conn=None, force: bool = False) -> dict[str, dict]:
     return catalog
 
 
-def _entitlements_from_row(row: dict) -> Entitlements:
-    features = row.get("features") or {}
-    if isinstance(features, str):  # asyncpg returns JSONB as str without a codec
+def decode_features(value: Any) -> dict[str, Any]:
+    """Decode a JSONB `features` column.
+
+    asyncpg hands JSONB back as a **str** — no `set_type_codec('jsonb', …)` is
+    registered anywhere in `app/database/` — so every consumer must decode it.
+    Centralized because forgetting is SILENT: `isinstance(value, dict)` simply
+    reads False, the caller falls back to `{}`, and a plan's features vanish
+    from the API with no error anywhere.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
         import json
 
         try:
-            features = json.loads(features)
+            decoded = json.loads(value)
         except ValueError:
-            features = {}
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
+
+
+def _entitlements_from_row(row: dict) -> Entitlements:
+    features = decode_features(row.get("features"))
     return Entitlements(
         plan_code=row["code"],
         plan_name=row.get("name") or row["code"],
@@ -187,8 +198,7 @@ def _entitlements_from_row(row: dict) -> Entitlements:
         allowed_fulfillment=frozenset(row.get("allowed_fulfillment") or ()),
         site_limit=row.get("site_limit"),
         mailbox_quota_included=int(row.get("mailbox_quota_included") or 0),
-        premium_design=bool(row.get("premium_design")),
-        features=features if isinstance(features, dict) else {},
+        features=features,
     )
 
 
@@ -205,11 +215,6 @@ async def resolve_entitlements(plan_code: Optional[str], *, conn=None) -> Entitl
             logger.warning("cappe plan %r missing from billing catalog", code)
         return _legacy_fallback(code)
     return _entitlements_from_row(row)
-
-
-async def resolve_for_account(account, *, conn=None) -> Entitlements:
-    """Convenience wrapper for a CappeAccount-shaped object."""
-    return await resolve_entitlements(getattr(account, "plan", None), conn=conn)
 
 
 # ── Take rate ─────────────────────────────────────────────────────────────

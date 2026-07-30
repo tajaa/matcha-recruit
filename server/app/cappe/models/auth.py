@@ -35,10 +35,10 @@ class CappeAccount(BaseModel):
     # Platform staff flag for the in-Cappe admin surface (plans, prices, take
     # rates). Not a tenant-facing capability — defaults false for everyone.
     is_platform_admin: bool = False
-    # Live subscription status, when there is one ('trialing'/'active'/
-    # 'past_due'/…). None on free accounts. Carried here so the billing UI can
-    # render without a second round-trip.
-    subscription_status: Optional[str] = None
+    # NOTE: subscription status is deliberately NOT carried here. It would mean
+    # joining cappe_subscriptions in the auth dependency that every request
+    # passes through, which turns a missing migration into a total outage.
+    # GET /billing/subscription serves it instead.
 
 
 class CappeTokenResponse(BaseModel):

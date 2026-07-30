@@ -28,7 +28,7 @@ from ..models.cappe import (
     CappePriceOut,
 )
 from ..services import billing as billing_svc
-from ..services.entitlements import invalidate_catalog_cache
+from ..services.entitlements import decode_features, invalidate_catalog_cache
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger(__name__)
@@ -37,9 +37,16 @@ router = APIRouter()
 
 _EDITABLE = (
     "name", "description", "status", "sort_order", "can_sell", "platform_fee_bps",
-    "allowed_fulfillment", "site_limit", "mailbox_quota_included", "premium_design",
+    "allowed_fulfillment", "site_limit", "mailbox_quota_included",
     "features", "unit_label", "max_quantity",
 )
+
+# The only editable columns that are actually nullable. Every field on
+# CappePlanUpsert is Optional (that is how PATCH semantics are expressed), and
+# `model_fields_set` counts an explicitly-sent `null` as sent — so without this
+# check, `{"can_sell": null}` builds `can_sell = NULL` and surfaces a raw
+# NotNullViolationError as an opaque 500 on a money-knob endpoint.
+_NULLABLE_FIELDS = {"description", "site_limit"}
 
 
 async def _audit(conn, actor: CappeAccount, action: str, target: str, payload: dict) -> None:
@@ -69,7 +76,14 @@ async def list_products(
     by_code: dict[str, list] = {}
     for p in prices:
         by_code.setdefault(p["product_code"], []).append(dict(p))
-    return [{**dict(r), "prices": by_code.get(r["code"], [])} for r in rows]
+    # `features` is decoded here too — returning it raw would hand the admin UI
+    # a JSON *string* for the same column the tenant catalog returns as an
+    # object, i.e. two shapes for one field.
+    return [
+        {**dict(r), "features": decode_features(r["features"]),
+         "prices": by_code.get(r["code"], [])}
+        for r in rows
+    ]
 
 
 @router.post("/admin/billing/products", status_code=status.HTTP_201_CREATED)
@@ -89,17 +103,16 @@ async def create_product(
             INSERT INTO cappe_billing_products
                 (code, kind, name, description, status, sort_order, can_sell,
                  platform_fee_bps, allowed_fulfillment, site_limit,
-                 mailbox_quota_included, premium_design, features, unit_label, max_quantity)
+                 mailbox_quota_included, features, unit_label, max_quantity)
             VALUES ($1,$2,$3,$4,COALESCE($5,'active'),COALESCE($6,0),COALESCE($7,false),
                     COALESCE($8,200),COALESCE($9,'{}'::text[]),$10,
-                    COALESCE($11,0),COALESCE($12,false),COALESCE($13,'{}'::jsonb),
-                    COALESCE($14,'unit'),COALESCE($15,100))
+                    COALESCE($11,0),COALESCE($12,'{}'::jsonb),
+                    COALESCE($13,'unit'),COALESCE($14,100))
             RETURNING *
             """,
             body.code, body.kind, body.name, body.description, body.status,
             body.sort_order, body.can_sell, body.platform_fee_bps,
             body.allowed_fulfillment, body.site_limit, body.mailbox_quota_included,
-            body.premium_design,
             json.dumps(body.features) if body.features is not None else None,
             body.unit_label, body.max_quantity,
         )
@@ -119,6 +132,13 @@ async def update_product(
     sent = [f for f in _EDITABLE if f in body.model_fields_set]
     if not sent:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+
+    nulled = [f for f in sent if getattr(body, f) is None and f not in _NULLABLE_FIELDS]
+    if nulled:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"These fields cannot be null: {', '.join(sorted(nulled))}",
+        )
 
     sets, args = [], []
     for i, field in enumerate(sent, start=2):
@@ -174,17 +194,39 @@ async def create_price(
     grandfathered by default, and migrating them is a separate, explicit action.
     That is the safe default: an admin typo here should not re-price the book.
     """
-    if body.role == "intro" and body.interval != "once":
+    # Validate BOTH directions of the intro/intro_days pairing. Only checking
+    # the intro direction lets `role='standard'` through with intro_days set,
+    # which violates `CONSTRAINT cappe_prices_intro_days
+    # CHECK ((role = 'intro') = (intro_days IS NOT NULL))` at INSERT time —
+    # after the Stripe Price has already been minted.
+    if body.role == "intro":
+        if body.interval != "once":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An intro price must be one-time ('once').",
+            )
+        if not body.intro_days:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An intro price needs intro_days.",
+            )
+    elif body.intro_days is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An intro price must be one-time ('once').",
-        )
-    if body.role == "intro" and not body.intro_days:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="An intro price needs intro_days.",
+            detail="intro_days is only valid on an intro price.",
         )
 
+    # Reserve the DB row FIRST, then mint the Stripe Price against its id.
+    #
+    # Minting first was wedge-able: the `lookup_key` was derived from COUNT(*),
+    # so if the INSERT failed the Stripe Price (and its globally-unique
+    # lookup_key) survived while the count did not advance — retrying computed
+    # the identical key, Stripe rejected it as a duplicate, and that
+    # (product, role, interval) could never be priced again without a SQL
+    # console. Keying on the row's own UUID means every attempt is unique.
+    #
+    # The reserved row is created NOT current and with a NULL stripe_price_id,
+    # so it is invisible to `resolve_price` until the Stripe call succeeds.
     async with get_connection() as conn:
         product = await conn.fetchrow(
             "SELECT code, name, description, stripe_product_id FROM cappe_billing_products "
@@ -193,15 +235,22 @@ async def create_price(
         )
         if product is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown product")
-        version = await conn.fetchval(
-            "SELECT COUNT(*) + 1 FROM cappe_billing_prices WHERE product_code = $1 "
-            "AND role = $2 AND interval = $3",
-            code, body.role, body.interval,
-        )
         stripe_product_id = product["stripe_product_id"]
 
+        pending_id = await conn.fetchval(
+            """
+            INSERT INTO cappe_billing_prices
+                (product_code, role, interval, unit_amount_cents, currency,
+                 intro_days, is_current, active)
+            VALUES ($1,$2,$3,$4,$5,$6,false,false)
+            RETURNING id
+            """,
+            code, body.role, body.interval, body.unit_amount_cents,
+            body.currency.upper(), body.intro_days,
+        )
+
     cs = get_cappe_stripe()
-    lookup_key = f"cappe_{code}_{body.role}_{body.interval}_v{version}"
+    lookup_key = f"cappe_{code}_{body.role}_{body.interval}_{str(pending_id).replace('-', '')[:12]}"
     try:
         if not stripe_product_id:
             stripe_product_id = await cs.ensure_product(
@@ -215,6 +264,9 @@ async def create_price(
             lookup_key=lookup_key,
         )
     except CappeStripeError as exc:
+        # Drop the reservation so it cannot accumulate as an unusable orphan.
+        async with get_connection() as conn:
+            await conn.execute("DELETE FROM cappe_billing_prices WHERE id = $1", pending_id)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Stripe: {exc}"
         ) from exc
@@ -238,14 +290,12 @@ async def create_price(
             )
             row = await conn.fetchrow(
                 """
-                INSERT INTO cappe_billing_prices
-                    (product_code, role, interval, unit_amount_cents, currency,
-                     intro_days, stripe_price_id, lookup_key, is_current, active)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,true)
+                UPDATE cappe_billing_prices
+                   SET stripe_price_id = $2, lookup_key = $3, is_current = true, active = true
+                 WHERE id = $1
                 RETURNING *
                 """,
-                code, body.role, body.interval, body.unit_amount_cents,
-                body.currency.upper(), body.intro_days, stripe_price_id, lookup_key,
+                pending_id, stripe_price_id, lookup_key,
             )
             await _audit(conn, admin, "price.create", code, {
                 "lookup_key": lookup_key,
@@ -342,13 +392,16 @@ async def comp_account(
         if not account:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown account")
 
-        async with conn.transaction():
-            await billing_svc.grant_comp(
-                conn, account_id=account_id, plan_code=body.plan_code,
-                until=body.until, reason=body.reason,
-            )
-            await _audit(conn, admin, "account.comp", str(account_id),
-                         body.model_dump(mode="json"))
+        try:
+            async with conn.transaction():
+                await billing_svc.grant_comp(
+                    conn, account_id=account_id, plan_code=body.plan_code,
+                    until=body.until, reason=body.reason,
+                )
+                await _audit(conn, admin, "account.comp", str(account_id),
+                             body.model_dump(mode="json"))
+        except billing_svc.LiveSubscriptionExists as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"status": "ok", "plan_code": body.plan_code}
 
 

@@ -38,21 +38,17 @@ async def require_cappe_account(
         )
 
     async with get_connection() as conn:
-        # The LEFT JOIN picks up live subscription status for the billing UI.
-        # It rides the partial unique index on (account_id) WHERE status is
-        # live, so it stays a single indexed lookup rather than a second query.
+        # Deliberately does NOT join cappe_subscriptions. Every authenticated
+        # Cappe request resolves through here, so joining the newest table would
+        # make the whole product 500 — login flows and the tenant renderer
+        # included — if the code ever ran ahead of its migration. Subscription
+        # status is a billing-UI detail; it is served by GET /billing/subscription,
+        # which already loads the row. Coupling auth to it buys nothing and risks
+        # a total outage.
         row = await conn.fetchrow(
-            """
-            SELECT a.id, a.email, a.name, a.plan, a.status, a.account_type,
-                   a.tokens_valid_after, a.is_platform_admin,
-                   s.status AS subscription_status
-              FROM cappe_accounts a
-              LEFT JOIN cappe_subscriptions s
-                     ON s.account_id = a.id
-                    AND s.status IN ('trialing', 'active', 'past_due',
-                                     'incomplete', 'unpaid', 'paused')
-             WHERE a.id = $1
-            """,
+            "SELECT id, email, name, plan, status, account_type, "
+            "tokens_valid_after, is_platform_admin "
+            "FROM cappe_accounts WHERE id = $1",
             account_id,
         )
 
@@ -78,7 +74,6 @@ async def require_cappe_account(
         status=row["status"],
         account_type=row["account_type"],
         is_platform_admin=bool(row["is_platform_admin"]),
-        subscription_status=row["subscription_status"],
     )
 
 

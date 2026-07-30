@@ -15,6 +15,7 @@ from ..models.cappe import (
     CappeAddon,
     CappeAddonQuantityRequest,
     CappeCancelRequest,
+    CappeChangePlanRequest,
     CappeCatalog,
     CappeCheckoutRequest,
     CappeCheckoutResponse,
@@ -26,6 +27,7 @@ from ..models.cappe import (
     CappeSubscriptionAddon,
 )
 from ..services import billing as billing_svc
+from ..services.entitlements import decode_features, mailbox_quota
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger(__name__)
@@ -74,8 +76,7 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
                 allowed_fulfillment=list(p["allowed_fulfillment"] or []),
                 site_limit=p["site_limit"],
                 mailbox_quota_included=p["mailbox_quota_included"],
-                premium_design=p["premium_design"],
-                features=p["features"] if isinstance(p["features"], dict) else {},
+                features=decode_features(p["features"]),
                 prices=_prices_for(prices, p["code"]),
                 intro_price_cents=intro["unit_amount_cents"] if intro else None,
                 intro_days=intro["intro_days"] if intro else None,
@@ -89,19 +90,22 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
     return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
 
 
-@router.get("/billing/subscription", response_model=CappeSubscription | None)
-async def get_subscription(account: CappeAccount = Depends(require_cappe_account)):
+async def _subscription_response(account_id) -> CappeSubscription | None:
+    """The tenant-facing view of a subscription. One builder, because three
+    endpoints return this shape and they must not drift."""
     async with get_connection() as conn:
-        sub = await billing_svc.current_subscription(conn, account.id)
+        sub = await billing_svc.current_subscription(conn, account_id)
         if not sub:
             return None
         addons = await billing_svc.subscription_addons(conn, sub["id"])
+        quota = await mailbox_quota(account_id, conn=conn)
     return CappeSubscription(
         plan_code=sub["plan_code"], plan_name=sub.get("plan_name"),
         interval=sub["interval"], status=sub["status"], source=sub["source"],
         current_period_end=sub["current_period_end"], trial_end=sub["trial_end"],
         cancel_at_period_end=sub["cancel_at_period_end"],
         comped_until=sub["comped_until"],
+        mailbox_quota=quota,
         addons=[
             CappeSubscriptionAddon(
                 code=a["product_code"], name=a["name"],
@@ -110,6 +114,11 @@ async def get_subscription(account: CappeAccount = Depends(require_cappe_account
             for a in addons
         ],
     )
+
+
+@router.get("/billing/subscription", response_model=CappeSubscription | None)
+async def get_subscription(account: CappeAccount = Depends(require_cappe_account)):
+    return await _subscription_response(account.id)
 
 
 @router.post("/billing/checkout", response_model=CappeCheckoutResponse)
@@ -135,7 +144,10 @@ async def start_checkout(
         if existing and existing["source"] == "stripe":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="You already have an active subscription. Change your plan instead.",
+                detail=(
+                    "You already have an active subscription. "
+                    "Use POST /billing/change-plan to switch plan or interval."
+                ),
             )
 
         price = await billing_svc.resolve_price(conn, body.plan_code, body.interval)
@@ -158,9 +170,10 @@ async def start_checkout(
                 intro_price_id = intro["stripe_price_id"]
                 intro_days = intro["intro_days"]
 
-        customer_id = await billing_svc.get_or_create_customer(
-            conn, account.id, account.email
-        )
+    # Outside the connection block on purpose — this may create a Stripe
+    # Customer, and holding a pooled connection across that network call pins
+    # one of ten for its whole duration.
+    customer_id = await billing_svc.get_or_create_customer(account.id, account.email)
 
     try:
         session = await get_cappe_stripe().create_subscription_checkout_session(
@@ -290,23 +303,95 @@ async def set_addon_quantity(
             await billing_svc.sync_subscription(
                 conn, account_id=account.id, subscription=fresh
             )
-        sub = await billing_svc.current_subscription(conn, account.id)
-        addons = await billing_svc.subscription_addons(conn, sub["id"]) if sub else []
+    return await _subscription_response(account.id)
 
-    return CappeSubscription(
-        plan_code=sub["plan_code"], plan_name=sub.get("plan_name"),
-        interval=sub["interval"], status=sub["status"], source=sub["source"],
-        current_period_end=sub["current_period_end"], trial_end=sub["trial_end"],
-        cancel_at_period_end=sub["cancel_at_period_end"],
-        comped_until=sub["comped_until"],
-        addons=[
-            CappeSubscriptionAddon(
-                code=a["product_code"], name=a["name"],
-                unit_label=a["unit_label"], quantity=a["quantity"],
+
+@router.post("/billing/change-plan", response_model=CappeSubscription)
+async def change_plan(
+    body: CappeChangePlanRequest, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Move a live subscription to a different plan and/or billing interval.
+
+    Prorated immediately in both directions. Entitlements follow Stripe's own
+    view of the subscription rather than this response: the sync below re-reads
+    it, and `payment_behavior='pending_if_incomplete'` means an upgrade whose
+    proration charge fails does not silently grant the higher tier.
+    """
+    async with get_connection() as conn:
+        sub = await billing_svc.current_subscription(conn, account.id)
+        if not sub or sub["source"] != "stripe" or not sub["stripe_subscription_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active subscription to change. Subscribe first.",
             )
-            for a in addons
-        ],
-    )
+        product = await conn.fetchrow(
+            "SELECT code, status, kind FROM cappe_billing_products WHERE code = $1",
+            body.plan_code,
+        )
+        if product is None or product["kind"] != "plan":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan")
+        if product["status"] != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That plan is no longer available.",
+            )
+        if sub["plan_code"] == body.plan_code and sub["interval"] == body.interval:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="You are already on that plan and interval.",
+            )
+
+        price = await billing_svc.resolve_price(conn, body.plan_code, body.interval)
+        if price is None or not price["stripe_price_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Billing is not configured for this plan yet.",
+            )
+        plan_item = await conn.fetchrow(
+            """
+            SELECT i.stripe_item_id
+              FROM cappe_subscription_items i
+              JOIN cappe_billing_products p ON p.code = i.product_code
+             WHERE i.subscription_id = $1 AND p.kind = 'plan'
+             LIMIT 1
+            """,
+            sub["id"],
+        )
+        if plan_item is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Subscription is still syncing — try again in a moment.",
+            )
+        stripe_sub_id = sub["stripe_subscription_id"]
+        interval_changed = sub["interval"] != body.interval
+        was_trialing = sub["status"] == "trialing"
+
+    try:
+        await get_cappe_stripe().change_subscription_price(
+            subscription_id=stripe_sub_id,
+            item_id=plan_item["stripe_item_id"],
+            new_price_id=price["stripe_price_id"],
+            # Re-anchor only when the billing cadence itself changed; a same-
+            # interval tier change should keep the customer's existing renewal
+            # date rather than silently moving it.
+            anchor_now=interval_changed,
+            # Someone upgrading mid-intro starts paying now rather than riding
+            # the $1 trial at the higher tier.
+            end_trial=was_trialing,
+        )
+        fresh = await get_cappe_stripe().retrieve_subscription(stripe_sub_id)
+    except CappeStripeError as exc:
+        logger.error("cappe: plan change failed for %s: %s", account.id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not change plan"
+        ) from exc
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await billing_svc.sync_subscription(
+                conn, account_id=account.id, subscription=fresh
+            )
+    return await _subscription_response(account.id)
 
 
 @router.post("/billing/cancel")

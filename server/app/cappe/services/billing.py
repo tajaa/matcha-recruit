@@ -23,15 +23,16 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from asyncpg.exceptions import UniqueViolationError
+
 from app.core.services.stripe_service import extract_current_period_end
+
+from app.database import get_connection
 
 from .entitlements import ENTITLED_SUBSCRIPTION_STATUSES, invalidate_catalog_cache
 from .stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger(__name__)
-
-# Statuses that mean "this account no longer has the tier it paid for".
-TERMINAL_STATUSES = frozenset({"canceled", "unpaid", "incomplete_expired"})
 
 FREE_PLAN_CODE = "free"
 
@@ -52,32 +53,41 @@ def _ts(value: Optional[int]) -> Optional[datetime]:
 
 # ── Customer ──────────────────────────────────────────────────────────────
 
-async def get_or_create_customer(conn, account_id: UUID, email: str) -> str:
+async def get_or_create_customer(account_id: UUID, email: str) -> str:
     """The account's Stripe Customer, creating one if needed.
 
     Account-level, unlike the pre-existing per-domain `cappe_domains.
     stripe_customer_id` — a tenant who bought a domain and then subscribed used
     to end up with two unrelated Customers and no single billing identity.
+
+    Manages its own connections and takes none from the caller, deliberately:
+    the `stripe.Customer.create` in the middle is a network call, and holding a
+    pooled connection across it pins one of ten for the whole round-trip. This
+    is the convention `commerce.create_public_order` already documents.
     """
-    existing = await conn.fetchval(
-        "SELECT stripe_customer_id FROM cappe_accounts WHERE id = $1", account_id
-    )
+    async with get_connection() as conn:
+        existing = await conn.fetchval(
+            "SELECT stripe_customer_id FROM cappe_accounts WHERE id = $1", account_id
+        )
     if existing:
         return existing
 
+    # No connection held here.
     customer_id = await get_cappe_stripe().ensure_customer(
         email=email, account_id=str(account_id)
     )
-    # Only claim it if nobody raced us; the partial unique index would reject a
-    # second account taking the same customer anyway.
-    await conn.execute(
-        "UPDATE cappe_accounts SET stripe_customer_id = $1, updated_at = NOW() "
-        "WHERE id = $2 AND stripe_customer_id IS NULL",
-        customer_id, account_id,
-    )
-    return await conn.fetchval(
-        "SELECT stripe_customer_id FROM cappe_accounts WHERE id = $1", account_id
-    ) or customer_id
+
+    async with get_connection() as conn:
+        # Only claim it if nobody raced us; the partial unique index would reject
+        # a second account taking the same customer anyway.
+        await conn.execute(
+            "UPDATE cappe_accounts SET stripe_customer_id = $1, updated_at = NOW() "
+            "WHERE id = $2 AND stripe_customer_id IS NULL",
+            customer_id, account_id,
+        )
+        return await conn.fetchval(
+            "SELECT stripe_customer_id FROM cappe_accounts WHERE id = $1", account_id
+        ) or customer_id
 
 
 # ── Reads ─────────────────────────────────────────────────────────────────
@@ -131,17 +141,34 @@ async def intro_eligible(conn, account_id: UUID) -> bool:
     return not prior
 
 
-async def resolve_price(conn, product_code: str, interval: str, role: str = "standard"):
-    """The current Price row for a product/interval, or None."""
+DEFAULT_CURRENCY = "USD"
+
+
+async def resolve_price(
+    conn,
+    product_code: str,
+    interval: str,
+    role: str = "standard",
+    currency: str = DEFAULT_CURRENCY,
+):
+    """The current Price row for a product/interval/currency, or None.
+
+    `currency` is part of the lookup, not an afterthought: `uq_cappe_price_current`
+    is keyed `(product_code, role, interval, currency) WHERE is_current`, so the
+    schema explicitly permits one current price per currency. Filtering on
+    product/interval/role alone and taking the newest row would silently start
+    charging every customer in whichever currency was added last.
+    """
     return await conn.fetchrow(
         """
         SELECT id, stripe_price_id, unit_amount_cents, currency, intro_days
           FROM cappe_billing_prices
-         WHERE product_code = $1 AND interval = $2 AND role = $3 AND is_current
+         WHERE product_code = $1 AND interval = $2 AND role = $3
+           AND currency = $4 AND is_current
          ORDER BY created_at DESC
          LIMIT 1
         """,
-        product_code, interval, role,
+        product_code, interval, role, currency.upper(),
     )
 
 
@@ -160,6 +187,28 @@ def effective_plan_code(status: str, plan_code: str) -> str:
 
 
 async def _materialize_plan(conn, account_id: UUID, plan_code: str) -> None:
+    """Write the effective tier onto the account.
+
+    A downgrade to free defers to a live, unexpired comp. Without that, ANY
+    later `customer.subscription.*` for an unrelated or long-cancelled Stripe
+    subscription on the account would resolve to `free` and silently revoke an
+    active comp, with nothing to notice it by.
+    """
+    if plan_code == FREE_PLAN_CODE:
+        comp = await conn.fetchrow(
+            """
+            SELECT plan_code FROM cappe_subscriptions
+             WHERE account_id = $1 AND source = 'comp'
+               AND status IN ('trialing','active','past_due')
+               AND (comped_until IS NULL OR comped_until > NOW())
+             ORDER BY created_at DESC
+             LIMIT 1
+            """,
+            account_id,
+        )
+        if comp is not None:
+            plan_code = comp["plan_code"]
+
     await conn.execute(
         "UPDATE cappe_accounts SET plan = $1, updated_at = NOW() "
         "WHERE id = $2 AND plan IS DISTINCT FROM $1",
@@ -272,21 +321,59 @@ async def sync_subscription(
             values["stripe_event_at"],
         )
     else:
-        sub_id = await conn.fetchval(
+        # A real paid subscription supersedes any live comp on the account.
+        # Without this the INSERT below violates `uq_cappe_sub_live` (one live
+        # row per account, regardless of source) — and because that happens
+        # inside the webhook, Stripe would retry the event forever while the
+        # customer is billed and never receives the plan.
+        await conn.execute(
             """
-            INSERT INTO cappe_subscriptions
-                (account_id, stripe_subscription_id, stripe_customer_id, plan_code,
-                 price_id, interval, status, current_period_end, trial_end,
-                 cancel_at_period_end, canceled_at, latest_invoice_id, stripe_event_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-            RETURNING id
+            UPDATE cappe_subscriptions
+               SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
+             WHERE account_id = $1 AND source = 'comp'
+               AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')
             """,
-            values["account_id"], values["stripe_subscription_id"],
-            values["stripe_customer_id"], values["plan_code"], values["price_id"],
-            values["interval"], values["status"], values["current_period_end"],
-            values["trial_end"], values["cancel_at_period_end"], values["canceled_at"],
-            values["latest_invoice_id"], values["stripe_event_at"],
+            account_id,
         )
+        try:
+            sub_id = await conn.fetchval(
+                """
+                INSERT INTO cappe_subscriptions
+                    (account_id, stripe_subscription_id, stripe_customer_id, plan_code,
+                     price_id, interval, status, current_period_end, trial_end,
+                     cancel_at_period_end, canceled_at, latest_invoice_id, stripe_event_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                RETURNING id
+                """,
+                values["account_id"], values["stripe_subscription_id"],
+                values["stripe_customer_id"], values["plan_code"], values["price_id"],
+                values["interval"], values["status"], values["current_period_end"],
+                values["trial_end"], values["cancel_at_period_end"], values["canceled_at"],
+                values["latest_invoice_id"], values["stripe_event_at"],
+            )
+        except UniqueViolationError:
+            # Another LIVE Stripe subscription already exists for this account —
+            # the double-checkout race (two tabs both pass start_checkout's
+            # guard, because that guard reads a row only the webhook creates).
+            # Both subscriptions are real and the customer is being billed twice.
+            #
+            # Cancel the one we are processing (the later arrival) and report
+            # handled, so Stripe stops retrying. Raising instead would leave the
+            # event retrying for days while the double billing continues.
+            logger.error(
+                "cappe: duplicate live subscription for account %s; cancelling %s",
+                account_id, stripe_sub_id,
+            )
+            try:
+                await get_cappe_stripe().cancel_subscription(
+                    stripe_sub_id, at_period_end=False
+                )
+            except CappeStripeError as exc:
+                logger.error(
+                    "cappe: could not cancel duplicate subscription %s: %s — "
+                    "MANUAL REFUND REQUIRED", stripe_sub_id, exc,
+                )
+            return None
 
     # Items are a pure projection — rebuild wholesale so a removed add-on
     # disappears and a quantity change cannot drift from what Stripe bills.
@@ -325,9 +412,13 @@ async def _account_for_subscription(conn, stripe_sub_id: str) -> Optional[UUID]:
 
 # ── Webhook handlers ──────────────────────────────────────────────────────
 
-async def handle_checkout_completed(conn, session: dict, event_at: Optional[datetime]) -> dict:
+async def handle_checkout_completed(session: dict, event_at: Optional[datetime]) -> dict:
     """A subscription Checkout finished. Read the subscription back from Stripe
-    (the session alone lacks item ids) and record it."""
+    (the session alone lacks item ids) and record it.
+
+    Opens its own connections around the Stripe call rather than borrowing the
+    webhook's, so a slow Stripe round-trip never pins a pooled connection.
+    """
     account_id = session.get("metadata", {}).get("account_id") or session.get("client_reference_id")
     stripe_sub_id = session.get("subscription")
     if not account_id or not stripe_sub_id:
@@ -335,51 +426,60 @@ async def handle_checkout_completed(conn, session: dict, event_at: Optional[date
 
     account_uuid = UUID(str(account_id))
     if session.get("customer"):
-        await conn.execute(
-            "UPDATE cappe_accounts SET stripe_customer_id = COALESCE(stripe_customer_id, $1), "
-            "updated_at = NOW() WHERE id = $2",
-            session["customer"], account_uuid,
-        )
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE cappe_accounts SET stripe_customer_id = COALESCE(stripe_customer_id, $1), "
+                "updated_at = NOW() WHERE id = $2",
+                session["customer"], account_uuid,
+            )
 
+    # No connection held across this.
     try:
         sub = await get_cappe_stripe().retrieve_subscription(stripe_sub_id)
     except CappeStripeError as exc:
         logger.error("cappe: could not retrieve subscription %s: %s", stripe_sub_id, exc)
         raise
 
-    await sync_subscription(conn, account_id=account_uuid, subscription=sub, event_at=event_at)
-
-    if str(session.get("metadata", {}).get("intro")) == "1":
-        # PK makes this idempotent under Stripe retries.
-        await conn.execute(
-            """
-            INSERT INTO cappe_intro_redemptions (account_id, stripe_subscription_id)
-            VALUES ($1, $2) ON CONFLICT (account_id) DO NOTHING
-            """,
-            account_uuid, stripe_sub_id,
-        )
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await sync_subscription(
+                conn, account_id=account_uuid, subscription=sub, event_at=event_at
+            )
+            if str(session.get("metadata", {}).get("intro")) == "1":
+                # PK makes this idempotent under Stripe retries.
+                await conn.execute(
+                    """
+                    INSERT INTO cappe_intro_redemptions (account_id, stripe_subscription_id)
+                    VALUES ($1, $2) ON CONFLICT (account_id) DO NOTHING
+                    """,
+                    account_uuid, stripe_sub_id,
+                )
     return {"status": "ok"}
 
 
-async def handle_subscription_event(conn, subscription: dict, event_at: Optional[datetime]) -> dict:
+async def handle_subscription_event(subscription: dict, event_at: Optional[datetime]) -> dict:
     """`customer.subscription.created|updated|deleted`."""
     stripe_sub_id = subscription.get("id")
-    account_id = await _account_for_subscription(conn, stripe_sub_id) if stripe_sub_id else None
-    if account_id is None:
-        # Not a Cappe subscription (core/Matcha owns it, or we never saw the
-        # checkout). Ignoring is correct — and is why this dispatcher must not
-        # route on metadata, which Stripe does not reliably inherit onto every
-        # downstream object.
+    if not stripe_sub_id:
         return {"status": "ignored"}
 
-    await sync_subscription(
-        conn, account_id=account_id, subscription=subscription, event_at=event_at
-    )
+    async with get_connection() as conn:
+        account_id = await _account_for_subscription(conn, stripe_sub_id)
+        if account_id is None:
+            # Not a Cappe subscription (core/Matcha owns it, or we never saw the
+            # checkout). Ignoring is correct — and is why this dispatcher must
+            # not route on metadata, which Stripe does not reliably inherit onto
+            # every downstream object.
+            return {"status": "ignored"}
+        async with conn.transaction():
+            await sync_subscription(
+                conn, account_id=account_id, subscription=subscription, event_at=event_at
+            )
     return {"status": "ok"}
 
 
 async def handle_invoice_event(
-    conn, invoice: dict, *, paid: bool, event_at: Optional[datetime]
+    invoice: dict, *, paid: bool, event_at: Optional[datetime]
 ) -> dict:
     """`invoice.paid` / `invoice.payment_failed`.
 
@@ -391,30 +491,40 @@ async def handle_invoice_event(
     stripe_sub_id = invoice.get("subscription")
     if not isinstance(stripe_sub_id, str):
         return {"status": "ignored"}
-    account_id = await _account_for_subscription(conn, stripe_sub_id)
+
+    async with get_connection() as conn:
+        account_id = await _account_for_subscription(conn, stripe_sub_id)
     if account_id is None:
         return {"status": "ignored"}
 
+    # No connection held across this.
     try:
         sub = await get_cappe_stripe().retrieve_subscription(stripe_sub_id)
     except CappeStripeError as exc:
         logger.error("cappe: could not retrieve subscription %s: %s", stripe_sub_id, exc)
         raise
 
-    await sync_subscription(conn, account_id=account_id, subscription=sub, event_at=event_at)
-    await conn.execute(
-        "UPDATE cappe_subscriptions SET latest_invoice_id = $1, updated_at = NOW() "
-        "WHERE stripe_subscription_id = $2",
-        invoice.get("id"), stripe_sub_id,
-    )
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await sync_subscription(
+                conn, account_id=account_id, subscription=sub, event_at=event_at
+            )
+            await conn.execute(
+                "UPDATE cappe_subscriptions SET latest_invoice_id = $1, updated_at = NOW() "
+                "WHERE stripe_subscription_id = $2",
+                invoice.get("id"), stripe_sub_id,
+            )
     logger.info(
         "cappe: invoice %s for %s (paid=%s)", invoice.get("id"), stripe_sub_id, paid
     )
     return {"status": "ok"}
 
 
-async def dispatch_billing_event(conn, event_type: str, obj: dict, event_at: Optional[datetime]) -> dict:
+async def dispatch_billing_event(event_type: str, obj: dict, event_at: Optional[datetime]) -> dict:
     """Route a platform Stripe event to the right subscription handler.
+
+    Takes no connection: each handler opens its own around its Stripe calls, so
+    the webhook never holds a pooled connection across a network round-trip.
 
     Returns `{"status": "ignored"}` for anything that isn't ours, so the caller
     can 200 rather than retrying an event that belongs to another product on the
@@ -422,26 +532,51 @@ async def dispatch_billing_event(conn, event_type: str, obj: dict, event_at: Opt
     """
     if event_type == "checkout.session.completed":
         if obj.get("mode") == "subscription" or (obj.get("metadata") or {}).get("type") == "cappe_subscription":
-            return await handle_checkout_completed(conn, obj, event_at)
+            return await handle_checkout_completed(obj, event_at)
         return {"status": "ignored"}
     if event_type.startswith("customer.subscription."):
-        return await handle_subscription_event(conn, obj, event_at)
+        return await handle_subscription_event(obj, event_at)
     if event_type in ("invoice.paid", "invoice.payment_failed"):
         return await handle_invoice_event(
-            conn, obj, paid=(event_type == "invoice.paid"), event_at=event_at
+            obj, paid=(event_type == "invoice.paid"), event_at=event_at
         )
     return {"status": "ignored"}
 
 
 # ── Comps (admin-granted plans, no Stripe subscription) ───────────────────
 
+class LiveSubscriptionExists(Exception):
+    """Raised when a comp would collide with a paying subscription."""
+
+
 async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: str) -> None:
     """Grant a plan with no Stripe subscription behind it.
 
     Modeled explicitly rather than by just setting `cappe_accounts.plan` so a
-    comp stays visible and revocable — otherwise comped accounts are
+    comp stays visible, expirable and revocable — otherwise comped accounts are
     indistinguishable from paying ones in every report.
+
+    `uq_cappe_sub_live` allows at most one live row per account regardless of
+    source, so this supersedes any live comp first and REFUSES outright when the
+    account has a live Stripe subscription. Silently superseding a paying
+    subscription would strand it: the Stripe side keeps billing while our row
+    says comp. Cancel the subscription first, deliberately.
     """
+    paying = await conn.fetchval(
+        """
+        SELECT stripe_subscription_id FROM cappe_subscriptions
+         WHERE account_id = $1 AND source = 'stripe'
+           AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')
+         LIMIT 1
+        """,
+        account_id,
+    )
+    if paying:
+        raise LiveSubscriptionExists(
+            "This account has a live Stripe subscription. Cancel it before comping, "
+            "or the customer keeps being billed."
+        )
+
     await conn.execute(
         "UPDATE cappe_subscriptions SET status = 'canceled', canceled_at = NOW(), "
         "updated_at = NOW() WHERE account_id = $1 AND source = 'comp' "
@@ -456,5 +591,47 @@ async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: s
         """,
         account_id, plan_code, until, reason,
     )
+    # Mirrored onto the account so the expiry sweep has a cheap set-based
+    # predicate and does not have to join subscriptions.
+    await conn.execute(
+        "UPDATE cappe_accounts SET plan_override_until = $1, updated_at = NOW() WHERE id = $2",
+        until, account_id,
+    )
     await _materialize_plan(conn, account_id, plan_code)
     invalidate_catalog_cache()
+
+
+async def expire_lapsed_comps(conn) -> int:
+    """Drop accounts whose comp has run out back to free. Returns the count.
+
+    Without this, `comped_until` is decorative: `_materialize_plan` wrote the
+    comped tier onto `cappe_accounts.plan` permanently and nothing reads the
+    expiry, so a comp "until March" is a comp forever.
+
+    Set-based and idempotent, so it is safe to run on any cadence.
+    """
+    rows = await conn.fetch(
+        """
+        WITH lapsed AS (
+            UPDATE cappe_subscriptions
+               SET status = 'canceled', canceled_at = NOW(), updated_at = NOW()
+             WHERE source = 'comp'
+               AND status IN ('trialing','active','past_due')
+               AND comped_until IS NOT NULL
+               AND comped_until <= NOW()
+            RETURNING account_id
+        )
+        UPDATE cappe_accounts a
+           SET plan = $1, plan_override_until = NULL, updated_at = NOW()
+          FROM lapsed
+         WHERE a.id = lapsed.account_id
+           AND NOT EXISTS (
+               SELECT 1 FROM cappe_subscriptions s
+                WHERE s.account_id = a.id AND s.source = 'stripe'
+                  AND s.status IN ('trialing','active','past_due')
+           )
+        RETURNING a.id
+        """,
+        FREE_PLAN_CODE,
+    )
+    return len(rows)

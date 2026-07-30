@@ -363,6 +363,13 @@ def on_worker_ready(**kwargs):
     else:
         print("[Worker] Cappe domain renewals scheduler is disabled, skipping.")
 
+    from app.workers.tasks.cappe_comp_expiry import run_cappe_comp_expiry
+
+    if _is_scheduler_enabled("cappe_comp_expiry"):
+        run_cappe_comp_expiry.delay()
+    else:
+        print("[Worker] Cappe comp expiry scheduler is disabled, skipping.")
+
 
 # ── Server error reporter integration ───────────────────────────────────────
 # Every Celery worker installs the root-logger DB handler so logger.error/exception

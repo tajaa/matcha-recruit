@@ -44,7 +44,7 @@ Cappe webhook**.
 | Creator limits | **Hard gate** — may only sell `service` / `booking` |
 | Private email | **Separate paid add-on**, priced per mailbox, on any paid plan |
 | Admin UI | **Inside the Cappe app**, behind a platform-admin flag |
-| Premium design | **Every paid plan** gets it, Creator included |
+| Premium design | **Every paid plan** gets it, Creator included (enforced in code, not the catalog — see below) |
 | Existing sellers | **Comped**, never cut off (see [Rollout](#rollout)) |
 
 ---
@@ -91,7 +91,7 @@ unchanged — `subtotal_cents`, tax excluded.
 - **`cappe_billing_products`** — ONE catalog for plans and add-ons (`kind`), so a
   single price table can hang off both. Carries the entitlements:
   `can_sell`, `platform_fee_bps`, `allowed_fulfillment`, `site_limit`,
-  `mailbox_quota_included`, `premium_design`, `features`.
+  `mailbox_quota_included`, `features`.
 - **`cappe_billing_prices`** — **APPEND-ONLY**. Stripe `Price` objects are
   immutable in `unit_amount`, so an admin price edit mints a *new* Stripe Price
   and a new row and flips `is_current`. Old rows survive, which is what makes
@@ -146,9 +146,13 @@ Replaced by catalog lookups: the inline `_PLAN_SITE_LIMIT = {"free": 1}` dict in
 (`pro` is a retired code, so that compare would have left riders permanently
 unreachable for every account on the current lineup).
 
-`design_gate.is_premium_plan` stays **pure and sync** — it runs at write choke
-points with no async DB context — but gains an optional `premium=` kwarg so
-callers holding resolved entitlements can use the admin-editable catalog value.
+`design_gate.PREMIUM_PLANS` stays the **single source of truth** for premium
+design, and is deliberately *not* a catalog column. It is consulted from ~12 call
+sites, several deep in Merlin's synchronous routing/tiering chain, which receive
+a bare plan string and have no async DB context. A first cut of this work added
+a `premium_design` column plus a `premium=` kwarg to thread it through — but no
+call site ever passed the kwarg, so the column sat editable in the admin UI
+changing nothing. An inert knob is worse than no knob; both were removed.
 
 ---
 
@@ -223,6 +227,43 @@ SELECT count(*) FROM cappe_accounts WHERE plan = 'free' AND stripe_charges_enabl
 
 and comp them onto a paid plan (`source='comp'`, `comped_until`) rather than
 breaking live storefronts.
+
+---
+
+## Defects found in review and fixed
+
+The first cut of this work passed CI and its own tests; a close read still found
+fifteen real defects. The ones worth remembering, because each is a shape that
+recurs:
+
+- **A total-outage risk from an ordering assumption.** The auth dependency that
+  *every* Cappe request passes through joined `cappe_subscriptions` for a
+  cosmetic field. Deploy the code before its migration and all of Cappe 500s —
+  login and the public renderer included. The join is gone; billing status is
+  served by the billing endpoint that already loads the row.
+- **"Fail open" that failed closed.** The entitlement catalog swallows read
+  errors so a missing table degrades gracefully — but the read sat *inside* an
+  open transaction, and swallowing a Postgres error there does not fail open:
+  the transaction is already aborted and the next statement raises. The exact
+  scenario the fallback existed for would have 500'd every storefront order.
+  Resolved before the transaction opens now.
+- **A claim with no release.** The Connect webhook claimed the dedupe key but,
+  unlike its sibling, never released it on failure — so one DB blip between the
+  claim and the order UPDATE left a paid order `pending` forever, receipt never
+  sent, retry answered "duplicate".
+- **Money objects minted before the row that records them.** A Stripe Price was
+  created before its DB insert, with a `lookup_key` derived from `COUNT(*)` — so
+  a failed insert burned that key permanently and no retry could ever succeed.
+  The row is reserved first and the key derives from its own id.
+- **Two collisions with `uq_cappe_sub_live`**, both ending in a webhook that
+  retries forever while the customer is billed. See the design points above.
+- **Silent type mismatch.** asyncpg returns JSONB as `str`; an `isinstance(...,
+  dict)` check therefore always failed and every plan's `features` came back
+  empty, with no error. Decoding is centralized now.
+- **Knobs that did nothing.** `premium_design` was editable and inert;
+  `pending_*` columns and `change_subscription_price` existed with no caller
+  while a 409 told users to "change your plan instead". The first was removed,
+  the second shipped as `POST /billing/change-plan`.
 
 ---
 

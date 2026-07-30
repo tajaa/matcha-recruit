@@ -42,6 +42,7 @@ TENANT_ENDPOINTS = [
     ("POST", "/api/cappe/billing/checkout"),
     ("POST", "/api/cappe/billing/portal"),
     ("POST", "/api/cappe/billing/addons"),
+    ("POST", "/api/cappe/billing/change-plan"),
     ("POST", "/api/cappe/billing/cancel"),
 ]
 

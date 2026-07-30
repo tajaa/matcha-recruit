@@ -30,7 +30,6 @@ class CappePlan(BaseModel):
     allowed_fulfillment: list[str] = Field(default_factory=list)
     site_limit: Optional[int] = None
     mailbox_quota_included: int = 0
-    premium_design: bool = False
     features: dict[str, Any] = Field(default_factory=dict)
     prices: list[CappePlanPrice] = Field(default_factory=list)
     intro_price_cents: Optional[int] = None
@@ -73,6 +72,9 @@ class CappeSubscription(BaseModel):
     cancel_at_period_end: bool = False
     comped_until: Optional[datetime] = None
     addons: list[CappeSubscriptionAddon] = Field(default_factory=list)
+    # Plan allowance + purchased add-on units, so the UI can show what the
+    # account is actually entitled to provision.
+    mailbox_quota: int = 0
 
 
 class CappeCheckoutRequest(BaseModel):
@@ -103,6 +105,19 @@ class CappeAddonQuantityRequest(BaseModel):
     quantity: int = Field(ge=0, le=1000)
 
 
+class CappeChangePlanRequest(BaseModel):
+    """Move a live subscription to a different plan and/or interval.
+
+    Proration is immediate in both directions — Stripe invoices the difference
+    on an upgrade and credits the customer balance on a downgrade. There is no
+    deferred-downgrade path: an earlier revision carried `pending_*` columns for
+    one, but nothing read them, and a scheduling mechanism nobody exercises is
+    worse than an honest immediate change.
+    """
+    plan_code: str = Field(max_length=40)
+    interval: BillingInterval = "month"
+
+
 class CappeCancelRequest(BaseModel):
     at_period_end: bool = True
 
@@ -121,7 +136,6 @@ class CappePlanUpsert(BaseModel):
     allowed_fulfillment: Optional[list[Literal["physical", "digital", "service", "booking"]]] = None
     site_limit: Optional[int] = Field(default=None, ge=0)
     mailbox_quota_included: Optional[int] = Field(default=None, ge=0)
-    premium_design: Optional[bool] = None
     features: Optional[dict[str, Any]] = None
     unit_label: Optional[str] = Field(default=None, max_length=50)
     max_quantity: Optional[int] = Field(default=None, ge=1)
@@ -196,6 +210,7 @@ __all__ = [
     "CappePortalRequest",
     "CappePortalResponse",
     "CappeAddonQuantityRequest",
+    "CappeChangePlanRequest",
     "CappeCancelRequest",
     "CappePlanUpsert",
     "CappePlanCreate",

@@ -46,7 +46,6 @@ def _plan(code, **over):
         "allowed_fulfillment": ["physical", "digital", "service", "booking"],
         "site_limit": None,
         "mailbox_quota_included": 0,
-        "premium_design": False,
         "features": {},
     }
     row.update(over)
@@ -97,12 +96,11 @@ class TestResolveEntitlements:
     async def test_reads_the_catalog_row(self):
         _seed_catalog([_plan("creator", platform_fee_bps=300, can_sell=True,
                              allowed_fulfillment=["service", "booking"],
-                             premium_design=True, features={"rider": True})])
+                             features={"rider": True})])
         e = await ent.resolve_entitlements("creator")
         assert e.platform_fee_bps == 300
         assert e.can_sell is True
         assert e.allowed_fulfillment == frozenset({"service", "booking"})
-        assert e.premium_design is True
         assert e.has("rider") is True
 
     @pytest.mark.asyncio
@@ -136,19 +134,6 @@ class TestResolveEntitlements:
 
 
 class TestLegacyFallback:
-    def test_preserves_premium_design_for_legacy_codes(self):
-        """`pro` is retired but existing accounts still carry it; the fallback
-        must not silently revoke design features they have today."""
-        for code in ("pro", "business", "creator"):
-            assert ent._legacy_fallback(code).premium_design is True
-        assert ent._legacy_fallback("free").premium_design is False
-
-    def test_agrees_with_the_static_design_gate(self):
-        from app.cappe.services.design_gate import PREMIUM_PLANS
-
-        for code in PREMIUM_PLANS:
-            assert ent._legacy_fallback(code).premium_design is True
-
     def test_free_keeps_its_one_site_cap(self):
         assert ent._legacy_fallback("free").site_limit == 1
         assert ent._legacy_fallback("business").site_limit is None
@@ -228,3 +213,30 @@ class TestCatalogCache:
         assert "past_due" in ent.ENTITLED_SUBSCRIPTION_STATUSES
         assert "canceled" not in ent.ENTITLED_SUBSCRIPTION_STATUSES
         assert "unpaid" not in ent.ENTITLED_SUBSCRIPTION_STATUSES
+
+
+# ── JSONB decoding ────────────────────────────────────────────────────────
+
+class TestDecodeFeatures:
+    """asyncpg hands JSONB back as a `str` — no codec is registered in
+    app/database — so every consumer must decode. Forgetting is SILENT: an
+    isinstance(x, dict) check just reads False and the caller falls back to {},
+    so a plan's features vanish from the API with no error anywhere."""
+
+    def test_decodes_a_json_string(self):
+        assert ent.decode_features('{"rider": true}') == {"rider": True}
+
+    def test_passes_a_dict_through(self):
+        assert ent.decode_features({"rider": True}) == {"rider": True}
+
+    def test_none_and_empty_are_empty_dicts(self):
+        assert ent.decode_features(None) == {}
+        assert ent.decode_features("") == {}
+
+    def test_malformed_json_does_not_raise(self):
+        assert ent.decode_features("{not json") == {}
+
+    def test_non_object_json_is_rejected(self):
+        """A bare list or scalar would break `.get()` on every caller."""
+        assert ent.decode_features("[1, 2]") == {}
+        assert ent.decode_features("42") == {}

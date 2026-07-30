@@ -353,6 +353,20 @@ async def create_public_order(site, body, background) -> dict:
     async with get_connection() as conn:
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
+        # Owner + entitlements are resolved BEFORE the transaction opens, for
+        # two reasons.
+        #
+        # 1. `get_catalog` swallows read errors so entitlements can fail OPEN to
+        #    legacy behaviour — but swallowing a Postgres error inside an open
+        #    transaction does not fail open. The transaction is already aborted,
+        #    and the next statement raises InFailedSQLTransactionError. In the
+        #    exact case the fallback exists for (code deployed ahead of
+        #    zzzzcappe26, so the catalog table is missing) every storefront
+        #    order would 500 — the opposite of what the fallback promises.
+        # 2. `fetch_site_owner` already returns the plan, so hoisting it means
+        #    one query serves both the selling gate and the fee below.
+        owner = await fetch_site_owner(conn, site["id"])
+        owner_ent = await resolve_entitlements(owner["plan"] if owner else None, conn=conn)
         async with conn.transaction():
             order_currency = None
             order_requires_approval = False  # any line needing creator review holds the whole order
@@ -476,13 +490,9 @@ async def create_public_order(site, body, background) -> dict:
             # itself be the workaround for selling without a paid plan.
             # Scoped to paid carts on purpose — $0 bookings, RSVPs and lead-gen
             # forms are the free tier's whole value and must keep working.
+            # `owner_ent` was resolved above the transaction; see the note there.
             if subtotal > 0:
-                owner_plan = await conn.fetchval(
-                    "SELECT a.plan FROM cappe_accounts a "
-                    "JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
-                    site["id"],
-                )
-                require_can_sell(await resolve_entitlements(owner_plan, conn=conn))
+                require_can_sell(owner_ent)
 
             # Tax (per-site rate, applied to physical/taxable lines only). Added
             # as a Stripe line item below so the charge matches the receipt total.
@@ -513,7 +523,6 @@ async def create_public_order(site, body, background) -> dict:
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
                 )
-        owner = await fetch_site_owner(conn, site["id"])
 
     # Low-stock alert to the owner (stock was decremented at order creation,
     # regardless of the payment path below).
@@ -535,10 +544,9 @@ async def create_public_order(site, body, background) -> dict:
     checkout_url = None
     if can_pay:
         cur = (order["currency"] or "USD").lower()
-        # Per-plan take rate. Computed ONCE here and handed to Stripe, so the
-        # number persisted on the order is the same number Stripe actually
-        # takes.
-        owner_ent = await resolve_entitlements(owner["plan"])
+        # Per-plan take rate, from the entitlements resolved once above.
+        # Computed ONCE here and handed to Stripe, so the number persisted on
+        # the order is the same number Stripe actually takes.
         fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
         line_items = [
             {
