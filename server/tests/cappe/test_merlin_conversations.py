@@ -260,6 +260,38 @@ async def test_resolve_conversation_returns_none_when_the_page_is_gone():
     assert not any("INSERT INTO cappe_merlin_conversations" in s for s in conn.statements)
 
 
+@pytest.mark.asyncio
+async def test_resolve_conversation_rejects_a_setup_kind_conversation():
+    """A dashboard setup-concierge conversation (`kind='setup'`, `page_id`
+    NULL) named on a page-editor `/merlin/chat` request must 404, even when
+    the request's own `page_id` is absent — otherwise the page-editor turn
+    loads the setup transcript as history and persists into it (see the
+    `_resolve_conversation` docstring)."""
+    from app.cappe.routes.merlin import _resolve_conversation
+
+    account_id, convo_id = uuid4(), uuid4()
+    conn = FakeConn(
+        fetchrow={"WHERE id = $1 AND account_id = $2": {
+            "id": convo_id, "account_id": account_id, "site_id": uuid4(), "page_id": None,
+            "kind": "setup", "staged_actions": None, "title": "setup chat",
+            "created_at": _NOW, "updated_at": _NOW,
+        }},
+    )
+
+    class _Body:
+        conversation_id = convo_id
+        message = "add a promo banner"
+
+    class _Account:
+        id = account_id
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _resolve_conversation(
+            conn, body=_Body(), site={"id": uuid4()}, page_uuid=None, account=_Account()
+        )
+    assert exc_info.value.status_code == 404
+
+
 def test_parse_page_id_degrades_rather_than_raising():
     """`page_id` predates persistence and rides in as a free string. A
     non-UUID means "can't record this turn", not "reject the edit"."""

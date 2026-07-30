@@ -258,6 +258,14 @@ async def add_message(
 # the user is more likely to be about to act on something just staged.
 MAX_PENDING_STAGED_ACTIONS = 10
 
+# Cap on the TOTAL entry count (any status) per conversation. Without this,
+# executed/dismissed/blocked entries — never touched by the pending cap above
+# — accumulate in the JSONB column forever: re-serialized on every mutate,
+# re-decoded on every setup request, all rendered by the panel. Pruned oldest
+# settled (non-'proposed') first, applied after the pending prune, so a
+# 'proposed' entry is never dropped to make room for a settled one.
+MAX_STAGED_ACTIONS = 40
+
 
 async def lock_conversation_actions(conn, conversation_id: UUID) -> list[dict[str, Any]]:
     """`SELECT staged_actions ... FOR UPDATE`, decoded, with NO transaction of
@@ -311,6 +319,15 @@ async def mutate_staged_actions(
                 for e in sorted(proposed, key=lambda e: e.get("created_at") or "")[
                     : len(proposed) - MAX_PENDING_STAGED_ACTIONS
                 ]
+            }
+            next_state = [e for e in next_state if e.get("id") not in drop_ids]
+
+        if len(next_state) > MAX_STAGED_ACTIONS:
+            settled = [e for e in next_state if isinstance(e, dict) and e.get("status") != "proposed"]
+            overflow = len(next_state) - MAX_STAGED_ACTIONS
+            drop_ids = {
+                e.get("id")
+                for e in sorted(settled, key=lambda e: e.get("created_at") or "")[: overflow]
             }
             next_state = [e for e in next_state if e.get("id") not in drop_ids]
 

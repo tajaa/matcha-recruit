@@ -188,16 +188,23 @@ async def refresh_site_search(conn, site_id: UUID) -> None:
     that already invalidate the render cache, because that is the same event.
 
     Best-effort: a failure here must not fail the write that triggered it — a
-    stale search vector is a bad search result, not a lost sale.
+    stale search vector is a bad search result, not a lost sale. Some callers
+    (e.g. Merlin's `execute_setup_action`) invoke this from inside their OWN
+    open transaction — a bare Postgres error would abort that whole
+    transaction even though it's caught here, so the query runs inside its
+    own `conn.transaction()`. asyncpg nests that as a SAVEPOINT when a
+    transaction is already open, so a failure here rolls back only the search
+    update, not the caller's outstanding writes.
     """
     try:
-        category_label = await conn.fetchval(
-            "SELECT directory_category FROM cappe_sites WHERE id = $1", site_id
-        )
-        # Index the human label too, so a search for "photography" hits a site
-        # categorized `photo-video`.
-        label_text = CATEGORY_LABELS.get(category_label or "", "") + " " + (category_label or "")
-        await conn.execute(_SEARCH_SQL, site_id, label_text.strip())
+        async with conn.transaction():
+            category_label = await conn.fetchval(
+                "SELECT directory_category FROM cappe_sites WHERE id = $1", site_id
+            )
+            # Index the human label too, so a search for "photography" hits a
+            # site categorized `photo-video`.
+            label_text = CATEGORY_LABELS.get(category_label or "", "") + " " + (category_label or "")
+            await conn.execute(_SEARCH_SQL, site_id, label_text.strip())
     except Exception as exc:  # noqa: BLE001 - never fail the caller's write
         logger.warning("directory: refresh_site_search failed for %s: %s", site_id, exc)
 

@@ -277,7 +277,7 @@ async def run_setup_agent(
                 yield {"type": "status", "message": "Wrapping up…"}
                 break
 
-            await rate_limiter.check_limit("cappe_merlin", "agent")
+            await rate_limiter.check_limit("cappe_merlin", "setup")
             model_calls += 1
             call_timeout = min(_CALL_TIMEOUT, max(1.0, _WALL_CLOCK - elapsed()))
             try:
@@ -322,12 +322,23 @@ async def run_setup_agent(
                     finish_message = str(args.get("message") or "").strip() or None
                     links = args.get("links")
                     if isinstance(links, list):
+                        # `final_links` accumulates across every `finish` call
+                        # in a turn — dedupe by target here (not just within
+                        # one call) so a repeated target across calls, or
+                        # within one call, can't reach the client twice and
+                        # collide on React's `key={l.target}`.
+                        seen_targets = {l["target"] for l in final_links}
                         for link in links:
-                            if isinstance(link, dict) and _valid_link_target(str(link.get("target") or "")):
-                                final_links.append({
-                                    "target": str(link["target"]),
-                                    "label": str(link.get("label") or link["target"]),
-                                })
+                            if not isinstance(link, dict):
+                                continue
+                            target = str(link.get("target") or "")
+                            if not _valid_link_target(target) or target in seen_targets:
+                                continue
+                            seen_targets.add(target)
+                            final_links.append({
+                                "target": target,
+                                "label": str(link.get("label") or target),
+                            })
                     finished = True
                     continue
 

@@ -193,15 +193,9 @@ export function useSetupMerlin(siteId: string | undefined, onReadiness?: (r: Cap
     [conversationId],
   )
 
-  const newConversation = useCallback(() => {
-    setConversationId(null)
-    setMessages([])
-    setStagedActions([])
-  }, [])
-
   return {
     messages, stagedActions, liveStatus, liveSteps, sending, error,
-    hydrated, hadPriorConversation: conversations.length > 0, conversations, conversationId,
-    send, approve, dismiss, newConversation, openConversation,
+    hydrated, hadPriorConversation: conversations.length > 0,
+    send, approve, dismiss,
   }
 }

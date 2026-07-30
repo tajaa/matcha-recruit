@@ -63,10 +63,19 @@ def _validate_block(raw: Any) -> tuple[Optional[dict[str, Any]], Optional[str]]:
     if not isinstance(btype, str) or btype not in BLOCK_TYPES or btype == "canvas":
         return None, f"unsupported block type '{raw.get('type')}'"
     allowed = BLOCK_FIELDS.get(btype, {})
-    content = {
-        k: v for k, v in raw.items()
-        if k != "type" and k in allowed and _field_value_error(v, allowed[k], btype, k) is None
-    }
+    content: dict[str, Any] = {}
+    for k, v in raw.items():
+        if k == "type" or k not in allowed:
+            continue
+        # Unlike `ops._v_add_block` (which drops a bad field and lets the
+        # CLIENT rebuild the block from `blockSchemas.ts` defaults), this
+        # writes straight to `cappe_pages.content` — a dropped field here is a
+        # dropped field on the live page, not a filled-in default. Refuse
+        # instead, so the model can retry with a corrected value.
+        err = _field_value_error(v, allowed[k], btype, k)
+        if err:
+            return None, f"block '{btype}': {err}"
+        content[k] = v
     return {"type": btype, **content}, None
 
 
@@ -164,8 +173,8 @@ def _validate_create_page(payload: dict[str, Any]) -> tuple[Optional[dict[str, A
     blocks: Optional[list[dict[str, Any]]] = None
     if preset is None:
         blocks, err = _validate_blocks(payload.get("blocks"))
-        if err:
-            return None, err
+        if err or not blocks:
+            return None, err or "either 'preset' or a non-empty 'blocks' list is required"
     return {"title": title.strip(), "preset": preset, "blocks": blocks}, None
 
 
@@ -388,7 +397,39 @@ _PROMO_POSITIONS = frozenset({"top", "bottom"})
 _PROMO_MODES = frozenset({"newsletter", "cta", "code"})
 
 
+def _validate_promo_cta(payload: dict[str, Any], out: dict[str, Any], *, href: bool, code: bool) -> Optional[str]:
+    """`ctaLabel`/`ctaHref`/`code` are accessory fields the model has no
+    visibility into the current value of (`setup_context.build_setup_prompt`
+    only tells it whether the promo is on/off, never its stored text — see
+    that module) — so unlike `text`/`heading`, these are presence-gated: only
+    written to `out` when the caller's payload actually names the key. That
+    is what lets "remove the button" work as `{"ctaLabel": null}` (clears)
+    while an unrelated `set_promo` call that never mentions `ctaLabel` leaves
+    it untouched, instead of wiping it every time (the pre-fix `_execute_set_promo`
+    merge silently no-op'd on `None` for exactly this reason, which was itself
+    the bug — it made an EXPLICIT clear request a no-op too)."""
+    if "ctaLabel" in payload:
+        cta_label = payload.get("ctaLabel")
+        if cta_label is not None and (not isinstance(cta_label, str) or len(cta_label) > 60):
+            return "'ctaLabel' must be at most 60 characters"
+        out["ctaLabel"] = cta_label
+    if href and "ctaHref" in payload:
+        cta_href = payload.get("ctaHref")
+        if cta_href is not None and (not isinstance(cta_href, str) or len(cta_href) > 300):
+            return "'ctaHref' must be at most 300 characters"
+        out["ctaHref"] = cta_href
+    if code and "code" in payload:
+        code_val = payload.get("code")
+        if code_val is not None and (not isinstance(code_val, str) or len(code_val) > 60):
+            return "'code' must be at most 60 characters"
+        out["code"] = code_val
+    return None
+
+
 def _validate_set_promo(payload: dict[str, Any]) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Field names here MUST match `services/render/page.py:_promos` /
+    `PromosPanel.tsx` — both read/write camelCase (`ctaLabel`, `ctaHref`), not
+    the snake_case this validator used to emit (silently dead CTAs)."""
     if not isinstance(payload, dict):
         return None, "invalid payload"
     target = payload.get("target")
@@ -407,19 +448,16 @@ def _validate_set_promo(payload: dict[str, Any]) -> tuple[Optional[dict[str, Any
             text = text.strip()
         elif text is not None and not isinstance(text, str):
             return None, "'text' must be text"
-        cta_label = payload.get("cta_label")
-        if cta_label is not None and (not isinstance(cta_label, str) or len(cta_label) > 60):
-            return None, "'cta_label' must be at most 60 characters"
-        cta_href = payload.get("cta_href")
-        if cta_href is not None and (not isinstance(cta_href, str) or len(cta_href) > 300):
-            return None, "'cta_href' must be at most 300 characters"
         position = payload.get("position", "top")
         if position not in _PROMO_POSITIONS:
             return None, "'position' must be 'top' or 'bottom'"
         dismissible = payload.get("dismissible", True)
         if not isinstance(dismissible, bool):
             return None, "'dismissible' must be true or false"
-        out.update(text=text, cta_label=cta_label, cta_href=cta_href, position=position, dismissible=dismissible)
+        out.update(text=text, position=position, dismissible=dismissible)
+        err = _validate_promo_cta(payload, out, href=True, code=False)
+        if err:
+            return None, err
     else:
         heading = payload.get("heading")
         if enabled:
@@ -434,10 +472,10 @@ def _validate_set_promo(payload: dict[str, Any]) -> tuple[Optional[dict[str, Any
         mode = payload.get("mode", "newsletter")
         if mode not in _PROMO_MODES:
             return None, "'mode' must be 'newsletter', 'cta', or 'code'"
-        cta_label = payload.get("cta_label")
-        if cta_label is not None and (not isinstance(cta_label, str) or len(cta_label) > 60):
-            return None, "'cta_label' must be at most 60 characters"
-        out.update(heading=heading, body=body, mode=mode, cta_label=cta_label)
+        out.update(heading=heading, body=body, mode=mode)
+        err = _validate_promo_cta(payload, out, href=True, code=True)
+        if err:
+            return None, err
 
     return out, None
 
@@ -467,8 +505,12 @@ async def _execute_set_promo(conn, site: dict[str, Any], account: Any, payload: 
     current = promos.get(target) if isinstance(promos.get(target), dict) else {}
     updated = dict(current)
     for key, value in payload.items():
-        if key in ("target", "enabled") or value is None:
+        if key in ("target", "enabled"):
             continue
+        # `value` may be an explicit None here — that's a clear, not a skip
+        # (see `_validate_set_promo`'s docstring: only sent fields are in the
+        # payload at all, so a key present with value None means the caller
+        # asked to clear it).
         updated[key] = value
     updated["enabled"] = payload["enabled"]
     meta = {**meta, "promos": {**promos, target: updated}}
@@ -555,11 +597,14 @@ SETUP_ACTIONS: tuple[SetupActionSpec, ...] = (
         gate=_gate_set_promo,
         execute=_execute_set_promo,
         summary=_summary_set_promo,
-        prompt_shape='{"target":"bar"|"popup","enabled":true,"text":"<bar only>","heading":"<popup only>","body":"<popup only>","cta_label":"<optional>","cta_href":"<bar only, optional>","position":"top"|"bottom","mode":"newsletter"|"cta"|"code","dismissible":true}',
+        prompt_shape='{"target":"bar"|"popup","enabled":true,"text":"<bar only>","heading":"<popup only>","body":"<popup only>","ctaLabel":"<optional>","ctaHref":"<optional>","code":"<popup, mode=code only>","position":"top"|"bottom","mode":"newsletter"|"cta"|"code","dismissible":true}',
         prompt_rules=(
             "'bar' is the site-wide announcement strip; 'popup' is a modal. Only send the fields that "
-            "target uses. This is Pro/Business/Creator only — say so plainly if the plan doesn't allow it "
-            "rather than staging something that will just get blocked.",
+            "target uses — 'code' only applies when mode='code'. This is Pro/Business/Creator only — say so "
+            "plainly if the plan doesn't allow it rather than staging something that will just get blocked.",
+            "To CLEAR the button (e.g. 'remove the button from the bar'), send 'ctaLabel'/'ctaHref' (or "
+            "'code') explicitly as null. Omitting one of those three leaves it unchanged; every other field "
+            "(text/heading/body/position/mode/dismissible) must be resent with its intended value every time.",
         ),
     ),
 )
@@ -631,22 +676,28 @@ async def execute_setup_action(conn, site: dict[str, Any], account: Any, entry: 
     same-turn/idempotency check, only the entitlement one, since that's the
     one thing that can legitimately change between stage and execute.
 
-    Returns `{"ok", "status", "message", "result"?}` — never raises for an
-    expected failure (gate block, `SetupActionError`); an unexpected
-    exception from `spec.execute` propagates, matching the rest of the
-    codebase's "don't swallow real bugs" convention.
+    Returns `{"ok", "status", "message", "retryable"?, "result"?}` — never
+    raises for an expected failure (gate block, `SetupActionError`); an
+    unexpected exception from `spec.execute` propagates, matching the rest of
+    the codebase's "don't swallow real bugs" convention. `retryable` is only
+    meaningful when `status == "blocked"`.
     """
     spec = SETUP_ACTIONS_BY_NAME.get(entry["type"])
     if spec is None:
-        return {"ok": False, "status": "blocked", "message": "Unknown action type."}
+        return {"ok": False, "status": "blocked", "retryable": False, "message": "Unknown action type."}
     ent = await resolve_entitlements(account.plan, conn=conn)
     blocked = spec.gate(entry["payload"], ent, account.plan)
     if blocked:
-        return {"ok": False, "status": "blocked", "message": blocked}
+        # A gate refusal is a STATE ("your plan can't do this") the user can
+        # change by upgrading — unlike a SetupActionError (e.g. "that page
+        # doesn't exist anymore"), it must not be terminal. `apply_outcome`
+        # reads `retryable` and leaves the entry `proposed` instead of
+        # flipping it to `blocked`, so Approve is still there after upgrading.
+        return {"ok": False, "status": "blocked", "retryable": True, "message": blocked}
     try:
         result = await spec.execute(conn, site, account, entry["payload"])
     except SetupActionError as exc:
-        return {"ok": False, "status": "blocked", "message": str(exc)}
+        return {"ok": False, "status": "blocked", "retryable": False, "message": str(exc)}
     return {
         "ok": True, "status": "executed", "result": result,
         "message": f"Done — {spec.summary(entry['payload'])}.",
@@ -676,7 +727,8 @@ def append_entry(entry: dict[str, Any]) -> Callable[[list[dict[str, Any]]], list
 
 
 def apply_outcome(entry_id: str, outcome: dict[str, Any]) -> Callable[[list[dict[str, Any]]], list[dict[str, Any]]]:
-    """`outcome` is `execute_setup_action`'s return value.
+    """`outcome` is `execute_setup_action`'s return value (or an equivalent
+    dict built from an `evaluate_setup_execute` "blocked" verdict).
 
     Only applies while the entry is still 'proposed' — same guard
     `dismiss_entry` uses. The real race guard is upstream of this function:
@@ -687,7 +739,14 @@ def apply_outcome(entry_id: str, outcome: dict[str, Any]) -> Callable[[list[dict
     concurrent confirmation blocks on the lock and, once it acquires it,
     re-reads a status that is no longer 'proposed' and refuses before this
     closure ever runs twice for the same entry. This `status == 'proposed'`
-    check is a defense-in-depth idempotency guard, not the sole race guard."""
+    check is a defense-in-depth idempotency guard, not the sole race guard.
+
+    A `status == "blocked"` outcome with `retryable=True` (an entitlement
+    gate — the user can fix this by upgrading) leaves the entry `proposed`
+    with the reason attached as `message`, rather than flipping it to the
+    terminal `blocked` status — that's reserved for a `SetupActionError`
+    (e.g. "that page doesn't exist anymore"), which nothing the user does
+    from this card can fix."""
     def _fn(current: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         for e in current:
@@ -695,11 +754,14 @@ def apply_outcome(entry_id: str, outcome: dict[str, Any]) -> Callable[[list[dict
                 out.append(e)
                 continue
             updated = dict(e)
-            updated["status"] = outcome["status"]
-            updated["message"] = outcome.get("message")
-            if outcome["status"] == "executed":
-                updated["result"] = outcome.get("result")
-                updated["executed_at"] = _now_iso()
+            if outcome["status"] == "blocked" and outcome.get("retryable"):
+                updated["message"] = outcome.get("message")
+            else:
+                updated["status"] = outcome["status"]
+                updated["message"] = outcome.get("message")
+                if outcome["status"] == "executed":
+                    updated["result"] = outcome.get("result")
+                    updated["executed_at"] = _now_iso()
             out.append(updated)
         return out
     return _fn

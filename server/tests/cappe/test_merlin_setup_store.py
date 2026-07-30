@@ -94,3 +94,26 @@ def test_mutate_staged_actions_leaves_a_short_queue_untouched():
     conn = _FakeConn([_entry("a"), _entry("b", status="dismissed")])
     result = asyncio.run(merlin_store.mutate_staged_actions(conn, "convo-1", lambda cur: cur))
     assert {e["id"] for e in result} == {"a", "b"}
+
+
+def test_mutate_staged_actions_prunes_oldest_settled_past_the_total_cap():
+    # 5 proposed (well under the pending cap) + settled entries past the
+    # total cap — executed/dismissed/blocked entries are never touched by
+    # MAX_PENDING_STAGED_ACTIONS, so without a total cap they'd grow forever.
+    proposed = [_entry(f"p{i}", created_at=f"2026-02-01T00:00:{i:02d}+00:00") for i in range(5)]
+    settled_count = merlin_store.MAX_STAGED_ACTIONS - len(proposed) + 5
+    settled = [
+        _entry(f"s{i}", status="executed", created_at=f"2026-01-01T00:00:{i:02d}+00:00")
+        for i in range(settled_count)
+    ]
+    conn = _FakeConn([*proposed, *settled])
+
+    result = asyncio.run(merlin_store.mutate_staged_actions(conn, "convo-1", lambda cur: cur))
+
+    assert len(result) == merlin_store.MAX_STAGED_ACTIONS
+    proposed_ids = {e["id"] for e in result if e["status"] == "proposed"}
+    assert proposed_ids == {e["id"] for e in proposed}, "no proposed entry is ever dropped for a settled one"
+    surviving_settled = [e for e in result if e["status"] != "proposed"]
+    assert all(e["id"] not in {"s0", "s1", "s2", "s3", "s4"} for e in surviving_settled), (
+        "the oldest settled entries must be the ones dropped"
+    )

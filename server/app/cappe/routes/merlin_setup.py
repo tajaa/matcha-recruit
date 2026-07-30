@@ -131,6 +131,8 @@ async def get_setup_conversation(
     conditionally."""
     async with get_connection() as conn:
         convo = await merlin_store.get_owned_conversation(conn, conversation_id, account.id)
+        if convo.get("kind") != "setup":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         messages = await merlin_store.get_messages(conn, conversation_id)
     return {**convo, "messages": messages}
 
@@ -157,17 +159,23 @@ async def _apply_action_outcome(
         if verdict.kind == "refuse":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=verdict.message)
         if verdict.kind == "blocked":
-            outcome = {"ok": False, "status": "blocked", "message": verdict.message}
+            # Same "retryable" shape `execute_setup_action` returns for a gate
+            # block — a stage-time gate failure here means the plan changed
+            # (or was never allowed) since staging, which is the same
+            # upgrade-then-retry case, not a terminal one.
+            outcome = {"ok": False, "status": "blocked", "retryable": True, "message": verdict.message}
         else:
             outcome = await execute_setup_action(conn, site, account, entry)
 
         updated = await merlin_store.mutate_staged_actions(
             conn, conversation["id"], apply_outcome(action_id, outcome)
         )
-        if outcome["ok"]:
-            await merlin_store.add_message(
-                conn, conversation["id"], role="assistant", content=outcome["message"],
-            )
+        # No assistant message is written here — the executed/blocked
+        # ActionCard IS the transcript record for this outcome, and the
+        # chat-confirm path (`setup_agent.do_execute_staged_action`)
+        # deliberately writes none either. Writing one here duplicated the
+        # same text (card + message) and the client never even rendered it
+        # until a reload.
         readiness = await compute_readiness(conn, site["id"], site)
 
     if outcome["ok"]:
@@ -211,6 +219,8 @@ async def dismiss_setup_staged_action(
         convo = await merlin_store.get_owned_conversation(conn, conversation_id, account.id)
         if convo.get("kind") != "setup":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        if find_entry(convo.get("staged_actions"), action_id) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Staged action not found")
         updated = await merlin_store.mutate_staged_actions(conn, conversation_id, dismiss_entry(action_id))
         messages = await merlin_store.get_messages(conn, conversation_id)
     return {**convo, "staged_actions": updated, "messages": messages}

@@ -224,12 +224,18 @@ async def _resolve_conversation(
     page A's transcript as history for an edit to page B, and persist the
     turn there instead of anywhere page B's panel will ever show it. 404 the
     same way an unowned id does — both are "this id isn't valid here".
+
+    A setup-kind conversation (`page_id IS NULL`) must also be rejected here
+    even when the request's own `page_id` is absent/non-UUID (`page_uuid is
+    None`) — otherwise this route would happily load the dashboard concierge's
+    transcript as page-editor history and persist a page-editor turn into it.
+    `kind` must be `'page'`, not just "id owned and page matches".
     """
     if body.conversation_id is not None:
         convo = await merlin_store.get_owned_conversation(
             conn, body.conversation_id, account.id
         )
-        if page_uuid is not None and convo["page_id"] != page_uuid:
+        if convo.get("kind") != "page" or (page_uuid is not None and convo["page_id"] != page_uuid):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
             )

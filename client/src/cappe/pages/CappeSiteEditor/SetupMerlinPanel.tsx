@@ -68,10 +68,15 @@ function ActionCard({ action, onApprove, onDismiss, busy }: {
       </div>
     )
   }
-  // proposed
+  // proposed — action.message is set when a previous approve attempt was
+  // blocked but retryable (e.g. an entitlement gate the user can now clear
+  // by upgrading) — the card stays actionable, so the reason must be visible.
   return (
     <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5">
       <p className="text-xs text-zinc-200">{action.summary}</p>
+      {action.message && (
+        <p className="mt-1 text-[11px] text-amber-400">{action.message}</p>
+      )}
       <div className="mt-2 flex gap-2">
         <button
           onClick={onApprove}
@@ -199,10 +204,10 @@ export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: S
             </div>
             {m.role === 'assistant' && m.links && m.links.length > 0 && (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {m.links.map((l: CappeSetupLink) =>
+                {m.links.map((l: CappeSetupLink, li: number) =>
                   l.target === 'publish' ? (
                     <button
-                      key={l.target}
+                      key={`${l.target}-${li}`}
                       onClick={onPublish}
                       className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20"
                     >
@@ -210,7 +215,7 @@ export function SetupMerlinPanel({ site, autoOpen, onSiteChanged, onPublish }: S
                     </button>
                   ) : (
                     <Link
-                      key={l.target}
+                      key={`${l.target}-${li}`}
                       to={linkHref(site.id, l.target)}
                       className="rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-medium text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-300"
                     >
