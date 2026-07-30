@@ -800,25 +800,33 @@ class TestWebhookDedupeRelease:
     during activation would permanently strand a paid customer with no
     access — the dedupe row would block every retry."""
 
+    # NOTE: `_release_event` is now a thin wrapper over
+    # app.core.services.stripe_events.release_stripe_event, so the SQL — and
+    # therefore the `get_connection` these tests need to patch — lives in the
+    # SERVICE module. Patching it on the route module would be silently ignored
+    # and the call would reach a real database.
+
     @pytest.mark.asyncio
     async def test_release_event_deletes_row(self):
         from app.core.routes.billing.stripe_webhook import _release_event
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
-        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
+        with patch("app.core.services.stripe_events.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
             mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
             await _release_event("evt_test_123")
-        # Should DELETE FROM stripe_webhook_events
+        # Should DELETE FROM stripe_webhook_events, scoped to this consumer
         delete_call = str(mock_conn.execute.call_args_list[0])
         assert "DELETE" in delete_call
         assert "stripe_webhook_events" in delete_call
+        assert "consumer" in delete_call
+        assert "core" in delete_call
 
     @pytest.mark.asyncio
     async def test_release_event_with_empty_id_is_noop(self):
         from app.core.routes.billing.stripe_webhook import _release_event
         # Should not raise, should not connect
-        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
+        with patch("app.core.services.stripe_events.get_connection") as mock_gc:
             await _release_event("")
             mock_gc.assert_not_called()
 
@@ -826,10 +834,33 @@ class TestWebhookDedupeRelease:
     async def test_release_swallows_db_errors(self):
         """If the dedupe table itself is broken, release shouldn't blow up."""
         from app.core.routes.billing.stripe_webhook import _release_event
-        with patch("app.core.routes.billing.stripe_webhook.get_connection") as mock_gc:
+        with patch("app.core.services.stripe_events.get_connection") as mock_gc:
             mock_gc.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("db down"))
             # Should log warning but not propagate
             await _release_event("evt_db_broken")
+
+    @pytest.mark.asyncio
+    async def test_claim_event_is_scoped_to_consumer(self):
+        """Core and Cappe share one Stripe account and both handle invoice.* /
+        customer.subscription.* events. If the ledger were keyed on event_id
+        alone, whichever endpoint claimed first would silently starve the other
+        — no error, no log, just a subscription that never activates."""
+        from app.core.services.stripe_events import claim_stripe_event
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value="evt_shared")
+        with patch("app.core.services.stripe_events.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            assert await claim_stripe_event("evt_shared", "invoice.paid") is True
+            assert await claim_stripe_event(
+                "evt_shared", "invoice.paid", consumer="cappe_platform"
+            ) is True
+
+        consumers = [call.args[3] for call in mock_conn.fetchval.call_args_list]
+        assert consumers == ["core", "cappe_platform"]
+        assert "ON CONFLICT (consumer, event_id)" in str(
+            mock_conn.fetchval.call_args_list[0].args[0]
+        )
 
     @pytest.mark.asyncio
     async def test_wrapper_releases_dedupe_on_handler_failure(self):

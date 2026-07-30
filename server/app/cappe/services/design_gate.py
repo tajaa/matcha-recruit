@@ -23,20 +23,38 @@ radius, light/dark mode.
 from copy import deepcopy
 from typing import Any
 
-PREMIUM_PLANS = {"pro", "business"}
+# Every PAID plan gets premium design — a customer paying monthly and still
+# hitting a locked control in the editor is the classic builder churn complaint.
+# 'creator' is the new solo tier; 'pro'/'hosting' are legacy codes kept so
+# existing accounts don't silently lose what they already have.
+#
+# This stays a pure/sync set rather than a catalog read because it runs at write
+# choke points (update_site, update_page, preview_site_page) that have no async
+# DB context. Callers that already hold resolved Entitlements can pass
+# `premium=ent.premium_design` to use the admin-editable catalog value instead.
+PREMIUM_PLANS = {"pro", "business", "creator"}
 
 # Top-level theme_config keys gated to premium plans.
 _PREMIUM_THEME_KEYS = ("style", "type", "premium")
 
 
-def is_premium_plan(plan: Any) -> bool:
+def is_premium_plan(plan: Any, *, premium: bool | None = None) -> bool:
+    """Whether this plan gets the premium design system.
+
+    `premium` lets a caller that has already resolved the account's
+    entitlements pass the catalog value (admin-editable) and bypass the static
+    set. Omitted, it falls back to `PREMIUM_PLANS` — so no existing call site
+    changes behaviour.
+    """
+    if premium is not None:
+        return bool(premium)
     return str(plan or "").lower() in PREMIUM_PLANS
 
 
-def gate_theme(theme_config: Any, plan: Any) -> Any:
+def gate_theme(theme_config: Any, plan: Any, *, premium: bool | None = None) -> Any:
     """Return a copy of `theme_config` with premium-only keys removed for
     non-premium plans. Premium plans (and non-dict input) pass through untouched."""
-    if is_premium_plan(plan) or not isinstance(theme_config, dict):
+    if is_premium_plan(plan, premium=premium) or not isinstance(theme_config, dict):
         return theme_config
     cleaned = deepcopy(theme_config)
     for key in _PREMIUM_THEME_KEYS:
@@ -47,10 +65,10 @@ def gate_theme(theme_config: Any, plan: Any) -> Any:
     return cleaned
 
 
-def gate_content(content: Any, plan: Any) -> Any:
+def gate_content(content: Any, plan: Any, *, premium: bool | None = None) -> Any:
     """Return a copy of a page's `content` with the premium per-section `_design`
     bag stripped from every block, for non-premium plans."""
-    if is_premium_plan(plan) or not isinstance(content, dict):
+    if is_premium_plan(plan, premium=premium) or not isinstance(content, dict):
         return content
     blocks = content.get("blocks")
     if not isinstance(blocks, list):

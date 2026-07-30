@@ -9,6 +9,11 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.services.product_definitions import product_for_pack_id
+from app.core.services.stripe_events import (
+    CONSUMER_CORE,
+    claim_stripe_event,
+    release_stripe_event,
+)
 from app.database import get_connection
 from app.matcha.services.billing import billing_service
 from app.matcha.services.billing import token_budget_service
@@ -19,65 +24,23 @@ router = APIRouter(tags=["stripe-webhooks"])
 
 
 async def _claim_event(event_id: str, event_type: str) -> bool:
-    """Record the event ID in stripe_webhook_events. Returns True if this
-    is the first time we've seen this event, False if it's a retry that
-    we already processed.
+    """Core's dedupe claim — see `core/services/stripe_events.py` for the
+    semantics (fail-closed) and for why the ledger is keyed by consumer.
 
-    Stripe retries webhook events on transient failures (or any non-2xx
-    response). Without dedupe, a retried event would re-execute every
-    side effect (feature flips, emails, subscription upserts). The unique
-    primary key on event_id makes the INSERT idempotent — a duplicate
-    inserts no row, so we return False. A genuine DB error is re-raised so the
-    webhook fails closed and Stripe retries.
+    Deliberately kept as a module-level wrapper rather than importing the
+    shared function under this name: the webhook route calls it by bare name
+    and tests patch it there (`patch.object(wh, "_claim_event", ...)`).
     """
-    try:
-        async with get_connection() as conn:
-            inserted = await conn.fetchval(
-                """
-                INSERT INTO stripe_webhook_events (event_id, event_type)
-                VALUES ($1, $2)
-                ON CONFLICT (event_id) DO NOTHING
-                RETURNING event_id
-                """,
-                event_id,
-                event_type,
-            )
-        return inserted is not None
-    except Exception:
-        # Fail CLOSED: a broken dedupe table (e.g. migration not yet applied)
-        # must NOT let side effects run without a durable idempotency record,
-        # or a Stripe retry double-processes the money path (double token
-        # grants, duplicate feature flips). Surface the error so the webhook
-        # returns 500 and Stripe retries — a delayed retry beats a double-spend.
-        logger.exception(
-            "stripe_webhook_events insert failed for %s (%s) — failing closed",
-            event_id,
-            event_type,
-        )
-        raise
+    return await claim_stripe_event(event_id, event_type, consumer=CONSUMER_CORE)
 
 
 from app.core.services.stripe_service import extract_current_period_end as _extract_current_period_end  # noqa: E402,F401
 
 
 async def _release_event(event_id: str) -> None:
-    """Delete the dedupe row so Stripe retries can re-process this event.
-
-    Called when a handler raises after we've already claimed the event_id.
-    Without this, the next Stripe retry would hit the dedupe gate and skip
-    the handler — leaving the caller (paid customer) permanently in a
-    half-activated state.
-    """
-    if not event_id:
-        return
-    try:
-        async with get_connection() as conn:
-            await conn.execute(
-                "DELETE FROM stripe_webhook_events WHERE event_id = $1",
-                event_id,
-            )
-    except Exception as exc:
-        logger.warning("stripe_webhook_events release failed: %s", exc)
+    """Core's dedupe release — see `_claim_event` on why this stays a
+    module-level wrapper instead of a direct import."""
+    await release_stripe_event(event_id, consumer=CONSUMER_CORE)
 
 
 @router.post("/webhooks/stripe")

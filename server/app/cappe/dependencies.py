@@ -38,9 +38,21 @@ async def require_cappe_account(
         )
 
     async with get_connection() as conn:
+        # The LEFT JOIN picks up live subscription status for the billing UI.
+        # It rides the partial unique index on (account_id) WHERE status is
+        # live, so it stays a single indexed lookup rather than a second query.
         row = await conn.fetchrow(
-            "SELECT id, email, name, plan, status, account_type, tokens_valid_after "
-            "FROM cappe_accounts WHERE id = $1",
+            """
+            SELECT a.id, a.email, a.name, a.plan, a.status, a.account_type,
+                   a.tokens_valid_after, a.is_platform_admin,
+                   s.status AS subscription_status
+              FROM cappe_accounts a
+              LEFT JOIN cappe_subscriptions s
+                     ON s.account_id = a.id
+                    AND s.status IN ('trialing', 'active', 'past_due',
+                                     'incomplete', 'unpaid', 'paused')
+             WHERE a.id = $1
+            """,
             account_id,
         )
 
@@ -65,4 +77,24 @@ async def require_cappe_account(
         plan=row["plan"],
         status=row["status"],
         account_type=row["account_type"],
+        is_platform_admin=bool(row["is_platform_admin"]),
+        subscription_status=row["subscription_status"],
     )
+
+
+async def require_cappe_platform_admin(
+    account: CappeAccount = Depends(require_cappe_account),
+) -> CappeAccount:
+    """Platform staff only — the in-Cappe admin surface (plan catalog, prices,
+    take rates, comps).
+
+    A pure function of the already-resolved account, so it costs no extra
+    query. Distinct from matcha's `require_admin`: a Cappe platform admin is a
+    Cappe identity (`scope=cappe`), not a matcha user.
+    """
+    if not account.is_platform_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform administrator access required",
+        )
+    return account

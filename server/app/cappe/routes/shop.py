@@ -26,6 +26,7 @@ from ..models.cappe import (
 from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, restock_order
+from ..services.entitlements import require_fulfillment, resolve_entitlements
 
 # Order statuses that reflect a physical decrement having happened, and the
 # statuses that reverse it. A status TRANSITION between these two sets is what
@@ -145,6 +146,12 @@ async def create_product(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        # What a plan may sell is data (`allowed_fulfillment` on the catalog
+        # row), not a hardcoded Creator-vs-Business branch — so the lineup can
+        # change from the admin UI without a deploy.
+        require_fulfillment(
+            await resolve_entitlements(account.plan, conn=conn), body.fulfillment
+        )
         await _validate_booking_type(conn, site_id, body.booking_type_id)
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -190,6 +197,13 @@ async def update_product(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        # Only when the caller is actually changing fulfillment — an unrelated
+        # edit (a price tweak, a rename) to a product that predates the gate
+        # must not start 403-ing.
+        if "fulfillment" in body.model_fields_set:
+            require_fulfillment(
+                await resolve_entitlements(account.plan, conn=conn), body.fulfillment
+            )
         await _validate_booking_type(conn, site_id, body.booking_type_id)
         async with conn.transaction():
             sets, args = build_patch(body, (

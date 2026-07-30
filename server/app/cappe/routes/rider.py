@@ -20,6 +20,7 @@ from ..models.cappe import (
     CappeRiderItem,
     CappeRiderReplace,
 )
+from ..services.entitlements import resolve_entitlements
 from ._shared import get_owned_site
 
 router = APIRouter()
@@ -27,17 +28,22 @@ router = APIRouter()
 _RIDER_COLS = "id, site_id, label, detail, is_required, sort_order, created_at"
 
 
-def _require_rider_capable(account: CappeAccount) -> None:
-    """Rider editing is a Pro creator (personal) capability."""
+async def _require_rider_capable(account: CappeAccount) -> None:
+    """Rider editing is a paid creator (personal) capability.
+
+    The plan half is an entitlement lookup rather than the old `plan != "pro"`:
+    'pro' is a retired code, so a bare string compare would leave riders
+    permanently unreachable for every account on the current lineup.
+    """
     if account.account_type != "personal":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="A rider is a creator feature — switch to a personal account to use it.",
         )
-    if account.plan != "pro":
+    if not (await resolve_entitlements(account.plan)).has("rider"):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Riders are a Pro feature. Upgrade to set your booking requirements.",
+            detail="Riders are a paid feature. Upgrade to set your booking requirements.",
         )
 
 
@@ -59,7 +65,7 @@ async def replace_rider(
     site_id: UUID, body: CappeRiderReplace, account: CappeAccount = Depends(require_cappe_account)
 ):
     """Replace the whole rider in one transaction."""
-    _require_rider_capable(account)
+    await _require_rider_capable(account)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():

@@ -31,7 +31,12 @@ class CappeStripeError(Exception):
 
 
 def platform_fee_cents(amount_cents: int) -> int:
-    """The platform's cut of a sale, in cents (2% by default, floored)."""
+    """FALLBACK take rate from the global setting (2% by default, floored).
+
+    The live rate is per-plan and comes from the billing catalog — see
+    `services/entitlements.fee_cents`. This remains only for callers with no
+    account context and as the degraded path when the catalog is unreadable.
+    """
     bps = get_settings().cappe_platform_fee_bps
     return max(0, (amount_cents * bps) // 10_000)
 
@@ -101,16 +106,24 @@ class CappeStripe:
         account_id: str,
         currency: str,
         line_items: list[dict[str, Any]],
-        amount_cents: int,
+        application_fee_cents: int,
         success_url: str,
         cancel_url: str,
         metadata: dict[str, str],
         customer_email: Optional[str] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
-        taking a platform `application_fee_amount`. Returns the Session."""
+        taking a platform `application_fee_amount`. Returns the Session.
+
+        The fee is passed in, never recomputed here. It used to be derived from
+        an `amount_cents` argument, which meant the caller computed the fee once
+        for persistence (`cappe_orders.platform_fee_cents`) and this method
+        computed it again for the actual charge. Both read the same global
+        setting, so they agreed by luck; with a per-plan rate they could
+        diverge, and the persisted number would be a lie about money.
+        """
         self._ensure_key()
-        fee = platform_fee_cents(amount_cents)
+        fee = max(0, int(application_fee_cents))
 
         def _create():
             return stripe.checkout.Session.create(

@@ -31,7 +31,12 @@ from .email import (
 )
 from .inventory import log_adjustment as _inv_log
 from .options import fetch_option_groups, validate_and_price_options
-from .stripe_connect import CappeStripeError, get_cappe_stripe, platform_fee_cents as cappe_platform_fee_cents
+from .entitlements import (
+    fee_cents as entitlement_fee_cents,
+    require_can_sell,
+    resolve_entitlements,
+)
+from .stripe_connect import CappeStripeError, get_cappe_stripe
 
 
 def order_subtotal(line_items: Iterable[tuple[int, int]]) -> int:
@@ -139,9 +144,13 @@ def validate_intake(intake_fields: list, answers: dict) -> None:
 async def fetch_site_owner(conn, site_id):
     """The site owner's account (email/name + Stripe-Connect status), for creator
     notifications and storefront checkout. Returns None if the site (or its
-    account) is gone."""
+    account) is gone.
+
+    `id` and `plan` are selected because the storefront checkout resolves the
+    owner's entitlements from them — the platform take rate is per-plan, so the
+    plan must be in hand at the point the fee is computed."""
     return await conn.fetchrow(
-        "SELECT a.email, a.name, a.stripe_account_id, a.stripe_charges_enabled "
+        "SELECT a.id, a.plan, a.email, a.name, a.stripe_account_id, a.stripe_charges_enabled "
         "FROM cappe_accounts a JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
         site_id,
     )
@@ -460,6 +469,21 @@ async def create_public_order(site, body, background) -> dict:
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
+
+            # Selling gate, BEFORE the order row exists. It cannot live on the
+            # Stripe branch below: that branch degrades to a manual pending
+            # order on any Stripe failure, so "never connect Stripe" would
+            # itself be the workaround for selling without a paid plan.
+            # Scoped to paid carts on purpose — $0 bookings, RSVPs and lead-gen
+            # forms are the free tier's whole value and must keep working.
+            if subtotal > 0:
+                owner_plan = await conn.fetchval(
+                    "SELECT a.plan FROM cappe_accounts a "
+                    "JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
+                    site["id"],
+                )
+                require_can_sell(await resolve_entitlements(owner_plan, conn=conn))
+
             # Tax (per-site rate, applied to physical/taxable lines only). Added
             # as a Stripe line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
@@ -511,7 +535,11 @@ async def create_public_order(site, body, background) -> dict:
     checkout_url = None
     if can_pay:
         cur = (order["currency"] or "USD").lower()
-        fee = cappe_platform_fee_cents(pay_total)
+        # Per-plan take rate. Computed ONCE here and handed to Stripe, so the
+        # number persisted on the order is the same number Stripe actually
+        # takes.
+        owner_ent = await resolve_entitlements(owner["plan"])
+        fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
         line_items = [
             {
                 "price_data": {
@@ -539,7 +567,7 @@ async def create_public_order(site, body, background) -> dict:
                 account_id=owner["stripe_account_id"],
                 currency=cur,
                 line_items=line_items,
-                amount_cents=pay_total,
+                application_fee_cents=fee,
                 success_url=body.success_url,
                 cancel_url=body.cancel_url,
                 metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},

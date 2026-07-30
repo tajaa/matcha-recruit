@@ -21,6 +21,7 @@ from ..models.cappe import (
     CappeSiteUpdate,
 )
 from ..services.design_gate import gate_content, gate_theme
+from ..services.entitlements import resolve_entitlements
 from ..services.directory import (
     CATEGORY_LABELS,
     apply_inferred_listing,
@@ -78,13 +79,13 @@ async def _infer_listing_after_publish(site_id: UUID) -> None:
         logger.warning("cappe: listing inference failed for site %s", site_id, exc_info=True)
 
 
-# Sites allowed per plan. Free is capped at one; paid plans are uncapped (None).
-_PLAN_SITE_LIMIT = {"free": 1}
-
-
 async def _enforce_site_limit(conn, account: CappeAccount) -> None:
-    """Raise 403 if the account is at its plan's site cap. Free = 1 site."""
-    limit = _PLAN_SITE_LIMIT.get(account.plan)
+    """Raise 403 if the account is at its plan's site cap.
+
+    The cap comes from the billing catalog (`site_limit`, NULL = unlimited) so
+    it is admin-editable; it used to be a hardcoded `{"free": 1}` dict here.
+    """
+    limit = (await resolve_entitlements(account.plan, conn=conn)).site_limit
     if limit is None:
         return
     count = await conn.fetchval("SELECT COUNT(*) FROM cappe_sites WHERE account_id = $1", account.id)
