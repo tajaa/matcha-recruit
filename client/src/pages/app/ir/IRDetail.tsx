@@ -59,14 +59,20 @@ export default function IRDetail() {
   const showUpsell = !showPolicyMapping || !showERFeatures
   // Matcha-X is at Lite parity for IR — same restricted tab set.
   const liteTier = isIrOnlyTier(me?.profile) || isMatchaX(me?.profile)
-  const tabs: readonly Tab[] = liteTier ? LITE_TABS : FULL_TABS
+  const irCopilotEnabled = hasFeature('ir_copilot')
+  // ir_copilot gates the Copilot tab AND the AI Analysis tab together — a
+  // /admin/products tenant without it (e.g. a bare-bones composed Lite)
+  // loses both, same as the interactive-only osha_logs split above.
+  const tabs: readonly Tab[] = (liteTier ? LITE_TABS : FULL_TABS).filter(
+    (t) => irCopilotEnabled || (t !== 'copilot' && t !== 'analysis'),
+  )
   const tabOptions = tabs.map((t) => ({
     value: t,
     label: t === 'analysis' ? 'AI Analysis' : t === 'copilot' ? 'Copilot' : t.charAt(0).toUpperCase() + t.slice(1),
   }))
   const navigate = useNavigate()
   const { incident, loading, error, updateIncident, deleteIncident, refetch } = useIRIncident(incidentId!)
-  const [tab, setTab] = useState<Tab>('copilot')
+  const [tab, setTab] = useState<Tab>(irCopilotEnabled ? 'copilot' : 'overview')
 
   const [rootCause, setRootCause] = useState('')
   const [correctiveActions, setCorrectiveActions] = useState('')
@@ -88,7 +94,7 @@ export default function IRDetail() {
 
   // Bounce stale URL/tab state when tier-restricted tabs aren't available.
   useEffect(() => {
-    if (!tabs.includes(tab)) setTab('copilot')
+    if (!tabs.includes(tab)) setTab(irCopilotEnabled ? 'copilot' : 'overview')
   }, [tabs, tab])
 
   // Sync local textarea state from incident on first load

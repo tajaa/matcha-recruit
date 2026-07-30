@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import get_settings
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.models.ir.osha import OshaRecordabilityUpdate
 from app.core.services.genai_client import get_genai_client
 from ._shared import _safe_json_loads, log_audit
@@ -137,6 +137,7 @@ async def update_osha_recordability(
 async def osha_ai_determination(
     incident_id: UUID,
     current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("osha_logs")),
 ):
     """AI-assisted OSHA recordability determination using Gemini."""
     company_id = await get_client_company_id(current_user)

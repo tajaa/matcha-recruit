@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.models.ir.osha import Osha300LogEntry, OshaPrivacyCaseEntry
 from app.matcha.routes.ir_incidents._shared import (
     log_audit,
@@ -191,6 +191,7 @@ async def get_osha_300_log(
     year: int = Query(..., description="Calendar year for the 300 log"),
     location_id: UUID = Query(..., description="business_locations.id — the 300 log is per establishment (29 CFR 1904.30)"),
     current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("osha_logs")),
 ):
     """Generate OSHA 300 log for a given year, scoped to one establishment.
 
@@ -337,6 +338,7 @@ async def get_osha_privacy_cases(
     year: int = Query(..., description="Calendar year for the privacy-case reference list"),
     location_id: UUID = Query(..., description="business_locations.id — resolves names for that establishment's 300 log"),
     current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("osha_logs")),
 ):
     """Confidential OSHA Privacy Case reference list (29 CFR 1904.29(b)(9)).
 
@@ -417,6 +419,7 @@ async def get_osha_301_form(
     incident_id: UUID,
     employee_id: Optional[UUID] = Query(None, description="Which injured employee's 301 (defaults to the first injured person)"),
     current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("osha_logs")),
 ):
     """Generate OSHA 301 form data for a recordable incident + injured employee."""
     company_id = await get_client_company_id(current_user)

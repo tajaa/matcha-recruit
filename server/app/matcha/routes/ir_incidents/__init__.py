@@ -36,19 +36,22 @@ from .crud import router  # noqa: F401  (package public symbol)
 # _legacy's collection-root routes and need to land in step 10 (CRUD
 # migration) where _legacy's empty-path routes also move out.
 from .anonymous_reporting import router as _anonymous_reporting_router
-router.include_router(_anonymous_reporting_router)
+# Additional gate on top of the inherited `incidents` requirement — all
+# public token intake (anonymous + per-location) is the `ir_magic_links`
+# sellable sub-part, split out 2026-07-30 for /admin/products composability.
+router.include_router(_anonymous_reporting_router, dependencies=[Depends(require_feature("ir_magic_links"))])
 
 from .info_requests import router as _info_requests_router
-router.include_router(_info_requests_router)
+router.include_router(_info_requests_router, dependencies=[Depends(require_feature("ir_magic_links"))])
 
 from .documents import router as _documents_router
 router.include_router(_documents_router)
 
 from .osha import router as _osha_router
-# Additional gate on top of the inherited `incidents` requirement — the
-# no-roster matcha_lite_essentials config has incidents on but osha_logs off
-# (no employee roster to log injured persons against).
-router.include_router(_osha_router, dependencies=[Depends(require_feature("osha_logs"))])
+# The OSHA feature gates now live INSIDE the osha/ package itself (a 3-way
+# split across osha_logs / osha_export / osha_auto_report) rather than one
+# gate at this include — see osha/__init__.py.
+router.include_router(_osha_router)
 
 from .investigation_interviews import router as _investigation_interviews_router
 router.include_router(_investigation_interviews_router)
@@ -60,13 +63,15 @@ from .capa import router as _capa_router
 router.include_router(_capa_router)
 
 from .ai_analysis import router as _ai_analysis_router
-router.include_router(_ai_analysis_router)
+# ir_copilot gates both this AI-analysis router and copilot.py below as one
+# combined sellable unit (2026-07-30 split out of `incidents`).
+router.include_router(_ai_analysis_router, dependencies=[Depends(require_feature("ir_copilot"))])
 
 from .analytics import router as _analytics_router
 router.include_router(_analytics_router)
 
 from .copilot import router as _copilot_router
-router.include_router(_copilot_router)
+router.include_router(_copilot_router, dependencies=[Depends(require_feature("ir_copilot"))])
 
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)

@@ -16,11 +16,18 @@ Fresh-aggregator variant (see `routes/CLAUDE.md`): no submodule declares an
 empty-path route, so `router` here is a bare `APIRouter()` the four sub-routers
 include into, rather than one submodule's router owning the others.
 
-The mount and its two stacked gates are unchanged and still live in
-`ir_incidents/__init__.py` — `incidents` from the package mount, plus
-`osha_logs` on the include.
+The parent mount (`ir_incidents/__init__.py`) still applies `incidents`; this
+package's own include now carries a 3-way OSHA sub-split (2026-07-30, for
+/admin/products composability) instead of one `osha_logs` gate:
+
+- `osha_logs` OR `osha_export` — logs.py, summary_300a.py, recordability.py
+  (CSV export + manual recordability work with either flag; interactive-only
+  endpoints add their own per-route `osha_logs` gate — see each module).
+- `osha_auto_report` — ita.py (electronic ITA submission).
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.matcha.dependencies import require_any_feature, require_feature
 
 from .ita import router as _ita_router
 from .logs import router as _logs_router
@@ -28,10 +35,11 @@ from .recordability import router as _recordability_router
 from .summary_300a import router as _summary_300a_router
 
 router = APIRouter()
-router.include_router(_logs_router)
-router.include_router(_summary_300a_router)
-router.include_router(_ita_router)
-router.include_router(_recordability_router)
+_export_or_full = [Depends(require_any_feature("osha_logs", "osha_export"))]
+router.include_router(_logs_router, dependencies=_export_or_full)
+router.include_router(_summary_300a_router, dependencies=_export_or_full)
+router.include_router(_ita_router, dependencies=[Depends(require_feature("osha_auto_report"))])
+router.include_router(_recordability_router, dependencies=_export_or_full)
 
 # Re-exported for tests + any future cross-router consumer. `_missing_ita_fields`
 # and the privacy/masking helpers were importable from the flat `osha` module;

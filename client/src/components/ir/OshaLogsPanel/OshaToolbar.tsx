@@ -15,6 +15,11 @@ interface OshaToolbarProps {
   onExport300aPdf: () => void
   onExportIta: () => void
   onSubmitIta: () => void
+  /** Interactive-only export (osha_logs) — export-only tenants (osha_export)
+   *  don't have GET /osha/300a/pdf. */
+  fullLogs: boolean
+  /** Electronic ITA filing (osha_auto_report) — separately sellable. */
+  itaEnabled: boolean
 }
 
 export function OshaToolbar({
@@ -30,6 +35,8 @@ export function OshaToolbar({
   onExport300aPdf,
   onExportIta,
   onSubmitIta,
+  fullLogs,
+  itaEnabled,
 }: OshaToolbarProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -70,26 +77,32 @@ export function OshaToolbar({
           <Download size={12} className="mr-1.5" />
           300A CSV
         </Button>
-        <Button size="sm" variant="ghost" onClick={onExport300aPdf}>
-          <FileText size={12} className="mr-1.5" />
-          300A PDF
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onExportIta} disabled={itaBusy}>
-          {itaBusy ? (
-            <Loader2 size={12} className="mr-1.5 animate-spin" />
-          ) : (
-            <Download size={12} className="mr-1.5" />
-          )}
-          ITA Export
-        </Button>
-        <Button size="sm" onClick={onSubmitIta} disabled={itaBusy}>
-          {itaBusy ? (
-            <Loader2 size={12} className="mr-1.5 animate-spin" />
-          ) : (
-            <Send size={12} className="mr-1.5" />
-          )}
-          Submit to ITA
-        </Button>
+        {fullLogs && (
+          <Button size="sm" variant="ghost" onClick={onExport300aPdf}>
+            <FileText size={12} className="mr-1.5" />
+            300A PDF
+          </Button>
+        )}
+        {itaEnabled && (
+          <>
+            <Button size="sm" variant="ghost" onClick={onExportIta} disabled={itaBusy}>
+              {itaBusy ? (
+                <Loader2 size={12} className="mr-1.5 animate-spin" />
+              ) : (
+                <Download size={12} className="mr-1.5" />
+              )}
+              ITA Export
+            </Button>
+            <Button size="sm" onClick={onSubmitIta} disabled={itaBusy}>
+              {itaBusy ? (
+                <Loader2 size={12} className="mr-1.5 animate-spin" />
+              ) : (
+                <Send size={12} className="mr-1.5" />
+              )}
+              Submit to ITA
+            </Button>
+          </>
+        )}
       </div>
     </div>
   )

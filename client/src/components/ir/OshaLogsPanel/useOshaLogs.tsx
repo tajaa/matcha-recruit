@@ -17,8 +17,14 @@ import type {
 
 export function useOshaLogs() {
   const navigate = useNavigate()
-  const { me } = useMe()
+  const { me, hasFeature } = useMe()
   const canRevealNames = me?.user?.role === 'admin' || me?.user?.role === 'client'
+  // fullLogs = interactive log/privacy-case/301/AI-determine surface (osha_logs).
+  // An export-only tenant (osha_export without osha_logs) still gets the
+  // 300A summary + CSV downloads below — those ride require_any_feature
+  // server-side — so only the fullLogs-gated fetches/panels are conditional.
+  const fullLogs = hasFeature('osha_logs')
+  const itaEnabled = hasFeature('osha_auto_report')
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [locations, setLocations] = useState<BusinessLocation[]>([])
@@ -127,9 +133,12 @@ export function useOshaLogs() {
     setPrivacyNames(null)
     setPrivacyError(null)
     Promise.allSettled([
-      api
-        .get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}&location_id=${locationId}`)
-        .then(setEntries),
+      // Interactive log — 403s for an export-only tenant, so don't even ask.
+      fullLogs
+        ? api
+            .get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}&location_id=${locationId}`)
+            .then(setEntries)
+        : Promise.resolve(setEntries([])),
       api
         .get<Summary300A>(`/ir/incidents/osha/300a?year=${year}&location_id=${locationId}`)
         .then((s) => {
@@ -154,7 +163,7 @@ export function useOshaLogs() {
         }
       })
       .finally(() => setLoading(false))
-  }, [year, locationId, reloadKey])
+  }, [year, locationId, reloadKey, fullLogs])
 
   // The actual download runs only after the attestation modal is confirmed, so
   // every path carries &attested=true (the backend gate + audit). Must go
@@ -231,6 +240,7 @@ export function useOshaLogs() {
 
   // ── ITA direct electronic submission ──────────────────────────────────────
   async function loadItaState() {
+    if (!itaEnabled) return
     try {
       const status = await api.get<ItaCredentialStatus>('/ir/incidents/osha/ita/credentials')
       setItaCredConfigured(status.configured)
@@ -324,6 +334,8 @@ export function useOshaLogs() {
   return {
     navigate,
     canRevealNames,
+    fullLogs,
+    itaEnabled,
     year,
     setYear,
     locations,

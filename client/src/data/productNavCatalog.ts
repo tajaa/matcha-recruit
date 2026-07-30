@@ -1,7 +1,7 @@
 import {
   AlertTriangle, BadgeCheck, BarChart3, Boxes, Building2, CalendarClock, CalendarDays,
   Car, ClipboardList, FileCheck2, FileSearch, FileSignature, FileText, GraduationCap,
-  Gavel, HeartPulse, MessageSquare, Scale, Shield, ShieldCheck, Siren,
+  Gavel, HeartPulse, MessageSquare, QrCode, Scale, Shield, ShieldCheck, Siren,
   Sparkles, TrendingUp, Users, Wallet,
 } from 'lucide-react'
 import type { NavIcon } from '../components/sidebars/SidebarShell'
@@ -15,7 +15,8 @@ import type { ProductDefinition } from '../types/dashboard'
  * map, so shipping a new page means adding one line here, not a new sidebar
  * file per product.
  *
- * Flags with no standalone page (osha_logs lives inside IR, hris_* are
+ * Flags with no standalone page (osha_auto_report and ir_copilot render
+ * inside the IR/OSHA pages rather than owning their own route, hris_* are
  * settings, werk_lite_calls_all_members is a policy toggle) are deliberately
  * absent — they're still sellable, they just don't produce a nav row.
  */
@@ -24,6 +25,8 @@ export type ProductNavEntry = { to: string; icon: NavIcon; label: string }
 export const PRODUCT_NAV_CATALOG: Record<string, ProductNavEntry> = {
   incidents: { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   osha_logs: { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
+  osha_export: { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
+  ir_magic_links: { to: '/app/ir/magic-links', icon: QrCode, label: 'Magic Links' },
   carrier_quotes: { to: '/app/ir/insurance', icon: ShieldCheck, label: 'Insurance' },
   employees: { to: '/app/employees', icon: Users, label: 'Employees' },
   employee_schedule: { to: '/app/employee-schedule', icon: CalendarDays, label: 'Schedule' },

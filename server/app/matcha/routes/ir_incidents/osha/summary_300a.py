@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
 
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.models.ir.osha import Osha300ASaveRequest, Osha300ASummary
 from app.matcha.routes.ir_incidents._shared import log_audit
 from app.matcha.services.ir.naics_titles import naics_industry_description
@@ -274,6 +274,7 @@ async def get_osha_300a_pdf(
     location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
     attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("osha_logs")),
 ):
     """Render the faithful federal OSHA Form 300A as a PDF for one establishment."""
     company_id = await get_client_company_id(current_user)

@@ -268,6 +268,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # matcha_lite_essentials config, where there's no employee roster to log
     # injured persons against. Gates the ir_incidents osha.py sub-router.
     "osha_logs": True,
+    # Sub-parts of OSHA carved out for /admin/products composability (all
+    # default True — every capability below already shipped for every
+    # `incidents` company; the split only lets a composed product withhold
+    # one without the others via materialize_features()).
+    "osha_export": True,       # 300-log/300A CSV download + manual recordability write
+    "osha_auto_report": True,  # ITA electronic submission (osha/ita.py)
+    "ir_magic_links": True,    # anonymous /report/:token, per-location /intake/:token,
+                               # single-use /request-info/:token + their token-mgmt routers
+    "ir_copilot": True,        # IR Copilot chat + AI analysis runners (categorize/severity/
+                               # root-cause/recommendations/similar/policy-mapping)
     # Schedule Intelligence — analytics over the employee_schedule data no
     # scheduling competitor offers: incident-correlation (do incidents cluster
     # on understaffed shifts?), Fair Workweek / predictive-scheduling $
@@ -331,6 +341,8 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "training": False,
         "discipline": False,
         "osha_logs": False,
+        "osha_export": False,
+        "osha_auto_report": False,
     },
     # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
     # Lite, `discipline` is in the always-on overlay so the paid bundle is
@@ -672,6 +684,10 @@ def assert_feature_allowed(
 FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
     "werk_lite": ("matcha_work",),
+    "osha_export": ("incidents",),
+    "osha_auto_report": ("incidents",),
+    "ir_magic_links": ("incidents",),
+    "ir_copilot": ("incidents",),
 }
 
 

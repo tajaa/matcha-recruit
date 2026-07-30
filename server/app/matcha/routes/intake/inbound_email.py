@@ -51,6 +51,20 @@ def _features_dict(raw) -> dict:
     return raw or {}
 
 
+def _public_intake_allowed(features: dict) -> bool:
+    """Gate for every public token form (anonymous report, per-location
+    intake, request-info). These checks read the RAW stored `enabled_features`
+    JSONB, not the merged/overlaid shape — so an existing company predating
+    the `ir_magic_links` split (2026-07-30) has no such key stored. Default to
+    ALLOWED on a missing key (mirrors the flag's True default in
+    DEFAULT_COMPANY_FEATURES); only an explicit False — a materialized
+    /admin/products tenant that didn't grant it, or an admin toggle — blocks.
+    `.get("ir_magic_links", False)` here would silently kill every existing
+    tenant's public links.
+    """
+    return bool(features.get("incidents", False)) and bool(features.get("ir_magic_links", True))
+
+
 async def _submit_budget(token: str, company_id: str, kind: str) -> None:
     """Per-link + per-company submission budget, on top of the per-IP cap
     (applied separately, before the DB lookup). Mirrors ``_voice_parse_budget``
@@ -144,6 +158,7 @@ async def validate_report_token(token: str):
             SELECT enabled_features FROM companies
             WHERE report_email_token = $1
               AND COALESCE((enabled_features->>'incidents')::boolean, false) = true
+              AND COALESCE((enabled_features->>'ir_magic_links')::boolean, true) = true
             """,
             token,
         )
@@ -216,11 +231,11 @@ async def submit_anonymous_report(
             if not company:
                 raise HTTPException(status_code=404, detail="Invalid reporting link")
 
-            # Check incidents feature — deny when NULL or missing
+            # Check incidents + ir_magic_links — deny when NULL/missing/False
             features = company.get("enabled_features")
             if isinstance(features, str):
                 features = json.loads(features)
-            if not (features or {}).get("incidents", False):
+            if not _public_intake_allowed(features or {}):
                 raise HTTPException(status_code=404, detail="Invalid reporting link")
 
             # Shared INSERT + OSHA-reportable detection + AI auto-classify +
@@ -284,7 +299,7 @@ async def parse_report_voice(token: str, request: Request, file: UploadFile = Fi
     if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     features = _features_dict(row["enabled_features"])
-    if not features.get("incidents", False):
+    if not _public_intake_allowed(features):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     if not features.get("ir_voice_intake", False):
         raise HTTPException(status_code=403, detail="Voice dictation is not enabled.")
@@ -352,7 +367,7 @@ async def validate_location_intake_token(token: str):
     features = row["enabled_features"]
     if isinstance(features, str):
         features = json.loads(features)
-    if not (features or {}).get("incidents", False):
+    if not _public_intake_allowed(features or {}):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     _check_link_usable(row)
 
@@ -547,7 +562,7 @@ async def submit_location_report(
     features = link["enabled_features"]
     if isinstance(features, str):
         features = json.loads(features)
-    if not (features or {}).get("incidents", False):
+    if not _public_intake_allowed(features or {}):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
 
     # Usability is re-checked under FOR UPDATE inside the txn (that lock is what
@@ -697,7 +712,7 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
     if not link:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     features = _features_dict(link["enabled_features"])
-    if not features.get("incidents", False):
+    if not _public_intake_allowed(features):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     _check_link_usable(link)
     if not features.get("ir_voice_intake", False):
@@ -780,7 +795,7 @@ async def validate_info_request_token(token: str):
             """,
             token,
         )
-    if not row or not _features_dict(row["enabled_features"]).get("incidents", False):
+    if not row or not _public_intake_allowed(_features_dict(row["enabled_features"])):
         raise HTTPException(status_code=404, detail="Invalid link")
     _check_info_request_usable(row)
 
@@ -827,7 +842,7 @@ async def submit_info_request(
             """,
             token,
         )
-    if not pre or not _features_dict(pre["enabled_features"]).get("incidents", False):
+    if not pre or not _public_intake_allowed(_features_dict(pre["enabled_features"])):
         raise HTTPException(status_code=404, detail="Invalid link")
     company_id = str(pre["company_id"])
 

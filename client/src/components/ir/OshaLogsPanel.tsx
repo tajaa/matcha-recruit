@@ -58,19 +58,23 @@ export function OshaLogsPanel() {
         onExport300aPdf={osha.onExport300aPdf}
         onExportIta={osha.exportIta}
         onSubmitIta={osha.submitIta}
+        fullLogs={osha.fullLogs}
+        itaEnabled={osha.itaEnabled}
       />
 
-      <ItaFilingPanel
-        itaCredConfigured={osha.itaCredConfigured}
-        showTokenInput={osha.showTokenInput}
-        setShowTokenInput={osha.setShowTokenInput}
-        itaTokenInput={osha.itaTokenInput}
-        setItaTokenInput={osha.setItaTokenInput}
-        saveItaToken={osha.saveItaToken}
-        savingToken={osha.savingToken}
-        itaSubmitMsg={osha.itaSubmitMsg}
-        itaSubmissions={osha.itaSubmissions}
-      />
+      {osha.itaEnabled && (
+        <ItaFilingPanel
+          itaCredConfigured={osha.itaCredConfigured}
+          showTokenInput={osha.showTokenInput}
+          setShowTokenInput={osha.setShowTokenInput}
+          itaTokenInput={osha.itaTokenInput}
+          setItaTokenInput={osha.setItaTokenInput}
+          saveItaToken={osha.saveItaToken}
+          savingToken={osha.savingToken}
+          itaSubmitMsg={osha.itaSubmitMsg}
+          itaSubmissions={osha.itaSubmissions}
+        />
+      )}
 
       {osha.loadError && <LoadErrorBanner message={osha.loadError} onRetry={osha.retryLoad} />}
 
@@ -97,17 +101,21 @@ export function OshaLogsPanel() {
         saveMsg={osha.saveMsg}
       />
 
-      <PrivacyCaseList
-        canRevealNames={osha.canRevealNames}
-        entries={osha.entries}
-        privacyNames={osha.privacyNames}
-        setPrivacyNames={osha.setPrivacyNames}
-        privacyError={osha.privacyError}
-        revealConfidentialNames={osha.revealConfidentialNames}
-        revealing={osha.revealing}
-      />
+      {osha.fullLogs && (
+        <>
+          <PrivacyCaseList
+            canRevealNames={osha.canRevealNames}
+            entries={osha.entries}
+            privacyNames={osha.privacyNames}
+            setPrivacyNames={osha.setPrivacyNames}
+            privacyError={osha.privacyError}
+            revealConfidentialNames={osha.revealConfidentialNames}
+            revealing={osha.revealing}
+          />
 
-      <Log300Table entries={osha.entries} year={osha.year} navigate={osha.navigate} />
+          <Log300Table entries={osha.entries} year={osha.year} navigate={osha.navigate} />
+        </>
+      )}
 
       <ExportAttestModal
         attestExport={osha.attestExport}

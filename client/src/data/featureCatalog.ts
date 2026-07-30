@@ -18,6 +18,11 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       offer_letters: 'Offer Letters',
       er_copilot: 'ER Copilot',
       incidents: 'Incidents',
+      osha_logs: 'OSHA Logs (interactive 300/301/300A recordkeeping)',
+      osha_export: 'OSHA 300 Log CSV Export (download-only)',
+      osha_auto_report: 'OSHA Auto-Report (ITA electronic submission)',
+      ir_magic_links: 'IR Magic Links (anonymous report + location + info-request links)',
+      ir_copilot: 'IR Copilot & AI Analysis',
       time_off: 'Time Off',
       accommodations: 'Accommodations',
       interview_prep: 'Interview Prep',
@@ -91,4 +96,8 @@ export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
 export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
   werk_lite: ['matcha_work'],
+  osha_export: ['incidents'],
+  osha_auto_report: ['incidents'],
+  ir_magic_links: ['incidents'],
+  ir_copilot: ['incidents'],
 }
