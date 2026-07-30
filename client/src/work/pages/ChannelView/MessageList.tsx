@@ -29,14 +29,31 @@ export default function MessageList({
         </div>
       )}
       {messages.map((msg, i) => {
-        const showAuthor = i === 0 || messages[i - 1].sender_id !== msg.sender_id
-        const isOwn = msg.sender_id === userId
-        const isDeleted = !!msg.deleted_at
-        const canDelete = !isDeleted && (isOwn || canModerate)
         // Stable key across the optimistic→confirmed swap: pending row and
         // its server echo share `client_message_id`, so React keeps the
         // DOM node instead of unmounting/remounting on echo.
         const rowKey = msg.client_message_id ? `cmid:${msg.client_message_id}` : `id:${msg.id}`
+
+        // System (Huume) messages have no sender and the backend 403s any
+        // edit/delete/react attempt on them — render a distinct centered row
+        // with none of those affordances rather than a chat bubble.
+        if (msg.message_type === 'system') {
+          return (
+            <div key={rowKey} className="flex justify-center my-2">
+              <span className="max-w-[85%] text-center text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-full px-3 py-1.5">
+                {msg.content}
+                <span className="ml-1.5 text-w-faint">
+                  {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </span>
+            </div>
+          )
+        }
+
+        const showAuthor = i === 0 || messages[i - 1].sender_id !== msg.sender_id
+        const isOwn = msg.sender_id === userId
+        const isDeleted = !!msg.deleted_at
+        const canDelete = !isDeleted && (isOwn || canModerate)
         return (
           <div key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${msg.pending ? 'opacity-60' : ''}`}>
             {showAuthor ? (

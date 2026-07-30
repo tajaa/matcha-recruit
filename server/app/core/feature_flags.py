@@ -228,6 +228,21 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # huume thread-mode toggle (column mw_threads.huume_mode) + the plan
     # approve/execute routes. Default off; admin-toggle; NOT bundled.
     "huume": False,
+    # EMS (Event Management System) — "@huume <what happened>" in any werk
+    # channel logs a structured "event" (behavioral/safety/operational/
+    # equipment/property/guest_experience — deliberately wider than IR:
+    # anything a company needs documentation for). One-shot Gemini classify
+    # (services/ems/event_intake.py, mirrors ticket_draft_service.py — NOT
+    # the huume agent loop, which hard-requires an mw_threads row) writes an
+    # ems_events row and Huume confirms in-channel. Admin/client review in
+    # the /work Events tab and may PROMOTE an event into a real IR incident
+    # (services/ems/promote.py -> create_incident_core) — AI never
+    # auto-creates the incident, same invariant as ir_voice_intake. Gates
+    # the /ems router + the /work events page; promotion additionally
+    # requires `incidents`. Logically meaningless without channels
+    # (matcha_work) to trigger from — see FEATURE_REQUIRES below, same
+    # reasoning as huume. Default off; admin-toggle; NOT bundled.
+    "ems": False,
     # Analysis Pilot (full Matcha / Pro). A company-facing, GENERAL-PURPOSE
     # bring-your-own-data analysis engine in a chat UI: the business uploads any
     # dataset (CSV / XLSX / financial-document PDF — 10-Ks, P&Ls, balance sheets,
@@ -725,6 +740,7 @@ def assert_feature_allowed(
 FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
     "werk_lite": ("matcha_work",),
+    "ems": ("matcha_work",),
 }
 
 

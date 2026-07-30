@@ -4,16 +4,21 @@ import type { ChannelSummary } from '../../../api/channels'
 import { listThreads, listProjects, getMWSubscription, THREADS_CHANGED_EVENT } from '../../../api/matchaWork'
 import type { MWThread, MWProject } from '../../../types'
 import { getUnreadCount } from '../../../api/inbox'
+import { listEvents } from '../../../api/events'
 
 /** Loads + polls the sidebar's server state: channels, projects, threads, inbox
- *  unread, pending connections, and (personal only) Plus subscription status. */
-export function useSidebarData(isPersonal: boolean, base: string, pathname: string) {
+ *  unread, pending connections, logged-events count, and (personal only) Plus
+ *  subscription status. `emsEnabled` gates the events fetch — false for any
+ *  caller without both the `ems` flag and events-review permission, so a
+ *  regular employee never fires a request the backend would just 403. */
+export function useSidebarData(isPersonal: boolean, base: string, pathname: string, emsEnabled = false) {
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [projects, setProjects] = useState<MWProject[]>([])
   const [threads, setThreads] = useState<MWThread[]>([])
   const [inboxUnread, setInboxUnread] = useState(0)
   const [pendingConnections, setPendingConnections] = useState(0)
   const [plusActive, setPlusActive] = useState<boolean | null>(null)
+  const [loggedEventsCount, setLoggedEventsCount] = useState(0)
 
   useEffect(() => {
     listChannels().then(setChannels).catch(() => {})
@@ -29,6 +34,16 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
         .catch(() => setPlusActive(false))
     }
   }, [])
+
+  useEffect(() => {
+    if (!emsEnabled) return
+    const load = () => {
+      listEvents({ status: 'logged', limit: 1 }).then((r) => setLoggedEventsCount(r.total)).catch(() => {})
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
+  }, [emsEnabled])
 
   useEffect(() => {
     if (pathname === base) {
@@ -73,5 +88,6 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
     inboxUnread,
     pendingConnections,
     plusActive,
+    loggedEventsCount,
   }
 }

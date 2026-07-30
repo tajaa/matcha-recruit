@@ -43,6 +43,7 @@ from .matcha_work import router as matcha_work_router, public_router as matcha_w
 from .risk_assessment import router as risk_assessment_router
 from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
+from .ems import router as ems_router
 from ..dependencies import require_feature, require_any_feature
 from ...core.dependencies import require_admin
 
@@ -144,6 +145,10 @@ matcha_router.include_router(accommodations_router, prefix="/accommodations", ta
 # + grievance workflow live under /labor.
 matcha_router.include_router(labor_relations_router, prefix="/labor", tags=["labor-relations"],
                              dependencies=[Depends(require_feature("labor_relations"))])
+# EMS — "@huume" channel event logging + review/promote-to-incident. Promotion
+# additionally requires `incidents` (checked in evaluate_promote, not here).
+matcha_router.include_router(ems_router, prefix="/ems", tags=["ems"],
+                             dependencies=[Depends(require_feature("ems"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 # Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)

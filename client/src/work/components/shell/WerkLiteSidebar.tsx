@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, LayoutGrid, Plus, ChevronDown, PanelLeftClose, Home, Pencil, LogOut, Compass } from 'lucide-react'
+import { Hash, LayoutGrid, Plus, ChevronDown, PanelLeftClose, Home, Pencil, LogOut, Compass, ClipboardList } from 'lucide-react'
 import { listChannels, updateChannel, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import { listProjects, createProjectNew, updateProjectMeta } from '../../api/matchaWork'
+import { listEvents } from '../../api/events'
 import type { MWProject } from '../../types'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
+import { canReviewEvents } from '../../utils/eventsPermissions'
 
 interface Props {
   open: boolean
@@ -27,11 +29,13 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const base = useWorkBase()
-  const { me } = useMe()
+  const { me, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
+  const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])
+  const [loggedEventsCount, setLoggedEventsCount] = useState(0)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [creatingBoard, setCreatingBoard] = useState(false)
   const [channelsOpen, setChannelsOpen] = useState(true)
@@ -54,6 +58,16 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
     window.addEventListener(CHANNELS_CHANGED_EVENT, handler)
     return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)
   }, [])
+
+  useEffect(() => {
+    if (!showEvents) return
+    const load = () => {
+      listEvents({ status: 'logged', limit: 1 }).then((r) => setLoggedEventsCount(r.total)).catch(() => {})
+    }
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
+  }, [showEvents])
 
   useEffect(() => {
     if (renaming) renameRef.current?.focus()
@@ -129,6 +143,20 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
         >
           <Home size={16} />
         </button>
+        {showEvents && (
+          <button
+            onClick={() => navigate(`${base}/events`)}
+            className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/events`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+            title="Events"
+          >
+            <ClipboardList size={16} />
+            {loggedEventsCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
+                {loggedEventsCount > 9 ? '!' : loggedEventsCount}
+              </span>
+            )}
+          </button>
+        )}
         <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
           className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
@@ -199,6 +227,25 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             <Home size={14} strokeWidth={1.6} />
             Home
           </button>
+
+          {showEvents && (
+            <button
+              onClick={() => navigate(`${base}/events`)}
+              className={`relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/events`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <ClipboardList size={14} strokeWidth={1.6} />
+              Events
+              {loggedEventsCount > 0 && (
+                <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
+                  {loggedEventsCount > 9 ? '9+' : loggedEventsCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Channels */}
           <div className="mt-2">

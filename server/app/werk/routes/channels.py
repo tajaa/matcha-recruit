@@ -27,6 +27,14 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 _USER_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
+# Message-scoped variant with a 'Huume' fallback for system messages
+# (sender_id NULL -> the LEFT JOIN users u yields no row). Deliberately NOT
+# folded into _USER_NAME_EXPR above — that constant is interpolated into
+# member lists, search, analytics, and other non-message queries that JOIN
+# users (never LEFT JOIN) and can't produce a NULL name today; keeping the
+# fallback message-only avoids it silently masking an unrelated NULL-name
+# bug in those paths later.
+_MSG_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email, 'Huume')"
 
 
 class ChannelMember(BaseModel):
@@ -62,7 +70,7 @@ class ReplyPreview(BaseModel):
 class ChannelMessage(BaseModel):
     id: UUID
     channel_id: UUID
-    sender_id: UUID
+    sender_id: Optional[UUID] = None
     sender_name: str
     sender_avatar_url: Optional[str] = None
     content: str
@@ -74,6 +82,7 @@ class ChannelMessage(BaseModel):
     edited_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[UUID] = None
+    message_type: str = "user"
 
 
 def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
@@ -129,6 +138,7 @@ def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
         edited_at=m["edited_at"],
         deleted_at=m["deleted_at"],
         deleted_by=m["deleted_by"],
+        message_type=m["message_type"],
     )
 
 
@@ -157,12 +167,13 @@ async def _fetch_reactions_map(conn, message_ids: list[UUID]) -> dict[UUID, list
 _MSG_SELECT = f"""
     SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
            m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
+           m.message_type,
            {{name_expr}} AS sender_name, u.avatar_url AS sender_avatar_url,
            rm.content AS reply_content, rm.attachments AS reply_attachments,
            rm.deleted_at IS NOT NULL AS reply_deleted,
            {{reply_name_expr}} AS reply_sender_name
     FROM channel_messages m
-    JOIN users u ON u.id = m.sender_id
+    LEFT JOIN users u ON u.id = m.sender_id
     LEFT JOIN clients c ON c.user_id = u.id
     LEFT JOIN employees e ON e.user_id = u.id
     LEFT JOIN admins a ON a.user_id = u.id
@@ -176,8 +187,8 @@ _MSG_SELECT = f"""
 def _msg_query(where: str, order: str = "m.created_at DESC", limit_param: str | None = None) -> str:
     """Build a channel messages query with reply joins."""
     q = _MSG_SELECT.format(
-        name_expr=_USER_NAME_EXPR,
-        reply_name_expr=_USER_NAME_EXPR.replace("c.", "rc.").replace("e.", "re.").replace("a.", "ra.").replace("u.", "ru."),
+        name_expr=_MSG_NAME_EXPR,
+        reply_name_expr=_MSG_NAME_EXPR.replace("c.", "rc.").replace("e.", "re.").replace("a.", "ra.").replace("u.", "ru."),
     )
     q += f" WHERE {where} ORDER BY {order}"
     if limit_param:
@@ -342,7 +353,7 @@ async def list_channels(
                    CASE WHEN cm.user_id IS NOT NULL THEN
                        (SELECT COUNT(*) FROM channel_messages msg
                         WHERE msg.channel_id = ch.id
-                          AND msg.sender_id != $1
+                          AND (msg.sender_id IS NULL OR msg.sender_id != $1)
                           AND (cm.last_read_at IS NULL OR msg.created_at > cm.last_read_at))
                    ELSE 0 END AS unread_count,
                    (SELECT MAX(msg2.created_at) FROM channel_messages msg2
@@ -1320,11 +1331,13 @@ async def delete_channel_message(
     """
     async with get_connection() as conn:
         msg = await conn.fetchrow(
-            "SELECT id, sender_id, deleted_at, created_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
         )
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found")
+        if msg["message_type"] != "user":
+            raise HTTPException(status_code=403, detail="System messages cannot be modified")
         if msg["deleted_at"] is not None:
             return {"ok": True, "already_deleted": True}
 
@@ -1388,11 +1401,13 @@ async def edit_channel_message(
 
     async with get_connection() as conn:
         msg = await conn.fetchrow(
-            "SELECT id, sender_id, deleted_at, created_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
         )
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found")
+        if msg["message_type"] != "user":
+            raise HTTPException(status_code=403, detail="System messages cannot be modified")
         if msg["deleted_at"] is not None:
             raise HTTPException(status_code=400, detail="Cannot edit a deleted message")
         if msg["sender_id"] != current_user.id:
@@ -1447,12 +1462,14 @@ async def toggle_reaction(
             raise HTTPException(status_code=403, detail="Not a member")
 
         # Verify message exists in this channel
-        msg_exists = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM channel_messages WHERE id = $1 AND channel_id = $2)",
+        msg_row = await conn.fetchrow(
+            "SELECT message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
         )
-        if not msg_exists:
+        if not msg_row:
             raise HTTPException(status_code=404, detail="Message not found")
+        if msg_row["message_type"] != "user":
+            raise HTTPException(status_code=403, detail="System messages cannot be modified")
 
         # Toggle: try insert, if conflict delete
         existing = await conn.fetchval(

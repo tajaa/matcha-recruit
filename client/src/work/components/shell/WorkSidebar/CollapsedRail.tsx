@@ -1,4 +1,4 @@
-import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   openChannels: () => void
   openProjects: () => void
   openChats: () => void
+  showEvents: boolean
+  loggedEventsCount: number
 }
 
 // ─── Collapsed: icon rail ───
@@ -32,6 +34,8 @@ export default function CollapsedRail({
   openChannels,
   openProjects,
   openChats,
+  showEvents,
+  loggedEventsCount,
 }: Props) {
   return (
     <aside className="w-12 bg-w-surface border-r border-w-line flex flex-col items-center py-2 gap-1 shrink-0">
@@ -59,6 +63,21 @@ export default function CollapsedRail({
       >
         <MailOpen size={16} />
       </button>
+
+      {showEvents && (
+        <button
+          onClick={() => navigate(`${base}/events`)}
+          className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/events`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+          title="Events"
+        >
+          <ClipboardList size={16} />
+          {loggedEventsCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
+              {loggedEventsCount > 9 ? '!' : loggedEventsCount}
+            </span>
+          )}
+        </button>
+      )}
 
       <button
         onClick={() => { onToggle(); openChannels() }}

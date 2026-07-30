@@ -69,10 +69,14 @@ export interface ChannelReaction {
 export interface ChannelMessage {
   id: string
   channel_id: string
-  sender_id: string
+  // null for system (Huume) messages — they have no sender to attribute.
+  sender_id: string | null
   sender_name: string
   sender_avatar_url: string | null
   content: string
+  // 'system' = a Huume-posted confirmation (EMS). Absent/undefined on
+  // messages fetched before this field shipped — treat as 'user'.
+  message_type?: 'user' | 'system'
   attachments?: ChannelAttachment[]
   reactions?: ChannelReaction[]
   created_at: string

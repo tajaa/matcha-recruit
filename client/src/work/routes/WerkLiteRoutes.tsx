@@ -7,6 +7,7 @@ import ChannelView from '../pages/ChannelView'
 import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
 import BoardView from '../pages/BoardView'
+import EventsHub from '../pages/EventsHub'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider } from './WorkSurfaceContext'
 import { useMe } from '../../hooks/useMe'
@@ -65,6 +66,16 @@ export default function WerkLiteRoutes() {
               <Route path="channels" element={<ChannelBrowse />} />
               <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
               <Route path="channels/:channelId" element={<ChannelView />} />
+              <Route
+                element={
+                  <FeatureGate feature="ems" label="Events">
+                    <Outlet />
+                  </FeatureGate>
+                }
+              >
+                <Route path="events" element={<EventsHub />} />
+                <Route path="events/:eventId" element={<EventsHub />} />
+              </Route>
               <Route path="boards/:projectId" element={<BoardView />} />
             </Route>
           </Route>

@@ -70,14 +70,21 @@ async def create_misc_tail(conn):
             CREATE TABLE IF NOT EXISTS channel_messages (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-                sender_id UUID NOT NULL REFERENCES users(id),
+                sender_id UUID REFERENCES users(id),
                 content TEXT NOT NULL,
                 attachments JSONB DEFAULT '[]'::jsonb,
                 reply_to_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
-                edited_at TIMESTAMPTZ
+                edited_at TIMESTAMPTZ,
+                message_type VARCHAR(20) NOT NULL DEFAULT 'user'
             )
         """)
+        # sender_id is nullable (EMS system/Huume messages have no human
+        # sender) — see alembic/versions/ems01_event_management.py. init_db()
+        # early-returns before this module runs whenever the `users` table
+        # already exists (bootstrap/__init__.py), so this CREATE TABLE only
+        # ever runs on a genuinely fresh DB — an existing DB's shape is
+        # migrated by ems01, not by an ALTER here.
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_channel_messages_channel
             ON channel_messages(channel_id, created_at DESC)

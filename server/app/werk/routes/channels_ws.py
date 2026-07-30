@@ -6,12 +6,12 @@ import logging
 from typing import Dict, Optional, Set
 from uuid import UUID
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from pydantic import BaseModel
 
 from ...database import get_connection
 from ...core.services.auth import decode_token
-from ...core.services.redis_cache import get_redis_cache
+from ...core.services.redis_cache import get_redis_cache, check_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,99 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
                 )
     except Exception:
         logger.warning("channel->project Files sync failed", exc_info=True)
+
+
+async def _bg_ems_intake(
+    channel_id_str: str, message_id_str: str, reporter_user_id_str: str, content: str,
+) -> None:
+    """EMS event intake for an "@huume ..." channel message. Off the send hot
+    path, top-level except — must NEVER affect message-send latency or
+    success. Excludes personal (is_personal) companies and companies without
+    the `ems` flag; rate-limited per company.
+
+    Deliberately uses TWO separate `get_connection()` blocks rather than one
+    held open for the whole function: `classify_event` makes 1-3 Gemini
+    calls (classify + best-effort IR categorize/severity, each with its own
+    retry), and the pool is capped at 10 connections
+    (app/database/pool.py). Holding a pooled connection across that would
+    let a handful of concurrent @huume messages starve every other request
+    in the backend, not just EMS."""
+    try:
+        # werk -> matcha.services: lazy in-function import per the
+        # documented werk/matcha boundary rule (CLAUDE.md).
+        from app.matcha.services.ems.event_intake import (
+            classify_event, gather_intake_context, persist_event,
+        )
+
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT ch.company_id, comp.is_personal, comp.enabled_features,
+                       comp.signup_source
+                FROM channels ch
+                JOIN companies comp ON comp.id = ch.company_id
+                WHERE ch.id = $1
+                """,
+                UUID(channel_id_str),
+            )
+            if not row or row["is_personal"]:
+                return
+            from app.core.feature_flags import merge_company_features
+            merged = merge_company_features(row["enabled_features"], row["signup_source"])
+            if not merged.get("ems"):
+                return
+            try:
+                await check_rate_limit(str(row["company_id"]), "ems_event", 30, 3600)
+            except HTTPException:
+                return  # over the hourly limit: skip silently, message already sent
+
+            company_id = row["company_id"]
+            context = await gather_intake_context(
+                conn, UUID(channel_id_str), UUID(message_id_str),
+            )
+        # No connection held across the Gemini calls.
+        classified = await classify_event(content, context)
+
+        async with get_connection() as conn:
+            event_row, confirmation = await persist_event(
+                conn,
+                company_id=company_id,
+                channel_id=UUID(channel_id_str),
+                message_id=UUID(message_id_str),
+                reporter_user_id=UUID(reporter_user_id_str),
+                content=content,
+                classified=classified,
+            )
+            if event_row is None:
+                return  # dedupe hit (ON CONFLICT on message_id) — nothing to confirm
+
+            sys_row = await conn.fetchrow(
+                """
+                INSERT INTO channel_messages (channel_id, sender_id, content, message_type)
+                VALUES ($1, NULL, $2, 'system')
+                RETURNING id, channel_id, content, message_type, created_at
+                """,
+                UUID(channel_id_str), confirmation,
+            )
+        await broadcast_system_message(channel_id_str, {
+            "id": str(sys_row["id"]),
+            "channel_id": channel_id_str,
+            "sender_id": None,
+            "sender_name": "Huume",
+            "sender_avatar_url": None,
+            "content": sys_row["content"],
+            "attachments": [],
+            "reply_to_id": None,
+            "reply_preview": None,
+            "reactions": [],
+            "created_at": sys_row["created_at"].isoformat(),
+            "edited_at": None,
+            "mentioned_user_ids": [],
+            "client_message_id": None,
+            "message_type": sys_row["message_type"],
+        })
+    except Exception:
+        logger.exception("EMS intake failed for message %s", message_id_str)
 
 
 async def _notify_channel_members(
@@ -576,6 +669,15 @@ async def broadcast_reaction_update(
     )
 
 
+async def broadcast_system_message(channel_id: str, message: dict) -> None:
+    """Fan out a system (Huume/EMS) message to a channel room. Called from
+    a background task, not a connected client — no WebSocket/user context
+    required. Goes through manager.broadcast_message so the envelope
+    matches every other message fan-out ({type, room, message}) — the
+    client reads `data.message` and silently drops anything else shaped."""
+    await manager.broadcast_message(channel_id, message)
+
+
 # ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
@@ -792,6 +894,7 @@ async def channel_websocket(
                                     DO UPDATE SET id = channel_messages.id
                                 RETURNING id, channel_id, sender_id, content, attachments,
                                           reply_to_id, client_message_id, created_at, edited_at,
+                                          message_type,
                                           -- xmax = 0 iff this row was just inserted (no conflict).
                                           -- Lets us skip duplicate side-effects (mention email,
                                           -- in-app notification, activity-timestamp updates) when
@@ -832,9 +935,9 @@ async def channel_websocket(
                                 rp = await conn.fetchrow(
                                     """
                                     SELECT m.content, m.attachments, m.deleted_at,
-                                           COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS sender_name
+                                           COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email, 'Huume') AS sender_name
                                     FROM channel_messages m
-                                    JOIN users u ON u.id = m.sender_id
+                                    LEFT JOIN users u ON u.id = m.sender_id
                                     LEFT JOIN clients c ON c.user_id = u.id
                                     LEFT JOIN employees e ON e.user_id = u.id
                                     LEFT JOIN admins a ON a.user_id = u.id
@@ -867,10 +970,22 @@ async def channel_websocket(
                             ) if mention_handles else []
                             mentioned_user_ids = [str(m["id"]) for m in mentioned_users]
 
+                            # EMS: "@huume ..." logs an event. Gated on
+                            # is_new_message — an ON CONFLICT cmid-retry
+                            # replay must not double-log (unique(message_id)
+                            # on ems_events is the DB-side belt). resolve_mentions
+                            # drops the unresolved "huume" handle (no huume
+                            # channel_members row), so no mention email/
+                            # notification noise from the trigger itself.
+                            if is_new_message and "huume" in mention_handles:
+                                _spawn_bg(_bg_ems_intake(
+                                    str(ch_uuid), str(row["id"]), str(user.id), row["content"],
+                                ))
+
                             await manager.broadcast_message(room_key, {
                                 "id": str(row["id"]),
                                 "channel_id": str(row["channel_id"]),
-                                "sender_id": str(row["sender_id"]),
+                                "sender_id": str(row["sender_id"]) if row["sender_id"] else None,
                                 "sender_name": user.name,
                                 "sender_avatar_url": user.avatar_url,
                                 "content": row["content"],
@@ -882,6 +997,7 @@ async def channel_websocket(
                                 "edited_at": None,
                                 "mentioned_user_ids": mentioned_user_ids,
                                 "client_message_id": client_message_id,
+                                "message_type": row["message_type"],
                             })
 
                             # Off-load offline-email check to Celery so the WS

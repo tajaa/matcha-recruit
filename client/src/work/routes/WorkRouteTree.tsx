@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Outlet } from 'react-router-dom'
 import WorkLayout from '../layout/WorkLayout'
 import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
@@ -10,6 +10,8 @@ import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
 import ChannelBilling from '../pages/ChannelBilling'
 import ConnectionsPanel from '../components/shell/ConnectionsPanel'
 import Inbox from '../pages/Inbox'
+import EventsHub from '../pages/EventsHub'
+import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
 // The route tree shared by the two full work surfaces:
@@ -39,6 +41,16 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="channels" element={<ChannelBrowse />} />
           <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
           <Route path="channels/:channelId" element={<ChannelView />} />
+          <Route
+            element={
+              <FeatureGate feature="ems" label="Events">
+                <Outlet />
+              </FeatureGate>
+            }
+          >
+            <Route path="events" element={<EventsHub />} />
+            <Route path="events/:eventId" element={<EventsHub />} />
+          </Route>
           <Route path=":threadId" element={<MatchaWorkThread />} />
           <Route path="projects/:projectId" element={<ProjectView />} />
         </Route>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList } from 'lucide-react'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
@@ -12,6 +12,7 @@ import TemplatePickerModal from '../panels/TemplatePickerModal'
 import type { RecruitingClient } from '../../types'
 import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
+import { canReviewEvents } from '../../utils/eventsPermissions'
 import type { Props } from './WorkSidebar/types'
 import { useSidebarData } from './WorkSidebar/useSidebarData'
 import { useSectionState } from './WorkSidebar/useSectionState'
@@ -29,8 +30,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const base = useWorkBase()
   const brand = useWorkBrand()
   const surface = useWorkSurface()
-  const { me, isPersonal, mwBetaLite } = useMe()
+  const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
+  const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
 
   const {
     channels, setChannels,
@@ -39,7 +41,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     inboxUnread,
     pendingConnections,
     plusActive,
-  } = useSidebarData(isPersonal, base, location.pathname)
+    loggedEventsCount,
+  } = useSidebarData(isPersonal, base, location.pathname, showEvents)
 
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
@@ -179,6 +182,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         openChannels={() => sections.open('channels')}
         openProjects={() => sections.open('projects')}
         openChats={() => sections.open('chats')}
+        showEvents={showEvents}
+        loggedEventsCount={loggedEventsCount}
       />
     )
   }
@@ -212,6 +217,26 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             <Home size={14} strokeWidth={1.6} />
             Home
           </button>
+
+          {/* Events (HR admin review of @huume-logged events) */}
+          {showEvents && (
+            <button
+              onClick={() => navigate(`${base}/events`)}
+              className={`relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/events`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <ClipboardList size={14} strokeWidth={1.6} />
+              Events
+              {loggedEventsCount > 0 && (
+                <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
+                  {loggedEventsCount > 9 ? '9+' : loggedEventsCount}
+                </span>
+              )}
+            </button>
+          )}
 
           {/* Filter sidebar */}
           <div className="relative mt-1 mb-1.5">
