@@ -1,5 +1,6 @@
 import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
+import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
 
 interface Props {
   onToggle: () => void
@@ -73,7 +74,7 @@ export default function CollapsedRail({
           <ClipboardList size={16} />
           {loggedEventsCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
-              {loggedEventsCount > 9 ? '!' : loggedEventsCount}
+              {formatEventsBadge(loggedEventsCount, true)}
             </span>
           )}
         </button>

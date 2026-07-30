@@ -89,7 +89,16 @@ export default function EventsHub() {
   }
 
   function applyEventUpdate(updated: EmsEvent) {
-    setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)))
+    // Reconcile against the active status filter: a dismissed/promoted
+    // event must leave the Logged list immediately, not sit there with a
+    // stale banner until the next full reload. The detail pane keeps
+    // showing the updated event (status banner) even after its row leaves
+    // the list.
+    setEvents((prev) =>
+      statusFilter !== 'all' && updated.status !== statusFilter
+        ? prev.filter((e) => e.id !== updated.id)
+        : prev.map((e) => (e.id === updated.id ? updated : e)),
+    )
     setSelectedEvent((prev) => (prev && prev.id === updated.id ? updated : prev))
   }
 

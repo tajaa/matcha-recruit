@@ -4,7 +4,7 @@ import type { ChannelSummary } from '../../../api/channels'
 import { listThreads, listProjects, getMWSubscription, THREADS_CHANGED_EVENT } from '../../../api/matchaWork'
 import type { MWThread, MWProject } from '../../../types'
 import { getUnreadCount } from '../../../api/inbox'
-import { listEvents } from '../../../api/events'
+import { useLoggedEventsCount } from '../../../hooks/useLoggedEventsCount'
 
 /** Loads + polls the sidebar's server state: channels, projects, threads, inbox
  *  unread, pending connections, logged-events count, and (personal only) Plus
@@ -18,7 +18,7 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
   const [inboxUnread, setInboxUnread] = useState(0)
   const [pendingConnections, setPendingConnections] = useState(0)
   const [plusActive, setPlusActive] = useState<boolean | null>(null)
-  const [loggedEventsCount, setLoggedEventsCount] = useState(0)
+  const loggedEventsCount = useLoggedEventsCount(emsEnabled)
 
   useEffect(() => {
     listChannels().then(setChannels).catch(() => {})
@@ -34,16 +34,6 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
         .catch(() => setPlusActive(false))
     }
   }, [])
-
-  useEffect(() => {
-    if (!emsEnabled) return
-    const load = () => {
-      listEvents({ status: 'logged', limit: 1 }).then((r) => setLoggedEventsCount(r.total)).catch(() => {})
-    }
-    load()
-    const id = setInterval(load, 60_000)
-    return () => clearInterval(id)
-  }, [emsEnabled])
 
   useEffect(() => {
     if (pathname === base) {

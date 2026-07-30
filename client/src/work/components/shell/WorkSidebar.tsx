@@ -13,6 +13,7 @@ import type { RecruitingClient } from '../../types'
 import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 import { canReviewEvents } from '../../utils/eventsPermissions'
+import { formatEventsBadge } from '../../hooks/useLoggedEventsCount'
 import type { Props } from './WorkSidebar/types'
 import { useSidebarData } from './WorkSidebar/useSidebarData'
 import { useSectionState } from './WorkSidebar/useSectionState'
@@ -232,7 +233,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Events
               {loggedEventsCount > 0 && (
                 <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                  {loggedEventsCount > 9 ? '9+' : loggedEventsCount}
+                  {formatEventsBadge(loggedEventsCount)}
                 </span>
               )}
             </button>

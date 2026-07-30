@@ -6,13 +6,13 @@ import type { ChannelSummary } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import { listProjects, createProjectNew, updateProjectMeta } from '../../api/matchaWork'
-import { listEvents } from '../../api/events'
 import type { MWProject } from '../../types'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 import { canReviewEvents } from '../../utils/eventsPermissions'
+import { useLoggedEventsCount, formatEventsBadge } from '../../hooks/useLoggedEventsCount'
 
 interface Props {
   open: boolean
@@ -35,7 +35,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])
-  const [loggedEventsCount, setLoggedEventsCount] = useState(0)
+  const loggedEventsCount = useLoggedEventsCount(showEvents)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [creatingBoard, setCreatingBoard] = useState(false)
   const [channelsOpen, setChannelsOpen] = useState(true)
@@ -59,15 +59,6 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
     return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)
   }, [])
 
-  useEffect(() => {
-    if (!showEvents) return
-    const load = () => {
-      listEvents({ status: 'logged', limit: 1 }).then((r) => setLoggedEventsCount(r.total)).catch(() => {})
-    }
-    load()
-    const id = setInterval(load, 60_000)
-    return () => clearInterval(id)
-  }, [showEvents])
 
   useEffect(() => {
     if (renaming) renameRef.current?.focus()
@@ -152,7 +143,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             <ClipboardList size={16} />
             {loggedEventsCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-w-accent text-[8px] font-bold text-white flex items-center justify-center">
-                {loggedEventsCount > 9 ? '!' : loggedEventsCount}
+                {formatEventsBadge(loggedEventsCount, true)}
               </span>
             )}
           </button>
@@ -241,7 +232,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
               Events
               {loggedEventsCount > 0 && (
                 <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                  {loggedEventsCount > 9 ? '9+' : loggedEventsCount}
+                  {formatEventsBadge(loggedEventsCount)}
                 </span>
               )}
             </button>

@@ -123,6 +123,50 @@ class TestParseModelJson:
         assert len(data["clarify_question"]) == 300
 
 
+class TestCoerceDoc:
+    """coerce_doc is the single normalization point for BOTH doc writers —
+    the model parse path (_parse_model_json) and the admin PUT
+    (routes/ems.py:update_event). EventDetail.tsx renders values with
+    v.trim(), so a non-string value here is a client crash."""
+
+    def test_non_dict_returns_empty(self):
+        assert event_intake.coerce_doc(None) == {}
+        assert event_intake.coerce_doc("not a dict") == {}
+        assert event_intake.coerce_doc([1, 2, 3]) == {}
+
+    def test_non_string_values_coerced(self):
+        assert event_intake.coerce_doc({"count": 3}) == {"count": "3"}
+        assert event_intake.coerce_doc({"flag": True}) == {"flag": "True"}
+        assert event_intake.coerce_doc({"nested": {"a": 1}}) == {"nested": "{'a': 1}"}
+
+    def test_caps_pairs_keys_values(self):
+        eleven_pairs = {f"k{i}": "v" for i in range(11)}
+        assert len(event_intake.coerce_doc(eleven_pairs)) == 10
+
+        long_key = "k" * 150
+        assert len(list(event_intake.coerce_doc({long_key: "v"}).keys())[0]) == 100
+
+        long_value = "v" * 3000
+        assert len(list(event_intake.coerce_doc({"k": long_value}).values())[0]) == 2000
+
+
+class TestQuestionMarker:
+    def test_marker_codepoint_pinned(self):
+        # extract_question() scans already-posted pill text for this exact
+        # string. A "fix the comment/emoji" edit that changes the codepoint
+        # would silently orphan every armed clarify question in the field —
+        # pin it as a failing test, not just a comment.
+        assert event_intake._QUESTION_MARKER == "\n\U0001F914 "
+
+    def test_extract_question_roundtrip(self):
+        pill = event_intake.question_text("\U0001F4CB Logged **Safety** event.", "Who was hurt?")
+        assert event_intake.extract_question(pill) == "Who was hurt?"
+
+    def test_extract_question_no_marker_returns_input_unchanged(self):
+        assert event_intake.extract_question("plain confirmation, no question") == \
+            "plain confirmation, no question"
+
+
 class TestConfirmationText:
     def test_names_category_label(self):
         text = event_intake._confirmation_text({"category": "guest_experience", "incident_recommendation": False})
@@ -337,13 +381,11 @@ class TestRefinementHelpers:
         assert "reply to this message" in text.lower()
 
 
-class _RefinementFakeConn:
-    """Fakes both apply_refinement UPDATE variants (model_ok True/False),
-    distinguished by SQL shape — the True variant sets `category = $5`, the
-    False variant doesn't touch classification columns at all. Echoes args
-    back into a RETURNING-shaped dict rather than modeling real `narrative
-    || $3` concatenation, which is enough to assert on for these tests.
-    """
+class _FoldFakeConn:
+    """Fakes fold_answer's UPDATE — narrative append + rounds increment
+    only, never classification columns. Echoes args back into a
+    RETURNING-shaped dict rather than modeling real `narrative || $3`
+    concatenation, which is enough to assert on for these tests."""
 
     def __init__(self, update_returns_none=False):
         self.update_returns_none = update_returns_none
@@ -358,31 +400,16 @@ class _RefinementFakeConn:
         if self.update_returns_none:
             return None  # WHERE status='logged' guard missed (promoted/dismissed race)
 
-        now = datetime.now(timezone.utc)
-        base = {
-            "channel_id": uuid4(), "message_id": uuid4(), "reporter_user_id": uuid4(),
-            "status": "logged", "clarification_rounds": 1, "created_at": now, "updated_at": now,
-        }
-        if "category = $5" in q:
-            (event_id, company_id, appended, title, category, severity_hint, doc_json,
-             incident_recommendation, incident_reasoning,
-             suggested_incident_type, suggested_severity) = args
-            return {
-                **base, "id": event_id, "company_id": company_id,
-                "title": title, "category": category, "severity_hint": severity_hint,
-                "doc": doc_json, "narrative": f"original{appended}",
-                "incident_recommendation": incident_recommendation,
-                "incident_reasoning": incident_reasoning,
-                "suggested_incident_type": suggested_incident_type,
-                "suggested_severity": suggested_severity,
-            }
         event_id, company_id, appended = args
+        now = datetime.now(timezone.utc)
         return {
-            **base, "id": event_id, "company_id": company_id,
+            "id": event_id, "company_id": company_id,
+            "channel_id": uuid4(), "message_id": uuid4(), "reporter_user_id": uuid4(),
             "title": None, "category": "uncategorized", "severity_hint": None,
             "doc": "{}", "narrative": f"original{appended}",
             "incident_recommendation": False, "incident_reasoning": None,
             "suggested_incident_type": None, "suggested_severity": None,
+            "status": "logged", "clarification_rounds": 1, "created_at": now, "updated_at": now,
         }
 
     async def execute(self, query, *args):
@@ -390,47 +417,114 @@ class _RefinementFakeConn:
         return "INSERT 0 1"
 
 
-class TestApplyRefinement:
+class TestFoldAnswer:
     @pytest.mark.asyncio
-    async def test_updates_classification_when_model_ok(self):
-        conn = _RefinementFakeConn()
-        classified = {
-            "title": "Slip in freezer", "category": "safety", "severity_hint": "medium",
-            "doc": {"where": "walk-in freezer"}, "incident_recommendation": True,
-            "incident_reasoning": "Possible injury.", "suggested_incident_type": "safety",
-            "suggested_severity": "medium", "model_ok": True,
-        }
-        updated = await event_intake.apply_refinement(
-            conn, event_id=uuid4(), company_id=uuid4(), answer="In the walk-in freezer",
-            classified=classified, answered_by=uuid4(),
+    async def test_appends_narrative_and_bumps_rounds(self):
+        conn = _FoldFakeConn()
+        folded = await event_intake.fold_answer(
+            conn, event_id=uuid4(), company_id=uuid4(),
+            answer="In the walk-in freezer", answered_by=uuid4(),
         )
-        assert updated is not None
-        assert updated["category"] == "safety"
-        assert "Follow-up: In the walk-in freezer" in updated["narrative"]
+        assert folded is not None
+        assert "Follow-up: In the walk-in freezer" in folded["narrative"]
+        # No classification column in the single UPDATE this issued.
+        update_query = conn.fetchrow_calls[0][0]
+        assert "category =" not in update_query
+        assert "title =" not in update_query
         # The audit INSERT ran (action='clarified').
         assert any("ems_event_audit_log" in q for q, _ in conn.executed)
 
     @pytest.mark.asyncio
-    async def test_append_only_when_model_failed(self):
-        conn = _RefinementFakeConn()
-        updated = await event_intake.apply_refinement(
-            conn, event_id=uuid4(), company_id=uuid4(), answer="not sure, ask Jenna",
-            classified={"model_ok": False}, answered_by=uuid4(),
+    async def test_none_when_event_not_logged(self):
+        conn = _FoldFakeConn(update_returns_none=True)
+        folded = await event_intake.fold_answer(
+            conn, event_id=uuid4(), company_id=uuid4(),
+            answer="answer", answered_by=uuid4(),
         )
-        assert updated is not None
-        # No classification column was touched by the UPDATE this test's
-        # single fetchrow call issued.
+        assert folded is None
+        # No audit row when the guard missed.
+        assert conn.executed == []
+
+
+class _ReclassifyFakeConn:
+    """Fakes apply_reclassification's UPDATE — classification columns only,
+    never narrative/clarification_rounds (fold_answer already did both)."""
+
+    def __init__(self, update_returns_none=False):
+        self.update_returns_none = update_returns_none
+        self.fetchrow_calls: list[tuple[str, tuple]] = []
+        self.executed: list[tuple[str, tuple]] = []
+
+    async def fetchrow(self, query, *args):
+        q = " ".join(query.split())
+        self.fetchrow_calls.append((q, args))
+        if "UPDATE ems_events" not in q:
+            raise AssertionError(f"unexpected fetchrow: {q}")
+        if self.update_returns_none:
+            return None  # WHERE status='logged' guard missed (promoted/dismissed race)
+
+        (event_id, company_id, title, category, severity_hint, doc_json,
+         incident_recommendation, incident_reasoning,
+         suggested_incident_type, suggested_severity) = args
+        now = datetime.now(timezone.utc)
+        return {
+            "id": event_id, "company_id": company_id,
+            "channel_id": uuid4(), "message_id": uuid4(), "reporter_user_id": uuid4(),
+            "title": title, "category": category, "severity_hint": severity_hint,
+            "doc": doc_json, "narrative": "original + follow-up (untouched by this UPDATE)",
+            "incident_recommendation": incident_recommendation,
+            "incident_reasoning": incident_reasoning,
+            "suggested_incident_type": suggested_incident_type,
+            "suggested_severity": suggested_severity,
+            "status": "logged", "clarification_rounds": 1, "created_at": now, "updated_at": now,
+        }
+
+    async def execute(self, query, *args):
+        self.executed.append((" ".join(query.split()), args))
+        return "INSERT 0 1"
+
+
+class TestApplyReclassification:
+    _CLASSIFIED_OK = {
+        "title": "Slip in freezer", "category": "safety", "severity_hint": "medium",
+        "doc": {"where": "walk-in freezer"}, "incident_recommendation": True,
+        "incident_reasoning": "Possible injury.", "suggested_incident_type": "safety",
+        "suggested_severity": "medium", "model_ok": True,
+    }
+
+    @pytest.mark.asyncio
+    async def test_rewrites_classification_when_model_ok(self):
+        conn = _ReclassifyFakeConn()
+        reclassified = await event_intake.apply_reclassification(
+            conn, event_id=uuid4(), company_id=uuid4(), classified=self._CLASSIFIED_OK,
+        )
+        assert reclassified is not None
+        assert reclassified["category"] == "safety"
+        # Never WRITES narrative or clarification_rounds — fold_answer's
+        # job. (RETURNING still names them, hence checking for the
+        # assignment form, not bare substring presence.)
         update_query = conn.fetchrow_calls[0][0]
-        assert "category =" not in update_query
-        assert "Follow-up: not sure, ask Jenna" in updated["narrative"]
+        assert "narrative =" not in update_query
+        assert "clarification_rounds =" not in update_query
+        assert any("ems_event_audit_log" in q for q, _ in conn.executed)
+
+    @pytest.mark.asyncio
+    async def test_noop_when_model_not_ok(self):
+        conn = _ReclassifyFakeConn()
+        reclassified = await event_intake.apply_reclassification(
+            conn, event_id=uuid4(), company_id=uuid4(), classified={"model_ok": False},
+        )
+        assert reclassified is None
+        # Never even issues the UPDATE — a Gemini failure during reclassify
+        # must not touch the row fold_answer already committed.
+        assert conn.fetchrow_calls == []
+        assert conn.executed == []
 
     @pytest.mark.asyncio
     async def test_none_when_event_not_logged(self):
-        conn = _RefinementFakeConn(update_returns_none=True)
-        updated = await event_intake.apply_refinement(
-            conn, event_id=uuid4(), company_id=uuid4(), answer="answer",
-            classified={"model_ok": False}, answered_by=uuid4(),
+        conn = _ReclassifyFakeConn(update_returns_none=True)
+        reclassified = await event_intake.apply_reclassification(
+            conn, event_id=uuid4(), company_id=uuid4(), classified=self._CLASSIFIED_OK,
         )
-        assert updated is None
-        # No audit row when the guard missed.
+        assert reclassified is None
         assert conn.executed == []

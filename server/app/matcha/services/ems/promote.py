@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 _ALLOWED_ROLES = frozenset({"client", "admin"})
 
 
+class PromoteRaceError(Exception):
+    """The status='logged' guard on the promote UPDATE missed — someone
+    promoted/dismissed the event between the route's read and this write.
+    Deliberately not a ValueError: create_incident_core can raise ValueError
+    for unrelated reasons (date parse, JSON encode) and those must surface
+    as real 500s, not a fake "promoted by someone else" 409."""
+
+
 @dataclass(frozen=True)
 class PromoteVerdict:
     kind: Literal["proceed", "refuse"]
@@ -42,6 +50,18 @@ def evaluate_promote(*, role: Optional[str], features: dict, event_status: str) 
     if event_status != "logged":
         return PromoteVerdict("refuse", f"Event is already {event_status}, not logged.", 409)
     return PromoteVerdict("proceed")
+
+
+def shape_witnesses(raw: Optional[list]) -> list[dict]:
+    """Convert PromoteRequest.witnesses (bare display-name strings) into the
+    Witness-shaped dicts create_incident_core stores and every reader
+    round-trips through parse_witnesses() -> Witness(**w). A bare string
+    there TypeErrors and silently drops the WHOLE witness list."""
+    return [
+        {"name": w.strip()}
+        for w in (raw or [])
+        if isinstance(w, str) and w.strip()
+    ]
 
 
 def _render_description(event: dict, channel_name: Optional[str], reporter_name: Optional[str]) -> str:
@@ -86,7 +106,7 @@ async def promote_event(
     severity = overrides.get("severity") or event.get("suggested_severity")
     occurred_at = overrides.get("occurred_at") or event["created_at"]
     location = overrides.get("location")
-    witnesses = overrides.get("witnesses") or []
+    witnesses = shape_witnesses(overrides.get("witnesses"))
 
     incident_row, bg_tasks = await create_incident_core(
         conn,
@@ -117,7 +137,7 @@ async def promote_event(
         event["id"], UUID(str(incident_row["id"])), actor_user_id,
     )
     if updated is None:
-        raise ValueError("Event was promoted or dismissed by someone else — refresh and retry.")
+        raise PromoteRaceError("Event was promoted or dismissed by someone else — refresh and retry.")
 
     await conn.execute(
         """

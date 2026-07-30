@@ -5,9 +5,33 @@ tests/huume/test_huume_actions.py for the sibling huume envelope.
     cd server && ./venv/bin/python -m pytest tests/ems/test_promote_envelope.py -q
 """
 
-from app.matcha.services.ems.promote import evaluate_promote
+from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, shape_witnesses
 
 FEATURES_ON = {"ems": True, "incidents": True, "matcha_work": True}
+
+
+class TestPromoteRaceError:
+    def test_is_not_a_value_error(self):
+        # promote.py:promote_event raises this instead of ValueError
+        # specifically so routes/ems.py's `except PromoteRaceError` doesn't
+        # also catch unrelated ValueErrors raised deep inside
+        # create_incident_core (date parse, JSON encode) and misreport them
+        # as a 409 promote/dismiss race.
+        assert not issubclass(PromoteRaceError, ValueError)
+
+
+class TestShapeWitnesses:
+    def test_strings_become_name_dicts(self):
+        assert shape_witnesses(["Bob", " Alice "]) == [{"name": "Bob"}, {"name": "Alice"}]
+
+    def test_drops_blank_and_non_string(self):
+        assert shape_witnesses(["", "   ", None, 3, "Bob"]) == [{"name": "Bob"}]
+
+    def test_none_is_empty(self):
+        assert shape_witnesses(None) == []
+
+    def test_empty_list_is_empty(self):
+        assert shape_witnesses([]) == []
 
 
 class TestEvaluatePromote:

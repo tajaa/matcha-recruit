@@ -18,7 +18,8 @@ from app.matcha.models.ems import (
     EmsEventListResponse, EmsEventOut, EmsEventUpdate, PromoteRequest, PromoteResponse,
 )
 from app.matcha.services.ems import categories
-from app.matcha.services.ems.promote import evaluate_promote, promote_event
+from app.matcha.services.ems.event_intake import coerce_doc
+from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, promote_event
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +51,6 @@ def _row_to_event(row) -> EmsEventOut:
     if isinstance(doc, str):
         doc = json.loads(doc) if doc else {}
     return EmsEventOut(**{**dict(row), "doc": doc or {}})
-
-
-async def _company_features(conn, company_id: UUID) -> dict:
-    from app.core.feature_flags import merge_company_features
-    row = await conn.fetchrow(
-        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id,
-    )
-    if not row:
-        return {}
-    return merge_company_features(row["enabled_features"], row["signup_source"])
 
 
 @router.get("/events", response_model=EmsEventListResponse)
@@ -127,7 +118,11 @@ async def update_event(
     company_id: UUID = Depends(get_client_company_id),
 ):
     sent = body.model_fields_set
-    if "category" in sent and body.category is not None and body.category not in categories.ALL_KEYS:
+    if "category" in sent and (
+        body.category is None or body.category not in categories.ALL_KEYS
+    ):
+        # category is NOT NULL in ems_events — an explicit null is not a
+        # "clear", it's invalid input (unlike the nullable true-PATCH columns).
         raise HTTPException(status_code=400, detail="Invalid category")
 
     dismiss_requested = "dismissed" in sent and bool(body.dismissed)
@@ -164,7 +159,7 @@ async def update_event(
         if "category" in sent:
             _set("category", body.category)
         if "doc" in sent:
-            _set("doc", json.dumps(body.doc or {}))
+            _set("doc", json.dumps(coerce_doc(body.doc)))
         if classification_edited:
             # An admin's manual edit must win over a clarify answer that
             # arrives later — apply_refinement only rewrites classification
@@ -227,7 +222,8 @@ async def promote(
             raise HTTPException(status_code=404, detail="Event not found")
         event = dict(row)
 
-        features = await _company_features(conn, company_id)
+        from app.core.feature_flags import get_company_features
+        features = await get_company_features(company_id, conn=conn)
         verdict = evaluate_promote(role=current_user.role, features=features, event_status=event["status"])
         if not verdict.ok:
             raise HTTPException(status_code=verdict.http_status, detail=verdict.reason)
@@ -245,7 +241,7 @@ async def promote(
                     actor_user_id=current_user.id,
                     actor_email=getattr(current_user, "email", None),
                 )
-        except ValueError as e:
+        except PromoteRaceError as e:
             raise HTTPException(status_code=409, detail=str(e))
 
     for fn, args, kwargs in bg_tasks:

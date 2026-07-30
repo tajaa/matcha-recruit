@@ -27,7 +27,7 @@ from uuid import UUID
 from google import genai
 from google.genai import types
 
-from ....config import get_settings
+from app.config import get_settings
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_json import clean_model_json
 from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
@@ -118,6 +118,16 @@ def _build_classify_prompt(content: str, context: list[dict]) -> str:
     )
 
 
+def coerce_doc(value) -> dict[str, str]:
+    """Clamp a doc dict to the stored shape: <=10 str->str pairs, keys
+    <=100 chars, values <=2000. The single normalization point for BOTH
+    writers (model parse + admin PUT) — EventDetail.tsx renders values
+    with v.trim(), so a non-string here is a client crash."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(k)[:100]: str(v)[:2000] for k, v in list(value.items())[:10]}
+
+
 def _parse_model_json(raw: str) -> dict:
     data = json.loads(clean_model_json(raw))
     if not isinstance(data, dict):
@@ -128,16 +138,13 @@ def _parse_model_json(raw: str) -> dict:
     severity_hint = data.get("severity_hint")
     if severity_hint not in ("low", "medium", "high"):
         severity_hint = None
-    doc = data.get("doc")
-    if not isinstance(doc, dict):
-        doc = {}
-    doc = {str(k)[:100]: str(v)[:2000] for k, v in list(doc.items())[:10]}
+    doc = coerce_doc(data.get("doc"))
     incident_recommendation = bool(data.get("incident_recommendation"))
     incident_reasoning = str(data.get("incident_reasoning") or "").strip()[:500] or None
 
     # Empty/missing question forces needs_clarification False — a model that
     # says "true" but gives nothing to ask is not a real clarification
-    # request, and question_text() would otherwise render a bare "❓ ".
+    # request, and question_text() would otherwise render a bare "🤔 ".
     clarify_question = str(data.get("clarify_question") or "").strip()[:300] or None
     needs_clarification = bool(data.get("needs_clarification")) and clarify_question is not None
 
@@ -205,7 +212,9 @@ def should_ask_again(classified: dict, rounds: int) -> bool:
     return bool(classified.get("needs_clarification")) and rounds < _MAX_CLARIFY_ROUNDS - 1
 
 
-_QUESTION_MARKER = "\n\U0001F914 "  # "\n❓ "
+_QUESTION_MARKER = "\n\U0001F914 "  # "\n🤔 " — NEVER change the codepoint:
+# extract_question() recovers the outstanding question from already-posted
+# pill text; a new marker orphans every armed question in the field.
 _QUESTION_SUFFIX = " — reply to this message to add details."
 
 
@@ -357,63 +366,42 @@ _REFINEMENT_RETURNING = """
 """
 
 
-async def apply_refinement(
+async def fold_answer(
     conn,
     *,
     event_id: UUID,
     company_id: UUID,
     answer: str,
-    classified: dict,
     answered_by: UUID,
 ) -> Optional[dict]:
-    """Fold a clarify answer into a still-logged event.
+    """Deterministically fold a clarify answer into a still-logged event:
+    narrative append + clarification_rounds increment + a 'clarified' audit
+    row. No classification rewrite, no Gemini call.
 
-    Always appends the answer to `narrative` — documentation survives even
-    when classification fails. The classification fields (title/category/
-    severity_hint/doc/incident_*) are rewritten ONLY when
-    classified["model_ok"] — a Gemini failure during refinement must not
-    downgrade an already-classified event back to 'uncategorized'; it only
-    records that the reporter answered.
+    Run this in the SAME transaction as the clarify_message_id claim
+    (channels_ws.py:_bg_ems_clarify) — once it commits, the reporter's
+    answer survives any downstream failure (Gemini outage, DB blip, process
+    restart) instead of being lost with the disarmed question. Pair with
+    apply_reclassification() for the AI-driven half.
 
     Guarded WHERE status = 'logged': a promoted/dismissed event is never
     rewritten. Returns the updated row (with the POST-increment
     clarification_rounds, for should_ask_again) or None on that guard miss
-    — the caller (channels_ws.py:_bg_ems_clarify) treats None as "ignore,
-    the event moved on since the question was asked."
+    — the caller treats None as "ignore, the event moved on since the
+    question was asked."
     """
     appended = f"\n\nFollow-up: {answer[:_MAX_NARRATIVE_CHARS]}"
-
-    if classified.get("model_ok"):
-        row = await conn.fetchrow(
-            f"""
-            UPDATE ems_events
-            SET narrative = narrative || $3,
-                title = $4, category = $5, severity_hint = $6, doc = $7::jsonb,
-                incident_recommendation = $8, incident_reasoning = $9,
-                suggested_incident_type = $10, suggested_severity = $11,
-                clarification_rounds = clarification_rounds + 1,
-                updated_at = NOW()
-            WHERE id = $1 AND company_id = $2 AND status = 'logged'
-            {_REFINEMENT_RETURNING}
-            """,
-            event_id, company_id, appended,
-            classified["title"], classified["category"], classified["severity_hint"],
-            json.dumps(classified["doc"]),
-            classified["incident_recommendation"], classified["incident_reasoning"],
-            classified.get("suggested_incident_type"), classified.get("suggested_severity"),
-        )
-    else:
-        row = await conn.fetchrow(
-            f"""
-            UPDATE ems_events
-            SET narrative = narrative || $3,
-                clarification_rounds = clarification_rounds + 1,
-                updated_at = NOW()
-            WHERE id = $1 AND company_id = $2 AND status = 'logged'
-            {_REFINEMENT_RETURNING}
-            """,
-            event_id, company_id, appended,
-        )
+    row = await conn.fetchrow(
+        f"""
+        UPDATE ems_events
+        SET narrative = narrative || $3,
+            clarification_rounds = clarification_rounds + 1,
+            updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 AND status = 'logged'
+        {_REFINEMENT_RETURNING}
+        """,
+        event_id, company_id, appended,
+    )
     if row is None:
         return None
 
@@ -424,7 +412,59 @@ async def apply_refinement(
         VALUES ($1, $2, 'clarified', $3::jsonb)
         """,
         event_id, answered_by,
-        json.dumps({"category": event_row["category"], "model_ok": bool(classified.get("model_ok"))}),
+        json.dumps({"category": event_row["category"], "model_ok": False}),
+    )
+    return event_row
+
+
+async def apply_reclassification(
+    conn,
+    *,
+    event_id: UUID,
+    company_id: UUID,
+    classified: dict,
+) -> Optional[dict]:
+    """Rewrite ONLY the classification columns (title/category/
+    severity_hint/doc/incident_recommendation/incident_reasoning/
+    suggested_*) from a classify_event() result over the refined narrative.
+    No narrative append, no clarification_rounds bump — fold_answer() above
+    already did both, unconditionally.
+
+    A no-op (returns None) unless classified["model_ok"] — a Gemini failure
+    during refinement must not downgrade an already-classified event back
+    to 'uncategorized'; the reporter's answer is already durable via
+    fold_answer(). Also a no-op WHERE status != 'logged' (promote/dismiss
+    race after the fold)."""
+    if not classified.get("model_ok"):
+        return None
+
+    row = await conn.fetchrow(
+        f"""
+        UPDATE ems_events
+        SET title = $3, category = $4, severity_hint = $5, doc = $6::jsonb,
+            incident_recommendation = $7, incident_reasoning = $8,
+            suggested_incident_type = $9, suggested_severity = $10,
+            updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 AND status = 'logged'
+        {_REFINEMENT_RETURNING}
+        """,
+        event_id, company_id,
+        classified["title"], classified["category"], classified["severity_hint"],
+        json.dumps(classified["doc"]),
+        classified["incident_recommendation"], classified["incident_reasoning"],
+        classified.get("suggested_incident_type"), classified.get("suggested_severity"),
+    )
+    if row is None:
+        return None
+
+    event_row = dict(row)
+    await conn.execute(
+        """
+        INSERT INTO ems_event_audit_log (event_id, user_id, action, details)
+        VALUES ($1, $2, 'reclassified', $3::jsonb)
+        """,
+        event_id, None,
+        json.dumps({"category": event_row["category"], "model_ok": True}),
     )
     return event_row
 

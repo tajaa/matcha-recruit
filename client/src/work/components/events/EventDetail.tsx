@@ -26,7 +26,9 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
     }
   }
 
-  const docEntries = Object.entries(event.doc).filter(([, v]) => v && v.trim().length > 0)
+  const docEntries = Object.entries(event.doc).filter(
+    ([, v]) => typeof v === 'string' && v.trim().length > 0,
+  )
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6">
