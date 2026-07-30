@@ -117,6 +117,26 @@ extension ProjectDetailViewModel {
                 } catch is CancellationError {
                     await MainActor.run { isLoading = false }
                     return
+                } catch APIError.httpError(404, _) {
+                    // 404 here means the PROJECT is gone, not that the endpoint is
+                    // missing on an older server. The fallback below cannot tell
+                    // those apart, so it used to re-request the same dead id via
+                    // the legacy detail path — two 404s per open, with nothing
+                    // evicting the project, so every re-open fired two more.
+                    //
+                    // On 2026-07-30 two deleted projects hit the nginx-404 jail's
+                    // maxretry in seconds. The team NATs out of one address, so it
+                    // banned everyone at once and presented as "Lost connection to
+                    // the server" — a total outage, while the site served fine.
+                    // Forget the project and stop; do not fall through.
+                    service.forgetProject(id: id)
+                    await MainActor.run {
+                        guard project == nil || project?.id == id else { return }
+                        project = nil
+                        errorMessage = "This project no longer exists. It may have been deleted."
+                        isLoading = false
+                    }
+                    return
                 } catch {
                     bundle = nil
                 }

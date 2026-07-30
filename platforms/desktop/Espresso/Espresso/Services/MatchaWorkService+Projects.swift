@@ -33,6 +33,28 @@ extension MatchaWorkService {
 
     func invalidateProjectDetail(id: String) { projectDetailCache.removeValue(forKey: id) }
 
+    /// Drop EVERY trace of a project the server no longer has.
+    ///
+    /// `invalidateProjectDetail` only clears the header cache, which is right for
+    /// a stale-but-live project. A project that 404s is gone: leaving its six
+    /// sub-resource caches populated keeps it paintable, so the UI happily
+    /// re-opens it and re-fires the fetch that just 404'd. That loop is what
+    /// fail2ban banned the whole office for on 2026-07-30 — see
+    /// deploy/fail2ban/filter.d/nginx-404.conf.
+    ///
+    /// Also drops the cached project LISTS, since a list holding the dead id is
+    /// what offers it for re-opening in the first place.
+    func forgetProject(id: String) {
+        projectDetailCache.removeValue(forKey: id)
+        projectTasksCache.removeValue(forKey: id)
+        projectFilesCache.removeValue(forKey: id)
+        projectFoldersCache.removeValue(forKey: id)
+        projectLinksCache.removeValue(forKey: id)
+        projectCollaboratorsCache.removeValue(forKey: id)
+        projectElementsCache.removeValue(forKey: id)
+        invalidateProjectLists()
+    }
+
     func getProjectDetail(id: String, forceRefresh: Bool = false) async throws -> MWProject {
         if !forceRefresh, let cached = cachedValue(projectDetailCache[id]) { return cached }
         let proj: MWProject = try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")

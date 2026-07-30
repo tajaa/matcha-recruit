@@ -1,0 +1,64 @@
+[DEFAULT]
+# Never ban these, in any jail. Upstream jail.conf ships this line COMMENTED OUT,
+# so before 2026-07-30 there was no whitelist at all — not even loopback.
+#
+# 76.32.122.49 is the office/home egress IP. The whole team NATs out of it, so a
+# ban there is not one person locked out, it is everyone at once, and it presents
+# as a total outage (connection refused, not a timeout — see README). It is a
+# residential address and WILL rotate; re-check it here when the office IP moves,
+# or the entry silently protects a stranger instead. `curl https://api.ipify.org`
+# prints the current one.
+ignoreip = 127.0.0.1/8 ::1 76.32.122.49
+
+# Ban for 1 hour
+bantime = 3600
+# Check last 10 minutes of logs
+findtime = 600
+# Ban after 5 failures
+maxretry = 5
+# Use iptables for banning
+banaction = iptables-multiport
+
+[sshd]
+enabled = true
+port = 22
+logpath = /var/log/secure
+maxretry = 3
+
+[nginx-http-auth]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/error.log
+
+# NOTE: the three jails below have never actually run. Their filters
+# (nginx-noscript.conf / nginx-badbots.conf / nginx-noproxy.conf) are not present
+# in /etc/fail2ban/filter.d on this host, so fail2ban skips them at startup —
+# `fail2ban-client status` lists only sshd, nginx-http-auth and nginx-404.
+# Left enabled but inert on purpose: deleting them would read as "we decided not
+# to screen for this", when the truth is the filters were never installed. Either
+# install the filters or drop these blocks — do not assume they are protecting
+# anything today.
+[nginx-noscript]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 6
+
+[nginx-badbots]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 2
+
+[nginx-noproxy]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 2
+
+[nginx-404]
+enabled = true
+port = http,https
+logpath = /var/log/nginx/access.log
+maxretry = 10
+findtime = 300
