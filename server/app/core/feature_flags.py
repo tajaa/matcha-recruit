@@ -268,12 +268,29 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # matcha_lite_essentials config, where there's no employee roster to log
     # injured persons against. Gates the ir_incidents osha.py sub-router.
     "osha_logs": True,
-    # Sub-parts of OSHA carved out for /admin/products composability (all
-    # default True — every capability below already shipped for every
-    # `incidents` company; the split only lets a composed product withhold
-    # one without the others via materialize_features()).
-    "osha_export": True,       # 300-log/300A CSV download + manual recordability write
-    "osha_auto_report": True,  # ITA electronic submission (osha/ita.py)
+    # Sub-parts of OSHA carved out for /admin/products composability. These are
+    # ADDITIVE and default False: their routes gate on
+    # require_any_feature("osha_logs", <flag>), so a legacy tenant with
+    # osha_logs on keeps every OSHA capability without storing these keys, and
+    # a tenant with osha_logs deliberately OFF (matcha_lite_essentials, or an
+    # admin toggle) does NOT silently regain them. Default True would have
+    # inverted exactly that: an absent key would read as granted.
+    "osha_export": False,       # 300-log/300A CSV download + manual recordability write
+    "osha_auto_report": False,  # ITA electronic submission (osha/ita.py)
+    # The two IR sub-parts CANNOT use that additive trick: their parent is
+    # `incidents` itself (the router mount already requires it), so
+    # require_any_feature("incidents", <flag>) would always pass and the flag
+    # could never withhold anything. They are therefore SUBTRACTIVE — default
+    # True so a legacy row that predates the split still reads as granted, and
+    # a composed product withholds by writing an explicit False
+    # (materialize_features). CONSEQUENCE: every place that stores a company's
+    # enabled_features as a full `{k: False for k in DEFAULT_COMPANY_FEATURES}`
+    # stomp and then re-enables `incidents` must ALSO re-enable these two, or
+    # the stomp silently denies them (they'd read False, not "inherit the
+    # True default", because a stored key always wins over the default in
+    # merge_company_features). See TIER_SIGNUP_PRESETS and
+    # routes/auth/register_business.py — every incidents-bearing branch there
+    # re-asserts both.
     "ir_magic_links": True,    # anonymous /report/:token, per-location /intake/:token,
                                # single-use /request-info/:token + their token-mgmt routers
     "ir_copilot": True,        # IR Copilot chat + AI analysis runners (categorize/severity/
@@ -340,9 +357,10 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "employees": False,
         "training": False,
         "discipline": False,
+        # osha_export/osha_auto_report need no entry here: both default False
+        # and their routes gate on require_any_feature("osha_logs", <flag>),
+        # so forcing osha_logs off already denies the whole OSHA surface.
         "osha_logs": False,
-        "osha_export": False,
-        "osha_auto_report": False,
     },
     # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
     # Lite, `discipline` is in the always-on overlay so the paid bundle is
@@ -421,16 +439,23 @@ TIER_SIGNUP_PRESETS: dict[str, dict[str, bool]] = {
     # Matcha Lite: incidents only (matches what stripe_webhook flips on
     # checkout.session.completed for matcha_lite — see stripe_webhook.py
     # line ~214). Don't add `employees` here or the post-tier-change shape
-    # diverges from a real Lite signup.
-    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    # diverges from a real Lite signup. ir_magic_links/ir_copilot DO need to
+    # be re-asserted True here even though they default True — this preset
+    # stomps the whole dict to False first, and a stored False always wins
+    # over the default in merge_company_features (see the flags' own
+    # comments above).
+    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True,
+                     "ir_magic_links": True, "ir_copilot": True},
     # Matcha Lite Essentials — same checkout family as Lite, no employee
     # roster. Mirrors matcha_lite's preset shape (incidents only; employees/
     # osha_logs stay off via TIER_REQUIRED_FEATURES at read time).
-    "matcha_lite_essentials": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    "matcha_lite_essentials": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True,
+                                "ir_magic_links": True, "ir_copilot": True},
     # Matcha-X (mid tier): incidents only here, same as Lite — employees/
     # discipline come from TIER_REQUIRED_FEATURES["matcha_x"] at read time
     # via merge_company_features, so don't add them to the preset.
-    "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
+    "matcha_x": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True,
+                 "ir_magic_links": True, "ir_copilot": True},
     # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES, plus
     # the Pro-bundled gates (labor_relations union/CBA admin; handbook_pilot
     # conversational handbook/policy generation), which default off so they
@@ -441,6 +466,7 @@ TIER_SIGNUP_PRESETS: dict[str, dict[str, bool]] = {
     "ir_only_self_serve": {
         **{k: False for k in DEFAULT_COMPANY_FEATURES},
         "incidents": True, "employees": True, "discipline": True,
+        "ir_magic_links": True, "ir_copilot": True,
     },
     # Matcha Compliance (standalone): compliance itself plus the 4-pillar
     # bundle, forced True directly (no webhook involved in an admin-driven
@@ -681,13 +707,24 @@ def assert_feature_allowed(
 # on alone, which grants nothing reachable. `werk_lite` needs `matcha_work`
 # too (its boards are matcha-work projects — see the werk_lite flag's row in
 # root CLAUDE.md) but was never enforced either.
+#
+# The OSHA/IR split flags (osha_export, osha_auto_report, ir_magic_links,
+# ir_copilot) deliberately do NOT go here even though each is logically
+# meaningless without `incidents`. Two reasons: (1) it's already enforced for
+# real — every route these flags gate sits inside a router whose mount (or,
+# for the OSHA pair, an any()-with-osha_logs include) already requires
+# `incidents`/`osha_logs`, so the sub-flag can't grant anything on its own;
+# there's nothing here for FEATURE_REQUIRES to actually protect. (2) unlike
+# huume/werk_lite (both default False), the IR pair defaults True — so
+# enforcing "can't be on without incidents" means an admin can never disable
+# `incidents` on any company that has either at its default, 400ing with a
+# violation naming a flag they never touched. Confirmed by a review: adding
+# them here broke PATCH /admin/company-features (toggling incidents off) and
+# PATCH .../tier (tier="bespoke", whose preset carries the pair True with no
+# `incidents` key at all).
 FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
     "werk_lite": ("matcha_work",),
-    "osha_export": ("incidents",),
-    "osha_auto_report": ("incidents",),
-    "ir_magic_links": ("incidents",),
-    "ir_copilot": ("incidents",),
 }
 
 

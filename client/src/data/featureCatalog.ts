@@ -96,8 +96,11 @@ export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
 export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
   werk_lite: ['matcha_work'],
-  osha_export: ['incidents'],
-  osha_auto_report: ['incidents'],
-  ir_magic_links: ['incidents'],
-  ir_copilot: ['incidents'],
+  // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately
+  // NOT here even though each needs incidents/osha_logs to do anything — see
+  // the backend FEATURE_REQUIRES comment (feature_flags.py) for why: the
+  // route-level gates already make them inert without their parent, and
+  // ir_magic_links/ir_copilot default True (subtractive), so enforcing the
+  // dependency here would disable-block incidents on any company with either
+  // still at its default.
 }

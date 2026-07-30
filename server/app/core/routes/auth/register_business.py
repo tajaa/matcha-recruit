@@ -283,6 +283,12 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # surface (handbooks + training auto-enabled).
                 ir_features["handbooks"] = True
                 ir_features["training"] = True
+                # ir_magic_links/ir_copilot default True in
+                # DEFAULT_COMPANY_FEATURES, but this dict comprehension just
+                # stomped them False — a stored False always beats the
+                # default, so they must be re-asserted, not just left alone.
+                ir_features["ir_magic_links"] = True
+                ir_features["ir_copilot"] = True
                 enabled_features_json = json.dumps(ir_features)
             elif is_resources_free:
                 # Resources-tier signup: auto-approved so they can immediately
@@ -319,6 +325,15 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # covering existing rows.
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 lite_features["handbooks"] = True
+                # Stored now regardless of payment status — the Stripe webhook
+                # only flips `incidents` via a partial JSONB update on
+                # checkout.session.completed, so whatever's stored here for
+                # these two (which default True in DEFAULT_COMPANY_FEATURES
+                # but were just stomped False above) is what a business-pays
+                # tenant is stuck with after paying. Inert until `incidents`
+                # flips regardless — the ir_incidents mount gates on that first.
+                lite_features["ir_magic_links"] = True
+                lite_features["ir_copilot"] = True
                 if lite_broker_pays or lite_invite_activated:
                     lite_features["incidents"] = True
                     if not is_lite_essentials:
@@ -339,6 +354,10 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 x_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 x_features["handbooks"] = True
                 x_features["training"] = True
+                # See the matching comment in the Lite branch above — these
+                # default True and must be re-asserted after the full stomp.
+                x_features["ir_magic_links"] = True
+                x_features["ir_copilot"] = True
                 if lite_broker_pays or lite_invite_activated:
                     x_features["incidents"] = True
                     x_features["employees"] = True
