@@ -23,9 +23,17 @@ from ..models.cappe import (
     CappeProductUpdate,
     CappeStockAdjust,
 )
-from ._shared import fetch_option_groups, get_owned_site, loads, loads_list
+from ._shared import build_patch, fetch_option_groups, get_owned_site, loads, loads_list
 from ..services.directory import refresh_site_search
-from ..services.inventory import log_adjustment
+from ..services.inventory import log_adjustment, restock_order
+
+# Order statuses that reflect a physical decrement having happened, and the
+# statuses that reverse it. A status TRANSITION between these two sets is what
+# triggers a restock — not the destination status alone — so cancelling an
+# already-cancelled/declined order (nothing to reverse) or an already-restocked
+# one (double-click) is a no-op rather than a double-credit.
+_RESTOCK_FROM_STATUSES = {"pending", "paid", "fulfilled"}
+_RESTOCK_TO_STATUSES = {"cancelled", "refunded"}
 
 router = APIRouter()
 
@@ -84,7 +92,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
             """INSERT INTO cappe_product_option_groups
                    (site_id, product_id, name, select_type, required, sort_order)
                VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
-            site_id, product_id, g.name, g.select_type, g.required, g.sort_order or gi,
+            site_id, product_id, g.name, g.select_type, g.required,
+            g.sort_order if g.sort_order is not None else gi,
         )
         for oi, o in enumerate(g.options or []):
             inv = o.inventory if o.inventory is not None else prior_inv.get((g.name, o.name))
@@ -92,7 +101,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                 """INSERT INTO cappe_product_options
                        (site_id, group_id, name, price_delta_cents, sort_order, inventory)
                    VALUES ($1, $2, $3, $4, $5, $6)""",
-                site_id, gid, o.name, o.price_delta_cents, o.sort_order or oi, inv,
+                site_id, gid, o.name, o.price_delta_cents,
+                o.sort_order if o.sort_order is not None else oi, inv,
             )
 
 
@@ -182,15 +192,15 @@ async def update_product(
         await get_owned_site(conn, site_id, account.id)
         await _validate_booking_type(conn, site_id, body.booking_type_id)
         async with conn.transaction():
-            sets, args = [], []
-            for col in ("name", "description", "price_cents", "currency", "image_url",
-                        "sku", "inventory", "low_stock_threshold", "status", "sort_order",
-                        "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
-                        "category"):
-                val = getattr(body, col)
-                if val is not None:
-                    args.append(val)
-                    sets.append(f"{col} = ${len(args)}")
+            sets, args = build_patch(body, (
+                "name", "description", "price_cents", "currency", "image_url",
+                "sku", "inventory", "low_stock_threshold", "status", "sort_order",
+                "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
+                "category",
+            ))
+            # intake_fields is JSONB NOT NULL DEFAULT '[]' — a `null` PATCH value
+            # has no sensible SQL NULL to clear to, so this stays on the plain
+            # `is not None` idiom rather than build_patch's model_fields_set.
             if body.intake_fields is not None:  # JSONB column needs explicit serialization
                 args.append(json.dumps(body.intake_fields))
                 sets.append(f"intake_fields = ${len(args)}")
@@ -374,17 +384,27 @@ async def update_order_status(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        order = await conn.fetchrow(
-            f"""UPDATE cappe_orders SET status = $1, updated_at = NOW()
-                WHERE id = $2 AND site_id = $3 RETURNING {_ORDER_COLS}""",
-            body.status, order_id, site_id,
-        )
-        if order is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-        items = await conn.fetch(
-            f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
-            order_id,
-        )
+        async with conn.transaction():
+            # Lock + read the CURRENT status first: whether this transition
+            # reverses a stock decrement depends on what it's transitioning
+            # FROM, and locking makes a concurrent double-click restock once.
+            current = await conn.fetchrow(
+                "SELECT status FROM cappe_orders WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                order_id, site_id,
+            )
+            if current is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            order = await conn.fetchrow(
+                f"""UPDATE cappe_orders SET status = $1, updated_at = NOW()
+                    WHERE id = $2 AND site_id = $3 RETURNING {_ORDER_COLS}""",
+                body.status, order_id, site_id,
+            )
+            if current["status"] in _RESTOCK_FROM_STATUSES and body.status in _RESTOCK_TO_STATUSES:
+                await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
+            items = await conn.fetch(
+                f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+                order_id,
+            )
     return _order_row(order, [_item_row(i) for i in items])
 
 
@@ -431,36 +451,7 @@ async def decline_order(
             )
             if order is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to decline")
-            # Restock physical lines (product + variant) with an audit row each.
-            phys = await conn.fetch(
-                "SELECT product_id, quantity, selected_option_ids FROM cappe_order_items "
-                "WHERE order_id = $1 AND fulfillment = 'physical'",
-                order_id,
-            )
-            for it in phys:
-                pid, q = it["product_id"], it["quantity"]
-                if pid is not None:
-                    bal = await conn.fetchval(
-                        "UPDATE cappe_products SET inventory = inventory + $1, updated_at = NOW() "
-                        "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
-                        q, pid, site_id,
-                    )
-                    if bal is not None:
-                        await log_adjustment(
-                            conn, site_id=site_id, product_id=pid, delta=q,
-                            balance_after=bal, reason="decline_restock",
-                        )
-                for oid in (it["selected_option_ids"] or []):
-                    obal = await conn.fetchval(
-                        "UPDATE cappe_product_options SET inventory = inventory + $1 "
-                        "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
-                        q, oid, site_id,
-                    )
-                    if obal is not None and pid is not None:
-                        await log_adjustment(
-                            conn, site_id=site_id, product_id=pid, option_id=oid, delta=q,
-                            balance_after=obal, reason="decline_restock",
-                        )
+            await restock_order(conn, site_id=site_id, order_id=order_id, reason="decline_restock")
             await conn.execute(
                 """UPDATE cappe_bookings SET status = 'declined', updated_at = NOW()
                    WHERE id IN (SELECT booking_id FROM cappe_order_items

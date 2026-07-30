@@ -39,12 +39,19 @@ def is_token_revoked(iat, tokens_valid_after) -> bool:
     watermark. Tokens minted before the feature shipped (no iat) or accounts
     that never revoked (NULL watermark) are never revoked.
 
+    The watermark is floored to whole seconds before comparing: `iat` is a JWT
+    claim (whole seconds), but a logout's `NOW()` carries microseconds. Without
+    the floor, a login in the same wall-clock second as a logout mints a token
+    whose truncated `iat` reads as strictly earlier than the microsecond
+    watermark — a legitimate just-logged-in session would immediately 401 as
+    "revoked" until the clock ticked over to the next second.
+
     Scope-independent, so it is a plain function rather than a bound helper.
     """
     if tokens_valid_after is None or iat is None:
         return False
     try:
-        return float(iat) < tokens_valid_after.timestamp()
+        return float(iat) < int(tokens_valid_after.timestamp())
     except (TypeError, ValueError, AttributeError):
         return False
 

@@ -123,13 +123,12 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_sites
-                        (account_id, name, slug, subdomain, custom_domain, source_type, is_multi_location)
-                    VALUES ($1, $2, $3, $3, $4, $5, $6)
+                        (account_id, name, slug, subdomain, source_type, is_multi_location)
+                    VALUES ($1, $2, $3, $3, $4, $5)
                     RETURNING {_SITE_COLS}""",
                 account.id,
                 body.name,
                 slug,
-                body.custom_domain or None,  # '' → NULL: empty strings would collide on the UNIQUE
                 body.source_type,
                 body.is_multi_location,
             )
@@ -279,8 +278,6 @@ async def update_site(
                 )
             add("slug", base)
             add("subdomain", base)
-        if body.custom_domain is not None:
-            add("custom_domain", body.custom_domain or None)
         if body.theme_config is not None:
             add("theme_config", json.dumps(gate_theme(body.theme_config, account.plan)))
         if body.meta_config is not None:
@@ -296,9 +293,17 @@ async def update_site(
         if body.receipt_prefix is not None:
             add("receipt_prefix", body.receipt_prefix or None)
         if body.status is not None:
-            add("status", body.status)
             if body.status == "published":
-                sets.append("published_at = COALESCE(published_at, NOW())")
+                # Publishing has its own gate (readiness checklist + page flip +
+                # search reindex + listing inference) — see POST /publish. Letting
+                # this generic PATCH flip status directly would mark a site
+                # published while its pages stay draft and no readiness item was
+                # ever checked.
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Use POST /sites/{id}/publish to publish a site.",
+                )
+            add("status", body.status)
 
         if not sets:
             row = await get_owned_site(conn, site_id, account.id)

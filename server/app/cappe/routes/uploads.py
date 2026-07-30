@@ -24,7 +24,7 @@ from ..services import cappe_assets, image_quota
 from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
 from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
-from ._shared import get_owned_site
+from ._shared import get_owned_site, read_capped
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,6 @@ _ALLOWED_DELIVERABLE = _ALLOWED | {
 # the other uploads, so keep the cap modest (compressed hero loops are small).
 _MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50 MB
 _ALLOWED_VIDEO = {"video/mp4", "video/webm", "video/quicktime"}
-_VIDEO_PLANS = {"pro", "business"}  # premium build tiers
 
 
 @router.post("/sites/{site_id}/upload", response_model=CappeUploadResponse)
@@ -78,9 +77,7 @@ async def upload_image(
     if file.content_type not in _ALLOWED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
 
-    data = await file.read()
-    if len(data) > _MAX_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image too large (max 5 MB)")
+    data = await read_capped(file, _MAX_BYTES, "Image too large (max 5 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
@@ -176,9 +173,7 @@ async def upload_deliverable(
     if file.content_type not in _ALLOWED_DELIVERABLE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
 
-    data = await file.read()
-    if len(data) > _MAX_DELIVERABLE_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large (max 25 MB)")
+    data = await read_capped(file, _MAX_DELIVERABLE_BYTES, "File too large (max 25 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
@@ -202,7 +197,7 @@ async def upload_video(
     Premium build tiers (Pro / Business) get the full-bleed autoplay hero video;
     free / hosting plans hit a 403 upsell. Mirrors the image upload otherwise.
     """
-    if account.plan not in _VIDEO_PLANS:
+    if not is_premium_plan(account.plan):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Hero video is a premium feature. Upgrade to Pro to add a background video.",
@@ -214,9 +209,7 @@ async def upload_video(
     if file.content_type not in _ALLOWED_VIDEO:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported video type (use MP4, WebM, or MOV)")
 
-    data = await file.read()
-    if len(data) > _MAX_VIDEO_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Video too large (max 50 MB)")
+    data = await read_capped(file, _MAX_VIDEO_BYTES, "Video too large (max 50 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 

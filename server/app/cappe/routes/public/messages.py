@@ -1,5 +1,4 @@
 """Cappe public surface — messages (client side, token-gated)."""
-import os
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
@@ -7,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
 from ...models.cappe import CappeMessageCreate, CappePublicThread
-from ...services.email import send_cappe_message_email
+from ...services.email import dashboard_url, send_cappe_message_email
 
 router = APIRouter()
 
@@ -69,9 +68,8 @@ async def public_thread_reply(token: str, body: CappeMessageCreate, request: Req
                 "UPDATE cappe_threads SET owner_unread = owner_unread + 1, status = 'open', "
                 "last_message_at = NOW() WHERE id = $1", thread["id"],
             )
-    dash = f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}/cappe/sites/{thread['site_id']}/messages"
     background.add_task(
         send_cappe_message_email, thread["owner_email"], thread["owner_name"], thread["site_name"],
-        body.body, dash, thread["client_name"] or "a client",
+        body.body, dashboard_url(f"/sites/{thread['site_id']}/messages"), thread["client_name"] or "a client",
     )
     return {"status": "ok"}

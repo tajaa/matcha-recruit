@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 # Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
 _DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
@@ -44,12 +44,9 @@ def normalize_custom_domain(value: Optional[str]) -> Optional[str]:
 class CappeSiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     source_type: Literal["blank", "byo"] = "blank"
-    custom_domain: Optional[str] = Field(default=None, max_length=255)
     # Set by the onboarding wizard: True when the business runs multiple
     # locations/branches. Drives whether the branch/location UI is surfaced.
     is_multi_location: bool = False
-
-    _norm_domain = field_validator("custom_domain")(normalize_custom_domain)
 
 
 class CappeSiteFromTemplate(BaseModel):
@@ -62,9 +59,9 @@ class CappeSiteUpdate(BaseModel):
     # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
     # route slugifies + checks reserved/uniqueness before applying.
     subdomain: Optional[str] = Field(default=None, max_length=140)
-    custom_domain: Optional[str] = Field(default=None, max_length=255)
-
-    _norm_domain = field_validator("custom_domain")(normalize_custom_domain)
+    # custom_domain is NOT editable here — it's owned by the verified
+    # connect/verify flow in routes/domains.py (a domain can't be claimed
+    # without proving control of it via TXT record). See models/domains.py.
     status: Optional[Literal["draft", "published", "archived"]] = None
     theme_config: Optional[dict[str, Any]] = None
     meta_config: Optional[dict[str, Any]] = None

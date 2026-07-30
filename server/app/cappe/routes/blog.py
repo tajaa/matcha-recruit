@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappePost, CappePostCreate, CappePostUpdate
-from ._shared import get_owned_site, slugify, unique_site_slug
+from ._shared import build_patch, get_owned_site, slugify, unique_site_slug
 
 router = APIRouter()
 
@@ -64,12 +64,7 @@ async def update_post(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        sets, args = [], []
-        for col in ("title", "excerpt", "body", "cover_image_url", "status"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
+        sets, args = build_patch(body, ("title", "excerpt", "body", "cover_image_url", "status"))
         if body.slug is not None:
             args.append(slugify(body.slug))
             sets.append(f"slug = ${len(args)}")

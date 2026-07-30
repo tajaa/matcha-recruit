@@ -1,8 +1,8 @@
 """Shared helpers for the Cappe routers."""
-from typing import Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 
 from ..services.commerce import fetch_site_owner as _site_owner  # noqa: F401
 from ..services.common import (  # noqa: F401
@@ -16,6 +16,26 @@ from ..services.options import fetch_option_groups  # noqa: F401
 
 # asyncpg returns JSONB columns as text (no global codec is registered), so
 # every JSONB read goes through _loads and every write through json.dumps.
+
+_READ_CHUNK_BYTES = 1024 * 1024  # 1 MiB
+
+
+async def read_capped(file: UploadFile, max_bytes: int, detail: str) -> bytes:
+    """Read an upload in bounded chunks, raising 413 as soon as the running
+    total exceeds `max_bytes` — instead of `await file.read()`ing the whole
+    body first and checking its size after. Bounds peak memory at roughly
+    `max_bytes + one chunk` regardless of how large the actual upload is."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=detail)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def unique_slug(conn, base: str, table: str, column: str = "slug") -> str:
@@ -80,3 +100,23 @@ def page_row_to_dict(row) -> dict:
     d = dict(row)
     d["content"] = loads(row["content"])
     return d
+
+
+def build_patch(body, cols: Sequence[str], start: int = 0) -> tuple[list[str], list[Any]]:
+    """Build `col = $n` SET clauses from a partial-update Pydantic model.
+
+    Driven by `model_fields_set` rather than `is not None` — a field the
+    caller never sent is left untouched, but an explicit `null` clears a
+    nullable column. The `is not None` idiom can't tell those two apart, which
+    made several PATCH routes unable to ever clear a nullable field once set.
+    `start` offsets placeholder numbering when the caller already bound
+    earlier `$1..$start` args before calling this.
+    """
+    sets: list[str] = []
+    args: list[Any] = []
+    fields = body.model_fields_set
+    for col in cols:
+        if col in fields:
+            args.append(getattr(body, col))
+            sets.append(f"{col} = ${start + len(args)}")
+    return sets, args

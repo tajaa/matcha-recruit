@@ -25,7 +25,7 @@ from ..models.cappe import (
     CappeRateRulesReplace,
     CappeRequestSummary,
 )
-from ._shared import get_owned_site, loads_list
+from ._shared import build_patch, get_owned_site, loads_list
 
 router = APIRouter()
 
@@ -162,13 +162,10 @@ async def update_booking_type(
         await get_owned_site(conn, site_id, account.id)
         await _validate_location(conn, site_id, body.location_id)
         async with conn.transaction():
-            sets, args = [], []
-            for col in ("name", "description", "duration_minutes", "price_cents", "status",
-                        "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id"):
-                val = getattr(body, col)
-                if val is not None:
-                    args.append(val)
-                    sets.append(f"{col} = ${len(args)}")
+            sets, args = build_patch(body, (
+                "name", "description", "duration_minutes", "price_cents", "status",
+                "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id",
+            ))
             if sets:
                 sets.append("updated_at = NOW()")
                 args.extend([type_id, site_id])

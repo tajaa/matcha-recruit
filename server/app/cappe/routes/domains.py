@@ -274,23 +274,30 @@ async def verify_domain(domain_id: UUID, account: CappeAccount = Depends(require
         )
 
     async with get_connection() as conn:
-        async with conn.transaction():
-            if await conn.fetchval(
-                "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active' AND id <> $2",
-                row["domain"], domain_id,
-            ):
+        try:
+            async with conn.transaction():
+                if await conn.fetchval(
+                    "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active' AND id <> $2",
+                    row["domain"], domain_id,
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
+                    )
+                updated = await conn.fetchrow(
+                    f"UPDATE cappe_domains SET status = 'active', updated_at = NOW() "
+                    f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
+                    domain_id,
+                )
+                await conn.execute(
+                    "UPDATE cappe_sites SET custom_domain = $1, updated_at = NOW() WHERE id = $2",
+                    row["domain"], row["site_id"],
+                )
+        except Exception as exc:  # concurrent claim landed on cappe_sites first
+            if "cappe_sites_custom_domain_key" in str(exc):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
                 )
-            updated = await conn.fetchrow(
-                f"UPDATE cappe_domains SET status = 'active', updated_at = NOW() "
-                f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
-                domain_id,
-            )
-            await conn.execute(
-                "UPDATE cappe_sites SET custom_domain = $1, updated_at = NOW() WHERE id = $2",
-                row["domain"], row["site_id"],
-            )
+            raise
     await invalidate_render_cache(row["site_id"])
     return dict(updated)
 
@@ -478,9 +485,14 @@ async def tls_authorize(domain: str = Query(..., max_length=255)):
     if host.startswith("www."):
         host = host[4:]
     async with get_connection() as conn:
+        # Only a domain with an ACTIVE row in cappe_domains (i.e. verified
+        # ownership via /domains/connect + /verify, or a completed platform
+        # purchase) is authorized. cappe_sites.custom_domain is set as a
+        # side effect of that same activation, so checking cappe_domains
+        # alone is sufficient — and it's what keeps an unverified claim from
+        # ever triggering Let's Encrypt issuance.
         ok = await conn.fetchval(
-            "SELECT 1 FROM cappe_sites WHERE custom_domain = $1 "
-            "UNION SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active' LIMIT 1",
+            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active'",
             host,
         )
     if not ok:

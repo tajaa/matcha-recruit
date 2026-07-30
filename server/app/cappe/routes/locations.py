@@ -15,7 +15,7 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappeLocation, CappeLocationCreate, CappeLocationUpdate
 from ..services.directory import refresh_site_search
-from ._shared import get_owned_site, loads_list
+from ._shared import build_patch, get_owned_site, loads_list
 from .render import invalidate_render_cache
 
 logger = logging.getLogger(__name__)
@@ -145,13 +145,8 @@ async def update_location(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        sets, args = [], []
-        for col in ("name", "address", "lat", "lng", "timezone", "contact_phone",
-                    "contact_email", "is_default", "active", "sort_order"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
+        sets, args = build_patch(body, ("name", "address", "lat", "lng", "timezone", "contact_phone",
+                    "contact_email", "is_default", "active", "sort_order"))
         if body.hours is not None:
             args.append(json.dumps([h.model_dump() for h in body.hours]))
             sets.append(f"hours = ${len(args)}::jsonb")

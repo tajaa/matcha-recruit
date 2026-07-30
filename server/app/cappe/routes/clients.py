@@ -7,6 +7,7 @@ derived from their most recent booking's location.
 """
 import csv
 import io
+import json
 import re
 from uuid import UUID
 
@@ -22,7 +23,7 @@ from ..models.cappe import (
     CappeClientImportError,
     CappeClientImportResult,
 )
-from ._shared import get_owned_site
+from ._shared import get_owned_site, read_capped
 
 router = APIRouter()
 
@@ -43,8 +44,13 @@ _COL_ALIASES = {
 
 # Union every touchpoint into (email, name, kind, amount, ts), then aggregate.
 # Branch comes from the explicit cappe_clients row, falling back to the most
-# recent booking's location.
-_CLIENTS_SQL = """
+# recent booking's location. `filter_email=True` appends a WHERE on `t.email`
+# (bound as $2) so a single-client lookup (add_client's upsert response)
+# doesn't have to ship every client on the site over the wire just to hand
+# back the one row it just wrote.
+def _clients_sql(filter_email: bool = False) -> str:
+    where_clause = "WHERE t.email = $2\n" if filter_email else ""
+    return f"""
 WITH touch AS (
     SELECT lower(customer_email) AS email, customer_name AS name, 'order' AS kind,
            subtotal_cents AS amount, created_at AS ts
@@ -93,9 +99,12 @@ FROM touch t
 LEFT JOIN cl ON cl.email = t.email
 LEFT JOIN bl ON bl.email = t.email
 LEFT JOIN cappe_locations loc ON loc.id = COALESCE(cl.location_id, bl.location_id)
-GROUP BY t.email, cl.location_id, bl.location_id, cl.phone, loc.name
+{where_clause}GROUP BY t.email, cl.location_id, bl.location_id, cl.phone, loc.name
 ORDER BY last_activity DESC
 """
+
+
+_CLIENTS_SQL = _clients_sql()
 
 
 def _client_from_row(r) -> CappeClient:
@@ -163,10 +172,9 @@ async def add_client(
         )
         if body.add_to_newsletter:
             await _add_to_newsletter(conn, site_id, email, body.name)
-        rows = await conn.fetch(_CLIENTS_SQL, site_id)
-    for r in rows:
-        if r["email"] == email:
-            return _client_from_row(r)
+        row = await conn.fetchrow(_clients_sql(filter_email=True), site_id, email)
+    if row is not None:
+        return _client_from_row(row)
     return CappeClient(email=email, name=body.name, phone=body.phone, is_imported=True, location_id=body.location_id)
 
 
@@ -197,11 +205,9 @@ async def import_clients(
     `add_to_newsletter` defaults False — importing a contact list does NOT email
     anyone unless the business explicitly opts in (and reserved test domains are
     always skipped from the newsletter)."""
-    raw = await file.read()
+    raw = await read_capped(file, _MAX_IMPORT_BYTES, "File too large (max 5 MB).")
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
-    if len(raw) > _MAX_IMPORT_BYTES:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 5 MB).")
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -237,6 +243,11 @@ async def import_clients(
         has_locations = bool(loc_rows)
         seen: set[str] = set()
 
+        # Parse + validate every row in Python first (no DB calls in the loop —
+        # each row's per-row reporting, e.g. "Unknown branch 'x'", still needs
+        # its own message, so this stays row-by-row; only the WRITE becomes
+        # one set-based statement below instead of ~5000 sequential round-trips).
+        batch: list[dict] = []
         for i, row in enumerate(data_rows, start=1):
             def cell(col: str) -> str:
                 j = col_idx.get(col)
@@ -271,24 +282,49 @@ async def import_clients(
             tags_raw = cell("tags")
             tags = [t.strip() for t in re.split(r"[;|]", tags_raw) if t.strip()] if tags_raw else []
 
-            inserted = await conn.fetchval(
-                """INSERT INTO cappe_clients (site_id, email, name, phone, location_id, notes, tags, source)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, 'import')
-                   ON CONFLICT (site_id, email) DO UPDATE SET
-                       name = COALESCE(EXCLUDED.name, cappe_clients.name),
-                       phone = COALESCE(EXCLUDED.phone, cappe_clients.phone),
-                       location_id = COALESCE(EXCLUDED.location_id, cappe_clients.location_id),
-                       notes = COALESCE(EXCLUDED.notes, cappe_clients.notes),
-                       tags = CASE WHEN cardinality(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE cappe_clients.tags END,
-                       updated_at = NOW()
-                   RETURNING (xmax = 0)""",
-                site_id, email, name, phone, location_id, notes, tags,
-            )
-            if inserted:
-                result.created += 1
-            else:
-                result.updated += 1
-            if add_to_newsletter and await _add_to_newsletter(conn, site_id, email, name):
-                result.newsletter_added += 1
+            batch.append({
+                "email": email, "name": name, "phone": phone,
+                "location_id": str(location_id) if location_id else None,
+                "notes": notes, "tags": tags,
+            })
+
+        if batch:
+            async with conn.transaction():
+                written = await conn.fetch(
+                    """INSERT INTO cappe_clients (site_id, email, name, phone, location_id, notes, tags, source)
+                       SELECT $1, x.email, x.name, x.phone, x.location_id, x.notes,
+                              COALESCE(
+                                  (SELECT array_agg(t) FROM jsonb_array_elements_text(x.tags) t),
+                                  '{}'::text[]
+                              ),
+                              'import'
+                       FROM jsonb_to_recordset($2::jsonb)
+                            AS x(email text, name text, phone text, location_id uuid, notes text, tags jsonb)
+                       ON CONFLICT (site_id, email) DO UPDATE SET
+                           name = COALESCE(EXCLUDED.name, cappe_clients.name),
+                           phone = COALESCE(EXCLUDED.phone, cappe_clients.phone),
+                           location_id = COALESCE(EXCLUDED.location_id, cappe_clients.location_id),
+                           notes = COALESCE(EXCLUDED.notes, cappe_clients.notes),
+                           tags = CASE WHEN cardinality(EXCLUDED.tags) > 0 THEN EXCLUDED.tags ELSE cappe_clients.tags END,
+                           updated_at = NOW()
+                       RETURNING (xmax = 0) AS inserted""",
+                    site_id, json.dumps(batch),
+                )
+                if add_to_newsletter:
+                    deliverable = [b for b in batch if not _is_reserved_test_domain(b["email"])]
+                    if deliverable:
+                        subscribed = await conn.fetch(
+                            """INSERT INTO cappe_subscribers (site_id, email, name, source, status)
+                               SELECT $1, e, n, 'import', 'subscribed'
+                               FROM unnest($2::text[], $3::text[]) AS t(e, n)
+                               ON CONFLICT (site_id, email) DO NOTHING
+                               RETURNING email""",
+                            site_id,
+                            [b["email"] for b in deliverable],
+                            [b["name"] for b in deliverable],
+                        )
+                        result.newsletter_added = len(subscribed)
+            result.created = sum(1 for r in written if r["inserted"])
+            result.updated = len(written) - result.created
 
     return result

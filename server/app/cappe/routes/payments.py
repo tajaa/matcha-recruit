@@ -53,11 +53,15 @@ async def connect_account(
         acct_id = await conn.fetchval(
             "SELECT stripe_account_id FROM cappe_accounts WHERE id = $1", account.id
         )
-        if not acct_id:
-            try:
-                acct_id = await cs.create_connected_account(account.email)
-            except CappeStripeError as exc:
-                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    if not acct_id:
+        # Connection released before the Stripe round-trip — see the module-wide
+        # rule in sites.py:501-513 / locations.py:38-45: an external HTTP call
+        # must never pin a pooled connection (pool is shared with matcha + tellus).
+        try:
+            acct_id = await cs.create_connected_account(account.email)
+        except CappeStripeError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+        async with get_connection() as conn:
             await conn.execute(
                 "UPDATE cappe_accounts SET stripe_account_id = $1, updated_at = NOW() WHERE id = $2",
                 acct_id, account.id,
@@ -81,14 +85,16 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
         acct_id = await conn.fetchval(
             "SELECT stripe_account_id FROM cappe_accounts WHERE id = $1", account.id
         )
-        if not acct_id:
-            return {"connected": False, "charges_enabled": False, "details_submitted": False}
-        try:
-            acct = await cs.retrieve_account(acct_id)
-        except CappeStripeError:
-            return {"connected": True, "charges_enabled": False, "details_submitted": False}
-        charges = bool(acct.get("charges_enabled"))
-        details = bool(acct.get("details_submitted"))
+    if not acct_id:
+        return {"connected": False, "charges_enabled": False, "details_submitted": False}
+    # Connection released before the Stripe round-trip — see connect_account.
+    try:
+        acct = await cs.retrieve_account(acct_id)
+    except CappeStripeError:
+        return {"connected": True, "charges_enabled": False, "details_submitted": False}
+    charges = bool(acct.get("charges_enabled"))
+    details = bool(acct.get("details_submitted"))
+    async with get_connection() as conn:
         await conn.execute(
             "UPDATE cappe_accounts SET stripe_charges_enabled = $1, stripe_details_submitted = $2, "
             "updated_at = NOW() WHERE id = $3",

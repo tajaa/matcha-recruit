@@ -280,7 +280,11 @@ async def logout(account: CappeAccount = Depends(require_cappe_account)):
     """Revoke all of this account's tokens by advancing its watermark — a real
     server-side logout (every existing access + refresh token stops working)."""
     async with get_connection() as conn:
+        # Floored to the second: `iat` claims are whole seconds, so a
+        # microsecond-precision watermark can outrun a same-second login's
+        # token and lock it out immediately. See is_token_revoked's docstring.
         await conn.execute(
-            "UPDATE cappe_accounts SET tokens_valid_after = NOW(), updated_at = NOW() WHERE id = $1",
+            "UPDATE cappe_accounts SET tokens_valid_after = date_trunc('second', NOW()), "
+            "updated_at = NOW() WHERE id = $1",
             account.id,
         )

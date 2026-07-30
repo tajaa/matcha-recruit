@@ -6,6 +6,7 @@ routes in bookings.py). Public booking reads active staff via public.py.
 """
 import csv
 import io
+import json
 from typing import Optional
 from uuid import UUID
 
@@ -21,7 +22,7 @@ from ..models.cappe import (
     CappeStaffImportResult,
     CappeStaffUpdate,
 )
-from ._shared import get_owned_site
+from ._shared import build_patch, get_owned_site, read_capped
 
 router = APIRouter()
 
@@ -96,12 +97,7 @@ async def update_staff(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_location(conn, site_id, body.location_id)
-        sets, args = [], []
-        for col in ("name", "bio", "image_url", "active", "sort_order", "location_id"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
+        sets, args = build_patch(body, ("name", "bio", "image_url", "active", "sort_order", "location_id"))
         if not sets:
             row = await conn.fetchrow(
                 f"SELECT {_STAFF_COLS} FROM cappe_staff WHERE id = $1 AND site_id = $2", staff_id, site_id
@@ -148,11 +144,9 @@ async def import_staff(
     Re-importing the same name updates that staff member's branch + bio (matched
     case-insensitively) rather than creating a duplicate.
     """
-    raw = await file.read()
+    raw = await read_capped(file, _MAX_IMPORT_BYTES, "File too large (max 2 MB).")
     if not raw:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The file is empty.")
-    if len(raw) > _MAX_IMPORT_BYTES:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File too large (max 2 MB).")
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -194,6 +188,14 @@ async def import_staff(
         existing_by_name = {r["lname"]: r["id"] for r in existing_rows}
         seen: set[str] = set()
 
+        # Parse + validate every row in Python first (no DB calls in the loop).
+        # Classifying update-vs-insert off the `existing_by_name` snapshot taken
+        # BEFORE the loop is safe because `seen` already skips any repeat name
+        # within this same file — no row in this batch can change which bucket
+        # a later row belongs in, so the two writes below can be one batched
+        # UPDATE and one batched INSERT instead of ~2000 sequential round-trips.
+        to_update: list[dict] = []
+        to_insert: list[dict] = []
         for i, row in enumerate(data_rows, start=1):
             def cell(col: str) -> str:
                 j = col_idx.get(col)
@@ -225,26 +227,43 @@ async def import_staff(
 
             bio = cell("bio") or None
             active = cell("active").lower() not in _INACTIVE_VALUES
+            loc_str = str(location_id) if location_id else None
 
             existing_id = existing_by_name.get(key)
             if existing_id is not None:
-                await conn.execute(
-                    """UPDATE cappe_staff
-                       SET location_id = $1,
-                           bio = COALESCE($2, bio),
-                           active = $3,
-                           updated_at = NOW()
-                       WHERE id = $4 AND site_id = $5""",
-                    location_id, bio, active, existing_id, site_id,
-                )
-                result.updated += 1
+                # Unconditional location_id write is intentional here (unlike
+                # the PATCH route's model_fields_set-driven build_patch): a
+                # `branch` column present in the imported file is an explicit
+                # per-row assertion, so a blank cell clearing a prior branch is
+                # correct, not a bug.
+                to_update.append({"id": str(existing_id), "bio": bio, "active": active, "location_id": loc_str})
             else:
-                new_id = await conn.fetchval(
-                    """INSERT INTO cappe_staff (site_id, name, bio, active, location_id)
-                       VALUES ($1, $2, $3, $4, $5) RETURNING id""",
-                    site_id, name, bio, active, location_id,
-                )
-                existing_by_name[key] = new_id  # so a later dup-by-name row updates, not re-inserts
-                result.created += 1
+                to_insert.append({"name": name, "bio": bio, "active": active, "location_id": loc_str})
+
+        # cappe_staff has no unique constraint on name, so there's no ON
+        # CONFLICT target — updates and inserts are matched ahead of time in
+        # Python (above) and applied as two separate set-based statements.
+        if to_update:
+            await conn.execute(
+                """UPDATE cappe_staff s
+                   SET location_id = x.location_id,
+                       bio = COALESCE(x.bio, s.bio),
+                       active = x.active,
+                       updated_at = NOW()
+                   FROM jsonb_to_recordset($1::jsonb)
+                        AS x(id uuid, bio text, active boolean, location_id uuid)
+                   WHERE s.id = x.id AND s.site_id = $2""",
+                json.dumps(to_update), site_id,
+            )
+            result.updated = len(to_update)
+        if to_insert:
+            await conn.execute(
+                """INSERT INTO cappe_staff (site_id, name, bio, active, location_id)
+                   SELECT $1, x.name, x.bio, x.active, x.location_id
+                   FROM jsonb_to_recordset($2::jsonb)
+                        AS x(name text, bio text, active boolean, location_id uuid)""",
+                site_id, json.dumps(to_insert),
+            )
+            result.created = len(to_insert)
 
     return result

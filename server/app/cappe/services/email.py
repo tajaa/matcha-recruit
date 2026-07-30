@@ -31,6 +31,11 @@ def booking_manage_url(token: str) -> str:
     """Customer-facing self-serve link for a booking (view/cancel/reschedule)."""
     return f"{_base_url()}/cappe/booking/{token}"
 
+
+def thread_url(token: str) -> str:
+    """Client-facing link to the public message thread page."""
+    return f"{_base_url()}/cappe/thread/{token}"
+
 _CCY_SYMBOL = {"USD": "$", "CAD": "$", "AUD": "$", "EUR": "€", "GBP": "£"}
 
 

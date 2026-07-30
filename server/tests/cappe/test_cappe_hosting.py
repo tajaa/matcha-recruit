@@ -4,6 +4,7 @@ and custom-domain normalization. No DB, no app boot.
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_hosting.py -q
 """
 import os
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -17,7 +18,7 @@ from app.config import load_settings  # noqa: E402
 load_settings()
 
 from app.cappe.models.cappe import (  # noqa: E402
-    CappeSiteUpdate,
+    CappeDomainConnectRequest,
     normalize_custom_domain,
 )
 from app.cappe.routes._shared import (  # noqa: E402
@@ -149,17 +150,18 @@ def test_normalize_custom_domain_rejects(raw):
         normalize_custom_domain(raw)
 
 
-def test_site_update_model_normalizes():
-    body = CappeSiteUpdate(custom_domain="https://WWW.Studio-Petals.com/")
-    assert body.custom_domain == "studio-petals.com"
+# custom_domain is NOT a CappeSiteUpdate field — a site can no longer set it
+# directly (see the xhigh review fix: an unverified value there both squatted
+# the renderer and authorized Let's Encrypt issuance for a domain the account
+# didn't own). The only model that still applies normalize_custom_domain is
+# CappeDomainConnectRequest, which starts a verified TXT-record claim rather
+# than writing the column — so these three tests moved here.
+
+def test_domain_connect_model_normalizes():
+    body = CappeDomainConnectRequest(site_id=uuid4(), domain="https://WWW.Studio-Petals.com/")
+    assert body.domain == "studio-petals.com"
 
 
-def test_site_update_model_rejects_invalid():
+def test_domain_connect_model_rejects_invalid():
     with pytest.raises(ValidationError):
-        CappeSiteUpdate(custom_domain="not a domain")
-
-
-def test_site_update_model_clear_semantics():
-    # '' survives validation so routes can interpret it as "clear the domain".
-    assert CappeSiteUpdate(custom_domain="").custom_domain == ""
-    assert CappeSiteUpdate().custom_domain is None
+        CappeDomainConnectRequest(site_id=uuid4(), domain="not a domain")

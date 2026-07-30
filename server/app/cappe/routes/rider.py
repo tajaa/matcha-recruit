@@ -69,7 +69,7 @@ async def replace_rider(
                     """INSERT INTO cappe_rider_items (site_id, label, detail, is_required, sort_order)
                        VALUES ($1, $2, $3, $4, $5)""",
                     site_id, item.label, item.detail, item.is_required,
-                    item.sort_order if item.sort_order else i,
+                    item.sort_order if item.sort_order is not None else i,
                 )
             rows = await conn.fetch(
                 f"SELECT {_RIDER_COLS} FROM cappe_rider_items WHERE site_id = $1 "

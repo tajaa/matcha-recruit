@@ -295,6 +295,20 @@ async def browse_directory(
     args.append(offset)
     offset_param = f"${len(args)}"
 
+    # The count must NOT be `COUNT(*) OVER ()` — a window function forces
+    # Postgres to materialize every matching row before LIMIT applies, which
+    # pays full-catalog cost on the cheapest possible call (page 1, no
+    # filters) and defeats the whole point of _MAX_DEPTH. This scalar
+    # subquery is uncorrelated (it repeats `where_sql` against its own fresh
+    # FROM, not the outer query's rows), so Postgres plans it as a one-shot
+    # InitPlan instead of a per-row re-evaluation, and its own inner LIMIT
+    # caps the cost at _MAX_DEPTH rows regardless of how many sites match.
+    # The geo join is included only when it's actually referenced by
+    # `where_sql` (the `loc.distance_km <=` predicate, radius search only) —
+    # the reviews LATERAL and the plain city/region location join are never
+    # part of the WHERE clause, so they're dropped from the count entirely.
+    count_geo_join = geo_join if has_geo else ""
+
     sql = f"""
         {geo_cte}
         SELECT {_ENTRY_COLS},
@@ -302,7 +316,14 @@ async def browse_directory(
                {distance_km_expr} AS distance_km,
                {rank_expr} AS rank,
                rev.rating, rev.review_count,
-               COUNT(*) OVER () AS total_count
+               (SELECT COUNT(*) FROM (
+                    SELECT 1 FROM cappe_sites s
+                      JOIN cappe_accounts a ON a.id = s.account_id
+                      LEFT JOIN cappe_site_search sv ON sv.site_id = s.id
+                      {count_geo_join}
+                     WHERE {where_sql}
+                     LIMIT {_MAX_DEPTH}
+               ) capped) AS total_count
           FROM cappe_sites s
           JOIN cappe_accounts a ON a.id = s.account_id
           -- Search index lives in its own table (see the migration): a

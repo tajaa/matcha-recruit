@@ -5,11 +5,11 @@ opens one (which marks it read), starts new conversations, and replies. Each
 owner message emails the client a token link to the public thread page
 (public read/reply lives in public.py). Client directory lives in clients.py.
 """
-import os
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
+from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
@@ -20,7 +20,7 @@ from ..models.cappe import (
     CappeThreadCreate,
     CappeThreadDetail,
 )
-from ..services.email import send_cappe_message_email
+from ..services.email import send_cappe_message_email, thread_url
 from ._shared import get_owned_site
 
 router = APIRouter()
@@ -31,9 +31,29 @@ _THREAD_COLS = (
 )
 
 
-def _client_thread_link(token) -> str:
-    base = os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
-    return f"https://{base}/cappe/thread/{token}"
+async def _owner_msg_request_ok(account_id) -> None:
+    """Per-account budget on the request itself — an owner blasting this
+    endpoint is their own account's abuse, so it 429s the request (unlike the
+    per-recipient budget below, which only ever skips the email)."""
+    await check_rate_limit(str(account_id), "cappe_owner_msg", 60, 3600)
+
+
+async def _recipient_send_ok(email: str) -> bool:
+    """Per-recipient send budget. Never blocks the thread/message write —
+    only the email — so a chatty owner still gets their message recorded even
+    past this cap; mirrors services/commerce.check_recipient_send_ok."""
+    try:
+        await check_rate_limit(email.lower(), "cappe_owner_msg_to", 20, 3600)
+        return True
+    except HTTPException:
+        return False
+
+
+async def _notify_recipient(to_email, to_name, site_name, body, link, from_label) -> None:
+    """Background-task entry point: gate on the recipient's own send budget
+    before ever calling the email service."""
+    if await _recipient_send_ok(to_email):
+        await send_cappe_message_email(to_email, to_name, site_name, body, link, from_label)
 
 
 @router.get("/sites/{site_id}/threads", response_model=list[CappeThread])
@@ -83,6 +103,7 @@ async def start_thread(
 ):
     """Start (or continue) a conversation with a client and send the first
     message. Reuses an existing open thread for the same client email."""
+    await _owner_msg_request_ok(account.id)
     email = body.client_email.strip().lower()
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
@@ -117,8 +138,8 @@ async def start_thread(
                 "WHERE thread_id = $1 ORDER BY created_at", thread["id"],
             )
     background.add_task(
-        send_cappe_message_email, email, body.client_name, site["name"], body.body,
-        _client_thread_link(full["access_token"]), site["name"],
+        _notify_recipient, email, body.client_name, site["name"], body.body,
+        thread_url(full["access_token"]), site["name"],
     )
     d = dict(full)
     d["messages"] = [dict(m) for m in msgs]
@@ -130,6 +151,7 @@ async def reply_thread(
     site_id: UUID, thread_id: UUID, body: CappeMessageCreate, background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
+    await _owner_msg_request_ok(account.id)
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
         thread = await conn.fetchrow(
@@ -149,8 +171,8 @@ async def reply_thread(
                 "last_message_at = NOW() WHERE id = $1", thread_id,
             )
     background.add_task(
-        send_cappe_message_email, thread["client_email"], thread["client_name"], site["name"],
-        body.body, _client_thread_link(thread["access_token"]), site["name"],
+        _notify_recipient, thread["client_email"], thread["client_name"], site["name"],
+        body.body, thread_url(thread["access_token"]), site["name"],
     )
     return dict(msg)
 

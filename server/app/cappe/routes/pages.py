@@ -132,6 +132,6 @@ async def delete_page(
         result = await conn.execute(
             "DELETE FROM cappe_pages WHERE id = $1 AND site_id = $2", page_id, site_id
         )
-        if result.endswith("0"):
+        if result.endswith(" 0"):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page not found")
     await invalidate_render_cache(site_id)

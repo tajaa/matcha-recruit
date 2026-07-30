@@ -20,7 +20,7 @@ from ..models.cappe import (
     CappeSubscriber,
     CappeSubscriberCreate,
 )
-from ._shared import get_owned_site
+from ._shared import build_patch, get_owned_site
 
 router = APIRouter()
 
@@ -138,12 +138,7 @@ async def update_campaign(
         if current["status"] in ("sent", "sending"):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A sent campaign can't be edited")
 
-        sets, args = [], []
-        for col in ("subject", "body_html", "from_name", "scheduled_at", "status"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
+        sets, args = build_patch(body, ("subject", "body_html", "from_name", "scheduled_at", "status"))
         if not sets:
             row = await conn.fetchrow(
                 f"SELECT {_CAMPAIGN_COLS} FROM cappe_campaigns WHERE id = $1", campaign_id

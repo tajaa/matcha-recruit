@@ -1,7 +1,8 @@
 """Cappe template catalog — public, read-only."""
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
 
+from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..models.cappe import CappeTemplateDetail, CappeTemplateSummary
 from ..services.render import render_site_html
@@ -46,12 +47,15 @@ async def get_template(slug: str):
 
 
 @router.get("/templates/{slug}/preview", response_class=HTMLResponse)
-async def preview_template(slug: str):
+async def preview_template(slug: str, request: Request):
     """Render a template's first page to standalone HTML (for gallery previews).
 
     Public, no auth — drives the live iframe thumbnail in the template gallery.
     Builds the same inputs `render_site_html` gets for a real published site.
     """
+    # The most CPU-expensive public endpoint (a full synchronous render) and,
+    # until now, the only public one with no rate limit at all.
+    await check_rate_limit(client_ip(request), "cappe_tpl_preview", 30, 60)
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT name, structure FROM cappe_templates WHERE slug = $1 AND is_active = true",
