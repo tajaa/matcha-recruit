@@ -865,15 +865,14 @@ async def _run_huume_dispatch(tc: TurnContext):
     # Per-company turn cap — GeminiRateLimiter guards the platform's Gemini
     # quota, not a tenant's own usage. A Huume turn costs up to 8 model calls
     # plus whatever the pilot tools spend, and (unlike handbook_pilot_chat's
-    # 40/hr) previously had no tenant limit at all. Kept at 60/hr — the
-    # original 60/hr hit was `show_record` taking one id per call, forcing a
-    # turn per record; that's now a single batched call (`record_view`'s
-    # `_MODEL_BATCH_BUILDERS`), so the symptom that justified the 200/hr raise
-    # is gone and the wider cap would only enlarge a runaway loop's blast
-    # radius for no remaining benefit.
+    # 40/hr) previously had no tenant limit at all. Raised 60->120/hr
+    # 2026-07-31: real usage was hitting the cap in normal daily use, not a
+    # runaway loop — the original 60/hr hit was `show_record` taking one id
+    # per call (fixed by batching, see below), so this raise is headroom for
+    # legitimate volume, not a re-opening of that old symptom.
     try:
         from app.core.services.redis_cache import check_rate_limit
-        await check_rate_limit(str(company_id), "huume_turn", 60, 3600)
+        await check_rate_limit(str(company_id), "huume_turn", 120, 3600)
     except HTTPException:
         yield _sse_data({"type": "error", "message": "Huume is being used a lot right now — try again in a bit."})
         tc.terminated = True
