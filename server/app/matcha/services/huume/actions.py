@@ -614,11 +614,19 @@ PILOT_TOOL_REQUIRED_FEATURE: dict[str, str | tuple[str, ...]] = {
     "ask_er_copilot": "er_copilot",
     "ask_ir_copilot": ("ir_copilot", "incidents"),
     "run_incident_analysis": ("ir_copilot", "incidents"),
+    # Not pilot-backed, but the same per-call envelope is what was missing:
+    # send_offer is gated on `offer_letters` via _HUUME_ACTION_REQUIRED_FEATURE
+    # below, but draft_offer_letter/check_offer_status ran ungated — a
+    # flag-off company could still draft (INSERT a real offer_letters row)
+    # and open the side panel's OfferLetterViewer, which then 403s forever
+    # against the /offer-letters mount's own require_feature("offer_letters").
+    "draft_offer_letter": "offer_letters",
+    "check_offer_status": "offer_letters",
 }
 
 _PILOT_FEATURE_LABEL = {
     "legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot", "er_copilot": "ER Copilot",
-    "ir_copilot": "IR Copilot", "incidents": "Incident Reporting",
+    "ir_copilot": "IR Copilot", "incidents": "Incident Reporting", "offer_letters": "Offer Letters",
 }
 
 

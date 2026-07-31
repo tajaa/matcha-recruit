@@ -457,6 +457,85 @@ async def get_usage_summary(
     summary = await doc_svc.get_token_usage_summary(company_id, current_user.id, period_days)
     return UsageSummaryResponse(**summary)
 
+
+async def _build_usage_meter(user_id, company_id, role: str) -> dict:
+    """Compose the three walls a tenant can hit into one meter payload, for
+    the Work shell's TokenIndicator — 'anywhere Huume/Gemini is used'.
+
+    Each block degrades to None INDEPENDENTLY on its own read failure (or,
+    for company_budget/huume_turns, when the caller has no company) — a
+    redis outage must not take down the quota half of the meter, and vice
+    versa. Never raises.
+
+    Admins skip company_budget/huume_turns entirely — mirrors the old
+    `/billing/balance` admin sentinel bypass and `_run_quota_gate`'s
+    `check_token_budget` role skip. Without this, `get_client_company_id`'s
+    `resolve_accessible_company_scope` hands an admin an arbitrary tenant's
+    company_id (first match), so the meter would show that tenant's budget
+    and an Upgrade button that starts checkout for the wrong company. The
+    per-user quota (the 429 wall) still applies to admins, so user_quota is
+    still resolved."""
+    from app.matcha.services.billing import entitlements_service, token_budget_service
+
+    user_quota = None
+    try:
+        plan = await entitlements_service.resolve_plan_for_user(user_id)
+        q = await doc_svc.check_token_quota(user_id, company_id)
+        user_quota = {
+            "plan": plan, "used": q["used"], "limit": q["limit"],
+            "remaining": q["remaining"], "window_hours": q["window_hours"],
+            "resets_at": q["resets_at"],
+        }
+    except Exception:
+        logger.warning("usage meter: quota read failed", exc_info=True)
+
+    company_budget = None
+    huume_turns = None
+    if company_id is not None and role != "admin":
+        try:
+            b = await token_budget_service.get_token_budget(company_id)
+            company_budget = {
+                "free_tokens_remaining": b["free_tokens_remaining"],
+                "subscription_tokens_remaining": b["subscription_tokens_remaining"],
+                "total_tokens_remaining": b["total_tokens_remaining"],
+                "free_token_limit": b["free_token_limit"],
+                "subscription_token_limit": b["subscription_token_limit"],
+                "has_active_subscription": b["has_active_subscription"],
+            }
+        except Exception:
+            logger.warning("usage meter: budget read failed", exc_info=True)
+
+        from app.core.services.redis_cache import get_rate_limit_state
+        from app.matcha.services.matcha_work.turn_pipeline import (
+            HUUME_TURN_LIMIT, HUUME_TURN_WINDOW_SECONDS,
+        )
+        huume_turns = await get_rate_limit_state(
+            str(company_id), "huume_turn", HUUME_TURN_LIMIT, HUUME_TURN_WINDOW_SECONDS,
+        )
+
+    return {"user_quota": user_quota, "company_budget": company_budget, "huume_turns": huume_turns}
+
+
+@router.get("/usage/meter")
+async def get_usage_meter(
+    response: Response,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Live position against the three AI-usage walls a turn can hit: the
+    per-user plan token quota (the 429 `_run_quota_gate` raises), the
+    company token budget (the 402 the same gate raises), and the
+    per-company `huume_turn` rate limit (turn_pipeline.HUUME_TURN_LIMIT).
+    One read for the Work shell's TokenIndicator, mounted once in
+    WorkLayout so it covers every turn-initiating surface.
+
+    no-store: this is fetched event-driven (on turn-complete/error, see
+    notifyUsageChanged) specifically to snap the meter to red right after a
+    429/402 — a browser-cached response would silently serve pre-turn
+    numbers for the cache window and defeat that."""
+    response.headers["Cache-Control"] = "no-store"
+    company_id = await get_client_company_id(current_user)
+    return await _build_usage_meter(current_user.id, company_id, current_user.role)
+
 # The global (non-project) manual task board + auto-populated deadline feed
 # moved to routes/dashboard/tasks.py (2026-07-28) — GET/POST/PATCH/DELETE
 # /dashboard/tasks[...]. It was core HR-ops data (credentials, incidents,

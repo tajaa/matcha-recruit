@@ -27,6 +27,7 @@ LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents", "er_cases",
     "pto_leave", "policies", "discipline", "compliance", "documents", "events",
+    "wage_floors",
 )
 
 # record_type values show_record accepts — the single source both the tool
@@ -82,15 +83,20 @@ TOOLS: tuple[HuumeTool, ...] = (
         "credential/license expirations, upcoming approved PTO/leave plus "
         "PENDING PTO requests awaiting a decision, active policy titles, "
         "discipline record counts by status (never narrative details), open "
-        "compliance requirement counts by category, or documents still "
-        "awaiting employee signature. Call this before drafting an offer if "
+        "compliance requirement counts by category, documents still "
+        "awaiting employee signature, or statutory minimum-wage/exempt-salary"
+        "-threshold FLOORS for a state (topic='wage_floors', query=the "
+        "2-letter state code) — ALWAYS use this for any statutory wage/salary "
+        "figure ('minimum salary', 'minimum wage', 'exempt threshold'); "
+        "training-data numbers go stale every January and must never be "
+        "quoted from memory. Call this before drafting an offer if "
         "you're unsure whether the candidate already has one, or before "
         "building a plan to check what integrations are actually connected. "
         "Use show_record with an id from a list here (incident/er_case/"
         "employee/credential) to open that record in the admin's side panel.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
-            "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email."),
+            "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),
             "days": types.Schema(type=types.Type.INTEGER, description="Lookback window in days for topic='incidents'. Default 90, max 365."),
         },
         required=["topic"],

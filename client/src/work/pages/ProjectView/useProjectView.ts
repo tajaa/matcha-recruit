@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useMe } from '../../../hooks/useMe'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, ensureDiscussionChannel, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, syncProjectInterviews, extractPlaceholderValue, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, ensureDiscussionChannel, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, syncProjectInterviews, extractPlaceholderValue, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl, notifyUsageChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { useProjectPresence } from '../../hooks/useProjectPresence'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
@@ -367,6 +367,7 @@ export function useProjectView() {
         }
         setStreaming(false)
         refreshUsage()
+        notifyUsageChanged()
         // Refresh project data so side panel picks up AI-generated updates (posting, sections, etc.)
         if (projectId) {
           const updated = await getProjectDetail(projectId)
@@ -377,6 +378,9 @@ export function useProjectView() {
         setStatusMessage('')
         setError(err)
         setStreaming(false)
+        // A 429/402 quota refusal is exactly when the meter should snap to
+        // red without waiting for the next poll.
+        notifyUsageChanged()
       },
     }, { model: selectedModel })
   }

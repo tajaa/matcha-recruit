@@ -92,6 +92,36 @@ class TestLookupGating:
         ))
         assert result["module"] == "off"
 
+    def test_offers_off_returns_module_off_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="offers", features={"offer_letters": False},
+        ))
+        assert result["module"] == "off"
+
+    def test_wage_floors_bad_state_is_error_without_conn(self):
+        # Validated before any DB call — conn=None never touched proves it.
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="wage_floors", query="california", features={},
+        ))
+        assert "module" not in result
+        assert "error" in result
+
+    def test_wage_floors_missing_query_is_error_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="wage_floors", query=None, features={},
+        ))
+        assert "module" not in result
+        assert "error" in result
+
+    def test_wage_floors_is_ungated_and_attempts_lookup(self):
+        # No feature required — a valid 2-letter state proceeds past the
+        # (absent) gate check and attempts the DB path, hitting conn=None.
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="wage_floors", query="CA", features={},
+        ))
+        assert "module" not in result
+        assert result.get("error") == "lookup failed"
+
     def test_compliance_off_returns_module_off_without_conn(self):
         # Neither of the two flags that gate this topic is on.
         result = _run(_lookup_context_impl(

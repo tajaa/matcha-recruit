@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep } from '../../types'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged, notifyUsageChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
@@ -234,6 +234,7 @@ export function useThreadController() {
         }
         setStreaming(false)
         refreshUsage()
+        notifyUsageChanged()
 
         if (thread?.title.startsWith('New Chat')) {
           const pickUpTitle = () => {
@@ -261,6 +262,9 @@ export function useThreadController() {
         setPendingHuumeSteps([])
         setError(err)
         setStreaming(false)
+        // A 429/402 quota refusal is exactly when the meter should snap to
+        // red without waiting for the next poll.
+        notifyUsageChanged()
       },
     }, streamOpts)
   }

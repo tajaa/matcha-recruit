@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from app.config import get_settings
 from app.core.models.auth import CurrentUser
+from app.core.services.rate_limiter import RateLimitExceeded
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
@@ -49,6 +50,13 @@ from app.matcha.services.matcha_work.matcha_work_ai import (
 from app.matcha.services.billing.model_pricing import calculate_call_cost
 
 logger = logging.getLogger(__name__)
+
+# Per-company Huume turn cap — shared with GET /matcha-work/usage/meter
+# (routes/matcha_work/workspace.py) so the meter can never drift from the
+# gate. History: 60 -> 120/hr, see the check_rate_limit call site below.
+HUUME_TURN_LIMIT = 120
+HUUME_TURN_WINDOW_SECONDS = 3600
+
 
 async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> str | None:
     """Fetch compliance RAG context for a user question. Returns None on failure."""
@@ -540,7 +548,18 @@ class TurnContext:
 async def _run_quota_gate(company_id: UUID, current_user: CurrentUser) -> None:
     """Token-budget + per-user quota checks. Raises HTTPException BEFORE the
     StreamingResponse is constructed, so failures surface as a real status code
-    (429 with structured detail) rather than an SSE error frame."""
+    (429 with structured detail) rather than an SSE error frame.
+
+    Headroom contract: this gate is the ONLY tenant-side quota decision for
+    a turn, and it runs at turn START only. `allowed` is `used < limit`, so
+    a turn that starts at limit-1 runs to completion on overdraft —
+    `token_budget_service.deduct_tokens` clamps the balance to zero rather
+    than raising, and nothing re-checks mid-turn. Do not "fix" this into a
+    mid-turn check: killing an agent turn partway strands half-executed
+    tool writes with no user-visible result. The only thing allowed to stop
+    a turn mid-flight is the platform-wide GeminiRateLimiter (see
+    huume/agent.py's RateLimitExceeded handling), and even that force-
+    finishes rather than discarding partial work once a call has run."""
     if current_user.role != "admin":
         await token_budget_service.check_token_budget(company_id)
 
@@ -872,7 +891,7 @@ async def _run_huume_dispatch(tc: TurnContext):
     # legitimate volume, not a re-opening of that old symptom.
     try:
         from app.core.services.redis_cache import check_rate_limit
-        await check_rate_limit(str(company_id), "huume_turn", 120, 3600)
+        await check_rate_limit(str(company_id), "huume_turn", HUUME_TURN_LIMIT, HUUME_TURN_WINDOW_SECONDS)
     except HTTPException:
         yield _sse_data({"type": "error", "message": "Huume is being used a lot right now — try again in a bit."})
         tc.terminated = True
@@ -916,6 +935,14 @@ async def _run_huume_dispatch(tc: TurnContext):
                 except Exception:
                     logger.warning("huume add_step failed for run %s", run_id, exc_info=True)
             yield _sse_data(frame)
+    except RateLimitExceeded:
+        # agent.py only re-raises this before its first model call (see
+        # _rate_limit_disposition) — any mid-loop hit force-finishes there
+        # instead and reaches this generator as a normal huume_result frame.
+        # A clean, specific message beats the generic crash text below.
+        logger.warning("Huume turn refused: platform Gemini capacity limit (thread %s)", thread_id)
+        run_failed = True
+        yield _sse_data({"type": "error", "message": "AI capacity is maxed out right now — try again in a few minutes."})
     except Exception:
         logger.exception("Huume turn crashed for thread %s", thread_id)
         run_failed = True

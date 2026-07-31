@@ -149,6 +149,33 @@ async def check_rate_limit(ip: str, action: str, limit: int, window: int) -> Non
     _rl_attempts[fk].append(now)
 
 
+async def get_rate_limit_state(key: str, action: str, limit: int, window: int) -> Optional[dict]:
+    """Read a `check_rate_limit` counter WITHOUT incrementing it — meter/
+    display use only. Returns {"used", "limit", "remaining",
+    "resets_in_seconds"}, or None when redis is unavailable (the in-process
+    `_rl_attempts` fallback is per-worker state and deliberately not exposed
+    here — a meter reading one uvicorn worker's memory would just be wrong).
+
+    `redis.ttl` returns -1 (key has no expiry) or -2 (key missing) — both
+    collapse to resets_in_seconds=0, "the window is fresh"."""
+    redis = get_redis_cache()
+    if redis is None:
+        return None
+    try:
+        rk = f"rl:{action}:{key}"
+        raw = await redis.get(rk)
+        used = int(raw) if raw is not None else 0
+        ttl = await redis.ttl(rk)
+        return {
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used),
+            "resets_in_seconds": max(0, ttl if isinstance(ttl, int) else 0),
+        }
+    except Exception:
+        return None
+
+
 async def cache_delete_pattern(redis, prefix: str) -> None:
     """Delete all keys matching a prefix. Use sparingly."""
     try:

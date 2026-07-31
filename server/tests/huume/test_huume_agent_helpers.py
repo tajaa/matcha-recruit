@@ -18,6 +18,7 @@ from app.matcha.services.huume.agent import (
     _STEP_PAYLOAD_CAP_CHARS,
     _StepRecorder,
     _cap_payload,
+    _rate_limit_disposition,
     _to_contents,
     is_sole_finish,
 )
@@ -138,3 +139,20 @@ class TestBuildOnboardingPlanEmploymentType:
     def test_missing_employment_type_is_none(self):
         plan = build_onboarding_plan(offer=self._offer(employment_type=None), features={}, integrations={})
         assert plan["employee"]["employment_type"] is None
+
+
+class TestRateLimitDisposition:
+    """A mid-loop platform RateLimitExceeded must not discard partial work
+    once at least one model call has run — see agent.py's `except
+    RateLimitExceeded` handler and the headroom contract documented on
+    turn_pipeline._run_quota_gate."""
+
+    def test_before_first_call_raises(self):
+        assert _rate_limit_disposition(0) == "raise"
+
+    def test_after_first_call_force_finishes(self):
+        assert _rate_limit_disposition(1) == "force_finish"
+
+    def test_mid_loop_force_finishes(self):
+        for n in (2, 5, 8):
+            assert _rate_limit_disposition(n) == "force_finish"

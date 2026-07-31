@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, notifyUsageChanged } from '../../api/matchaWork'
 import type { MWMessage, MWStreamEvent, MWSendResponse } from '../../types'
 import MessageBubble from '../panels/MessageBubble'
 
@@ -83,10 +83,12 @@ export default function BoardChatTab({ projectId }: BoardChatTabProps) {
           return [...withoutTemp, data.user_message, data.assistant_message]
         })
         setStreaming(false)
+        notifyUsageChanged()
       },
       onError: (err) => {
         setError(err)
         setStreaming(false)
+        notifyUsageChanged()
       },
     })
   }

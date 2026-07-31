@@ -56,6 +56,18 @@ logger = logging.getLogger(__name__)
 # every tier's planner/executor model is routing.FLASH today.
 _MODEL = routing.FLASH
 _MAX_MODEL_CALLS = 8
+
+
+def _rate_limit_disposition(model_calls: int) -> str:
+    """Pure decision for a mid-loop RateLimitExceeded (platform-wide Gemini
+    capacity, not tenant quota): "raise" before any model call this turn —
+    nothing to lose, the turn is unbilled — else "force_finish" — partial
+    work + accumulated usage must survive, same as a _MAX_MODEL_CALLS/wall-
+    clock bound hit. `model_calls` is incremented before each call (see the
+    loop), so this covers both an RLE from the loop's own check_limit and
+    one surfaced from inside a tool call."""
+    return "raise" if model_calls == 0 else "force_finish"
+
 # 300s, not the 150s the loop launched with: the pilot tools (ask_legal_pilot /
 # draft_handbook_content / generate_legal_packet) each embed their own
 # 90s-capped Gemini call, and a 150s budget could force-finish the turn before
@@ -508,6 +520,15 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "draft_offer_letter":
+                # send_offer is gated on `offer_letters` via evaluate_huume_action
+                # below; drafting must be gated the same way — an ungated draft
+                # still INSERTs a real offer_letters row and opens the side
+                # panel's OfferLetterViewer, which then 403s forever against
+                # the /offer-letters mount's own require_feature("offer_letters").
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                if refusal:
+                    step = recorder.record(tool=name, kind="write", label="Offer letter drafting unavailable", status="rejected", detail=refusal)
+                    return {"status": "refused", "message": refusal}, step
                 fields = {k: v for k, v in args.items() if k != "offer_id"}
                 result = await onboarding_skill.draft_offer_letter(
                     company_id=company_id, thread_id=thread_id, offer_id=args.get("offer_id"), **fields,
@@ -523,6 +544,10 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "check_offer_status":
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                if refusal:
+                    step = recorder.record(tool=name, kind="read", label="Offer status unavailable", status="rejected", detail=refusal)
+                    return {"status": "refused", "message": refusal}, step
                 result = await onboarding_skill.check_offer_status(company_id=company_id, offer_id=str(args.get("offer_id") or ""))
                 step = recorder.record(tool=name, kind="read", label="Checked offer status", status="ok" if result.get("status") != "error" else "error")
                 return _json_safe(result), step
@@ -1229,7 +1254,29 @@ async def run_huume_turn(
             contents.append(types.Content(role="user", parts=response_parts))
 
     except RateLimitExceeded:
-        raise
+        # Platform-wide Gemini capacity (GeminiRateLimiter), not this
+        # tenant's own quota. Before the first model call there is nothing
+        # to lose — re-raise so the dispatcher reports a clean capacity
+        # error and the turn is never billed (see turn_pipeline._run_
+        # huume_dispatch). Mid-loop, partial work already exists (tool DB
+        # writes have happened, usage is accumulated in total_usage): force-
+        # finish exactly like a _MAX_MODEL_CALLS/wall-clock bound hit
+        # instead of discarding it — this is the "force-finish with partial
+        # work on a bound hit" contract from the module docstring, now
+        # covering this bound too. Falls through to the final_message
+        # fallback + huume_result yield below with NO further model call.
+        if _rate_limit_disposition(model_calls) == "raise":
+            raise
+        logger.info("Huume agent hit the platform Gemini limit mid-turn (calls=%s)", model_calls)
+        yield {"type": "status", "message": "Hit the AI capacity limit — wrapping up with what's done."}
+        # Persisted message must say why it's truncated — otherwise the
+        # generic final_message fallback below reads as a normal finish and
+        # a reload gives no indication capacity was hit.
+        final_message = (
+            "I hit the AI capacity limit mid-task — here's what finished before stopping."
+            if recorder.steps
+            else "I hit the AI capacity limit before completing anything — nothing was changed."
+        )
     except Exception as exc:
         logger.warning("Huume agent turn failed: %s", exc, exc_info=True)
         turn_error = "Huume hit a problem mid-turn — keeping what worked."

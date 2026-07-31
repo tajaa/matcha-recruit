@@ -196,6 +196,7 @@ from app.core.services.compliance_service._reads import (  # noqa: F401
     get_employee_impact_for_location,
     get_hierarchical_requirements,
     get_location_requirements,
+    get_wage_floors_for_state,
     search_company_requirements,
 )
 from app.core.services.compliance_service._dashboards import (  # noqa: F401
@@ -354,6 +355,7 @@ __all__ = [
     "get_recent_corrections",
     "get_specialization_completeness",
     "get_upcoming_legislation",
+    "get_wage_floors_for_state",
     "is_codified_row",
     "mark_alert_read",
     "normalize_and_hash",

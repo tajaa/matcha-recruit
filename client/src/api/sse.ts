@@ -140,7 +140,15 @@ export class SSEHttpError extends ApiError {
 async function _readDetail(res: Response): Promise<{ detail: string; body: unknown }> {
   try {
     const body = await res.json()
-    const detail = typeof body?.detail === 'string' ? body.detail : ''
+    // detail may be a plain string OR a structured object ({code, message, …}
+    // — e.g. the 429 quota_exhausted / 402 token_budget_exhausted gates in
+    // turn_pipeline._run_quota_gate). Prefer its human message; the full
+    // object stays on SSEHttpError.body for callers that branch on .code.
+    const d = body?.detail
+    const detail =
+      typeof d === 'string' ? d
+      : typeof d?.message === 'string' ? d.message
+      : ''
     return { detail, body }
   } catch {
     return { detail: '', body: null } // non-JSON error body

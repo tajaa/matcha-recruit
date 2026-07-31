@@ -7,21 +7,11 @@ import NotificationBell from '../components/shell/NotificationBell'
 import NotificationSettingsMenu from '../components/shell/NotificationSettingsMenu'
 import WorkSidebar from '../components/shell/WorkSidebar'
 import WerkLiteSidebar from '../components/shell/WerkLiteSidebar'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMe } from '../../hooks/useMe'
 import { api } from '../../api/client'
+import { fetchUsageMeter, USAGE_CHANGED_EVENT, type UsageMeter } from '../api/matchaWork'
 import { useWorkSurface, useWorkBrand, useWorkBase } from '../routes/WorkSurfaceContext'
-
-interface TokenBudget {
-  free_tokens_used: number
-  free_token_limit: number
-  free_tokens_remaining: number
-  subscription_tokens_used: number
-  subscription_token_limit: number
-  subscription_tokens_remaining: number
-  total_tokens_remaining: number
-  has_active_subscription: boolean
-}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -29,41 +19,135 @@ function formatTokens(n: number): string {
   return String(n)
 }
 
-function TokenIndicator() {
-  const [budget, setBudget] = useState<TokenBudget | null>(null)
+// /matcha-work/usage/meter nulls company_budget for admin callers server-
+// side (workspace.py:_build_usage_meter) rather than sending a sentinel —
+// an admin's company_id is an arbitrary resolved tenant, not one they
+// should see a budget/Upgrade button for. The old /billing/balance sentinel
+// path (>= 999_999_000 remaining) is kept as a belt-and-suspenders guard
+// in case any other caller of company_budget still sends one.
+const ADMIN_SENTINEL = 999_999_000
+// Floor between refetches triggered by USAGE_CHANGED_EVENT — a burst of
+// turn-complete events (e.g. multiple tabs) coalesces into one fetch. The
+// server sends no-store (fetched event-driven specifically to snap to red
+// right after a 429/402), so a request inside the floor is deferred to a
+// trailing fetch rather than dropped — dropping it would leave the meter
+// stale until the next unrelated event.
+const REFRESH_FLOOR_MS = 5_000
 
-  useEffect(() => {
-    api.get<TokenBudget>('/matcha-work/billing/balance')
-      .then(setBudget)
-      .catch(() => {})
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  } catch {
+    return iso
+  }
+}
+
+// Mounted once here in the shared Work shell, which wraps every turn-
+// initiating surface (MatchaWorkThread, ProjectView, werk-lite BoardChatTab
+// — see WorkRouteTree.tsx / WerkLiteRoutes.tsx) — "anywhere Huume/Gemini is
+// used" is exactly this one mount point, not per-page duplication.
+function TokenIndicator() {
+  const [meter, setMeter] = useState<UsageMeter | null>(null)
+  const [open, setOpen] = useState(false)
+  const lastFetch = useRef(0)
+  const trailingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const doFetch = useCallback(() => {
+    lastFetch.current = Date.now()
+    fetchUsageMeter().then(setMeter).catch(() => {})
   }, [])
 
-  if (!budget) return null
+  const refresh = useCallback(() => {
+    const elapsed = Date.now() - lastFetch.current
+    if (elapsed >= REFRESH_FLOOR_MS) {
+      doFetch()
+      return
+    }
+    if (trailingTimer.current) return
+    trailingTimer.current = setTimeout(() => {
+      trailingTimer.current = null
+      doFetch()
+    }, REFRESH_FLOOR_MS - elapsed)
+  }, [doFetch])
 
-  const { has_active_subscription, total_tokens_remaining } = budget
-  const used = has_active_subscription ? budget.subscription_tokens_used : budget.free_tokens_used
-  const limit = has_active_subscription ? budget.subscription_token_limit : budget.free_token_limit
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 100
-  const low = total_tokens_remaining <= 0
-  const warn = !low && pct > 90
+  useEffect(() => {
+    refresh()
+    window.addEventListener(USAGE_CHANGED_EVENT, refresh)
+    return () => {
+      window.removeEventListener(USAGE_CHANGED_EVENT, refresh)
+      if (trailingTimer.current) clearTimeout(trailingTimer.current)
+    }
+  }, [refresh])
 
-  if (total_tokens_remaining >= 999_999_000) return null // admin sentinel
+  useEffect(() => {
+    if (!open) return
+    function handleClick(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [open])
+
+  if (!meter) return null
+  const { user_quota, company_budget, huume_turns } = meter
+  if (!user_quota && !company_budget) return null
+  if (company_budget && company_budget.total_tokens_remaining >= ADMIN_SENTINEL) return null
+
+  // The bar reflects whichever wall is closer — a full company budget
+  // doesn't hide an about-to-reset-anyway user quota, and vice versa.
+  const quotaFrac = user_quota && user_quota.limit > 0 ? user_quota.remaining / user_quota.limit : 1
+  const budgetLimit = company_budget
+    ? company_budget.free_token_limit + company_budget.subscription_token_limit
+    : 0
+  // No recorded limit is not "unmetered" — a company with 0 budget rows
+  // still 402s every turn (check_token_budget), so a 0-limit company must
+  // read as exhausted (frac 0), not full (frac 1).
+  const budgetFrac = company_budget
+    ? budgetLimit > 0
+      ? company_budget.total_tokens_remaining / budgetLimit
+      : company_budget.total_tokens_remaining > 0 ? 1 : 0
+    : 1
+  const frac = Math.min(quotaFrac, budgetFrac)
+  const bindingIsBudget = company_budget != null && budgetFrac <= quotaFrac
+
+  const low = frac <= 0
+  const warn = !low && frac < 0.25
+  const remainingLabel = bindingIsBudget
+    ? company_budget
+      ? formatTokens(company_budget.total_tokens_remaining)
+      : ''
+    : user_quota
+      ? formatTokens(user_quota.remaining)
+      : ''
+
+  const color = low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-w-faint'
+  const barColor = low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-w-accent'
+  const textColor = low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-w-dim'
 
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <Zap size={14} className={low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-w-faint'} />
-      <div className="flex items-center gap-1.5">
-        <div className="hidden sm:block w-16 h-1.5 rounded-full bg-w-surface2 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-w-accent'}`}
-            style={{ width: `${Math.min(pct, 100)}%` }}
-          />
+    <div ref={ref} className="relative flex items-center gap-2 text-xs">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5"
+        title="AI usage"
+      >
+        <Zap size={14} className={color} />
+        <div className="flex items-center gap-1.5">
+          <div className="hidden sm:block w-16 h-1.5 rounded-full bg-w-surface2 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${barColor}`}
+              style={{ width: `${Math.min(Math.max(frac, 0), 1) * 100}%` }}
+            />
+          </div>
+          <span className={textColor}>{remainingLabel}</span>
         </div>
-        <span className={low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-w-dim'}>
-          {formatTokens(total_tokens_remaining)}
-        </span>
-      </div>
-      {low && (
+      </button>
+
+      {/* Company-budget exhaustion is a checkout moment; a per-user quota
+          reset is a wait-it-out moment — never show Upgrade for the latter,
+          it would send an admin to buy tokens the company already has. */}
+      {low && bindingIsBudget && (
         <button
           onClick={async () => {
             try {
@@ -74,10 +158,38 @@ function TokenIndicator() {
               window.location.href = res.checkout_url
             } catch {}
           }}
-          className="ml-1 px-2 py-0.5 rounded-md bg-w-accent text-black font-medium hover:bg-w-accent-hi transition-colors"
+          className="px-2 py-0.5 rounded-md bg-w-accent text-black font-medium hover:bg-w-accent-hi transition-colors"
         >
           Upgrade
         </button>
+      )}
+      {low && !bindingIsBudget && user_quota && (
+        <span className="text-red-400">Resets {formatTime(user_quota.resets_at)}</span>
+      )}
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-64 rounded-lg border border-w-line bg-w-surface shadow-xl z-50 text-xs p-3 space-y-2">
+          {user_quota && (
+            <div>
+              <div className="text-w-dim">Your AI quota ({user_quota.plan})</div>
+              <div className="text-w-text font-mono">
+                {formatTokens(user_quota.used)}/{formatTokens(user_quota.limit)} · resets {formatTime(user_quota.resets_at)}
+              </div>
+            </div>
+          )}
+          {company_budget && (
+            <div>
+              <div className="text-w-dim">Company balance</div>
+              <div className="text-w-text font-mono">{formatTokens(company_budget.total_tokens_remaining)} left</div>
+            </div>
+          )}
+          {huume_turns && (
+            <div>
+              <div className="text-w-dim">Huume turns this hour</div>
+              <div className="text-w-text font-mono">{huume_turns.used}/{huume_turns.limit}</div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

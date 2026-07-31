@@ -108,8 +108,11 @@ async def lookup_context(
 
 
 # topic -> feature flag gating it. Absent from this dict = no extra gate
-# (roster/templates/integrations/offers, which predate this and ride only
-# `huume` + the mode's own gate).
+# (roster/templates/integrations, which predate this and ride only `huume` +
+# the mode's own gate). `offers` is gated on `offer_letters` — reading the
+# same table the (also gated) draft_offer_letter/check_offer_status tools
+# write; see actions.PILOT_TOOL_REQUIRED_FEATURE for why drafting must be
+# gated at all.
 _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "training": "training",
     "training_status": "training",
@@ -123,6 +126,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "discipline": "discipline",
     "documents": "employees",
     "events": "ems",
+    "offers": "offer_letters",
 }
 
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
@@ -564,6 +568,26 @@ async def _lookup_context_impl(
                 company_id, f"%{query}%" if query else None,
             )
             return {"topic": "offers", "matches": [dict(r) for r in rows]}
+        if topic == "wage_floors":
+            # No extra feature gate — this reads facts (the company's own
+            # codified compliance_requirements rows, falling back to the
+            # shared jurisdiction_requirements catalog), not the Compliance
+            # PRODUCT surface. A company without `compliance`/`compliance_lite`
+            # simply has no codified rows and falls straight to the catalog.
+            state = (query or "").strip().upper()
+            if len(state) != 2:
+                return {
+                    "topic": "wage_floors",
+                    "error": "give a 2-letter state code, e.g. query='CA'",
+                }
+            from app.core.services.compliance_service import get_wage_floors_for_state
+            result = await get_wage_floors_for_state(conn, company_id, state)
+            if not result.get("found"):
+                result["note"] = (
+                    f"No codified wage data for {state} — ask the admin for the "
+                    "figure rather than estimating one."
+                )
+            return {"topic": "wage_floors", **result}
         return {"topic": topic, "error": "unknown topic"}
     except Exception:
         logger.exception("huume lookup_context failed topic=%s company=%s", topic, company_id)

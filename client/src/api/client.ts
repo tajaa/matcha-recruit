@@ -115,7 +115,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           throw new Error('Session expired')
         }
         const retryBody = await retry.json().catch(() => null)
-        const msg = retryBody?.detail || `${retry.status} ${retry.statusText}`
+        const msg = (typeof retryBody?.detail === 'string' ? retryBody.detail : retryBody?.detail?.message)
+          || `${retry.status} ${retry.statusText}`
         // 401/403 are auth conditions (handled by refresh/logout), not bugs —
         // don't pollute the error reporter with them.
         if (path !== '/client-errors' && retry.status !== 401 && retry.status !== 403) {
@@ -137,7 +138,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const errBody = await res.json().catch(() => null)
     let msg: string
     if (errBody?.detail) {
-      msg = typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
+      // Structured details ({code, message, …} — e.g. the 429/402 token
+      // quota/budget gates) carry a human `.message`; prefer it over the
+      // raw JSON dump.
+      msg = typeof errBody.detail === 'string' ? errBody.detail
+        : typeof errBody.detail?.message === 'string' ? errBody.detail.message
+        : JSON.stringify(errBody.detail)
     } else if (res.status >= 500) {
       msg = res.status === 502 || res.status === 503 || res.status === 504
         ? 'Server temporarily unavailable — retry in a moment.'

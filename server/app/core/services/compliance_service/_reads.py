@@ -350,6 +350,122 @@ async def get_employee_impact_for_location(
         }
 
 
+_WAGE_FLOOR_RATE_TYPES = ("general", "exempt_salary", "tipped")
+
+
+async def get_wage_floors_for_state(
+    conn, company_id: UUID, state: str,
+) -> Dict[str, Any]:
+    """Statutory minimum-wage / exempt-salary-threshold floors for a bare
+    state code — the grounding source for Huume's
+    `lookup_context(topic='wage_floors')`. Company-codified data wins over
+    the shared catalog, mirroring `get_employee_impact_for_location`'s
+    cascade above but keyed on a state rather than one `business_locations`
+    row, since "what's the CA exempt threshold?" isn't always about an
+    existing location.
+
+    Precedence per rate_type (general/exempt_salary/tipped), first match wins:
+    1. This company's own `compliance_requirements` rows, via its locations
+       in `state` — city > county > state > federal.
+    2. The shared catalog's city-level `jurisdiction_requirements`, via the
+       same locations' `jurisdiction_id`.
+    3. The shared catalog's state-level `jurisdiction_requirements` (no city).
+
+    A company with multiple locations in the state can have several rows
+    tied for the winning precedence level (e.g. SF + Fresno both city-level)
+    — within a tier, the MAX numeric value wins, so a company-wide answer
+    is never below the legal floor at any one of its locations.
+
+    Returns {"state": <upper 2-letter>, "found": bool, "floors": {rate_type:
+    {value, unit, source}}} — never a guessed number; `found=False` or a
+    missing rate_type means the caller must say so, not estimate.
+    `exempt_salary` is ANNUAL; `general`/`tipped` are HOURLY, labeled
+    explicitly so a caller can't conflate them.
+    """
+    state = (state or "").strip().upper()
+    if len(state) != 2:
+        return {"state": state, "found": False, "floors": {}}
+
+    async with _conn_or_new(conn) as conn:
+        floors: Dict[str, Dict[str, Any]] = {}
+
+        company_rows = await conn.fetch(
+            """
+            SELECT cr.rate_type, cr.numeric_value
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON bl.id = cr.location_id
+            WHERE bl.company_id = $1 AND UPPER(bl.state) = $2
+              AND cr.category = 'minimum_wage' AND cr.numeric_value IS NOT NULL
+              AND cr.rate_type = ANY($3::text[])
+            ORDER BY
+                CASE cr.jurisdiction_level
+                    WHEN 'city' THEN 1 WHEN 'county' THEN 2
+                    WHEN 'state' THEN 3 WHEN 'federal' THEN 4 ELSE 5
+                END,
+                cr.numeric_value DESC
+            """,
+            company_id, state, list(_WAGE_FLOOR_RATE_TYPES),
+        )
+        for r in company_rows:
+            rt = r["rate_type"] or "general"
+            if rt not in floors:
+                floors[rt] = {"value": float(r["numeric_value"]), "source": "company_codified"}
+
+        missing = [rt for rt in _WAGE_FLOOR_RATE_TYPES if rt not in floors]
+        if missing:
+            # bl.jurisdiction_id can point at a city, county, or state row —
+            # order by that row's own level (not an assumed "city") and
+            # label `source` from what actually won, so a state-level FK
+            # doesn't get mislabeled "catalog_city".
+            city_rows = await conn.fetch(
+                """
+                SELECT jr.rate_type, jr.numeric_value, j.level::text AS jurisdiction_level
+                FROM business_locations bl
+                JOIN jurisdictions j ON j.id = bl.jurisdiction_id
+                JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+                WHERE bl.company_id = $1 AND UPPER(bl.state) = $2
+                  AND jr.category = 'minimum_wage' AND jr.numeric_value IS NOT NULL
+                  AND jr.rate_type = ANY($3::text[])
+                ORDER BY
+                    CASE j.level::text
+                        WHEN 'city' THEN 1 WHEN 'county' THEN 2
+                        WHEN 'state' THEN 3 ELSE 4
+                    END,
+                    jr.numeric_value DESC
+                """,
+                company_id, state, missing,
+            )
+            for r in city_rows:
+                rt = r["rate_type"] or "general"
+                if rt not in floors:
+                    level = r["jurisdiction_level"]
+                    source = "catalog_city" if level in ("city", "county") else "catalog_state"
+                    floors[rt] = {"value": float(r["numeric_value"]), "source": source}
+
+        missing = [rt for rt in _WAGE_FLOOR_RATE_TYPES if rt not in floors]
+        if missing:
+            state_rows = await conn.fetch(
+                """
+                SELECT jr.rate_type, jr.numeric_value
+                FROM jurisdictions j
+                JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+                WHERE UPPER(j.state) = $1
+                  AND (j.city IS NULL OR j.city = '' OR LOWER(j.city) = LOWER(j.state))
+                  AND jr.category = 'minimum_wage' AND jr.numeric_value IS NOT NULL
+                  AND jr.rate_type = ANY($2::text[])
+                ORDER BY jr.rate_type, jr.numeric_value DESC
+                """,
+                state, missing,
+            )
+            for r in state_rows:
+                rt = r["rate_type"] or "general"
+                if rt not in floors:
+                    floors[rt] = {"value": float(r["numeric_value"]), "source": "catalog_state"}
+
+        for rt, entry in floors.items():
+            entry["unit"] = "annual" if rt == "exempt_salary" else "hourly"
+
+        return {"state": state, "found": bool(floors), "floors": floors}
 
 
 async def get_location_requirements(

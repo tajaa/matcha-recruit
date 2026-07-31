@@ -21,7 +21,7 @@ from app.matcha.services.huume.tools import TOOLS_BY_NAME
 FEATURES_ON = {
     "huume": True, "matcha_work": True,
     "legal_defense": True, "handbook_pilot": True, "er_copilot": True, "ir_copilot": True,
-    "incidents": True,
+    "incidents": True, "offer_letters": True,
 }
 
 
@@ -72,6 +72,16 @@ class TestEvaluatePilotTool:
         for tool in ("er_case_brief", "ask_er_copilot"):
             reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
             assert reason and "er_copilot" in reason
+
+    def test_offer_tools_require_offer_letters(self):
+        # draft_offer_letter previously ran ungated in the agent dispatch —
+        # a flag-off company could still INSERT a real offer_letters row and
+        # open the side panel's OfferLetterViewer, which 403s forever against
+        # the /offer-letters mount's own require_feature("offer_letters").
+        features = {**FEATURES_ON, "offer_letters": False}
+        for tool in ("draft_offer_letter", "check_offer_status"):
+            reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
+            assert reason and "offer_letters" in reason
 
     def test_huume_flag_required(self):
         reason = evaluate_pilot_tool(
