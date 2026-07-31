@@ -180,17 +180,20 @@ class TestConfirmationText:
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
         assert "incident" not in text.lower()
 
-    def test_carries_no_markdown(self):
-        # The channel renderer (MessageList.tsx, message_type === 'system')
-        # prints content into a plain whitespace-pre-wrap span with no
-        # markdown parser, so `**bold**` renders as literal asterisks in
-        # the pill. Keep these strings plain text.
+    def test_emphasizes_only_the_category(self):
+        # `**` is the ONLY markup the channel renderer parses
+        # (systemContent.tsx:renderSystemContent, applied by MessageList's
+        # message_type === 'system' branch). Anything else renders as
+        # literal characters in the pill, so the markers must (a) be
+        # balanced and (b) wrap the category label and nothing else.
         for category, rec in [("safety", True), ("operational", False)]:
             text = event_intake._confirmation_text(
                 {"category": category, "incident_recommendation": rec},
             )
-            assert "**" not in text, text
-            assert "__" not in text, text
+            label = categories.category_label(category)
+            assert f"**{label}**" in text, text
+            assert text.count("**") == 2, text
+            assert "__" not in text, text  # underscore emphasis is NOT parsed
 
 
 class TestCreateEventFromMessage:

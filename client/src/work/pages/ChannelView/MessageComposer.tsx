@@ -1,6 +1,7 @@
 import { CornerUpLeft, Send, Loader2, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
 import type { ChannelMember, ChannelMessage } from '../../api/channels'
 import { handleFromEmail } from './mentions'
+import { stripEmphasis } from './systemContent'
 
 interface MessageComposerProps {
   pendingFiles: File[]
@@ -48,7 +49,7 @@ export default function MessageComposer({
             <span className="text-w-text">
               {replyTo.message_type === 'system' ? 'Huume' : replyTo.sender_name}
             </span>
-            : {replyTo.content}
+            : {stripEmphasis(replyTo.content)}
           </span>
           <button onClick={onClearReply} className="ml-auto text-w-dim hover:text-w-text shrink-0">
             <X size={10} />

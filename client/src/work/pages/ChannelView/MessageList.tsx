@@ -1,6 +1,8 @@
 import { FileText, Reply, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
+import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
 import { renderMessageContent } from './mentions'
+import { renderSystemContent, stripEmphasis } from './systemContent'
 
 interface MessageListProps {
   messages: ChannelMessage[]
@@ -16,7 +18,7 @@ interface MessageListProps {
 function ReplyPreviewStub({ preview }: { preview: NonNullable<ChannelMessage['reply_preview']> }) {
   return (
     <div className="mb-0.5 pl-2 border-l-2 border-w-line text-xs text-w-dim truncate">
-      <span className="font-medium">{preview.sender_name}</span> {preview.content}
+      <span className="font-medium">{preview.sender_name}</span> {stripEmphasis(preview.content)}
     </div>
   )
 }
@@ -45,31 +47,50 @@ export default function MessageList({
         const rowKey = msg.client_message_id ? `cmid:${msg.client_message_id}` : `id:${msg.id}`
 
         // System (Huume) messages have no sender and the backend 403s any
-        // edit/delete/react attempt on them — render a distinct centered row
-        // with none of those affordances EXCEPT reply, which is how a Huume
-        // clarification question gets answered (see channels_ws.py
-        // _bg_ems_clarify — it fires on any reply whose reply_to_id names an
-        // outstanding ems_events.clarify_message_id). This branch returns
-        // early and has no `group` wrapper, so the button is always visible
-        // rather than hover-revealed like the delete button below.
+        // edit/delete/react attempt on them — render them attributed to
+        // Huume, on the same avatar/name/body grid as a human row so the
+        // pill reads as the agent talking rather than as disembodied
+        // chrome, but keep the bubble treatment so it stays visually
+        // distinct from a person's message. `sender_id` is null on these
+        // rows, so the normal initial-letter avatar would render "?" —
+        // hence <HuumeAvatar>. Every affordance is dropped EXCEPT reply,
+        // which is how a Huume clarification question gets answered (see
+        // channels_ws.py _bg_ems_clarify — it fires on any reply whose
+        // reply_to_id names an outstanding ems_events.clarify_message_id).
+        // This branch returns early and has no `group` wrapper, so the
+        // button is always visible rather than hover-revealed like the
+        // delete button below.
+        // Mirrored to the right (avatar/name/bubble all flip side via
+        // flex-row-reverse) — the one bucket in this list that isn't a
+        // human's own message but still gets the "other side" treatment,
+        // so the pane reads as two parties talking rather than one long
+        // left-aligned column with an agent's asides mixed in.
         if (msg.message_type === 'system') {
           return (
-            <div key={rowKey} className="flex justify-center items-center gap-1.5 my-2">
-              <span className="max-w-[85%] text-center text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-full px-3 py-1.5 whitespace-pre-wrap">
-                {msg.content}
-                <span className="ml-1.5 text-w-faint">
-                  {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </span>
-              {!msg.pending && (
-                <button
-                  onClick={() => onReply(msg)}
-                  className="text-w-faint hover:text-w-text shrink-0"
-                  title="Reply"
-                >
-                  <Reply size={12} />
-                </button>
-              )}
+            <div key={rowKey} className="mt-3 flex flex-row-reverse gap-2.5">
+              <HuumeAvatar />
+              <div className="min-w-0 flex-1 flex flex-col items-end">
+                <div className="flex flex-row-reverse items-baseline gap-2 mb-0.5">
+                  <span className="text-sm font-medium text-w-accent">Huume</span>
+                  <span className="text-[10px] text-w-faint">
+                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="flex flex-row-reverse items-start gap-1.5">
+                  <span className="max-w-[85%] text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-2xl px-3 py-1.5 whitespace-pre-wrap text-left">
+                    {renderSystemContent(msg.content)}
+                  </span>
+                  {!msg.pending && (
+                    <button
+                      onClick={() => onReply(msg)}
+                      className="text-w-faint hover:text-w-text shrink-0 mt-1.5"
+                      title="Reply"
+                    >
+                      <Reply size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           )
         }

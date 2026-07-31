@@ -322,10 +322,10 @@ async def _bg_ems_clarify(
             # Over the hourly limit: the answer is already folded above (no
             # Gemini, no new question) — post the deterministic pill.
             async with get_connection() as conn:
-                # Plain text, no markdown — see _confirmation_text's note.
+                # `**bold**` only — see _confirmation_text's note.
                 sys_row = await _insert_system_message(
                     conn, channel_id_str,
-                    f"\U0001F4CB Updated {categories.category_label(folded['category'])} event — thanks.",
+                    f"\U0001F4CB Updated **{categories.category_label(folded['category'])}** event — thanks.",
                 )
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
             return True
@@ -344,7 +344,7 @@ async def _bg_ems_clarify(
             if ask_again:
                 text = question_text("\U0001F4CB Updated the event.", classified["clarify_question"])
             else:
-                text = f"\U0001F4CB Updated {categories.category_label(display['category'])} event — thanks."
+                text = f"\U0001F4CB Updated **{categories.category_label(display['category'])}** event — thanks."
             sys_row = await _insert_system_message(conn, channel_id_str, text)
             if ask_again:
                 await conn.execute(
