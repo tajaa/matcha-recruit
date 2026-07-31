@@ -187,9 +187,15 @@ async def _ir_suggestions(title: str, narrative: str) -> dict:
 
 
 def _confirmation_text(event_row: dict) -> str:
+    # PLAIN TEXT ONLY — no markdown. The channel renderer
+    # (client/src/work/pages/ChannelView/MessageList.tsx, the
+    # message_type === 'system' branch) prints `{msg.content}` into a
+    # whitespace-pre-wrap span with no markdown parser, so `**bold**` shows
+    # up as literal asterisks in the pill. Same rule applies to the
+    # "Updated ... event" strings in channels_ws.py:_bg_ems_clarify.
     label = categories.category_label(event_row["category"])
     suffix = " — flagged for possible incident review" if event_row["incident_recommendation"] else ""
-    return f"\U0001F4CB Logged **{label}** event (visible to HR admins in Events){suffix}."
+    return f"\U0001F4CB Logged {label} event (visible to HR admins in Events){suffix}."
 
 
 _MAX_CLARIFY_ROUNDS = 2

@@ -180,6 +180,18 @@ class TestConfirmationText:
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
         assert "incident" not in text.lower()
 
+    def test_carries_no_markdown(self):
+        # The channel renderer (MessageList.tsx, message_type === 'system')
+        # prints content into a plain whitespace-pre-wrap span with no
+        # markdown parser, so `**bold**` renders as literal asterisks in
+        # the pill. Keep these strings plain text.
+        for category, rec in [("safety", True), ("operational", False)]:
+            text = event_intake._confirmation_text(
+                {"category": category, "incident_recommendation": rec},
+            )
+            assert "**" not in text, text
+            assert "__" not in text, text
+
 
 class TestCreateEventFromMessage:
     @pytest.mark.asyncio

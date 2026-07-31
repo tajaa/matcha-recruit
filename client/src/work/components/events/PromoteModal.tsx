@@ -10,6 +10,8 @@ interface PromoteModalProps {
   onPromoted: (incidentId: string) => void
 }
 
+/** `ems_events.created_at` (a real instant, timestamptz) -> the local
+ *  wall-clock string a datetime-local input wants. */
 function toDatetimeLocal(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
@@ -39,7 +41,14 @@ export function PromoteModal({ event, onClose, onPromoted }: PromoteModalProps) 
         title: title.trim() || undefined,
         incident_type: incidentType,
         severity,
-        occurred_at: occurredAt ? new Date(occurredAt).toISOString() : undefined,
+        // Send the local wall-clock string VERBATIM, not .toISOString().
+        // `ir_incidents.occurred_at` is TIMESTAMP *WITHOUT* TIME ZONE, and
+        // every other IR intake path writes local wall-clock into it (the
+        // manual form posts free-text `date_text`). Converting to UTC first
+        // made asyncpg strip the offset on write, so an evening event west
+        // of UTC landed on the incident dated a day ahead of the date this
+        // very modal displayed.
+        occurred_at: occurredAt || undefined,
         location: location.trim() || undefined,
         witnesses: witnessNames.length > 0 ? witnessNames : undefined,
       })

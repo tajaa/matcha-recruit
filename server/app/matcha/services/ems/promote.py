@@ -52,6 +52,22 @@ def evaluate_promote(*, role: Optional[str], features: dict, event_status: str) 
     return PromoteVerdict("proceed")
 
 
+def naive_occurred_at(value):
+    """Strip the tzinfo off a datetime bound for `ir_incidents.occurred_at`,
+    which is TIMESTAMP *WITHOUT* TIME ZONE.
+
+    The UI sends a local wall-clock string (already naive — see
+    PromoteModal.tsx), so this is a no-op on that path. It bites on the
+    fallback, where `ems_events.created_at` IS tz-aware (timestamptz):
+    handing that to asyncpg let it silently convert to UTC and drop the
+    offset, so an evening event west of UTC filed an incident dated a day
+    ahead. Converting explicitly keeps the wall-clock the reporter would
+    recognize instead of a UTC one, matching every other IR intake path."""
+    if value is None or getattr(value, "tzinfo", None) is None:
+        return value
+    return value.astimezone().replace(tzinfo=None)
+
+
 def shape_witnesses(raw: Optional[list]) -> list[dict]:
     """Convert PromoteRequest.witnesses (bare display-name strings) into the
     Witness-shaped dicts create_incident_core stores and every reader
@@ -104,7 +120,7 @@ async def promote_event(
     title = overrides.get("title") or event.get("title") or "Event"
     incident_type = overrides.get("incident_type") or event.get("suggested_incident_type")
     severity = overrides.get("severity") or event.get("suggested_severity")
-    occurred_at = overrides.get("occurred_at") or event["created_at"]
+    occurred_at = naive_occurred_at(overrides.get("occurred_at") or event["created_at"])
     location = overrides.get("location")
     witnesses = shape_witnesses(overrides.get("witnesses"))
 

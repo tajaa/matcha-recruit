@@ -5,7 +5,11 @@ tests/huume/test_huume_actions.py for the sibling huume envelope.
     cd server && ./venv/bin/python -m pytest tests/ems/test_promote_envelope.py -q
 """
 
-from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, shape_witnesses
+from datetime import datetime, timedelta, timezone
+
+from app.matcha.services.ems.promote import (
+    PromoteRaceError, evaluate_promote, naive_occurred_at, shape_witnesses,
+)
 
 FEATURES_ON = {"ems": True, "incidents": True, "matcha_work": True}
 
@@ -18,6 +22,34 @@ class TestPromoteRaceError:
         # create_incident_core (date parse, JSON encode) and misreport them
         # as a 409 promote/dismiss race.
         assert not issubclass(PromoteRaceError, ValueError)
+
+
+class TestNaiveOccurredAt:
+    """`ir_incidents.occurred_at` is TIMESTAMP *WITHOUT* TIME ZONE. Handing
+    asyncpg a tz-aware datetime let it convert to UTC and drop the offset,
+    so an evening event west of UTC filed an incident dated a day ahead of
+    what the promote modal displayed."""
+
+    def test_naive_passes_through_unchanged(self):
+        dt = datetime(2026, 7, 30, 17, 20)
+        assert naive_occurred_at(dt) is dt
+
+    def test_none_passes_through(self):
+        assert naive_occurred_at(None) is None
+
+    def test_aware_becomes_naive(self):
+        aware = datetime(2026, 7, 31, 0, 20, tzinfo=timezone.utc)
+        out = naive_occurred_at(aware)
+        assert out.tzinfo is None
+
+    def test_aware_keeps_local_wall_clock_not_utc(self):
+        # Same instant, expressed in a +14 offset. Its LOCAL wall clock is
+        # what a reporter would recognize; naive-UTC would be a day off.
+        tz = timezone(timedelta(hours=14))
+        aware = datetime(2026, 7, 31, 14, 20, tzinfo=tz)
+        out = naive_occurred_at(aware)
+        assert out == aware.astimezone().replace(tzinfo=None)
+        assert out.tzinfo is None
 
 
 class TestShapeWitnesses:
