@@ -122,6 +122,34 @@ class TestParseModelJson:
         data = event_intake._parse_model_json(raw)
         assert len(data["clarify_question"]) == 300
 
+    def test_ack_parsed_and_sanitized(self):
+        raw = json.dumps({"category": "equipment", "ack": "Ugh, the **ice machine** again\n"})
+        data = event_intake._parse_model_json(raw)
+        assert data["ack"] == "Ugh, the ice machine again"
+
+    def test_missing_ack_becomes_none(self):
+        raw = json.dumps({"category": "equipment"})
+        data = event_intake._parse_model_json(raw)
+        assert data["ack"] is None
+
+
+class TestSanitizePillText:
+    def test_collapses_newlines_and_whitespace(self):
+        assert event_intake._sanitize_pill_text("line one\n\nline  two", 200) == "line one line two"
+
+    def test_strips_asterisks(self):
+        # ** would mis-pair with the **category** emphasis _confirmation_text
+        # wraps around it — see that function's docstring.
+        assert event_intake._sanitize_pill_text("the *freezer* broke", 200) == "the freezer broke"
+
+    def test_caps_length(self):
+        assert len(event_intake._sanitize_pill_text("x" * 500, 50)) == 50
+
+    def test_empty_or_none_becomes_none(self):
+        assert event_intake._sanitize_pill_text(None, 200) is None
+        assert event_intake._sanitize_pill_text("   ", 200) is None
+        assert event_intake._sanitize_pill_text("", 200) is None
+
 
 class TestCoerceDoc:
     """coerce_doc is the single normalization point for BOTH doc writers —
@@ -166,6 +194,15 @@ class TestQuestionMarker:
         assert event_intake.extract_question("plain confirmation, no question") == \
             "plain confirmation, no question"
 
+    def test_extract_question_strips_legacy_suffix(self):
+        # Pills armed before the casual-voice pass carry the old suffix —
+        # already-posted pills in the field must still round-trip.
+        pill = (
+            "\U0001F4CB Logged this as **Safety**." + event_intake._QUESTION_MARKER
+            + "Who was hurt?" + event_intake._LEGACY_QUESTION_SUFFIX
+        )
+        assert event_intake.extract_question(pill) == "Who was hurt?"
+
 
 class TestConfirmationText:
     def test_names_category_label(self):
@@ -180,20 +217,53 @@ class TestConfirmationText:
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
         assert "incident" not in text.lower()
 
+    def test_no_hr_visibility_clause(self):
+        text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
+        assert "HR admins" not in text
+
+    def test_ack_used_when_present(self):
+        text = event_intake._confirmation_text(
+            {"category": "equipment", "incident_recommendation": False},
+            ack="Ugh, the ice machine again",
+        )
+        assert text.startswith("\U0001F4CB Ugh, the ice machine again — filed under **Equipment**")
+
+    def test_falls_back_without_ack(self):
+        text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
+        assert text == "\U0001F4CB Logged this as **Equipment**."
+
     def test_emphasizes_only_the_category(self):
         # `**` is the ONLY markup the channel renderer parses
         # (systemContent.tsx:renderSystemContent, applied by MessageList's
         # message_type === 'system' branch). Anything else renders as
         # literal characters in the pill, so the markers must (a) be
         # balanced and (b) wrap the category label and nothing else.
-        for category, rec in [("safety", True), ("operational", False)]:
+        for category, rec, ack in [
+            ("safety", True, None), ("operational", False, "Noted, thanks"),
+        ]:
             text = event_intake._confirmation_text(
-                {"category": category, "incident_recommendation": rec},
+                {"category": category, "incident_recommendation": rec}, ack=ack,
             )
             label = categories.category_label(category)
             assert f"**{label}**" in text, text
             assert text.count("**") == 2, text
             assert "__" not in text, text  # underscore emphasis is NOT parsed
+
+
+class TestUpdateText:
+    def test_ack_used_when_present(self):
+        text = event_intake.update_text(
+            {"category": "safety", "incident_recommendation": False}, ack="Got it, added that",
+        )
+        assert text == "\U0001F4CB Got it, added that — updated the **Safety** event."
+
+    def test_falls_back_without_ack(self):
+        text = event_intake.update_text({"category": "safety", "incident_recommendation": False})
+        assert text == "\U0001F4CB Thanks, updated the **Safety** event."
+
+    def test_flags_incident_recommendation(self):
+        text = event_intake.update_text({"category": "safety", "incident_recommendation": True})
+        assert "incident" in text.lower()
 
 
 class TestCreateEventFromMessage:

@@ -167,6 +167,167 @@ async def _ems_flag_enabled(conn, company_id) -> bool:
     return _ems_row_allowed(row)
 
 
+async def _ems_first_time_hint(conn, channel_id_str: str) -> str:
+    """`ask.FIRST_TIME_HINT` the FIRST time Huume logs something in a given
+    channel, "" every time after — this is how people find out it does more
+    than log (nothing else in the channel advertises it). Called after the
+    INSERT, so the channel's own new event is included: count == 1 means
+    this is it.
+
+    Cheap enough to run per intake (indexed channel_id, one COUNT), and
+    non-fatal — a failure here must not cost the confirmation."""
+    from app.matcha.services.ems.ask import FIRST_TIME_HINT
+    try:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM ems_events WHERE channel_id = $1", UUID(channel_id_str),
+        )
+        return FIRST_TIME_HINT if count == 1 else ""
+    except Exception:
+        logger.exception("EMS: first-time hint check failed for channel %s", channel_id_str)
+        return ""
+
+
+async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str, intent: str) -> None:
+    """Answer an "@huume what's been logged in here?" (ASK) or "@huume help"
+    (HELP) instead of logging an event. Same off-hot-path, top-level-except,
+    never-affects-send-latency contract as _bg_ems_intake.
+
+    Visibility is decided in `services/ems/ask`, not here — see that
+    module's docstring for why a channel answer can't reuse the
+    admin-only REST gate. This function only supplies the two inputs that
+    decision needs: the company (via the same _ems_company_gate) and the
+    asker's role.
+
+    Rate-limited on its own `ems_ask` key rather than the `ems_event` one:
+    logging is the documentation-critical path, and a chatty afternoon of
+    questions must never exhaust the budget that lets a real event be
+    written down.
+
+    Two connection blocks, same reasoning as _bg_ems_intake — no pooled
+    connection is held across the answer's Gemini call."""
+    try:
+        from app.matcha.services.ems import ask as ems_ask
+        from app.matcha.services.ems.intent import HELP, strip_mention
+
+        async with get_connection() as conn:
+            company_id = await _ems_company_gate(conn, channel_id_str)
+            if company_id is None:
+                return
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(asker_user_id_str))
+            is_admin = ems_ask.is_admin_role(role)
+
+            if intent == HELP:
+                text = ems_ask.help_text(is_admin=is_admin)
+                sys_row = await _insert_system_message(conn, channel_id_str, text)
+                await broadcast_system_message(
+                    channel_id_str, _system_message_payload(channel_id_str, sys_row),
+                )
+                return
+
+            try:
+                await check_rate_limit(str(company_id), "ems_ask", 30, 3600)
+            except HTTPException:
+                return  # over the hourly limit: skip silently, same as intake
+
+            events = await ems_ask.fetch_channel_events(
+                conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                include_behavioral=is_admin,
+            )
+            if not events:
+                # "Nothing you can see" and "nothing happened" must not read
+                # as the same sentence — see ask.no_events_text.
+                hidden = not is_admin and await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM ems_events
+                        WHERE channel_id = $1 AND company_id = $2 AND status <> 'dismissed'
+                    )
+                    """,
+                    UUID(channel_id_str), company_id,
+                )
+                text = ems_ask.no_events_text(filtered=bool(hidden))
+                sys_row = await _insert_system_message(conn, channel_id_str, text)
+                await broadcast_system_message(
+                    channel_id_str, _system_message_payload(channel_id_str, sys_row),
+                )
+                return
+
+        # No connection held across the Gemini call.
+        answer = await ems_ask.answer_question(strip_mention(content), events, is_admin=is_admin)
+
+        async with get_connection() as conn:
+            sys_row = await _insert_system_message(conn, channel_id_str, answer)
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+    except Exception:
+        logger.exception("EMS ask failed in channel %s", channel_id_str)
+
+
+async def _bg_ems_link(channel_id_str: str, asker_user_id_str: str) -> None:
+    """Answer "@huume send the reporting link" — the company-wide anonymous
+    IR `/report/:token` link (see services/ems/intent.LINK). Same
+    off-hot-path/top-level-except/never-affects-send-latency contract as
+    _bg_ems_intake, and no Gemini call at all — the whole reply is
+    deterministic, so there's nothing to rate-limit here.
+
+    Two gates stack, and they're deliberately different shapes:
+    _ems_company_gate (the `ems` flag, merged) decides whether Huume
+    responds in this channel AT ALL; report_link_allowed (raw
+    `incidents`+`ir_magic_links`) decides whether THIS specific answer is
+    something the company sells — a company can have `ems` on and IR off,
+    in which case the honest reply is "that's not set up here", not a 404
+    silence that reads as Huume ignoring the ask.
+
+    Employees can ask for an EXISTING link (it's poster-grade public by
+    design — anyone with the door poster's QR code already has it) but
+    can't mint a new one: generating changes what the poster/prior link
+    points at, an admin-only action everywhere else this token is touched
+    (routes/ir_incidents/anonymous_reporting.py, require_admin_or_client)."""
+    try:
+        from app.matcha.services.ems import ask as ems_ask
+        from app.matcha.services.ir.report_links import (
+            fetch_report_token, generate_report_token, public_report_url, report_link_allowed,
+        )
+
+        async with get_connection() as conn:
+            company_id = await _ems_company_gate(conn, channel_id_str)
+            if company_id is None:
+                return
+
+            features = await conn.fetchval("SELECT enabled_features FROM companies WHERE id = $1", company_id)
+            if isinstance(features, str):
+                features = json.loads(features)
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(asker_user_id_str))
+            is_admin = ems_ask.is_admin_role(role)
+
+            if not report_link_allowed(features or {}):
+                text = (
+                    "\U0001F4CB Reporting links aren't set up for this company."
+                    if is_admin else
+                    "\U0001F4CB I don't have a reporting link for this company — an admin can "
+                    "set one up in Incidents."
+                )
+            else:
+                token = await fetch_report_token(conn, company_id)
+                if token is None and is_admin:
+                    token = await generate_report_token(conn, company_id)
+                if token is None:
+                    text = (
+                        "\U0001F4CB There's no reporting link set up yet — an admin can create "
+                        "one in Incidents → Magic Links."
+                    )
+                else:
+                    text = (
+                        f"\U0001F4CB Anyone can report something confidentially here — no login "
+                        f"needed: {public_report_url(token)}\nIt's anonymous unless they choose "
+                        f"to give their name."
+                    )
+
+            sys_row = await _insert_system_message(conn, channel_id_str, text)
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+    except Exception:
+        logger.exception("EMS link request failed in channel %s", channel_id_str)
+
+
 async def _bg_ems_intake(
     channel_id_str: str, message_id_str: str, reporter_user_id_str: str, content: str,
 ) -> None:
@@ -223,7 +384,14 @@ async def _bg_ems_intake(
                 return  # dedupe hit (ON CONFLICT on message_id) — nothing to confirm
 
             ask = classified.get("needs_clarification") and classified.get("clarify_question")
-            message_text = question_text(confirmation, classified["clarify_question"]) if ask else confirmation
+            if ask:
+                # The first-time hint is deliberately NOT appended here:
+                # extract_question() recovers an armed question by stripping
+                # the trailing _QUESTION_SUFFIX, so anything after it would
+                # be read back as part of the question itself.
+                message_text = question_text(confirmation, classified["clarify_question"])
+            else:
+                message_text = confirmation + await _ems_first_time_hint(conn, channel_id_str)
             sys_row = await _insert_system_message(conn, channel_id_str, message_text)
             if ask:
                 # Arm the pending question: a reply to THIS system message
@@ -269,9 +437,8 @@ async def _bg_ems_clarify(
         from app.matcha.services.ems.event_intake import (
             apply_reclassification, classify_event, compose_refinement_content,
             extract_question, fold_answer, gather_intake_context, question_text,
-            should_ask_again,
+            should_ask_again, update_text,
         )
-        from app.matcha.services.ems import categories
 
         reply_uuid = UUID(reply_to_id_str)
 
@@ -322,10 +489,8 @@ async def _bg_ems_clarify(
             # Over the hourly limit: the answer is already folded above (no
             # Gemini, no new question) — post the deterministic pill.
             async with get_connection() as conn:
-                # `**bold**` only — see _confirmation_text's note.
                 sys_row = await _insert_system_message(
-                    conn, channel_id_str,
-                    f"\U0001F4CB Updated **{categories.category_label(folded['category'])}** event — thanks.",
+                    conn, channel_id_str, update_text(folded),
                 )
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
             return True
@@ -342,9 +507,10 @@ async def _bg_ems_clarify(
 
             ask_again = should_ask_again(classified, claimed["clarification_rounds"])
             if ask_again:
-                text = question_text("\U0001F4CB Updated the event.", classified["clarify_question"])
+                preamble = classified.get("ack") or "Got it, thanks."
+                text = question_text(f"\U0001F4CB {preamble}", classified["clarify_question"])
             else:
-                text = f"\U0001F4CB Updated **{categories.category_label(display['category'])}** event — thanks."
+                text = update_text(display, classified.get("ack"))
             sys_row = await _insert_system_message(conn, channel_id_str, text)
             if ask_again:
                 await conn.execute(
@@ -390,7 +556,14 @@ async def _bg_ems_dispatch(
     _bg_ems_intake and _bg_ems_clarify fired independently and minted a
     duplicate. If the clarify claim misses (stale pill, already answered)
     an @huume mention still falls through to intake, so "@huume new thing"
-    typed as a reply onto an old pill isn't swallowed."""
+    typed as a reply onto an old pill isn't swallowed.
+
+    An @huume mention that is a QUESTION ("what happened last week?") or a
+    capability probe ("help") is answered instead of logged — see
+    services/ems/intent.classify_intent, which is deterministic and biased
+    to LOG precisely because this is the fork where an event could be lost.
+    The clarify path above still wins: a reply answering a live Huume
+    question is folded into its event even when phrased as a question."""
     if reply_to_system_id_str is not None:
         claimed = await _bg_ems_clarify(
             channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
@@ -398,7 +571,15 @@ async def _bg_ems_dispatch(
         if claimed:
             return
     if has_huume_mention:
-        await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+        from app.matcha.services.ems.intent import LINK, LOG, classify_intent
+
+        intent = classify_intent(content)
+        if intent == LOG:
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+        elif intent == LINK:
+            await _bg_ems_link(channel_id_str, sender_user_id_str)
+        else:
+            await _bg_ems_ask(channel_id_str, sender_user_id_str, content, intent)
 
 
 async def _notify_channel_members(

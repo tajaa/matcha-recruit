@@ -200,39 +200,42 @@ export function useCopilotPanel({
     }
   }, [incidentId, refresh])
 
-  // Cold start once if no prior messages. The ref — not the `streaming` state —
-  // is what makes this once-per-incident: `streaming` is a render-time value, so
-  // a second run of this effect before setStreaming(true) commits would fire a
-  // duplicate LLM round (StrictMode double-invoke, or any remount of the panel).
+  // Used to be an auto-fired cold start the moment an empty transcript
+  // loaded — landing on an incident triggered a billed LLM round with no
+  // warning, which read as the page doing something behind your back.
+  // Now it's explicit: `showStartGate` tells the panel to render a Start
+  // control instead, and `startCopilot` is what that control calls.
+  //
+  // The ref — not the `streaming` state — is what makes this once-per-incident:
+  // `streaming` is a render-time value, so a second call before setStreaming(true)
+  // commits could fire a duplicate LLM round (e.g. a double-click).
   const coldStartedRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (loading) return
-    // An empty transcript because the fetch FAILED is not an incident that needs
-    // cold-starting — kicking off a billed LLM round on a network blip was the
-    // spurious-trigger half of this bug.
-    if (loadFailed) return
-    // A closed incident has nothing left to advise on. The poll effect already
-    // treats closed as terminal; before the incident-switch reset above this was
-    // masked by stale messages happening to be non-empty.
-    if (incidentIsClosed) return
-    if (coldStartedRef.current === incidentId) return
-    if (messages.length === 0 && currentCards.length === 0 && !streaming) {
-      const startedFor = incidentId
-      coldStartedRef.current = startedFor
-      // Clear the marker if the round never landed, or a transient 503 would
-      // leave this incident permanently without a cold start — IRDetail no
-      // longer remounts the panel, so nothing else would retry it. Guarded on
-      // the id so a late failure from the previous incident can't unlock the
-      // current one into a duplicate round.
-      void streamRound(null).then((ok) => {
-        if (!ok && coldStartedRef.current === startedFor) coldStartedRef.current = null
-      })
-    }
-    // streamRound is intentionally omitted (it would re-fire every render);
-    // incidentId IS included so switching incidents cold-starts the new one
-    // instead of closing over the previous incident's streamRound.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, loadFailed, incidentIsClosed, incidentId])
+
+  const showStartGate =
+    !loading &&
+    // An empty transcript because the fetch FAILED is not an incident ready
+    // to start — offering to kick off a billed LLM round on a network blip
+    // was the spurious-trigger half of the original bug.
+    !loadFailed &&
+    // A closed incident has nothing left to advise on. The poll effect
+    // already treats closed as terminal.
+    !incidentIsClosed &&
+    messages.length === 0 &&
+    currentCards.length === 0 &&
+    coldStartedRef.current !== incidentId
+
+  const startCopilot = useCallback(() => {
+    if (streaming || coldStartedRef.current === incidentId) return
+    const startedFor = incidentId
+    coldStartedRef.current = startedFor
+    // Clear the marker if the round never landed, or a transient 503 would
+    // leave this incident permanently unable to start — nothing else would
+    // retry it. Guarded on the id so a late failure from a since-switched-away
+    // incident can't unlock the current one into a duplicate round.
+    void streamRound(null).then((ok) => {
+      if (!ok && coldStartedRef.current === startedFor) coldStartedRef.current = null
+    })
+  }, [incidentId, streaming, streamRound])
 
   async function handleSubmitInput() {
     const text = input.trim()
@@ -409,6 +412,8 @@ export function useCopilotPanel({
     evidence,
     loading,
     streaming,
+    showStartGate,
+    startCopilot,
     busyCardMessageId,
     busyStage,
     input,

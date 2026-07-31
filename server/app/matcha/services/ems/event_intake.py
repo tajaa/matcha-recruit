@@ -102,6 +102,11 @@ def _build_classify_prompt(content: str, context: list[dict]) -> str:
         '"doc": {str: str} (a FEW short section->value pairs describing '
         "what happened — use section names relevant to the category, e.g. "
         '"who", "where", "what_happened"), '
+        '"ack": str (ONE short, casual sentence acknowledging what was '
+        "reported, written like a teammate replying in a group chat — refer "
+        "to the specific thing that happened in your own words, vary your "
+        "phrasing, no corporate boilerplate, don't restate the category "
+        "name or say the word 'logged'/'event', <=140 chars), "
         '"incident_recommendation": bool (true only if this plausibly '
         "warrants a formal HR/safety incident record — real injury, "
         "property damage/hazard, a guest incident with a complaint/refund, "
@@ -113,8 +118,9 @@ def _build_classify_prompt(content: str, context: list[dict]) -> str:
         "e.g. a safety event with no who/injury, a behavioral event with no "
         "who. Never ask about routine operational/equipment notes), "
         '"clarify_question": str|null (ONE short question that would resolve '
-        "it, asked directly to the reporter; null when needs_clarification "
-        "is false)}"
+        "it, asked casually and directly to the reporter like a teammate "
+        "would ask, not a form field; null when needs_clarification is "
+        "false)}"
     )
 
 
@@ -128,6 +134,24 @@ def coerce_doc(value) -> dict[str, str]:
     return {str(k)[:100]: str(v)[:2000] for k, v in list(value.items())[:10]}
 
 
+def _sanitize_pill_text(value, cap: int) -> Optional[str]:
+    """Clamp model-written text destined for a channel system-message pill.
+
+    Two rendering contracts this must never violate: systemContent.tsx
+    parses ONLY balanced `**bold**` pairs (a stray `*` in model text would
+    mis-pair with the category emphasis _confirmation_text/update_text add
+    around it), and extract_question() recovers an armed clarify question
+    by scanning rendered pill text for the literal `_QUESTION_MARKER`
+    (`"\n🤔 "`) — a newline in model text could fake that marker. Collapse
+    whitespace to single spaces and drop `*` before anything else touches
+    this string."""
+    text = str(value or "")
+    text = " ".join(text.split())
+    text = text.replace("*", "")
+    text = text.strip()[:cap]
+    return text or None
+
+
 def _parse_model_json(raw: str) -> dict:
     data = json.loads(clean_model_json(raw))
     if not isinstance(data, dict):
@@ -139,13 +163,14 @@ def _parse_model_json(raw: str) -> dict:
     if severity_hint not in ("low", "medium", "high"):
         severity_hint = None
     doc = coerce_doc(data.get("doc"))
+    ack = _sanitize_pill_text(data.get("ack"), 200)
     incident_recommendation = bool(data.get("incident_recommendation"))
     incident_reasoning = str(data.get("incident_reasoning") or "").strip()[:500] or None
 
     # Empty/missing question forces needs_clarification False — a model that
     # says "true" but gives nothing to ask is not a real clarification
     # request, and question_text() would otherwise render a bare "🤔 ".
-    clarify_question = str(data.get("clarify_question") or "").strip()[:300] or None
+    clarify_question = _sanitize_pill_text(data.get("clarify_question"), 300)
     needs_clarification = bool(data.get("needs_clarification")) and clarify_question is not None
 
     return {
@@ -153,6 +178,7 @@ def _parse_model_json(raw: str) -> dict:
         "category": category,
         "severity_hint": severity_hint,
         "doc": doc,
+        "ack": ack,
         "incident_recommendation": incident_recommendation,
         "incident_reasoning": incident_reasoning,
         "needs_clarification": needs_clarification,
@@ -186,16 +212,39 @@ async def _ir_suggestions(title: str, narrative: str) -> dict:
     return {}
 
 
-def _confirmation_text(event_row: dict) -> str:
+# Trailing punctuation the model sometimes leaves on `ack` — stripped so it
+# doesn't collide with the " — filed under **X**" clause _confirmation_text/
+# update_text append.
+_ACK_TRAILING_PUNCT = " .,;:—-"
+
+
+def _confirmation_text(event_row: dict, ack: Optional[str] = None) -> str:
     # `**bold**` is the ONLY markup the channel renderer understands:
     # client/src/work/pages/ChannelView/systemContent.tsx splits on `**`
     # pairs for the message_type === 'system' branch. Nothing else is
     # parsed — `_italic_`, links, lists all render as literal characters,
-    # so don't reach for them. Same rule applies to the "Updated ... event"
-    # strings in channels_ws.py:_bg_ems_clarify.
+    # so don't reach for them. Same rule applies to update_text() below and
+    # the "Updated ... event" strings in channels_ws.py:_bg_ems_clarify.
     label = categories.category_label(event_row["category"])
-    suffix = " — flagged for possible incident review" if event_row["incident_recommendation"] else ""
-    return f"\U0001F4CB Logged **{label}** event (visible to HR admins in Events){suffix}."
+    flagged = " — flagged for possible incident review" if event_row["incident_recommendation"] else ""
+    if ack:
+        lead = ack.rstrip(_ACK_TRAILING_PUNCT)
+        return f"\U0001F4CB {lead} — filed under **{label}**{flagged}."
+    return f"\U0001F4CB Logged this as **{label}**{flagged}."
+
+
+def update_text(event_row: dict, ack: Optional[str] = None) -> str:
+    """Confirmation pill for a clarify-answer fold (channels_ws.py:
+    _bg_ems_clarify's final pill, once reclassification has run). Public
+    (not `_`-prefixed) — same reasoning as question_text() below. Mirrors
+    _confirmation_text's ack/fallback shape; see its docstring for the
+    `**bold**`-only rendering rule."""
+    label = categories.category_label(event_row["category"])
+    flagged = " — flagged for possible incident review" if event_row["incident_recommendation"] else ""
+    if ack:
+        lead = ack.rstrip(_ACK_TRAILING_PUNCT)
+        return f"\U0001F4CB {lead} — updated the **{label}** event{flagged}."
+    return f"\U0001F4CB Thanks, updated the **{label}** event{flagged}."
 
 
 _MAX_CLARIFY_ROUNDS = 2
@@ -221,7 +270,11 @@ def should_ask_again(classified: dict, rounds: int) -> bool:
 _QUESTION_MARKER = "\n\U0001F914 "  # "\n🤔 " — NEVER change the codepoint:
 # extract_question() recovers the outstanding question from already-posted
 # pill text; a new marker orphans every armed question in the field.
-_QUESTION_SUFFIX = " — reply to this message to add details."
+_QUESTION_SUFFIX = " — just reply to this message."
+# Suffix questions were armed with before the casual-voice pass. Kept only
+# so extract_question() still round-trips pills already posted in the
+# field when this shipped — never used for new pills.
+_LEGACY_QUESTION_SUFFIX = " — reply to this message to add details."
 
 
 def question_text(confirmation: str, question: str) -> str:
@@ -243,8 +296,9 @@ def extract_question(pill_content: str) -> str:
     if idx == -1:
         return pill_content
     question = pill_content[idx + len(_QUESTION_MARKER):]
-    if question.endswith(_QUESTION_SUFFIX):
-        question = question[: -len(_QUESTION_SUFFIX)]
+    for suffix in (_QUESTION_SUFFIX, _LEGACY_QUESTION_SUFFIX):
+        if question.endswith(suffix):
+            return question[: -len(suffix)]
     return question
 
 
@@ -253,6 +307,7 @@ _FALLBACK_CLASSIFICATION = {
     "category": categories.FALLBACK_KEY,
     "severity_hint": None,
     "doc": {},
+    "ack": None,
     "incident_recommendation": False,
     "incident_reasoning": None,
     "suggested_incident_type": None,
@@ -360,7 +415,7 @@ async def persist_event(
         event_row["id"], reporter_user_id,
         json.dumps({"category": event_row["category"], "channel_id": str(channel_id)}),
     )
-    return event_row, _confirmation_text(event_row)
+    return event_row, _confirmation_text(event_row, classified.get("ack"))
 
 
 _REFINEMENT_RETURNING = """

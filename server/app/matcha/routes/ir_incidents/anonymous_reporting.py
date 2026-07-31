@@ -18,6 +18,7 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.matcha.services.ir.ir_report_poster import (
     build_report_poster_pdf, resolve_branding, DEFAULT_BRANDING,
 )
+from app.matcha.services.ir.report_links import generate_report_token
 
 from ._shared import _build_public_link, _location_label
 
@@ -98,13 +99,8 @@ async def generate_anonymous_reporting_token(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Company not found")
-    token = secrets.token_urlsafe(24)
     async with get_connection() as conn:
-        await conn.execute(
-            "UPDATE companies SET report_email_token = $1, report_token_used_at = NULL WHERE id = $2",
-            token,
-            company_id,
-        )
+        token = await generate_report_token(conn, company_id)
     return {
         "token": token,
         "link": _public_report_link(request, token),

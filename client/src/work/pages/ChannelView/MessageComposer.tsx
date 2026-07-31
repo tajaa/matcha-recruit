@@ -3,6 +3,11 @@ import type { ChannelMember, ChannelMessage } from '../../api/channels'
 import { handleFromEmail } from './mentions'
 import { stripEmphasis } from './systemContent'
 
+// Mirrors the backend's own mention detection (channels_ws.py's
+// has_huume_mention) — the hint must appear exactly when the message would
+// actually reach Huume.
+const HUUME_MENTION = /@huume\b/i
+
 interface MessageComposerProps {
   pendingFiles: File[]
   setPendingFiles: React.Dispatch<React.SetStateAction<File[]>>
@@ -90,6 +95,19 @@ export default function MessageComposer({
           }}
         />
         <div className="flex-1 relative">
+          {/* Huume can do more than log — but nothing in the channel says so
+              until you've already sent something. Surfacing the other two
+              asks at the moment someone types the mention is the only
+              affordance that arrives BEFORE the first message. Backend
+              counterpart: services/ems/intent.classify_intent, which routes
+              a question to an answer instead of logging it. */}
+          {HUUME_MENTION.test(input) && !(mentionQuery !== null && mentionMatches.length > 0) && (
+            <div className="absolute bottom-full left-0 mb-1 px-2.5 py-1.5 rounded-lg bg-w-surface border border-w-line shadow-lg z-20 text-[11px] text-w-dim">
+              <span className="text-w-text">Huume</span> can log what happened, or answer{' '}
+              <span className="text-w-text">“what happened last week?”</span> · try{' '}
+              <span className="text-w-text">“@huume help”</span>
+            </div>
+          )}
           {mentionQuery !== null && mentionMatches.length > 0 && (
             <div className="absolute bottom-full left-0 mb-1 w-full max-w-xs bg-w-surface border border-w-line rounded-lg shadow-xl z-20 overflow-hidden">
               <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-w-dim border-b border-w-line">

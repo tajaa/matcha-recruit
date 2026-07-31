@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import IRCopilotCard from './IRCopilotCard'
 import { IRRequestInfoModal } from './IRRequestInfoModal'
 import { CopilotHeader } from './IRCopilotPanel/CopilotHeader'
@@ -21,6 +21,8 @@ export default function IRCopilotPanel(props: Props) {
     evidence,
     loading,
     streaming,
+    showStartGate,
+    startCopilot,
     busyCardMessageId,
     busyStage,
     input,
@@ -98,6 +100,27 @@ export default function IRCopilotPanel(props: Props) {
 
       {/* Transcript */}
       <div className="space-y-3">
+        {showStartGate && (
+          <div className="max-w-[65ch] rounded-lg border border-zinc-700/60 bg-zinc-900/40 p-5 flex flex-col items-start gap-3">
+            <div className="flex items-center gap-2 text-zinc-200">
+              <Sparkles className="w-4 h-4 text-emerald-400" />
+              <span className="font-medium text-sm">Copilot hasn't looked at this incident yet</span>
+            </div>
+            <p className="text-sm text-zinc-400 leading-snug">
+              It'll review what's on file and suggest next steps. Nothing runs until you start it —
+              you can also just type a question below instead.
+            </p>
+            <button
+              onClick={startCopilot}
+              disabled={streaming}
+              className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed px-3.5 py-2 text-sm font-medium text-white transition-colors"
+            >
+              {streaming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              Start Copilot
+            </button>
+          </div>
+        )}
+
         {messages.map((m) => (
           <TranscriptMessage key={m.id} m={m} />
         ))}
