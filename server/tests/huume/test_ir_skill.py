@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.services.rate_limiter import RateLimitExceeded
 from app.matcha.services.huume import ir_skill
 
 COMPANY_ID = uuid4()
@@ -51,6 +52,8 @@ class _FakeConn:
             return self.cached_row
         if "SELECT * FROM ir_incidents WHERE id" in q:
             return self.incident_row
+        if "FROM companies WHERE id" in q or "FROM business_locations WHERE id" in q:
+            return None
         raise AssertionError(f"unexpected fetchrow: {q}")
 
     async def execute(self, query, *args):
@@ -175,3 +178,226 @@ class TestRunAnalysis:
         assert len(conn.executed) == 1
         sql, _args = conn.executed[0]
         assert "ON CONFLICT (incident_id, analysis_type)" in " ".join(sql.split())
+
+    @pytest.mark.asyncio
+    async def test_refresh_bypasses_cache(self, monkeypatch):
+        # cached_row is present, but refresh=True must skip the probe and
+        # recompute — the plan's item 5 fix (no refresh param previously).
+        incident_row = {
+            "title": "Autoclave failure", "description": "Stopped mid-cycle.",
+            "incident_type": "equipment", "severity": "medium", "location": None,
+            "category_data": {}, "witnesses": [],
+        }
+        conn = _FakeConn(
+            incident_exists=True,
+            cached_row={"analysis_data": '{"primary_cause": "stale"}'},
+            incident_row=incident_row,
+        )
+        _patch_conn(monkeypatch, conn)
+        _patch_log_audit(monkeypatch)
+
+        import app.matcha.services.ir.ir_analysis as ir_analysis
+
+        class _FakeAnalyzer:
+            async def analyze_root_cause(self, **kwargs):
+                return {"primary_cause": "fresh", "contributing_factors": [],
+                        "prevention_suggestions": [], "reasoning": "x", "generated_at": "now"}
+
+        monkeypatch.setattr(ir_analysis, "get_ir_analyzer", lambda: _FakeAnalyzer())
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None,
+            analysis_type="root_cause", refresh=True,
+        )
+        assert result["status"] == "ok"
+        assert result["cached"] is False
+        assert result["analysis"]["primary_cause"] == "fresh"
+
+    @pytest.mark.asyncio
+    async def test_missing_incident_row_returns_error_not_typeerror(self, monkeypatch):
+        # incident_exists=True (passes _resolve_incident's own existence
+        # check) but the SELECT * fetch itself returns None — a delete-mid-
+        # turn race. dict(None) must not escape as a bare TypeError.
+        conn = _FakeConn(incident_exists=True, cached_row=None, incident_row=None)
+        _patch_conn(monkeypatch, conn)
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, analysis_type="root_cause",
+        )
+        assert result["status"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_returns_error_not_raise(self, monkeypatch):
+        incident_row = {
+            "title": "Autoclave failure", "description": "Stopped mid-cycle.",
+            "incident_type": "equipment", "severity": "medium", "location": None,
+            "category_data": {}, "witnesses": [],
+        }
+        conn = _FakeConn(incident_exists=True, cached_row=None, incident_row=incident_row)
+        _patch_conn(monkeypatch, conn)
+
+        import app.matcha.services.ir.ir_analysis as ir_analysis
+
+        class _RateLimitedAnalyzer:
+            async def analyze_root_cause(self, **kwargs):
+                raise RateLimitExceeded("limited", "hourly", 10, 10)
+
+        monkeypatch.setattr(ir_analysis, "get_ir_analyzer", lambda: _RateLimitedAnalyzer())
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, analysis_type="root_cause",
+        )
+        assert result["status"] == "error"
+        assert "rate limit" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_recommendations_triggers_training_mapping(self, monkeypatch):
+        incident_row = {
+            "title": "Slip near dock", "description": "…", "incident_type": "safety",
+            "severity": "medium", "root_cause": None, "company_id": COMPANY_ID, "location_id": None,
+        }
+        conn = _FakeConn(incident_exists=True, cached_row=None, incident_row=incident_row)
+        _patch_conn(monkeypatch, conn)
+        _patch_log_audit(monkeypatch)
+
+        import app.matcha.services.ir.ir_analysis as ir_analysis
+        import app.matcha.routes.ir_incidents.ai_analysis as ai_analysis
+
+        class _FakeAnalyzer:
+            async def generate_recommendations(self, **kwargs):
+                return {
+                    "recommendations": [], "summary": "x", "generated_at": "now",
+                    "training_recommended": True, "training_topics": ["ppe"],
+                }
+
+        monkeypatch.setattr(ir_analysis, "get_ir_analyzer", lambda: _FakeAnalyzer())
+        auto_map = AsyncMock()
+        monkeypatch.setattr(ai_analysis, "_auto_map_training_topics", auto_map)
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, analysis_type="recommendations",
+        )
+        assert result["status"] == "ok"
+        auto_map.assert_awaited_once_with(str(INCIDENT_ID), str(COMPANY_ID))
+
+    @pytest.mark.asyncio
+    async def test_recommendations_without_flag_skips_training_mapping(self, monkeypatch):
+        incident_row = {
+            "title": "Slip near dock", "description": "…", "incident_type": "safety",
+            "severity": "medium", "root_cause": None, "company_id": COMPANY_ID, "location_id": None,
+        }
+        conn = _FakeConn(incident_exists=True, cached_row=None, incident_row=incident_row)
+        _patch_conn(monkeypatch, conn)
+        _patch_log_audit(monkeypatch)
+
+        import app.matcha.services.ir.ir_analysis as ir_analysis
+        import app.matcha.routes.ir_incidents.ai_analysis as ai_analysis
+
+        class _FakeAnalyzer:
+            async def generate_recommendations(self, **kwargs):
+                return {"recommendations": [], "summary": "x", "generated_at": "now",
+                        "training_recommended": False}
+
+        monkeypatch.setattr(ir_analysis, "get_ir_analyzer", lambda: _FakeAnalyzer())
+        auto_map = AsyncMock()
+        monkeypatch.setattr(ai_analysis, "_auto_map_training_topics", auto_map)
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, analysis_type="recommendations",
+        )
+        assert result["status"] == "ok"
+        auto_map.assert_not_awaited()
+
+
+class TestAskCopilotAtomicity:
+    @pytest.mark.asyncio
+    async def test_failed_guidance_leaves_no_orphaned_user_turn(self, monkeypatch):
+        # Regression for the plan's item 6: previously the user turn was
+        # persisted before the Gemini call, so a failure left a question
+        # with no answer in the incident's Copilot transcript. Now the user
+        # turn only reaches the DB inside persist_assistant_round, which
+        # must never be called on a guidance failure.
+        conn = _FakeConn(incident_exists=True)
+        _patch_conn(monkeypatch, conn)
+
+        import app.matcha.services.ir.ir_ai_orchestrator as orch
+
+        async def _load_incident_state(conn, iid, company_id):
+            return {"id": str(INCIDENT_ID), "incident_number": "IR-1"}, [], []
+
+        persist_mock = AsyncMock()
+        monkeypatch.setattr(orch, "load_incident_state", _load_incident_state)
+        monkeypatch.setattr(orch, "persist_assistant_round", persist_mock)
+
+        async def _boom(**kwargs):
+            raise RuntimeError("gemini down")
+
+        monkeypatch.setattr(orch, "generate_guidance", _boom)
+
+        result = await ir_skill.ask_copilot(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, question="what next?",
+        )
+        assert result["status"] == "error"
+        persist_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_returns_error_not_raise(self, monkeypatch):
+        conn = _FakeConn(incident_exists=True)
+        _patch_conn(monkeypatch, conn)
+
+        import app.matcha.services.ir.ir_ai_orchestrator as orch
+
+        async def _load_incident_state(conn, iid, company_id):
+            return {"id": str(INCIDENT_ID), "incident_number": "IR-1"}, [], []
+
+        monkeypatch.setattr(orch, "load_incident_state", _load_incident_state)
+        monkeypatch.setattr(orch, "persist_assistant_round", AsyncMock())
+
+        async def _limited(**kwargs):
+            raise RateLimitExceeded("limited", "hourly", 10, 10)
+
+        monkeypatch.setattr(orch, "generate_guidance", _limited)
+
+        result = await ir_skill.ask_copilot(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, question="what next?",
+        )
+        assert result["status"] == "error"
+        assert "rate limit" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_success_persists_user_and_assistant_atomically(self, monkeypatch):
+        conn = _FakeConn(incident_exists=True)
+        _patch_conn(monkeypatch, conn)
+        _patch_log_audit(monkeypatch)
+
+        import app.matcha.services.ir.ir_ai_orchestrator as orch
+
+        async def _load_incident_state(conn, iid, company_id):
+            return {"id": str(INCIDENT_ID), "incident_number": "IR-1"}, [], []
+
+        async def _generate_guidance(*, incident, analyses, messages):
+            # The question must be visible in the messages passed to the
+            # model even though it was never separately persisted first.
+            assert any(m.get("role") == "user" and "what next" in m.get("content", "") for m in messages)
+            return {"summary": "do X", "open_questions": [], "cards": []}
+
+        persist_mock = AsyncMock()
+        monkeypatch.setattr(orch, "load_incident_state", _load_incident_state)
+        monkeypatch.setattr(orch, "generate_guidance", _generate_guidance)
+        monkeypatch.setattr(orch, "persist_assistant_round", persist_mock)
+
+        result = await ir_skill.ask_copilot(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, question="what next?",
+        )
+        assert result["status"] == "ok"
+        persist_mock.assert_awaited_once()
+        _, kwargs = persist_mock.call_args
+        assert kwargs["user_message"] == "what next?"

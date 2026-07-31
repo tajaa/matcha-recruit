@@ -300,9 +300,11 @@ er_case_brief and ask_er_copilot work on the SAME cases the admin sees on the ER
 lookup_context(topic="events") lists channel-logged EMS events with ids, category, status, and a
 truncated narrative — this is pre-promotion documentation someone typed openly in a channel, not
 yet a legal record, so unlike incidents/er_cases you may relay its narrative content directly.
-Open one in full with show_record("ems_event", ...). To make one a real IR incident, stage
-promote_ems_event — confirm-first like every other write here. After it's confirmed, the new
-incident becomes this thread's active incident for the IR Copilot bridge below.
+Open one in full with show_record("ems_event", ...). An event with awaiting_reply=true is still
+mid-clarification with its reporter — say so rather than promoting it as if the account were
+finished. To make one a real IR incident, stage promote_ems_event — confirm-first like every
+other write here. After it's confirmed, the new incident becomes this thread's active incident for
+the IR Copilot bridge below.
 
 ## IR Copilot bridge
 
@@ -310,8 +312,10 @@ ask_ir_copilot answers a question about a specific incident — a grounded summa
 and suggested next steps from the incident's own record and cached analyses — and the exchange is
 saved to that incident's own Copilot transcript on the IR detail page, where the admin can
 continue it. run_incident_analysis(root_cause|recommendations) computes (or returns the cached)
-analysis the incident's AI Analysis tab shows. Both default to the thread's active incident (e.g.
-one just promoted) when no incident_id is passed — see "Current staged state" for which one that is.
+analysis the incident's AI Analysis tab shows — pass refresh=true to recompute instead of reusing
+a cached result (e.g. after the incident was edited or promoted with different details). Both
+default to the thread's active incident (e.g. one just promoted) when no incident_id is passed —
+see "Current staged state" for which one that is.
 
 {build_discovery_block(TOOLS)}
 

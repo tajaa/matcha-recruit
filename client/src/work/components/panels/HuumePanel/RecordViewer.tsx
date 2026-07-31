@@ -35,6 +35,7 @@ function Prose({ children }: { children?: string | null }) {
 
 const RECORD_ICON: Record<string, typeof AlertTriangle> = {
   incident: AlertTriangle, er_case: Briefcase, employee: User, credential: BadgeCheck,
+  ems_event: AlertTriangle,
 }
 export function recordIcon(recordType: string, size = 12) {
   const Icon = RECORD_ICON[recordType] ?? FileText

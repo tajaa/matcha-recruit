@@ -940,6 +940,7 @@ async def run_huume_turn(
                     company_id=company_id, actor_user_id=user_id,
                     incident_id=args.get("incident_id"), state_incident_id=_state_ir().get("incident_id"),
                     analysis_type=str(args.get("analysis_type") or ""),
+                    refresh=bool(args.get("refresh")),
                 )
                 ok = result.get("status") == "ok"
                 if ok:

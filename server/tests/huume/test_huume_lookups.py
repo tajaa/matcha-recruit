@@ -86,6 +86,12 @@ class TestLookupGating:
         ))
         assert result["module"] == "off"
 
+    def test_events_off_returns_module_off_without_conn(self):
+        result = _run(_lookup_context_impl(
+            None, company_id="c1", topic="events", features={"ems": False},
+        ))
+        assert result["module"] == "off"
+
     def test_compliance_off_returns_module_off_without_conn(self):
         # Neither of the two flags that gate this topic is on.
         result = _run(_lookup_context_impl(
@@ -135,6 +141,12 @@ class TestShowRecords:
     def test_credential_off_refused(self):
         result = _run(show_records_for_model(
             company_id="c1", record_type="credential", record_ids=["not-even-a-uuid"], features={"credential_templates": False},
+        ))
+        assert result["status"] == "refused"
+
+    def test_ems_event_off_refused(self):
+        result = _run(show_records_for_model(
+            company_id="c1", record_type="ems_event", record_ids=["not-even-a-uuid"], features={"ems": False},
         ))
         assert result["status"] == "refused"
 

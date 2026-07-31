@@ -385,20 +385,25 @@ async def _lookup_context_impl(
                 """
                 SELECT ev.id, ev.title, ev.category, ev.severity_hint, ev.status,
                        ev.incident_recommendation, ev.incident_id,
+                       (ev.clarify_message_id IS NOT NULL AND ev.status = 'logged') AS awaiting_reply,
                        LEFT(ev.narrative, 400) AS narrative, ch.name AS channel_name, ev.created_at
                 FROM ems_events ev LEFT JOIN channels ch ON ch.id = ev.channel_id
                 WHERE ev.company_id = $1 AND ev.created_at >= NOW() - ($2 || ' days')::interval
                   AND ($3::text IS NULL OR ev.title ILIKE '%' || $3 || '%' OR ev.narrative ILIKE '%' || $3 || '%')
-                ORDER BY ev.created_at DESC LIMIT 20
+                ORDER BY ev.created_at DESC LIMIT 21
                 """,
                 company_id, str(window), query,
             )
+            truncated = len(rows) > 20
+            note = "Promote one with promote_ems_event(event_id=...); open detail with show_record('ems_event', ...)."
+            if truncated:
+                note += " More events exist in this window than shown — narrow with query or a smaller days window."
             return {
                 "topic": "events",
                 "window_days": window,
                 "counts_by_status": {r["status"]: r["count"] for r in counts},
-                "events": [dict(r) for r in rows],
-                "note": "Promote one with promote_ems_event(event_id=...); open detail with show_record('ems_event', ...).",
+                "events": [dict(r) for r in rows[:20]],
+                "note": note,
             }
         if topic == "pto_leave":
             pto_rows = await conn.fetch(

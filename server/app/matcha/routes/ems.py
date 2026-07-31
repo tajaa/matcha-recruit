@@ -20,7 +20,7 @@ from app.matcha.models.ems import (
 from app.matcha.services.ems import categories
 from app.matcha.services.ems.event_intake import coerce_doc
 from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, promote_event
-from app.matcha.services.ems.queries import EVENT_SELECT as _EVENT_SELECT, _NAME_EXPR  # noqa: F401
+from app.matcha.services.ems.queries import EVENT_SELECT as _EVENT_SELECT
 
 logger = logging.getLogger(__name__)
 

@@ -569,10 +569,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Run one AI analysis on an incident and cache it to the incident's AI "
         "Analysis panels: root_cause (primary cause, contributing factors, "
         "prevention) or recommendations (corrective actions). Returns the "
-        "cached result instantly if it already ran.",
+        "cached result instantly if it already ran — pass refresh=true to "
+        "recompute instead (e.g. the incident was edited since the last run).",
         properties={
             "analysis_type": types.Schema(type=types.Type.STRING, enum=["root_cause", "recommendations"]),
             "incident_id": types.Schema(type=types.Type.STRING),
+            "refresh": types.Schema(type=types.Type.BOOLEAN, description="Recompute even if a cached analysis exists."),
         },
         required=["analysis_type"],
         intent_hints=("root cause analysis", "corrective action recommendations"),

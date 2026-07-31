@@ -714,14 +714,28 @@ async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[d
         {"label": "Logged", "value": _iso(data.get("created_at")) or "—"},
     ]
     if data.get("incident_id"):
-        meta.append({"label": "Incident", "value": f"/app/ir/{data['incident_id']}"})
+        # RecordViewer.tsx's Meta renders `value` as literal text (only
+        # `view.link` becomes a clickable <Link>) — a raw "/app/ir/<uuid>"
+        # path would show as an un-clickable string to copy by hand.
+        # incident_number is the human label the admin actually recognizes.
+        incident_number = await conn.fetchval(
+            "SELECT incident_number FROM ir_incidents WHERE id = $1", data["incident_id"],
+        )
+        meta.append({"label": "Incident", "value": incident_number or str(data["incident_id"])})
 
     sections = []
     if data.get("narrative"):
         sections.append({"label": "Narrative", "body": data["narrative"]})
     for key, value in (doc or {}).items():
+        label = key.replace("_", " ").title()
         if isinstance(value, str) and value.strip():
-            sections.append({"label": key.replace("_", " ").title(), "body": value})
+            sections.append({"label": label, "body": value})
+        elif isinstance(value, list) and value:
+            # doc list fields (people/items in the intake schema) were
+            # silently dropped here while the model still sees them via
+            # _model_ems_events_batch's full `doc` — the admin's panel and
+            # the model's grounding must show the same thing.
+            sections.append({"label": label, "items": [str(v) for v in value if v not in (None, "")]})
     if data.get("incident_reasoning"):
         sections.append({"label": "Incident reasoning", "body": data["incident_reasoning"]})
 

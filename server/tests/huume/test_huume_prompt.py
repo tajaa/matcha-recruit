@@ -89,6 +89,28 @@ class TestBuildStateBlock:
         assert "Jane Doe" in block
         assert "draft_discipline" in block
 
+    def test_staged_ems_promote_carries_event_id(self):
+        state = {
+            "huume_action": {
+                "type": "ems_promote", "status": "proposed", "event_id": "ev-1",
+                "title": "Autoclave failure",
+            }
+        }
+        block = build_state_block(state)
+        assert "ev-1" in block
+        assert "promote_ems_event" in block
+        assert "Autoclave failure" in block
+
+    def test_huume_ir_pointer_rendered(self):
+        state = {"huume_ir": {"incident_id": "inc-1", "incident_number": "IR-2026-004"}}
+        block = build_state_block(state)
+        assert "inc-1" in block and "IR-2026-004" in block
+        assert "ask_ir_copilot" in block
+
+    def test_huume_ir_absent_when_not_set(self):
+        block = build_state_block({"huume_offer": {"offer_id": "offer-2", "status": "accepted"}})
+        assert "incident_id" not in block
+
     def test_all_present_but_terminal_is_still_nothing_staged(self):
         state = {
             "huume_action": {"type": "send_offer", "offer_id": "x", "status": "sent"},
@@ -110,3 +132,7 @@ class TestBuildSystemPrompt:
     def test_lists_cancel_staged_tool(self):
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "cancel_staged" in prompt
+
+    def test_lists_promote_ems_event_as_staged(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "promote_ems_event" in prompt
