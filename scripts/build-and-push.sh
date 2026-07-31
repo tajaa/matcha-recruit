@@ -54,6 +54,8 @@ BUILD_GUMMFIT_FRONTEND=false
 BUILD_GUMMLOCAL_BACKEND=false
 BUILD_GUMMLOCAL_FRONTEND=false
 BUILD_AGENT=false
+REMOTE_DISPATCH=false
+REMOTE_HOTFIX=false
 LANDING_BUILD_VERSION="0"
 # Captured once in main() before any build runs. Both build_image and
 # push_image reference this so a commit that lands mid-run (e.g. user
@@ -139,6 +141,15 @@ OPTIONS:
     --gumm-local           Build both gumm-local images (backend + frontend)
     --agent                Build the matcha-agent sandbox image
     --all                  Build all images (matcha + gummfit + gumm-local + agent)
+    --remote               Skip local docker entirely — dispatch the GitHub Actions
+                           deploy.yml workflow instead (gh CLI required) and stream
+                           its progress. Maps --backend-only/--frontend-only/(none)
+                           to the workflow's target=backend/frontend/matcha. Not
+                           valid with --gummfit*/--gumm-local*/--agent/--all.
+    --hotfix               With --remote: pass hotfix=true to the workflow (pull +
+                           blue/green swap only, skips nginx sync/backup/pruning).
+                           No effect without --remote (update-ec2.sh has its own
+                           --hotfix for the local path).
     -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES (required):
@@ -179,6 +190,11 @@ EXAMPLES:
 
     # Build the agent sandbox image
     $0 --agent
+
+    # Dispatch the GitHub Actions workflow instead of building locally
+    $0 --remote
+    $0 --remote --backend-only
+    $0 --remote --hotfix
 EOF
 }
 
@@ -200,6 +216,14 @@ parse_args() {
                 ;;
             --deploy)
                 TRIGGER_DEPLOY=true
+                shift
+                ;;
+            --remote)
+                REMOTE_DISPATCH=true
+                shift
+                ;;
+            --hotfix)
+                REMOTE_HOTFIX=true
                 shift
                 ;;
             --backend-only)
@@ -609,8 +633,91 @@ build_agent() {
 }
 
 
+# Dispatch .github/workflows/deploy.yml instead of building locally. The
+# workflow builds on a free arm64 GH-hosted runner and SSH-deploys via the
+# same scripts/update-ec2.sh, so this is a remote equivalent of the local
+# build-and-push.sh + update-ec2.sh chain — not a separate deploy path.
+dispatch_remote_deploy() {
+    log_section "Remote Dispatch (GitHub Actions)"
+
+    if ! command -v gh >/dev/null 2>&1; then
+        log_error "gh CLI not found. Install: https://cli.github.com/"
+        exit 1
+    fi
+
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ] || [ "$BUILD_GUMMFIT_FRONTEND" = true ] || \
+       [ "$BUILD_GUMMLOCAL_BACKEND" = true ] || [ "$BUILD_GUMMLOCAL_FRONTEND" = true ] || \
+       [ "$BUILD_AGENT" = true ]; then
+        log_error "--remote only supports matcha targets (backend/frontend/matcha) — gummfit/gumm-local/agent aren't in deploy.yml's target options."
+        exit 1
+    fi
+
+    local target
+    if [ "$BUILD_BACKEND" = true ] && [ "$BUILD_FRONTEND" = true ]; then
+        target="matcha"
+    elif [ "$BUILD_BACKEND" = true ]; then
+        target="backend"
+    elif [ "$BUILD_FRONTEND" = true ]; then
+        target="frontend"
+    else
+        log_error "--remote needs at least one of backend/frontend selected."
+        exit 1
+    fi
+
+    log_info "Target: $target"
+    log_info "Hotfix: $REMOTE_HOTFIX"
+
+    # The workflow builds from origin/main, not this working tree — a local
+    # commit or uncommitted change won't be what actually deploys. Warn, but
+    # don't block: dispatching main-as-is is often exactly what's wanted.
+    git fetch origin main -q 2>/dev/null || log_warning "Could not fetch origin/main to check for drift"
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        log_warning "Working tree has uncommitted changes — the workflow deploys origin/main, not this tree."
+    fi
+    local local_head remote_head
+    local_head=$(git rev-parse HEAD 2>/dev/null || echo "")
+    remote_head=$(git rev-parse origin/main 2>/dev/null || echo "")
+    if [ -n "$local_head" ] && [ -n "$remote_head" ] && [ "$local_head" != "$remote_head" ]; then
+        log_warning "Local HEAD (${local_head:0:7}) differs from origin/main (${remote_head:0:7}) — push first if you want this commit deployed."
+    fi
+
+    log_info "Dispatching deploy.yml (target=${target}, hotfix=${REMOTE_HOTFIX})..."
+    if ! gh workflow run deploy.yml --ref main -f target="$target" -f hotfix="$REMOTE_HOTFIX"; then
+        log_error "Failed to dispatch workflow"
+        exit 1
+    fi
+
+    # `gh workflow run` doesn't return a run id, so poll for the run it just
+    # created rather than guessing a fixed sleep.
+    log_info "Waiting for the run to appear..."
+    local run_id="" attempt=0
+    while [ -z "$run_id" ] && [ "$attempt" -lt 15 ]; do
+        sleep 2
+        run_id=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId,status,createdAt \
+            --jq '.[0].databaseId' 2>/dev/null || echo "")
+        attempt=$((attempt + 1))
+    done
+
+    if [ -z "$run_id" ]; then
+        log_warning "Could not locate the new run automatically. Check: gh run list --workflow=deploy.yml"
+        exit 0
+    fi
+
+    local run_url
+    run_url=$(gh run view "$run_id" --json url --jq '.url' 2>/dev/null || echo "")
+    log_success "Run started: ${run_url:-#$run_id}"
+    log_info "Streaming progress (Ctrl-C stops watching, not the run)..."
+
+    gh run watch "$run_id" --exit-status
+}
+
 # Main execution
 main() {
+    if [ "$REMOTE_DISPATCH" = true ]; then
+        dispatch_remote_deploy
+        exit $?
+    fi
+
     log_section "Matcha-Recruit Build & Push Script"
     log_info "Platform: $PLATFORM"
     log_info "Push to ECR: $PUSH_TO_ECR"
