@@ -288,6 +288,29 @@ async def main() -> None:
         # matter when the day-1 script was originally run.
         day2 = (last_msg_at + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
+        # The seeded day must land in the PAST — a future-dated row outranks
+        # every live message in GET /channels/{id}'s ORDER BY created_at DESC
+        # LIMIT 50, so anything typed live in the channel silently falls off
+        # the page on the next refetch ("history lost on re-entry"). Clamp
+        # the NEW anchor into the past instead of rewinding existing rows:
+        # this script is additive-only, and a blanket
+        # `created_at = created_at - shift` over the whole channel silently
+        # back-dates every prior message — seeded history AND anything
+        # typed live — and breaks every earlier script's documented
+        # `created_at > '<run start>'` undo (the rows it deleted-for no
+        # longer match after being shifted).
+        yesterday = (await conn.fetchval("SELECT NOW()")).replace(
+            hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        if day2 > yesterday:
+            day2 = yesterday
+        if day2 <= last_msg_at:
+            print(
+                "Existing #Front Desk history is already at or past yesterday — "
+                "no safe past slot left for a new day without overlapping it. "
+                "Aborting without changing anything."
+            )
+            return
+
         print(f"Seeding {len(DAY2)} messages on day3 starting {day2.date()}...")
         for hour, minute, sender_key, text, kind in DAY2:
             ts = day2 + timedelta(hours=hour, minutes=minute)

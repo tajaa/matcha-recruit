@@ -180,9 +180,14 @@ async def main() -> None:
             await ensure_member(conn, CHANNEL_ID, uid)
 
         base = (await conn.fetchval("SELECT now()")).replace(hour=0, minute=0, second=0, microsecond=0)
-        # Anchor day 0 to the most recent Monday-shaped weekday two days back
-        # from "now" so the seeded history reads as recent, never future.
-        day0 = base - timedelta(days=2)
+        # Anchor day 0 three days back (not two) — this script covers 2 days
+        # of narrative (day0/day1), and the day2/day3 follow-on scripts each
+        # append one more day, so a 2-day anchor puts the LAST chained day
+        # ON today, which future-dates every message with a later hour than
+        # "now" (see day2/day3's matching comment on why that's the "history
+        # vanishes on re-entry" bug). Starting one day deeper keeps the
+        # full 4-day chain in the past.
+        day0 = base - timedelta(days=4)
 
         print(f"Seeding {len(CONVERSATION)} messages across 2 days starting {day0.date()}...")
         trigger_count = 0

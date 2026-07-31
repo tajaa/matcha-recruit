@@ -36,8 +36,15 @@ pytestmark = [
 # Mirror the _USER_NAME_EXPR + WHERE template from
 # app/werk/routes/channels.py:721. The {name_filter} and
 # {exact_email_clause} placeholders are filled per-shape below.
+#
+# Must track the NULLIF+BTRIM wrap on the production expression: bare
+# CONCAT(NULL, ' ', NULL) (no `employees` row) returns ' ', a non-NULL
+# string, so COALESCE stops there instead of falling through to
+# a.name/u.email — this stale copy previously asserted the pre-fix
+# search/ordering semantics (an admin-only user's name resolving to a
+# blank string) rather than the app's real behavior.
 _USER_NAME_EXPR = (
-    "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
+    "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
 )
 
 

@@ -113,3 +113,23 @@ class TestBgEmsDispatch:
 
         clarify_mock.assert_not_awaited()
         intake_mock.assert_awaited_once()
+
+
+class TestIntakeDisposition:
+    """Pure decision for _bg_ems_intake's model-side backstop — the
+    classifier's not_an_event flag reroutes a message that regex-level
+    classify_intent routed to LOG (see intent.py) but Gemini itself read as
+    a question/request with nothing to document."""
+
+    def test_not_an_event_reroutes_to_ask(self):
+        classified = {"not_an_event": True, "category": "uncategorized"}
+        assert channels_ws._intake_disposition(classified) == "reroute_ask"
+
+    def test_normal_classification_persists(self):
+        classified = {"not_an_event": False, "category": "safety"}
+        assert channels_ws._intake_disposition(classified) == "persist"
+
+    def test_missing_key_defaults_to_persist(self):
+        # The Gemini-outage fallback shape carries not_an_event=False, but
+        # this must degrade safely even without the key at all.
+        assert channels_ws._intake_disposition({"category": "uncategorized"}) == "persist"

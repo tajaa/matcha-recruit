@@ -153,7 +153,12 @@ _USER_NAME_JOIN = """
     LEFT JOIN admins a ON a.user_id = u.id
 """
 
-_USER_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
+# NULLIF+BTRIM wrap is load-bearing: Postgres CONCAT() ignores NULL args, so
+# with no matching `employees` row CONCAT(NULL, ' ', NULL) returns ' ' — a
+# non-NULL string — and COALESCE stops there instead of falling through to
+# a.name/u.email. Blanks every admin-only user's name without it (see the
+# matching fix in werk/routes/channels.py).
+_USER_NAME_EXPR = "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
 
 
 # ---------------------------------------------------------------------------

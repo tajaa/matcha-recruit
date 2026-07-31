@@ -47,6 +47,15 @@ export class ChannelSocket extends BaseSocket {
   onCallEnded: ((data: { channel_id: string; call_id: string; reason?: string }) => void) | null = null
   onCallParticipantsChanged: ((data: { channel_id: string; call_id: string; participant_ids: string[]; count: number; max_participants: number }) => void) | null = null
   onCallInvited: ((data: { channel_id: string; call_id: string; invited_by: string }) => void) | null = null
+  // Server-side rejection of a join_room/message send (not a member, bad
+  // channel id, over 4000 chars, ...) — previously discarded entirely
+  // (no 'error' case below), so a message sat as a ghost 'pending' row
+  // forever with no user-visible signal of why it never persisted.
+  // `channelId`/`clientMessageId` let a listener scope the error to the
+  // channel/message it actually concerns — the socket is shared across
+  // every joined room, so an unscoped error would otherwise blank
+  // whichever channel view happens to be open.
+  onServerError: ((message: string, details: { channelId?: string; clientMessageId?: string }) => void) | null = null
 
   protected path() {
     return '/ws/channels'
@@ -114,6 +123,12 @@ export class ChannelSocket extends BaseSocket {
         break
       case 'call.invited':
         this.onCallInvited?.(data as never)
+        break
+      case 'error':
+        this.onServerError?.(data.message as string, {
+          channelId: data.channel_id as string | undefined,
+          clientMessageId: data.client_message_id as string | undefined,
+        })
         break
     }
   }

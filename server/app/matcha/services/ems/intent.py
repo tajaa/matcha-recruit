@@ -33,6 +33,18 @@ SCHEDULE = "schedule"
 # before matching so every pattern below can anchor on ^.
 _MENTION_PREFIX = re.compile(r"^\s*@\s*huume\b[\s,:;\-—]*", re.IGNORECASE)
 
+# "Hey @huume ...", "ok @huume ...", "good morning @huume ..." — the sender
+# is still ADDRESSING the bot; the greeting defeats the position-0 mention
+# strip and with it every ^-anchored pattern below, so everything becomes a
+# LOG (the "weekly recap logged as an event" bug). A mention deeper in a
+# sentence ("tell @huume about it") is being talked ABOUT, not addressed —
+# only greeting words may precede a strippable mention.
+_GREETING_PREFIX = re.compile(
+    r"^(?:hey|hi|hello|yo|hiya|howdy|ok|okay|please|pls|morning|"
+    r"good (?:morning|afternoon|evening))\b[\s,!.:;\-—]*",
+    re.IGNORECASE,
+)
+
 _HELP_PATTERNS = (
     r"^help\b",
     r"^what can (?:you|u) do\b",
@@ -52,8 +64,8 @@ _RECALL_PATTERNS = (
     r"^what happened\b",
     r"^what went on\b",
     r"^what was going on\b",
-    r"^what(?:'s| has| have)? been (?:logged|reported|going on|happening)\b",
-    r"^what(?:'s| is| are)? (?:the )?(?:events?|incidents?|logs?)\b",
+    r"^what(?:'?s| has| have)? been (?:logged|reported|going on|happening)\b",
+    r"^what(?:'?s| is| are)? (?:the )?(?:events?|incidents?|logs?|reports?|(?:status )?updates?)\b",
     r"^(?:show|list|recap|remind|tell|give) (?:me|us)\b",
     r"^(?:show|list|recap)\b",
     r"^summar(?:y|ize|ise)\b",
@@ -61,10 +73,25 @@ _RECALL_PATTERNS = (
     r"^(?:pull|look) up\b",
     r"^any(?:thing|)? (?:logged|reported|else logged)\b",
     r"^anyone (?:log|report)(?:ed)?\b",
-    r"^any (?:events?|incidents?|reports?)\b",
+    r"^any (?:events?|incidents?|reports?|(?:status )?updates?)\b",
     r"^(?:did|have|has) (?:we|you|anyone|any ?one|somebody|someone)\b",
     r"^do we have (?:any|anything)\b",
-    r"^can (?:you|u) (?:show|list|tell|remind|summar|recap|find|pull|look)\w*\b",
+    # Recall-specific verbs that aren't ordinary report phrasing regardless
+    # of object ("can you list/summarize/recap/find/pull up/look up ...").
+    r"^(?:can|could|would|will) (?:you|u) (?:please )?(?:list|summar\w*|recap\w*|find|pull up|look up)\b",
+    # Ambiguous verbs ("show/tell/give/get/send") ARE ordinary report
+    # phrasing too — "can you send someone, the sink is leaking" or "can
+    # you tell everyone the walk-in flooded" must still LOG. Only count
+    # these as a recall ask when the object is "me"/"us" — a report never
+    # phrases itself that way.
+    r"^(?:can|could|would|will) (?:you|u) (?:please )?(?:show|tell|give|get|send)\s+(?:me|us)\b",
+    r"^(?:can|could) i (?:get|have|see)\s+(?:a |the |an )?(?:recap|summary|rundown|roundup|update|events?|incidents?|logs?|reports?)\b",
+    # Modifier-tolerant recap noun — "weekly recap of...", "quick recap of
+    # the week please" — a plain leading noun beats a hardcoded verb-first
+    # anchor. Subsumes bare "^recap" above but that entry stays for the
+    # show/list/recap group's shared phrasing.
+    r"^(?:(?:a|the|my|our|quick|short|full|daily|weekly|monthly)\s+)*(?:recap|summary|rundown|roundup)\b",
+    r"^(?:i|we)(?:'d| would)? (?:need|want|would like)\b(?:\s+\w+){0,2}?\s+(?:a |the )?(?:recap|summary|rundown|roundup)\b",
 )
 
 # Weaker signal: only counts as a question when the message actually ends
@@ -100,7 +127,13 @@ _SHIFT_NOUN = (
     r"schedule|scheduled|staff(?:ed|ing)?|on the schedule)"
 )
 _SCHEDULE_PATTERNS = (
+    # The leading lookahead excludes a recap/summary noun ANYWHERE in the
+    # rest of the message — not just before the shift noun is reached —
+    # so "I need a shift recap" (recap noun AFTER the shift noun) is a
+    # recall ask (see _RECALL_PATTERNS), not a staffing request, the same
+    # as "I need a weekly recap of the schedule" (recap noun before it).
     rf"^(?:i|we)(?:'ll|'d| will| would)? (?:need|want|gotta|have to|need to get)\b"
+    rf"(?!.*\b(?:recap|summary|rundown|roundup)\b)"
     rf"(?:(?!\bto (?:report|log|file|talk|discuss|flag)\b).)*?\b{_SHIFT_NOUN}\b",
     r"^(?:can|could|will|would) (?:you|u) (?:schedule|staff|book|add|set ?up|put)\b",
     r"^schedule\b",
@@ -116,8 +149,26 @@ _SCHEDULE_RE = tuple(re.compile(p, re.IGNORECASE) for p in _SCHEDULE_PATTERNS)
 def strip_mention(content: str) -> str:
     """The message with a leading "@huume" address removed — what the
     person actually said. Also what the ask path feeds the model as the
-    question, so it isn't answering "@huume" as if it were a word."""
-    return _MENTION_PREFIX.sub("", content or "").strip()
+    question, so it isn't answering "@huume" as if it were a word.
+
+    A leading greeting ("hey @huume ...") is stripped along with the
+    mention — see _GREETING_PREFIX. A mention that isn't at the very start
+    (after any greeting) is left alone: "tell @huume about it" is a report
+    ABOUT huume, not addressed TO it, and stripping it there would make an
+    ordinary sentence fragment start matching ^-anchored patterns.
+
+    Greeting words are only stripped BEFORE the mention ("hey, good
+    morning @huume ..."), never after: re-applying the greeting strip once
+    the mention is gone would eat real message words that happen to be
+    greeting homographs ("@huume morning shift was short staffed" must
+    keep "morning" — it's not filler, it's the report)."""
+    text = (content or "").strip()
+    for _ in range(5):  # "hey, good morning @huume ..." — bounded loop
+        stripped = _GREETING_PREFIX.sub("", text)
+        if stripped == text:
+            break
+        text = stripped
+    return _MENTION_PREFIX.sub("", text).strip()
 
 
 def classify_intent(content: str) -> str:

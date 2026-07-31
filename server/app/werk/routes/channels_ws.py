@@ -187,7 +187,10 @@ async def _ems_first_time_hint(conn, channel_id_str: str) -> str:
         return ""
 
 
-async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str, intent: str) -> None:
+async def _bg_ems_ask(
+    channel_id_str: str, asker_user_id_str: str, content: str, intent: str,
+    skip_rate_limit: bool = False,
+) -> None:
     """Answer an "@huume what's been logged in here?" (ASK) or "@huume help"
     (HELP) instead of logging an event. Same off-hot-path, top-level-except,
     never-affects-send-latency contract as _bg_ems_intake.
@@ -201,7 +204,10 @@ async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str,
     Rate-limited on its own `ems_ask` key rather than the `ems_event` one:
     logging is the documentation-critical path, and a chatty afternoon of
     questions must never exhaust the budget that lets a real event be
-    written down.
+    written down. `skip_rate_limit=True` is for the `_bg_ems_intake` model
+    backstop, which already consumed one `ems_event` token to get here —
+    charging `ems_ask` too would burn both budgets for a single message,
+    defeating the reason they're split.
 
     Two connection blocks, same reasoning as _bg_ems_intake — no pooled
     connection is held across the answer's Gemini call."""
@@ -224,10 +230,11 @@ async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str,
                 text = ems_ask.help_text(is_admin=is_admin)
                 sys_row = await _insert_system_message(conn, channel_id_str, text)
             else:
-                try:
-                    await check_rate_limit(str(company_id), "ems_ask", 30, 3600)
-                except HTTPException:
-                    return  # over the hourly limit: skip silently, same as intake
+                if not skip_rate_limit:
+                    try:
+                        await check_rate_limit(str(company_id), "ems_ask", 30, 3600)
+                    except HTTPException:
+                        return  # over the hourly limit: skip silently, same as intake
 
                 events = await ems_ask.fetch_channel_events(
                     conn, company_id=company_id, channel_id=UUID(channel_id_str),
@@ -640,6 +647,31 @@ async def _bg_ems_intake(
         # No connection held across the Gemini calls.
         classified = await classify_event(content, context)
 
+        # Model-side backstop for the deterministic classify_intent gate:
+        # the regex layer routed this to LOG, but the model itself read the
+        # message as a question/request with nothing to document (e.g. a
+        # recap phrasing the regex didn't catch). Reroute to the same
+        # answer path a correctly-classified ASK would take instead of
+        # logging a junk event — the misread becomes a visible wrong
+        # answer, not a silent bad log row. See _intake_disposition.
+        #
+        # A wrong `not_an_event=True` on a genuine report has no DB trail
+        # otherwise (no ems_events row to hang an audit-log entry off of),
+        # so this is logged here — the only forensic record if someone
+        # later asks "where did my report go?".
+        if _intake_disposition(classified) == "reroute_ask":
+            from app.matcha.services.ems.intent import ASK
+            logger.warning(
+                "EMS: model backstop rerouted message %s (channel %s) from LOG to ASK "
+                "(classify_event returned not_an_event=True) — content=%r",
+                message_id_str, channel_id_str, content[:200],
+            )
+            # skip_rate_limit=True: the ems_event check above already gated
+            # this call; charging ems_ask too would burn both budgets for
+            # one message (see _bg_ems_ask's docstring).
+            await _bg_ems_ask(channel_id_str, reporter_user_id_str, content, ASK, skip_rate_limit=True)
+            return
+
         async with get_connection() as conn:
             event_row, confirmation = await persist_event(
                 conn,
@@ -797,6 +829,21 @@ async def _bg_ems_clarify(
         return claim_happened
 
 
+def _intake_disposition(classified: dict) -> str:
+    """"persist" (log the event, the default) or "reroute_ask" (the
+    classifier's model-side backstop: the message reached intake as a LOG
+    per intent.classify_intent's deterministic bias, but the model itself
+    flagged it as a question/request with nothing to document — e.g. a
+    recap phrasing the regex layer didn't catch). Pure so the branch is
+    unit-testable without DB/Gemini — see _bg_ems_intake's use of it.
+
+    A Gemini outage's fallback shape carries not_an_event=False (see
+    event_intake._FALLBACK_CLASSIFICATION), so this always persists during
+    an outage — the "documentation survives everything" invariant is
+    untouched."""
+    return "reroute_ask" if classified.get("not_an_event") else "persist"
+
+
 def _ems_dispatch_decision(
     *, reply_target_type: Optional[str], has_huume_mention: bool,
 ) -> tuple[bool, bool]:
@@ -933,7 +980,11 @@ router = APIRouter()
 # User identity model (resolved at connection time)
 # ---------------------------------------------------------------------------
 
-_USER_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
+# NULLIF+BTRIM wrap: Postgres CONCAT() ignores NULLs, so with no matching
+# `employees` row CONCAT(NULL, ' ', NULL) is ' ' (non-NULL) and COALESCE
+# stops there instead of falling through to a.name/u.email — see the same
+# fix + comment on channels.py's _USER_NAME_EXPR.
+_USER_NAME_EXPR = "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
 
 
 class ChannelUser(BaseModel):
@@ -1495,7 +1546,9 @@ async def channel_websocket(
                     try:
                         ch_uuid = UUID(channel_id)
                     except (ValueError, TypeError):
-                        await websocket.send_json({"type": "error", "message": "Invalid channel ID"})
+                        await websocket.send_json({
+                            "type": "error", "message": "Invalid channel ID", "channel_id": channel_id,
+                        })
                         continue
                     async with get_connection() as conn:
                         # Verify membership (allows cross-tenant memberships; REST uses the same rule)
@@ -1536,6 +1589,7 @@ async def channel_websocket(
                             await websocket.send_json({
                                 "type": "error",
                                 "message": "Channel not found or not a member",
+                                "channel_id": str(ch_uuid),
                             })
 
             elif msg_type == "leave_room":
@@ -1563,6 +1617,18 @@ async def channel_websocket(
                         cmid_uuid = UUID(str(client_message_id))
                     except (ValueError, TypeError):
                         cmid_uuid = None
+                if channel_id and (content or attachments) and len(content) > 4000:
+                    # Previously a bare `if ... and len(content) <= 4000:`
+                    # with no else — an oversize send fell through to the
+                    # next receive_json() with no error frame, leaving the
+                    # client's optimistic pending row stuck forever.
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Message too long (max 4000 characters)",
+                        "channel_id": channel_id,
+                        "client_message_id": client_message_id,
+                    })
+                    continue
                 if channel_id and (content or attachments) and len(content) <= 4000:
                     try:
                         ch_uuid = UUID(channel_id)
@@ -1670,7 +1736,7 @@ async def channel_websocket(
                                 rp = await conn.fetchrow(
                                     """
                                     SELECT m.content, m.attachments, m.deleted_at,
-                                           COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email, 'Huume') AS sender_name
+                                           COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email, 'Huume') AS sender_name
                                     FROM channel_messages m
                                     LEFT JOIN users u ON u.id = m.sender_id
                                     LEFT JOIN clients c ON c.user_id = u.id
@@ -1797,6 +1863,8 @@ async def channel_websocket(
                             await websocket.send_json({
                                 "type": "error",
                                 "message": "Not a member of this channel",
+                                "channel_id": str(ch_uuid),
+                                "client_message_id": client_message_id,
                             })
 
             elif msg_type == "typing":

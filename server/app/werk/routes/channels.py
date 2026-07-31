@@ -26,15 +26,17 @@ router = APIRouter()
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-_USER_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
-# Message-scoped variant with a 'Huume' fallback for system messages
-# (sender_id NULL -> the LEFT JOIN users u yields no row). Deliberately NOT
-# folded into _USER_NAME_EXPR above — that constant is interpolated into
-# member lists, search, analytics, and other non-message queries that JOIN
-# users (never LEFT JOIN) and can't produce a NULL name today; keeping the
-# fallback message-only avoids it silently masking an unrelated NULL-name
-# bug in those paths later.
-_MSG_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email, 'Huume')"
+# NULLIF+BTRIM wrap is load-bearing: Postgres CONCAT() ignores NULL args, so
+# with no matching `employees` row CONCAT(NULL, ' ', NULL) returns ' ' — a
+# non-NULL string — and COALESCE stops there instead of falling through to
+# a.name/u.email (or 'Huume' below). Blanked every admin-only user's name
+# and every system-message sender until this wrap.
+_USER_NAME_EXPR = "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
+# The 'Huume' fallback for system messages (sender_id IS NULL) is NOT part
+# of this expression: _name_subquery's `WHERE u.id = m.sender_id` matches
+# zero rows when sender_id is NULL, so the whole scalar subquery evaluates
+# to NULL regardless of what's inside it — the fallback has to be an outer
+# COALESCE around the subquery call, applied at each _MSG_SELECT site.
 
 
 class ChannelMember(BaseModel):
@@ -163,33 +165,55 @@ async def _fetch_reactions_map(conn, message_ids: list[UUID]) -> dict[UUID, list
     return result
 
 
-# SQL fragment for message queries — includes reply LEFT JOIN
+def _name_subquery(user_id_expr: str) -> str:
+    """Scalar-subquery name resolution for one sender column — same
+    "don't JOIN, don't fan out" convention as list_channels' created_by_name
+    (channels.py ~line 373, "a creator with multiple employees rows must
+    not fan the channel list out"). `employees.user_id` carries a UNIQUE
+    constraint today so a direct LEFT JOIN can't actually duplicate a
+    message row right now, but a scalar subquery costs nothing extra here
+    and can't silently regress into a fan-out if that constraint is ever
+    relaxed — LIMIT 1 with a deterministic ORDER BY either way. `e.id` alone
+    only disambiguates duplicate `employees` rows; `clients`/`admins` can
+    also duplicate for a user (no UNIQUE constraint on their user_id), so
+    all three ids are in the ORDER BY or a tie between two `clients` rows
+    is unordered and `sender_name` can flip across identical requests.
+
+    Returns NULL (not 'Huume') when `user_id_expr` is NULL — a system
+    message's sender_id — since `WHERE u.id = NULL` matches zero rows and a
+    zero-row scalar subquery is NULL no matter what's inside it. Callers in
+    a message context must wrap this in `COALESCE(..., 'Huume')`."""
+    return f"""(SELECT {_USER_NAME_EXPR}
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id = {user_id_expr}
+                ORDER BY e.id, c.id, a.id LIMIT 1)"""
+
+
+# SQL fragment for message queries — includes reply LEFT JOIN. Sender/
+# reply-sender names are scalar subqueries (see _name_subquery), not JOINs,
+# so a sender can never fan a message row out; each is COALESCE-wrapped to
+# 'Huume' for the sender_id IS NULL (system message) case the subquery
+# itself can't express.
 _MSG_SELECT = f"""
     SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
            m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
            m.message_type,
-           {{name_expr}} AS sender_name, u.avatar_url AS sender_avatar_url,
+           COALESCE({_name_subquery("m.sender_id")}, 'Huume') AS sender_name,
+           u.avatar_url AS sender_avatar_url,
            rm.content AS reply_content, rm.attachments AS reply_attachments,
            rm.deleted_at IS NOT NULL AS reply_deleted,
-           {{reply_name_expr}} AS reply_sender_name
+           COALESCE({_name_subquery("rm.sender_id")}, 'Huume') AS reply_sender_name
     FROM channel_messages m
     LEFT JOIN users u ON u.id = m.sender_id
-    LEFT JOIN clients c ON c.user_id = u.id
-    LEFT JOIN employees e ON e.user_id = u.id
-    LEFT JOIN admins a ON a.user_id = u.id
     LEFT JOIN channel_messages rm ON rm.id = m.reply_to_id
-    LEFT JOIN users ru ON ru.id = rm.sender_id
-    LEFT JOIN clients rc ON rc.user_id = ru.id
-    LEFT JOIN employees re ON re.user_id = ru.id
-    LEFT JOIN admins ra ON ra.user_id = ru.id
 """
 
 def _msg_query(where: str, order: str = "m.created_at DESC", limit_param: str | None = None) -> str:
     """Build a channel messages query with reply joins."""
-    q = _MSG_SELECT.format(
-        name_expr=_MSG_NAME_EXPR,
-        reply_name_expr=_MSG_NAME_EXPR.replace("c.", "rc.").replace("e.", "re.").replace("a.", "ra.").replace("u.", "ru."),
-    )
+    q = _MSG_SELECT
     q += f" WHERE {where} ORDER BY {order}"
     if limit_param:
         q += f" LIMIT {limit_param}"
@@ -1181,27 +1205,43 @@ async def get_channel(
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
 
-        # Check membership + get role
-        my_membership = await conn.fetchrow(
-            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+        # Check membership + get role. `is_member` excludes a removed
+        # member — must match the WS send gate (channels_ws.py's is_member
+        # check) and the join_room gate exactly, or a removed member gets
+        # a normal composer here whose every send is then silently
+        # rejected over the socket (join_channel already resets the flag
+        # on rejoin, so this only affects someone who hasn't rejoined yet).
+        #
+        # `has_membership_row` deliberately does NOT exclude removed —
+        # it's what the 404 access-control checks below use. A removed
+        # member of a cross-tenant paid channel or a private channel was a
+        # real member; gating those checks on `is_member` 404s them out of
+        # the channel entirely (no rejoin/subscribe gate reachable, since
+        # the frontend never gets channel data to render one) instead of
+        # showing the "membership lapsed" gate the removal flag exists for.
+        membership_row = await conn.fetchrow(
+            "SELECT role, removed_for_inactivity FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
-        is_member = my_membership is not None
-        my_role = my_membership["role"] if my_membership else None
+        has_membership_row = membership_row is not None
+        is_member = has_membership_row and not membership_row["removed_for_inactivity"]
+        my_role = membership_row["role"] if is_member else None
 
-        # Access control: must either be in the channel's tenant, be a member,
-        # or be a platform admin. Otherwise 404 (don't reveal existence).
+        # Access control: must either be in the channel's tenant, have ever
+        # been a member, or be a platform admin. Otherwise 404 (don't
+        # reveal existence).
         if (
-            not is_member
+            not has_membership_row
             and ch["company_id"] != company_id
             and current_user.role != "admin"
         ):
             raise HTTPException(status_code=404, detail="Channel not found")
 
-        # Private channels in your own tenant are still gated to members
+        # Private channels in your own tenant are still gated to (past or
+        # present) members
         if (
             ch["visibility"] == "private"
-            and not is_member
+            and not has_membership_row
             and current_user.role != "admin"
         ):
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -1280,12 +1320,17 @@ async def get_channel_messages(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        # Verify channel + membership (allows cross-tenant memberships)
+        # Verify channel + membership (allows cross-tenant memberships).
+        # removed_for_inactivity IS NOT TRUE — must match the WS send gate
+        # and get_channel's membership check exactly (see that function's
+        # comment); otherwise a removed member is shown the non-member
+        # join gate by GET /channels/{id} but can still page through full
+        # history here.
         is_member = await conn.fetchval(
             """
             SELECT EXISTS(
                 SELECT 1 FROM channel_members cm
-                WHERE cm.channel_id = $1 AND cm.user_id = $2
+                WHERE cm.channel_id = $1 AND cm.user_id = $2 AND cm.removed_for_inactivity IS NOT TRUE
             )
             """,
             channel_id, current_user.id,
@@ -1341,8 +1386,11 @@ async def delete_channel_message(
         if msg["deleted_at"] is not None:
             return {"ok": True, "already_deleted": True}
 
+        # removed_for_inactivity IS NOT TRUE — same rule as get_channel /
+        # get_channel_messages: a removed member's moderation rights lapse
+        # along with their membership, not just their own delete window.
         member_role = await conn.fetchval(
-            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE",
             channel_id, current_user.id,
         )
         is_author = msg["sender_id"] == current_user.id

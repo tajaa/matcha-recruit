@@ -158,6 +158,7 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     setMessages,
     setTypingUsers,
     setOnlineUsers,
+    setError,
   })
 
   // Fetch channel-wide (open-to-all) job postings so the banner can render

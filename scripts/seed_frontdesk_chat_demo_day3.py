@@ -171,6 +171,28 @@ async def main() -> None:
         roles = {key: await conn.fetchval("SELECT role FROM users WHERE id = $1", uid) for key, uid in senders.items()}
 
         day4 = (last_msg_at + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # See seed_frontdesk_chat_demo_day2.py's matching comment — a
+        # future-dated row outranks every live message in GET /channels/{id}
+        # (ORDER BY created_at DESC LIMIT 50), silently dropping anything
+        # typed live in the channel on the next refetch. Clamp the NEW
+        # anchor into the past instead of rewinding existing rows — this
+        # script is additive-only, and a blanket
+        # `created_at = created_at - shift` over the whole channel silently
+        # back-dates every prior message (seeded AND live) and breaks every
+        # earlier script's documented `created_at > '<run start>'` undo.
+        yesterday = (await conn.fetchval("SELECT NOW()")).replace(
+            hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        if day4 > yesterday:
+            day4 = yesterday
+        if day4 <= last_msg_at:
+            print(
+                "Existing #Front Desk history is already at or past yesterday — "
+                "no safe past slot left for a new day without overlapping it. "
+                "Aborting without changing anything."
+            )
+            return
+
         print(f"Seeding {len(DAY4)} messages on day4 starting {day4.date()}...")
 
         for hour, minute, sender_key, text, kind in DAY4:

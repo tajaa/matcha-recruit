@@ -96,7 +96,16 @@ def _build_classify_prompt(content: str, context: list[dict]) -> str:
         "## MESSAGE TO LOG\n"
         f"{content}\n\n"
         "Respond ONLY with JSON: "
-        '{"title": str (<=80 chars, short imperative summary), '
+        '{"not_an_event": bool (true ONLY if the message is a QUESTION or '
+        "REQUEST directed at you — asking for a recap/summary/status "
+        "update, asking what's on file, or asking what you can do — with "
+        "NOTHING in it to document. Any account of something that "
+        "happened, however minor, is false, even if phrased as a "
+        "question ('what a mess, the walk-in flooded overnight' is an "
+        "event, not a question). When in doubt, false — an event that "
+        "goes undocumented can never be recovered), "
+        '"title": str (<=80 chars, short imperative summary; "" when '
+        "not_an_event is true), "
         '"category": str (one of the category keys above), '
         '"severity_hint": "low"|"medium"|"high"|null, '
         '"doc": {str: str} (a FEW short section->value pairs describing '
@@ -157,6 +166,7 @@ def _parse_model_json(raw: str) -> dict:
     if not isinstance(data, dict):
         raise ValueError("model response was not a JSON object")
 
+    not_an_event = bool(data.get("not_an_event"))
     title = str(data.get("title") or "").strip()[:_MAX_TITLE_CHARS]
     category = categories.normalize_category(data.get("category"))
     severity_hint = data.get("severity_hint")
@@ -183,6 +193,7 @@ def _parse_model_json(raw: str) -> dict:
         "incident_reasoning": incident_reasoning,
         "needs_clarification": needs_clarification,
         "clarify_question": clarify_question,
+        "not_an_event": not_an_event,
     }
 
 
@@ -316,6 +327,7 @@ _FALLBACK_CLASSIFICATION = {
     "needs_clarification": False,  # never ask a question during a Gemini outage
     "clarify_question": None,
     "model_ok": False,
+    "not_an_event": False,  # an outage still logs as uncategorized, never reroutes
 }
 
 

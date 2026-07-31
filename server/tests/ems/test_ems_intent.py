@@ -133,3 +133,65 @@ class TestHelp:
         # "what can you do" matches an interrogative lead too — HELP is
         # checked first so a capability probe never burns a Gemini call.
         assert classify_intent("@huume what can you do?") == HELP
+
+
+class TestGreetingPrefixedMention:
+    """A greeting before the address ("Hey @huume ...") used to defeat every
+    ^-anchored pattern below — the mention strip only worked at position 0.
+    This is the exact "weekly recap logged as an event" failure class."""
+
+    @pytest.mark.parametrize("message", [
+        "Hey @huume give me a weekly recap",
+        "hi @huume what happened last week",
+        "ok @huume what happened yesterday",
+        "please @huume recap the week",
+        "good morning @huume catch me up",
+    ])
+    def test_greeting_prefixed_recall_asks(self, message):
+        assert classify_intent(message) == ASK
+
+    @pytest.mark.parametrize("message", [
+        "good morning @huume the fridge died",
+        "hey @huume the walk-in flooded overnight",
+    ])
+    def test_greeting_strip_does_not_flip_reports_to_ask(self, message):
+        # A greeting must not make an ordinary report start matching
+        # recall patterns it wouldn't otherwise match.
+        assert classify_intent(message) == LOG
+
+    def test_mid_sentence_mention_still_untouched(self):
+        # Pinned alongside TestStripMention.test_only_strips_leading — the
+        # greeting-prefix change must not affect a mention that isn't the
+        # very first thing addressed.
+        assert strip_mention("tell @huume about it") == "tell @huume about it"
+
+
+class TestRecapPhrasingGaps:
+    """Confirmed-misroute phrasings from the recap ticket — each used to
+    fall to LOG (or, for the schedule case, get stolen by SCHEDULE) before
+    the pattern additions."""
+
+    @pytest.mark.parametrize("message", [
+        "@huume can you give me a weekly recap of status updates",
+        "@huume could you give me a recap",
+        "@huume can I get a recap of the week",
+        "@huume weekly recap of status updates",
+        "@huume quick recap of the week please",
+        "@huume whats been going on this week",
+        "@huume what are the status updates",
+        "@huume any status updates this week",
+        "@huume I need a weekly recap of the schedule",
+    ])
+    def test_recap_phrasings_ask(self, message):
+        assert classify_intent(message) == ASK
+
+    def test_past_tense_report_stays_log(self):
+        # LOG-bias guard — a bare past-tense report with no polite lead
+        # must not be captured by the new recap/give/get patterns.
+        assert classify_intent("@huume gave the patient the wrong form today") == LOG
+
+    def test_schedule_still_wins_without_a_recap_noun(self):
+        # The negative lookahead added to _SCHEDULE_PATTERNS only excludes
+        # recap/summary wording — an ordinary staffing request must still
+        # route to SCHEDULE, not get pulled into the new recall patterns.
+        assert classify_intent("@huume we need an opener saturday") == "schedule"

@@ -3,6 +3,7 @@ import type React from 'react'
 import { getChannelMessages } from '../../api/channels'
 import type { ChannelMessage } from '../../api/channels'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
+import { useToast } from '../../../components/ui'
 
 type OnlineUser = { id: string; name: string; avatar_url: string | null }
 
@@ -16,6 +17,7 @@ interface UseChannelSocketParams {
   setMessages: React.Dispatch<React.SetStateAction<ChannelMessage[]>>
   setTypingUsers: React.Dispatch<React.SetStateAction<Map<string, string>>>
   setOnlineUsers: React.Dispatch<React.SetStateAction<OnlineUser[]>>
+  setError: React.Dispatch<React.SetStateAction<string>>
 }
 
 // WebSocket connection — uses the process-wide shared socket so the global
@@ -31,7 +33,10 @@ export function useChannelSocket({
   setMessages,
   setTypingUsers,
   setOnlineUsers,
+  setError,
 }: UseChannelSocketParams) {
+  const { toast } = useToast()
+
   useEffect(() => {
     if (!channelId || !isMember) return
 
@@ -119,6 +124,32 @@ export function useChannelSocket({
       )
     }
 
+    // Server rejected a join_room/message send (not a member, bad channel,
+    // over the length cap) — surface it instead of leaving a pending
+    // optimistic row (or a stuck composer) with no explanation.
+    //
+    // The socket is shared across every joined room (global notification
+    // listener + whichever channel view is open), so an error scoped to a
+    // DIFFERENT channel (e.g. a stale join_room replay for a channel this
+    // user was removed from) must not blank the channel actually being
+    // viewed — only act on errors for this channel, or unscoped ones
+    // (bad-channel-id parse failures carry no id to compare).
+    socket.onServerError = (message, details) => {
+      if (details.channelId && details.channelId !== channelId) return
+
+      if (details.clientMessageId) {
+        // A rejected send (not a member, over the length cap) — drop the
+        // ghost pending row and surface a transient toast instead of the
+        // full-screen error gate, which would otherwise replace a working
+        // channel view over one failed message.
+        setMessages((prev) => prev.filter((m) => m.client_message_id !== details.clientMessageId))
+        toast(message || 'Message failed to send', 'error')
+        return
+      }
+
+      setError(message || 'Something went wrong sending that message')
+    }
+
     // Reconnect catch-up: onopen only fires on a genuine reconnect (not on
     // this effect's initial mount, since the shared socket is usually already
     // open) — refetch and merge by id so messages missed during the drop
@@ -150,6 +181,7 @@ export function useChannelSocket({
       socket.onMessageDeleted = null
       socket.onMessageEdited = null
       socket.onReactionUpdate = null
+      socket.onServerError = null
       // Unsubscribe rather than nulling a shared slot: useChannelNotifications
       // and useLiveKitCall hold the same singleton, and `= null` used to remove
       // whichever handler happened to be registered, not just this one.
@@ -157,5 +189,5 @@ export function useChannelSocket({
       socketRef.current = null
       // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }
-  }, [channelId, isMember, userId, scrollToBottom])
+  }, [channelId, isMember, userId, scrollToBottom, toast])
 }

@@ -97,6 +97,21 @@ class TestParseModelJson:
         data = event_intake._parse_model_json(raw)
         assert data["title"] is None
 
+    def test_not_an_event_true(self):
+        raw = json.dumps({"not_an_event": True, "category": "uncategorized"})
+        data = event_intake._parse_model_json(raw)
+        assert data["not_an_event"] is True
+
+    def test_not_an_event_false(self):
+        raw = json.dumps({"not_an_event": False, "category": "safety"})
+        data = event_intake._parse_model_json(raw)
+        assert data["not_an_event"] is False
+
+    def test_not_an_event_missing_defaults_false(self):
+        raw = json.dumps({"category": "safety"})
+        data = event_intake._parse_model_json(raw)
+        assert data["not_an_event"] is False
+
     def test_clarify_fields_roundtrip(self):
         raw = json.dumps({
             "category": "behavioral", "needs_clarification": True,
@@ -335,6 +350,10 @@ class TestClassifyEvent:
         assert classified["suggested_severity"] is None
         assert classified["needs_clarification"] is False  # never ask during an outage
         assert classified["model_ok"] is False
+        # An outage must still LOG (documentation survives everything) —
+        # never reroute to the ASK backstop just because the model was
+        # unreachable.
+        assert classified["not_an_event"] is False
 
     @pytest.mark.asyncio
     async def test_success_sets_model_ok(self, monkeypatch):
