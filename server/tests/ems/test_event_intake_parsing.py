@@ -217,9 +217,11 @@ class TestConfirmationText:
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
         assert "incident" not in text.lower()
 
-    def test_no_hr_visibility_clause(self):
+    def test_has_hr_visibility_clause(self):
+        # The only disclosure telling a reporter their channel message became
+        # an HR-reviewed record — must survive every confirmation pill.
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
-        assert "HR admins" not in text
+        assert "HR admins" in text
 
     def test_ack_used_when_present(self):
         text = event_intake._confirmation_text(
@@ -230,7 +232,7 @@ class TestConfirmationText:
 
     def test_falls_back_without_ack(self):
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
-        assert text == "\U0001F4CB Logged this as **Equipment**."
+        assert text == "\U0001F4CB Logged this as **Equipment** (visible to HR admins in Events)."
 
     def test_emphasizes_only_the_category(self):
         # `**` is the ONLY markup the channel renderer parses

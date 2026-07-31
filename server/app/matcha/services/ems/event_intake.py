@@ -227,10 +227,11 @@ def _confirmation_text(event_row: dict, ack: Optional[str] = None) -> str:
     # the "Updated ... event" strings in channels_ws.py:_bg_ems_clarify.
     label = categories.category_label(event_row["category"])
     flagged = " — flagged for possible incident review" if event_row["incident_recommendation"] else ""
+    visibility = " (visible to HR admins in Events)"
     if ack:
         lead = ack.rstrip(_ACK_TRAILING_PUNCT)
-        return f"\U0001F4CB {lead} — filed under **{label}**{flagged}."
-    return f"\U0001F4CB Logged this as **{label}**{flagged}."
+        return f"\U0001F4CB {lead} — filed under **{label}**{flagged}{visibility}."
+    return f"\U0001F4CB Logged this as **{label}**{flagged}{visibility}."
 
 
 def update_text(event_row: dict, ack: Optional[str] = None) -> str:

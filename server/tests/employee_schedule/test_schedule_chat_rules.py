@@ -97,9 +97,20 @@ class TestResolveDates:
         out = resolve_dates({"weekdays": ["monday", "friday"]}, self.WEEK_START, today)
         assert out == [date(2026, 8, 7)]
 
-    def test_all_requested_days_already_past_needs_clarify(self):
+    def test_bare_weekday_all_past_rolls_to_next_week(self):
+        # "Monday" said on a Saturday, with no explicit week hint: every
+        # candidate in the resolved (this) week is already past, so this
+        # rolls forward to the SAME weekday next week rather than clarifying
+        # — a manager saying "Monday" virtually always means the next one.
         today = date(2026, 8, 8)
         out = resolve_dates({"weekdays": ["monday"]}, self.WEEK_START, today)
+        assert out == [date(2026, 8, 10)]
+
+    def test_explicit_past_date_still_needs_clarify(self):
+        # An explicit ISO date has no unambiguous "next" — unlike a bare
+        # weekday name, this still clarifies rather than guessing a week.
+        today = date(2026, 8, 8)
+        out = resolve_dates({"date": "2026-08-03"}, self.WEEK_START, today)
         assert isinstance(out, NeedsClarify)
 
 
@@ -257,8 +268,17 @@ class TestParseConfirmReply:
     def test_unrelated_text_is_other(self):
         assert parse_confirm_reply("make it 8am instead") == "other"
 
-    def test_leading_token_wins_on_conflicting_reply(self):
-        assert parse_confirm_reply("no wait confirm") == "cancel"
+    def test_conflicting_reply_is_other_not_leading_token(self):
+        # Matching only the leading token used to read this as "cancel" —
+        # an ambiguous message with trailing content must not silently pick
+        # either interpretation; it falls to "other" and re-arms for a
+        # clean confirm/cancel.
+        assert parse_confirm_reply("no wait confirm") == "other"
+
+    def test_partial_confirm_with_modification_is_other(self):
+        # A real production bug: "yes but swap Dana for Marcus" must never
+        # execute the unmodified proposal.
+        assert parse_confirm_reply("yes but swap Dana for Marcus") == "other"
 
     def test_empty_string_is_other(self):
         assert parse_confirm_reply("") == "other"

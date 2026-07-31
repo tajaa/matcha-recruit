@@ -106,6 +106,7 @@ async def create_shift_core(
     color: Optional[str] = None,
     notes: Optional[str] = None,
     kind: str = "work",
+    template_id: Optional[UUID] = None,
     training_requirement: Optional[dict] = None,
     training_requirement_id: Optional[UUID] = None,
     employee_ids: list[UUID],
@@ -133,14 +134,14 @@ async def create_shift_core(
         """
         INSERT INTO schedule_shifts
             (company_id, location_id, role, department, starts_at, ends_at,
-             break_minutes, required_staff, color, notes, kind,
+             break_minutes, required_staff, color, notes, kind, template_id,
              training_requirement_id, created_by, status, published_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::varchar,
-                CASE WHEN $14::varchar = 'published' THEN NOW() END)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::varchar,
+                CASE WHEN $15::varchar = 'published' THEN NOW() END)
         RETURNING id
         """,
         company_id, location_id, role, department, starts_at, ends_at,
-        break_minutes, required_staff, color, notes, kind,
+        break_minutes, required_staff, color, notes, kind, template_id,
         training_requirement_id, created_by, status,
     )
     for emp_id in dict.fromkeys(employee_ids):

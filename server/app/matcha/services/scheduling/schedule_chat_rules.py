@@ -108,40 +108,53 @@ def resolve_dates(
     """Precedence: an explicit ISO date > named weekdays (within the resolved
     week) > the matched template's own `days_of_week` mask ∩ the week >
     NeedsClarify. Any resolved date strictly before `today` is dropped —
-    proposing a shift in the past is never useful; if EVERYTHING drops,
-    that's a clarify too (never silently propose nothing)."""
-    dates: list[date] = []
+    proposing a shift in the past is never useful.
 
+    A bare weekday name (no explicit date, no week hint) whose every
+    candidate in the resolved week already fell in the past rolls forward to
+    the SAME weekday next week instead of clarifying — "I need a closer
+    Monday" said on a Wednesday almost always means the next Monday, not
+    "propose nothing this week." An explicit ISO date or a template-days
+    fallback that's entirely in the past still clarifies — there's no
+    unambiguous "next" for those. If EVERYTHING drops, that's a clarify too
+    (never silently propose nothing)."""
     explicit = spec.get("date")
     if explicit:
         try:
-            dates = [date.fromisoformat(explicit)]
+            explicit_date = date.fromisoformat(explicit)
         except (ValueError, TypeError):
-            dates = []
+            explicit_date = None
+        if explicit_date is not None:
+            if explicit_date < today:
+                return NeedsClarify(
+                    "Which days should I schedule? Everything I found there was already in the past."
+                )
+            return [explicit_date]
 
-    if not dates:
-        weekdays = spec.get("weekdays") or []
-        wanted = {
-            _WEEKDAY_NAMES[w.strip().lower()]
-            for w in weekdays
-            if isinstance(w, str) and w.strip().lower() in _WEEKDAY_NAMES
-        }
-        if wanted:
-            dates = [week_start + timedelta(days=i) for i in range(7) if i in wanted]
-
-    if not dates and template_days:
-        wanted = set(template_days)
+    weekdays = spec.get("weekdays") or []
+    wanted = {
+        _WEEKDAY_NAMES[w.strip().lower()]
+        for w in weekdays
+        if isinstance(w, str) and w.strip().lower() in _WEEKDAY_NAMES
+    }
+    if wanted:
         dates = [week_start + timedelta(days=i) for i in range(7) if i in wanted]
+        future = [d for d in dates if d >= today]
+        if not future:
+            rolled_start = week_start + timedelta(days=7)
+            future = [rolled_start + timedelta(days=i) for i in range(7) if i in wanted]
+        return future
 
-    if not dates:
-        return NeedsClarify("Which days should I schedule?")
+    if template_days:
+        dates = [week_start + timedelta(days=i) for i in range(7) if i in set(template_days)]
+        dates = [d for d in dates if d >= today]
+        if not dates:
+            return NeedsClarify(
+                "Which days should I schedule? Everything I found there was already in the past."
+            )
+        return dates
 
-    dates = [d for d in dates if d >= today]
-    if not dates:
-        return NeedsClarify(
-            "Which days should I schedule? Everything I found there was already in the past."
-        )
-    return dates
+    return NeedsClarify("Which days should I schedule?")
 
 
 # ── Location / template matching ────────────────────────────────────────
@@ -342,12 +355,12 @@ _THUMBS_UP = {"\U0001F44D", "\U0001F44D\U0001F3FB", "\U0001F44D\U0001F3FC",
 
 _CONFIRM_RE = re.compile(
     r"^(?:confirm(?:ed)?|yes|yep|yeah|yea|sure|do it|go ahead|"
-    r"approve[d]?|book it|ship it|lgtm|looks good|sounds good)\b",
+    r"approve[d]?|book it|ship it|lgtm|looks good|sounds good)[\s!.]*$",
     re.IGNORECASE,
 )
 _CANCEL_RE = re.compile(
     r"^(?:cancel|no|nope|nah|stop|don'?t|scrap(?: it)?|never ?mind|"
-    r"forget it|kill it)\b",
+    r"forget it|kill it)[\s!.]*$",
     re.IGNORECASE,
 )
 
@@ -355,10 +368,11 @@ _CANCEL_RE = re.compile(
 def parse_confirm_reply(text: str) -> Literal["confirm", "cancel", "other"]:
     """Deterministic, no model call — a proposal's confirm/cancel gate must
     not depend on Gemini being up. Caller applies `intent.strip_mention`
-    first. Cancel wins ties by construction (its vocabulary and confirm's
-    don't overlap), so "no wait, confirm" reads as cancel on the leading
-    token — the same "first thing wins" idiom as everywhere else the module
-    disambiguates on the message's opening words."""
+    first. Both patterns are anchored start-to-end (only trailing
+    punctuation/whitespace tolerated) — a bare "yes"/"confirm" is unambiguous,
+    but "yes but swap Dana for Marcus" carries a modification the deterministic
+    matcher can't parse, so it must NOT silently execute the unmodified
+    proposal; it falls through to "other" and re-arms for a clean reply."""
     t = (text or "").strip()
     if t in _THUMBS_UP:
         return "confirm"

@@ -53,7 +53,7 @@ from .schedule_chat_rules import (
     resolve_week,
 )
 from .schedule_intelligence import fetch_lapse_items
-from .schedule_rules import INACTIVE_EMPLOYMENT_STATUSES
+from .schedule_rules import INACTIVE_EMPLOYMENT_STATUSES, sunday_indexed_weekday, template_windows
 from .shift_compliance import _approved_db_rules, _week_hours, check_shift_compliance
 from .shift_writes import create_shift_core, find_conflicts, log_audit
 
@@ -71,6 +71,10 @@ CLARIFY_BAIL_TEXT = (
 REARM_TEXT = (
     "Didn't catch that — reply **confirm** to put these on the schedule, "
     "or **cancel**."
+)
+EXECUTE_FAILED_TEXT = (
+    "Something went wrong putting these on the schedule — nothing was "
+    "created. Reply **confirm** to try again, or **cancel**."
 )
 
 # User decision: the manager's "confirm" reply IS the review step — shifts
@@ -118,7 +122,7 @@ def _build_parse_prompt(content: str, today: date) -> str:
     )
 
 
-_TIME_RE = re.compile(r"^[0-2]\d:[0-5]\d$")
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _coerce_time(value) -> Optional[str]:
@@ -338,11 +342,23 @@ async def build_proposal(
                     days_field = json.loads(days_field)
                 except json.JSONDecodeError:
                     days_field = []
-            template_days = [int(d) for d in (days_field or [])]
+            template_days = []
+            for d in (days_field or []):
+                try:
+                    di = int(d)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= di <= 6:
+                    template_days.append(di)
             start_time_v = template["start_time"]
             end_time_v = template["end_time"]
             break_minutes = template["break_minutes"] or 0
-            required_staff = req["count"] or template["required_staff"] or 1
+            # The template's own headcount wins when matched — _coerce_shift_
+            # request clamps a missing count to the documented default of 1,
+            # which is otherwise indistinguishable from "the manager actually
+            # asked for 1" and would silently override a template configured
+            # for more (e.g. required_staff=3).
+            required_staff = template["required_staff"] or req["count"] or 1
             role = req.get("role") or template.get("role")
             template_id = template["id"]
         elif req.get("start_time") and req.get("end_time"):
@@ -363,9 +379,10 @@ async def build_proposal(
             return await _clarify(dates_or_clarify.question, dates_or_clarify.options)
 
         for d in dates_or_clarify:
-            starts_at = datetime.combine(d, start_time_v, tzinfo=timezone.utc)
-            end_day = d + timedelta(days=1) if end_time_v <= start_time_v else d
-            ends_at = datetime.combine(end_day, end_time_v, tzinfo=timezone.utc)
+            starts, ends = template_windows(
+                d, d, {sunday_indexed_weekday(d)}, start_time_v, end_time_v,
+            )
+            starts_at, ends_at = starts[0], ends[0]
             resolved_shifts.append({
                 "label": req["label"],
                 "template_id": str(template_id) if template_id else None,
@@ -458,10 +475,25 @@ async def build_proposal(
         # Pinned employees skip the pre-filter — their conflict is reported
         # by find_conflicts below, not silently dropped from consideration.
         free = [r for r in roster if str(r["id"]) not in busy or str(r["id"]) in pinned]
+
+        # A cheap week-hours-only pass over every free candidate (roster is
+        # ordered alphabetically, not by load) so the cap below keeps the
+        # genuinely least-loaded people rather than an arbitrary alphabetical
+        # prefix — rank_candidates' own primary tiebreaker is week_hours.
+        # Reused again in CandidateContext below instead of re-querying it,
+        # since check_shift_compliance already computes the same figure
+        # internally for its own violation checks.
+        hours_by_id: dict[str, float] = {}
+        for r in free:
+            hours_by_id[str(r["id"])] = await _week_hours(conn, company_id, r["id"], starts_at, 0.0, None)
+
         pinned_rows = [r for r in free if str(r["id"]) in pinned]
-        other_rows = [r for r in free if str(r["id"]) not in pinned][
-            : max(0, _CANDIDATE_CAP - len(pinned_rows))
-        ]
+        other_rows = sorted(
+            (r for r in free if str(r["id"]) not in pinned),
+            key=lambda r: (
+                hours_by_id[str(r["id"])], r["first_name"] or "", r["last_name"] or "", str(r["id"]),
+            ),
+        )[: max(0, _CANDIDATE_CAP - len(pinned_rows))]
         survivors = pinned_rows + other_rows
 
         contexts: list[CandidateContext] = []
@@ -474,11 +506,11 @@ async def build_proposal(
                 starts_at=starts_at, ends_at=ends_at,
                 break_minutes=shift["break_minutes"], employee_id=eid,
                 lapse_items=lapse_map.get(str(eid), []),
+                fw_event="assign", fw_shift_published=True,
             )
-            week_hours = await _week_hours(conn, company_id, eid, starts_at, 0.0, None)
             contexts.append(CandidateContext(
                 employee_id=str(eid), name=name, job_title=r["job_title"],
-                conflicts=conflicts, violations=violations, week_hours=week_hours,
+                conflicts=conflicts, violations=violations, week_hours=hours_by_id[str(eid)],
             ))
 
         rank = rank_candidates(
@@ -586,27 +618,38 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
     created_shift_ids: list[UUID] = []
     violations_acknowledged: list[dict] = []
 
+    # One batched lapse-item fetch over every assignee across every shift —
+    # fetch_lapse_items already takes a list; looping it per assignee (as
+    # below, previously) re-ran the same query once per person instead of once.
+    all_employee_ids = [
+        UUID(a["employee_id"]) for shift in proposal["shifts"] for a in shift["assignees"]
+    ]
+    lapse_map: dict = {}
+    if all_employee_ids:
+        lapse_map = await fetch_lapse_items(
+            conn, company_id, list(dict.fromkeys(all_employee_ids)),
+            credential_templates_enabled=credential_templates_enabled,
+            training_enabled=training_enabled,
+        )
+
     async with conn.transaction():
         for shift in proposal["shifts"]:
             starts_at = datetime.fromisoformat(shift["starts_at"])
             ends_at = datetime.fromisoformat(shift["ends_at"])
             location_id = UUID(shift["location_id"]) if shift.get("location_id") else None
+            template_id = UUID(shift["template_id"]) if shift.get("template_id") else None
 
             surviving_ids: list[UUID] = []
             assignee_names: list[str] = []
             for a in shift["assignees"]:
                 eid = UUID(a["employee_id"])
                 conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
-                lapse_map = await fetch_lapse_items(
-                    conn, company_id, [eid],
-                    credential_templates_enabled=credential_templates_enabled,
-                    training_enabled=training_enabled,
-                )
                 violations = await check_shift_compliance(
                     conn, company_id, location_id=location_id,
                     starts_at=starts_at, ends_at=ends_at,
                     break_minutes=shift["break_minutes"], employee_id=eid,
                     lapse_items=lapse_map.get(str(eid), []),
+                    fw_event="assign", fw_shift_published=True,
                 )
                 block = next((v for v in violations if v.get("severity") == "block"), None)
                 if conflicts or block:
@@ -626,6 +669,7 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
                 location_id=location_id, role=shift.get("role"), department=None,
                 starts_at=starts_at, ends_at=ends_at,
                 break_minutes=shift["break_minutes"], required_staff=shift["required_staff"],
+                template_id=template_id,
                 employee_ids=surviving_ids, created_by=confirmed_by,
                 status=_CREATE_STATUS,
                 audit_details={

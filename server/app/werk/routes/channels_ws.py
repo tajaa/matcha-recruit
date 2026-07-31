@@ -209,6 +209,10 @@ async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str,
         from app.matcha.services.ems import ask as ems_ask
         from app.matcha.services.ems.intent import HELP, strip_mention
 
+        sys_row = None
+        events = None
+        is_admin = False
+
         async with get_connection() as conn:
             company_id = await _ems_company_gate(conn, channel_id_str)
             if company_id is None:
@@ -219,38 +223,37 @@ async def _bg_ems_ask(channel_id_str: str, asker_user_id_str: str, content: str,
             if intent == HELP:
                 text = ems_ask.help_text(is_admin=is_admin)
                 sys_row = await _insert_system_message(conn, channel_id_str, text)
-                await broadcast_system_message(
-                    channel_id_str, _system_message_payload(channel_id_str, sys_row),
+            else:
+                try:
+                    await check_rate_limit(str(company_id), "ems_ask", 30, 3600)
+                except HTTPException:
+                    return  # over the hourly limit: skip silently, same as intake
+
+                events = await ems_ask.fetch_channel_events(
+                    conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                    include_behavioral=is_admin,
                 )
-                return
-
-            try:
-                await check_rate_limit(str(company_id), "ems_ask", 30, 3600)
-            except HTTPException:
-                return  # over the hourly limit: skip silently, same as intake
-
-            events = await ems_ask.fetch_channel_events(
-                conn, company_id=company_id, channel_id=UUID(channel_id_str),
-                include_behavioral=is_admin,
-            )
-            if not events:
-                # "Nothing you can see" and "nothing happened" must not read
-                # as the same sentence — see ask.no_events_text.
-                hidden = not is_admin and await conn.fetchval(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1 FROM ems_events
-                        WHERE channel_id = $1 AND company_id = $2 AND status <> 'dismissed'
+                if not events:
+                    # "Nothing you can see" and "nothing happened" must not
+                    # read as the same sentence — see ask.no_events_text.
+                    hidden = not is_admin and await conn.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM ems_events
+                            WHERE channel_id = $1 AND company_id = $2 AND status <> 'dismissed'
+                        )
+                        """,
+                        UUID(channel_id_str), company_id,
                     )
-                    """,
-                    UUID(channel_id_str), company_id,
-                )
-                text = ems_ask.no_events_text(filtered=bool(hidden))
-                sys_row = await _insert_system_message(conn, channel_id_str, text)
-                await broadcast_system_message(
-                    channel_id_str, _system_message_payload(channel_id_str, sys_row),
-                )
-                return
+                    text = ems_ask.no_events_text(filtered=bool(hidden))
+                    sys_row = await _insert_system_message(conn, channel_id_str, text)
+
+        # Broadcast AFTER the connection releases in every branch above —
+        # holding a pooled connection across the fan-out isn't needed and
+        # (the events==None Gemini-answer path below) must never happen.
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return
 
         # No connection held across the Gemini call.
         answer = await ems_ask.answer_question(strip_mention(content), events, is_admin=is_admin)
@@ -366,23 +369,32 @@ async def _bg_schedule_request(
         from app.matcha.services.scheduling import schedule_chat
         from app.matcha.services.scheduling.schedule_chat_rules import evaluate_schedule_proposal
 
+        sys_row = None
+
         async with get_connection() as conn:
             company_id = await _ems_company_gate(conn, channel_id_str)
             if company_id is None:
                 return
+
+            # Rate-limit BEFORE any write: previously the authz-refusal pill
+            # below was written+broadcast unconditionally, giving an
+            # unbounded write/fan-out path to anyone retrying an unauthorized
+            # request. Checking first bounds both the refusal pill and the
+            # real flow on the same per-company budget.
+            try:
+                await check_rate_limit(str(company_id), "ems_schedule", 20, 3600)
+            except HTTPException:
+                return  # over the hourly limit: skip silently, same as ems_ask/ems_event
 
             features = await _schedule_company_features(conn, company_id)
             role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
             verdict = evaluate_schedule_proposal(role=role, features=features, stage="propose")
             if not verdict.ok:
                 sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return
 
-            try:
-                await check_rate_limit(str(company_id), "ems_schedule", 20, 3600)
-            except HTTPException:
-                return  # over the hourly limit: skip silently, same as ems_ask/ems_event
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return
 
         # No connection held across the Gemini parse call.
         parsed = await schedule_chat.parse_schedule_request(strip_mention(content), _date.today())
@@ -426,7 +438,17 @@ async def _bg_schedule_reply(
     connection block. Only the clarify-answer path needs a second call to
     `schedule_chat.parse_schedule_request` — that branch closes the first
     connection before making it, then opens a fresh one, same two-block
-    shape as `_bg_ems_clarify`."""
+    shape as `_bg_ems_clarify`.
+
+    Every branch below sets `sys_row` and falls through to a single
+    broadcast after its connection releases, rather than broadcasting while
+    still holding the pooled connection. A confirm whose `execute_proposal`
+    write itself raises is caught explicitly: the claim above already
+    cleared `confirm_message_id` on the original pill, so letting the
+    exception propagate to the top-level handler would leave the proposal
+    row unclaimable forever (still 'proposed', nothing to reply to) with no
+    feedback in the channel — instead it re-arms on a fresh pill so a later
+    confirm can retry."""
     claim_happened = False
     try:
         from datetime import date as _date
@@ -442,9 +464,11 @@ async def _bg_schedule_reply(
         need_reparse = False
         composed: Optional[str] = None
         proposal: Optional[dict] = None
+        claimed: Optional[dict] = None
+        sys_row = None
 
         async with get_connection() as conn:
-            claimed = await conn.fetchrow(
+            claimed_row = await conn.fetchrow(
                 """
                 UPDATE schedule_chat_proposals
                 SET confirm_message_id = NULL, updated_at = NOW()
@@ -456,10 +480,10 @@ async def _bg_schedule_reply(
                 """,
                 reply_uuid,
             )
-            if claimed is None:
+            if claimed_row is None:
                 return False
             claim_happened = True
-            claimed = dict(claimed)
+            claimed = dict(claimed_row)
             proposal = claimed["proposal"]
             if isinstance(proposal, str):
                 proposal = json.loads(proposal)
@@ -481,56 +505,67 @@ async def _bg_schedule_reply(
                     reply_uuid, claimed["id"],
                 )
                 sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
 
-            action = parse_confirm_reply(strip_mention(content))
+            else:
+                action = parse_confirm_reply(strip_mention(content))
 
-            if action == "cancel":
-                await conn.execute(
-                    "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
-                    claimed["id"],
-                )
-                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CANCELLED_TEXT)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
+                if action == "cancel":
+                    await conn.execute(
+                        "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                        claimed["id"],
+                    )
+                    sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CANCELLED_TEXT)
 
-            if claimed["status"] == "proposed" and action == "confirm":
-                text = await schedule_chat.execute_proposal(
-                    conn, proposal_row={**claimed, "proposal": proposal},
-                    confirmed_by=sender_uuid, features=features,
-                )
-                sys_row = await _insert_system_message(conn, channel_id_str, text)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
+                elif claimed["status"] == "proposed" and action == "confirm":
+                    try:
+                        text = await schedule_chat.execute_proposal(
+                            conn, proposal_row={**claimed, "proposal": proposal},
+                            confirmed_by=sender_uuid, features=features,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "schedule chat execute_proposal failed for proposal %s", claimed["id"],
+                        )
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str, schedule_chat.EXECUTE_FAILED_TEXT,
+                        )
+                        await conn.execute(
+                            "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                            sys_row["id"], claimed["id"],
+                        )
+                    else:
+                        sys_row = await _insert_system_message(conn, channel_id_str, text)
 
-            if claimed["status"] == "proposed":  # action == 'other'
-                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.REARM_TEXT)
-                await conn.execute(
-                    "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
-                    sys_row["id"], claimed["id"],
-                )
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
+                elif claimed["status"] == "proposed":  # action == 'other'
+                    sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.REARM_TEXT)
+                    await conn.execute(
+                        "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                        sys_row["id"], claimed["id"],
+                    )
 
-            # status == 'clarifying' (confirm or other, either way this reply
-            # is the answer to the outstanding question) — either bail past
-            # the round cap, or re-parse. Both close this connection first.
-            if claimed["clarify_rounds"] >= schedule_chat.CLARIFY_ROUND_CAP:
-                await conn.execute(
-                    "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
-                    claimed["id"],
-                )
-                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CLARIFY_BAIL_TEXT)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
+                elif claimed["clarify_rounds"] >= schedule_chat.CLARIFY_ROUND_CAP:
+                    # status == 'clarifying', past the round cap.
+                    await conn.execute(
+                        "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                        claimed["id"],
+                    )
+                    sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CLARIFY_BAIL_TEXT)
 
-            need_reparse = True
-            composed = schedule_chat.compose_clarify_followup(proposal, content)
+                else:
+                    # status == 'clarifying' — this reply is the answer to the
+                    # outstanding question and needs a fresh Gemini parse,
+                    # which must not run with this connection held.
+                    need_reparse = True
+                    composed = schedule_chat.compose_clarify_followup(proposal, content)
 
-        # No connection held across the Gemini re-parse call.
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return True
+
         if not need_reparse or composed is None:
             return True
+
+        # No connection held across the Gemini re-parse call.
         parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
 
         async with get_connection() as conn2:
@@ -540,23 +575,22 @@ async def _bg_schedule_reply(
                     claimed["id"],
                 )
                 sys_row = await _insert_system_message(conn2, channel_id_str, schedule_chat.CLARIFY_BAIL_TEXT)
-                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-                return True
+            else:
+                history = list(proposal.get("clarify_history") or []) + [
+                    {"q": proposal.get("clarify_question"), "a": content}
+                ]
+                build = await schedule_chat.build_proposal(
+                    conn2, company_id=claimed["company_id"], channel_id=claimed.get("channel_id"),
+                    source_message_id=claimed.get("source_message_id"), created_by=claimed["created_by"],
+                    parsed=parsed, today=_date.today(), original_content=proposal.get("original_content", ""),
+                    clarify_history=history, existing_proposal_id=claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn2, channel_id_str, build.pill_text)
+                await conn2.execute(
+                    "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], build.proposal_id,
+                )
 
-            history = list(proposal.get("clarify_history") or []) + [
-                {"q": proposal.get("clarify_question"), "a": content}
-            ]
-            build = await schedule_chat.build_proposal(
-                conn2, company_id=claimed["company_id"], channel_id=claimed.get("channel_id"),
-                source_message_id=claimed.get("source_message_id"), created_by=claimed["created_by"],
-                parsed=parsed, today=_date.today(), original_content=proposal.get("original_content", ""),
-                clarify_history=history, existing_proposal_id=claimed["id"],
-            )
-            sys_row = await _insert_system_message(conn2, channel_id_str, build.pill_text)
-            await conn2.execute(
-                "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
-                sys_row["id"], build.proposal_id,
-            )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
         return True
     except Exception:
