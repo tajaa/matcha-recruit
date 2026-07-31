@@ -237,6 +237,93 @@ def _design_catalog_text() -> str:
     return "\n".join(lines)
 
 
+def _resolve_field_text(blocks: list[dict[str, Any]], block_id: Any, field: str) -> Optional[str]:
+    """The current string value at a selection's dot-path field, or None if the
+    block/path doesn't resolve. Mirrors ops.py's dot-path walk (`set_field`)
+    but read-only — used to cross-check a client-reported selection range
+    against the server's own snapshot before trusting the offsets (the editor
+    state can move between the user's click and this request landing)."""
+    block = next((b for b in blocks if isinstance(b, dict) and b.get("id") == block_id), None)
+    if block is None or not field:
+        return None
+    cur: Any = block
+    for part in field.split("."):
+        if isinstance(cur, list):
+            if not part.isdigit():
+                return None
+            idx = int(part)
+            cur = cur[idx] if 0 <= idx < len(cur) else None
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+        if cur is None:
+            return None
+    return cur if isinstance(cur, str) else None
+
+
+def build_selection_prompt_line(
+    selection: Optional[dict[str, Any]], blocks: list[dict[str, Any]], selected_block: Optional[str],
+) -> str:
+    """The `SELECTED:` prompt line — a field/range/kind-aware upgrade of the old
+    block-only `SELECTED SECTION:` line, shared by the single-shot prompt
+    (`_build_prompt`) and the agent loop (`agent._build_system_prompt`) so the
+    two can't drift. Falls back to `selected_block` (block-only, legacy) when
+    there's no structured `selection`, then to "nothing selected".
+
+    Never raises on a malformed/stale selection (`CappeMerlinSelection` is
+    deliberately lenient) — degrades to field-level or block-level guidance
+    instead of trusting a range that no longer matches the snapshot.
+    """
+    if selection:
+        block_id = selection.get("block")
+        kind = selection.get("kind") or "text"
+        field = selection.get("field")
+        start, end = selection.get("start"), selection.get("end")
+        sel_text = selection.get("text")
+        if field:
+            if isinstance(start, int) and isinstance(end, int) and sel_text:
+                actual = _resolve_field_text(blocks, block_id, field)
+                if actual is not None and actual[start:end] == sel_text:
+                    return (
+                        f'SELECTED: characters {start}-{end} ("{sel_text}") of field "{field}" '
+                        f'on block {block_id} (kind={kind}). Resolve "this"/"it"/"this word" to '
+                        "exactly this range — not the whole field."
+                    )
+                if actual and sel_text and sel_text in actual:
+                    # Editor state moved between the click and this request —
+                    # re-anchor by searching for the same text rather than
+                    # trusting offsets that have drifted.
+                    new_start = actual.index(sel_text)
+                    return (
+                        f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
+                        f'("{sel_text}") of field "{field}" on block {block_id} (kind={kind}) — '
+                        "re-anchored by text match, the original offsets had drifted."
+                    )
+                return (
+                    f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the highlighted '
+                    "range may be stale (the field changed since it was selected); treat the WHOLE "
+                    "field as selected, not a specific range."
+                )
+            return (
+                f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the whole field is '
+                'selected. Resolve "this"/"it" to this field.'
+            )
+        return (
+            f"SELECTED: block {block_id} (kind={kind}) — the whole section/element is selected, no "
+            'specific field. Resolve "this section"/"here"/"it" to this block.'
+        )
+    if selected_block:
+        return (
+            f"SELECTED SECTION: id={selected_block}. "
+            'Resolve "this section" / "here" / "it" to this block.'
+        )
+    return (
+        'SELECTED: nothing. If the user refers to "this section"/"this word"/"it" and it is '
+        "ambiguous which they mean, ask instead of guessing."
+    )
+
+
 def _strip_prompt_noise(block: dict[str, Any]) -> dict[str, Any]:
     """A prompt-only view of one block: drops null/empty-string field values
     and empty `_design` groups — noise that costs tokens on every turn without
@@ -284,6 +371,7 @@ def _build_prompt(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str], business_type: Optional[str],
     feedback: Optional[str], selected_block: Optional[str] = None,
+    selection: Optional[dict[str, Any]] = None,
     attachments: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     parts = [
@@ -301,16 +389,7 @@ def _build_prompt(
     parts.append("Current blocks (JSON):\n" + json.dumps(compact_blocks, separators=(",", ":")))
     parts.append("Current theme (JSON):\n" + json.dumps(theme, separators=(",", ":")))
 
-    if selected_block:
-        parts.append(
-            f"SELECTED SECTION: id={selected_block}. "
-            'Resolve "this section" / "here" / "it" to this block.'
-        )
-    else:
-        parts.append(
-            "SELECTED SECTION: none. If the user refers to \"this section\" and it is "
-            "ambiguous which they mean, ask instead of guessing."
-        )
+    parts.append(build_selection_prompt_line(selection, blocks, selected_block))
 
     trimmed = history[-_MAX_HISTORY_MESSAGES:]
     if trimmed:
@@ -346,6 +425,7 @@ async def run_merlin_turn(
     *, message: str, history: list[dict[str, Any]], blocks: list[dict[str, Any]],
     theme: dict[str, Any], business_name: Optional[str] = None, business_type: Optional[str] = None,
     model_tier: str = DEFAULT_MODEL_TIER, plan: Any = None, selected_block: Optional[str] = None,
+    selection: Optional[dict[str, Any]] = None,
     attachments: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """Run one Merlin chat turn. Returns `{"message", "ops", "rejected", "tier"}`.
@@ -385,7 +465,7 @@ async def run_merlin_turn(
         prompt = _build_prompt(
             message=message, history=history, blocks=blocks, theme=theme,
             business_name=business_name, business_type=business_type, feedback=last_feedback,
-            selected_block=selected_block, attachments=attachments,
+            selected_block=selected_block, selection=selection, attachments=attachments,
         )
         # Attached images ride alongside the text as Parts (never fetched from a
         # user-given URL — `attachments` here already carries fetched bytes, see

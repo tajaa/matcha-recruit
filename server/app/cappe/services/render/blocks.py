@@ -12,16 +12,26 @@ _ASSETS = Path(__file__).parent / "assets"
 
 # ── blocks ──────────────────────────────────────────────────────────────────
 
-def _btn(label, href, *, solid=True):
+def _btn(label, href, *, solid=True, field=None, editable=False):
     if not label:
         return ""
     cls = "cz-btn--solid" if solid else "cz-btn--ghost"
-    return f'<a class="cz-btn {cls}" href="{_esc(_safe_href(href))}">{_esc(label)}</a>'
+    attrs = _fattr(field, editable, "button") if field else ""
+    return f'<a class="cz-btn {cls}"{attrs} href="{_esc(_safe_href(href))}">{_esc(label)}</a>'
 
 
-def _fattr(field: str, editable: bool) -> str:
-    """`data-cz-field` tag for canvas inline-text editing — only in editor mode."""
-    return f' data-cz-field="{field}"' if editable else ""
+def _fattr(field: str, editable: bool, kind: str = "text") -> str:
+    """`data-cz-field` tag for canvas inline-text editing + Merlin's unified
+    selection contract — only in editor mode. `kind` ("text"|"image"|"button")
+    rides as `data-cz-kind` (omitted for the "text" default) so the editor
+    runtime's click handler (canvas.js:postSelection) can report what kind of
+    element was highlighted without guessing from tag name."""
+    if not editable:
+        return ""
+    attrs = f' data-cz-field="{field}"'
+    if kind != "text":
+        attrs += f' data-cz-kind="{kind}"'
+    return attrs
 
 
 def _head(b, editable=False):
@@ -35,8 +45,8 @@ def _hero(b, t, editable=False):
     eyebrow = f'<p class="cz-eyebrow cz-hero__eyebrow"{_fattr("eyebrow", editable)}>{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
     title = f'<h1 class="cz-hero__title"{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h1>'
     lead = f'<p class="cz-hero__lead"{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
-    cta = (f'<div class="cz-cta-row">{_btn(b.get("cta"), b.get("ctaHref"))}'
-           f'{_btn(b.get("cta2"), b.get("cta2Href"), solid=False)}</div>') if (b.get("cta") or b.get("cta2")) else ""
+    cta = (f'<div class="cz-cta-row">{_btn(b.get("cta"), b.get("ctaHref"), field="cta", editable=editable)}'
+           f'{_btn(b.get("cta2"), b.get("cta2Href"), solid=False, field="cta2", editable=editable)}</div>') if (b.get("cta") or b.get("cta2")) else ""
     img = _safe_image(b.get("image"))
     vid = _safe_image(b.get("video"))  # same URL sanitizer (scheme + breakout chars)
 
@@ -70,7 +80,7 @@ def _hero(b, t, editable=False):
         return (f'<section class="cz-hero {cls}" style="{bgstyle}"><div class="cz-wrap">'
                 f'{eyebrow}{title}{lead}{cta}</div></section>')
     if style == "split":
-        art = (f'<img src="{_esc(img)}" alt="" />' if img else "")
+        art = (f'<img src="{_esc(img)}" alt=""{_fattr("image", editable, "image")} />' if img else "")
         return (f'<section class="cz-hero cz-hero--split"><div class="cz-wrap cz-grid">'
                 f'<div>{eyebrow}{title}{lead}{cta}</div><div class="cz-art">{art}</div></div></section>')
     mod = "cz-hero--minimal" if style == "minimal" else "cz-hero--centered"
@@ -127,7 +137,7 @@ def _testimonial(b, t):
 def _cta(b, t, editable=False):
     sub = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
     return (f'<section class="cz-band"><div class="cz-wrap"><h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>{sub}'
-            f'<a class="cz-btn" href="{_esc(_safe_href(b.get("ctaHref")))}">{_esc(b.get("cta") or "Get started")}</a></div></section>')
+            f'<a class="cz-btn"{_fattr("cta", editable, "button")} href="{_esc(_safe_href(b.get("ctaHref")))}">{_esc(b.get("cta") or "Get started")}</a></div></section>')
 
 
 def _menu(b, t):
@@ -216,13 +226,13 @@ def _bento(b, t):
 
 def _split(b, t, editable=False):
     img = _safe_image(b.get("image"))
-    art = f'<img src="{_esc(img)}" alt="" />' if img else ""
+    art = f'<img src="{_esc(img)}" alt=""{_fattr("image", editable, "image")} />' if img else ""
     eyebrow = f'<p class="cz-eyebrow"{_fattr("eyebrow", editable)}>{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
     head = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
     body = f'<p{_fattr("body", editable)}>{_esc(b.get("body"))}</p>' if b.get("body") else ""
     bl = [x for x in (b.get("bullets") or []) if x]
     bullets = ('<ul class="cz-split__bullets">' + "".join(f'<li>{_esc(x)}</li>' for x in bl) + "</ul>") if bl else ""
-    cta = _btn(b.get("cta"), b.get("ctaHref")) if b.get("cta") else ""
+    cta = _btn(b.get("cta"), b.get("ctaHref"), field="cta", editable=editable) if b.get("cta") else ""
     mod = " cz-split--reverse" if b.get("reverse") else ""
     return (f'<section class="cz-split{mod}"><div class="cz-wrap"><div class="cz-split__grid">'
             f'<div class="cz-split__art">{art}</div>'
@@ -566,14 +576,14 @@ def _canvas(b, t, editable=False, index=0):
         if kind == "image":
             src = _safe_image(el.get("src"))
             inner = f'<img src="{_esc(src)}" alt="{_esc(el.get("alt"))}" loading="lazy" />' if src else ""
-            els_html.append(f'<div class="cz-el cz-el--img"{dataattr}{style_attr}>{inner}</div>')
+            els_html.append(f'<div class="cz-el cz-el--img"{dataattr}{_fattr(eid, editable, "image")}{style_attr}>{inner}</div>')
         elif kind == "button":
             btncls = "cz-btn--ghost" if style.get("variant") == "outline" else "cz-btn--solid"
             href = _esc(_safe_href(el.get("href")))
             # data-cz-field tags the label for inline editing; the click runtime
             # already preventDefaults <a> navigation in the editor.
             els_html.append(
-                f'<a class="cz-el cz-el--btn cz-btn {btncls}"{dataattr}{_fattr(eid, editable)} '
+                f'<a class="cz-el cz-el--btn cz-btn {btncls}"{dataattr}{_fattr(eid, editable, "button")} '
                 f'href="{href}"{style_attr}>{_esc(el.get("text"))}</a>'
             )
         else:

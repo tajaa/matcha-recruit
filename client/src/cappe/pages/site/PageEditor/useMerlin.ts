@@ -68,6 +68,19 @@ export type MerlinStep = {
   image_url?: string
 }
 
+/** Mirrors server `CappeMerlinSelection` — a field, character range, or
+ *  element kind within a block, more precise than `selectedBlock` alone.
+ *  `block` here is the block's stable `_k` id (index.tsx converts from the
+ *  iframe's numeric index the same way it already does for `selectedBlock`). */
+export type MerlinSelection = {
+  block: string
+  field?: string | null
+  kind: 'text' | 'image' | 'button' | 'element'
+  start?: number | null
+  end?: number | null
+  text?: string | null
+}
+
 export type MerlinConversation = {
   id: string
   title: string
@@ -174,6 +187,9 @@ export function useMerlin(
     blocks: CappeBlock[]
     theme: Record<string, unknown>
     selectedBlock?: string | null
+    /** The finer-grained highlight (field/range/element kind), when the user
+     *  has one — see MerlinSelection. */
+    selection?: MerlinSelection | null
   },
   onApply: (next: {
     blocks: CappeBlock[]
@@ -755,7 +771,7 @@ export function useMerlin(
     abortRef.current = abort
 
     try {
-      const { blocks, theme, selectedBlock } = getSnapshot()
+      const { blocks, theme, selectedBlock, selection } = getSnapshot()
       const snapshotBlocks = blocks.map((b) => {
         const { _k, ...rest } = b
         return { ...rest, id: _k }
@@ -789,6 +805,7 @@ export function useMerlin(
           theme,
           model_tier: tier,
           selected_block: selectedBlock ?? null,
+          selection: selection ?? null,
           attachments: sentAttachments,
         },
         (raw) => {

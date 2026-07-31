@@ -424,7 +424,16 @@ function SlashMenu({ items, activeIndex, onHover, onPick }: {
   )
 }
 
-export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typeof useMerlin>; selectedLabel: string | null }) {
+export function MerlinDrawer({ merlin, selectedLabel, selectionChip = null }: {
+  merlin: ReturnType<typeof useMerlin>
+  selectedLabel: string | null
+  /** The finer-grained highlight chip ("'Fresh' in Hero heading") — set
+   *  whenever the user has highlighted a specific field/range/element, with
+   *  a clear button that drops back to whole-block selection. Optional —
+   *  tests and any caller that hasn't wired selection yet just get the
+   *  existing selectedLabel chip. */
+  selectionChip?: { label: string; onClear: () => void } | null
+}) {
   const premium = usePremium()
   const {
     open, setOpen, messages, send, sending, error, tier, setTier, width, setWidth, setWidthLive,
@@ -842,7 +851,24 @@ export function MerlinDrawer({ merlin, selectedLabel }: { merlin: ReturnType<typ
                 your next message will act on" — so a request like "make this
                 warmer" has an obvious referent instead of the user wondering
                 whether Merlin knows what "this" is. */}
-            {selectedLabel && (
+            {selectionChip ? (
+              <div
+                key={selectionChip.label}
+                className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"
+              >
+                <MousePointerClick className="h-3 w-3 shrink-0" />
+                <span className="flex-1 truncate">
+                  Editing: <strong className="font-semibold">{selectionChip.label}</strong>
+                </span>
+                <button
+                  onClick={selectionChip.onClear}
+                  className="shrink-0 rounded p-0.5 text-emerald-300/70 hover:bg-emerald-500/10 hover:text-emerald-200"
+                  title="Clear selection"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : selectedLabel && (
               <div
                 key={selectedLabel}
                 className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"

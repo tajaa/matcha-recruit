@@ -48,6 +48,40 @@ function probeThemeRegion(el){
   post({type:'cz-theme-probe',region:inSection?'sectionPad':'bodyFont'});
 }
 function post(m){try{window.parent.postMessage(m,'*');}catch(e){}}
+// Char-offset of (node,offset) within root's flattened textContent — walks text
+// nodes in document order so a selection inside nested markup (rare in a field,
+// but e.g. a <b> wrapper) still resolves to the plain-text offset the server's
+// field string uses.
+function textOffset(root,node,offset){
+  var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
+  var total=0,n;
+  while((n=walker.nextNode())){if(n===node)return total+offset;total+=n.textContent.length;}
+  return total;
+}
+// A live (non-collapsed) text selection wholly inside `el`, or null. Verifies
+// the extracted substring matches root text at the computed offset — Selection
+// API + TreeWalker can disagree on edge cases (BR, collapsed whitespace); when
+// they do, degrade to whole-field selection rather than ship a wrong range.
+function detectRange(el){
+  var sel=window.getSelection&&window.getSelection();
+  if(!sel||!sel.rangeCount||sel.isCollapsed)return null;
+  var range=sel.getRangeAt(0);
+  if(!el.contains(range.startContainer)||!el.contains(range.endContainer))return null;
+  var raw=sel.toString();
+  if(!raw)return null;
+  var start=textOffset(el,range.startContainer,range.startOffset);
+  var full=el.textContent||'';
+  if(full.slice(start,start+raw.length)!==raw)return null;
+  return {start:start,end:start+raw.length,text:raw.slice(0,300)};
+}
+// Selection contract for Merlin (highlight-driven precision design): posted
+// alongside the legacy cz-select on every field/element click, additive —
+// cz-select still drives block highlight + the floating inspector anchor.
+function postSelection(el,kind,block,field,start,end,text){
+  var r=el.getBoundingClientRect();
+  post({type:'cz-selection',block:block,field:field,kind:kind,start:start,end:end,
+        text:text,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
+}
 function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
 function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
 function idxOf(el){var b=el&&el.closest?el.closest('[data-cz-block]'):null;return b?parseInt(b.getAttribute('data-cz-block'),10):-1;}
@@ -71,11 +105,27 @@ document.addEventListener('click',function(e){
   var ce=e.target.closest&&e.target.closest('.cz-el');
   var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
   var i=parseInt(b.getAttribute('data-cz-block'),10);
-  if(ce){if(ce!==selEl){selectEl(ce);postSelectEl(ce);}return;}
+  if(ce){
+    if(ce!==selEl){selectEl(ce);postSelectEl(ce);}
+    var cf=ce.getAttribute('data-cz-field');
+    if(cf){
+      var ck=ce.getAttribute('data-cz-kind')||'text';
+      var cr=ck==='text'?detectRange(ce):null;
+      postSelection(ce,ck,i,cf,cr?cr.start:null,cr?cr.end:null,cr?cr.text:(ce.textContent||'').slice(0,300));
+    }
+    return;
+  }
   var f=e.target.closest&&e.target.closest('[data-cz-field]');
   var r=b.getBoundingClientRect();
   highlight(i);
   post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
+  if(f){
+    var fk=f.getAttribute('data-cz-kind')||'text';
+    var fr=fk==='text'?detectRange(f):null;
+    postSelection(f,fk,i,f.getAttribute('data-cz-field'),fr?fr.start:null,fr?fr.end:null,fr?fr.text:(f.textContent||'').slice(0,300));
+  } else {
+    postSelection(b,'element',i,null,null,null,null);
+  }
 },true);
 document.addEventListener('dblclick',function(e){
   if(themeMode||restrictMode)return;

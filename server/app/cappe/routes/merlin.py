@@ -304,7 +304,7 @@ async def _prepare_turn(
     premium = is_premium_plan(account.plan)
     tier, routed = await route_tier(
         body.model_tier, account.plan,
-        message=body.message, has_selected_block=bool(body.selected_block),
+        message=body.message, has_selected_block=bool(body.selected_block or body.selection),
         history_tail=_recent_history_tail(body.history),
     )
     agentic = allow_agentic and premium and tier in AGENT_TIERS
@@ -382,6 +382,7 @@ async def merlin_chat(
             model_tier=turn.tier,
             plan=account.plan,
             selected_block=body.selected_block,
+            selection=body.selection.model_dump() if body.selection else None,
             attachments=turn.attachments,
         )
     except RateLimitExceeded as exc:

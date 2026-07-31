@@ -102,6 +102,7 @@ async def stream_agent_turn(
                     plan=account.plan,
                     account_id=str(account.id),
                     selected_block=body.selected_block,
+                    selection=body.selection.model_dump() if body.selection else None,
                     attachments=prep.attachments,
                 )
                 async for frame in stream:
@@ -119,6 +120,7 @@ async def stream_agent_turn(
                     model_tier=prep.tier,
                     plan=account.plan,
                     selected_block=body.selected_block,
+                    selection=body.selection.model_dump() if body.selection else None,
                     attachments=prep.attachments,
                 )
                 result = {**single_shot, "steps": []}

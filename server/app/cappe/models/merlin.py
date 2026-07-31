@@ -21,6 +21,35 @@ class CappeMerlinAttachment(BaseModel):
     mime: Optional[str] = None
 
 
+class CappeMerlinSelection(BaseModel):
+    """What the user has highlighted in the editor iframe right now — posted by
+    the runtime as `cz-selection` (`render/assets/canvas.js:postSelection`) and
+    forwarded verbatim by `useMerlin.ts`. Supersedes `selected_block` with finer
+    granularity (field, character range, element kind) while that field stays
+    for back-compat with any client that hasn't picked this up yet.
+
+    Deliberately lenient — every field but `block` is optional and unvalidated
+    beyond type/length here. A malformed or stale selection must never fail the
+    turn; `turn.py`/`agent.py` degrade it to block-level (or drop it) rather
+    than reject the request. `text` is the AUTHORITATIVE anchor for a range —
+    the server cross-checks it against the field's actual substring at
+    `start:end` and re-anchors or degrades on drift (editor state can move
+    between the user's selection and this request landing)."""
+    block: str = Field(max_length=100)
+    # Dot path into the block, e.g. "heading" or "items.2.title" (set_field's
+    # own convention) — None means the whole block (a card/element click).
+    field: Optional[str] = Field(default=None, max_length=200)
+    kind: Literal["text", "image", "button", "element"] = "text"
+    # Character offsets into the field's plain-string value. Both-or-neither —
+    # None means "the whole field", not "start of field".
+    start: Optional[int] = Field(default=None, ge=0)
+    end: Optional[int] = Field(default=None, ge=0)
+    # The selected substring (range) or the field's full text (whole-field
+    # click) — capped well under a paragraph; a longer selection is truncated
+    # client-side (canvas.js), not rejected here.
+    text: Optional[str] = Field(default=None, max_length=300)
+
+
 class CappeMerlinChatRequest(BaseModel):
     """Client state is the source of truth — Merlin auto-applies to editor
     state client-side and nothing persists until the user hits Save, so the
@@ -51,8 +80,14 @@ class CappeMerlinChatRequest(BaseModel):
     # `services/merlin/routing.py:route_tier`.
     model_tier: Literal["auto", "lite", "regular", "max"] = "auto"
     # The block the user currently has selected in the editor, so "this
-    # section" resolves to something instead of being guessed at.
+    # section" resolves to something instead of being guessed at. Kept for
+    # back-compat; `selection` (below) is the finer-grained superset a
+    # current client sends alongside it.
     selected_block: Optional[str] = Field(default=None, max_length=100)
+    # Unified selection contract (block → field → char range → element kind) —
+    # see CappeMerlinSelection. None when nothing is highlighted, same as an
+    # absent `selected_block`.
+    selection: Optional[CappeMerlinSelection] = None
     # Images the user attached to THIS message. Capped well above
     # merlin.attachments.MAX_ATTACHMENTS (4) — the module drops the excess
     # rather than 422ing a slightly-over request.
@@ -177,6 +212,7 @@ class CappeMerlinResultsUpdate(BaseModel):
 __all__ = [
     "CappeMerlinHistoryTurn",
     "CappeMerlinAttachment",
+    "CappeMerlinSelection",
     "CappeMerlinChatRequest",
     "CappeMerlinRejection",
     "CappeMerlinChatResponse",

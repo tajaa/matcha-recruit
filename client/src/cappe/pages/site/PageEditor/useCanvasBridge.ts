@@ -2,6 +2,19 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
 
+/** Raw `cz-selection` payload from the runtime (canvas.js:postSelection) —
+ *  `block` is still the iframe's numeric index at this layer; index.tsx
+ *  converts it to the block's stable `_k` id (same conversion `selectedBlock`
+ *  already does) before it reaches Merlin's request contract. */
+export type CanvasSelection = {
+  block: number
+  field: string | null
+  kind: 'text' | 'image' | 'button' | 'element'
+  start: number | null
+  end: number | null
+  text: string | null
+}
+
 /** Canvas mode (Pro & Business): click-on-page editing via the preview iframe.
  *  Owns selection/breakpoint/floating-panel state, the freeform canvas-element
  *  mutators, and the postMessage bridge to the framed runtime. `iframeRef` is
@@ -25,6 +38,11 @@ export function useCanvasBridge(
 ) {
   const [selBlock, setSelBlock] = useState<number | null>(null)
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
+  // Merlin's highlight-driven selection (Phase 1 of the precision-design plan)
+  // — a field, character range, or element kind within selBlock. Independent
+  // of selElement (freeform canvas resize/drag state): a text-range highlight
+  // inside a canvas heading sets both, a plain section click sets neither.
+  const [selection, setSelection] = useState<CanvasSelection | null>(null)
   const [canvasBp, setCanvasBp] = useState<'d' | 'm'>('d')            // freeform canvas: editing desktop vs mobile
   const [popPos, setPopPos] = useState<{ top: number; left: number }>({ top: 96, left: 96 })
   // Once the user drags the floating inspector, keep it where they put it (don't
@@ -134,6 +152,13 @@ export function useCanvasBridge(
           if (!onEl) postToCanvas({ type: 'cz-highlight', block: d.block })
           break
         }
+        case 'cz-selection': {
+          setSelection({
+            block: d.block, field: d.field ?? null, kind: d.kind || 'text',
+            start: d.start ?? null, end: d.end ?? null, text: d.text ?? null,
+          })
+          break
+        }
         case 'cz-edit': {
           const b = blocksRef.current[d.block]
           if (isCanvasBlock(b)) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.field ? { ...el, text: d.value } : el)) } : x)))
@@ -157,6 +182,7 @@ export function useCanvasBridge(
           })
           setSelBlock(d.to)
           setSelElement(null)  // a freeform element selection doesn't survive a section move
+          setSelection(null)   // its block index is stale after a reorder
           break
         case 'cz-drop-image': {
           // Only accept https URLs — the dropped value comes from the
@@ -186,6 +212,7 @@ export function useCanvasBridge(
   return {
     selBlock, setSelBlock,
     selElement, setSelElement,
+    selection, setSelection,
     canvasBp, setCanvasBreakpoint,
     popPos,
     panelDragged,

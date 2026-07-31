@@ -16,7 +16,7 @@ import { ThemeDrawer } from './ThemeMenu'
 import { themeObj } from './themeHelpers'
 import { useCanvasBridge } from './useCanvasBridge'
 import { useEditorHistory } from './useEditorHistory'
-import { useMerlin } from './useMerlin'
+import { useMerlin, type MerlinSelection } from './useMerlin'
 import { usePagePreview } from './usePagePreview'
 import { useThemeBridge, type ThemeRegion } from './useThemeBridge'
 import { useThemeEditor } from './useThemeEditor'
@@ -68,6 +68,7 @@ export default function PageEditor() {
     blocks: CappeBlock[]
     theme: Record<string, unknown>
     selectedBlock?: string | null
+    selection?: MerlinSelection | null
   }>({ blocks, theme: themeEditor.theme })
   const merlin = useMerlin(
     siteId, pageId,
@@ -120,15 +121,45 @@ export default function PageEditor() {
   // Refresh Merlin's view of live editor state every render. Assigned here
   // rather than at the useRef because `canvas` (the block selection) is
   // declared below the hook that consumes it.
+  // canvas.selection carries the iframe's numeric block index — converted to
+  // the block's stable `_k` id here, same as selectedBlock below, so a stale
+  // index (block deleted mid-flight) degrades to "not sent" rather than
+  // addressing the wrong block.
+  const selectionBlockKey = canvas.selection != null
+    ? (blocks[canvas.selection.block]?._k as string | undefined)
+    : undefined
+  const merlinSelection: MerlinSelection | null = canvas.selection && selectionBlockKey
+    ? {
+        block: selectionBlockKey, field: canvas.selection.field, kind: canvas.selection.kind,
+        start: canvas.selection.start, end: canvas.selection.end, text: canvas.selection.text,
+      }
+    : null
   liveStateRef.current = {
     blocks,
     theme: themeEditor.theme,
     selectedBlock: canvas.selBlock != null ? (blocks[canvas.selBlock]?._k as string | undefined) ?? null : null,
+    selection: merlinSelection,
   }
   // Merlin's own acknowledgment of the current selection ("Working on Hero —
   // what should we do here?") — a display label, not the `_k` used above.
   const selectedBlockType = canvas.selBlock != null ? blocks[canvas.selBlock]?.type : undefined
   const selectedLabel = selectedBlockType ? BLOCK_SCHEMAS[selectedBlockType]?.label ?? null : null
+  // The finer-grained chip ("Editing: 'Fresh' in Hero heading") — only shown
+  // when the selection names a specific FIELD (a range or a whole-field
+  // click); a bare element/section selection is already covered by
+  // selectedLabel's "Working on Hero" chip above, so showing both would say
+  // the same thing twice.
+  const selectionChip = (() => {
+    const sel = merlinSelection
+    if (!sel || !sel.field) return null
+    const blockLabel = selectedLabel || 'section'
+    const fieldLabel = sel.field.replace(/([a-z])([A-Z])/g, '$1 $2')
+    if (sel.start != null && sel.end != null && sel.text) {
+      const preview = sel.text.length > 40 ? `${sel.text.slice(0, 40)}…` : sel.text
+      return { label: `"${preview}" in ${blockLabel} ${fieldLabel}`, onClear: () => canvas.setSelection(null) }
+    }
+    return { label: `${blockLabel} ${fieldLabel}`, onClear: () => canvas.setSelection(null) }
+  })()
 
   // Reverse sync: clicking a page element while the drawer is open probes which
   // theme region governs it; the drawer scrolls to + flashes that control. Only
@@ -387,7 +418,7 @@ export default function PageEditor() {
           />
         )}
         <ThemeDrawer themeEditor={themeEditor} designerUnlocked={designerUnlocked} bridge={themeBridge} probe={themeProbe} />
-        <MerlinDrawer merlin={merlin} selectedLabel={selectedLabel} />
+        <MerlinDrawer merlin={merlin} selectedLabel={selectedLabel} selectionChip={selectionChip} />
         </div>
       </div>
     </SiteCtx.Provider>

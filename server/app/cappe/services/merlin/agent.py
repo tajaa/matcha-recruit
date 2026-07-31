@@ -50,6 +50,7 @@ from ..design_gate import is_premium_plan
 from .. import image_quota
 from .turn import (
     DEFAULT_MODEL_TIER,
+    build_selection_prompt_line,
     build_shared_prompt_sections,
     has_theme_intent,
     strip_prompt_noise,
@@ -317,6 +318,7 @@ def _build_system_prompt(
     theme: dict[str, Any],
     business_name: Optional[str],
     selected_block: Optional[str],
+    selection: Optional[dict[str, Any]] = None,
     history: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
 ) -> str:
@@ -328,16 +330,7 @@ def _build_system_prompt(
     parts.append("Current blocks (JSON):\n" + json.dumps(compact, separators=(",", ":")))
     parts.append("Current theme (JSON):\n" + json.dumps(theme, separators=(",", ":")))
 
-    if selected_block:
-        parts.append(
-            f"SELECTED SECTION: id={selected_block}. "
-            'Resolve "this section" / "here" / "it" to this block.'
-        )
-    else:
-        parts.append(
-            'SELECTED SECTION: none. If the user refers to "this section" and it is '
-            "ambiguous which they mean, ask instead of guessing."
-        )
+    parts.append(build_selection_prompt_line(selection, blocks, selected_block))
 
     caption = caption_lines(attachments)
     if caption:
@@ -382,6 +375,7 @@ async def run_merlin_agent(
     plan: Any = None,
     account_id: Optional[str] = None,
     selected_block: Optional[str] = None,
+    selection: Optional[dict[str, Any]] = None,
     attachments: Optional[list[dict[str, Any]]] = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one agent turn, yielding SSE-shaped frames.
@@ -432,7 +426,7 @@ async def run_merlin_agent(
         thinking_config=types.ThinkingConfig(thinking_level=tier_cfg.thinking_level),
         system_instruction=_build_system_prompt(
             blocks=blocks, theme=theme, business_name=business_name,
-            selected_block=selected_block, history=history, attachments=atts,
+            selected_block=selected_block, selection=selection, history=history, attachments=atts,
         ),
     )
     first_parts: list[types.Part] = [

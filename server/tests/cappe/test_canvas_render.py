@@ -49,9 +49,13 @@ def test_mobile_style_is_block_scoped():
     assert '.cz-cv-3 [data-cz-id="bad' not in html  # skipped id has no mobile rule
 
 
-def test_field_tags_are_text_only_and_editor_only():
+def test_field_tags_cover_every_kind_and_are_editor_only():
+    # Merlin's unified selection contract (highlight-driven precision design,
+    # Phase 1) tags every addressable kind, not just text — the heading plus
+    # both valid images ("bad id!" is skipped entirely, see test_bad_id_is_skipped).
     edit = R._render_block(_block(), R._tokens({}), 3, True)
-    assert edit.count("data-cz-field") == 1        # only the heading text element
+    assert edit.count("data-cz-field") == 3
+    assert edit.count('data-cz-kind="image"') == 2
     pub = R._render_block(_block(), R._tokens({}), 3, False)
     assert "data-cz-field" not in pub              # no inline-edit hooks published
     assert "data-cz-block" not in pub              # no selection hooks published
