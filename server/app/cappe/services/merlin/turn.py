@@ -262,6 +262,21 @@ def _resolve_field_text(blocks: list[dict[str, Any]], block_id: Any, field: str)
     return cur if isinstance(cur, str) else None
 
 
+def _resolve_element_text(blocks: list[dict[str, Any]], block_id: Any, element_id: str) -> Optional[str]:
+    """The current text value of a freeform-canvas element (`elements[].text`),
+    or None if the block/element doesn't resolve. Read-only counterpart to
+    `_resolve_field_text` for canvas elements, which are addressed by id (the
+    `canvas_update` op's `el`), not a `set_field` dot path."""
+    block = next((b for b in blocks if isinstance(b, dict) and b.get("id") == block_id), None)
+    if block is None or not element_id:
+        return None
+    for el in (block.get("elements") or []):
+        if isinstance(el, dict) and el.get("id") == element_id:
+            text = el.get("text")
+            return text if isinstance(text, str) else None
+    return None
+
+
 def build_selection_prompt_line(
     selection: Optional[dict[str, Any]], blocks: list[dict[str, Any]], selected_block: Optional[str],
 ) -> str:
@@ -277,42 +292,78 @@ def build_selection_prompt_line(
     """
     if selection:
         block_id = selection.get("block")
-        kind = selection.get("kind") or "text"
-        field = selection.get("field")
-        start, end = selection.get("start"), selection.get("end")
-        sel_text = selection.get("text")
-        if field:
-            if isinstance(start, int) and isinstance(end, int) and sel_text:
-                actual = _resolve_field_text(blocks, block_id, field)
-                if actual is not None and actual[start:end] == sel_text:
+        # A selection naming a block that's no longer in the snapshot (deleted,
+        # or a client bug) must not be cited to the model as if it existed —
+        # fall through to selected_block / nothing-selected instead.
+        block_exists = any(isinstance(b, dict) and b.get("id") == block_id for b in blocks)
+        if block_exists:
+            kind = selection.get("kind") or "text"
+            field = selection.get("field")
+            element = selection.get("element")
+            start, end = selection.get("start"), selection.get("end")
+            sel_text = selection.get("text")
+            if element:
+                # A freeform-canvas element — a different id space and a
+                # different op (canvas_update, not set_field) than `field`.
+                if isinstance(start, int) and isinstance(end, int) and sel_text:
+                    actual = _resolve_element_text(blocks, block_id, element)
+                    if actual is not None and actual[start:end] == sel_text:
+                        return (
+                            f'SELECTED: characters {start}-{end} ("{sel_text}") of canvas element '
+                            f'"{element}" on block {block_id} (kind={kind}). Resolve "this"/"it" to '
+                            'exactly this range. Address it with canvas_update {block, el, patch}, '
+                            "not set_field."
+                        )
+                    if actual and sel_text and sel_text in actual:
+                        new_start = actual.index(sel_text)
+                        return (
+                            f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
+                            f'("{sel_text}") of canvas element "{element}" on block {block_id} '
+                            f"(kind={kind}) — re-anchored by text match, the original offsets had "
+                            'drifted. Address it with canvas_update {block, el, patch}, not set_field.'
+                        )
                     return (
-                        f'SELECTED: characters {start}-{end} ("{sel_text}") of field "{field}" '
-                        f'on block {block_id} (kind={kind}). Resolve "this"/"it"/"this word" to '
-                        "exactly this range — not the whole field."
-                    )
-                if actual and sel_text and sel_text in actual:
-                    # Editor state moved between the click and this request —
-                    # re-anchor by searching for the same text rather than
-                    # trusting offsets that have drifted.
-                    new_start = actual.index(sel_text)
-                    return (
-                        f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
-                        f'("{sel_text}") of field "{field}" on block {block_id} (kind={kind}) — '
-                        "re-anchored by text match, the original offsets had drifted."
+                        f'SELECTED: canvas element "{element}" on block {block_id} (kind={kind}) — the '
+                        "highlighted range may be stale; treat the WHOLE element as selected. Address "
+                        'it with canvas_update {block, el, patch}, not set_field.'
                     )
                 return (
-                    f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the highlighted '
-                    "range may be stale (the field changed since it was selected); treat the WHOLE "
-                    "field as selected, not a specific range."
+                    f'SELECTED: canvas element "{element}" on block {block_id} (kind={kind}) — the '
+                    'whole element is selected. Resolve "this"/"it" to it. Address it with '
+                    'canvas_update {block, el, patch}, not set_field.'
+                )
+            if field:
+                if isinstance(start, int) and isinstance(end, int) and sel_text:
+                    actual = _resolve_field_text(blocks, block_id, field)
+                    if actual is not None and actual[start:end] == sel_text:
+                        return (
+                            f'SELECTED: characters {start}-{end} ("{sel_text}") of field "{field}" '
+                            f'on block {block_id} (kind={kind}). Resolve "this"/"it"/"this word" to '
+                            "exactly this range — not the whole field."
+                        )
+                    if actual and sel_text and sel_text in actual:
+                        # Editor state moved between the click and this request —
+                        # re-anchor by searching for the same text rather than
+                        # trusting offsets that have drifted.
+                        new_start = actual.index(sel_text)
+                        return (
+                            f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
+                            f'("{sel_text}") of field "{field}" on block {block_id} (kind={kind}) — '
+                            "re-anchored by text match, the original offsets had drifted."
+                        )
+                    return (
+                        f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the highlighted '
+                        "range may be stale (the field changed since it was selected); treat the WHOLE "
+                        "field as selected, not a specific range."
+                    )
+                return (
+                    f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the whole field is '
+                    'selected. Resolve "this"/"it" to this field.'
                 )
             return (
-                f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the whole field is '
-                'selected. Resolve "this"/"it" to this field.'
+                f"SELECTED: block {block_id} (kind={kind}) — the whole section/element is selected, no "
+                'specific field. Resolve "this section"/"here"/"it" to this block.'
             )
-        return (
-            f"SELECTED: block {block_id} (kind={kind}) — the whole section/element is selected, no "
-            'specific field. Resolve "this section"/"here"/"it" to this block.'
-        )
     if selected_block:
         return (
             f"SELECTED SECTION: id={selected_block}. "

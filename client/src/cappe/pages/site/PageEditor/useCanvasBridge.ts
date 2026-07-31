@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
+import { applyFieldPath } from './merlinOps'
 
-/** Raw `cz-selection` payload from the runtime (canvas.js:postSelection) —
- *  `block` is still the iframe's numeric index at this layer; index.tsx
- *  converts it to the block's stable `_k` id (same conversion `selectedBlock`
- *  already does) before it reaches Merlin's request contract. */
+/** `cz-selection` payload from the runtime (canvas.js:postSelection), resolved
+ *  to the block's stable `_k` id at RECEIPT time (inside this hook's message
+ *  handler, where `blocksRef` is live truth) rather than at send time — a
+ *  block delete/insert/undo between the click and a later render can't
+ *  silently repoint an old numeric index at a different block. If the
+ *  reported index doesn't resolve to a real block, no selection is set at
+ *  all (same "stale index degrades to not sent" contract `cz-drop-image`
+ *  already uses via index.tsx's `_k` lookup). */
 export type CanvasSelection = {
-  block: number
+  blockKey: string
+  /** `set_field`-style dot path (see server `BLOCK_FIELDS`) — null for a
+   *  whole-block/element selection. Mutually exclusive with `element`. */
   field: string | null
+  /** A freeform-canvas element id (`elements[].id`), addressed via
+   *  `canvas_update`, not `set_field` — mutually exclusive with `field`. */
+  element: string | null
   kind: 'text' | 'image' | 'button' | 'element'
   start: number | null
   end: number | null
@@ -110,6 +120,14 @@ export function useCanvasBridge(
     setSelElement((cur) => (cur === id ? null : cur))
   }
 
+  // `selection` is keyed on a block's `_k`, so it survives reorders/undo for
+  // free — but the block it names can still be deleted (or undone away)
+  // entirely. Drop it the moment that happens, rather than letting a later
+  // Merlin turn address a block that no longer exists.
+  useEffect(() => {
+    setSelection((s) => (s && !blocks.some((b) => b._k === s.blockKey) ? null : s))
+  }, [blocks])
+
   // Canvas bridge: the framed runtime posts selection/edit/reorder events; we
   // validate by source identity (the iframe is opaque-origin, so `e.origin` is
   // "null" — never check it). Mounted once; reads live state via refs.
@@ -153,16 +171,40 @@ export function useCanvasBridge(
           break
         }
         case 'cz-selection': {
-          setSelection({
-            block: d.block, field: d.field ?? null, kind: d.kind || 'text',
+          const blockKey = blocksRef.current[d.block]?._k as string | undefined
+          setSelection(blockKey ? {
+            blockKey, field: d.field ?? null, element: d.element ?? null, kind: d.kind || 'text',
             start: d.start ?? null, end: d.end ?? null, text: d.text ?? null,
-          })
+          } : null)
           break
         }
         case 'cz-edit': {
           const b = blocksRef.current[d.block]
           if (isCanvasBlock(b)) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.field ? { ...el, text: d.value } : el)) } : x)))
-          else if (b) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, [d.field]: d.value } : x)))
+          else if (b) {
+            // `d.field` is a set_field-style dot path (a list-item field like
+            // "items.2.title" is addressable since P0's full-coverage tagging) —
+            // route through the same applyFieldPath the Merlin op applier uses,
+            // not a literal top-level `{[d.field]: d.value}` assign, which would
+            // write a bogus key named "items.2.title" instead of descending
+            // into the array.
+            const updated = applyFieldPath(b, d.field, d.value)
+            if (updated) {
+              setBlocks((bs) => bs.map((x, j) => (j === d.block ? updated : x)))
+              // The current selection's range is offsets into the OLD field
+              // value — an edit to that same field just moved or deleted the
+              // text it names. Re-anchor by searching the new value for the
+              // same substring (same idea as the server's own re-anchor in
+              // turn.py); drop the range (fall back to whole-field) if the
+              // text is gone, rather than keep pointing at stale offsets.
+              setSelection((s) => {
+                if (!s || s.blockKey !== updated._k || s.field !== d.field) return s
+                if (s.start == null || s.end == null || !s.text) return s
+                const idx = typeof d.value === 'string' ? d.value.indexOf(s.text) : -1
+                return idx === -1 ? { ...s, start: null, end: null, text: null } : { ...s, start: idx, end: idx + s.text.length }
+              })
+            }
+          }
           break
         }
         case 'cz-elem-move':
@@ -182,7 +224,11 @@ export function useCanvasBridge(
           })
           setSelBlock(d.to)
           setSelElement(null)  // a freeform element selection doesn't survive a section move
-          setSelection(null)   // its block index is stale after a reorder
+          // `selection` is NOT cleared here — it's keyed on the block's stable
+          // `_k` (resolved at cz-selection receipt), not the numeric index a
+          // reorder shifts, so the highlighted field is still valid at its
+          // new position. The staleness effect below only drops it once the
+          // block itself is actually gone.
           break
         case 'cz-drop-image': {
           // Only accept https URLs — the dropped value comes from the

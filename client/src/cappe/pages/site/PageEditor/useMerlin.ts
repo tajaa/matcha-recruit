@@ -70,11 +70,15 @@ export type MerlinStep = {
 
 /** Mirrors server `CappeMerlinSelection` — a field, character range, or
  *  element kind within a block, more precise than `selectedBlock` alone.
- *  `block` here is the block's stable `_k` id (index.tsx converts from the
- *  iframe's numeric index the same way it already does for `selectedBlock`). */
+ *  `block` here is the block's stable `_k` id (resolved from the iframe's
+ *  numeric index at cz-selection receipt — see useCanvasBridge.ts). */
 export type MerlinSelection = {
   block: string
+  /** `set_field` dot path — mutually exclusive with `element`. */
   field?: string | null
+  /** Freeform-canvas element id, addressed via `canvas_update` — mutually
+   *  exclusive with `field`. */
+  element?: string | null
   kind: 'text' | 'image' | 'button' | 'element'
   start?: number | null
   end?: number | null

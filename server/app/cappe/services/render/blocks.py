@@ -90,48 +90,59 @@ def _hero(b, t, editable=False):
 def _features(b, t, editable=False):
     cards = "".join(
         f'<div class="cz-card"><div class="cz-feat__icon">{_esc(i.get("icon") or (i.get("title") or "•")[:1])}</div>'
-        f'<h3>{_esc(i.get("title"))}</h3><p>{_esc(i.get("body"))}</p></div>'
-        for i in (b.get("items") or []) if isinstance(i, dict))
+        f'<h3{_fattr(f"items.{idx}.title", editable)}>{_esc(i.get("title"))}</h3>'
+        f'<p{_fattr(f"items.{idx}.body", editable)}>{_esc(i.get("body"))}</p></div>'
+        for idx, i in enumerate(b.get("items") or []) if isinstance(i, dict))
     return f'<section class="cz-features"><div class="cz-wrap">{_head(b, editable)}<div class="cz-cards">{cards}</div></div></section>'
 
 
-def _gallery(b, t):
+def _gallery(b, t, editable=False):
     tiles = ""
-    for i in (b.get("images") or []):
+    for idx, i in enumerate(b.get("images") or []):
         if not isinstance(i, dict):
             continue
         u = _safe_image(i.get("url"))
         if not u:
             continue
-        cap = f'<figcaption>{_esc(i.get("caption"))}</figcaption>' if i.get("caption") else ""
-        tiles += f'<figure class="cz-tile"><img src="{_esc(u)}" alt="{_esc(i.get("caption"))}" />{cap}</figure>'
-    return f'<section class="cz-gallery"><div class="cz-wrap">{_head(b)}<div class="cz-grid-img">{tiles}</div></div></section>'
+        cap = f'<figcaption{_fattr(f"images.{idx}.caption", editable)}>{_esc(i.get("caption"))}</figcaption>' if i.get("caption") else ""
+        tiles += (f'<figure class="cz-tile"><img src="{_esc(u)}" alt="{_esc(i.get("caption"))}"'
+                  f'{_fattr(f"images.{idx}.url", editable, "image")} />{cap}</figure>')
+    return f'<section class="cz-gallery"><div class="cz-wrap">{_head(b, editable)}<div class="cz-grid-img">{tiles}</div></div></section>'
 
 
-def _pricing(b, t):
+def _pricing(b, t, editable=False):
     cards = ""
-    for p in (b.get("plans") or []):
+    for idx, p in enumerate(b.get("plans") or []):
         if not isinstance(p, dict):
             continue
         hot = bool(p.get("highlighted"))
         feats = "".join(f'<li>{_esc(f)}</li>' for f in (p.get("features") or []))
         badge = '<span class="cz-plan__badge">Popular</span>' if hot else ""
-        cards += (f'<div class="cz-plan {"cz-plan--hot" if hot else ""}">{badge}<h3>{_esc(p.get("name"))}</h3>'
-                  f'<div class="cz-plan__price">{_esc(p.get("price"))}<span>{_esc(p.get("period") or "")}</span></div>'
-                  f'<ul>{feats}</ul>{_btn(p.get("cta") or "Choose", p.get("ctaHref"), solid=hot)}</div>')
-    return f'<section class="cz-pricing"><div class="cz-wrap">{_head(b)}<div class="cz-plans">{cards}</div></div></section>'
+        # `price` is wrapped in its own <span> (not the whole .cz-plan__price div)
+        # so the tagged element's textContent is exactly the price value — the
+        # sibling period <span> would otherwise get folded into a highlighted
+        # range's reported text and break the server's exact-match anchor check.
+        cards += (f'<div class="cz-plan {"cz-plan--hot" if hot else ""}">{badge}'
+                  f'<h3{_fattr(f"plans.{idx}.name", editable)}>{_esc(p.get("name"))}</h3>'
+                  f'<div class="cz-plan__price"><span{_fattr(f"plans.{idx}.price", editable)}>{_esc(p.get("price"))}</span>'
+                  f'<span>{_esc(p.get("period") or "")}</span></div>'
+                  f'<ul>{feats}</ul>{_btn(p.get("cta") or "Choose", p.get("ctaHref"), solid=hot, field=f"plans.{idx}.cta", editable=editable)}</div>')
+    return f'<section class="cz-pricing"><div class="cz-wrap">{_head(b, editable)}<div class="cz-plans">{cards}</div></div></section>'
 
 
-def _testimonial(b, t):
+def _testimonial(b, t, editable=False):
     items = b.get("items") or ([{"quote": b.get("quote"), "author": b.get("author"), "role": b.get("role")}] if b.get("quote") else [])
     cards = ""
-    for i in items:
+    for idx, i in enumerate(items):
         if not isinstance(i, dict):
             continue
-        role = f' · <span>{_esc(i.get("role"))}</span>' if i.get("role") else ""
-        cards += (f'<figure class="cz-quote"><blockquote>“{_esc(i.get("quote"))}”</blockquote>'
-                  f'<figcaption><b>{_esc(i.get("author"))}</b>{role}</figcaption></figure>')
-    return f'<section class="cz-quotes"><div class="cz-wrap">{_head(b)}<div class="cz-quote-grid">{cards}</div></div></section>'
+        # Quote text is wrapped in an inner <span> so the curly quote marks
+        # around it stay outside the tagged element's textContent (same
+        # exact-match reasoning as the pricing price/period split above).
+        role = f' · <span{_fattr(f"items.{idx}.role", editable)}>{_esc(i.get("role"))}</span>' if i.get("role") else ""
+        cards += (f'<figure class="cz-quote"><blockquote>“<span{_fattr(f"items.{idx}.quote", editable)}>{_esc(i.get("quote"))}</span>”</blockquote>'
+                  f'<figcaption><b{_fattr(f"items.{idx}.author", editable)}>{_esc(i.get("author"))}</b>{role}</figcaption></figure>')
+    return f'<section class="cz-quotes"><div class="cz-wrap">{_head(b, editable)}<div class="cz-quote-grid">{cards}</div></div></section>'
 
 
 def _cta(b, t, editable=False):
@@ -140,88 +151,89 @@ def _cta(b, t, editable=False):
             f'<a class="cz-btn"{_fattr("cta", editable, "button")} href="{_esc(_safe_href(b.get("ctaHref")))}">{_esc(b.get("cta") or "Get started")}</a></div></section>')
 
 
-def _menu(b, t):
+def _menu(b, t, editable=False):
     cols = ""
-    for s in (b.get("sections") or []):
+    for sidx, s in enumerate(b.get("sections") or []):
         if not isinstance(s, dict):
             continue
         rows = ""
-        for it in (s.get("items") or []):
+        for iidx, it in enumerate(s.get("items") or []):
             if not isinstance(it, dict):
                 continue
-            rows += (f'<div class="cz-menu-row"><span class="name">{_esc(it.get("name"))}</span>'
-                     f'<span class="dots"></span><span class="price">{_esc(it.get("price"))}</span></div>')
+            base = f"sections.{sidx}.items.{iidx}"
+            rows += (f'<div class="cz-menu-row"><span class="name"{_fattr(f"{base}.name", editable)}>{_esc(it.get("name"))}</span>'
+                     f'<span class="dots"></span><span class="price"{_fattr(f"{base}.price", editable)}>{_esc(it.get("price"))}</span></div>')
             if it.get("description"):
-                rows += f'<div class="desc">{_esc(it.get("description"))}</div>'
-        cols += f'<div><h3>{_esc(s.get("name"))}</h3>{rows}</div>'
-    return f'<section class="cz-menu"><div class="cz-wrap">{_head(b)}<div class="cz-menu-grid">{cols}</div></div></section>'
+                rows += f'<div class="desc"{_fattr(f"{base}.description", editable)}>{_esc(it.get("description"))}</div>'
+        cols += f'<div><h3{_fattr(f"sections.{sidx}.name", editable)}>{_esc(s.get("name"))}</h3>{rows}</div>'
+    return f'<section class="cz-menu"><div class="cz-wrap">{_head(b, editable)}<div class="cz-menu-grid">{cols}</div></div></section>'
 
 
-def _posts(b, t):
+def _posts(b, t, editable=False):
     rows = ""
-    for i in (b.get("items") or []):
+    for idx, i in enumerate(b.get("items") or []):
         if not isinstance(i, dict):
             continue
-        date = f'<div class="date">{_esc(i.get("date"))}</div>' if i.get("date") else ""
+        date = f'<div class="date"{_fattr(f"items.{idx}.date", editable)}>{_esc(i.get("date"))}</div>' if i.get("date") else ""
         href = _safe_href("/p/" + i.get("slug")) if i.get("slug") else "#"
-        rows += (f'<article class="cz-post">{date}<h3><a href="{_esc(href)}">{_esc(i.get("title"))}</a></h3>'
-                 f'<p>{_esc(i.get("excerpt"))}</p></article>')
-    return f'<section class="cz-posts"><div class="cz-narrow">{_head(b)}{rows}</div></section>'
+        rows += (f'<article class="cz-post">{date}<h3><a href="{_esc(href)}"{_fattr(f"items.{idx}.title", editable)}>{_esc(i.get("title"))}</a></h3>'
+                 f'<p{_fattr(f"items.{idx}.excerpt", editable)}>{_esc(i.get("excerpt"))}</p></article>')
+    return f'<section class="cz-posts"><div class="cz-narrow">{_head(b, editable)}{rows}</div></section>'
 
 
-def _stats(b, t):
+def _stats(b, t, editable=False):
     cells = "".join(
-        f'<div class="cz-stat"><div class="cz-stat__num">{_esc(i.get("value"))}</div>'
-        f'<div class="cz-stat__label">{_esc(i.get("label"))}</div></div>'
-        for i in (b.get("items") or []) if isinstance(i, dict))
-    return f'<section class="cz-stats"><div class="cz-wrap">{_head(b)}<div class="cz-stats-grid">{cells}</div></div></section>'
+        f'<div class="cz-stat"><div class="cz-stat__num"{_fattr(f"items.{idx}.value", editable)}>{_esc(i.get("value"))}</div>'
+        f'<div class="cz-stat__label"{_fattr(f"items.{idx}.label", editable)}>{_esc(i.get("label"))}</div></div>'
+        for idx, i in enumerate(b.get("items") or []) if isinstance(i, dict))
+    return f'<section class="cz-stats"><div class="cz-wrap">{_head(b, editable)}<div class="cz-stats-grid">{cells}</div></div></section>'
 
 
-def _logos(b, t):
-    title = f'<p class="cz-logos__title">{_esc(b.get("heading") or "Trusted by")}</p>'
+def _logos(b, t, editable=False):
+    title = f'<p class="cz-logos__title"{_fattr("heading", editable)}>{_esc(b.get("heading") or "Trusted by")}</p>'
     items = ""
-    for i in (b.get("items") or []):
+    for idx, i in enumerate(b.get("items") or []):
         if not isinstance(i, dict):
             continue
         u = _safe_image(i.get("image"))
         if u:
-            items += f'<img src="{_esc(u)}" alt="{_esc(i.get("name"))}" />'
+            items += f'<img src="{_esc(u)}" alt="{_esc(i.get("name"))}"{_fattr(f"items.{idx}.image", editable, "image")} />'
         elif i.get("name"):
-            items += f'<span class="cz-logos__name">{_esc(i.get("name"))}</span>'
+            items += f'<span class="cz-logos__name"{_fattr(f"items.{idx}.name", editable)}>{_esc(i.get("name"))}</span>'
     return f'<section class="cz-logos"><div class="cz-wrap">{title}<div class="cz-logos__row">{items}</div></div></section>'
 
 
-def _faq(b, t):
+def _faq(b, t, editable=False):
     rows = ""
-    for i in (b.get("items") or []):
+    for idx, i in enumerate(b.get("items") or []):
         if not isinstance(i, dict) or not i.get("q"):
             continue
-        rows += (f'<details class="cz-faq__item"><summary>{_esc(i.get("q"))}</summary>'
-                 f'<p>{_esc(i.get("a"))}</p></details>')
-    return f'<section class="cz-faq"><div class="cz-wrap">{_head(b)}<div class="cz-faq__list">{rows}</div></div></section>'
+        rows += (f'<details class="cz-faq__item"><summary{_fattr(f"items.{idx}.q", editable)}>{_esc(i.get("q"))}</summary>'
+                 f'<p{_fattr(f"items.{idx}.a", editable)}>{_esc(i.get("a"))}</p></details>')
+    return f'<section class="cz-faq"><div class="cz-wrap">{_head(b, editable)}<div class="cz-faq__list">{rows}</div></div></section>'
 
 
-def _bento(b, t):
+def _bento(b, t, editable=False):
     cells = ""
-    for i in (b.get("items") or []):
+    for idx, i in enumerate(b.get("items") or []):
         if not isinstance(i, dict):
             continue
         span = str(i.get("span") or "").lower()
         mod = " cz-bento-cell--wide" if span == "wide" else (" cz-bento-cell--tall" if span == "tall" else "")
         icon = f'<div class="cz-bento-cell__icon">{_esc(i.get("icon"))}</div>' if i.get("icon") else ""
-        head = f'<h3>{_esc(i.get("title"))}</h3>' if i.get("title") else ""
-        body = f'<p>{_esc(i.get("body"))}</p>' if i.get("body") else ""
+        head = f'<h3{_fattr(f"items.{idx}.title", editable)}>{_esc(i.get("title"))}</h3>' if i.get("title") else ""
+        body = f'<p{_fattr(f"items.{idx}.body", editable)}>{_esc(i.get("body"))}</p>' if i.get("body") else ""
         u = _safe_image(i.get("image"))
         if u:
             # Defense-in-depth: _safe_image already rejects quotes/parens, but
             # encode locally too so the CSS url() literal can't be closed even
             # if that guard ever changes (HTML-attr escape + CSS-quote encode).
             safe_u = _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
-            cells += (f'<div class="cz-bento-cell cz-bento-cell--img{mod}" '
+            cells += (f'<div class="cz-bento-cell cz-bento-cell--img{mod}"{_fattr(f"items.{idx}.image", editable, "image")} '
                       f'style="background-image:url(\'{safe_u}\')">{icon}{head}{body}</div>')
         else:
             cells += f'<div class="cz-bento-cell{mod}">{icon}{head}{body}</div>'
-    return f'<section class="cz-bento"><div class="cz-wrap">{_head(b)}<div class="cz-bento-grid">{cells}</div></div></section>'
+    return f'<section class="cz-bento"><div class="cz-wrap">{_head(b, editable)}<div class="cz-bento-grid">{cells}</div></div></section>'
 
 
 def _split(b, t, editable=False):
@@ -230,8 +242,13 @@ def _split(b, t, editable=False):
     eyebrow = f'<p class="cz-eyebrow"{_fattr("eyebrow", editable)}>{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
     head = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
     body = f'<p{_fattr("body", editable)}>{_esc(b.get("body"))}</p>' if b.get("body") else ""
-    bl = [x for x in (b.get("bullets") or []) if x]
-    bullets = ('<ul class="cz-split__bullets">' + "".join(f'<li>{_esc(x)}</li>' for x in bl) + "</ul>") if bl else ""
+    # Tagged by RAW index into `bullets` (not the filtered `bl` position) so the
+    # emitted path always matches the array `set_field`/`_resolve_field_text`
+    # actually index into.
+    bullets_html = "".join(
+        f'<li{_fattr(f"bullets.{idx}", editable)}>{_esc(x)}</li>'
+        for idx, x in enumerate(b.get("bullets") or []) if x)
+    bullets = f'<ul class="cz-split__bullets">{bullets_html}</ul>' if bullets_html else ""
     cta = _btn(b.get("cta"), b.get("ctaHref"), field="cta", editable=editable) if b.get("cta") else ""
     mod = " cz-split--reverse" if b.get("reverse") else ""
     return (f'<section class="cz-split{mod}"><div class="cz-wrap"><div class="cz-split__grid">'
@@ -252,17 +269,17 @@ def _text(b, t, editable=False):
     return f'<section class="cz-text"><div class="cz-narrow">{head}{inner}</div></section>'
 
 
-def _credentials(b, t):
+def _credentials(b, t, editable=False):
     cards = ""
-    for i in (b.get("items") or []):
+    for idx, i in enumerate(b.get("items") or []):
         if not isinstance(i, dict):
             continue
         meta = " · ".join(x for x in (_esc(i.get("issuer")), _esc(i.get("year"))) if x)
         meta_html = f'<div class="cz-cred__meta">{meta}</div>' if meta else ""
-        detail = f'<p class="cz-cred__detail">{_esc(i.get("detail"))}</p>' if i.get("detail") else ""
+        detail = f'<p class="cz-cred__detail"{_fattr(f"items.{idx}.detail", editable)}>{_esc(i.get("detail"))}</p>' if i.get("detail") else ""
         cards += (f'<div class="cz-cred"><div class="cz-cred__badge">✓</div>'
-                  f'<div><h3>{_esc(i.get("title"))}</h3>{meta_html}{detail}</div></div>')
-    return f'<section class="cz-creds"><div class="cz-wrap">{_head(b)}<div class="cz-creds-grid">{cards}</div></div></section>'
+                  f'<div><h3{_fattr(f"items.{idx}.title", editable)}>{_esc(i.get("title"))}</h3>{meta_html}{detail}</div></div>')
+    return f'<section class="cz-creds"><div class="cz-wrap">{_head(b, editable)}<div class="cz-creds-grid">{cards}</div></div></section>'
 
 
 # ── interactive widgets (same-origin /api/cappe/public, no styling deps) ─────
@@ -309,50 +326,50 @@ _CONTACT_JS = (_ASSETS / "contact.js").read_text(encoding="utf-8")
 _REVIEWS_JS = (_ASSETS / "reviews.js").read_text(encoding="utf-8")
 
 
-def _reviews(b, t):
+def _reviews(b, t, editable=False):
     wid = "rv" + str(_uid())
     show_form = b.get("allowSubmissions") is not False  # default on
-    return (f'<section class="cz-reviews"><div class="cz-wrap">{_head(b)}'
+    return (f'<section class="cz-reviews"><div class="cz-wrap">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-reviews-box" data-form="{"1" if show_form else "0"}">'
             f'<p style="color:var(--muted)">Loading reviews…</p></div></div></section>'
             f'<script>{_REVIEWS_JS.replace("__ID__", wid)}</script>')
 
 
-def _store(b, t):
+def _store(b, t, editable=False):
     # `id="shop"` is a stable anchor any CTA/nav can link to (#shop) regardless
     # of the seller's vocation — the generalizable "go buy" destination.
     wid = "st" + str(_uid())
-    return (f'<section id="shop" class="cz-store"><div class="cz-wrap">{_head(b)}'
+    return (f'<section id="shop" class="cz-store"><div class="cz-wrap">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-store-box"><p style="color:var(--muted)">Loading products...</p></div></div></section>'
             f'<script>{_STORE_JS.replace("__ID__", wid)}</script>')
 
 
-def _booking(b, t):
+def _booking(b, t, editable=False):
     wid = "bk" + str(_uid())
-    return (f'<section id="book" class="cz-form-sec"><div class="cz-wrap">{_head(b)}'
+    return (f'<section id="book" class="cz-form-sec"><div class="cz-wrap">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-form"><p style="color:var(--muted)">Loading...</p></div></div></section>'
             f'<script>{_BOOKING_JS.replace("__ID__", wid)}</script>')
 
 
-def _newsletter(b, t):
+def _newsletter(b, t, editable=False):
     wid = "nl" + str(_uid())
-    return (f'<section class="cz-form-sec"><div class="cz-narrow" style="text-align:center">{_head(b)}'
+    return (f'<section class="cz-form-sec"><div class="cz-narrow" style="text-align:center">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-form"></div></div></section>'
             f'<script>{_NEWSLETTER_JS.replace("__ID__", wid)}</script>')
 
 
-def _contact(b, t):
+def _contact(b, t, editable=False):
     wid = "cf" + str(_uid())
     fields = b.get("fields") or ["name", "email", "message"]
     form_slug = b.get("formSlug") or b.get("form_slug") or ""
-    sub = f'<p>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
+    sub = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
     inputs = "".join(
         (f'<textarea class="cz-field" data-k="{_esc(f)}" rows="4" placeholder="{_esc(f.capitalize())}"></textarea>'
          if f == "message" else
          f'<input class="cz-field" data-k="{_esc(f)}" placeholder="{_esc(f.capitalize())}" />')
         for f in fields if isinstance(f, str))
     return (f'<section class="cz-form-sec"><div class="cz-narrow">'
-            f'<div class="cz-head"><h2>{_esc(b.get("heading") or "Get in touch")}</h2>{sub}</div>'
+            f'<div class="cz-head"><h2{_fattr("heading", editable)}>{_esc(b.get("heading") or "Get in touch")}</h2>{sub}</div>'
             f'<div id="{wid}" data-form="{_esc(form_slug)}" class="cz-form">{inputs}'
             f'<button class="cz-btn cz-btn--solid cz-btn--block">Send</button><p class="cz-msg"></p></div></div></section>'
             f'<script>{_CONTACT_JS.replace("__ID__", wid)}</script>')
@@ -375,7 +392,7 @@ def _resolve_loc(t, b):
     return locs[0]
 
 
-def _map(b, t):
+def _map(b, t, editable=False):
     """A "find us" block: address + directions deep links (no API key), plus an
     OpenStreetMap embed when the owner supplied lat/lng. Per-location when the
     site has locations."""
@@ -401,13 +418,13 @@ def _map(b, t):
     actions = ""
     if query:
         g = f"https://www.google.com/maps/search/?api=1&query={query}"
-        addr_html = f'<p class="cz-map__addr">{_esc(addr)}</p>' if addr else ""
+        addr_html = f'<p class="cz-map__addr"{_fattr("address", editable)}>{_esc(addr)}</p>' if addr else ""
         apple = (f'<a class="cz-btn cz-btn--ghost" href="https://maps.apple.com/?q={query}" '
                  f'target="_blank" rel="noopener noreferrer">Apple Maps</a>') if addr else ""
         actions = (f'{addr_html}<div class="cz-map__actions">'
                    f'<a class="cz-btn cz-btn--solid" href="{_esc(g)}" target="_blank" rel="noopener noreferrer">Get directions</a>'
                    f'{apple}</div>')
-    return f'<section class="cz-map"><div class="cz-wrap">{_head(b)}{embed}{actions}</div></section>'
+    return f'<section class="cz-map"><div class="cz-wrap">{_head(b, editable)}{embed}{actions}</div></section>'
 
 
 _OPENNOW_JS = "<script>" + (_ASSETS / "opennow.js").read_text(encoding="utf-8") + "</script>"
@@ -415,7 +432,7 @@ _OPENNOW_JS = "<script>" + (_ASSETS / "opennow.js").read_text(encoding="utf-8") 
 _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-def _hours(b, t):
+def _hours(b, t, editable=False):
     """Structured weekly hours table + a client-computed "Open now" badge (the
     badge is computed in-browser from injected hours+tz, so it's cache-safe)."""
     loc = _resolve_loc(t, b) or {}
@@ -432,7 +449,7 @@ def _hours(b, t):
         else:
             val = '<span class="cz-hours__closed">Closed</span>'
         rows += f'<div class="cz-hours__row"><span>{name}</span><span>{val}</span></div>'
-    return (f'<section class="cz-hours"><div class="cz-narrow" style="text-align:center">{_head(b)}'
+    return (f'<section class="cz-hours"><div class="cz-narrow" style="text-align:center">{_head(b, editable)}'
             f'<span class="cz-badge" data-opennow></span>'
             f'<div class="cz-hours__list">{rows}</div></div></section>'
             f'{_OPENNOW_JS}')
@@ -609,17 +626,12 @@ _RENDERERS = {
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 
-# Renderers that accept a 3rd `editable` arg to emit `data-cz-field` tags for the
-# canvas inline-text editor. Populated when those renderers are made editable-aware.
-_EDITABLE_AWARE: frozenset[str] = frozenset({"hero", "cta", "text", "split", "features"})
-
-
 def _render_block(block, t, index=None, editable=False, anchors=False):
     if not isinstance(block, dict):
         return ""
     btype = block.get("type")
     # Canvas needs the block index (for per-block CSS scoping) + editable, so it's
-    # dispatched here rather than through _RENDERERS' (block, t[, editable]) shape.
+    # dispatched here rather than through _RENDERERS' (block, t, editable) shape.
     if btype == "canvas":
         raw = _canvas(block, t, editable, index if index is not None else 0)
         return _apply_design(
@@ -627,7 +639,7 @@ def _render_block(block, t, index=None, editable=False, anchors=False):
         ) if raw else raw
     fn = _RENDERERS.get(btype)
     if fn:
-        raw = fn(block, t, editable) if btype in _EDITABLE_AWARE else fn(block, t)
+        raw = fn(block, t, editable)
     else:
         body = block.get("body") or block.get("heading")
         raw = _text({"body": body}, t) if body else ""

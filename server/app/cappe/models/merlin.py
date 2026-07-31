@@ -38,7 +38,13 @@ class CappeMerlinSelection(BaseModel):
     block: str = Field(max_length=100)
     # Dot path into the block, e.g. "heading" or "items.2.title" (set_field's
     # own convention) — None means the whole block (a card/element click).
+    # Mutually exclusive with `element` below.
     field: Optional[str] = Field(default=None, max_length=200)
+    # A freeform-canvas element id (the block's `elements[].id`) — set instead
+    # of `field` when the highlight is inside a `canvas` block, since those
+    # elements are addressed via `canvas_update {block, el, patch}`, a
+    # different op with a different id space than `set_field`'s dot paths.
+    element: Optional[str] = Field(default=None, max_length=100)
     kind: Literal["text", "image", "button", "element"] = "text"
     # Character offsets into the field's plain-string value. Both-or-neither —
     # None means "the whole field", not "start of field".

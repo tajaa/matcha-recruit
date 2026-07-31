@@ -121,17 +121,13 @@ export default function PageEditor() {
   // Refresh Merlin's view of live editor state every render. Assigned here
   // rather than at the useRef because `canvas` (the block selection) is
   // declared below the hook that consumes it.
-  // canvas.selection carries the iframe's numeric block index — converted to
-  // the block's stable `_k` id here, same as selectedBlock below, so a stale
-  // index (block deleted mid-flight) degrades to "not sent" rather than
-  // addressing the wrong block.
-  const selectionBlockKey = canvas.selection != null
-    ? (blocks[canvas.selection.block]?._k as string | undefined)
-    : undefined
-  const merlinSelection: MerlinSelection | null = canvas.selection && selectionBlockKey
+  // canvas.selection is already resolved to the block's stable `_k` at
+  // cz-selection receipt time (useCanvasBridge.ts) — no index lookup here.
+  const merlinSelection: MerlinSelection | null = canvas.selection
     ? {
-        block: selectionBlockKey, field: canvas.selection.field, kind: canvas.selection.kind,
-        start: canvas.selection.start, end: canvas.selection.end, text: canvas.selection.text,
+        block: canvas.selection.blockKey, field: canvas.selection.field, element: canvas.selection.element,
+        kind: canvas.selection.kind, start: canvas.selection.start, end: canvas.selection.end,
+        text: canvas.selection.text,
       }
     : null
   liveStateRef.current = {
@@ -145,15 +141,20 @@ export default function PageEditor() {
   const selectedBlockType = canvas.selBlock != null ? blocks[canvas.selBlock]?.type : undefined
   const selectedLabel = selectedBlockType ? BLOCK_SCHEMAS[selectedBlockType]?.label ?? null : null
   // The finer-grained chip ("Editing: 'Fresh' in Hero heading") — only shown
-  // when the selection names a specific FIELD (a range or a whole-field
-  // click); a bare element/section selection is already covered by
-  // selectedLabel's "Working on Hero" chip above, so showing both would say
-  // the same thing twice.
+  // when the selection names a specific FIELD or canvas ELEMENT (a range or a
+  // whole-field/element click); a bare section selection is already covered
+  // by selectedLabel's "Working on Hero" chip above, so showing both would
+  // say the same thing twice.
   const selectionChip = (() => {
     const sel = merlinSelection
-    if (!sel || !sel.field) return null
+    if (!sel || (!sel.field && !sel.element)) return null
     const blockLabel = selectedLabel || 'section'
-    const fieldLabel = sel.field.replace(/([a-z])([A-Z])/g, '$1 $2')
+    if (sel.element) {
+      // Canvas elements have no dot-path field name to show — the element id
+      // isn't user-meaningful, so the chip just names the block + kind.
+      return { label: `${sel.kind} element in ${blockLabel}`, onClear: () => canvas.setSelection(null) }
+    }
+    const fieldLabel = sel.field!.replace(/([a-z])([A-Z])/g, '$1 $2')
     if (sel.start != null && sel.end != null && sel.text) {
       const preview = sel.text.length > 40 ? `${sel.text.slice(0, 40)}…` : sel.text
       return { label: `"${preview}" in ${blockLabel} ${fieldLabel}`, onClear: () => canvas.setSelection(null) }

@@ -121,6 +121,21 @@ function deepSet(target: unknown, parts: string[], value: unknown): { ok: boolea
   return { ok: true, value: base }
 }
 
+/** Apply a `set_field`-style dot path to a block, returning the updated block
+ *  or `null` if the path doesn't match the block's shape (same refusal rules
+ *  as `deepSet` above — a container mismatch or index gap is refused, never
+ *  coerced). Shared by the `set_field` op applier below and the canvas
+ *  runtime's inline double-click edit (`cz-edit` in useCanvasBridge.ts), so a
+ *  dot-path field (e.g. a card's `items.2.title`) behaves identically
+ *  whichever path wrote it — `cz-edit` used to always assign a top-level key
+ *  literally named `"items.2.title"` instead of descending into the array. */
+export function applyFieldPath(block: CappeBlock, path: string, value: unknown): CappeBlock | null {
+  const [head, ...rest] = path.split('.')
+  if (!rest.length) return { ...block, [head]: value }
+  const r = deepSet(block[head], rest, value)
+  return r.ok ? { ...block, [head]: r.value } : null
+}
+
 function asRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
 }
@@ -196,16 +211,10 @@ export function applyMerlinOps(
         const idx = nextBlocks.findIndex((b) => b._k === resolveBlock(op.block))
         if (idx === -1) { results.push({ ok: false, summary: 'Skipped — section no longer exists' }); break }
         const block = nextBlocks[idx]
-        const [head, ...rest] = op.path.split('.')
-        let newVal: unknown = op.value
-        if (rest.length) {
-          const r = deepSet(block[head], rest, op.value)
-          if (!r.ok) { results.push({ ok: false, summary: `Skipped — "${op.path}" doesn't match this section's shape` }); break }
-          newVal = r.value
-        }
-        const updated = { ...block, [head]: newVal }
+        const updated = applyFieldPath(block, op.path, op.value)
+        if (!updated) { results.push({ ok: false, summary: `Skipped — "${op.path}" doesn't match this section's shape` }); break }
         nextBlocks = nextBlocks.map((b, i) => (i === idx ? updated : b))
-        results.push({ ok: true, summary: `Edited ${blockLabel(block.type)} — ${head}` })
+        results.push({ ok: true, summary: `Edited ${blockLabel(block.type)} — ${op.path.split('.')[0]}` })
         break
       }
       case 'set_design': {

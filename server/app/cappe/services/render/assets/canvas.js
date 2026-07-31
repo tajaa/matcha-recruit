@@ -72,15 +72,61 @@ function detectRange(el){
   var start=textOffset(el,range.startContainer,range.startOffset);
   var full=el.textContent||'';
   if(full.slice(start,start+raw.length)!==raw)return null;
-  return {start:start,end:start+raw.length,text:raw.slice(0,300)};
+  // Clamp text+end TOGETHER — reporting text.slice(0,300) but end=start+raw.length
+  // (the UNCLAMPED length) desyncs them: the server's exact-match anchor check
+  // (`actual[start:end] == text`) then fails on length alone for anything over
+  // 300 chars and silently falls back to a re-anchor/stale read instead.
+  var txt=raw.length>300?raw.slice(0,300):raw;
+  return {start:start,end:start+txt.length,text:txt};
+}
+// Selection persistence across a collapsing click: a second click inside a
+// field the user already range-selected collapses the browser Selection, and
+// without this a naive re-check would downgrade to "whole field selected" —
+// discarding the highlight the user is still looking at. Keyed per
+// (block,field-or-element) so switching fields always starts fresh.
+var lastRangeKey=null,lastRange=null;
+function rangeKey(block,field,element){return block+'|'+(field||'')+'|'+(element||'');}
+function detectRangeOrKeep(el,block,field,element){
+  var key=rangeKey(block,field,element);
+  var r=detectRange(el);
+  if(r){lastRangeKey=key;lastRange=r;return r;}
+  if(key===lastRangeKey&&lastRange)return lastRange;
+  lastRangeKey=key;lastRange=null;
+  return null;
+}
+// Shared by the click handler and the mouseup/selectionchange listeners below
+// (Selection-API events fire on `document`, not the field — drag-select can
+// end with the pointer outside the field, and keyboard shift+arrow selection
+// never fires a click at all). Posts nothing when there's no live range AND
+// no kept one — a plain collapsed click elsewhere is handled by the click
+// listener itself, not this path.
+function maybePostFieldSelection(el){
+  if(!el||themeMode||editing)return;
+  var block=el.closest&&el.closest('[data-cz-block]');if(!block)return;
+  var i=parseInt(block.getAttribute('data-cz-block'),10);
+  var isCanvasEl=el.classList&&el.classList.contains('cz-el');
+  var kind=el.getAttribute('data-cz-kind')||'text';
+  if(kind!=='text')return;
+  if(isCanvasEl){
+    var cid=el.getAttribute('data-cz-field');if(!cid)return;
+    var cr=detectRangeOrKeep(el,i,null,cid);
+    if(cr)postSelection(el,'text',i,null,cr.start,cr.end,cr.text,cid);
+  } else {
+    var field=el.getAttribute('data-cz-field');if(!field)return;
+    var fr=detectRangeOrKeep(el,i,field,null);
+    if(fr)postSelection(el,'text',i,field,fr.start,fr.end,fr.text);
+  }
 }
 // Selection contract for Merlin (highlight-driven precision design): posted
 // alongside the legacy cz-select on every field/element click, additive —
 // cz-select still drives block highlight + the floating inspector anchor.
-function postSelection(el,kind,block,field,start,end,text){
+// `field` is a set_field-style dot path (see BLOCK_FIELDS server-side);
+// `element` is a freeform-canvas element id (addressed via canvas_update, a
+// different op entirely) — mutually exclusive, never both set.
+function postSelection(el,kind,block,field,start,end,text,element){
   var r=el.getBoundingClientRect();
-  post({type:'cz-selection',block:block,field:field,kind:kind,start:start,end:end,
-        text:text,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
+  post({type:'cz-selection',block:block,field:field||null,element:element||null,kind:kind,
+        start:start,end:end,text:text,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
 }
 function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
 function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
@@ -107,11 +153,14 @@ document.addEventListener('click',function(e){
   var i=parseInt(b.getAttribute('data-cz-block'),10);
   if(ce){
     if(ce!==selEl){selectEl(ce);postSelectEl(ce);}
-    var cf=ce.getAttribute('data-cz-field');
-    if(cf){
+    // A `.cz-el` is a freeform-canvas element: its `data-cz-field` carries the
+    // element id (canvas_update's `el`), NOT a set_field dot path — post it as
+    // `element`, not `field`, so the server doesn't try to resolve it as one.
+    var cid=ce.getAttribute('data-cz-field');
+    if(cid){
       var ck=ce.getAttribute('data-cz-kind')||'text';
-      var cr=ck==='text'?detectRange(ce):null;
-      postSelection(ce,ck,i,cf,cr?cr.start:null,cr?cr.end:null,cr?cr.text:(ce.textContent||'').slice(0,300));
+      var cr=ck==='text'?detectRangeOrKeep(ce,i,null,cid):null;
+      postSelection(ce,ck,i,null,cr?cr.start:null,cr?cr.end:null,cr?cr.text:(ce.textContent||'').slice(0,300),cid);
     }
     return;
   }
@@ -121,15 +170,42 @@ document.addEventListener('click',function(e){
   post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
   if(f){
     var fk=f.getAttribute('data-cz-kind')||'text';
-    var fr=fk==='text'?detectRange(f):null;
+    var fr=fk==='text'?detectRangeOrKeep(f,i,f.getAttribute('data-cz-field'),null):null;
     postSelection(f,fk,i,f.getAttribute('data-cz-field'),fr?fr.start:null,fr?fr.end:null,fr?fr.text:(f.textContent||'').slice(0,300));
   } else {
     postSelection(b,'element',i,null,null,null,null);
   }
 },true);
+// Range capture beyond a plain click: a drag-select that ends with the
+// pointer outside the field (mouseup target != the field) never reaches the
+// click handler's range check, and keyboard shift+arrow selection never
+// fires a click at all. Debounced — selectionchange fires on every caret
+// tick during a drag, and this only needs the settled result.
+document.addEventListener('mouseup',function(e){
+  var f=e.target.closest&&e.target.closest('[data-cz-field]');
+  if(f)maybePostFieldSelection(f);
+});
+var _scTimer=null;
+document.addEventListener('selectionchange',function(){
+  clearTimeout(_scTimer);
+  _scTimer=setTimeout(function(){
+    var sel=window.getSelection&&window.getSelection();
+    if(!sel||!sel.rangeCount||sel.isCollapsed)return;
+    var node=sel.anchorNode;
+    var el=node&&(node.nodeType===1?node:node.parentElement);
+    var f=el&&el.closest&&el.closest('[data-cz-field]');
+    if(f)maybePostFieldSelection(f);
+  },120);
+});
 document.addEventListener('dblclick',function(e){
   if(themeMode||restrictMode)return;
   var f=e.target.closest&&e.target.closest('[data-cz-field]');if(!f)return;
+  // Images (hero/split art, canvas image elements) must never become
+  // contenteditable — typing into one posts cz-edit with the field's real
+  // dot path and the typed TEXT as `value`, which useCanvasBridge.ts then
+  // writes onto an image field, corrupting it with junk text. Buttons keep
+  // inline label editing (pre-existing behavior for canvas buttons).
+  if((f.getAttribute('data-cz-kind')||'text')==='image')return;
   e.preventDefault();
   if(editing&&editing!==f)editing.blur();
   clearHandles();
