@@ -1,11 +1,12 @@
-"""Pure-function tests for the four HR-ops staged actions (no DB/Gemini).
+"""Pure-function tests for the HR-ops staged actions (no DB/Gemini).
 
     cd server && ./venv/bin/python -m pytest tests/huume/test_huume_hr_ops.py -q
 
 Covers `evaluate_huume_action`'s ir_report / er_case / training_assign /
-pto_decision branches, the table-driven `_build_hr_ops_staged` confirm-match
-in agent.py, the registry entries, and the state-block lines that echo the id
-each confirm turn must pass back. Mirrors `test_huume_discipline.py`'s shape.
+pto_decision / ems_promote branches, the table-driven `_build_hr_ops_staged`
+confirm-match in agent.py, the registry entries, and the state-block lines
+that echo the id each confirm turn must pass back. Mirrors
+`test_huume_discipline.py`'s shape.
 
 The deliberate asymmetry worth knowing: ir_report/er_case do NOT run the
 hard-stop classifier that discipline_draft does — safety/harassment narrative
@@ -50,6 +51,15 @@ def _training(**overrides):
     return base
 
 
+EVENT_ID = "3f6b1c22-0000-4000-8000-000000000004"
+
+
+def _promote(**overrides):
+    base = {"type": "ems_promote", "status": "proposed", "event_id": EVENT_ID}
+    base.update(overrides)
+    return base
+
+
 def _pto(**overrides):
     base = {"type": "pto_decision", "status": "proposed",
             "request_id": PTO_ID, "decision": "approve"}
@@ -72,6 +82,7 @@ class TestStageAndAuthz:
         (_er(), "er_copilot"),
         (_training(), "training"),
         (_pto(), "time_off"),
+        (_promote(), "ems"),
     ]
 
     def test_fresh_call_stages(self):
@@ -222,6 +233,50 @@ class TestPtoDecisionValidation:
         assert verdict.action["note"] is None
 
 
+class TestEmsPromoteValidation:
+    def test_non_uuid_event_id_refuses(self):
+        verdict = _evaluate(_promote(event_id="not-a-uuid"), _features(ems=True))
+        assert verdict.kind == "refuse"
+        assert "lookup_context" in verdict.message
+
+    def test_bad_occurred_at_refuses(self):
+        verdict = _evaluate(_promote(occurred_at="whenever"), _features(ems=True))
+        assert verdict.kind == "refuse"
+
+    def test_valid_payload_proceeds(self):
+        verdict = _evaluate(_promote(), _features(ems=True))
+        assert verdict.ok
+        assert verdict.action["event_id"] == EVENT_ID
+
+    def test_iso_occurred_at_parsed_to_datetime(self):
+        # Unlike ir_report (which leaves occurred_at as a raw string —
+        # create_incident_core's own parser handles it), this one MUST be a
+        # real datetime object: ems.promote.promote_event runs
+        # naive_occurred_at on it, which checks .tzinfo — a bare string has
+        # no such attribute and the check would silently no-op.
+        import datetime
+        verdict = _evaluate(_promote(occurred_at="2026-07-30T17:20:00"), _features(ems=True))
+        assert verdict.ok
+        assert isinstance(verdict.action["occurred_at"], datetime.datetime)
+
+    def test_unknown_incident_type_and_severity_dropped(self):
+        verdict = _evaluate(_promote(incident_type="kerfuffle", severity="spicy"), _features(ems=True))
+        assert verdict.ok
+        assert verdict.action["incident_type"] is None
+        assert verdict.action["severity"] is None
+
+    def test_known_incident_type_and_severity_kept(self):
+        verdict = _evaluate(_promote(incident_type="Safety", severity="HIGH"), _features(ems=True))
+        assert verdict.action["incident_type"] == "safety"
+        assert verdict.action["severity"] == "high"
+
+    def test_no_hard_stop_on_behavioral_narrative(self):
+        # Same reasoning as ir_report: promoting an already-logged event is
+        # not new disclosure of the content, just a status change.
+        verdict = _evaluate(_promote(title="Repeated harassment complaint from front desk"), _features(ems=True))
+        assert verdict.ok
+
+
 class TestBuildHrOpsStaged:
     """The two-turn confirm match, compared against the TURN-START snapshot."""
 
@@ -267,6 +322,14 @@ class TestBuildHrOpsStaged:
         done = _pto(status="decided")
         _, confirming = _build_hr_ops_staged(spec, {"request_id": PTO_ID, "decision": "approve"}, done)
         assert confirming is False
+
+    def test_promote_ems_event_matches_on_event_id(self):
+        spec = _HR_OPS_TOOL_SPECS["promote_ems_event"]
+        existing = _promote()
+        _, confirming = _build_hr_ops_staged(spec, {"event_id": EVENT_ID}, existing)
+        assert confirming is True
+        _, other = _build_hr_ops_staged(spec, {"event_id": "3f6b1c22-0000-4000-8000-000000000099"}, existing)
+        assert other is False
 
     def test_employee_ids_coerced_to_strings(self):
         spec = _HR_OPS_TOOL_SPECS["assign_training"]
@@ -335,6 +398,7 @@ class TestRegistry:
             "open_er_case": {"description"},
             "assign_training": {"requirement_id", "employee_ids"},
             "decide_pto_request": {"request_id", "decision"},
+            "promote_ems_event": {"event_id"},
         }
         for name, required in expected.items():
             declared = set(TOOLS_BY_NAME[name].declaration.parameters.required or [])
@@ -361,6 +425,7 @@ class TestStateBlock:
             (_er(), "ef56ab78"),
             (_training(), REQ_ID),
             (_pto(), PTO_ID),
+            (_promote(), EVENT_ID),
         ]
         for action, needle in cases:
             block = build_state_block({"huume_action": action})

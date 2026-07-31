@@ -26,12 +26,12 @@ from google.genai import types
 LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents", "er_cases",
-    "pto_leave", "policies", "discipline", "compliance", "documents",
+    "pto_leave", "policies", "discipline", "compliance", "documents", "events",
 )
 
 # record_type values show_record accepts — the single source both the tool
 # schema's enum and record_view.py's dispatch table read from.
-SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "discipline")
+SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "discipline", "ems_event")
 
 
 @dataclass(frozen=True)
@@ -527,6 +527,55 @@ TOOLS: tuple[HuumeTool, ...] = (
             "employee relations", "er case", "er issue", "complaint about",
             "grievance", "investigation", "workplace complaint",
         ),
+    ),
+    # ---- EMS events skill (feature `ems`; promotion also needs `incidents`) --
+    _tool(
+        "promote_ems_event", "staged",
+        "Promote a logged EMS event into a real IR incident. This STAGES the "
+        "promotion for the admin's confirmation — nothing is filed until they "
+        "confirm on a LATER turn by calling this again with EXACTLY the same "
+        "event_id. Get event ids from lookup_context(topic='events'). The "
+        "event's own title/suggested type/severity are used unless overridden. "
+        "Promotion is one-way; the incident is a legal record editable in Incidents.",
+        properties={
+            "event_id": types.Schema(type=types.Type.STRING, description="The EMS event id, from lookup_context(topic='events') or show_record."),
+            "title": types.Schema(type=types.Type.STRING),
+            "incident_type": types.Schema(type=types.Type.STRING, enum=["safety", "behavioral", "property", "near_miss", "other"]),
+            "severity": types.Schema(type=types.Type.STRING, enum=["critical", "high", "medium", "low"]),
+            "occurred_at": types.Schema(type=types.Type.STRING, description="ISO datetime. Omit to use the event's logged time."),
+            "location": types.Schema(type=types.Type.STRING),
+        },
+        required=["event_id"],
+        intent_hints=("promote the event", "logged event", "make it an incident", "escalate the event"),
+    ),
+    # ---- IR Copilot bridge (feature `ir_copilot`) ----------------------------
+    _tool(
+        "ask_ir_copilot", "write",
+        "Ask the IR Copilot for guidance on an incident — a grounded summary, "
+        "open questions, and suggested next steps from the incident's own "
+        "record and cached analyses. The exchange is saved to the incident's "
+        "Copilot transcript on the IR detail page, where the admin can "
+        "continue it. Pass incident_id when more than one is in play; omit to "
+        "use the thread's active incident (e.g. one just promoted).",
+        properties={
+            "question": types.Schema(type=types.Type.STRING),
+            "incident_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["question"],
+        intent_hints=("incident copilot", "incident report pilot", "guidance on the incident"),
+    ),
+    _tool(
+        "run_incident_analysis", "write",
+        "Run one AI analysis on an incident and cache it to the incident's AI "
+        "Analysis panels: root_cause (primary cause, contributing factors, "
+        "prevention) or recommendations (corrective actions). Returns the "
+        "cached result instantly if it already ran.",
+        properties={
+            "analysis_type": types.Schema(type=types.Type.STRING, enum=["root_cause", "recommendations"]),
+            "incident_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["analysis_type"],
+        intent_hints=("root cause analysis", "corrective action recommendations"),
     ),
     _tool(
         "finish", "finish",

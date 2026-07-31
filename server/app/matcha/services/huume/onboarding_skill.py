@@ -122,6 +122,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "policies": "handbooks",
     "discipline": "discipline",
     "documents": "employees",
+    "events": "ems",
 }
 
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
@@ -367,6 +368,37 @@ async def _lookup_context_impl(
                 "topic": "er_cases",
                 "counts_by_status": {r["status"]: r["count"] for r in counts},
                 "cases": [dict(r) for r in rows],
+            }
+        if topic == "events":
+            # EMS channel-logged events. Narrative IS included (truncated) —
+            # see record_view._model_ems_events_batch's note for why this
+            # diverges from the incidents/er_cases no-narrative rule above:
+            # this is pre-promotion documentation typed openly in a channel,
+            # not yet a legal record. Ids included because promote_ems_event
+            # and show_record both take them.
+            window = _clamp_incident_days(days)
+            counts = await conn.fetch(
+                "SELECT status, COUNT(*) FROM ems_events WHERE company_id = $1 GROUP BY status",
+                company_id,
+            )
+            rows = await conn.fetch(
+                """
+                SELECT ev.id, ev.title, ev.category, ev.severity_hint, ev.status,
+                       ev.incident_recommendation, ev.incident_id,
+                       LEFT(ev.narrative, 400) AS narrative, ch.name AS channel_name, ev.created_at
+                FROM ems_events ev LEFT JOIN channels ch ON ch.id = ev.channel_id
+                WHERE ev.company_id = $1 AND ev.created_at >= NOW() - ($2 || ' days')::interval
+                  AND ($3::text IS NULL OR ev.title ILIKE '%' || $3 || '%' OR ev.narrative ILIKE '%' || $3 || '%')
+                ORDER BY ev.created_at DESC LIMIT 20
+                """,
+                company_id, str(window), query,
+            )
+            return {
+                "topic": "events",
+                "window_days": window,
+                "counts_by_status": {r["status"]: r["count"] for r in counts},
+                "events": [dict(r) for r in rows],
+                "note": "Promote one with promote_ems_event(event_id=...); open detail with show_record('ems_event', ...).",
             }
         if topic == "pto_leave":
             pto_rows = await conn.fetch(

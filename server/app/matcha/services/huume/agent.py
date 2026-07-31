@@ -45,7 +45,7 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, discipline_skill, er_skill, handbook_skill, legal_skill, onboarding_skill, record_view, routing, store
+from . import actions, discipline_skill, er_skill, handbook_skill, ir_skill, legal_skill, onboarding_skill, record_view, routing, store
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -294,6 +294,17 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Discipline decision not recorded",
         "done_status": "decided",
     },
+    "promote_ems_event": {
+        "action_type": "ems_promote",
+        "match_key": "event_id",
+        "mints_confirm_id": False,
+        "fields": ("event_id", "title", "incident_type", "severity", "occurred_at", "location"),
+        "staged_label": "Staged: promote event to incident",
+        "refused_label": "Event promotion refused",
+        "done_label": "Promoted event to incident",
+        "failed_label": "Event not promoted",
+        "done_status": "promoted",
+    },
 }
 
 
@@ -423,6 +434,10 @@ async def run_huume_turn(
 
     def _state_er() -> dict[str, Any]:
         val = state_updates.get("huume_er") or current_state.get("huume_er")
+        return val if isinstance(val, dict) else {}
+
+    def _state_ir() -> dict[str, Any]:
+        val = state_updates.get("huume_ir") or current_state.get("huume_ir")
         return val if isinstance(val, dict) else {}
 
     def _collect_citations(result: dict[str, Any]) -> None:
@@ -701,6 +716,13 @@ async def run_huume_turn(
                 result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
                 done = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": spec["done_status"] if done else "failed"}
+                # Promote hands the incident to the IR bridge: "now run the
+                # pilot on it" resolves without the model re-asking for an id.
+                if done and spec["action_type"] == "ems_promote" and result.get("record_id"):
+                    state_updates["huume_ir"] = {
+                        "incident_id": result["record_id"],
+                        "incident_number": result.get("record_label"),
+                    }
                 # Post-commit enrichment the executors hand back as
                 # (fn, args, kwargs); same best-effort contract as
                 # draft_discipline above — a failed enrichment must not fail a
@@ -893,6 +915,38 @@ async def run_huume_turn(
                 step = recorder.record(
                     tool=name, kind="write",
                     label="Ran ER Copilot analysis" if ok else "ER Copilot analysis failed",
+                    status="ok" if ok else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "ask_ir_copilot":
+                result = await ir_skill.ask_copilot(
+                    company_id=company_id, actor_user_id=user_id,
+                    incident_id=args.get("incident_id"), state_incident_id=_state_ir().get("incident_id"),
+                    question=str(args.get("question") or ""),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_ir"] = {"incident_id": result["incident_id"], "incident_number": result.get("incident_number")}
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Ran IR Copilot" if ok else "IR Copilot failed",
+                    status="ok" if ok else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "run_incident_analysis":
+                result = await ir_skill.run_analysis(
+                    company_id=company_id, actor_user_id=user_id,
+                    incident_id=args.get("incident_id"), state_incident_id=_state_ir().get("incident_id"),
+                    analysis_type=str(args.get("analysis_type") or ""),
+                )
+                ok = result.get("status") == "ok"
+                if ok:
+                    state_updates["huume_ir"] = {"incident_id": result["incident_id"], "incident_number": _state_ir().get("incident_number")}
+                step = recorder.record(
+                    tool=name, kind="write",
+                    label="Ran incident analysis" if ok else "Incident analysis failed",
                     status="ok" if ok else "error", detail=result.get("message"),
                 )
                 return _json_safe(result), step

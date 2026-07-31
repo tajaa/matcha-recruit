@@ -20,30 +20,11 @@ from app.matcha.models.ems import (
 from app.matcha.services.ems import categories
 from app.matcha.services.ems.event_intake import coerce_doc
 from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, promote_event
+from app.matcha.services.ems.queries import EVENT_SELECT as _EVENT_SELECT, _NAME_EXPR  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
-
-_EVENT_SELECT = f"""
-    SELECT ev.id, ev.company_id, ev.channel_id, ch.name AS channel_name,
-           ev.message_id, ev.reporter_user_id, {_NAME_EXPR} AS reporter_name,
-           ev.title, ev.category, ev.severity_hint, ev.doc, ev.narrative,
-           ev.incident_recommendation, ev.incident_reasoning,
-           ev.suggested_incident_type, ev.suggested_severity,
-           ev.status, ev.incident_id,
-           (ev.clarify_message_id IS NOT NULL AND ev.status = 'logged') AS awaiting_reply,
-           ev.clarification_rounds,
-           ev.created_at, ev.updated_at
-    FROM ems_events ev
-    LEFT JOIN channels ch ON ch.id = ev.channel_id
-    LEFT JOIN users u ON u.id = ev.reporter_user_id
-    LEFT JOIN clients c ON c.user_id = u.id
-    LEFT JOIN employees e ON e.user_id = u.id
-    LEFT JOIN admins a ON a.user_id = u.id
-"""
 
 
 def _row_to_event(row) -> EmsEventOut:

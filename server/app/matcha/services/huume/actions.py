@@ -102,6 +102,10 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "amend_handbook": "handbook_pilot",
     "discipline_from_incident": "discipline",
     "discipline_decision": "discipline",
+    # The incidents+role+status half of this gate is re-asserted per call in
+    # ems_skill.execute_promote via ems.promote.evaluate_promote — this
+    # registry is single-flag, same as every other entry here.
+    "ems_promote": "ems",
 }
 
 # discipline_from_incident / discipline_decision — the incident-triggered
@@ -232,6 +236,9 @@ def evaluate_huume_action(
     if action_type == "discipline_decision":
         return _validate_discipline_decision(staged_action)
 
+    if action_type == "ems_promote":
+        return _validate_ems_promote(staged_action)
+
     if action_type == "amend_handbook":
         # No field validation needed beyond "there's a target" — ownership,
         # archived-status, and upload-vs-template refusal all happen inside
@@ -313,6 +320,43 @@ def _validate_ir_report(staged: dict[str, Any]) -> HuumeVerdict:
     severity = str(staged.get("severity") or "").strip().lower()
     if severity in _IR_SEVERITIES:
         normalized["severity"] = severity
+    return HuumeVerdict(kind="proceed", message="", action=normalized)
+
+
+def _validate_ems_promote(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for promoting a logged EMS event into an IR
+    incident. No hard-stop classifier re-check, same reasoning as
+    _validate_ir_report — an event's narrative already went through the
+    sanctioned EMS intake channel; this only decides whether to promote it.
+
+    occurred_at is parsed to a real datetime (not left as a string, unlike
+    _validate_ir_report) because ems.promote.promote_event runs
+    naive_occurred_at on it, which needs a datetime to check tzinfo against —
+    a bare string would silently no-op that check."""
+    event_id = str(staged.get("event_id") or "").strip()
+    if not _is_uuid(event_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="A valid event_id is required — get one from lookup_context(topic='events').",
+        )
+
+    occurred_at = None
+    if staged.get("occurred_at") not in (None, ""):
+        occurred_at = _parse_iso_datetime(staged["occurred_at"])
+        if occurred_at is None:
+            return HuumeVerdict(kind="refuse", message="occurred_at isn't a valid ISO datetime.")
+
+    incident_type = str(staged.get("incident_type") or "").strip().lower()
+    severity = str(staged.get("severity") or "").strip().lower()
+    normalized: dict[str, Any] = {
+        "type": "ems_promote",
+        "event_id": event_id,
+        "title": (str(staged.get("title") or "").strip() or None),
+        "incident_type": incident_type if incident_type in _IR_INCIDENT_TYPES else None,
+        "severity": severity if severity in _IR_SEVERITIES else None,
+        "occurred_at": occurred_at,
+        "location": (str(staged.get("location") or "").strip() or None),
+    }
     return HuumeVerdict(kind="proceed", message="", action=normalized)
 
 
@@ -562,10 +606,13 @@ PILOT_TOOL_REQUIRED_FEATURE: dict[str, str] = {
     "promote_handbook_drafts": "handbook_pilot",
     "er_case_brief": "er_copilot",
     "ask_er_copilot": "er_copilot",
+    "ask_ir_copilot": "ir_copilot",
+    "run_incident_analysis": "ir_copilot",
 }
 
 _PILOT_FEATURE_LABEL = {
     "legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot", "er_copilot": "ER Copilot",
+    "ir_copilot": "IR Copilot",
 }
 
 
@@ -781,6 +828,11 @@ async def execute_huume_action(
     if action.get("type") in _DISCIPLINE_SKILL_ACTIONS:
         from app.matcha.services.huume import discipline_skill
         return await discipline_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    if action.get("type") == "ems_promote":
+        from app.matcha.services.huume import ems_skill
+        return await ems_skill.execute_promote(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     return {"status": "error", "message": "Unsupported action."}

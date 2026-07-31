@@ -20,7 +20,7 @@ from app.matcha.services.huume.tools import TOOLS_BY_NAME
 
 FEATURES_ON = {
     "huume": True, "matcha_work": True,
-    "legal_defense": True, "handbook_pilot": True, "er_copilot": True,
+    "legal_defense": True, "handbook_pilot": True, "er_copilot": True, "ir_copilot": True,
 }
 
 
@@ -50,6 +50,12 @@ class TestEvaluatePilotTool:
         for tool in ("draft_handbook_content", "promote_handbook_drafts"):
             reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
             assert reason and "handbook_pilot" in reason
+
+    def test_ir_tools_require_ir_copilot(self):
+        features = {**FEATURES_ON, "ir_copilot": False}
+        for tool in ("ask_ir_copilot", "run_incident_analysis"):
+            reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
+            assert reason and "IR Copilot" in reason
 
     def test_er_tools_require_er_copilot(self):
         features = {**FEATURES_ON, "er_copilot": False}

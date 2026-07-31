@@ -36,6 +36,7 @@ RECORD_REQUIRED_FEATURE: dict[str, str] = {
     "employee": "employees",
     "credential": "credential_templates",
     "discipline": "discipline",
+    "ems_event": "ems",
 }
 
 # Working-set cap on the side panel — also the per-call cap on show_record,
@@ -259,12 +260,55 @@ async def _model_disciplines_batch(conn, company_id: UUID, rids: list[UUID]) -> 
     return out
 
 
+async def _model_ems_events_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    # Unlike every other batch builder above, this INCLUDES a truncated
+    # narrative + doc. An EMS event is pre-promotion documentation the
+    # reporter typed openly in a channel — not yet a legal record. The
+    # strict no-narrative rule attaches the moment it IS promoted: it
+    # becomes an ir_incidents row and _model_incidents_batch (which excludes
+    # description) is what the model sees from then on. Deliberate product
+    # call, 2026-07-31.
+    if not rids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT id, title, category, severity_hint, status, incident_recommendation,
+               suggested_incident_type, suggested_severity, narrative, doc, created_at
+        FROM ems_events
+        WHERE id = ANY($1::uuid[]) AND company_id = $2
+        """,
+        rids, company_id,
+    )
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        narrative = data.get("narrative") or ""
+        doc = data.get("doc")
+        if isinstance(doc, str):
+            doc = json.loads(doc) if doc else {}
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": data.get("title") or narrative[:60] or "Event",
+            "category": data.get("category"),
+            "record_status": data.get("status"),
+            "severity_hint": data.get("severity_hint"),
+            "incident_recommendation": bool(data.get("incident_recommendation")),
+            "suggested_incident_type": data.get("suggested_incident_type"),
+            "suggested_severity": data.get("suggested_severity"),
+            "narrative": narrative[:500],
+            "doc": doc or {},
+            "created_at": _iso(data.get("created_at")),
+        }
+    return out
+
+
 _MODEL_BATCH_BUILDERS = {
     "incident": _model_incidents_batch,
     "er_case": _model_er_cases_batch,
     "employee": _model_employees_batch,
     "credential": _model_credentials_batch,
     "discipline": _model_disciplines_batch,
+    "ems_event": _model_ems_events_batch,
 }
 # Kept for the record-type-parity test (SHOW_RECORD_TYPES == _MODEL_BUILDERS
 # == ... == _VIEW_BUILDERS) — same key set as _MODEL_BATCH_BUILDERS.
@@ -639,12 +683,67 @@ async def _build_discipline_view(conn, company_id: UUID, rid: UUID) -> Optional[
     }
 
 
+_EMS_STATUS_TONE = {"logged": "amber", "promoted": "emerald", "dismissed": "zinc"}
+
+
+async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+    from app.matcha.services.ems import categories
+    from app.matcha.services.ems.queries import EVENT_SELECT
+
+    row = await conn.fetchrow(f"{EVENT_SELECT} WHERE ev.id = $1 AND ev.company_id = $2", rid, company_id)
+    if not row:
+        return None
+    data = dict(row)
+    doc = data.get("doc")
+    if isinstance(doc, str):
+        doc = json.loads(doc) if doc else {}
+
+    status = data.get("status") or "logged"
+    chips = [
+        {"label": categories.category_label(data.get("category")), "tone": "zinc"},
+        {"label": status.title(), "tone": _EMS_STATUS_TONE.get(status, "zinc")},
+    ]
+    if data.get("severity_hint"):
+        chips.append({"label": data["severity_hint"].title(), "tone": _SEVERITY_TONE.get(data["severity_hint"], "zinc")})
+    if data.get("incident_recommendation"):
+        chips.append({"label": "Flagged for incident review", "tone": "orange"})
+
+    meta = [
+        {"label": "Channel", "value": f"#{data.get('channel_name')}" if data.get("channel_name") else "—"},
+        {"label": "Reported by", "value": data.get("reporter_name") or "—"},
+        {"label": "Logged", "value": _iso(data.get("created_at")) or "—"},
+    ]
+    if data.get("incident_id"):
+        meta.append({"label": "Incident", "value": f"/app/ir/{data['incident_id']}"})
+
+    sections = []
+    if data.get("narrative"):
+        sections.append({"label": "Narrative", "body": data["narrative"]})
+    for key, value in (doc or {}).items():
+        if isinstance(value, str) and value.strip():
+            sections.append({"label": key.replace("_", " ").title(), "body": value})
+    if data.get("incident_reasoning"):
+        sections.append({"label": "Incident reasoning", "body": data["incident_reasoning"]})
+
+    return {
+        "record_type": "ems_event",
+        "record_id": str(data["id"]),
+        "title": data.get("title") or categories.category_label(data.get("category")),
+        "subtitle": None,
+        "chips": chips,
+        "meta": meta,
+        "sections": sections,
+        "link": f"/work/events/{data['id']}",
+    }
+
+
 _VIEW_BUILDERS = {
     "incident": _build_incident_view,
     "er_case": _build_er_case_view,
     "employee": _build_employee_view,
     "credential": _build_credential_view,
     "discipline": _build_discipline_view,
+    "ems_event": _build_ems_event_view,
 }
 
 
