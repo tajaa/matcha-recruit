@@ -123,13 +123,11 @@ export default function PageEditor() {
   // declared below the hook that consumes it.
   // canvas.selection is already resolved to the block's stable `_k` at
   // cz-selection receipt time (useCanvasBridge.ts) — no index lookup here.
+  // CanvasSelection's shape is a structural subset of MerlinSelection (same
+  // field names now that both use `block`), so no per-field remap is needed —
+  // one used to exist here and silently dropped any field added to one type
+  // but not the other.
   const merlinSelection: MerlinSelection | null = canvas.selection
-    ? {
-        block: canvas.selection.blockKey, field: canvas.selection.field, element: canvas.selection.element,
-        kind: canvas.selection.kind, start: canvas.selection.start, end: canvas.selection.end,
-        text: canvas.selection.text,
-      }
-    : null
   liveStateRef.current = {
     blocks,
     theme: themeEditor.theme,
@@ -148,7 +146,13 @@ export default function PageEditor() {
   const selectionChip = (() => {
     const sel = merlinSelection
     if (!sel || (!sel.field && !sel.element)) return null
-    const blockLabel = selectedLabel || 'section'
+    // Resolve the block label from the selection's OWN `_k` (sel.block), not
+    // from canvas.selBlock's numeric index — those can point at different
+    // blocks for a moment (e.g. right after a Merlin turn inserts/reorders
+    // sections, before selBlock's index-derived state catches up), and this
+    // chip is the user's only statement of what their next message acts on.
+    const selBlockType = blocks.find((b) => b._k === sel.block)?.type
+    const blockLabel = (selBlockType ? BLOCK_SCHEMAS[selBlockType]?.label : null) || selectedLabel || 'section'
     if (sel.element) {
       // Canvas elements have no dot-path field name to show — the element id
       // isn't user-meaningful, so the chip just names the block + kind.

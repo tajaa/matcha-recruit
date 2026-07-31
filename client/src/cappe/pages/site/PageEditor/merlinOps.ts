@@ -129,8 +129,14 @@ function deepSet(target: unknown, parts: string[], value: unknown): { ok: boolea
  *  dot-path field (e.g. a card's `items.2.title`) behaves identically
  *  whichever path wrote it — `cz-edit` used to always assign a top-level key
  *  literally named `"items.2.title"` instead of descending into the array. */
+// Structural keys a dot-path must never be able to reach — overwriting one
+// would corrupt the block's identity/design bag rather than its content.
+const _RESERVED_PATH_KEYS = new Set(['_k', 'id', 'type', '_design'])
+
 export function applyFieldPath(block: CappeBlock, path: string, value: unknown): CappeBlock | null {
+  if (!path) return null
   const [head, ...rest] = path.split('.')
+  if (!head || _RESERVED_PATH_KEYS.has(head)) return null
   if (!rest.length) return { ...block, [head]: value }
   const r = deepSet(block[head], rest, value)
   return r.ok ? { ...block, [head]: r.value } : null

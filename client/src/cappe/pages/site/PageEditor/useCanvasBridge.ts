@@ -8,11 +8,14 @@ import { applyFieldPath } from './merlinOps'
  *  handler, where `blocksRef` is live truth) rather than at send time — a
  *  block delete/insert/undo between the click and a later render can't
  *  silently repoint an old numeric index at a different block. If the
- *  reported index doesn't resolve to a real block, no selection is set at
- *  all (same "stale index degrades to not sent" contract `cz-drop-image`
- *  already uses via index.tsx's `_k` lookup). */
+ *  reported index doesn't resolve to a real block, the existing selection is
+ *  left untouched rather than cleared — the iframe's rendered DOM can lag
+ *  parent `blocks` state (a debounced/suspended preview), so "can't resolve
+ *  this index right now" is not the same claim as "the block is gone"; the
+ *  staleness effect below is what actually clears a selection once its block
+ *  is confirmed gone. */
 export type CanvasSelection = {
-  blockKey: string
+  block: string
   /** `set_field`-style dot path (see server `BLOCK_FIELDS`) — null for a
    *  whole-block/element selection. Mutually exclusive with `element`. */
   field: string | null
@@ -125,7 +128,7 @@ export function useCanvasBridge(
   // entirely. Drop it the moment that happens, rather than letting a later
   // Merlin turn address a block that no longer exists.
   useEffect(() => {
-    setSelection((s) => (s && !blocks.some((b) => b._k === s.blockKey) ? null : s))
+    setSelection((s) => (s && !blocks.some((b) => b._k === s.block) ? null : s))
   }, [blocks])
 
   // Canvas bridge: the framed runtime posts selection/edit/reorder events; we
@@ -172,16 +175,36 @@ export function useCanvasBridge(
         }
         case 'cz-selection': {
           const blockKey = blocksRef.current[d.block]?._k as string | undefined
-          setSelection(blockKey ? {
-            blockKey, field: d.field ?? null, element: d.element ?? null, kind: d.kind || 'text',
+          // An index that doesn't resolve (the iframe's rendered DOM lagging
+          // parent `blocks` state — e.g. a debounced/suspended preview after
+          // a delete) means "can't tell what this points at now", not "the
+          // user's existing selection is gone" — leave it alone rather than
+          // wiping a still-valid highlight.
+          setSelection((s) => (blockKey ? {
+            block: blockKey, field: d.field ?? null, element: d.element ?? null, kind: d.kind || 'text',
             start: d.start ?? null, end: d.end ?? null, text: d.text ?? null,
-          } : null)
+          } : s))
           break
         }
         case 'cz-edit': {
+          // Defense in depth against an image field ever reaching contenteditable
+          // (canvas.js's dblclick handler is the primary guard, and blur now
+          // tells us the kind it saw) — never let typed text overwrite an image
+          // URL even if that guard is ever bypassed or the attribute is dropped.
+          if (d.kind === 'image') break
           const b = blocksRef.current[d.block]
-          if (isCanvasBlock(b)) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.field ? { ...el, text: d.value } : el)) } : x)))
-          else if (b) {
+          if (isCanvasBlock(b)) {
+            setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.field ? { ...el, text: d.value } : el)) } : x)))
+            // Same re-anchor as the non-canvas branch below, for a freeform
+            // canvas element: the selection's range is offsets into the OLD
+            // element text, which this edit just moved or deleted.
+            setSelection((s) => {
+              if (!s || s.block !== b?._k || s.element !== d.field) return s
+              if (s.start == null || s.end == null || !s.text) return s
+              const idx = typeof d.value === 'string' ? d.value.indexOf(s.text) : -1
+              return idx === -1 ? { ...s, start: null, end: null, text: null } : { ...s, start: idx, end: idx + s.text.length }
+            })
+          } else if (b) {
             // `d.field` is a set_field-style dot path (a list-item field like
             // "items.2.title" is addressable since P0's full-coverage tagging) —
             // route through the same applyFieldPath the Merlin op applier uses,
@@ -189,21 +212,30 @@ export function useCanvasBridge(
             // write a bogus key named "items.2.title" instead of descending
             // into the array.
             const updated = applyFieldPath(b, d.field, d.value)
-            if (updated) {
-              setBlocks((bs) => bs.map((x, j) => (j === d.block ? updated : x)))
-              // The current selection's range is offsets into the OLD field
-              // value — an edit to that same field just moved or deleted the
-              // text it names. Re-anchor by searching the new value for the
-              // same substring (same idea as the server's own re-anchor in
-              // turn.py); drop the range (fall back to whole-field) if the
-              // text is gone, rather than keep pointing at stale offsets.
-              setSelection((s) => {
-                if (!s || s.blockKey !== updated._k || s.field !== d.field) return s
-                if (s.start == null || s.end == null || !s.text) return s
-                const idx = typeof d.value === 'string' ? d.value.indexOf(s.text) : -1
-                return idx === -1 ? { ...s, start: null, end: null, text: null } : { ...s, start: idx, end: idx + s.text.length }
-              })
+            if (!updated) {
+              // The render side is expected to only ever emit a path
+              // BLOCK_FIELDS actually supports (server/app/cappe/services/
+              // merlin/catalog.py) — reaching here means that invariant broke
+              // somewhere upstream. The user's typed edit is dropped either
+              // way (writing a bogus top-level key was the worse alternative,
+              // see applyFieldPath's own doc), but this should never be
+              // silent — there's no toast plumbed into this hook.
+              console.warn(`cz-edit: "${d.field}" doesn't match block ${b.type}'s shape — edit dropped`)
+              break
             }
+            setBlocks((bs) => bs.map((x, j) => (j === d.block ? updated : x)))
+            // The current selection's range is offsets into the OLD field
+            // value — an edit to that same field just moved or deleted the
+            // text it names. Re-anchor by searching the new value for the
+            // same substring (same idea as the server's own re-anchor in
+            // turn.py); drop the range (fall back to whole-field) if the
+            // text is gone, rather than keep pointing at stale offsets.
+            setSelection((s) => {
+              if (!s || s.block !== updated._k || s.field !== d.field) return s
+              if (s.start == null || s.end == null || !s.text) return s
+              const idx = typeof d.value === 'string' ? d.value.indexOf(s.text) : -1
+              return idx === -1 ? { ...s, start: null, end: null, text: null } : { ...s, start: idx, end: idx + s.text.length }
+            })
           }
           break
         }

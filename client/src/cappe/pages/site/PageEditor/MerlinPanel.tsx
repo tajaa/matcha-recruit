@@ -850,35 +850,35 @@ export function MerlinDrawer({ merlin, selectedLabel, selectionChip = null }: {
             {/* Acknowledges the editor's current selection — "this is what
                 your next message will act on" — so a request like "make this
                 warmer" has an obvious referent instead of the user wondering
-                whether Merlin knows what "this" is. */}
-            {selectionChip ? (
-              <div
-                key={selectionChip.label}
-                className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"
-              >
-                <MousePointerClick className="h-3 w-3 shrink-0" />
-                <span className="flex-1 truncate">
-                  Editing: <strong className="font-semibold">{selectionChip.label}</strong>
-                </span>
-                <button
-                  onClick={selectionChip.onClear}
-                  className="shrink-0 rounded p-0.5 text-emerald-300/70 hover:bg-emerald-500/10 hover:text-emerald-200"
-                  title="Clear selection"
+                whether Merlin knows what "this" is. selectionChip (a specific
+                field/element) takes priority over the coarser selectedLabel
+                (a bare section) — same content either way, differing only in
+                copy and whether a clear button applies. */}
+            {(selectionChip || selectedLabel) && (() => {
+              const chip = selectionChip ?? { label: selectedLabel as string, onClear: null }
+              return (
+                <div
+                  key={chip.label}
+                  className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ) : selectedLabel && (
-              <div
-                key={selectedLabel}
-                className="mb-2 flex items-center gap-1.5 rounded-lg border border-emerald-700/30 bg-emerald-500/[0.06] px-2.5 py-1.5 text-[11px] text-emerald-300"
-              >
-                <MousePointerClick className="h-3 w-3 shrink-0" />
-                <span>
-                  Working on <strong className="font-semibold">{selectedLabel}</strong> — what should we do here?
-                </span>
-              </div>
-            )}
+                  <MousePointerClick className="h-3 w-3 shrink-0" />
+                  <span className="flex-1 truncate">
+                    {selectionChip
+                      ? <>Editing: <strong className="font-semibold">{chip.label}</strong></>
+                      : <>Working on <strong className="font-semibold">{chip.label}</strong> — what should we do here?</>}
+                  </span>
+                  {chip.onClear && (
+                    <button
+                      onClick={chip.onClear}
+                      className="shrink-0 rounded p-0.5 text-emerald-300/70 hover:bg-emerald-500/10 hover:text-emerald-200"
+                      title="Clear selection"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
             {/* Model tier. Lite is free on every plan; the rest need Pro/Business.
                 Locked options stay visible (and selectable) — the server clamps
                 to lite — so the upgrade path is discoverable instead of hidden. */}

@@ -82,16 +82,19 @@ function detectRange(el){
 // Selection persistence across a collapsing click: a second click inside a
 // field the user already range-selected collapses the browser Selection, and
 // without this a naive re-check would downgrade to "whole field selected" —
-// discarding the highlight the user is still looking at. Keyed per
-// (block,field-or-element) so switching fields always starts fresh.
-var lastRangeKey=null,lastRange=null;
-function rangeKey(block,field,element){return block+'|'+(field||'')+'|'+(element||'');}
-function detectRangeOrKeep(el,block,field,element){
-  var key=rangeKey(block,field,element);
+// discarding the highlight the user is still looking at. Keyed on the actual
+// DOM element (identity, not the numeric `data-cz-block` index) — the index
+// shifts on every reorder/insert/delete, so two DIFFERENT blocks can share an
+// index across a quick reorder-then-click and the old string key would then
+// hand back a stale range from the wrong block. A different DOM node is
+// always a fresh start; the same node is the only thing this cache means to
+// recognize.
+var lastRangeEl=null,lastRange=null;
+function detectRangeOrKeep(el){
   var r=detectRange(el);
-  if(r){lastRangeKey=key;lastRange=r;return r;}
-  if(key===lastRangeKey&&lastRange)return lastRange;
-  lastRangeKey=key;lastRange=null;
+  if(r){lastRangeEl=el;lastRange=r;return r;}
+  if(el===lastRangeEl&&lastRange)return lastRange;
+  lastRangeEl=el;lastRange=null;
   return null;
 }
 // Shared by the click handler and the mouseup/selectionchange listeners below
@@ -109,11 +112,11 @@ function maybePostFieldSelection(el){
   if(kind!=='text')return;
   if(isCanvasEl){
     var cid=el.getAttribute('data-cz-field');if(!cid)return;
-    var cr=detectRangeOrKeep(el,i,null,cid);
+    var cr=detectRangeOrKeep(el);
     if(cr)postSelection(el,'text',i,null,cr.start,cr.end,cr.text,cid);
   } else {
     var field=el.getAttribute('data-cz-field');if(!field)return;
-    var fr=detectRangeOrKeep(el,i,field,null);
+    var fr=detectRangeOrKeep(el);
     if(fr)postSelection(el,'text',i,field,fr.start,fr.end,fr.text);
   }
 }
@@ -123,7 +126,17 @@ function maybePostFieldSelection(el){
 // `field` is a set_field-style dot path (see BLOCK_FIELDS server-side);
 // `element` is a freeform-canvas element id (addressed via canvas_update, a
 // different op entirely) — mutually exclusive, never both set.
+// A single drag-select/click can reach here up to 3x (the click handler's own
+// range check, the mouseup listener, and the debounced selectionchange
+// listener) — each would otherwise post a fresh object and force a parent
+// re-render. Skip an exact repeat of the last post (rect excluded — the
+// parent only uses it to reposition the floating inspector, not for equality
+// of "did the selection change").
+var lastPosted=null;
 function postSelection(el,kind,block,field,start,end,text,element){
+  var key=block+'|'+kind+'|'+(field||'')+'|'+(element||'')+'|'+start+'|'+end+'|'+(text||'');
+  if(key===lastPosted)return;
+  lastPosted=key;
   var r=el.getBoundingClientRect();
   post({type:'cz-selection',block:block,field:field||null,element:element||null,kind:kind,
         start:start,end:end,text:text,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
@@ -159,7 +172,7 @@ document.addEventListener('click',function(e){
     var cid=ce.getAttribute('data-cz-field');
     if(cid){
       var ck=ce.getAttribute('data-cz-kind')||'text';
-      var cr=ck==='text'?detectRangeOrKeep(ce,i,null,cid):null;
+      var cr=ck==='text'?detectRangeOrKeep(ce):null;
       postSelection(ce,ck,i,null,cr?cr.start:null,cr?cr.end:null,cr?cr.text:(ce.textContent||'').slice(0,300),cid);
     }
     return;
@@ -170,7 +183,7 @@ document.addEventListener('click',function(e){
   post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
   if(f){
     var fk=f.getAttribute('data-cz-kind')||'text';
-    var fr=fk==='text'?detectRangeOrKeep(f,i,f.getAttribute('data-cz-field'),null):null;
+    var fr=fk==='text'?detectRangeOrKeep(f):null;
     postSelection(f,fk,i,f.getAttribute('data-cz-field'),fr?fr.start:null,fr?fr.end:null,fr?fr.text:(f.textContent||'').slice(0,300));
   } else {
     postSelection(b,'element',i,null,null,null,null);
@@ -222,9 +235,9 @@ document.addEventListener('blur',function(e){
   if(!editing||e.target!==editing)return;
   var f=editing;editing=null;
   f.removeAttribute('contenteditable');f.classList.remove('cz-editing');
-  var i=idxOf(f),field=f.getAttribute('data-cz-field');
+  var i=idxOf(f),field=f.getAttribute('data-cz-field'),kind=f.getAttribute('data-cz-kind')||'text';
   if(cancelEdit){f.innerText=origText;cancelEdit=false;}
-  else{var v=f.innerText.replace(/\s+$/,'');if(v!==origText)post({type:'cz-edit',block:i,field:field,value:v});}
+  else{var v=f.innerText.replace(/\s+$/,'');if(v!==origText)post({type:'cz-edit',block:i,field:field,value:v,kind:kind});}
   if(selEl===f)addHandles(f);
   post({type:'cz-editing-end'});
 },true);

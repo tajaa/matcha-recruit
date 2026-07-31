@@ -13,6 +13,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services import render as R  # noqa: E402
+from app.cappe.services.merlin.catalog import BLOCK_FIELDS  # noqa: E402
 from app.cappe.services.merlin.turn import (  # noqa: E402
     _resolve_element_text,
     _resolve_field_text,
@@ -153,6 +154,30 @@ def test_no_selection_and_no_selected_block_is_nothing():
     assert "SELECTED: nothing" in line
 
 
+def test_field_truly_missing_falls_back_to_nothing():
+    # Not "changed since selection" (that's test_text_gone_degrades_to_whole_field)
+    # — this field never existed on the block at all (a stale/hallucinated
+    # dot-path). Must not be cited to the model as if it existed.
+    sel = {"block": "b1", "field": "ghostfield", "start": None, "end": None, "text": None, "kind": "text"}
+    line = build_selection_prompt_line(sel, _BLOCKS, None)
+    assert "SELECTED: nothing" in line
+    assert "ghostfield" not in line
+
+
+def test_field_truly_missing_with_range_falls_back_to_nothing():
+    sel = {"block": "b1", "field": "ghostfield", "start": 0, "end": 3, "text": "abc", "kind": "text"}
+    line = build_selection_prompt_line(sel, _BLOCKS, None)
+    assert "SELECTED: nothing" in line
+    assert "ghostfield" not in line
+
+
+def test_element_truly_missing_falls_back_to_nothing():
+    sel = {"block": "cv1", "field": None, "element": "ghostel", "start": None, "end": None, "text": None, "kind": "text"}
+    line = build_selection_prompt_line(sel, _CANVAS_BLOCKS, None)
+    assert "SELECTED: nothing" in line
+    assert "ghostel" not in line
+
+
 # --- render coverage: every block type tags its text fields -----------------
 # One fixture per type, populated so every text/textarea field this type
 # supports actually renders. Values are the field's own dotted path, so the
@@ -165,20 +190,20 @@ _COVERAGE_FIXTURES: dict[str, dict] = {
              "subheading": "subheading", "cta": "cta", "cta2": "cta2"},
     "features": {"type": "features", "heading": "heading", "subheading": "subheading",
                  "items": [{"title": "items.0.title", "body": "items.0.body"}]},
-    "gallery": {"type": "gallery", "heading": "heading", "subheading": "subheading",
+    "gallery": {"type": "gallery", "heading": "heading",
                 "images": [{"url": "https://x.test/a.png", "caption": "images.0.caption"}]},
-    "pricing": {"type": "pricing", "heading": "heading", "subheading": "subheading",
+    "pricing": {"type": "pricing", "heading": "heading",
                 "plans": [{"name": "plans.0.name", "price": "plans.0.price", "period": "mo",
                            "cta": "plans.0.cta", "ctaHref": "https://x.test"}]},
-    "testimonial": {"type": "testimonial", "heading": "heading", "subheading": "subheading",
+    "testimonial": {"type": "testimonial", "heading": "heading",
                     "items": [{"quote": "items.0.quote", "author": "items.0.author", "role": "items.0.role"}]},
     "cta": {"type": "cta", "heading": "heading", "subheading": "subheading", "cta": "cta",
             "ctaHref": "https://x.test"},
-    "menu": {"type": "menu", "heading": "heading", "subheading": "subheading",
+    "menu": {"type": "menu", "heading": "heading",
              "sections": [{"name": "sections.0.name",
                            "items": [{"name": "sections.0.items.0.name", "price": "sections.0.items.0.price",
                                       "description": "sections.0.items.0.description"}]}]},
-    "posts": {"type": "posts", "heading": "heading", "subheading": "subheading",
+    "posts": {"type": "posts", "heading": "heading",
               "items": [{"date": "items.0.date", "title": "items.0.title", "excerpt": "items.0.excerpt",
                          "slug": "s"}]},
     "stats": {"type": "stats", "heading": "heading", "subheading": "subheading",
@@ -210,13 +235,13 @@ _COVERAGE_FIXTURES: dict[str, dict] = {
 _EXPECTED_FIELDS: dict[str, list[str]] = {
     "hero": ["eyebrow", "heading", "subheading", "cta", "cta2"],
     "features": ["heading", "subheading", "items.0.title", "items.0.body"],
-    "gallery": ["heading", "subheading", "images.0.caption"],
-    "pricing": ["heading", "subheading", "plans.0.name", "plans.0.price", "plans.0.cta"],
-    "testimonial": ["heading", "subheading", "items.0.quote", "items.0.author", "items.0.role"],
+    "gallery": ["heading", "images.0.caption"],
+    "pricing": ["heading", "plans.0.name", "plans.0.price", "plans.0.cta"],
+    "testimonial": ["heading", "items.0.quote", "items.0.author", "items.0.role"],
     "cta": ["heading", "subheading", "cta"],
-    "menu": ["heading", "subheading", "sections.0.name", "sections.0.items.0.name",
+    "menu": ["heading", "sections.0.name", "sections.0.items.0.name",
              "sections.0.items.0.price", "sections.0.items.0.description"],
-    "posts": ["heading", "subheading", "items.0.date", "items.0.title", "items.0.excerpt"],
+    "posts": ["heading", "items.0.date", "items.0.title", "items.0.excerpt"],
     "stats": ["heading", "subheading", "items.0.value", "items.0.label"],
     "logos": ["heading", "items.0.name"],
     "faq": ["heading", "subheading", "items.0.q", "items.0.a"],
@@ -271,6 +296,41 @@ def test_every_block_type_publishes_no_field_tags():
         t = _tokens_for(btype)
         html = R._render_block(block, t, index=0, editable=False)
         assert "data-cz-field" not in html, f"{btype}: leaked data-cz-field into published output"
+
+
+def test_expected_fields_match_block_fields_catalog():
+    # Cross-checks every emitted `data-cz-field` path's top-level segment
+    # against BLOCK_FIELDS (services/merlin/catalog.py) — the source of truth
+    # `set_field`/validate_ops actually accepts. Without this, a render-side
+    # tag for a field a type doesn't have (the gallery/pricing/testimonial/
+    # menu/posts/map `subheading` bug) can ship and only the render coverage
+    # test above notices — and that test just enshrines whatever the render
+    # emits, it doesn't know what's actually valid.
+    for btype, fields in _EXPECTED_FIELDS.items():
+        allowed = BLOCK_FIELDS[btype]
+        for field in fields:
+            head = field.split(".")[0]
+            assert head in allowed, (
+                f'{btype}: emits data-cz-field for "{field}" but BLOCK_FIELDS["{btype}"] has no '
+                f'"{head}" — set_field would reject this path'
+            )
+
+
+def test_testimonial_legacy_scalar_shape_is_not_tagged():
+    # Old content with no `items` array (single scalar quote/author/role) has
+    # no array for a "items.N.*" set_field path to descend into — tagging it
+    # that way advertised a path deepSet always refuses (P0 review finding).
+    block = {"type": "testimonial", "quote": "Great place", "author": "Ann"}
+    html = R._render_block(block, R._tokens({}), index=0, editable=True)
+    assert "data-cz-field" not in html
+    assert "Great place" in html and "Ann" in html  # still renders, just not tagged
+
+
+def test_testimonial_real_items_shape_is_still_tagged():
+    block = {"type": "testimonial", "items": [{"quote": "Great place", "author": "Ann"}]}
+    html = R._render_block(block, R._tokens({}), index=0, editable=True)
+    assert 'data-cz-field="items.0.quote"' in html
+    assert 'data-cz-field="items.0.author"' in html
 
 
 # --- image-kind fields (separate from the text-only coverage loop above) ----

@@ -3,7 +3,13 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Module-level, not a class attribute — a leading-underscore class attribute on
+# a Pydantic BaseModel is captured as a ModelPrivateAttr descriptor, not the
+# plain value, so `cls._X` inside a classmethod validator would not be the
+# frozenset itself.
+_SELECTION_KNOWN_KINDS = frozenset({"text", "image", "button", "element"})
 
 class CappeMerlinHistoryTurn(BaseModel):
     role: Literal["user", "assistant"]
@@ -54,6 +60,35 @@ class CappeMerlinSelection(BaseModel):
     # click) — capped well under a paragraph; a longer selection is truncated
     # client-side (canvas.js), not rejected here.
     text: Optional[str] = Field(default=None, max_length=300)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_out_of_contract_values(cls, data: Any) -> Any:
+        """Sanitize BEFORE field validation runs, so an out-of-contract value
+        degrades instead of 422ing the whole chat request — the docstring's
+        "must never fail the turn" promise otherwise only held for the fields
+        this class happened to leave unconstrained. A `kind` this build
+        doesn't recognize (a newer canvas.js emitting a value this server
+        hasn't shipped support for yet, or a stale cached bundle) previously
+        rejected the request outright with the user's prompt lost, instead of
+        degrading to block-level guidance the way every other malformed-
+        selection path in this contract does."""
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        if out.get("kind") not in _SELECTION_KNOWN_KINDS:
+            out["kind"] = "text"
+        field = out.get("field")
+        if isinstance(field, str) and len(field) > 200:
+            out["field"] = field[:200]
+        text = out.get("text")
+        if isinstance(text, str) and len(text) > 300:
+            out["text"] = text[:300]
+        for key in ("start", "end"):
+            v = out.get(key)
+            if isinstance(v, int) and v < 0:
+                out[key] = None
+        return out
 
 
 class CappeMerlinChatRequest(BaseModel):

@@ -151,7 +151,7 @@ _GENERAL_RULES: tuple[str, ...] = (
     'NEVER substitute a different change for the one you were asked to make. If you cannot accomplish the request with the ops above, return an empty "ops" array and say plainly what you can\'t do. Doing something the user did not ask for is far worse than doing nothing.',
     'Your "message" must describe ONLY the ops you actually emitted. Never describe an effect you did not produce.',
     "Change only what was asked. Do not rewrite the user's copy, switch their theme, or restyle sections as a side effect of an unrelated request.",
-    'When the user says "this section", "here", or "it", they mean the SELECTED SECTION named below. If nothing is selected and the target is ambiguous, ask which section rather than guessing.',
+    'When the user says "this section", "here", or "it", they mean whatever the SELECTED: line below names — a whole section, a specific field, an element, or a character range; resolve to the MOST SPECIFIC one it names, not the enclosing section. If nothing is selected and the target is ambiguous, ask which section rather than guessing.',
     'Address blocks and canvas elements ONLY by the "id" values given to you below — never by position/index guessing.',
     "At most 20 ops at a time. Prefer editing an existing block over removing and recreating it.",
     "Never invent a block type or field name outside the catalog below.",
@@ -305,65 +305,76 @@ def build_selection_prompt_line(
             if element:
                 # A freeform-canvas element — a different id space and a
                 # different op (canvas_update, not set_field) than `field`.
-                if isinstance(start, int) and isinstance(end, int) and sel_text:
-                    actual = _resolve_element_text(blocks, block_id, element)
-                    if actual is not None and actual[start:end] == sel_text:
+                # `actual is None` means the element itself is gone (deleted,
+                # or a stale/bogus client id) — same "must not be cited to the
+                # model as if it existed" rule as the block check above, so
+                # this falls through to selected_block / nothing-selected
+                # instead of returning here.
+                actual = _resolve_element_text(blocks, block_id, element)
+                if actual is not None:
+                    if isinstance(start, int) and isinstance(end, int) and sel_text:
+                        if actual[start:end] == sel_text:
+                            return (
+                                f'SELECTED: characters {start}-{end} ("{sel_text}") of canvas element '
+                                f'"{element}" on block {block_id} (kind={kind}). Resolve "this"/"it" to '
+                                'exactly this range. Address it with canvas_update {block, el, patch}, '
+                                "not set_field."
+                            )
+                        if sel_text in actual:
+                            new_start = actual.index(sel_text)
+                            return (
+                                f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
+                                f'("{sel_text}") of canvas element "{element}" on block {block_id} '
+                                f"(kind={kind}) — re-anchored by text match, the original offsets had "
+                                'drifted. Address it with canvas_update {block, el, patch}, not set_field.'
+                            )
                         return (
-                            f'SELECTED: characters {start}-{end} ("{sel_text}") of canvas element '
-                            f'"{element}" on block {block_id} (kind={kind}). Resolve "this"/"it" to '
-                            'exactly this range. Address it with canvas_update {block, el, patch}, '
-                            "not set_field."
-                        )
-                    if actual and sel_text and sel_text in actual:
-                        new_start = actual.index(sel_text)
-                        return (
-                            f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
-                            f'("{sel_text}") of canvas element "{element}" on block {block_id} '
-                            f"(kind={kind}) — re-anchored by text match, the original offsets had "
-                            'drifted. Address it with canvas_update {block, el, patch}, not set_field.'
+                            f'SELECTED: canvas element "{element}" on block {block_id} (kind={kind}) — the '
+                            "highlighted range may be stale; treat the WHOLE element as selected. Address "
+                            'it with canvas_update {block, el, patch}, not set_field.'
                         )
                     return (
                         f'SELECTED: canvas element "{element}" on block {block_id} (kind={kind}) — the '
-                        "highlighted range may be stale; treat the WHOLE element as selected. Address "
-                        'it with canvas_update {block, el, patch}, not set_field.'
+                        'whole element is selected. Resolve "this"/"it" to it. Address it with '
+                        'canvas_update {block, el, patch}, not set_field.'
                     )
-                return (
-                    f'SELECTED: canvas element "{element}" on block {block_id} (kind={kind}) — the '
-                    'whole element is selected. Resolve "this"/"it" to it. Address it with '
-                    'canvas_update {block, el, patch}, not set_field.'
-                )
-            if field:
-                if isinstance(start, int) and isinstance(end, int) and sel_text:
-                    actual = _resolve_field_text(blocks, block_id, field)
-                    if actual is not None and actual[start:end] == sel_text:
+            elif field:
+                # Same existence rule as the element branch above: a `field`
+                # that doesn't resolve at all (not just changed content) must
+                # not be cited as if it existed.
+                actual = _resolve_field_text(blocks, block_id, field)
+                if actual is not None:
+                    if isinstance(start, int) and isinstance(end, int) and sel_text:
+                        if actual[start:end] == sel_text:
+                            return (
+                                f'SELECTED: characters {start}-{end} ("{sel_text}") of field "{field}" '
+                                f'on block {block_id} (kind={kind}). Resolve "this"/"it"/"this word" to '
+                                "exactly this range — not the whole field."
+                            )
+                        if sel_text in actual:
+                            # Editor state moved between the click and this request —
+                            # re-anchor by searching for the same text rather than
+                            # trusting offsets that have drifted.
+                            new_start = actual.index(sel_text)
+                            return (
+                                f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
+                                f'("{sel_text}") of field "{field}" on block {block_id} (kind={kind}) — '
+                                "re-anchored by text match, the original offsets had drifted."
+                            )
                         return (
-                            f'SELECTED: characters {start}-{end} ("{sel_text}") of field "{field}" '
-                            f'on block {block_id} (kind={kind}). Resolve "this"/"it"/"this word" to '
-                            "exactly this range — not the whole field."
-                        )
-                    if actual and sel_text and sel_text in actual:
-                        # Editor state moved between the click and this request —
-                        # re-anchor by searching for the same text rather than
-                        # trusting offsets that have drifted.
-                        new_start = actual.index(sel_text)
-                        return (
-                            f'SELECTED: characters {new_start}-{new_start + len(sel_text)} '
-                            f'("{sel_text}") of field "{field}" on block {block_id} (kind={kind}) — '
-                            "re-anchored by text match, the original offsets had drifted."
+                            f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the highlighted '
+                            "range may be stale (the field changed since it was selected); treat the WHOLE "
+                            "field as selected, not a specific range."
                         )
                     return (
-                        f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the highlighted '
-                        "range may be stale (the field changed since it was selected); treat the WHOLE "
-                        "field as selected, not a specific range."
+                        f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the whole field is '
+                        'selected. Resolve "this"/"it" to this field.'
                     )
+            else:
                 return (
-                    f'SELECTED: field "{field}" on block {block_id} (kind={kind}) — the whole field is '
-                    'selected. Resolve "this"/"it" to this field.'
+                    f"SELECTED: block {block_id} (kind={kind}) — the whole section/element is selected, no "
+                    'specific field. Resolve "this section"/"here"/"it" to this block.'
                 )
-            return (
-                f"SELECTED: block {block_id} (kind={kind}) — the whole section/element is selected, no "
-                'specific field. Resolve "this section"/"here"/"it" to this block.'
-            )
     if selected_block:
         return (
             f"SELECTED SECTION: id={selected_block}. "

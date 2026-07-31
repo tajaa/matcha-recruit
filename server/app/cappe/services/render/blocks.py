@@ -34,9 +34,14 @@ def _fattr(field: str, editable: bool, kind: str = "text") -> str:
     return attrs
 
 
-def _head(b, editable=False):
+def _head(b, editable=False, sub=True):
+    # `sub` gates the subheading tag for block types whose BLOCK_FIELDS entry
+    # (server/app/cappe/services/merlin/catalog.py) has no "subheading" field —
+    # gallery/pricing/testimonial/menu/posts/map. Without it these types still
+    # got a `data-cz-field="subheading"` tag whenever legacy content happened
+    # to carry that key, advertising a set_field path the op layer rejects.
     h = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
-    s = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
+    s = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if (sub and b.get("subheading")) else ""
     return f'<div class="cz-head">{h}{s}</div>' if (h or s) else ""
 
 
@@ -107,7 +112,7 @@ def _gallery(b, t, editable=False):
         cap = f'<figcaption{_fattr(f"images.{idx}.caption", editable)}>{_esc(i.get("caption"))}</figcaption>' if i.get("caption") else ""
         tiles += (f'<figure class="cz-tile"><img src="{_esc(u)}" alt="{_esc(i.get("caption"))}"'
                   f'{_fattr(f"images.{idx}.url", editable, "image")} />{cap}</figure>')
-    return f'<section class="cz-gallery"><div class="cz-wrap">{_head(b, editable)}<div class="cz-grid-img">{tiles}</div></div></section>'
+    return f'<section class="cz-gallery"><div class="cz-wrap">{_head(b, editable, sub=False)}<div class="cz-grid-img">{tiles}</div></div></section>'
 
 
 def _pricing(b, t, editable=False):
@@ -127,11 +132,17 @@ def _pricing(b, t, editable=False):
                   f'<div class="cz-plan__price"><span{_fattr(f"plans.{idx}.price", editable)}>{_esc(p.get("price"))}</span>'
                   f'<span>{_esc(p.get("period") or "")}</span></div>'
                   f'<ul>{feats}</ul>{_btn(p.get("cta") or "Choose", p.get("ctaHref"), solid=hot, field=f"plans.{idx}.cta", editable=editable)}</div>')
-    return f'<section class="cz-pricing"><div class="cz-wrap">{_head(b, editable)}<div class="cz-plans">{cards}</div></div></section>'
+    return f'<section class="cz-pricing"><div class="cz-wrap">{_head(b, editable, sub=False)}<div class="cz-plans">{cards}</div></div></section>'
 
 
 def _testimonial(b, t, editable=False):
-    items = b.get("items") or ([{"quote": b.get("quote"), "author": b.get("author"), "role": b.get("role")}] if b.get("quote") else [])
+    real_items = b.get("items")
+    items = real_items or ([{"quote": b.get("quote"), "author": b.get("author"), "role": b.get("role")}] if b.get("quote") else [])
+    # The legacy scalar shape (no `items` array — old single-quote content)
+    # has no array for a "items.N.*" set_field path to descend into, so
+    # tagging it that way advertised a path deepSet always refuses. Only tag
+    # when `items` genuinely exists on the block.
+    tag = editable and bool(real_items)
     cards = ""
     for idx, i in enumerate(items):
         if not isinstance(i, dict):
@@ -139,10 +150,10 @@ def _testimonial(b, t, editable=False):
         # Quote text is wrapped in an inner <span> so the curly quote marks
         # around it stay outside the tagged element's textContent (same
         # exact-match reasoning as the pricing price/period split above).
-        role = f' · <span{_fattr(f"items.{idx}.role", editable)}>{_esc(i.get("role"))}</span>' if i.get("role") else ""
-        cards += (f'<figure class="cz-quote"><blockquote>“<span{_fattr(f"items.{idx}.quote", editable)}>{_esc(i.get("quote"))}</span>”</blockquote>'
-                  f'<figcaption><b{_fattr(f"items.{idx}.author", editable)}>{_esc(i.get("author"))}</b>{role}</figcaption></figure>')
-    return f'<section class="cz-quotes"><div class="cz-wrap">{_head(b, editable)}<div class="cz-quote-grid">{cards}</div></div></section>'
+        role = f' · <span{_fattr(f"items.{idx}.role", tag)}>{_esc(i.get("role"))}</span>' if i.get("role") else ""
+        cards += (f'<figure class="cz-quote"><blockquote>“<span{_fattr(f"items.{idx}.quote", tag)}>{_esc(i.get("quote"))}</span>”</blockquote>'
+                  f'<figcaption><b{_fattr(f"items.{idx}.author", tag)}>{_esc(i.get("author"))}</b>{role}</figcaption></figure>')
+    return f'<section class="cz-quotes"><div class="cz-wrap">{_head(b, editable, sub=False)}<div class="cz-quote-grid">{cards}</div></div></section>'
 
 
 def _cta(b, t, editable=False):
@@ -166,7 +177,7 @@ def _menu(b, t, editable=False):
             if it.get("description"):
                 rows += f'<div class="desc"{_fattr(f"{base}.description", editable)}>{_esc(it.get("description"))}</div>'
         cols += f'<div><h3{_fattr(f"sections.{sidx}.name", editable)}>{_esc(s.get("name"))}</h3>{rows}</div>'
-    return f'<section class="cz-menu"><div class="cz-wrap">{_head(b, editable)}<div class="cz-menu-grid">{cols}</div></div></section>'
+    return f'<section class="cz-menu"><div class="cz-wrap">{_head(b, editable, sub=False)}<div class="cz-menu-grid">{cols}</div></div></section>'
 
 
 def _posts(b, t, editable=False):
@@ -178,7 +189,7 @@ def _posts(b, t, editable=False):
         href = _safe_href("/p/" + i.get("slug")) if i.get("slug") else "#"
         rows += (f'<article class="cz-post">{date}<h3><a href="{_esc(href)}"{_fattr(f"items.{idx}.title", editable)}>{_esc(i.get("title"))}</a></h3>'
                  f'<p{_fattr(f"items.{idx}.excerpt", editable)}>{_esc(i.get("excerpt"))}</p></article>')
-    return f'<section class="cz-posts"><div class="cz-narrow">{_head(b, editable)}{rows}</div></section>'
+    return f'<section class="cz-posts"><div class="cz-narrow">{_head(b, editable, sub=False)}{rows}</div></section>'
 
 
 def _stats(b, t, editable=False):
@@ -424,7 +435,7 @@ def _map(b, t, editable=False):
         actions = (f'{addr_html}<div class="cz-map__actions">'
                    f'<a class="cz-btn cz-btn--solid" href="{_esc(g)}" target="_blank" rel="noopener noreferrer">Get directions</a>'
                    f'{apple}</div>')
-    return f'<section class="cz-map"><div class="cz-wrap">{_head(b, editable)}{embed}{actions}</div></section>'
+    return f'<section class="cz-map"><div class="cz-wrap">{_head(b, editable, sub=False)}{embed}{actions}</div></section>'
 
 
 _OPENNOW_JS = "<script>" + (_ASSETS / "opennow.js").read_text(encoding="utf-8") + "</script>"
@@ -605,8 +616,13 @@ def _canvas(b, t, editable=False, index=0):
             )
         else:
             tag = "h2" if kind == "heading" else "p"
-            # Only text/buttons get data-cz-field, so the inline-text editor
-            # (dblclick → contenteditable) targets a label, never an image wrapper.
+            # Image elements ALSO get data-cz-field (above) — kept out of
+            # contenteditable purely by canvas.js's dblclick handler checking
+            # data-cz-kind==="image" and bailing before it ever sets
+            # contenteditable. That client-side check is the only thing
+            # stopping a cz-edit for an image field; useCanvasBridge.ts's
+            # cz-edit receiver re-checks kind too, so a bypass there doesn't
+            # overwrite an image URL with typed text.
             els_html.append(
                 f'<{tag} class="cz-el cz-el--{kind}"{dataattr}{_fattr(eid, editable)}{style_attr}>'
                 f'{_esc(el.get("text"))}</{tag}>'
