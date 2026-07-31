@@ -172,6 +172,32 @@ describe('deriveHuumeArtifacts', () => {
     expect(deriveHuumeArtifacts({ plans: {}, action })).toEqual([])
   })
 
+  // Regression: the idKey ternary only handled 6 of the 8 non-offer action
+  // types and threw 'unreachable' for the rest — discipline_from_incident/
+  // discipline_decision were already silently broken, and adding
+  // ems_promote without a case here would have crashed the panel the same
+  // way instead of the "renders blank" bug it was meant to fix.
+  it('yields an action artifact for discipline_from_incident', () => {
+    const action: HuumeAction = {
+      type: 'discipline_from_incident', status: 'proposed', confirm_id: 'c1',
+      employee_id: 'e1', infraction_type: 'attendance',
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:discipline_from_incident:c1', action }])
+  })
+
+  it('yields an action artifact for discipline_decision', () => {
+    const action: HuumeAction = { type: 'discipline_decision', status: 'proposed', record_id: 'r1' }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:discipline_decision:r1', action }])
+  })
+
+  it('yields an action artifact for ems_promote', () => {
+    const action: HuumeAction = { type: 'ems_promote', status: 'proposed', event_id: 'ev1' }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:ems_promote:ev1', action }])
+  })
+
   it('omits handbook when pending_drafts is empty', () => {
     const result = deriveHuumeArtifacts({ plans: {}, handbook: { session_id: 's1', pending_drafts: [] } })
     expect(result).toEqual([])

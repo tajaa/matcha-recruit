@@ -40,6 +40,8 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return `Disciplinary Action${action.infraction_type ? ` — ${action.infraction_type}` : ''}${action.employee_name ? ` · ${action.employee_name}` : ''}`
     case 'discipline_decision':
       return `Discipline ${action.decision === 'deny' ? 'Denial' : 'Approval'}`
+    case 'ems_promote':
+      return `Promote to Incident${action.incident_type ? ` — ${action.incident_type}` : ''}`
   }
 }
 
@@ -176,6 +178,19 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Decision" value={action.decision === 'deny' ? 'Deny' : 'Approve'} />
           </div>
           <Prose>{action.reason}</Prose>
+        </>
+      )}
+
+      {action.type === 'ems_promote' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Occurred" value={action.occurred_at} />
+            <Meta label="Type" value={action.incident_type} />
+            <Meta label="Severity" value={action.severity} />
+            <Meta label="Location" value={action.location} />
+          </div>
+          <Prose>{action.title}</Prose>
+          <p className="text-[11px] opacity-60">Files the logged event as a real IR incident — the original event stays in Events.</p>
         </>
       )}
     </div>

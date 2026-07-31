@@ -595,9 +595,15 @@ def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) ->
 
 
 # Pilot-backed chat tools (Legal Pilot / Handbook Pilot skills) and the company
-# feature flag each one requires beyond `huume` + `matcha_work`. Mirrors
+# feature flag(s) each one requires beyond `huume` + `matcha_work`. Mirrors
 # STEP_REQUIRED_FEATURE: the registry the pure envelope below reads from.
-PILOT_TOOL_REQUIRED_FEATURE: dict[str, str] = {
+# Value is a str for a single flag, or a tuple when more than one must be on —
+# ask_ir_copilot/run_incident_analysis need BOTH: `ir_copilot` gates the
+# Copilot feature itself, but it's default-True and deliberately absent from
+# FEATURE_REQUIRES (see root CLAUDE.md), so it says nothing about whether the
+# company's `incidents` (the paid Lite gate) is still on — a cancelled Lite
+# sub only stores incidents=False, not ir_copilot=False.
+PILOT_TOOL_REQUIRED_FEATURE: dict[str, str | tuple[str, ...]] = {
     "list_legal_matters": "legal_defense",
     "open_legal_matter": "legal_defense",
     "ask_legal_pilot": "legal_defense",
@@ -606,13 +612,13 @@ PILOT_TOOL_REQUIRED_FEATURE: dict[str, str] = {
     "promote_handbook_drafts": "handbook_pilot",
     "er_case_brief": "er_copilot",
     "ask_er_copilot": "er_copilot",
-    "ask_ir_copilot": "ir_copilot",
-    "run_incident_analysis": "ir_copilot",
+    "ask_ir_copilot": ("ir_copilot", "incidents"),
+    "run_incident_analysis": ("ir_copilot", "incidents"),
 }
 
 _PILOT_FEATURE_LABEL = {
     "legal_defense": "Legal Pilot", "handbook_pilot": "Handbook Pilot", "er_copilot": "ER Copilot",
-    "ir_copilot": "IR Copilot",
+    "ir_copilot": "IR Copilot", "incidents": "Incident Reporting",
 }
 
 
@@ -634,9 +640,11 @@ def evaluate_pilot_tool(*, tool: str, role: Optional[str], features: dict[str, A
         return "Huume isn't enabled for this company."
     if not features.get("matcha_work"):
         return "Matcha Work isn't enabled for this company."
-    if not features.get(required):
-        label = _PILOT_FEATURE_LABEL.get(required, required)
-        return f"{label} ('{required}') isn't enabled for this company."
+    required_flags = (required,) if isinstance(required, str) else required
+    for flag in required_flags:
+        if not features.get(flag):
+            label = _PILOT_FEATURE_LABEL.get(flag, flag)
+            return f"{label} ('{flag}') isn't enabled for this company."
     return None
 
 

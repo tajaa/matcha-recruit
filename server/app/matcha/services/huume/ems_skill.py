@@ -82,7 +82,11 @@ async def execute_promote(
         "status": "created",
         "message": (
             f"Promoted the event into incident {label}. The IR classifier and policy "
-            "mapper are running in the background; the record is editable in Incidents."
+            # Not actually background: agent.py awaits bg_tasks inline before
+            # this message reaches the admin, same as every other HR-ops
+            # tool's bg_tasks (see hr_ops_skill.py's report_incident message,
+            # which makes no "background" claim for the same reason).
+            "mapper have run; the record is editable in Incidents."
         ),
         "record_id": str(incident_row["id"]),
         "record_label": str(label),

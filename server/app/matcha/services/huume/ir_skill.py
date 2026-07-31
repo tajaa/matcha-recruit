@@ -96,6 +96,21 @@ async def ask_copilot(
         logger.exception("huume: IR Copilot round failed for incident %s", iid)
         return {"status": "error", "message": "IR Copilot couldn't generate guidance right now."}
 
+    # generate_guidance swallows its own Gemini timeouts/parse errors into
+    # payload={} instead of raising (see ir_ai_orchestrator.py) — the except
+    # above never fires for that case. persist_assistant_round has the same
+    # "produced nothing" check and would write ONLY the user turn if we
+    # called it here, which is exactly the orphaned-question-on-a-legal-
+    # record outcome the comment above this function exists to prevent.
+    # Catch it here too, before the user turn is ever persisted.
+    if (
+        not (payload.get("summary") or "").strip()
+        and not (payload.get("cards") or [])
+        and not (payload.get("open_questions") or [])
+    ):
+        logger.warning("huume: IR Copilot round produced no summary/cards for incident %s", iid)
+        return {"status": "error", "message": "IR Copilot couldn't generate guidance right now."}
+
     async with get_connection() as conn:
         await persist_assistant_round(
             conn, incident_id=iid, user_id=actor_user_id, user_message=question,
@@ -155,6 +170,13 @@ async def run_analysis(
         if err:
             return {"status": "error", "message": err}
 
+        # Fetched once up front (before the cache check can short-circuit)
+        # so every return path reports THIS call's resolved incident, never
+        # a stale number carried over from the thread's previous state.
+        incident_number = await conn.fetchval(
+            "SELECT incident_number FROM ir_incidents WHERE id = $1", iid,
+        )
+
         if not refresh:
             cached = await conn.fetchrow(
                 """
@@ -168,6 +190,7 @@ async def run_analysis(
                 data = cached["analysis_data"]
                 return {
                     "status": "ok", "cached": True, "incident_id": str(iid),
+                    "incident_number": incident_number,
                     "analysis": json.loads(data) if isinstance(data, str) else data,
                 }
 
@@ -259,6 +282,7 @@ async def run_analysis(
             logger.exception("huume: training-topic auto-map failed for incident %s", iid)
 
     return {
-        "status": "ok", "cached": False, "incident_id": str(iid), "analysis": result,
+        "status": "ok", "cached": False, "incident_id": str(iid),
+        "incident_number": incident_number, "analysis": result,
         "note": "Cached — the AI Analysis tab on the incident opens pre-computed.",
     }

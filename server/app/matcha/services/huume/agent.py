@@ -299,6 +299,13 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "match_key": "event_id",
         "mints_confirm_id": False,
         "fields": ("event_id", "title", "incident_type", "severity", "occurred_at", "location"),
+        # incident_type/severity are the enum classifier fields the admin can
+        # override on the confirm turn ("yes, but mark it critical") — must
+        # force a fresh proposal like `decision` does elsewhere, or the
+        # changed value is silently dropped in favor of the originally
+        # staged one (match_key still matches on event_id). title/location/
+        # occurred_at stay excluded, same as free-text description/note.
+        "decision_fields": ("incident_type", "severity"),
         "staged_label": "Staged: promote event to incident",
         "refused_label": "Event promotion refused",
         "done_label": "Promoted event to incident",
@@ -944,7 +951,7 @@ async def run_huume_turn(
                 )
                 ok = result.get("status") == "ok"
                 if ok:
-                    state_updates["huume_ir"] = {"incident_id": result["incident_id"], "incident_number": _state_ir().get("incident_number")}
+                    state_updates["huume_ir"] = {"incident_id": result["incident_id"], "incident_number": result.get("incident_number")}
                 step = recorder.record(
                     tool=name, kind="write",
                     label="Ran incident analysis" if ok else "Incident analysis failed",

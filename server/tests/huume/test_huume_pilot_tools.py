@@ -21,6 +21,7 @@ from app.matcha.services.huume.tools import TOOLS_BY_NAME
 FEATURES_ON = {
     "huume": True, "matcha_work": True,
     "legal_defense": True, "handbook_pilot": True, "er_copilot": True, "ir_copilot": True,
+    "incidents": True,
 }
 
 
@@ -56,6 +57,15 @@ class TestEvaluatePilotTool:
         for tool in ("ask_ir_copilot", "run_incident_analysis"):
             reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
             assert reason and "IR Copilot" in reason
+
+    def test_ir_tools_also_require_incidents(self):
+        # ir_copilot defaults True and is deliberately absent from
+        # FEATURE_REQUIRES — a cancelled Lite sub only stores incidents=False,
+        # so the chat tools must check `incidents` too, not just `ir_copilot`.
+        features = {**FEATURES_ON, "incidents": False}
+        for tool in ("ask_ir_copilot", "run_incident_analysis"):
+            reason = evaluate_pilot_tool(tool=tool, role="client", features=features)
+            assert reason and "incidents" in reason
 
     def test_er_tools_require_er_copilot(self):
         features = {**FEATURES_ON, "er_copilot": False}

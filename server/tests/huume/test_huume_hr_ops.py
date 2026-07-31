@@ -331,6 +331,29 @@ class TestBuildHrOpsStaged:
         _, other = _build_hr_ops_staged(spec, {"event_id": "3f6b1c22-0000-4000-8000-000000000099"}, existing)
         assert other is False
 
+    def test_promote_ems_event_changed_severity_restages_instead_of_executing_stale(self):
+        """The bug: admin stages a promote at severity='low', then replies
+        'yes, but mark it critical' — the model calls with the SAME event_id
+        but severity='critical'. Matching on event_id alone would return
+        `existing` (the ORIGINAL severity) with confirming=True, silently
+        filing the incident at the wrong severity."""
+        spec = _HR_OPS_TOOL_SPECS["promote_ems_event"]
+        existing = _promote(incident_type="safety", severity="low")
+        staged, confirming = _build_hr_ops_staged(
+            spec, {"event_id": EVENT_ID, "severity": "critical"}, existing,
+        )
+        assert confirming is False
+        assert staged["severity"] == "critical"
+
+    def test_promote_ems_event_unchanged_severity_still_confirms(self):
+        spec = _HR_OPS_TOOL_SPECS["promote_ems_event"]
+        existing = _promote(incident_type="safety", severity="low")
+        staged, confirming = _build_hr_ops_staged(
+            spec, {"event_id": EVENT_ID, "severity": "low"}, existing,
+        )
+        assert confirming is True
+        assert staged is existing
+
     def test_employee_ids_coerced_to_strings(self):
         spec = _HR_OPS_TOOL_SPECS["assign_training"]
         staged, _ = _build_hr_ops_staged(spec, {"requirement_id": REQ_ID, "employee_ids": [EMP_ID]}, None)

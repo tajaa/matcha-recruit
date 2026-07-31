@@ -1,4 +1,4 @@
-import { BookOpen, CalendarCheck, FileSignature, Gavel, GraduationCap, Scale, ShieldAlert, Siren } from 'lucide-react'
+import { ArrowUpCircle, BookOpen, CalendarCheck, FileSignature, Gavel, GraduationCap, Scale, ShieldAlert, Siren } from 'lucide-react'
 import type { HuumeAction } from '../types'
 
 /** Terminal status -> the past-tense chip. Keyed by type because each staged
@@ -15,6 +15,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   amend_handbook: { amended: 'Handbook amended' },
   discipline_from_incident: { filed: 'Disciplinary action staged for HR approval' },
   discipline_decision: { decided: 'Approval decision recorded' },
+  ems_promote: { promoted: 'Promoted to incident' },
 }
 
 /** One-line summary for the chat banner strip / the panel's passive status line. */
@@ -38,6 +39,8 @@ export function bannerLabel(action: HuumeAction): string {
       return `Stage disciplinary action for ${action.employee_name ?? 'employee'} — confirm?`
     case 'discipline_decision':
       return `${action.decision === 'deny' ? 'Deny' : 'Approve'} this disciplinary action?`
+    case 'ems_promote':
+      return 'Promote this event to an incident?'
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -53,5 +56,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'pto_decision') return <CalendarCheck size={size} />
   if (type === 'amend_handbook') return <BookOpen size={size} />
   if (type === 'discipline_decision') return <Gavel size={size} />
+  if (type === 'ems_promote') return <ArrowUpCircle size={size} />
   return <ShieldAlert size={size} />
 }

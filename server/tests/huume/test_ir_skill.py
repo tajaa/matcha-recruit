@@ -34,14 +34,17 @@ class _ConnCtx:
 
 
 class _FakeConn:
-    def __init__(self, *, incident_exists=True, cached_row=None, incident_row=None):
+    def __init__(self, *, incident_exists=True, cached_row=None, incident_row=None, incident_number="IR-2"):
         self.incident_exists = incident_exists
         self.cached_row = cached_row
         self.incident_row = incident_row
+        self.incident_number = incident_number
         self.executed = []
 
     async def fetchval(self, query, *args):
         q = " ".join(query.split())
+        if q.startswith("SELECT incident_number FROM ir_incidents WHERE id"):
+            return self.incident_number if self.incident_exists else None
         if "FROM ir_incidents WHERE id" in q:
             return INCIDENT_ID if self.incident_exists else None
         raise AssertionError(f"unexpected fetchval: {q}")
@@ -146,8 +149,25 @@ class TestRunAnalysis:
         assert result["status"] == "ok"
         assert result["cached"] is True
         assert result["analysis"]["primary_cause"] == "cached"
+        assert result["incident_number"] == "IR-2"
         analyzer_factory.assert_not_called()
         assert conn.executed == []
+
+    @pytest.mark.asyncio
+    async def test_incident_number_matches_resolved_incident_not_prior_state(self, monkeypatch):
+        # Regression: agent.py used to fall back to the thread's PREVIOUS
+        # huume_ir state for incident_number instead of trusting the
+        # result of THIS call — wrong whenever an explicit incident_id
+        # differs from what was previously active. run_analysis must
+        # report the number for the incident it actually resolved.
+        conn = _FakeConn(incident_exists=True, cached_row={"analysis_data": "{}"}, incident_number="IR-9")
+        _patch_conn(monkeypatch, conn)
+
+        result = await ir_skill.run_analysis(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, analysis_type="root_cause",
+        )
+        assert result["incident_number"] == "IR-9"
 
     @pytest.mark.asyncio
     async def test_upsert_uses_on_conflict(self, monkeypatch):
@@ -175,6 +195,7 @@ class TestRunAnalysis:
         )
         assert result["status"] == "ok"
         assert result["cached"] is False
+        assert result["incident_number"] == "IR-2"
         assert len(conn.executed) == 1
         sql, _args = conn.executed[0]
         assert "ON CONFLICT (incident_id, analysis_type)" in " ".join(sql.split())
@@ -338,6 +359,38 @@ class TestAskCopilotAtomicity:
             raise RuntimeError("gemini down")
 
         monkeypatch.setattr(orch, "generate_guidance", _boom)
+
+        result = await ir_skill.ask_copilot(
+            company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            incident_id=str(INCIDENT_ID), state_incident_id=None, question="what next?",
+        )
+        assert result["status"] == "error"
+        persist_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_swallowed_gemini_failure_leaves_no_orphaned_user_turn(self, monkeypatch):
+        # generate_guidance itself swallows Gemini timeouts/parse errors into
+        # payload={} rather than raising (see ir_ai_orchestrator.py) — the
+        # RuntimeError case above never fires for this failure mode.
+        # persist_assistant_round would otherwise treat {} as "produced
+        # nothing" and persist ONLY the user turn — the exact orphan this
+        # class of test exists to prevent.
+        conn = _FakeConn(incident_exists=True)
+        _patch_conn(monkeypatch, conn)
+
+        import app.matcha.services.ir.ir_ai_orchestrator as orch
+
+        async def _load_incident_state(conn, iid, company_id):
+            return {"id": str(INCIDENT_ID), "incident_number": "IR-1"}, [], []
+
+        persist_mock = AsyncMock()
+        monkeypatch.setattr(orch, "load_incident_state", _load_incident_state)
+        monkeypatch.setattr(orch, "persist_assistant_round", persist_mock)
+
+        async def _empty(**kwargs):
+            return {}
+
+        monkeypatch.setattr(orch, "generate_guidance", _empty)
 
         result = await ir_skill.ask_copilot(
             company_id=COMPANY_ID, actor_user_id=ACTOR_ID,

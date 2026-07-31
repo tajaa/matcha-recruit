@@ -634,6 +634,20 @@ export interface HuumeActionDisciplineDecision {
   reason?: string | null
 }
 
+/** Promote a logged EMS event into a real IR incident — mirrors the
+ * Events-tab button's own promote flow, staged here so it goes through the
+ * same confirm-first two-turn gate as every other Huume write. */
+export interface HuumeActionEmsPromote {
+  type: 'ems_promote'
+  status: 'proposed' | 'promoted' | 'failed' | 'cancelled'
+  event_id: string
+  title?: string | null
+  incident_type?: string
+  severity?: string
+  occurred_at?: string | null
+  location?: string | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -649,6 +663,7 @@ export type HuumeAction =
   | HuumeActionAmendHandbook
   | HuumeActionDisciplineFromIncident
   | HuumeActionDisciplineDecision
+  | HuumeActionEmsPromote
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */
