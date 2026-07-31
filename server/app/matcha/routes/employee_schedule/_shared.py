@@ -18,6 +18,9 @@ from ...dependencies import get_client_company_id
 from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
     INACTIVE_EMPLOYMENT_STATUSES, build_patch, conflict_detail, shift_full_detail,
 )
+from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
+    _iso, find_conflicts, log_audit,
+)
 
 _SHIFT_COLS = (
     "id, company_id, location_id, template_id, series_id, role, department, "
@@ -46,26 +49,6 @@ async def require_company_id(current_user) -> UUID:
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated with this account")
     return company_id
-
-
-async def log_audit(
-    conn,
-    company_id: UUID,
-    entity_type: str,
-    entity_id: Optional[UUID],
-    actor_user_id: Optional[UUID],
-    action: str,
-    details: Optional[dict] = None,
-) -> None:
-    await conn.execute(
-        """
-        INSERT INTO schedule_audit_log
-            (company_id, entity_type, entity_id, actor_user_id, action, details)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-        """,
-        company_id, entity_type, entity_id, actor_user_id, action,
-        json.dumps(details or {}),
-    )
 
 
 async def assert_employee_in_company(conn, company_id: UUID, employee_id: UUID) -> None:
@@ -101,14 +84,6 @@ async def assert_location_in_company(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Location not found")
-
-
-def _iso(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, (datetime,)):
-        return value.isoformat()
-    return str(value)
 
 
 def shift_snapshot(row) -> dict:
@@ -203,45 +178,6 @@ async def fetch_shifts(
     for s in shifts:
         s["assignments"] = by_shift.get(s["id"], [])
     return shifts
-
-
-async def find_conflicts(
-    conn,
-    company_id: UUID,
-    employee_id: UUID,
-    starts_at: datetime,
-    ends_at: datetime,
-    *,
-    exclude_shift_id: Optional[UUID] = None,
-) -> list[dict]:
-    """Non-cancelled shifts this employee is already on that overlap the window.
-
-    Used to block accidental double-booking on the assignment paths; callers
-    expose a `force` override for deliberate back-to-back/overlap scheduling.
-    """
-    rows = await conn.fetch(
-        """
-        SELECT s.id, s.starts_at, s.ends_at, s.role, s.status
-        FROM schedule_shifts s
-        JOIN schedule_shift_assignments a ON a.shift_id = s.id
-        WHERE s.company_id = $1 AND a.employee_id = $2
-          AND s.status <> 'cancelled'
-          AND s.starts_at < $4 AND s.ends_at > $3
-          AND ($5::uuid IS NULL OR s.id <> $5)
-        ORDER BY s.starts_at
-        """,
-        company_id, employee_id, starts_at, ends_at, exclude_shift_id,
-    )
-    return [
-        {
-            "shift_id": str(r["id"]),
-            "starts_at": _iso(r["starts_at"]),
-            "ends_at": _iso(r["ends_at"]),
-            "role": r["role"],
-            "status": r["status"],
-        }
-        for r in rows
-    ]
 
 
 def raise_conflict(employee_id: UUID, conflicts: list[dict]) -> None:

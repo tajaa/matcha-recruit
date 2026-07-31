@@ -20,7 +20,7 @@ from ...services.scheduling.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
 from ...services.scheduling import schedule_compliance, schedule_intelligence
-from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
+from ...services.scheduling.shift_writes import create_shift_core
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
@@ -197,56 +197,17 @@ async def create_shift(body: ShiftCreate,
                 force=force,
             )
         async with conn.transaction():
-            shift_id = await conn.fetchval(
-                """
-                INSERT INTO schedule_shifts
-                    (company_id, location_id, role, department, starts_at, ends_at,
-                     break_minutes, required_staff, color, notes, kind,
-                     training_requirement_id, created_by)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-                RETURNING id
-                """,
-                company_id, body.location_id, body.role, body.department,
-                body.starts_at, body.ends_at, body.break_minutes, body.required_staff,
-                body.color, body.notes, body.kind, body.training_requirement_id,
-                current_user.id,
+            shift_id = await create_shift_core(
+                conn, company_id,
+                location_id=body.location_id, role=body.role, department=body.department,
+                starts_at=body.starts_at, ends_at=body.ends_at,
+                break_minutes=body.break_minutes, required_staff=body.required_staff,
+                color=body.color, notes=body.notes, kind=body.kind,
+                training_requirement=dict(training_requirement) if training_requirement else None,
+                training_requirement_id=body.training_requirement_id,
+                employee_ids=body.employee_ids, created_by=current_user.id,
+                status="draft",
             )
-            for emp_id in dict.fromkeys(body.employee_ids):
-                await conn.execute(
-                    """
-                    INSERT INTO schedule_shift_assignments
-                        (company_id, shift_id, employee_id, assigned_by)
-                    VALUES ($1,$2,$3,$4)
-                    ON CONFLICT (shift_id, employee_id) DO NOTHING
-                    """,
-                    company_id, shift_id, emp_id, current_user.id,
-                )
-                if body.kind == "training" and training_requirement is not None:
-                    await assign_training(
-                        conn, company_id, dict(training_requirement), [emp_id],
-                        source_type="schedule", source_ref=shift_id,
-                        source_note=f"Scheduled training session {body.starts_at.date().isoformat()}",
-                        due_date=body.starts_at.astimezone(timezone.utc).date(),
-                        assigned_by=current_user.id,
-                    )
-                elif body.kind == "work":
-                    try:
-                        await evaluate_scheduled_role_rules(
-                            conn, company_id, emp_id,
-                            shift_id=shift_id, shift_role=body.role,
-                            shift_start=body.starts_at.astimezone(timezone.utc).date(),
-                        )
-                    except Exception:
-                        logger.exception(
-                            "scheduled_role training rules failed for shift %s", shift_id
-                        )
-            await log_audit(conn, company_id, "shift", shift_id, current_user.id,
-                            "shift.create", {
-                                "starts_at": body.starts_at.isoformat(),
-                                "ends_at": body.ends_at.isoformat(),
-                                "location_id": str(body.location_id) if body.location_id else None,
-                                "status": "draft",
-                            })
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})

@@ -27,6 +27,7 @@ LOG = "log"
 ASK = "ask"
 HELP = "help"
 LINK = "link"
+SCHEDULE = "schedule"
 
 # Leading "@huume" / "@Huume:" the sender typed to address the bot. Stripped
 # before matching so every pattern below can anchor on ^.
@@ -86,9 +87,30 @@ _LINK_PATTERNS = (
     r"\blink\s+(?:to|for)\s+(?:the\s+)?report\b",
 )
 
+# The "build me a schedule" ask. Bias-to-LOG stands here too: every pattern
+# requires BOTH a request verb (need/want/schedule/add/...) AND a shift-noun,
+# and every pattern is start-anchored. \bneed\b / \bwant\b deliberately do
+# NOT match "needed"/"wanted" (word-boundary + exact tense), so a past-tense
+# report — "we needed more staff last night and someone got hurt" — still
+# LOGs. The negative lookahead in the first pattern keeps "I need to report
+# an incident" / "we need to talk about what happened" in LOG too: those are
+# requests, but not requests FOR a shift.
+_SHIFT_NOUN = (
+    r"(?:opener|closer|opening|closing|shift|shifts|cover(?:age)?|"
+    r"schedule|scheduled|staff(?:ed|ing)?|on the schedule)"
+)
+_SCHEDULE_PATTERNS = (
+    rf"^(?:i|we)(?:'ll|'d| will| would)? (?:need|want|gotta|have to|need to get)\b"
+    rf"(?:(?!\bto (?:report|log|file|talk|discuss|flag)\b).)*?\b{_SHIFT_NOUN}\b",
+    r"^(?:can|could|will|would) (?:you|u) (?:schedule|staff|book|add|set ?up|put)\b",
+    r"^schedule\b",
+    rf"^(?:add|set ?up|create|build|make|book)\b(?:\s+\S+){{0,6}}\s+{_SHIFT_NOUN}\b",
+)
+
 _HELP_RE = tuple(re.compile(p, re.IGNORECASE) for p in _HELP_PATTERNS)
 _RECALL_RE = tuple(re.compile(p, re.IGNORECASE) for p in _RECALL_PATTERNS)
 _LINK_RE = tuple(re.compile(p, re.IGNORECASE) for p in _LINK_PATTERNS)
+_SCHEDULE_RE = tuple(re.compile(p, re.IGNORECASE) for p in _SCHEDULE_PATTERNS)
 
 
 def strip_mention(content: str) -> str:
@@ -100,10 +122,14 @@ def strip_mention(content: str) -> str:
 
 def classify_intent(content: str) -> str:
     """LOG (default), ASK (recall question about what's on file), HELP (what
-    can you do), or LINK (share the anonymous reporting link). See the
-    module docstring for why LOG wins ties. HELP is checked first so a
-    capability probe never falls into ASK/LINK on a shared word ("what can
-    you do" reads as interrogative too)."""
+    can you do), LINK (share the anonymous reporting link), or SCHEDULE
+    (build/change the shift schedule). See the module docstring for why LOG
+    wins ties. HELP is checked first so a capability probe never falls into
+    ASK/LINK/SCHEDULE on a shared word ("what can you do" reads as
+    interrogative too). SCHEDULE is checked before RECALL so "can you
+    schedule two people for Saturday" never lands in ASK — RECALL's
+    show/list/tell/remind/summarize/recap/find/pull/look verb set doesn't
+    overlap schedule/staff/book/add."""
     text = strip_mention(content)
     if not text:
         return HELP  # a bare "@huume" is someone poking it to see what it is
@@ -115,6 +141,10 @@ def classify_intent(content: str) -> str:
     for pattern in _LINK_RE:
         if pattern.search(text):
             return LINK
+
+    for pattern in _SCHEDULE_RE:
+        if pattern.search(text):
+            return SCHEDULE
 
     for pattern in _RECALL_RE:
         if pattern.search(text):

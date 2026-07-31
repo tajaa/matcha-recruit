@@ -328,6 +328,242 @@ async def _bg_ems_link(channel_id_str: str, asker_user_id_str: str) -> None:
         logger.exception("EMS link request failed in channel %s", channel_id_str)
 
 
+async def _schedule_company_features(conn, company_id) -> dict:
+    """Merged features for a company, `{}` for a personal company (never
+    reached in practice — schedule pills only ever originate from a real
+    tenant channel, but the guard mirrors `_ems_row_allowed`)."""
+    from app.core.feature_flags import merge_company_features
+
+    row = await conn.fetchrow(
+        "SELECT is_personal, enabled_features, signup_source FROM companies WHERE id = $1",
+        company_id,
+    )
+    if not row or row["is_personal"]:
+        return {}
+    return merge_company_features(row["enabled_features"], row["signup_source"])
+
+
+async def _bg_schedule_request(
+    channel_id_str: str, message_id_str: str, sender_user_id_str: str, content: str,
+) -> None:
+    """"@huume I need an opener and a closer for our La Jolla store next
+    week" — SCHEDULE-classified channel message. Same off-hot-path,
+    top-level-except, never-affects-send-latency contract as _bg_ems_intake.
+
+    Two connection blocks: the Gemini parse call (services/scheduling/
+    schedule_chat.py:parse_schedule_request) must not run with a pooled
+    connection held (same reasoning as _bg_ems_ask/_bg_ems_intake — the pool
+    is capped at 10).
+
+    Bias-to-LOG survives a SCHEDULE misroute: a parse that comes back
+    non-actionable (Gemini outage, or the intent regex matched something
+    that isn't really a staffing request) falls back to _bg_ems_intake so
+    the message is still documented rather than silently dropped."""
+    try:
+        from datetime import date as _date
+
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.scheduling import schedule_chat
+        from app.matcha.services.scheduling.schedule_chat_rules import evaluate_schedule_proposal
+
+        async with get_connection() as conn:
+            company_id = await _ems_company_gate(conn, channel_id_str)
+            if company_id is None:
+                return
+
+            features = await _schedule_company_features(conn, company_id)
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
+            verdict = evaluate_schedule_proposal(role=role, features=features, stage="propose")
+            if not verdict.ok:
+                sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return
+
+            try:
+                await check_rate_limit(str(company_id), "ems_schedule", 20, 3600)
+            except HTTPException:
+                return  # over the hourly limit: skip silently, same as ems_ask/ems_event
+
+        # No connection held across the Gemini parse call.
+        parsed = await schedule_chat.parse_schedule_request(strip_mention(content), _date.today())
+        if parsed is None or not parsed.get("shift_requests"):
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+            return
+
+        async with get_connection() as conn:
+            build = await schedule_chat.build_proposal(
+                conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
+                parsed=parsed, today=_date.today(), original_content=content,
+            )
+            sys_row = await _insert_system_message(conn, channel_id_str, build.pill_text)
+            await conn.execute(
+                "UPDATE schedule_chat_proposals SET confirm_message_id = $1, updated_at = NOW() WHERE id = $2",
+                sys_row["id"], build.proposal_id,
+            )
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+    except Exception:
+        logger.exception("schedule chat request failed for message %s", message_id_str)
+
+
+async def _bg_schedule_reply(
+    channel_id_str: str, reply_to_id_str: str, sender_user_id_str: str, content: str,
+) -> bool:
+    """Fold a reply-to-a-schedule-pill into its proposal. Same
+    off-hot-path/top-level-except/claim-then-act contract as
+    _bg_ems_clarify: returns True iff the atomic claim below matched (this
+    reply IS aimed at a live proposal), False on a claim miss (stale/
+    already-resolved pill) — _bg_ems_dispatch uses this to decide whether an
+    @huume mention on the same message should still fall through to the
+    normal intent fork.
+
+    The claim mirrors `ems_events.clarify_message_id` (migration `ems01`):
+    first reply to a pill wins (partial unique index on
+    `confirm_message_id`), and the 7-day age guard IS the expiry — no
+    sweeper, a stale pill simply never claims again.
+
+    Confirm/cancel/re-arm never call Gemini and run entirely in the first
+    connection block. Only the clarify-answer path needs a second call to
+    `schedule_chat.parse_schedule_request` — that branch closes the first
+    connection before making it, then opens a fresh one, same two-block
+    shape as `_bg_ems_clarify`."""
+    claim_happened = False
+    try:
+        from datetime import date as _date
+
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.scheduling import schedule_chat
+        from app.matcha.services.scheduling.schedule_chat_rules import (
+            evaluate_schedule_proposal, parse_confirm_reply,
+        )
+
+        reply_uuid = UUID(reply_to_id_str)
+        sender_uuid = UUID(sender_user_id_str)
+        need_reparse = False
+        composed: Optional[str] = None
+        proposal: Optional[dict] = None
+
+        async with get_connection() as conn:
+            claimed = await conn.fetchrow(
+                """
+                UPDATE schedule_chat_proposals
+                SET confirm_message_id = NULL, updated_at = NOW()
+                WHERE confirm_message_id = $1
+                  AND status IN ('proposed', 'clarifying')
+                  AND created_at > NOW() - INTERVAL '7 days'
+                RETURNING id, company_id, channel_id, source_message_id, status,
+                          proposal, clarify_rounds, created_by
+                """,
+                reply_uuid,
+            )
+            if claimed is None:
+                return False
+            claim_happened = True
+            claimed = dict(claimed)
+            proposal = claimed["proposal"]
+            if isinstance(proposal, str):
+                proposal = json.loads(proposal)
+
+            # Re-assert role + features on the REPLIER — any admin/client may
+            # confirm a proposal, not only the manager who started it, and a
+            # flag/role change between propose and confirm must be caught.
+            features = await _schedule_company_features(conn, claimed["company_id"])
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", sender_uuid)
+            verdict = evaluate_schedule_proposal(
+                role=role, features=features, stage="confirm", proposal_status=claimed["status"],
+            )
+            if not verdict.ok:
+                # Refused (e.g. an employee replying to a manager's pill) —
+                # re-arm on the ORIGINAL pill so the manager's later confirm
+                # still claims it. We hold the claim, so this can't race.
+                await conn.execute(
+                    "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                    reply_uuid, claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            action = parse_confirm_reply(strip_mention(content))
+
+            if action == "cancel":
+                await conn.execute(
+                    "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                    claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CANCELLED_TEXT)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            if claimed["status"] == "proposed" and action == "confirm":
+                text = await schedule_chat.execute_proposal(
+                    conn, proposal_row={**claimed, "proposal": proposal},
+                    confirmed_by=sender_uuid, features=features,
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, text)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            if claimed["status"] == "proposed":  # action == 'other'
+                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.REARM_TEXT)
+                await conn.execute(
+                    "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], claimed["id"],
+                )
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            # status == 'clarifying' (confirm or other, either way this reply
+            # is the answer to the outstanding question) — either bail past
+            # the round cap, or re-parse. Both close this connection first.
+            if claimed["clarify_rounds"] >= schedule_chat.CLARIFY_ROUND_CAP:
+                await conn.execute(
+                    "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                    claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CLARIFY_BAIL_TEXT)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            need_reparse = True
+            composed = schedule_chat.compose_clarify_followup(proposal, content)
+
+        # No connection held across the Gemini re-parse call.
+        if not need_reparse or composed is None:
+            return True
+        parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
+
+        async with get_connection() as conn2:
+            if parsed is None:
+                await conn2.execute(
+                    "UPDATE schedule_chat_proposals SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                    claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn2, channel_id_str, schedule_chat.CLARIFY_BAIL_TEXT)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
+            history = list(proposal.get("clarify_history") or []) + [
+                {"q": proposal.get("clarify_question"), "a": content}
+            ]
+            build = await schedule_chat.build_proposal(
+                conn2, company_id=claimed["company_id"], channel_id=claimed.get("channel_id"),
+                source_message_id=claimed.get("source_message_id"), created_by=claimed["created_by"],
+                parsed=parsed, today=_date.today(), original_content=proposal.get("original_content", ""),
+                clarify_history=history, existing_proposal_id=claimed["id"],
+            )
+            sys_row = await _insert_system_message(conn2, channel_id_str, build.pill_text)
+            await conn2.execute(
+                "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                sys_row["id"], build.proposal_id,
+            )
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        return True
+    except Exception:
+        logger.exception("schedule chat reply failed for %s", reply_to_id_str)
+        return claim_happened
+
+
 async def _bg_ems_intake(
     channel_id_str: str, message_id_str: str, reporter_user_id_str: str, content: str,
 ) -> None:
@@ -563,21 +799,36 @@ async def _bg_ems_dispatch(
     services/ems/intent.classify_intent, which is deterministic and biased
     to LOG precisely because this is the fork where an event could be lost.
     The clarify path above still wins: a reply answering a live Huume
-    question is folded into its event even when phrased as a question."""
+    question is folded into its event even when phrased as a question.
+
+    A reply that misses the EMS clarify claim is next offered to the
+    schedule-proposal claim (`_bg_schedule_reply`) — a reply aimed at a
+    live "@huume I need an opener…" pill is its confirm/cancel/clarify
+    answer, not a new mention-fork dispatch. A miss there too still falls
+    through to the mention fork below, so "@huume new thing" typed as a
+    reply onto a stale schedule pill isn't swallowed, same reasoning as
+    EMS."""
     if reply_to_system_id_str is not None:
         claimed = await _bg_ems_clarify(
             channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
         )
         if claimed:
             return
+        claimed = await _bg_schedule_reply(
+            channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
+        )
+        if claimed:
+            return
     if has_huume_mention:
-        from app.matcha.services.ems.intent import LINK, LOG, classify_intent
+        from app.matcha.services.ems.intent import LINK, LOG, SCHEDULE, classify_intent
 
         intent = classify_intent(content)
         if intent == LOG:
             await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
         elif intent == LINK:
             await _bg_ems_link(channel_id_str, sender_user_id_str)
+        elif intent == SCHEDULE:
+            await _bg_schedule_request(channel_id_str, message_id_str, sender_user_id_str, content)
         else:
             await _bg_ems_ask(channel_id_str, sender_user_id_str, content, intent)
 

@@ -1,0 +1,369 @@
+"""Pure, DB-free rules for the @huume channel-scheduling flow.
+
+Mirrors `schedule_rules.py`'s split: DB assembly and the one Gemini parse
+call live in `services/scheduling/schedule_chat.py`; every decision that
+doesn't need either lives here, so it can be unit-tested without a database
+or a model call — the same reason `schedule_rules.py` and
+`schedule_compliance.py` are DB-free.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from typing import Literal, Optional, Union
+from uuid import UUID
+
+from .schedule_rules import sunday_indexed_weekday
+
+# ── Authorization envelope ──────────────────────────────────────────────
+
+ALLOWED_ROLES = frozenset({"client", "admin"})  # same pair as promote.evaluate_promote
+
+_MANAGER_ONLY_MESSAGE = (
+    "I can only build schedules for managers — if you need a shift change, "
+    "file a swap or availability request from the Schedule tab in your portal."
+)
+_SCHEDULING_OFF_MESSAGE = (
+    "Scheduling isn't turned on for this workspace — an admin can enable "
+    "Employee Schedule."
+)
+
+
+@dataclass(frozen=True)
+class ScheduleVerdict:
+    kind: Literal["proceed", "refuse"]
+    reason: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return self.kind == "proceed"
+
+
+def evaluate_schedule_proposal(
+    *,
+    role: Optional[str],
+    features: dict,
+    stage: Literal["propose", "confirm"],
+    proposal_status: Optional[str] = None,
+) -> ScheduleVerdict:
+    """Pure authz envelope, mirrors `services/ems/promote.py:evaluate_promote`.
+
+    Order: role -> `ems` flag -> `employee_schedule` flag -> (confirm stage
+    only) proposal status. Called at BOTH propose time and confirm time —
+    flag flips and role changes between the two chat turns are re-asserted
+    on the replier, never trusted from the first check (same idiom as
+    `services/huume/actions.py:evaluate_huume_action`).
+    """
+    if role not in ALLOWED_ROLES:
+        return ScheduleVerdict("refuse", _MANAGER_ONLY_MESSAGE)
+    if not features.get("ems"):
+        return ScheduleVerdict("refuse", "EMS is not enabled for this company.")
+    if not features.get("employee_schedule"):
+        return ScheduleVerdict("refuse", _SCHEDULING_OFF_MESSAGE)
+    if stage == "confirm" and proposal_status not in ("proposed", "clarifying"):
+        return ScheduleVerdict("refuse", f"That proposal is already {proposal_status}.")
+    return ScheduleVerdict("proceed")
+
+
+# ── Week / date resolution ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class NeedsClarify:
+    question: str
+    options: list = field(default_factory=list)  # ≤6, rendered as a dashed list
+
+
+def resolve_week(week_hint: Optional[str], today: date) -> date:
+    """The SUNDAY that starts the target week — matches
+    `shift_compliance._week_window` + the schedule grid's own week-start
+    convention, so a proposed shift lands in the same week an admin looking
+    at the grid would expect. `'next_week'` is the Sunday strictly after
+    today's own week (never today, even when today IS a Sunday);
+    `'this_week'`/None is today's own week's Sunday."""
+    this_sunday = today - timedelta(days=sunday_indexed_weekday(today))
+    if week_hint == "next_week":
+        return this_sunday + timedelta(days=7)
+    return this_sunday
+
+
+_WEEKDAY_NAMES = {
+    "sunday": 0, "sun": 0,
+    "monday": 1, "mon": 1,
+    "tuesday": 2, "tue": 2, "tues": 2,
+    "wednesday": 3, "wed": 3,
+    "thursday": 4, "thu": 4, "thurs": 4,
+    "friday": 5, "fri": 5,
+    "saturday": 6, "sat": 6,
+}
+
+
+def resolve_dates(
+    spec: dict,
+    week_start: date,
+    today: date,
+    template_days: Optional[list[int]] = None,
+) -> Union[list[date], NeedsClarify]:
+    """Precedence: an explicit ISO date > named weekdays (within the resolved
+    week) > the matched template's own `days_of_week` mask ∩ the week >
+    NeedsClarify. Any resolved date strictly before `today` is dropped —
+    proposing a shift in the past is never useful; if EVERYTHING drops,
+    that's a clarify too (never silently propose nothing)."""
+    dates: list[date] = []
+
+    explicit = spec.get("date")
+    if explicit:
+        try:
+            dates = [date.fromisoformat(explicit)]
+        except (ValueError, TypeError):
+            dates = []
+
+    if not dates:
+        weekdays = spec.get("weekdays") or []
+        wanted = {
+            _WEEKDAY_NAMES[w.strip().lower()]
+            for w in weekdays
+            if isinstance(w, str) and w.strip().lower() in _WEEKDAY_NAMES
+        }
+        if wanted:
+            dates = [week_start + timedelta(days=i) for i in range(7) if i in wanted]
+
+    if not dates and template_days:
+        wanted = set(template_days)
+        dates = [week_start + timedelta(days=i) for i in range(7) if i in wanted]
+
+    if not dates:
+        return NeedsClarify("Which days should I schedule?")
+
+    dates = [d for d in dates if d >= today]
+    if not dates:
+        return NeedsClarify(
+            "Which days should I schedule? Everything I found there was already in the past."
+        )
+    return dates
+
+
+# ── Location / template matching ────────────────────────────────────────
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(text: Optional[str]) -> set[str]:
+    return set(_TOKEN_RE.findall((text or "").lower()))
+
+
+def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
+    """`locations` = active `business_locations` rows (id, name, address,
+    city, state, zipcode). "La Jolla" must match a row NAMED "La Jolla …"
+    (whose `city` column is San Diego) via name/address — a bare city match
+    scores lowest on purpose, so a neighborhood name never resolves through
+    the city column of some OTHER store in the same metro. Ties (score is
+    equal and > 0 for more than one row) are all returned; the caller
+    clarifies on 0 or >1."""
+    hint_norm = (hint or "").strip().lower()
+    if not hint_norm:
+        return [locations[0]] if len(locations) == 1 else []
+
+    hint_tokens = _tokens(hint_norm)
+    scored: list[tuple[float, dict]] = []
+    for loc in locations:
+        name = (loc.get("name") or "").strip().lower()
+        address = (loc.get("address") or "").strip().lower()
+        city = (loc.get("city") or "").strip().lower()
+        name_tokens = _tokens(name)
+        score = 0.0
+        if name and hint_tokens and hint_tokens <= name_tokens:
+            score = 3.0
+        elif name and (hint_norm in name or name in hint_norm):
+            score = 2.0
+        elif address and hint_norm in address:
+            score = 1.0
+        elif city and hint_norm == city:
+            score = 0.5
+        if score > 0:
+            scored.append((score, loc))
+
+    if not scored:
+        return []
+    top = max(s for s, _ in scored)
+    return [loc for s, loc in scored if s == top]
+
+
+def _stem(word: str) -> str:
+    """Naive suffix strip so "opener"/"opening"/"openers" all reduce to
+    "open" and "closer"/"closing" reduce to "clos" — just enough to match a
+    manager's shorthand ("opener") against a template's own name/role
+    ("Opening Shift", role "Closer")."""
+    w = word.lower()
+    for suffix in ("ing", "ers", "er", "s"):
+        if w.endswith(suffix) and len(w) - len(suffix) >= 3:
+            return w[: -len(suffix)]
+    return w
+
+
+def _stems(text: Optional[str]) -> set[str]:
+    return {_stem(t) for t in _TOKEN_RE.findall((text or "").lower())}
+
+
+def match_template(
+    hint: Optional[str], label: Optional[str], templates: list[dict]
+) -> Optional[dict]:
+    """Precedence: exact name == hint > name-token stem overlap > role-token
+    stem overlap. `hint` falls back to `label` ("opener") when the model
+    didn't return a `template_hint`. Deterministic ties broken by
+    (name, id)."""
+    effective_hint = (hint or label or "").strip()
+    if not effective_hint or not templates:
+        return None
+    hint_lower = effective_hint.lower()
+    hint_stems = _stems(effective_hint)
+
+    def _sort_key(t: dict):
+        return (t.get("name") or "", str(t.get("id")))
+
+    exact = [t for t in templates if (t.get("name") or "").strip().lower() == hint_lower]
+    if exact:
+        return sorted(exact, key=_sort_key)[0]
+
+    name_matches = [t for t in templates if hint_stems & _stems(t.get("name"))]
+    if name_matches:
+        return sorted(name_matches, key=_sort_key)[0]
+
+    role_matches = [t for t in templates if hint_stems & _stems(t.get("role"))]
+    if role_matches:
+        return sorted(role_matches, key=_sort_key)[0]
+
+    return None
+
+
+def build_adhoc_spec(label: str, start_time, end_time, role: Optional[str]) -> dict:
+    """When no template matched but the manager (or the model's parse) gave
+    explicit times. `break_minutes=0` deliberately — the §512 meal-break
+    advisory then tells the truth ("scheduled with only 0 min break") rather
+    than us silently inventing a break the manager never mentioned."""
+    return {
+        "label": label,
+        "start_time": start_time,
+        "end_time": end_time,
+        "role": role,
+        "break_minutes": 0,
+        "template_id": None,
+    }
+
+
+# ── Candidate ranking ────────────────────────────────────────────────────
+
+@dataclass
+class CandidateContext:
+    employee_id: str
+    name: str
+    job_title: Optional[str]
+    conflicts: list[dict]     # find_conflicts rows
+    violations: list[dict]    # check_shift_compliance rows
+    week_hours: float = 0.0
+
+
+@dataclass
+class RankResult:
+    chosen: list[CandidateContext]
+    alternates: list[CandidateContext]
+    excluded: list[tuple[CandidateContext, str]]  # (ctx, human reason w/ verbatim violation)
+
+
+def _has_block(violations: list[dict]) -> bool:
+    return any(v.get("severity") == "block" for v in violations)
+
+
+def _exclusion_reason(ctx: CandidateContext) -> str:
+    if ctx.conflicts:
+        c = ctx.conflicts[0]
+        return f"{ctx.name} is already on a shift {c.get('starts_at')}–{c.get('ends_at')} that day."
+    block = next((v for v in ctx.violations if v.get("severity") == "block"), None)
+    if block:
+        statute = f" ({block['statute']})" if block.get("statute") else ""
+        return f"{block['message']}{statute}"
+    return f"{ctx.name} can't be scheduled for this shift."
+
+
+def _role_bonus(job_title: Optional[str], shift_role: Optional[str]) -> int:
+    """0 (sorts first) when the employee's job title stem-overlaps the
+    shift's role, else 1 — a light tiebreaker, not a hard filter."""
+    if not job_title or not shift_role:
+        return 1
+    return 0 if _stems(job_title) & _stems(shift_role) else 1
+
+
+def rank_candidates(
+    slots_needed: int,
+    candidates: list[CandidateContext],
+    *,
+    pinned_ids: Optional[list[str]] = None,
+    shift_role: Optional[str] = None,
+) -> RankResult:
+    """Exclusions first: any conflict, or any `severity=='block'` violation,
+    excludes the candidate outright — a hard statutory violation is never
+    proposed, pinned or not (a manager naming someone doesn't override the
+    law). Survivors sort: pinned first (the manager named them; advisories
+    still listed on them) -> zero-advisory -> fewer advisories -> lower
+    week_hours -> role-stem bonus -> name -> employee_id. Fully
+    deterministic."""
+    pinned = set(pinned_ids or [])
+    survivors: list[CandidateContext] = []
+    excluded: list[tuple[CandidateContext, str]] = []
+    for ctx in candidates:
+        if ctx.conflicts or _has_block(ctx.violations):
+            excluded.append((ctx, _exclusion_reason(ctx)))
+        else:
+            survivors.append(ctx)
+
+    def sort_key(ctx: CandidateContext):
+        return (
+            0 if ctx.employee_id in pinned else 1,
+            len(ctx.violations),
+            ctx.week_hours,
+            _role_bonus(ctx.job_title, shift_role),
+            ctx.name,
+            ctx.employee_id,
+        )
+
+    survivors.sort(key=sort_key)
+    return RankResult(
+        chosen=survivors[:slots_needed],
+        alternates=survivors[slots_needed:],
+        excluded=excluded,
+    )
+
+
+# ── Confirm-reply parsing ────────────────────────────────────────────────
+
+_THUMBS_UP = {"\U0001F44D", "\U0001F44D\U0001F3FB", "\U0001F44D\U0001F3FC",
+              "\U0001F44D\U0001F3FD", "\U0001F44D\U0001F3FE", "\U0001F44D\U0001F3FF"}
+
+_CONFIRM_RE = re.compile(
+    r"^(?:confirm(?:ed)?|yes|yep|yeah|yea|sure|do it|go ahead|"
+    r"approve[d]?|book it|ship it|lgtm|looks good|sounds good)\b",
+    re.IGNORECASE,
+)
+_CANCEL_RE = re.compile(
+    r"^(?:cancel|no|nope|nah|stop|don'?t|scrap(?: it)?|never ?mind|"
+    r"forget it|kill it)\b",
+    re.IGNORECASE,
+)
+
+
+def parse_confirm_reply(text: str) -> Literal["confirm", "cancel", "other"]:
+    """Deterministic, no model call — a proposal's confirm/cancel gate must
+    not depend on Gemini being up. Caller applies `intent.strip_mention`
+    first. Cancel wins ties by construction (its vocabulary and confirm's
+    don't overlap), so "no wait, confirm" reads as cancel on the leading
+    token — the same "first thing wins" idiom as everywhere else the module
+    disambiguates on the message's opening words."""
+    t = (text or "").strip()
+    if t in _THUMBS_UP:
+        return "confirm"
+    if _CANCEL_RE.match(t):
+        return "cancel"
+    if _CONFIRM_RE.match(t):
+        return "confirm"
+    return "other"
