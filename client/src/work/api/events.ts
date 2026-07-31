@@ -30,6 +30,9 @@ export interface EmsEvent {
   incident_reasoning: string | null
   suggested_incident_type: string | null
   suggested_severity: string | null
+  urgency: 'osha' | 'severe' | null
+  protocol_qualifies: boolean | null
+  protocol_reasoning: string | null
   status: EmsEventStatus
   incident_id: string | null
   // True while Huume has posted a follow-up question in-channel that hasn't

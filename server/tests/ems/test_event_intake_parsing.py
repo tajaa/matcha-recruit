@@ -36,7 +36,8 @@ class _FakeConn:
             (company_id, channel_id, message_id, reporter_user_id,
              title, category, severity_hint, doc_json, narrative,
              incident_recommendation, incident_reasoning,
-             suggested_incident_type, suggested_severity) = args
+             suggested_incident_type, suggested_severity,
+             urgency, protocol_qualifies, protocol_reasoning) = args
             now = datetime.now(timezone.utc)
             return {
                 "id": uuid4(), "company_id": company_id, "channel_id": channel_id,
@@ -47,6 +48,8 @@ class _FakeConn:
                 "incident_reasoning": incident_reasoning,
                 "suggested_incident_type": suggested_incident_type,
                 "suggested_severity": suggested_severity,
+                "urgency": urgency, "protocol_qualifies": protocol_qualifies,
+                "protocol_reasoning": protocol_reasoning,
                 "status": "logged", "created_at": now, "updated_at": now,
             }
         raise AssertionError(f"unexpected fetchrow: {q}")
@@ -111,6 +114,46 @@ class TestParseModelJson:
         raw = json.dumps({"category": "safety"})
         data = event_intake._parse_model_json(raw)
         assert data["not_an_event"] is False
+
+    def test_severe_true(self):
+        raw = json.dumps({"category": "safety", "severe": True})
+        data = event_intake._parse_model_json(raw)
+        assert data["severe"] is True
+
+    def test_severe_missing_defaults_false(self):
+        raw = json.dumps({"category": "safety"})
+        data = event_intake._parse_model_json(raw)
+        assert data["severe"] is False
+
+    def test_protocol_assessment_parsed(self):
+        raw = json.dumps({
+            "category": "guest_experience",
+            "protocol_assessment": {"qualifies": True, "reasoning": "Matches the guest-complaint definition."},
+        })
+        data = event_intake._parse_model_json(raw)
+        assert data["protocol_qualifies"] is True
+        assert data["protocol_reasoning"] == "Matches the guest-complaint definition."
+
+    def test_protocol_assessment_reasoning_capped_at_500(self):
+        raw = json.dumps({
+            "category": "safety",
+            "protocol_assessment": {"qualifies": False, "reasoning": "x" * 800},
+        })
+        data = event_intake._parse_model_json(raw)
+        assert len(data["protocol_reasoning"]) == 500
+
+    def test_protocol_assessment_missing_stays_none(self):
+        raw = json.dumps({"category": "safety"})
+        data = event_intake._parse_model_json(raw)
+        assert data["protocol_qualifies"] is None
+        assert data["protocol_reasoning"] is None
+
+    def test_protocol_assessment_malformed_stays_none(self):
+        for bad in ('"yes"', "[]", '{"reasoning": "no qualifies key"}'):
+            raw = json.dumps({"category": "safety", "protocol_assessment": json.loads(bad)})
+            data = event_intake._parse_model_json(raw)
+            assert data["protocol_qualifies"] is None
+            assert data["protocol_reasoning"] is None
 
     def test_clarify_fields_roundtrip(self):
         raw = json.dumps({
@@ -282,6 +325,71 @@ class TestUpdateText:
         text = event_intake.update_text({"category": "safety", "incident_recommendation": True})
         assert "incident" in text.lower()
 
+    def test_osha_urgency_leads_with_siren(self):
+        text = event_intake.update_text(
+            {"category": "safety", "incident_recommendation": True, "urgency": "osha"},
+        )
+        assert text.startswith("\U0001F6A8")
+
+
+class TestPillEmojiAndFlagClause:
+    def test_no_urgency_uses_clipboard(self):
+        assert event_intake._pill_emoji({"urgency": None}) == "\U0001F4CB"
+        assert event_intake._pill_emoji({}) == "\U0001F4CB"
+
+    def test_urgency_uses_siren(self):
+        assert event_intake._pill_emoji({"urgency": "osha"}) == "\U0001F6A8"
+        assert event_intake._pill_emoji({"urgency": "severe"}) == "\U0001F6A8"
+
+    def test_osha_clause_contains_hotline_and_window(self):
+        clause = event_intake._flag_clause({
+            "urgency": "osha", "incident_recommendation": True, "protocol_qualifies": None,
+        })
+        assert "OSHA-reportable" in clause
+        assert event_intake.OSHA_EMERGENCY_HOTLINE in clause
+        assert event_intake.OSHA_REPORTING_WINDOW in clause
+
+    def test_severe_clause(self):
+        clause = event_intake._flag_clause({
+            "urgency": "severe", "incident_recommendation": True, "protocol_qualifies": None,
+        })
+        assert "flagged severe" in clause
+
+    def test_protocol_qualifies_true_clause(self):
+        clause = event_intake._flag_clause({
+            "urgency": None, "incident_recommendation": True, "protocol_qualifies": True,
+        })
+        assert "qualifies as an incident" in clause
+
+    def test_protocol_qualifies_false_clause(self):
+        clause = event_intake._flag_clause({
+            "urgency": None, "incident_recommendation": False, "protocol_qualifies": False,
+        })
+        assert "doesn't qualify" in clause
+
+    def test_osha_wins_over_protocol_false(self):
+        # OSHA bypasses protocol per spec — the pill must lead with the
+        # OSHA clause even when the protocol assessment said "no".
+        clause = event_intake._flag_clause({
+            "urgency": "osha", "incident_recommendation": True, "protocol_qualifies": False,
+        })
+        assert "OSHA-reportable" in clause
+
+    def test_osha_pill_has_balanced_bold_and_siren_lead(self):
+        text = event_intake._confirmation_text({
+            "category": "safety", "incident_recommendation": True, "urgency": "osha",
+        })
+        assert text.startswith("\U0001F6A8")
+        assert text.count("**") % 2 == 0
+
+    def test_osha_pill_question_text_round_trips(self):
+        confirmation = event_intake._confirmation_text({
+            "category": "safety", "incident_recommendation": True, "urgency": "osha",
+        })
+        pill = event_intake.question_text(confirmation, "Who was hurt?")
+        assert pill.startswith("\U0001F6A8")
+        assert event_intake.extract_question(pill) == "Who was hurt?"
+
 
 class TestCreateEventFromMessage:
     @pytest.mark.asyncio
@@ -325,6 +433,25 @@ class TestCreateEventFromMessage:
         assert confirmation == ""
 
 
+class TestBuildClassifyPrompt:
+    def test_no_protocol_text_omits_protocol_sections(self):
+        prompt = event_intake._build_classify_prompt("the fridge is loud", [])
+        assert "COMPANY INCIDENT PROTOCOL" not in prompt
+        assert "protocol_assessment" not in prompt
+
+    def test_protocol_text_adds_both_sections(self):
+        prompt = event_intake._build_classify_prompt(
+            "we had an incident with a guest", [], protocol_text="Only injuries count as incidents.",
+        )
+        assert "COMPANY INCIDENT PROTOCOL" in prompt
+        assert "Only injuries count as incidents." in prompt
+        assert "protocol_assessment" in prompt
+
+    def test_severe_field_always_present(self):
+        prompt = event_intake._build_classify_prompt("x", [])
+        assert '"severe": bool' in prompt
+
+
 class TestClassifyEvent:
     """classify_event is the seam channels_ws.py:_bg_ems_intake calls with NO
     pooled connection held — it makes 1-3 Gemini calls (classify + best-effort
@@ -354,6 +481,28 @@ class TestClassifyEvent:
         # never reroute to the ASK backstop just because the model was
         # unreachable.
         assert classified["not_an_event"] is False
+
+    @pytest.mark.asyncio
+    async def test_gemini_outage_with_osha_words_still_flags(self, monkeypatch):
+        def _boom():
+            raise RuntimeError("Gemini unavailable")
+        monkeypatch.setattr(event_intake, "_get_client", _boom)
+        # OSHA-forced incident_recommendation makes _ir_suggestions run —
+        # keep it from attempting a real Gemini call in this outage test.
+        def _raise_ir_error():
+            raise event_intake.IRAnalysisError("analyzer unavailable")
+        monkeypatch.setattr(event_intake, "get_ir_analyzer", _raise_ir_error)
+
+        classified = await event_intake.classify_event(
+            "the truck driver was hospitalized after the crash", [],
+        )
+        assert classified["urgency"] == "osha"
+        assert classified["incident_recommendation"] is True
+        # Deterministic OSHA prefill overrides the (unavailable) IR suggestions.
+        assert classified["suggested_severity"] == "critical"
+        assert classified["suggested_incident_type"] == "safety"
+        # Still logs as uncategorized — the outage invariant is untouched.
+        assert classified["category"] == categories.FALLBACK_KEY
 
     @pytest.mark.asyncio
     async def test_success_sets_model_ok(self, monkeypatch):
@@ -457,6 +606,28 @@ class TestPersistEvent:
         assert event_row["category"] == "safety"
         assert confirmation
 
+    @pytest.mark.asyncio
+    async def test_urgency_and_protocol_columns_roundtrip(self):
+        conn = _FakeConn()
+        classified = {
+            "title": "Hospitalization", "category": "safety", "severity_hint": "high", "doc": {},
+            "incident_recommendation": True, "incident_reasoning": "OSHA",
+            "suggested_incident_type": "safety", "suggested_severity": "critical",
+            "urgency": "osha", "protocol_qualifies": True, "protocol_reasoning": "Matches definition.",
+        }
+        event_row, _ = await event_intake.persist_event(
+            conn,
+            company_id=uuid4(), channel_id=uuid4(), message_id=uuid4(),
+            reporter_user_id=uuid4(), content="someone was hospitalized", classified=classified,
+        )
+        assert event_row["urgency"] == "osha"
+        assert event_row["protocol_qualifies"] is True
+        assert event_row["protocol_reasoning"] == "Matches definition."
+        # Audit details carry urgency too.
+        audit_query, audit_args = conn.executed[0]
+        assert "ems_event_audit_log" in audit_query
+        assert '"urgency": "osha"' in audit_args[2]
+
 
 class TestRefinementHelpers:
     def test_compose_refinement_content(self):
@@ -506,15 +677,17 @@ class _FoldFakeConn:
         if self.update_returns_none:
             return None  # WHERE status='logged' guard missed (promoted/dismissed race)
 
-        event_id, company_id, appended = args
+        event_id, company_id, appended, escalate = args
         now = datetime.now(timezone.utc)
         return {
             "id": event_id, "company_id": company_id,
             "channel_id": uuid4(), "message_id": uuid4(), "reporter_user_id": uuid4(),
             "title": None, "category": "uncategorized", "severity_hint": None,
             "doc": "{}", "narrative": f"original{appended}",
-            "incident_recommendation": False, "incident_reasoning": None,
+            "incident_recommendation": bool(escalate), "incident_reasoning": None,
             "suggested_incident_type": None, "suggested_severity": None,
+            "urgency": "osha" if escalate else None,
+            "protocol_qualifies": None, "protocol_reasoning": None,
             "status": "logged", "clarification_rounds": 1, "created_at": now, "updated_at": now,
         }
 
@@ -551,6 +724,33 @@ class TestFoldAnswer:
         # No audit row when the guard missed.
         assert conn.executed == []
 
+    @pytest.mark.asyncio
+    async def test_osha_answer_escalates(self):
+        # Deterministic escalation on the ANSWER text — must fire even
+        # though this whole function never calls Gemini (the Gemini-outage
+        # clarify path relies on exactly this).
+        conn = _FoldFakeConn()
+        folded = await event_intake.fold_answer(
+            conn, event_id=uuid4(), company_id=uuid4(),
+            answer="he was hospitalized overnight", answered_by=uuid4(),
+        )
+        assert folded["urgency"] == "osha"
+        assert folded["incident_recommendation"] is True
+        # The 4th positional UPDATE param is the escalate flag.
+        _, args = conn.fetchrow_calls[0]
+        assert args[3] is True
+
+    @pytest.mark.asyncio
+    async def test_plain_answer_does_not_escalate(self):
+        conn = _FoldFakeConn()
+        folded = await event_intake.fold_answer(
+            conn, event_id=uuid4(), company_id=uuid4(),
+            answer="it was near the front counter", answered_by=uuid4(),
+        )
+        assert folded["urgency"] is None
+        _, args = conn.fetchrow_calls[0]
+        assert args[3] is False
+
 
 class _ReclassifyFakeConn:
     """Fakes apply_reclassification's UPDATE — classification columns only,
@@ -571,7 +771,8 @@ class _ReclassifyFakeConn:
 
         (event_id, company_id, title, category, severity_hint, doc_json,
          incident_recommendation, incident_reasoning,
-         suggested_incident_type, suggested_severity) = args
+         suggested_incident_type, suggested_severity,
+         urgency, protocol_qualifies, protocol_reasoning) = args
         now = datetime.now(timezone.utc)
         return {
             "id": event_id, "company_id": company_id,
@@ -582,6 +783,8 @@ class _ReclassifyFakeConn:
             "incident_reasoning": incident_reasoning,
             "suggested_incident_type": suggested_incident_type,
             "suggested_severity": suggested_severity,
+            "urgency": urgency, "protocol_qualifies": protocol_qualifies,
+            "protocol_reasoning": protocol_reasoning,
             "status": "logged", "clarification_rounds": 1, "created_at": now, "updated_at": now,
         }
 

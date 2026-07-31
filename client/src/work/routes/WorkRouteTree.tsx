@@ -11,6 +11,7 @@ import ChannelBilling from '../pages/ChannelBilling'
 import ConnectionsPanel from '../components/shell/ConnectionsPanel'
 import Inbox from '../pages/Inbox'
 import EventsHub from '../pages/EventsHub'
+import ProtocolPage from '../pages/ProtocolPage'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -50,6 +51,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           >
             <Route path="events" element={<EventsHub />} />
             <Route path="events/:eventId" element={<EventsHub />} />
+            <Route path="protocol" element={<ProtocolPage />} />
           </Route>
           <Route path=":threadId" element={<MatchaWorkThread />} />
           <Route path="projects/:projectId" element={<ProjectView />} />

@@ -15,7 +15,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.ems import (
-    EmsEventListResponse, EmsEventOut, EmsEventUpdate, PromoteRequest, PromoteResponse,
+    EmsEventListResponse, EmsEventOut, EmsEventUpdate, EmsProtocolOut, EmsProtocolUpdate,
+    PromoteRequest, PromoteResponse,
 )
 from app.matcha.services.ems import categories
 from app.matcha.services.ems.event_intake import coerce_doc
@@ -229,3 +230,50 @@ async def promote(
         background_tasks.add_task(fn, *args, **kwargs)
 
     return PromoteResponse(incident_id=UUID(str(incident_row["id"])))
+
+
+@router.get("/protocol", response_model=EmsProtocolOut)
+async def get_protocol(
+    current_user=Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """The company's event-protocol file; defaults when never saved (no
+    bootstrap insert — mirrors onboarding notification-settings)."""
+    from app.matcha.services.ems.protocols import fetch_protocol
+    async with get_connection() as conn:
+        row = await fetch_protocol(conn, company_id)
+    if not row:
+        return EmsProtocolOut()
+    return EmsProtocolOut(**{k: row[k] for k in EmsProtocolOut.model_fields if k in row})
+
+
+@router.put("/protocol", response_model=EmsProtocolOut)
+async def put_protocol(
+    body: EmsProtocolUpdate,
+    current_user=Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    from app.matcha.services.ems.protocols import upsert_protocol
+    emails: list[str] = []
+    seen: set[str] = set()
+    for raw in body.notify_emails:
+        e = (raw or "").strip()
+        if not e:
+            continue
+        if "@" not in e or " " in e:
+            raise HTTPException(status_code=400, detail=f"Invalid notify email: {e}")
+        if e.lower() not in seen:
+            seen.add(e.lower())
+            emails.append(e)
+    async with get_connection() as conn:
+        row = await upsert_protocol(
+            conn, company_id=company_id, updated_by=current_user.id,
+            body={
+                "notify_emails": emails,
+                "notify_all_admins": body.notify_all_admins,
+                "incident_definition": body.incident_definition.strip(),
+                "culture_notes": body.culture_notes.strip(),
+                "corrective_actions": body.corrective_actions.strip(),
+            },
+        )
+    return EmsProtocolOut(**{k: row[k] for k in EmsProtocolOut.model_fields if k in row})

@@ -22,6 +22,13 @@ export function stripEmphasis(text: string): string {
   return text.replace(/\*\*(.+?)\*\*/g, '$1')
 }
 
+/** Urgent (OSHA/severe) pills lead with 🚨 — the server-composed first
+ *  character (event_intake._pill_emoji). Content is the ONE urgency signal
+ *  that survives a REST history reload; the WS payload isn't re-sent. */
+export function isUrgentSystemContent(text: string): boolean {
+  return text.startsWith('\u{1F6A8}')
+}
+
 export function renderSystemContent(text: string): ReactNode[] {
   // Split keeps the capture group, so segments alternate
   // plain / bold / plain / bold / … starting at plain.

@@ -21,8 +21,10 @@ function toDatetimeLocal(iso: string): string {
 
 export function PromoteModal({ event, onClose, onPromoted }: PromoteModalProps) {
   const [title, setTitle] = useState(event.title ?? '')
-  const [incidentType, setIncidentType] = useState(event.suggested_incident_type ?? 'other')
-  const [severity, setSeverity] = useState(event.suggested_severity ?? 'medium')
+  const [incidentType, setIncidentType] = useState(
+    event.suggested_incident_type ?? (event.urgency === 'osha' ? 'safety' : 'other'))
+  const [severity, setSeverity] = useState(
+    event.urgency === 'osha' ? 'critical' : (event.suggested_severity ?? 'medium'))
   const [occurredAt, setOccurredAt] = useState(toDatetimeLocal(event.created_at))
   const [location, setLocation] = useState('')
   const [witnesses, setWitnesses] = useState('')

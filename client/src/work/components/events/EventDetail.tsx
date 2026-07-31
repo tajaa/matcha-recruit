@@ -88,6 +88,25 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
           </div>
         )}
 
+        {/* Urgency banner — deterministic server-side flag (OSHA keyword
+            regex or model severe judgment); admins were paged at log time. */}
+        {event.urgency && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-300">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {event.urgency === 'osha'
+                ? 'Possibly OSHA-reportable (29 CFR 1904.39)'
+                : 'Flagged severe'}
+            </div>
+            <p className="text-sm text-red-200/90 mt-1.5">
+              {event.urgency === 'osha'
+                ? 'A fatality must be reported to OSHA within 8 hours; an in-patient hospitalization, amputation, or loss of an eye within 24 hours. OSHA hotline: 1-800-321-6742.'
+                : 'Huume judged this event severe — immediate review recommended.'}
+            </p>
+            <p className="text-xs text-red-200/60 mt-1.5">Admins were notified when this was logged.</p>
+          </div>
+        )}
+
         {/* Incident recommendation banner — visible regardless of the incidents
             feature, so a company that hasn't bought Incidents can still see
             Huume's judgment call before deciding whether to upgrade. */}
@@ -105,6 +124,20 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
                 Suggested: {event.suggested_incident_type ?? '—'}
                 {event.suggested_severity ? ` · ${event.suggested_severity} severity` : ''}
               </p>
+            )}
+          </div>
+        )}
+
+        {/* Protocol assessment — null means "never assessed", not "no". */}
+        {event.protocol_qualifies !== null && (
+          <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-4 py-3">
+            <div className="text-sm font-medium text-sky-300">
+              {event.protocol_qualifies
+                ? 'Qualifies as an incident under your company protocol'
+                : 'Does not qualify as an incident under your company protocol'}
+            </div>
+            {event.protocol_reasoning && (
+              <p className="text-sm text-sky-200/90 mt-1.5">{event.protocol_reasoning}</p>
             )}
           </div>
         )}

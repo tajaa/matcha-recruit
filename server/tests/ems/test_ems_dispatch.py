@@ -133,3 +133,14 @@ class TestIntakeDisposition:
         # The Gemini-outage fallback shape carries not_an_event=False, but
         # this must degrade safely even without the key at all.
         assert channels_ws._intake_disposition({"category": "uncategorized"}) == "persist"
+
+    def test_osha_overrides_reroute(self):
+        # A message carrying an OSHA keyword that the model misread as a
+        # question must still be documented — persisting a NULL not
+        # rerouting to the ask path with zero DB trail.
+        classified = {"not_an_event": True, "urgency": "osha"}
+        assert channels_ws._intake_disposition(classified) == "persist"
+
+    def test_not_an_event_without_osha_still_reroutes(self):
+        classified = {"not_an_event": True, "urgency": None}
+        assert channels_ws._intake_disposition(classified) == "reroute_ask"

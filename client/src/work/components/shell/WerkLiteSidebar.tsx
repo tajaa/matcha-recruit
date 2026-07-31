@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, LayoutGrid, Plus, ChevronDown, PanelLeftClose, Home, Pencil, LogOut, Compass, ClipboardList } from 'lucide-react'
+import { Hash, LayoutGrid, Plus, ChevronDown, PanelLeftClose, Home, Pencil, LogOut, Compass, ClipboardList, BookOpenCheck } from 'lucide-react'
 import { listChannels, updateChannel, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
@@ -148,6 +148,15 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             )}
           </button>
         )}
+        {showEvents && (
+          <button
+            onClick={() => navigate(`${base}/protocol`)}
+            className={`p-2 rounded-lg transition-colors ${isActive(`${base}/protocol`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+            title="Protocol"
+          >
+            <BookOpenCheck size={16} />
+          </button>
+        )}
         <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
           className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
@@ -235,6 +244,20 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
                   {formatEventsBadge(loggedEventsCount)}
                 </span>
               )}
+            </button>
+          )}
+
+          {showEvents && (
+            <button
+              onClick={() => navigate(`${base}/protocol`)}
+              className={`relative w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/protocol`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <BookOpenCheck size={14} strokeWidth={1.6} />
+              Protocol
             </button>
           )}
 

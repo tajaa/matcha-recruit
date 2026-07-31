@@ -24,6 +24,9 @@ class EmsEventOut(BaseModel):
     incident_reasoning: Optional[str] = None
     suggested_incident_type: Optional[str] = None
     suggested_severity: Optional[str] = None
+    urgency: Optional[Literal["osha", "severe"]] = None
+    protocol_qualifies: Optional[bool] = None
+    protocol_reasoning: Optional[str] = None
     status: Literal["logged", "promoted", "dismissed"]
     incident_id: Optional[UUID] = None
     awaiting_reply: bool = False
@@ -56,3 +59,20 @@ class PromoteRequest(BaseModel):
 
 class PromoteResponse(BaseModel):
     incident_id: UUID
+
+
+class EmsProtocolOut(BaseModel):
+    notify_emails: list[str] = Field(default_factory=list)
+    notify_all_admins: bool = True
+    incident_definition: str = ""
+    culture_notes: str = ""
+    corrective_actions: str = ""
+    updated_at: Optional[datetime] = None
+
+
+class EmsProtocolUpdate(BaseModel):
+    notify_emails: list[str] = Field(default_factory=list, max_length=20)
+    notify_all_admins: bool = True
+    incident_definition: str = Field("", max_length=20000)
+    culture_notes: str = Field("", max_length=20000)
+    corrective_actions: str = Field("", max_length=20000)

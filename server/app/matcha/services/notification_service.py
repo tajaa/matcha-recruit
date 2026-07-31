@@ -51,6 +51,11 @@ TYPES = {
     # A candidate accepted/declined an offer letter that a Huume thread sent
     # (routes/employee_lifecycle/offer_letters.py candidate accept/decline).
     "huume_offer": "Offer Response",
+    # Huume flagged a channel-logged EMS event urgent (OSHA-reportable or
+    # severe) — services/ems/urgent_notify.py fan-out. Not channel_-prefixed
+    # on purpose: the desktop banner path suppresses channel_* types and an
+    # urgent flag must banner.
+    "ems_urgent_event": "Urgent Event",
 }
 
 

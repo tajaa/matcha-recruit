@@ -1,4 +1,5 @@
-"""bootstrap.ems — ems_events + ems_event_audit_log (mirrors alembic/versions/ems01_event_management.py).
+"""bootstrap.ems — ems_events + ems_event_audit_log + company_event_protocols
+(mirrors alembic/versions/ems01_event_management.py + ems02_urgency_and_protocols.py).
 
 clarify_message_id / clarification_rounds / uniq_ems_events_clarify back
 conversational clarification — see that migration's docstring for the full
@@ -23,6 +24,9 @@ async def create_ems(conn):
             incident_reasoning TEXT,
             suggested_incident_type VARCHAR(50),
             suggested_severity VARCHAR(20),
+            urgency VARCHAR(10) CHECK (urgency IN ('osha', 'severe')),
+            protocol_qualifies BOOLEAN,
+            protocol_reasoning TEXT,
             status VARCHAR(20) NOT NULL DEFAULT 'logged'
                 CHECK (status IN ('logged', 'promoted', 'dismissed')),
             incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
@@ -63,4 +67,18 @@ async def create_ems(conn):
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_ems_event_audit_log_event
         ON ems_event_audit_log(event_id, created_at DESC)
+    """)
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS company_event_protocols (
+            company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+            notify_emails TEXT[] NOT NULL DEFAULT '{}',
+            notify_all_admins BOOLEAN NOT NULL DEFAULT true,
+            incident_definition TEXT NOT NULL DEFAULT '',
+            culture_notes TEXT NOT NULL DEFAULT '',
+            corrective_actions TEXT NOT NULL DEFAULT '',
+            updated_by UUID REFERENCES users(id),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
     """)

@@ -629,9 +629,14 @@ async def _bg_ems_intake(
         # werk -> matcha.services: lazy in-function import per the
         # documented werk/matcha boundary rule (CLAUDE.md).
         from app.matcha.services.ems.event_intake import (
-            classify_event, gather_intake_context, persist_event, question_text,
+            classify_event, fallback_classification, gather_intake_context,
+            persist_event, question_text,
+        )
+        from app.matcha.services.ems.protocols import (
+            fetch_protocol, mentions_incident, protocol_prompt_excerpt,
         )
 
+        rate_limited = False
         async with get_connection() as conn:
             company_id = await _ems_company_gate(conn, channel_id_str)
             if company_id is None:
@@ -639,13 +644,28 @@ async def _bg_ems_intake(
             try:
                 await check_rate_limit(str(company_id), "ems_event", 30, 3600)
             except HTTPException:
-                return  # over the hourly limit: skip silently, message already sent
+                # Over the hourly limit. The limit bounds Gemini spend/pill
+                # spam — an OSHA-regex hit costs zero Gemini, and an
+                # over-budget hour must not lose a fatality report, so those
+                # persist via the deterministic fallback below. Everything
+                # else skips silently as before (message already sent).
+                if fallback_classification(content)["urgency"] != "osha":
+                    return
+                rate_limited = True
+
+            protocol_text = None
+            if not rate_limited and mentions_incident(content):
+                protocol_row = await fetch_protocol(conn, company_id)
+                protocol_text = protocol_prompt_excerpt(protocol_row)
 
             context = await gather_intake_context(
                 conn, UUID(channel_id_str), UUID(message_id_str),
             )
         # No connection held across the Gemini calls.
-        classified = await classify_event(content, context)
+        if rate_limited:
+            classified = fallback_classification(content)  # zero Gemini calls
+        else:
+            classified = await classify_event(content, context, protocol_text=protocol_text)
 
         # Model-side backstop for the deterministic classify_intent gate:
         # the regex layer routed this to LOG, but the model itself read the
@@ -703,8 +723,22 @@ async def _bg_ems_intake(
                     sys_row["id"], event_row["id"],
                 )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        if event_row.get("urgency"):
+            _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(event_row)))
     except Exception:
         logger.exception("EMS intake failed for message %s", message_id_str)
+
+
+async def _bg_ems_urgent_notify(company_id_str: str, event_row: dict) -> None:
+    """Urgent-event fan-out off the pill path — a notify failure must never
+    cost the confirmation. Lazy import per the werk→matcha boundary rule."""
+    try:
+        from app.matcha.services.ems.urgent_notify import send_urgent_event_notifications
+        await send_urgent_event_notifications(
+            company_id=UUID(company_id_str), event_row=event_row,
+        )
+    except Exception:
+        logger.exception("EMS urgent notify failed for event %s", event_row.get("id"))
 
 
 async def _bg_ems_clarify(
@@ -737,9 +771,12 @@ async def _bg_ems_clarify(
     claim_happened = False
     try:
         from app.matcha.services.ems.event_intake import (
-            apply_reclassification, classify_event, compose_refinement_content,
+            _pill_emoji, apply_reclassification, classify_event, compose_refinement_content,
             extract_question, fold_answer, gather_intake_context, question_text,
             should_ask_again, update_text,
+        )
+        from app.matcha.services.ems.protocols import (
+            fetch_protocol, mentions_incident, protocol_prompt_excerpt,
         )
 
         reply_uuid = UUID(reply_to_id_str)
@@ -753,7 +790,7 @@ async def _bg_ems_clarify(
                     """
                     UPDATE ems_events SET clarify_message_id = NULL
                     WHERE clarify_message_id = $1 AND status = 'logged'
-                    RETURNING id, company_id, narrative, clarification_rounds
+                    RETURNING id, company_id, narrative, clarification_rounds, urgency
                     """,
                     reply_uuid,
                 )
@@ -783,6 +820,11 @@ async def _bg_ems_clarify(
                 # reporter had said them.
                 question = extract_question(question_row["content"]) if question_row else ""
                 context = await gather_intake_context(conn, UUID(channel_id_str), reply_uuid)
+
+                protocol_text = None
+                if mentions_incident(claimed["narrative"]) or mentions_incident(content):
+                    protocol_row = await fetch_protocol(conn, company_id)
+                    protocol_text = protocol_prompt_excerpt(protocol_row)
         # -- the answer is durable from here on; only reclassification can still fail --
 
         try:
@@ -795,11 +837,13 @@ async def _bg_ems_clarify(
                     conn, channel_id_str, update_text(folded),
                 )
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            if folded.get("urgency") and not claimed["urgency"]:
+                _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(folded)))
             return True
 
         # No connection held across the Gemini call.
         refinement_content = compose_refinement_content(claimed["narrative"], question, content)
-        classified = await classify_event(refinement_content, context)
+        classified = await classify_event(refinement_content, context, protocol_text=protocol_text)
 
         async with get_connection() as conn:
             reclassified = await apply_reclassification(
@@ -810,7 +854,7 @@ async def _bg_ems_clarify(
             ask_again = should_ask_again(classified, claimed["clarification_rounds"])
             if ask_again:
                 preamble = classified.get("ack") or "Got it, thanks."
-                text = question_text(f"\U0001F4CB {preamble}", classified["clarify_question"])
+                text = question_text(f"{_pill_emoji(display)} {preamble}", classified["clarify_question"])
             else:
                 text = update_text(display, classified.get("ack"))
             sys_row = await _insert_system_message(conn, channel_id_str, text)
@@ -821,6 +865,8 @@ async def _bg_ems_clarify(
                 )
 
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        if display.get("urgency") and not claimed["urgency"]:
+            _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(display)))
         return True
     except Exception:
         logger.exception("EMS clarify failed for reply to message %s", reply_to_id_str)
@@ -840,7 +886,14 @@ def _intake_disposition(classified: dict) -> str:
     A Gemini outage's fallback shape carries not_an_event=False (see
     event_intake._FALLBACK_CLASSIFICATION), so this always persists during
     an outage — the "documentation survives everything" invariant is
-    untouched."""
+    untouched.
+
+    OSHA overrides the reroute: a message carrying an OSHA keyword that the
+    model misread as a question must still be documented — rerouting to
+    the ask path leaves no DB row at all, the exact loss this pipeline
+    exists to prevent."""
+    if classified.get("urgency") == "osha":
+        return "persist"
     return "reroute_ask" if classified.get("not_an_event") else "persist"
 
 

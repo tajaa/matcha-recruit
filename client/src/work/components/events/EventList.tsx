@@ -46,7 +46,10 @@ export function EventList({ events, selectedId, onSelect }: EventListProps) {
               <span className="text-[10px] uppercase tracking-[0.12em] text-w-dim font-medium">
                 {EMS_CATEGORY_LABELS[event.category]}
               </span>
-              {event.incident_recommendation && event.status === 'logged' && (
+              {event.urgency && event.status === 'logged' && (
+                <AlertTriangle className="w-3 h-3 text-red-500 shrink-0" />
+              )}
+              {!event.urgency && event.incident_recommendation && event.status === 'logged' && (
                 <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
               )}
               <span className="ml-auto text-[10px] text-w-faint shrink-0">

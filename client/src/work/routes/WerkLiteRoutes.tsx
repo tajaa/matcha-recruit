@@ -8,6 +8,7 @@ import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
 import BoardView from '../pages/BoardView'
 import EventsHub from '../pages/EventsHub'
+import ProtocolPage from '../pages/ProtocolPage'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider } from './WorkSurfaceContext'
 import { useMe } from '../../hooks/useMe'
@@ -75,6 +76,7 @@ export default function WerkLiteRoutes() {
               >
                 <Route path="events" element={<EventsHub />} />
                 <Route path="events/:eventId" element={<EventsHub />} />
+                <Route path="protocol" element={<ProtocolPage />} />
               </Route>
               <Route path="boards/:projectId" element={<BoardView />} />
             </Route>

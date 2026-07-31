@@ -2,7 +2,7 @@ import { FileText, Reply, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
 import { renderMessageContent } from './mentions'
-import { renderSystemContent, stripEmphasis } from './systemContent'
+import { isUrgentSystemContent, renderSystemContent, stripEmphasis } from './systemContent'
 
 interface MessageListProps {
   messages: ChannelMessage[]
@@ -66,6 +66,7 @@ export default function MessageList({
         // so the pane reads as two parties talking rather than one long
         // left-aligned column with an agent's asides mixed in.
         if (msg.message_type === 'system') {
+          const urgent = isUrgentSystemContent(msg.content)
           return (
             <div key={rowKey} className="mt-3 flex flex-row-reverse gap-2.5">
               <HuumeAvatar />
@@ -77,7 +78,11 @@ export default function MessageList({
                   </span>
                 </div>
                 <div className="flex flex-row-reverse items-start gap-1.5">
-                  <span className="max-w-[85%] text-xs text-w-dim bg-w-surface2/60 border border-w-line rounded-2xl px-3 py-1.5 whitespace-pre-wrap text-left">
+                  <span className={`max-w-[85%] text-xs rounded-2xl px-3 py-1.5 whitespace-pre-wrap text-left ${
+                    urgent
+                      ? 'text-red-200 bg-red-500/10 border border-red-500/40'
+                      : 'text-w-dim bg-w-surface2/60 border border-w-line'
+                  }`}>
                     {renderSystemContent(msg.content)}
                   </span>
                   {!msg.pending && (
