@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import type React from 'react'
 import { getChannelMessages } from '../../api/channels'
 import type { ChannelMessage } from '../../api/channels'
+import { mergeMessages, upsertMessage } from '../../api/channelMessages'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
 import { useToast } from '../../../components/ui'
 
@@ -36,6 +37,7 @@ export function useChannelSocket({
   setError,
 }: UseChannelSocketParams) {
   const { toast } = useToast()
+  const lastMarkReadRef = useRef(0)
 
   useEffect(() => {
     if (!channelId || !isMember) return
@@ -45,30 +47,24 @@ export function useChannelSocket({
 
     const handleMessage = (msg: ChannelMessage) => {
       if (msg.channel_id !== channelId) return
-      setMessages((prev) => {
-        // Reconcile optimistic-pending entries first. The sender's own echo
-        // carries the client_message_id we generated on send; replace the
-        // pending row (whose `id` is the client UUID) with the server-
-        // confirmed one so the row keeps its position but flips pending=false
-        // and gets the real server id + timestamp.
-        if (msg.client_message_id) {
-          const idx = prev.findIndex(
-            (m) => m.client_message_id === msg.client_message_id && m.pending,
-          )
-          if (idx >= 0) {
-            const next = prev.slice()
-            next[idx] = msg
-            return next
-          }
-        }
-        // Normal dedup by server id (reconnect replays, other senders).
-        return prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
-      })
+      // Reconciles the sender's optimistic-pending row by client_message_id
+      // (echo), else dedups by server id (reconnect replays, other
+      // senders), always keeping (created_at, id) order — two devices
+      // can otherwise render the same messages in different orders (two
+      // uvicorn workers, no cross-device ordering guarantee).
+      setMessages((prev) => upsertMessage(prev, msg))
       // Auto-scroll if near bottom
       const container = messagesContainerRef.current
       if (container) {
         const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150
         if (nearBottom) setTimeout(scrollToBottom, 50)
+      }
+      // Advance last_read_at while actually watching the channel — otherwise
+      // unread only zeroes on the next GET /channels/{id} and this open tab
+      // accrues phantom unread. Debounced to one frame per 5s.
+      if (document.visibilityState === 'visible' && Date.now() - lastMarkReadRef.current > 5000) {
+        lastMarkReadRef.current = Date.now()
+        socket.markRead(channelId)
       }
     }
 
@@ -151,17 +147,16 @@ export function useChannelSocket({
     }
 
     // Reconnect catch-up: onopen only fires on a genuine reconnect (not on
-    // this effect's initial mount, since the shared socket is usually already
-    // open) — refetch and merge by id so messages missed during the drop
-    // aren't silently gone. Optimistic-pending sends not yet echoed are kept.
+    // this effect's initial mount, since the shared socket is usually
+    // already open) — refetch and UNION (never replace) so a WS message
+    // that lands while this fetch is in flight survives. The old
+    // replace-the-array version erased it on THIS device only, which was
+    // the reported cross-device divergence. Pending rows reconcile by
+    // client_message_id, which REST now returns.
     const offConnected = socket.addConnectedListener(() => {
       getChannelMessages(channelId)
         .then((fetched) => {
-          setMessages((prev) => {
-            const fetchedIds = new Set(fetched.map((m) => m.id))
-            const stillPending = prev.filter((m) => m.pending && !fetchedIds.has(m.id))
-            return [...fetched, ...stillPending]
-          })
+          setMessages((prev) => mergeMessages(prev, fetched))
         })
         .catch(() => {})
     })

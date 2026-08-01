@@ -42,6 +42,40 @@ export abstract class BaseSocket {
   private _closed = false
   private _reconnectAttempts = 0
 
+  constructor() {
+    // Laptop sleep / network change recovery. The OS can freeze or kill the
+    // socket without a prompt onclose, and background tabs throttle the
+    // backoff timer to ~1/min — so on wake, reconnect immediately and (even
+    // if the socket looks open) fire connected-listeners so the channel
+    // view's reconnect catch-up refetch runs. Espresso does the same via
+    // didBecomeActiveNotification for exactly this reason. Listeners are
+    // never removed: the sockets are process-lifetime singletons.
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this._wake()
+      })
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => this._wake())
+    }
+  }
+
+  private _wake() {
+    if (this._closed) return
+    if (this.isOpen) {
+      // Possibly a zombie socket (frozen tab) — the catch-up refetch is the
+      // recovery either way; the next ping cycle flushes a true zombie out.
+      this._emit(this.connectedListeners)
+      return
+    }
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
+    this._reconnectAttempts = 0
+    this.connect()
+  }
+
   // Listener SETS, not single slots. The channel socket is a process-wide
   // singleton shared by useChannelSocket, useChannelNotifications and
   // useLiveKitCall; with one slot each, the last hook to mount silently
@@ -188,11 +222,16 @@ export abstract class BaseSocket {
     this.clearState()
   }
 
-  /** Send a frame if the socket is open; a no-op otherwise. */
-  protected send(data: Record<string, unknown>) {
+  /** Send a frame if the socket is open. Returns false when the frame was
+   * dropped (closed / reconnecting) so callers can queue it for replay —
+   * the old void signature silently ate messages sent during a backoff
+   * window, the primary cross-device divergence cause. */
+  protected send(data: Record<string, unknown>): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
+      return true
     }
+    return false
   }
 
   private _startPing() {
@@ -212,8 +251,14 @@ export abstract class BaseSocket {
   private _scheduleReconnect() {
     if (this._closed) return
     // Capped exponential backoff (3s, 6s, 12s, 24s, … max 30s) so a downed
-    // server isn't hammered every 3s indefinitely. Reset to 0 on a clean open.
-    const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** this._reconnectAttempts)
+    // server isn't hammered every 3s indefinitely. Reset to 0 on a clean
+    // open. +0-1s jitter: a server blip disconnects every client
+    // simultaneously; deterministic backoff reconnects them all at exactly
+    // t+3s and every one fires its catch-up history fetch in the same
+    // instant.
+    const delay =
+      Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** this._reconnectAttempts) +
+      Math.random() * 1000
     this._reconnectAttempts++
     this.reconnectTimeout = setTimeout(() => {
       this.connect()

@@ -72,6 +72,10 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     canModerate,
     handleDeleteMessage,
     handleSend,
+    handleRetryMessage,
+    hasMore,
+    loadingOlder,
+    loadOlder,
     applyMention,
     handleKeyDown,
     handleInputChange,
@@ -184,6 +188,10 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
             members={channel?.members ?? []}
             onDelete={handleDeleteMessage}
             onReply={handleReply}
+            onRetry={handleRetryMessage}
+            onLoadOlder={loadOlder}
+            hasMore={hasMore}
+            loadingOlder={loadingOlder}
           />
 
           {/* Typing indicator */}

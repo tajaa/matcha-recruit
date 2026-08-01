@@ -47,6 +47,11 @@ class TestSocket extends BaseSocket {
   protected handleMessage(data: Record<string, unknown>) { this.handled.push(data) }
   protected beforeDisconnect() { this.leaveSent = this.isOpen; this.send({ type: 'leave' }) }
   protected clearState() { this.cleared = true }
+
+  // Exposes the protected send() so tests can assert on its return value.
+  trySend(data: Record<string, unknown>): boolean {
+    return this.send(data)
+  }
 }
 
 const latest = () => FakeWebSocket.instances[FakeWebSocket.instances.length - 1]
@@ -115,7 +120,7 @@ describe('BaseSocket', () => {
     expect(latest().frames()).toContainEqual({ type: 'join', id: 'room-1' })
 
     latest().serverClose(1006)
-    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(4000) // base 3000 + up to 1000 jitter
     latest().open()
     expect(latest().frames()).toContainEqual({ type: 'join', id: 'room-1' })
   })
@@ -126,10 +131,13 @@ describe('BaseSocket', () => {
     const delays = [3000, 6000, 12000, 24000, 30000, 30000]
     for (const d of delays) {
       latest().serverClose(1006)
-      // Nothing should reconnect one tick early...
-      vi.advanceTimersByTime(d - 1)
       const before = FakeWebSocket.instances.length
-      vi.advanceTimersByTime(1)
+      // Nothing reconnects before the base delay — jitter only adds, never
+      // subtracts (+0-1000ms, see baseSocket.ts's _scheduleReconnect).
+      vi.advanceTimersByTime(d - 1)
+      expect(FakeWebSocket.instances.length).toBe(before)
+      // Covers the full jitter range on top of the base delay.
+      vi.advanceTimersByTime(1001)
       expect(FakeWebSocket.instances.length).toBe(before + 1)
     }
   })
@@ -138,14 +146,14 @@ describe('BaseSocket', () => {
     const s = new TestSocket()
     s.connect()
     latest().serverClose(1006)
-    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(4000) // base 3000 + up to 1000 jitter
     latest().serverClose(1006)
-    vi.advanceTimersByTime(6000)
+    vi.advanceTimersByTime(7000) // base 6000 + up to 1000 jitter
     latest().open() // clean connection — attempts reset
 
     latest().serverClose(1006)
     const before = FakeWebSocket.instances.length
-    vi.advanceTimersByTime(3000)
+    vi.advanceTimersByTime(4000) // reset -> base delay 3000 again + jitter
     expect(FakeWebSocket.instances.length).toBe(before + 1)
   })
 
@@ -253,5 +261,48 @@ describe('BaseSocket', () => {
     s.joined = 'room-1'
     ws.open()
     expect(ws.sent).toHaveLength(0)
+  })
+
+  it('send() reports success/failure via its return value', () => {
+    // Callers (channelSocket's outbox) need this to know whether to queue a
+    // frame for replay — the old void signature silently ate it either way.
+    const s = new TestSocket()
+    expect(s.trySend({ type: 'ping' })).toBe(false) // no socket yet
+    s.connect()
+    latest().open()
+    expect(s.trySend({ type: 'ping' })).toBe(true)
+    latest().readyState = FakeWebSocket.CLOSED
+    expect(s.trySend({ type: 'ping' })).toBe(false)
+  })
+
+  it('wakes on visibilitychange: reconnects if closed, re-fires connected listeners if open', () => {
+    const s = new TestSocket()
+    const seen: string[] = []
+    s.addConnectedListener(() => seen.push('connected'))
+    s.connect()
+    latest().open()
+    expect(seen).toEqual(['connected'])
+
+    // Tab already open at wake time (OS froze it without a close event) —
+    // fire connected-listeners again so the reconnect catch-up refetch runs.
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(seen).toEqual(['connected', 'connected'])
+
+    // Socket actually dead — wake reconnects immediately, bypassing backoff.
+    latest().serverClose(1006)
+    const before = FakeWebSocket.instances.length
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(FakeWebSocket.instances.length).toBe(before + 1)
+  })
+
+  it('reconnect backoff includes jitter, staying within [base, base+1000)', () => {
+    const s = new TestSocket()
+    s.connect()
+    latest().serverClose(1006) // schedules first retry at ~3000-4000ms
+    vi.advanceTimersByTime(2999)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(1001) // covers up to 4000ms elapsed
+    expect(FakeWebSocket.instances).toHaveLength(2)
   })
 })

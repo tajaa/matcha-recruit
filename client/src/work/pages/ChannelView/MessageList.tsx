@@ -13,6 +13,10 @@ interface MessageListProps {
   members: ChannelMember[]
   onDelete: (msg: ChannelMessage) => void
   onReply: (msg: ChannelMessage) => void
+  onRetry: (msg: ChannelMessage) => void
+  onLoadOlder: () => void
+  hasMore: boolean
+  loadingOlder: boolean
 }
 
 function ReplyPreviewStub({ preview }: { preview: NonNullable<ChannelMessage['reply_preview']> }) {
@@ -32,9 +36,22 @@ export default function MessageList({
   members,
   onDelete,
   onReply,
+  onRetry,
+  onLoadOlder,
+  hasMore,
+  loadingOlder,
 }: MessageListProps) {
   return (
-    <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+    <div
+      ref={messagesContainerRef}
+      className="flex-1 overflow-y-auto px-4 py-3 space-y-1"
+      onScroll={(e) => {
+        if (hasMore && !loadingOlder && e.currentTarget.scrollTop < 60) onLoadOlder()
+      }}
+    >
+      {loadingOlder && (
+        <div className="text-center py-2 text-w-faint text-xs">Loading older messages…</div>
+      )}
       {messages.length === 0 && (
         <div className="text-center py-12 text-w-faint text-sm">
           No messages yet. Start the conversation!
@@ -184,6 +201,14 @@ export default function MessageList({
                   </span>
                 ))}
               </div>
+            )}
+            {msg.failed && (
+              <button
+                onClick={() => onRetry(msg)}
+                className="mt-1 text-xs text-red-500 hover:underline"
+              >
+                Failed to send — click to retry
+              </button>
             )}
             </div>
             {!isDeleted && (

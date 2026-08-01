@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
-import { UserPlus, Settings, Heart, BarChart2, Briefcase, LogOut } from 'lucide-react'
+import { UserPlus, Settings, Heart, BarChart2, Briefcase, LogOut, Bell, BellOff } from 'lucide-react'
 import {
   getChannel,
+  getChannelMessages,
   joinChannel,
   leaveChannel,
   uploadChannelFiles,
   getChannelPaymentInfo,
   createChannelCheckout,
   deleteChannelMessage,
+  setChannelMute,
 } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
+import { mergeMessages } from '../../api/channelMessages'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../../hooks/useMe'
 import { listOpenPostings } from '../../api/channelJobPostings'
@@ -42,6 +45,13 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
 
   const [channel, setChannel] = useState<ChannelDetail | null>(null)
   const [messages, setMessages] = useState<ChannelMessage[]>([])
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  // Seeded false (ChannelDetail carries no per-member mute flag today — that
+  // lives on ChannelSummary/listChannels); the toggle below is authoritative
+  // for this session, and the sidebar refetch (CHANNELS_CHANGED_EVENT) picks
+  // up the server value elsewhere.
+  const [muted, setMuted] = useState(false)
   const { appendOptimistic } = useOptimisticMessages(setMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
@@ -129,11 +139,15 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     if (!channelId) return
     setLoading(true)
     setError('')
+    setHasMore(true)
     getChannel(channelId)
       .then((data) => {
         setChannel(data)
         setMessages(data.messages)
         setIsMember(data.is_member)
+        // get_channel's inline messages come from the same 50-row limit as
+        // the paginated endpoint — a full page means there's likely more.
+        setHasMore(data.messages.length >= 50)
         if (data.is_member) setTimeout(scrollToBottom, 100)
       })
       .catch((err) => {
@@ -141,6 +155,30 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
       })
       .finally(() => setLoading(false))
   }, [channelId, scrollToBottom])
+
+  const loadOlder = useCallback(async () => {
+    if (!channelId || loadingOlder || !hasMore) return
+    const oldest = messages.find((m) => !m.pending)
+    if (!oldest) return
+    setLoadingOlder(true)
+    try {
+      const older = await getChannelMessages(channelId, oldest.created_at, oldest.id)
+      if (older.length < 50) setHasMore(false)
+      if (older.length) {
+        // Preserve the viewport: record height before the prepend, restore after.
+        const container = messagesContainerRef.current
+        const prevHeight = container?.scrollHeight ?? 0
+        setMessages((prev) => mergeMessages(prev, older))
+        requestAnimationFrame(() => {
+          if (container) container.scrollTop += container.scrollHeight - prevHeight
+        })
+      }
+    } catch {
+      // transient — next scroll retries
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [channelId, messages, loadingOlder, hasMore])
 
   // Load payment info
   useEffect(() => {
@@ -224,9 +262,30 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
         if (nearBottom) setTimeout(scrollToBottom, 50)
       }
     }
-    socketRef.current?.sendMessage(channelId, content, attachments, cmid, replyTo?.id)
+    const sent = socketRef.current?.sendMessage(channelId, content, attachments, cmid, replyTo?.id) ?? false
+    if (!sent) {
+      // Queued to the durable outbox (channelSocket.ts); it replays on
+      // reconnect. Mark failed now so the row visibly needs attention
+      // rather than ghosting as pending forever.
+      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid ? { ...m, failed: true } : m)))
+    }
+    // 8s echo deadline (mirrors Espresso's schedulePendingTimeout): if the
+    // echo hasn't replaced the pending row by then, flip it to failed.
+    window.setTimeout(() => {
+      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid && m.pending ? { ...m, failed: true } : m)))
+    }, 8000)
     setInput('')
     setReplyTo(null)
+  }
+
+  function handleRetryMessage(msg: ChannelMessage) {
+    if (!channelId || !msg.client_message_id) return
+    setMessages((prev) => prev.map((m) => (m.client_message_id === msg.client_message_id ? { ...m, failed: false } : m)))
+    const cmid = msg.client_message_id
+    socketRef.current?.sendMessage(channelId, msg.content, msg.attachments, cmid, msg.reply_to_id ?? undefined)
+    window.setTimeout(() => {
+      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid && m.pending ? { ...m, failed: true } : m)))
+    }, 8000)
   }
 
   function handleReply(msg: ChannelMessage) {
@@ -342,11 +401,23 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
 
   const typingText = Array.from(typingUsers.values()).join(', ')
 
+  async function handleToggleMute() {
+    if (!channelId) return
+    const next = !muted
+    setMuted(next) // optimistic — server is source of truth on the next sidebar refetch
+    try {
+      await setChannelMute(channelId, next)
+    } catch {
+      setMuted(!next)
+    }
+  }
+
   const isOwner = channel?.my_role === 'owner'
   const isOwnerOrMod = !!channel?.my_role && ['owner', 'moderator'].includes(channel.my_role)
   const isPaid = !!paymentInfo?.is_paid
   const secondaryActions: HeaderAction[] = ([
     isOwnerOrMod && { key: 'add', icon: UserPlus, label: 'Add members', onClick: () => setShowAddMembers(true), hover: 'hover:text-w-accent' },
+    isMember && { key: 'mute', icon: muted ? BellOff : Bell, label: muted ? 'Unmute channel' : 'Mute channel', active: muted, onClick: handleToggleMute, hover: 'hover:text-w-accent' },
     ((isOwnerOrMod && isPaid) || (!isOwnerOrMod && isMember)) && { key: 'jobs', icon: Briefcase, label: 'Job postings', active: showJobPostings, onClick: () => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }, hover: 'hover:text-w-accent' },
     isOwner && isPaid && { key: 'analytics', icon: BarChart2, label: 'Channel analytics', active: showAnalytics, onClick: () => { setShowAnalytics(!showAnalytics); setShowSettings(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
     isOwner && isPaid && { key: 'settings', icon: Settings, label: 'Channel settings', active: showSettings, onClick: () => { setShowSettings(!showSettings); setShowAnalytics(false); setShowJobPostings(false) }, hover: 'hover:text-w-accent' },
@@ -413,6 +484,10 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     canModerate,
     handleDeleteMessage,
     handleSend,
+    handleRetryMessage,
+    hasMore,
+    loadingOlder,
+    loadOlder,
     applyMention,
     handleKeyDown,
     handleInputChange,

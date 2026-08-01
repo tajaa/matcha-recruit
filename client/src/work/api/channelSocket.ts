@@ -6,6 +6,20 @@ type TypingHandler = (user: { id: string; name: string }) => void
 type OnlineHandler = (users: { id: string; name: string; avatar_url: string | null }[]) => void
 type UserEventHandler = (user: { id: string; name: string }) => void
 
+/** Durable outbox for sends attempted while the socket was down. Mirrors
+ * Espresso's channels_outbox_v1 (UserDefaults) — safe to blind-replay because
+ * the server INSERT is idempotent on (sender_id, client_message_id). */
+type OutboxEntry = {
+  channel_id: string
+  content: string
+  attachments?: { url: string; filename: string; content_type: string; size: number }[]
+  client_message_id: string
+  reply_to_id?: string
+  queued_at: number
+}
+const OUTBOX_KEY = 'channels_outbox_v1'
+const OUTBOX_CAP = 50
+
 export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
   private messageListeners: Set<MessageHandler> = new Set()
@@ -56,6 +70,10 @@ export class ChannelSocket extends BaseSocket {
   // every joined room, so an unscoped error would otherwise blank
   // whichever channel view happens to be open.
   onServerError: ((message: string, details: { channelId?: string; clientMessageId?: string }) => void) | null = null
+  // Cross-device read-state push (Phase 1's mark_read WS frame / Phase 2's
+  // GET /channels/{id}) — another of this user's devices marked a channel
+  // read; the sidebar badge should zero to match.
+  onChannelRead: ((data: { channel_id: string }) => void) | null = null
 
   protected path() {
     return '/ws/channels'
@@ -67,6 +85,52 @@ export class ChannelSocket extends BaseSocket {
     for (const room of this.joinedRooms) {
       this.send({ type: 'join_room', channel_id: room })
     }
+    // After membership is re-established: replay anything queued while down.
+    this._flushOutbox()
+  }
+
+  private _readOutbox(): OutboxEntry[] {
+    try {
+      const raw = localStorage.getItem(OUTBOX_KEY)
+      return raw ? (JSON.parse(raw) as OutboxEntry[]) : []
+    } catch {
+      return []
+    }
+  }
+
+  private _writeOutbox(entries: OutboxEntry[]) {
+    try {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(entries.slice(-OUTBOX_CAP)))
+    } catch { /* quota — drop rather than crash the send path */ }
+  }
+
+  private _enqueueOutbox(entry: OutboxEntry) {
+    const rest = this._readOutbox().filter((e) => e.client_message_id !== entry.client_message_id)
+    this._writeOutbox([...rest, entry])
+  }
+
+  removeFromOutbox(clientMessageId: string) {
+    const entries = this._readOutbox()
+    const rest = entries.filter((e) => e.client_message_id !== clientMessageId)
+    if (rest.length !== entries.length) this._writeOutbox(rest)
+  }
+
+  private _flushOutbox() {
+    const entries = this._readOutbox()
+    if (!entries.length) return
+    const remaining: OutboxEntry[] = []
+    for (const e of entries) {
+      const ok = this.send({
+        type: 'message',
+        channel_id: e.channel_id,
+        content: e.content,
+        ...(e.attachments?.length ? { attachments: e.attachments } : {}),
+        client_message_id: e.client_message_id,
+        ...(e.reply_to_id ? { reply_to_id: e.reply_to_id } : {}),
+      })
+      if (!ok) remaining.push(e)
+    }
+    this._writeOutbox(remaining)
   }
 
   protected clearState() {
@@ -75,9 +139,12 @@ export class ChannelSocket extends BaseSocket {
 
   protected handleMessage(data: Record<string, unknown>) {
     switch (data.type) {
-      case 'message':
-        this._dispatchMessage(data.message as ChannelMessage)
+      case 'message': {
+        const m = data.message as ChannelMessage
+        if (m.client_message_id) this.removeFromOutbox(m.client_message_id)
+        this._dispatchMessage(m)
         break
+      }
       case 'message_deleted':
         this.onMessageDeleted?.({
           channel_id: data.room as string,
@@ -124,11 +191,19 @@ export class ChannelSocket extends BaseSocket {
       case 'call.invited':
         this.onCallInvited?.(data as never)
         break
-      case 'error':
+      case 'error': {
+        const cmid = data.client_message_id as string | undefined
+        // Permanently rejected (not a member, over the length cap, rate
+        // limited) — don't replay it forever from the outbox.
+        if (cmid) this.removeFromOutbox(cmid)
         this.onServerError?.(data.message as string, {
           channelId: data.channel_id as string | undefined,
-          clientMessageId: data.client_message_id as string | undefined,
+          clientMessageId: cmid,
         })
+        break
+      }
+      case 'channel_read':
+        this.onChannelRead?.({ channel_id: data.channel_id as string })
         break
     }
   }
@@ -150,8 +225,8 @@ export class ChannelSocket extends BaseSocket {
     attachments?: { url: string; filename: string; content_type: string; size: number }[],
     clientMessageId?: string,
     replyToId?: string,
-  ) {
-    this.send({
+  ): boolean {
+    const sent = this.send({
       type: 'message',
       channel_id: channelId,
       content,
@@ -159,10 +234,22 @@ export class ChannelSocket extends BaseSocket {
       ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
       ...(replyToId ? { reply_to_id: replyToId } : {}),
     })
+    if (!sent && clientMessageId) {
+      this._enqueueOutbox({
+        channel_id: channelId, content, attachments,
+        client_message_id: clientMessageId, reply_to_id: replyToId,
+        queued_at: Date.now(),
+      })
+    }
+    return sent
   }
 
   sendTyping(channelId: string) {
     this.send({ type: 'typing', channel_id: channelId })
+  }
+
+  markRead(channelId: string) {
+    this.send({ type: 'mark_read', channel_id: channelId })
   }
 
 }

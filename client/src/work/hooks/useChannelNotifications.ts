@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getSharedChannelSocket } from '../api/channelSocket'
-import { listChannels, type ChannelMessage, type ChannelSummary } from '../api/channels'
+import { listChannels, CHANNELS_CHANGED_EVENT, type ChannelMessage, type ChannelSummary } from '../api/channels'
 import { useToast } from '../../components/ui/Toast'
 import { useMe } from '../../hooks/useMe'
 import { getChannelSoundEnabled, getChannelToastEnabled } from './useNotificationSettings'
@@ -39,6 +39,11 @@ export function useChannelNotifications() {
   // Channel name lookup, populated after the initial list fetch. Used so
   // the toast can show "#leadership" instead of a bare UUID.
   const channelNamesRef = useRef<Map<string, string>>(new Map())
+  // Per-member mute (channel_members.is_muted) — kept in sync with
+  // CHANNELS_CHANGED_EVENT so a mute toggled elsewhere takes effect without
+  // a remount.
+  const mutedChannelsRef = useRef<Set<string>>(new Set())
+  const lastBadgeRefreshRef = useRef(0)
 
   const userId = me?.user?.id ?? null
 
@@ -48,25 +53,45 @@ export function useChannelNotifications() {
     const socket = getSharedChannelSocket()
 
     let cancelled = false
-    // Load membership list and join every room
-    listChannels()
-      .then((channels: ChannelSummary[]) => {
-        if (cancelled) return
-        for (const ch of channels) {
-          if (ch.is_member) {
-            channelNamesRef.current.set(ch.id, ch.name)
-            socket.joinRoom(ch.id)
+    // Load membership list, join every room, and track mute state.
+    const loadChannels = () => {
+      listChannels()
+        .then((channels: ChannelSummary[]) => {
+          if (cancelled) return
+          for (const ch of channels) {
+            if (ch.is_member) {
+              channelNamesRef.current.set(ch.id, ch.name)
+              socket.joinRoom(ch.id)
+            }
+            if (ch.is_muted) mutedChannelsRef.current.add(ch.id)
+            else mutedChannelsRef.current.delete(ch.id)
           }
-        }
-      })
-      .catch(() => {})
+        })
+        .catch(() => {})
+    }
+    loadChannels()
+    window.addEventListener(CHANNELS_CHANGED_EVENT, loadChannels)
 
     const handleMessage = (msg: ChannelMessage) => {
+      // Sidebar unread badges only refresh on navigation/mount today — nudge
+      // the existing CHANNELS_CHANGED_EVENT refetch (debounced to 1/5s) so a
+      // message arriving on any channel keeps the badge fresh. Fires even
+      // for own messages / muted channels — the count is server-computed,
+      // not derived from this listener's own filtering below.
+      if (Date.now() - lastBadgeRefreshRef.current > 5000) {
+        lastBadgeRefreshRef.current = Date.now()
+        window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+      }
+
       // Skip our own messages
       if (msg.sender_id === userId) return
 
       // Skip if the user is currently viewing this channel
       if (pathnameRef.current.includes(`${base}/channels/${msg.channel_id}`)) return
+
+      // Muted channel: no sound, no toast (mentions still notify via the
+      // server-side bell/push exception; the sidebar badge still ticks).
+      if (mutedChannelsRef.current.has(msg.channel_id)) return
 
       const channelName = channelNamesRef.current.get(msg.channel_id) ?? 'a channel'
       const preview = truncate(msg.content || '(attachment)', 80)
@@ -85,10 +110,17 @@ export function useChannelNotifications() {
     }
 
     socket.addMessageListener(handleMessage)
+    // Another of this user's devices marked a channel read — refresh the
+    // sidebar so this device's badge zeroes to match.
+    socket.onChannelRead = () => {
+      window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+    }
 
     return () => {
       cancelled = true
       socket.removeMessageListener(handleMessage)
+      socket.onChannelRead = null
+      window.removeEventListener(CHANNELS_CHANGED_EVENT, loadChannels)
       // Note: we don't leave rooms or disconnect — the shared socket lives
       // for the app's lifetime and other components may still depend on it.
     }

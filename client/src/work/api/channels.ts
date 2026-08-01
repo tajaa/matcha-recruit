@@ -15,6 +15,8 @@ export interface ChannelSummary {
   is_paid?: boolean
   price_cents?: number | null
   currency?: string
+  /** Per-member mute — silences sound/toast except direct @mentions. */
+  is_muted?: boolean
 }
 
 /** Allowed channel categories (mirrors `CHANNEL_CATEGORIES` in
@@ -104,13 +106,17 @@ export interface ChannelMessage {
    * not have this field; renderers should treat absence as "no mentions
    * resolved" but may still parse `@handle` patterns in `content` for display. */
   mentioned_user_ids?: string[]
-  /** Client-generated correlation ID echoed by the server on broadcast. The
-   * sender appends an optimistic-pending message with this ID before the WS
-   * echo arrives; on echo the pending entry is replaced rather than duplicated. */
+  /** Client-generated correlation ID, echoed on the WS broadcast AND now
+   * returned by REST (get_channel/get_channel_messages) — used to reconcile
+   * a still-pending local row against a reconnect refetch's persisted copy
+   * (see channelMessages.mergeMessages). */
   client_message_id?: string | null
   /** Local-only flag set by the optimistic-send path. Never present in
    * server-broadcast or REST-fetched messages. */
   pending?: boolean
+  /** Local-only: pending send that got no echo within 8s (or was queued to
+   * the outbox while offline). Renders a retry affordance. */
+  failed?: boolean
 }
 
 export interface ChannelDetail {
@@ -204,11 +210,22 @@ export const createChannel = async (
 export const getChannel = (id: string) =>
   api.get<ChannelDetail>(`/channels/${id}`)
 
-export const getChannelMessages = (id: string, before?: string) =>
-  api.get<ChannelMessage[]>(`/channels/${id}/messages${before ? `?before=${encodeURIComponent(before)}` : ''}`)
+export const getChannelMessages = (id: string, before?: string, beforeId?: string) => {
+  const qs = new URLSearchParams()
+  if (before) qs.set('before', before)
+  if (beforeId) qs.set('before_id', beforeId)
+  const q = qs.toString()
+  return api.get<ChannelMessage[]>(`/channels/${id}/messages${q ? `?${q}` : ''}`)
+}
 
 export const deleteChannelMessage = (channelId: string, messageId: string) =>
   api.delete<{ ok: boolean }>(`/channels/${channelId}/messages/${messageId}`)
+
+export const setChannelMute = async (id: string, muted: boolean) => {
+  const res = await api.post<{ ok: boolean; muted: boolean }>(`/channels/${id}/mute`, { muted })
+  window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+  return res
+}
 
 export const joinChannel = async (id: string) => {
   const res = await api.post(`/channels/${id}/join`)
