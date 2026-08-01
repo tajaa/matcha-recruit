@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
+from ._shared import resolve_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -196,16 +197,6 @@ class PromoteDemoteBody(BaseModel):
     user_id: UUID
 
 
-class BroadcastSummary(BaseModel):
-    id: str
-    channel_id: str
-    started_by: str
-    started_at: str
-    title: Optional[str]
-    active: bool
-    publisher_user_ids: list[str]
-
-
 # ---------------------------------------------------------------------------
 # POST /channels/{channel_id}/broadcast/start
 # ---------------------------------------------------------------------------
@@ -228,6 +219,8 @@ async def start_broadcast(
     # infra feature). Watching stays free — only starting is gated.
     await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
 
+    orphan_broadcast_id = None  # set inside the txn if an orphan was recovered; pushed after conn closes
+
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
 
@@ -244,6 +237,10 @@ async def start_broadcast(
             # Enforce max 1 active broadcast per channel.
             # Recover orphans: if existing row is past the duration cap (server may
             # have restarted before the in-process auto-stop fired), close it now.
+            # The event push is deferred until after this connection/transaction
+            # closes — it opens its own pool connection and must not fire before
+            # the UPDATE is committed (a later 409 in this txn would roll it back
+            # into a phantom "ended" event for a broadcast that's still active).
             existing = await _active_broadcast(conn, channel_id)
             if existing:
                 elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
@@ -252,13 +249,7 @@ async def start_broadcast(
                         "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1",
                         existing["id"],
                     )
-                    # Best-effort: tell members the orphan ended.
-                    await _push_broadcast_event(str(channel_id), {
-                        "type": "broadcast.ended",
-                        "channel_id": str(channel_id),
-                        "broadcast_id": str(existing["id"]),
-                        "reason": "orphan_recovered",
-                    })
+                    orphan_broadcast_id = existing["id"]
                     existing = None
 
             if existing:
@@ -291,6 +282,14 @@ async def start_broadcast(
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
+
+    if orphan_broadcast_id is not None:
+        await _push_broadcast_event(str(channel_id), {
+            "type": "broadcast.ended",
+            "channel_id": str(channel_id),
+            "broadcast_id": str(orphan_broadcast_id),
+            "reason": "orphan_recovered",
+        })
 
     try:
         token = mint_token(
@@ -346,8 +345,8 @@ async def stop_broadcast(
         if not bc:
             raise HTTPException(status_code=404, detail="No active broadcast")
 
-        await conn.execute(
-            "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1",
+        ended = await conn.fetchval(
+            "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1 AND ended_at IS NULL RETURNING id",
             bc["id"],
         )
 
@@ -362,11 +361,14 @@ async def stop_broadcast(
     except Exception:
         logger.warning("LiveKit delete_room failed for %s", bc["livekit_room"], exc_info=True)
 
-    await _push_broadcast_event(str(channel_id), {
-        "type": "broadcast.ended",
-        "channel_id": str(channel_id),
-        "broadcast_id": str(bc["id"]),
-    })
+    if ended:
+        # Already ended by the webhook (room_finished race) — that path
+        # already pushed broadcast.ended, so skip the duplicate here.
+        await _push_broadcast_event(str(channel_id), {
+            "type": "broadcast.ended",
+            "channel_id": str(channel_id),
+            "broadcast_id": str(bc["id"]),
+        })
     return {"ok": True}
 
 
@@ -430,7 +432,7 @@ async def refresh_broadcast_token(
     """Re-mint the caller's token. Capped at the broadcast's remaining duration —
     cannot extend a broadcast past BROADCAST_MAX_DURATION_SECONDS.
     """
-    from ...core.services.livekit_service import mint_token, list_participant_identities, _get_lk_config
+    from ...core.services.livekit_service import mint_token, list_publisher_identities, _get_lk_config
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
@@ -448,11 +450,17 @@ async def refresh_broadcast_token(
     remaining = max(30, BROADCAST_MAX_DURATION_SECONDS - int(elapsed))
 
     identity = str(current_user.id)
-    try:
-        publishers = await list_participant_identities(bc["livekit_room"])
-        can_publish = identity in publishers and str(bc["started_by"]) == identity
-    except Exception:
-        can_publish = str(bc["started_by"]) == identity
+    # The starter always keeps publish rights; anyone else re-checks their
+    # LIVE grant (e.g. a promoted guest) rather than losing it on refresh —
+    # can_publish here used to require identity == started_by unconditionally,
+    # which silently demoted promoted publishers back to viewer.
+    if identity == str(bc["started_by"]):
+        can_publish = True
+    else:
+        try:
+            can_publish = identity in await list_publisher_identities(bc["livekit_room"])
+        except Exception:
+            can_publish = False
 
     try:
         token = mint_token(
@@ -501,19 +509,7 @@ async def promote_publisher(
         # Guest must be a channel member
         await _assert_member(conn, channel_id, body.user_id)
 
-        # Resolve display name for the token
-        name_row = await conn.fetchrow(
-            """
-            SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
-            FROM users u
-            LEFT JOIN clients c ON c.user_id = u.id
-            LEFT JOIN employees e ON e.user_id = u.id
-            LEFT JOIN admins a ON a.user_id = u.id
-            WHERE u.id = $1
-            """,
-            body.user_id,
-        )
-        guest_name = name_row["name"] if name_row else str(body.user_id)
+        guest_name = await resolve_display_name(conn, body.user_id)
 
     identity = str(body.user_id)
 
@@ -583,18 +579,7 @@ async def demote_publisher(
         if not bc:
             raise HTTPException(status_code=404, detail="No active broadcast")
 
-        name_row = await conn.fetchrow(
-            """
-            SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
-            FROM users u
-            LEFT JOIN clients c ON c.user_id = u.id
-            LEFT JOIN employees e ON e.user_id = u.id
-            LEFT JOIN admins a ON a.user_id = u.id
-            WHERE u.id = $1
-            """,
-            body.user_id,
-        )
-        guest_name = name_row["name"] if name_row else str(body.user_id)
+        guest_name = await resolve_display_name(conn, body.user_id)
 
     identity = str(body.user_id)
 

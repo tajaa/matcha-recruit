@@ -21,7 +21,7 @@ surface at a time (and one mic device on the client).
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 from uuid import UUID
 
 import asyncpg
@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
+from ._shared import resolve_display_name, spawn_bg
 from .channel_broadcasts import _active_broadcast, _assert_member, _assert_owner
 
 logger = logging.getLogger(__name__)
@@ -62,21 +63,6 @@ def _call_room_name(channel_id: UUID) -> str:
     # Distinct prefix from broadcasts' "channel-{id}" so the shared LiveKit
     # webhook can route by room name.
     return f"call-{channel_id}"
-
-
-async def _display_name(conn, user_id: UUID) -> str:
-    row = await conn.fetchrow(
-        """
-        SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
-        FROM users u
-        LEFT JOIN clients c ON c.user_id = u.id
-        LEFT JOIN employees e ON e.user_id = u.id
-        LEFT JOIN admins a ON a.user_id = u.id
-        WHERE u.id = $1
-        """,
-        user_id,
-    )
-    return row["name"] if row else str(user_id)
 
 
 async def _push_call_event(channel_id: str, event: dict) -> None:
@@ -304,6 +290,8 @@ async def start_call(
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
+    orphan_call_id = None  # set inside the txn if an orphan was recovered; pushed after conn closes
+
     async with get_connection() as conn:
         # werk-lite is a company-paid product: the per-user Werk plan gate
         # (Go Live = Pro) doesn't apply, and WHO may start a call is a company
@@ -340,7 +328,11 @@ async def start_call(
             )
 
             # Recover orphans past the duration cap (server may have restarted
-            # before the in-process auto-stop fired).
+            # before the in-process auto-stop fired). The event push is
+            # deferred until after this connection/transaction closes — it
+            # opens its own pool connection and must not fire before the
+            # UPDATE is committed (a later 409 in this txn would roll it back
+            # into a phantom "ended" event for a call that's still active).
             existing = await _active_call(conn, channel_id)
             if existing:
                 elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
@@ -349,12 +341,7 @@ async def start_call(
                         "UPDATE channel_calls SET ended_at = NOW() WHERE id = $1",
                         existing["id"],
                     )
-                    await _push_call_event(str(channel_id), {
-                        "type": "call.ended",
-                        "channel_id": str(channel_id),
-                        "call_id": str(existing["id"]),
-                        "reason": "orphan_recovered",
-                    })
+                    orphan_call_id = existing["id"]
                     existing = None
 
             if existing:
@@ -366,7 +353,7 @@ async def start_call(
                 raise HTTPException(status_code=409, detail="A broadcast is active in this channel — end it first")
 
             invitees = await _member_filtered(conn, channel_id, body.invited_user_ids)
-            owner_name = await _display_name(conn, current_user.id)
+            owner_name = await resolve_display_name(conn, current_user.id)
 
             room_name = _call_room_name(channel_id)
             try:
@@ -389,6 +376,14 @@ async def start_call(
                     """,
                     [(row["id"], uid, current_user.id) for uid in invitees],
                 )
+
+    if orphan_call_id is not None:
+        await _push_call_event(str(channel_id), {
+            "type": "call.ended",
+            "channel_id": str(channel_id),
+            "call_id": str(orphan_call_id),
+            "reason": "orphan_recovered",
+        })
 
     # Best-effort: explicit room creation carries the authoritative caps.
     # On failure the room still auto-creates at join — we just lose the
@@ -427,8 +422,8 @@ async def start_call(
         "mode": body.mode,
         "max_participants": CALL_MAX_PARTICIPANTS,
     })
-    await _notify_invitees(channel_id, call_id, current_user.id, invitees)
-    await _notify_call_started(channel_id, call_id, current_user.id, owner_name, body.mode)
+    spawn_bg(_notify_invitees(channel_id, call_id, current_user.id, invitees))
+    spawn_bg(_notify_call_started(channel_id, call_id, current_user.id, owner_name, body.mode))
 
     return {
         "call_id": str(call_id),
@@ -472,7 +467,7 @@ async def get_call_token(
             if not invited:
                 raise HTTPException(status_code=403, detail="You haven't been invited to this call")
 
-        display_name = await _display_name(conn, current_user.id)
+        display_name = await resolve_display_name(conn, current_user.id)
 
     identity = str(current_user.id)
     # Friendly capacity check; LiveKit's max_participants is the hard backstop,
@@ -568,8 +563,8 @@ async def stop_call(
         if not call:
             raise HTTPException(status_code=404, detail="No active call")
 
-        await conn.execute(
-            "UPDATE channel_calls SET ended_at = NOW() WHERE id = $1",
+        ended = await conn.fetchval(
+            "UPDATE channel_calls SET ended_at = NOW() WHERE id = $1 AND ended_at IS NULL RETURNING id",
             call["id"],
         )
 
@@ -580,11 +575,14 @@ async def stop_call(
     except Exception:
         logger.warning("LiveKit delete_room failed for %s", call["livekit_room"], exc_info=True)
 
-    await _push_call_event(str(channel_id), {
-        "type": "call.ended",
-        "channel_id": str(channel_id),
-        "call_id": str(call["id"]),
-    })
+    if ended:
+        # Already ended by the webhook (room_finished race) — that path
+        # already pushed call.ended, so skip the duplicate here.
+        await _push_call_event(str(channel_id), {
+            "type": "call.ended",
+            "channel_id": str(channel_id),
+            "call_id": str(call["id"]),
+        })
     return {"ok": True}
 
 

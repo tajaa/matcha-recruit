@@ -155,6 +155,24 @@ async def list_participant_identities(room_name: str) -> list[str]:
         return [p.identity for p in resp.participants]
 
 
+async def list_publisher_identities(room_name: str) -> list[str]:
+    """Return identities of participants currently granted can_publish=True.
+
+    Distinct from list_participant_identities (everyone in the room) — used
+    to check who actually holds stage/publish rights right now, e.g. so a
+    token refresh doesn't silently demote a promoted broadcast guest.
+    """
+    try:
+        from livekit.api import LiveKitAPI, ListParticipantsRequest
+    except ImportError as e:
+        raise RuntimeError(f"livekit-api package not installed: {e}")
+
+    url, key, secret = _get_lk_config()
+    async with LiveKitAPI(url, key, secret) as lk:
+        resp = await lk.room.list_participants(ListParticipantsRequest(room=room_name))
+        return [p.identity for p in resp.participants if p.permission.can_publish]
+
+
 # ---------------------------------------------------------------------------
 # Webhook signature verification (synchronous)
 # ---------------------------------------------------------------------------

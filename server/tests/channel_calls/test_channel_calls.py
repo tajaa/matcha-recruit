@@ -196,6 +196,12 @@ class TestCapacity:
 # ============================================================
 
 class TestStartCall:
+    # start_call fetches the channel's company + merged feature flags (werk-lite
+    # gating) before the mutual-exclusion checks below — every side_effect list
+    # in this class must lead with these two rows.
+    _CHAN_ROW = {"company_id": uuid4()}
+    _FEATS_ROW = {"enabled_features": {}, "signup_source": "bespoke"}
+
     def _patches(self, conn, active_call=None, active_broadcast=None):
         return {
             "get_connection": patch(f"{MOD}.get_connection", _conn_ctx(conn)),
@@ -204,7 +210,7 @@ class TestStartCall:
             "push": patch(f"{MOD}._push_call_event", AsyncMock()),
             "notify_invitees": patch(f"{MOD}._notify_invitees", AsyncMock()),
             "notify_started": patch(f"{MOD}._notify_call_started", AsyncMock()),
-            "display_name": patch(f"{MOD}._display_name", AsyncMock(return_value="Owner")),
+            "display_name": patch(f"{MOD}.resolve_display_name", AsyncMock(return_value="Owner")),
             "auto_stop": patch(f"{MOD}._schedule_auto_stop"),
             "lk_config": patch(f"{LK}._get_lk_config", return_value=("ws://t", "k", "s")),
             "create_room": patch(f"{LK}.create_room", AsyncMock()),
@@ -223,7 +229,7 @@ class TestStartCall:
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [_call_row(channel_id)]  # _active_call -> fresh row
+        conn.fetchrow.side_effect = [self._CHAN_ROW, self._FEATS_ROW, _call_row(channel_id)]  # _active_call -> fresh row
 
         with ExitStack() as stack:
             self._enter_all(stack, self._patches(conn))
@@ -239,7 +245,7 @@ class TestStartCall:
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
-        conn.fetchrow.side_effect = [None]  # no active call
+        conn.fetchrow.side_effect = [self._CHAN_ROW, self._FEATS_ROW, None]  # no active call
 
         with ExitStack() as stack:
             self._enter_all(stack, self._patches(conn, active_broadcast={"id": uuid4()}))
@@ -257,6 +263,8 @@ class TestStartCall:
         call_id = uuid4()
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
+            self._CHAN_ROW,
+            self._FEATS_ROW,
             None,                                                       # _active_call
             {"id": call_id, "started_at": datetime.now(timezone.utc)},  # INSERT RETURNING
         ]
@@ -274,6 +282,99 @@ class TestStartCall:
         # Collaborator bell/banner fan-out fires once with the starter's name
         mocks["notify_started"].assert_awaited_once()
         assert mocks["notify_started"].await_args.args[3] == "Owner"
+
+    @pytest.mark.asyncio
+    async def test_orphan_recovered_push_fires_after_conn_closes(self):
+        """The orphan-recovery push must happen after the get_connection()
+        block (and its transaction/advisory lock) has closed — it opens its
+        own pool connection and must not fire pre-commit. Verified here by
+        asserting the recovery event lands before the new call.started event,
+        and that a fresh call still starts successfully in the same request."""
+        from contextlib import ExitStack
+        from app.werk.routes.channel_calls import start_call, StartCallBody, CALL_MAX_DURATION_SECONDS
+
+        channel_id = uuid4()
+        user = _user()
+        new_call_id = uuid4()
+        orphan_call_id = uuid4()
+        orphan = _call_row(
+            channel_id,
+            started_minutes_ago=(CALL_MAX_DURATION_SECONDS // 60) + 10,
+        )
+        orphan["id"] = orphan_call_id
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            self._CHAN_ROW,
+            self._FEATS_ROW,
+            orphan,                                                          # _active_call -> orphaned
+            {"id": new_call_id, "started_at": datetime.now(timezone.utc)},   # INSERT RETURNING
+        ]
+        conn.fetch.return_value = []  # _member_filtered (no invitees)
+
+        with ExitStack() as stack:
+            mocks = self._enter_all(stack, self._patches(conn))
+            resp = await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
+
+        assert resp["call_id"] == str(new_call_id)
+        push_calls = mocks["push"].await_args_list
+        assert [c.args[1]["type"] for c in push_calls] == ["call.ended", "call.started"]
+        assert push_calls[0].args[1]["reason"] == "orphan_recovered"
+        assert push_calls[0].args[1]["call_id"] == str(orphan_call_id)
+
+
+# ============================================================
+# Stop (POST /call/stop)
+# ============================================================
+
+class TestStopCall:
+    @pytest.mark.asyncio
+    async def test_stop_pushes_call_ended(self):
+        from app.werk.routes.channel_calls import stop_call
+        channel_id = uuid4()
+        call_id = uuid4()
+        user = _user()
+        call = _call_row(channel_id, started_by=user.id)
+        call["id"] = call_id
+        conn = AsyncMock()
+        conn.fetchrow.return_value = call          # _active_call
+        conn.fetchval.return_value = call_id        # UPDATE ... RETURNING id (still active)
+
+        with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
+             patch(f"{MOD}._assert_owner", AsyncMock()), \
+             patch(f"{MOD}._cancel_auto_stop"), \
+             patch(f"{LK}.delete_room", AsyncMock()), \
+             patch(f"{MOD}._push_call_event", AsyncMock()) as push:
+            resp = await stop_call(channel_id, current_user=user)
+
+        assert resp == {"ok": True}
+        push.assert_awaited_once()
+        assert push.await_args.args[1]["type"] == "call.ended"
+        assert push.await_args.args[1]["call_id"] == str(call_id)
+
+    @pytest.mark.asyncio
+    async def test_stop_skips_duplicate_push_when_already_ended_by_webhook(self):
+        """A room_finished webhook racing the owner's manual /stop already ended
+        the row and pushed call.ended — the UPDATE's `AND ended_at IS NULL`
+        guard returns no row, and /stop must not push a second call.ended."""
+        from app.werk.routes.channel_calls import stop_call
+        channel_id = uuid4()
+        call_id = uuid4()
+        user = _user()
+        call = _call_row(channel_id, started_by=user.id)
+        call["id"] = call_id
+        conn = AsyncMock()
+        conn.fetchrow.return_value = call    # _active_call still reads the pre-race row
+        conn.fetchval.return_value = None    # UPDATE ... WHERE ended_at IS NULL -> no row
+
+        with patch(f"{MOD}.get_connection", _conn_ctx(conn)), \
+             patch(f"{MOD}._assert_owner", AsyncMock()), \
+             patch(f"{MOD}._cancel_auto_stop"), \
+             patch(f"{LK}.delete_room", AsyncMock()), \
+             patch(f"{MOD}._push_call_event", AsyncMock()) as push:
+            resp = await stop_call(channel_id, current_user=user)
+
+        assert resp == {"ok": True}
+        push.assert_not_awaited()
 
 
 # ============================================================
