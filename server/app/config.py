@@ -6,6 +6,8 @@ from typing import Optional
 from urllib.parse import urlparse
 from dotenv import load_dotenv
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
 
@@ -303,7 +305,7 @@ def load_settings() -> Settings:
         vertex_ai_project=os.getenv("VERTEX_AI_PROJECT"),
         vertex_ai_location=os.getenv("VERTEX_AI_LOCATION", "us-central1"),
         live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"),
-        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3-flash-preview"),
+        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", GEMINI_FLASH),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),

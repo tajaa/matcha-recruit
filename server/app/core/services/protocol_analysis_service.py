@@ -12,7 +12,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.core.services.genai_client import get_genai_client
-from app.core.services.model_catalog import GEMINI_FLASH
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 
 from ...config import get_settings
 
@@ -179,7 +179,7 @@ async def analyze_protocol(
         company_context=context_section,
     )
 
-    models = [GEMINI_FLASH]
+    models = [GEMINI_FLASH, GEMINI_FLASH_LITE]
     last_error = None
 
     for model_name in models:

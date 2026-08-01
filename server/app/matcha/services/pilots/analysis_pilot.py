@@ -44,7 +44,9 @@ MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 90
 _HISTORY_TURNS = 12
 _MAX_LINE_ITEMS = 40
-_THINKING_BUDGET = 1024  # chat-turn reasoning budget; degrades to none if the model/SDK rejects it
+# A ThinkingLevel, never a budget — the 3.x fleet dropped `thinking_budget` and
+# passing one is a hard 400 INVALID_ARGUMENT. See model_catalog.py's note.
+_THINKING_LEVEL = "low"
 _HISTORY_CLIP = 2_000       # per-message char cap in the prompt (bounds pasted walls of text)
 _COMPACT_TRIGGER = 30       # uncompacted user/assistant msgs before a rolling summary is written
 _MAX_SESSION_MESSAGES = 240 # hard cap on user/assistant rows per session (~120 exchanges)
@@ -445,7 +447,7 @@ def _gen_config(cache_name: str | None = None, *, thinking: bool = True):
     if cache_name:
         kw["cached_content"] = cache_name
     if thinking:
-        kw["thinking_config"] = types.ThinkingConfig(thinking_budget=_THINKING_BUDGET)
+        kw["thinking_config"] = types.ThinkingConfig(thinking_level=_THINKING_LEVEL)
     return types.GenerateContentConfig(**kw)
 
 
