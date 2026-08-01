@@ -209,8 +209,11 @@ class TestDisconnectCleansRooms:
 
         await manager.disconnect(ws, user.id)
 
-        assert user.id not in manager.room_members[room_a]
-        assert user.id not in manager.room_members[room_b]
+        # The last member leaving now prunes the room entry entirely (fixes
+        # a slow leak — one room_members dict entry per channel ever joined,
+        # never freed). A membership check is "not present" either way.
+        assert room_a not in manager.room_members
+        assert room_b not in manager.room_members
         assert user.id not in manager.active_connections
 
     @pytest.mark.asyncio

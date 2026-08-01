@@ -76,6 +76,77 @@ async def is_user_online(user_id: UUID) -> bool:
         return False
 
 
+async def get_offline_users(user_ids: list[UUID]) -> list[UUID]:
+    """Batched is_user_online: one MGET instead of N GETs + N lock
+    acquisitions. Redis unavailable ⇒ treat everyone as offline (same
+    fail-open-to-push posture is_user_online falls back to for a single
+    user, applied uniformly here rather than per-user local-table checks)."""
+    if not user_ids:
+        return []
+    from ...werk.routes.channels_ws import _ONLINE_KEY_PREFIX
+    from .redis_cache import get_redis_cache
+    redis = get_redis_cache()
+    if redis is None:
+        return list(user_ids)
+    try:
+        vals = await redis.mget([f"{_ONLINE_KEY_PREFIX}{u}" for u in user_ids])
+    except Exception:
+        return list(user_ids)
+    return [u for u, v in zip(user_ids, vals) if not v]
+
+
+async def send_to_many(
+    user_ids: list[UUID],
+    title: str,
+    body: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    """Batched send_to_user: ONE device_tokens query for every recipient
+    instead of one query per user. Same message content for all recipients
+    (the channels bulk-notify caller's use case — a single channel message
+    fanned out to N offline members)."""
+    client = await _get_client()
+    if client is None or not user_ids:
+        return
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id, token FROM device_tokens WHERE user_id = ANY($1::uuid[]) AND platform = 'ios'",
+            user_ids,
+        )
+    if not rows:
+        return
+
+    from aioapns import NotificationRequest, PushType
+
+    message = {
+        "aps": {
+            "alert": {"title": title, "body": body or ""},
+            "sound": "default",
+        },
+        **(payload or {}),
+    }
+
+    dead: list[str] = []
+    for r in rows:
+        token = r["token"]
+        try:
+            req = NotificationRequest(
+                device_token=token, message=message, push_type=PushType.ALERT
+            )
+            resp = await client.send_notification(req)
+            if not resp.is_successful and resp.description in ("Unregistered", "BadDeviceToken"):
+                dead.append(token)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("APNs send failed token=%s…: %s", token[:8], e)
+
+    if dead:
+        async with get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM device_tokens WHERE token = ANY($1::text[])", dead
+            )
+
+
 async def send_to_user(
     user_id: UUID,
     title: str,

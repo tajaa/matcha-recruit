@@ -3,9 +3,11 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Dict, Optional, Set
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from cachetools import TTLCache
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
 from pydantic import BaseModel
 
@@ -32,6 +34,29 @@ def _room_key(channel_id) -> Optional[str]:
         return str(UUID(str(channel_id)))
     except (ValueError, TypeError):
         return None
+
+
+class _TokenBucket:
+    """Per-socket send limiter: burst of 10, refill 1/s. Pure — caller
+    supplies `now` (time.monotonic()) so tests need no clock patching.
+    In-memory per worker: a reconnect resets the bucket, which is fine —
+    the point is stopping a hot loop, not accounting."""
+    __slots__ = ("burst", "refill", "tokens", "updated")
+
+    def __init__(self, burst: int = 10, refill_per_sec: float = 1.0):
+        self.burst = burst
+        self.refill = refill_per_sec
+        self.tokens = float(burst)
+        self.updated: Optional[float] = None
+
+    def allow(self, now: float) -> bool:
+        if self.updated is not None:
+            self.tokens = min(float(self.burst), self.tokens + (now - self.updated) * self.refill)
+        self.updated = now
+        if self.tokens >= 1.0:
+            self.tokens -= 1.0
+            return True
+        return False
 
 
 async def _safe_send_text(ws: WebSocket, data: str) -> bool:
@@ -1005,26 +1030,39 @@ async def _bg_ems_dispatch(
 async def _notify_channel_members(
     members: list, ch_name: Optional[str], sender_name: str, preview: str, channel_id_str: str,
 ) -> None:
-    """In-app notification fan-out for a new channel message, as a single
-    background task instead of one bare `create_task` per member — avoids
-    N members opening N concurrent pool connections off one message send,
-    and keeps a live reference so the tasks can't be GC'd mid-flight."""
+    """Bell fan-out for a new channel message — ONE batched call (see
+    notification_service.create_notifications_bulk) instead of a sequential
+    per-member loop that cost ~2 pool acquires + ~2 Redis RTs per member. A
+    200-member channel used to be ~400 remote round-trips per message."""
     from app.matcha.services import notification_service as notif_svc
-    for m in members:
-        if not m["company_id"]:
-            continue
-        try:
-            await notif_svc.create_notification(
-                user_id=m["user_id"],
-                company_id=m["company_id"],
-                type="channel_message",
-                title=f"#{ch_name}",
-                body=f"{sender_name}: {preview}",
-                link="/work",
-                metadata={"channel_id": channel_id_str},
-            )
-        except Exception:
-            logger.warning("channel_message notification failed for %s", m["user_id"], exc_info=True)
+    targets = [(m["user_id"], m["company_id"]) for m in members if m["company_id"]]
+    if not targets:
+        return
+    try:
+        await notif_svc.create_notifications_bulk(
+            user_ids=[t[0] for t in targets],
+            company_ids=[t[1] for t in targets],
+            type="channel_message",
+            title=f"#{ch_name}",
+            body=f"{sender_name}: {preview}",
+            link="/work",
+            metadata={"channel_id": channel_id_str},
+        )
+    except Exception:
+        logger.warning("bulk channel_message notification failed", exc_info=True)
+
+
+_channel_name_cache: "TTLCache" = TTLCache(maxsize=2048, ttl=60)
+
+
+async def _get_channel_name(conn, ch_uuid: UUID) -> Optional[str]:
+    """60s-cached channel name — was a per-message SELECT on the send path."""
+    key = str(ch_uuid)
+    if key in _channel_name_cache:
+        return _channel_name_cache[key]
+    name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", ch_uuid)
+    _channel_name_cache[key] = name
+    return name
 
 # Online presence — written on every WS receive (heartbeat), read by the
 # mention_email Celery worker to skip emails for users who are still active.
@@ -1040,7 +1078,28 @@ _ONLINE_TTL_SECONDS = 60
 # this channel on startup and re-dispatches incoming envelopes to its own
 # local sockets via _local_broadcast_to_room / _local_send_to_user.
 _FANOUT_CHANNEL = "channels:fanout"
+# Typing is the highest-frequency event class; it rides its own pub/sub
+# channel so a typing storm can't head-of-line-block message delivery in the
+# (serial, per-worker) fanout subscriber loop.
+_TYPING_CHANNEL = "channels:typing:fanout"
 _SERVER_PING_INTERVAL_SECONDS = 25
+# A healthy client touches at least every 25-30s (its own ping, or its pong
+# reply to server_ping). 90s = 3 missed cycles ⇒ the socket is a zombie the
+# 5s send timeout can't see (TCP buffer still accepting writes).
+_LIVENESS_DEADLINE_SECONDS = 90
+
+# Identifies THIS worker's envelopes on the fanout channel. Local delivery
+# now happens synchronously at publish time (local-first), so the subscriber
+# must skip envelopes this worker published or every local socket gets
+# doubles.
+_WORKER_ID = uuid4().hex
+
+
+def _should_process_envelope(envelope: dict, worker_id: str) -> bool:
+    """Pure: process an envelope unless this worker published it. Envelopes
+    from pre-deploy workers carry no 'origin' — process those (worst case a
+    brief double-delivery during a rolling restart; client dedups by id)."""
+    return envelope.get("origin") != worker_id
 
 
 async def _mark_online(user_id: UUID) -> None:
@@ -1097,6 +1156,10 @@ class ChannelConnectionManager:
         self.users: Dict[UUID, ChannelUser] = {}
         self.user_rooms: Dict[UUID, Set[str]] = {}
         self.lock = asyncio.Lock()
+        # Liveness tracking (touch() called on every inbound frame + on
+        # connect). Plain dict — single event loop, no await between reads
+        # and writes, so no lock needed. See _server_ping_loop's reaper.
+        self.last_seen: Dict[WebSocket, float] = {}
 
     async def connect(
         self, websocket: WebSocket, user: ChannelUser, subprotocol: Optional[str] = None
@@ -1108,9 +1171,20 @@ class ChannelConnectionManager:
                 self.user_rooms[user.id] = set()
             self.active_connections[user.id].add(websocket)
             self.users[user.id] = user
+            self.last_seen[websocket] = time.monotonic()
+
+    def touch(self, websocket: WebSocket) -> None:
+        """Stamp last-activity for the liveness reaper."""
+        self.last_seen[websocket] = time.monotonic()
 
     async def disconnect(self, websocket: WebSocket, user_id: UUID):
+        # Collect broadcasts under the lock, send after release — the lock is
+        # non-reentrant and _local_broadcast_to_room re-acquires it for dead-
+        # socket cleanup, so awaiting a broadcast while holding it deadlocks
+        # the whole manager the moment Redis is down AND a socket is dead.
+        to_broadcast: list[tuple[str, dict]] = []
         async with self.lock:
+            self.last_seen.pop(websocket, None)
             if user_id in self.active_connections:
                 self.active_connections[user_id].discard(websocket)
                 if not self.active_connections[user_id]:
@@ -1122,14 +1196,21 @@ class ChannelConnectionManager:
                         for room in rooms_to_leave:
                             if room in self.room_members:
                                 self.room_members[room].discard(user_id)
+                                if not self.room_members[room]:
+                                    # Never deleted before — slow leak, one
+                                    # entry per channel ever joined.
+                                    del self.room_members[room]
                                 if user:
-                                    await self._broadcast_to_room(room, {
+                                    to_broadcast.append((room, {
                                         "type": "user_left",
                                         "room": room,
                                         "user": user.model_dump(mode='json'),
-                                    }, exclude_user=user_id)
+                                    }))
+        for room, payload in to_broadcast:
+            await self._broadcast_to_room(room, payload, exclude_user=user_id)
 
     async def join_room(self, user_id: UUID, room_key: str):
+        payload = None
         async with self.lock:
             if room_key not in self.room_members:
                 self.room_members[room_key] = set()
@@ -1141,24 +1222,31 @@ class ChannelConnectionManager:
                 self.user_rooms[user_id].add(room_key)
 
             if not was_in_room and user_id in self.users:
-                await self._broadcast_to_room(room_key, {
+                payload = {
                     "type": "user_joined",
                     "room": room_key,
                     "user": self.users[user_id].model_dump(mode='json'),
-                }, exclude_user=user_id)
+                }
+        if payload:
+            await self._broadcast_to_room(room_key, payload, exclude_user=user_id)
 
     async def leave_room(self, user_id: UUID, room_key: str):
+        payload = None
         async with self.lock:
             if room_key in self.room_members:
                 self.room_members[room_key].discard(user_id)
+                if not self.room_members[room_key]:
+                    del self.room_members[room_key]
             if user_id in self.user_rooms:
                 self.user_rooms[user_id].discard(room_key)
             if user_id in self.users:
-                await self._broadcast_to_room(room_key, {
+                payload = {
                     "type": "user_left",
                     "room": room_key,
                     "user": self.users[user_id].model_dump(mode='json'),
-                })
+                }
+        if payload:
+            await self._broadcast_to_room(room_key, payload)
 
     async def broadcast_message(self, room_key: str, message: dict):
         await self._broadcast_to_room(room_key, {
@@ -1168,11 +1256,12 @@ class ChannelConnectionManager:
         })
 
     async def broadcast_typing(self, room_key: str, user: ChannelUser):
+        # Rides its own pub/sub channel — see _TYPING_CHANNEL's comment.
         await self._broadcast_to_room(room_key, {
             "type": "typing",
             "room": room_key,
             "user": user.model_dump(mode='json'),
-        }, exclude_user=user.id)
+        }, exclude_user=user.id, channel=_TYPING_CHANNEL)
 
     async def get_online_users(self, room_key: str) -> list:
         async with self.lock:
@@ -1185,21 +1274,45 @@ class ChannelConnectionManager:
             ]
 
     async def send_to_user(self, user_id: UUID, message: dict):
-        """Send a message to a specific user (all their connections, on any worker)."""
+        """Send to a user's connections on every worker. Local sockets are
+        written directly (survives a Redis/subscriber outage); the Redis
+        publish only exists to reach the OTHER worker's sockets."""
+        await self._local_send_to_user(user_id, message)
         redis = get_redis_cache()
         if redis is None:
-            await self._local_send_to_user(user_id, message)
             return
         envelope = {
             "kind": "user",
             "user_id": str(user_id),
             "message": message,
+            "origin": _WORKER_ID,
         }
         try:
             await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
         except Exception:
-            logger.exception("Redis publish failed in send_to_user; using local fallback")
-            await self._local_send_to_user(user_id, message)
+            logger.exception("Redis publish failed in send_to_user (local delivery already done)")
+
+    async def send_to_users(self, payloads: "Dict[UUID, dict]") -> None:
+        """Multicast: per-user payloads in ONE fanout envelope. Local sockets
+        are written directly; one Redis publish covers the other worker
+        (subscriber kind 'users'). Used by the batched notification fanout
+        (create_notifications_bulk) instead of N separate send_to_user calls."""
+        if not payloads:
+            return
+        for uid, message in payloads.items():
+            await self._local_send_to_user(uid, message)
+        redis = get_redis_cache()
+        if redis is None:
+            return
+        envelope = {
+            "kind": "users",
+            "messages": {str(uid): m for uid, m in payloads.items()},
+            "origin": _WORKER_ID,
+        }
+        try:
+            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+        except Exception:
+            logger.exception("Redis publish failed in send_to_users (local delivery already done)")
 
     async def _local_send_to_user(self, user_id: UUID, message: dict):
         """Direct write to this worker's local sockets for a user. Called by
@@ -1219,28 +1332,32 @@ class ChannelConnectionManager:
                 for ws in dead:
                     self.active_connections.get(user_id, set()).discard(ws)
 
-    async def _broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
+    async def _broadcast_to_room(
+        self, room_key: str, message: dict, exclude_user: UUID = None,
+        channel: str = _FANOUT_CHANNEL,
+    ):
         """Fan-out to every WS member of a room across all uvicorn workers.
 
-        Publishes to Redis so other workers' subscribers can deliver to their
-        own local sockets. If Redis is unavailable (e.g. dev without Redis),
-        falls back to local-only fanout so single-process dev still works.
+        Local-first: this worker's sockets are written directly, then one
+        Redis publish reaches the other worker. `channel` lets high-frequency
+        event classes (typing) ride their own pub/sub channel so they can't
+        head-of-line-block message delivery in the serial subscriber.
         """
+        await self._local_broadcast_to_room(room_key, message, exclude_user=exclude_user)
         redis = get_redis_cache()
         if redis is None:
-            await self._local_broadcast_to_room(room_key, message, exclude_user=exclude_user)
             return
         envelope = {
             "kind": "room",
             "room": room_key,
             "message": message,
             "exclude_user": str(exclude_user) if exclude_user else None,
+            "origin": _WORKER_ID,
         }
         try:
-            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+            await redis.publish(channel, json.dumps(envelope, default=str))
         except Exception:
-            logger.exception("Redis publish failed in _broadcast_to_room; using local fallback")
-            await self._local_broadcast_to_room(room_key, message, exclude_user=exclude_user)
+            logger.exception("Redis publish failed in _broadcast_to_room (local delivery already done)")
 
     async def _local_broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
         """Direct write to this worker's local sockets for a room. Called by
@@ -1275,12 +1392,59 @@ manager = ChannelConnectionManager()
 # ---------------------------------------------------------------------------
 
 _subscriber_task: Optional[asyncio.Task] = None
+_typing_subscriber_task: Optional[asyncio.Task] = None
 _server_ping_task: Optional[asyncio.Task] = None
 
 
-async def _fanout_subscriber_loop() -> None:
-    """Long-running per-worker task. Subscribes to the Redis fanout channel
-    and dispatches incoming envelopes to this worker's local sockets.
+async def _process_envelope(envelope: dict) -> None:
+    """Dispatch one decoded fanout envelope to this worker's local sockets.
+    Shared by the message-fanout and typing-fanout subscriber loops."""
+    if not _should_process_envelope(envelope, _WORKER_ID):
+        return
+    kind = envelope.get("kind")
+    msg = envelope.get("message")
+    if msg is None and kind != "users":
+        return
+    if kind == "room":
+        room_key = envelope.get("room")
+        if not room_key:
+            return
+        exclude_raw = envelope.get("exclude_user")
+        exclude_user = None
+        if exclude_raw:
+            try:
+                exclude_user = UUID(exclude_raw)
+            except (ValueError, TypeError):
+                exclude_user = None
+        await manager._local_broadcast_to_room(
+            room_key, msg, exclude_user=exclude_user,
+        )
+    elif kind == "user":
+        uid_raw = envelope.get("user_id")
+        if not uid_raw:
+            return
+        try:
+            uid = UUID(uid_raw)
+        except (ValueError, TypeError):
+            return
+        await manager._local_send_to_user(uid, msg)
+    elif kind == "users":
+        # Multicast: one envelope, many recipients (bulk notify).
+        msgs = envelope.get("messages") or {}
+        for uid_raw, m in msgs.items():
+            try:
+                uid = UUID(uid_raw)
+            except (ValueError, TypeError):
+                continue
+            await manager._local_send_to_user(uid, m)
+
+
+async def _subscriber_loop(channel: str, label: str) -> None:
+    """Long-running per-worker task. Subscribes to a Redis fanout channel and
+    dispatches incoming envelopes to this worker's local sockets via
+    _process_envelope. Parametrized by channel so message and typing traffic
+    ride independent pub/sub channels (see _TYPING_CHANNEL) and can't head-
+    of-line-block each other.
 
     Self-healing: on any exception, sleeps 2s and re-subscribes. Cancellation
     exits cleanly.
@@ -1294,8 +1458,8 @@ async def _fanout_subscriber_loop() -> None:
                 await asyncio.sleep(5)
                 continue
             pubsub = redis.pubsub()
-            await pubsub.subscribe(_FANOUT_CHANNEL)
-            logger.info("[Channels WS] Subscribed to %s", _FANOUT_CHANNEL)
+            await pubsub.subscribe(channel)
+            logger.info("[Channels WS] Subscribed to %s (%s)", channel, label)
             async for raw in pubsub.listen():
                 if raw is None or raw.get("type") != "message":
                     continue
@@ -1305,54 +1469,43 @@ async def _fanout_subscriber_loop() -> None:
                 try:
                     envelope = json.loads(payload)
                 except Exception:
-                    logger.warning("[Channels WS] Malformed fanout envelope; dropping")
+                    logger.warning("[Channels WS] Malformed fanout envelope on %s; dropping", label)
                     continue
-                kind = envelope.get("kind")
-                msg = envelope.get("message")
-                if msg is None:
-                    continue
-                if kind == "room":
-                    room_key = envelope.get("room")
-                    if not room_key:
-                        continue
-                    exclude_raw = envelope.get("exclude_user")
-                    exclude_user = None
-                    if exclude_raw:
-                        try:
-                            exclude_user = UUID(exclude_raw)
-                        except (ValueError, TypeError):
-                            exclude_user = None
-                    await manager._local_broadcast_to_room(
-                        room_key, msg, exclude_user=exclude_user,
-                    )
-                elif kind == "user":
-                    uid_raw = envelope.get("user_id")
-                    if not uid_raw:
-                        continue
-                    try:
-                        uid = UUID(uid_raw)
-                    except (ValueError, TypeError):
-                        continue
-                    await manager._local_send_to_user(uid, msg)
+                await _process_envelope(envelope)
+            # listen() ended without raising (connection closed cleanly) —
+            # don't spin through resubscribe at full speed.
+            await asyncio.sleep(1)
         except asyncio.CancelledError:
             break
         except Exception:
-            logger.exception("[Channels WS] Subscriber loop error; restarting in 2s")
+            logger.exception("[Channels WS] Subscriber loop error (%s); restarting in 2s", label)
             await asyncio.sleep(2)
         finally:
             if pubsub is not None:
                 try:
-                    await pubsub.unsubscribe(_FANOUT_CHANNEL)
+                    await pubsub.unsubscribe(channel)
                     await pubsub.aclose()
                 except Exception:
                     pass
+
+
+async def _fanout_subscriber_loop() -> None:
+    await _subscriber_loop(_FANOUT_CHANNEL, "messages")
+
+
+async def _typing_subscriber_loop() -> None:
+    await _subscriber_loop(_TYPING_CHANNEL, "typing")
 
 
 async def _server_ping_loop() -> None:
     """Periodic keepalive push from server to every connected WS. Prevents
     Nginx / intermediaries from silently killing idle connections and gives
     the server early detection of dead sockets (a failed send drops the WS
-    from active_connections)."""
+    from active_connections). Also reaps zombie sockets — a half-open
+    connection can pass the 5s send timeout indefinitely (kernel buffer
+    still accepting writes) while never actually reaching the peer; a client
+    that hasn't touched the connection (ping or pong) in
+    _LIVENESS_DEADLINE_SECONDS is closed outright."""
     while True:
         try:
             await asyncio.sleep(_SERVER_PING_INTERVAL_SECONDS)
@@ -1362,13 +1515,28 @@ async def _server_ping_loop() -> None:
                 snapshot: list[tuple[UUID, list[WebSocket]]] = [
                     (uid, list(conns)) for uid, conns in manager.active_connections.items()
                 ]
+            targets: list[tuple[UUID, WebSocket]] = [
+                (uid, ws) for uid, conns in snapshot for ws in conns
+            ]
+
+            now = time.monotonic()
+            stale = [
+                (uid, ws) for uid, ws in targets
+                if now - manager.last_seen.get(ws, now) > _LIVENESS_DEADLINE_SECONDS
+            ]
+            for _, ws in stale:
+                try:
+                    await asyncio.wait_for(ws.close(), timeout=2)
+                except Exception:
+                    pass
+            if stale:
+                stale_set = {id(ws) for _, ws in stale}
+                targets = [(uid, ws) for uid, ws in targets if id(ws) not in stale_set]
+
             ping_payload = json.dumps({"type": "server_ping"})
             # Ping every socket on this worker concurrently rather than one at
             # a time — sequential sends here would delay the next room's
             # pings behind a single slow/half-dead connection.
-            targets: list[tuple[UUID, WebSocket]] = [
-                (uid, ws) for uid, conns in snapshot for ws in conns
-            ]
             if targets:
                 results = await asyncio.gather(
                     *(_safe_send_text(ws, ping_payload) for _, ws in targets)
@@ -1387,11 +1555,13 @@ async def _server_ping_loop() -> None:
 
 
 def start_fanout_subscriber() -> None:
-    """Start the per-worker Redis pub/sub subscriber. Idempotent."""
-    global _subscriber_task
-    if _subscriber_task and not _subscriber_task.done():
-        return
-    _subscriber_task = asyncio.create_task(_fanout_subscriber_loop())
+    """Start the per-worker Redis pub/sub subscribers (message + typing).
+    Idempotent."""
+    global _subscriber_task, _typing_subscriber_task
+    if not _subscriber_task or _subscriber_task.done():
+        _subscriber_task = asyncio.create_task(_fanout_subscriber_loop())
+    if not _typing_subscriber_task or _typing_subscriber_task.done():
+        _typing_subscriber_task = asyncio.create_task(_typing_subscriber_loop())
 
 
 def start_server_ping_loop() -> None:
@@ -1403,8 +1573,8 @@ def start_server_ping_loop() -> None:
 
 
 async def stop_fanout_subscriber() -> None:
-    """Cancel the subscriber task on shutdown."""
-    global _subscriber_task
+    """Cancel both subscriber tasks on shutdown."""
+    global _subscriber_task, _typing_subscriber_task
     if _subscriber_task is not None:
         _subscriber_task.cancel()
         try:
@@ -1412,6 +1582,13 @@ async def stop_fanout_subscriber() -> None:
         except (asyncio.CancelledError, Exception):
             pass
         _subscriber_task = None
+    if _typing_subscriber_task is not None:
+        _typing_subscriber_task.cancel()
+        try:
+            await _typing_subscriber_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _typing_subscriber_task = None
 
 
 async def stop_server_ping_loop() -> None:
@@ -1618,10 +1795,15 @@ async def channel_websocket(
 
     await manager.connect(websocket, user, subprotocol=subprotocol)
     await _mark_online(user.id)
+    # Per-socket send limiter — one loose/abusive client must never be able
+    # to loop `type: message` sends as fast as the DB round-trips allow, each
+    # triggering a full room + notification fanout.
+    rate = _TokenBucket()
 
     try:
         while True:
             data = await websocket.receive_json()
+            manager.touch(websocket)
             await _mark_online(user.id)
             msg_type = data.get("type")
 
@@ -1705,6 +1887,18 @@ async def channel_websocket(
                         cmid_uuid = UUID(str(client_message_id))
                     except (ValueError, TypeError):
                         cmid_uuid = None
+                if not rate.allow(time.monotonic()):
+                    # Never kill the socket over rate — error frame + drop.
+                    # Client-side onServerError removes the pending row and
+                    # toasts (scoped by client_message_id).
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": "rate_limited",
+                        "message": "You're sending messages too quickly — give it a moment.",
+                        "channel_id": channel_id,
+                        "client_message_id": client_message_id,
+                    })
+                    continue
                 if channel_id and (content or attachments) and len(content) > 4000:
                     # Previously a bare `if ... and len(content) <= 4000:`
                     # with no else — an oversize send fell through to the
@@ -1793,22 +1987,40 @@ async def channel_websocket(
                                 ch_uuid, user.id, content or "", attachments_json, reply_uuid, cmid_uuid,
                             )
                             is_new_message = bool(row["inserted"])
-                            # Update channel + member activity timestamps only
-                            # on the fresh-insert path. A retried duplicate
-                            # send shouldn't bump activity (otherwise a flaky
-                            # client could keep a channel appearing "active"
-                            # via repeated cmid retries).
-                            if is_new_message:
-                                await conn.execute(
-                                    "UPDATE channels SET updated_at = NOW() WHERE id = $1",
-                                    ch_uuid,
-                                )
-                                await conn.execute(
-                                    "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
-                                    ch_uuid, user.id,
-                                )
+                            # Everything between the committed INSERT and the
+                            # broadcast below is best-effort: a failure here
+                            # must degrade the payload (no preview / no
+                            # mentions), never strand a persisted row
+                            # unbroadcast and kill the sender's socket via the
+                            # endpoint's catch-all.
+                            broadcast_attachments: list = []
+                            reply_preview = None
+                            mention_handles: list = []
+                            mentioned_user_ids: list = []
 
-                            broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
+                            try:
+                                # Update channel + member activity timestamps
+                                # only on the fresh-insert path. A retried
+                                # duplicate send shouldn't bump activity
+                                # (otherwise a flaky client could keep a
+                                # channel appearing "active" via repeated
+                                # cmid retries).
+                                if is_new_message:
+                                    await conn.execute(
+                                        "UPDATE channels SET updated_at = NOW() WHERE id = $1",
+                                        ch_uuid,
+                                    )
+                                    await conn.execute(
+                                        "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
+                                        ch_uuid, user.id,
+                                    )
+                            except Exception:
+                                logger.warning("[Channel WS] activity bump failed", exc_info=True)
+
+                            try:
+                                broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
+                            except Exception:
+                                logger.warning("[Channel WS] attachments parse failed", exc_info=True)
 
                             # Mirror chat media into the linked collab project's
                             # Files (root) — fire-and-forget on its own connection
@@ -1818,46 +2030,52 @@ async def channel_websocket(
                                 _spawn_bg(_bg_sync_channel_attachments(
                                     str(ch_uuid), user.id, list(broadcast_attachments),
                                 ))
-                            # Build reply preview for broadcast
-                            reply_preview = None
-                            if reply_uuid:
-                                rp = await conn.fetchrow(
-                                    """
-                                    SELECT m.content, m.attachments, m.deleted_at,
-                                           COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email, 'Huume') AS sender_name
-                                    FROM channel_messages m
-                                    LEFT JOIN users u ON u.id = m.sender_id
-                                    LEFT JOIN clients c ON c.user_id = u.id
-                                    LEFT JOIN employees e ON e.user_id = u.id
-                                    LEFT JOIN admins a ON a.user_id = u.id
-                                    WHERE m.id = $1
-                                    """,
-                                    reply_uuid,
-                                )
-                                if rp:
-                                    rp_atts = []
-                                    if not rp["deleted_at"]:
-                                        raw = rp["attachments"]
-                                        rp_atts = _json.loads(raw) if isinstance(raw, str) else (raw or [])
-                                    reply_preview = {
-                                        "id": str(reply_uuid),
-                                        "sender_name": rp["sender_name"],
-                                        "content": "" if rp["deleted_at"] else rp["content"],
-                                        "attachments": rp_atts,
-                                    }
 
-                            # Parse + resolve @mentions BEFORE broadcasting so the
-                            # payload carries the resolved IDs for client-side chip
-                            # rendering. Email enqueue happens below; emails are
-                            # rate-limited and only send to offline users.
-                            from app.matcha.services.matcha_work.mentions import (
-                                parse_mentions, resolve_mentions,
-                            )
-                            mention_handles = parse_mentions(row["content"])
-                            mentioned_users = await resolve_mentions(
-                                conn, ch_uuid, mention_handles, exclude_user_id=user.id,
-                            ) if mention_handles else []
-                            mentioned_user_ids = [str(m["id"]) for m in mentioned_users]
+                            try:
+                                # Build reply preview for broadcast
+                                if reply_uuid:
+                                    rp = await conn.fetchrow(
+                                        """
+                                        SELECT m.content, m.attachments, m.deleted_at,
+                                               COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email, 'Huume') AS sender_name
+                                        FROM channel_messages m
+                                        LEFT JOIN users u ON u.id = m.sender_id
+                                        LEFT JOIN clients c ON c.user_id = u.id
+                                        LEFT JOIN employees e ON e.user_id = u.id
+                                        LEFT JOIN admins a ON a.user_id = u.id
+                                        WHERE m.id = $1
+                                        """,
+                                        reply_uuid,
+                                    )
+                                    if rp:
+                                        rp_atts = []
+                                        if not rp["deleted_at"]:
+                                            raw = rp["attachments"]
+                                            rp_atts = _json.loads(raw) if isinstance(raw, str) else (raw or [])
+                                        reply_preview = {
+                                            "id": str(reply_uuid),
+                                            "sender_name": rp["sender_name"],
+                                            "content": "" if rp["deleted_at"] else rp["content"],
+                                            "attachments": rp_atts,
+                                        }
+                            except Exception:
+                                logger.warning("[Channel WS] reply preview failed", exc_info=True)
+
+                            try:
+                                # Parse + resolve @mentions BEFORE broadcasting so the
+                                # payload carries the resolved IDs for client-side chip
+                                # rendering. Email enqueue happens below; emails are
+                                # rate-limited and only send to offline users.
+                                from app.matcha.services.matcha_work.mentions import (
+                                    parse_mentions, resolve_mentions,
+                                )
+                                mention_handles = parse_mentions(row["content"])
+                                mentioned_users = await resolve_mentions(
+                                    conn, ch_uuid, mention_handles, exclude_user_id=user.id,
+                                ) if mention_handles else []
+                                mentioned_user_ids = [str(m["id"]) for m in mentioned_users]
+                            except Exception:
+                                logger.warning("[Channel WS] mention resolve failed", exc_info=True)
 
                             # EMS: ONE dispatch task, routed by
                             # _ems_dispatch_decision. Gated on is_new_message
@@ -1926,12 +2144,11 @@ async def channel_websocket(
                             # Skip on duplicate retry to avoid double-notify.
                             if is_new_message:
                                 try:
-                                    _ch_name = await conn.fetchval(
-                                        "SELECT name FROM channels WHERE id = $1", ch_uuid
-                                    )
+                                    _ch_name = await _get_channel_name(conn, ch_uuid)
                                     _members = await conn.fetch(
                                         """
-                                        SELECT cm.user_id, COALESCE(c.company_id, e.org_id) AS company_id
+                                        SELECT cm.user_id, cm.is_muted,
+                                               COALESCE(c.company_id, e.org_id) AS company_id
                                         FROM channel_members cm
                                         JOIN users u ON u.id = cm.user_id
                                         LEFT JOIN clients c ON c.user_id = u.id
@@ -1941,12 +2158,20 @@ async def channel_websocket(
                                         """,
                                         ch_uuid, user.id,
                                     )
+                                    # Mute silences the bell EXCEPT direct
+                                    # @mentions (Slack semantics) — the live
+                                    # in-channel message frame above is
+                                    # unaffected by mute either way.
+                                    _notify_targets = [
+                                        m for m in _members
+                                        if not m["is_muted"] or str(m["user_id"]) in mentioned_user_ids
+                                    ]
                                     _preview = (row["content"] or "")[:80]
                                     _spawn_bg(_notify_channel_members(
-                                        list(_members), _ch_name, user.name, _preview, str(ch_uuid),
+                                        list(_notify_targets), _ch_name, user.name, _preview, str(ch_uuid),
                                     ))
                                 except Exception:
-                                    pass
+                                    logger.warning("[Channel WS] notify fanout setup failed", exc_info=True)
                         else:
                             await websocket.send_json({
                                 "type": "error",
@@ -1965,10 +2190,32 @@ async def channel_websocket(
                         if is_room_member:
                             await manager.broadcast_typing(room_key, user)
 
+            elif msg_type == "mark_read":
+                # Client sends this (debounced) while sitting in a visible
+                # channel as messages arrive — otherwise last_read_at only
+                # advances on GET /channels/{id} and phantom unread piles up.
+                channel_id = data.get("channel_id")
+                rk = _room_key(channel_id) if channel_id else None
+                if rk:
+                    try:
+                        async with get_connection() as conn:
+                            await conn.execute(
+                                "UPDATE channel_members SET last_read_at = NOW() WHERE channel_id = $1 AND user_id = $2",
+                                UUID(rk), user.id,
+                            )
+                        # Zero the badge on this user's OTHER devices too.
+                        await manager.send_to_user(user.id, {
+                            "type": "channel_read",
+                            "channel_id": rk,
+                            "user_id": str(user.id),
+                        })
+                    except Exception:
+                        logger.warning("[Channel WS] mark_read failed", exc_info=True)
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logger.error(f"[Channel WS] Error: {e}")
+        logger.error("[Channel WS] Error: %s", e, exc_info=True)
     finally:
         await manager.disconnect(websocket, user.id)
         # Only clear the online key if this was the user's last active WS.

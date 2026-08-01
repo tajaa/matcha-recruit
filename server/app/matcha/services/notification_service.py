@@ -139,6 +139,74 @@ async def create_notification(
     return dict(row)
 
 
+async def create_notifications_bulk(
+    *,
+    user_ids: list[UUID],
+    company_ids: list[UUID],
+    type: str,
+    title: str,
+    body: Optional[str] = None,
+    link: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Batched sibling of create_notification for N-recipient fan-outs
+    (channel messages). One INSERT for the bell rows, one WS multicast
+    envelope, one batched presence check + APNs pass — replaces N sequential
+    create_notification calls (2N pool acquires + 2N Redis RTs) on the
+    channels hot path. user_ids/company_ids are parallel arrays.
+    No email path — channel messages never email."""
+    if not user_ids:
+        return
+    import json as _json
+    meta_json = _json.dumps(metadata or {})
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
+            SELECT t.u, t.c, $3, $4, $5, $6, $7::jsonb
+            FROM unnest($1::uuid[], $2::uuid[]) AS t(u, c)
+            RETURNING id, user_id, type, title, body, link, metadata, created_at
+            """,
+            user_ids, company_ids, type, title, body, link, meta_json,
+        )
+
+    # One multicast WS envelope for every recipient's bell (same lazy manager
+    # import edge create_notification already uses — no new import kind).
+    try:
+        from ...werk.routes.channels_ws import manager as _ch_manager
+        payloads = {
+            row["user_id"]: {
+                "type": "notification",
+                "notification": {
+                    "id": str(row["id"]),
+                    "type": row["type"],
+                    "title": row["title"],
+                    "body": row["body"],
+                    "link": row["link"],
+                    "metadata": row["metadata"],
+                    "is_read": False,
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                },
+            }
+            for row in rows
+        }
+        await _ch_manager.send_to_users(payloads)
+    except Exception as e:
+        logger.warning("Bulk notification WS push failed: %s", e)
+
+    # APNs only for users with no live socket, resolved in ONE presence pass.
+    try:
+        from ...core.services import apns_service
+        offline = await apns_service.get_offline_users(user_ids)
+        if offline:
+            await apns_service.send_to_many(
+                offline, title, body,
+                {"type": type, "link": link, "metadata": metadata or {}},
+            )
+    except Exception as e:
+        logger.warning("Bulk APNs push failed: %s", e)
+
+
 async def get_notifications(
     user_id: UUID,
     *,
