@@ -12,9 +12,12 @@ changes here.
 
 Three tiers, not two: `lite` for confirm turns (the most common turn shape —
 "yes", "approve it"), `standard` for everything ordinary, `deep` for
-discovery/analytical asks or a narrative-shaped message. `deep`'s model is
-still flash — the user's call was thinking level, not a pro-tier model — kept
-as a dataclass field so upgrading later is a one-line catalog edit.
+discovery/analytical asks or a narrative-shaped message. `lite` runs the
+cheaper flash-lite model — every tool reachable from a confirm turn
+(`execute_approved_steps`, the staged-action confirm leg, `cancel_staged`,
+`finish`) is a server-verified id echo, never a judgment call; a wrong tool
+pick 404s/refuses rather than mis-writing. `standard`/`deep` stay on flash —
+kept as a dataclass field so re-tiering later is a one-line catalog edit.
 """
 
 from __future__ import annotations
@@ -34,6 +37,12 @@ from .tools import TOOLS, HuumeTool
 # that outside code reads (TIERS, FALLBACK_TIER, HINT_INDEX, ...) is public
 # for the same reason.
 FLASH = "gemini-3.6-flash"
+# The `lite` tier's model — confirm turns only, never standard/deep. The 3.x
+# generation dropped `thinking_budget`; passing it (even thinking_budget=0,
+# the 2.5-era way to turn thinking off) is a hard 400 INVALID_ARGUMENT on
+# flash-lite. "minimal" is the 3.x thinking-off equivalent (mirrors Cappe's
+# Merlin, `cappe/services/merlin/catalog.py` — same model, same reasoning).
+FLASH_LITE = "gemini-3.5-flash-lite"
 
 
 @dataclass(frozen=True)
@@ -45,7 +54,7 @@ class HuumeTier:
 
 
 TIERS: dict[str, HuumeTier] = {
-    "lite":     HuumeTier(FLASH, "none", FLASH, "none"),
+    "lite":     HuumeTier(FLASH_LITE, "minimal", FLASH_LITE, "minimal"),
     "standard": HuumeTier(FLASH, None,   FLASH, None),
     "deep":     HuumeTier(FLASH, "high", FLASH, "low"),
 }

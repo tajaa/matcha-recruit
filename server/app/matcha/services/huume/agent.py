@@ -53,7 +53,8 @@ logger = logging.getLogger(__name__)
 
 # Kept as an alias (not re-literaled) so MODEL_PRICING lookups and any other
 # existing reference to "the model Huume uses" track routing.py's catalog —
-# every tier's planner/executor model is routing.FLASH today.
+# the standard/deep tiers' planner/executor model is routing.FLASH; the lite
+# (confirm-turn) tier runs routing.FLASH_LITE instead (see routing.TIERS).
 _MODEL = routing.FLASH
 _MAX_MODEL_CALLS = 8
 

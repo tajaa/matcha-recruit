@@ -28,10 +28,17 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "input_per_1m": Decimal("1.50"),
         "output_per_1m": Decimal("7.50"),
     },
-    # Gemini 3.1 Flash Lite — flash-lite tier
+    # Gemini 3.1 Flash Lite — flash-lite tier (kept for already-logged rows)
     "gemini-3.1-flash-lite": {
         "input_per_1m": Decimal("0.10"),
         "output_per_1m": Decimal("0.40"),
+    },
+    # Gemini 3.5 Flash Lite — Huume's `lite` (confirm-turn) tier + EMS
+    # classify/ask. Must match ai_usage.PRICING's row, same reason as
+    # 3.6-flash above.
+    "gemini-3.5-flash-lite": {
+        "input_per_1m": Decimal("0.30"),
+        "output_per_1m": Decimal("2.50"),
     },
     # Gemini 3.1 Flash Image — image output tokens are billed at the image
     # rate (~$30/1M ≈ $0.039 per 1290-token image). GA landed 2026-06-25 as

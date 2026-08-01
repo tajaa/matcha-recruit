@@ -16,6 +16,7 @@ from app.matcha.services.billing.model_pricing import (
     DEFAULT_PRICING, MODEL_PRICING, calculate_call_cost,
 )
 from app.matcha.services.huume.agent import _MODEL, _accumulate_usage
+from app.matcha.services.huume.routing import FLASH_LITE
 
 
 class TestAccumulateUsage:
@@ -57,6 +58,20 @@ class TestHuumeModelPricing:
     def test_million_token_cost(self):
         cost = calculate_call_cost("gemini-3.6-flash", 1_000_000, 1_000_000)
         assert cost == Decimal("9.000000")   # 1.50 in + 7.50 out
+
+
+class TestHuumeLiteTierPricing:
+    def test_lite_tier_model_is_priced_not_default(self):
+        # The lite (confirm-turn) tier's model must never fall back to
+        # DEFAULT_PRICING either.
+        assert FLASH_LITE in MODEL_PRICING
+        assert MODEL_PRICING[FLASH_LITE] != DEFAULT_PRICING
+
+    def test_lite_rate_matches_admin_ledger(self):
+        from app.core.services.ai_usage import PRICING
+        inp, outp = PRICING[("gemini", "gemini-3.5-flash-lite")]
+        assert MODEL_PRICING[FLASH_LITE]["input_per_1m"] == Decimal(str(inp))
+        assert MODEL_PRICING[FLASH_LITE]["output_per_1m"] == Decimal(str(outp))
 
 
 class TestThinkingBilling:

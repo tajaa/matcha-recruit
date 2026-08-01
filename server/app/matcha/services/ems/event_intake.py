@@ -44,7 +44,7 @@ _CONTEXT_MESSAGES = 15
 _MAX_TITLE_CHARS = 300
 _MAX_NARRATIVE_CHARS = 4000  # matches the WS send guard on channel_messages.content
 
-FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 
 _client: Optional[genai.Client] = None
 

@@ -185,15 +185,32 @@ class TestThinkingConfig:
         cfg = routing.thinking_config("low")
         assert cfg.thinking_level == "LOW"
 
+    def test_minimal_sets_thinking_level_not_budget(self):
+        # The lite tier's level — must go through the thinking_level branch,
+        # never thinking_budget=0 (that's a hard 400 on flash-lite).
+        cfg = routing.thinking_config("minimal")
+        assert cfg.thinking_level == "MINIMAL"
+        assert cfg.thinking_budget is None
+
 
 class TestTiersCatalog:
     def test_three_tiers_registered(self):
         assert set(routing.TIERS) == {"lite", "standard", "deep"}
 
-    def test_lite_uses_zero_thinking_both_calls(self):
+    def test_lite_uses_flash_lite_model_minimal_thinking_both_calls(self):
+        # flash-lite hard-400s on thinking_budget=0 (the "none" mapping) —
+        # lite must use a thinking_level ("minimal"), never that branch.
         tier = routing.TIERS["lite"]
-        assert tier.planner_thinking == "none"
-        assert tier.executor_thinking == "none"
+        assert tier.planner_model == routing.FLASH_LITE
+        assert tier.executor_model == routing.FLASH_LITE
+        assert tier.planner_thinking == "minimal"
+        assert tier.executor_thinking == "minimal"
+
+    def test_standard_and_deep_stay_on_flash(self):
+        assert routing.TIERS["standard"].planner_model == routing.FLASH
+        assert routing.TIERS["standard"].executor_model == routing.FLASH
+        assert routing.TIERS["deep"].planner_model == routing.FLASH
+        assert routing.TIERS["deep"].executor_model == routing.FLASH
 
     def test_standard_omits_thinking_config_both_calls(self):
         tier = routing.TIERS["standard"]
@@ -299,7 +316,10 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
+    recorded = []
+
     async def _generate(*, model, contents, config):
+        recorded.append(model)
         return _fake_response(parts=[], text="Confirmed.")
 
     client = MagicMock()
@@ -318,3 +338,4 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
 
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "lite"
+    assert recorded == [routing.FLASH_LITE]
