@@ -7,36 +7,24 @@ chat pipeline. Fire-and-forget, dispatched from messaging.py's turn pipeline.
 """
 
 import logging
-import os
 import re
 from typing import Optional
 from uuid import UUID
 
-from google import genai
 from google.genai import types
 
-from app.config import get_settings
-from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.database import get_connection
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
 
 logger = logging.getLogger(__name__)
 
 # Flash-lite: cheapest/fastest tier — a title is a one-shot, throwaway read.
-FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
+FLASH_LITE_MODEL = GEMINI_FLASH_LITE
 
 _DEFAULT_TITLE = "New Chat"
 _MAX_TITLE_LEN = 80
 _MAX_SNIPPET_LEN = 1500
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
-    return _client
 
 
 def _build_title_prompt(user_text: str, assistant_text: str) -> str:

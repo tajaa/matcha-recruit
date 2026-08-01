@@ -20,16 +20,14 @@ that message is folded back in via `apply_refinement` — see that function and
 
 import json
 import logging
-import os
 from typing import Optional
 from uuid import UUID
 
-from google import genai
 from google.genai import types
 
-from app.config import get_settings
-from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.core.services.model_json import clean_model_json
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
 from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 from app.matcha.services.ir.ir_cards import OSHA_EMERGENCY_HOTLINE, OSHA_REPORTING_WINDOW
 # Import from ir_incident_parsing directly (the defining module) — pulling
@@ -37,6 +35,7 @@ from app.matcha.services.ir.ir_cards import OSHA_EMERGENCY_HOTLINE, OSHA_REPORTI
 from app.matcha.services.ir.ir_incident_parsing import _detect_osha_reportable_keywords
 
 from . import categories
+from ._shared import sanitize_pill_text as _sanitize_pill_text
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +43,7 @@ _CONTEXT_MESSAGES = 15
 _MAX_TITLE_CHARS = 300
 _MAX_NARRATIVE_CHARS = 4000  # matches the WS send guard on channel_messages.content
 
-FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
-    return _client
+FLASH_LITE_MODEL = GEMINI_FLASH_LITE
 
 
 async def gather_intake_context(conn, channel_id: UUID, before_message_id: UUID) -> list[dict]:
@@ -170,24 +159,6 @@ def coerce_doc(value) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {str(k)[:100]: str(v)[:2000] for k, v in list(value.items())[:10]}
-
-
-def _sanitize_pill_text(value, cap: int) -> Optional[str]:
-    """Clamp model-written text destined for a channel system-message pill.
-
-    Two rendering contracts this must never violate: systemContent.tsx
-    parses ONLY balanced `**bold**` pairs (a stray `*` in model text would
-    mis-pair with the category emphasis _confirmation_text/update_text add
-    around it), and extract_question() recovers an armed clarify question
-    by scanning rendered pill text for the literal `_QUESTION_MARKER`
-    (`"\n🤔 "`) — a newline in model text could fake that marker. Collapse
-    whitespace to single spaces and drop `*` before anything else touches
-    this string."""
-    text = str(value or "")
-    text = " ".join(text.split())
-    text = text.replace("*", "")
-    text = text.strip()[:cap]
-    return text or None
 
 
 def _parse_model_json(raw: str) -> dict:

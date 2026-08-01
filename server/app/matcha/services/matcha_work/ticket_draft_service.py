@@ -7,15 +7,14 @@ commit_scan_service) rather than the entangled matcha_work_ai.generate()."""
 
 import json
 import logging
-import os
 from typing import Optional
 from uuid import UUID
 
-from google import genai
-from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
-from ....config import get_settings
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
+
 from ....database import get_connection
 from . import element_repo_service
 from app.core.services.model_json import clean_model_json as _clean_json_text
@@ -25,17 +24,7 @@ logger = logging.getLogger(__name__)
 _MAX_HISTORY_MESSAGES = 20
 
 # Flash-lite: cheapest/fastest tier for the Prop repo-chat + draft generation.
-FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
-    return _client
+FLASH_LITE_MODEL = GEMINI_FLASH_LITE
 
 
 # ---------------------------------------------------------------------------

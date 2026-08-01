@@ -7,6 +7,8 @@ from typing import Optional
 from google import genai
 from google.genai import types
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ COMPACTION_PROMPT = (
 )
 
 
-COMPACTION_MODEL = "gemini-3.6-flash"
+COMPACTION_MODEL = GEMINI_FLASH
 
 
 COMPACTION_THRESHOLD = 30

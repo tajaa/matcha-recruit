@@ -168,12 +168,13 @@ async def answer_question(question: str, events: list[dict], *, is_admin: bool) 
     a Gemini outage degrades to a deterministic pointer at the Events tab
     rather than losing the turn, same instinct as classify_event's
     fallback."""
-    from .event_intake import FLASH_LITE_MODEL, _get_client
+    from app.core.services.model_catalog import GEMINI_FLASH_LITE
+    from app.matcha.services._shared.gemini import genai_env_client
 
     prompt = _build_prompt(question, render_events_block(events, is_admin=is_admin), is_admin=is_admin)
     try:
-        resp = await _get_client().aio.models.generate_content(
-            model=FLASH_LITE_MODEL,
+        resp = await genai_env_client().aio.models.generate_content(
+            model=GEMINI_FLASH_LITE,
             contents=prompt,
             config=types.GenerateContentConfig(temperature=0.4, max_output_tokens=600),
         )

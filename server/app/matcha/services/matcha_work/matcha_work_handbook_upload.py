@@ -24,6 +24,7 @@ from ....core.services.handbook_service import (
     MANDATORY_STATE_TOPIC_RULES,
     STATE_NAMES,
 )
+from ....core.services.model_catalog import GEMINI_FLASH
 from ....core.services.storage import get_storage
 from ..er.er_document_parser import ERDocumentParser
 from . import matcha_work_document as doc_svc
@@ -95,7 +96,7 @@ HANDBOOK_SIGNAL_PHRASES: tuple[str, ...] = (
 )
 MIN_HANDBOOK_SIGNALS = 3
 KEYWORD_FAST_PATH_THRESHOLD = 10
-RELEVANCE_MODEL = "gemini-3.6-flash"
+RELEVANCE_MODEL = GEMINI_FLASH
 RELEVANCE_TIMEOUT = 15  # seconds
 RELEVANCE_SAMPLE_CHARS = 3000
 

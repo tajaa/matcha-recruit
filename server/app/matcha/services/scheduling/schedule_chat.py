@@ -39,7 +39,9 @@ from google.genai import types
 
 from app.core.feature_flags import get_company_features
 from app.core.services.model_json import clean_model_json
-from app.matcha.services.ems.event_intake import FLASH_LITE_MODEL, _get_client, _sanitize_pill_text
+from app.core.services.model_catalog import GEMINI_FLASH_LITE as FLASH_LITE_MODEL
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
+from app.matcha.services.ems._shared import sanitize_pill_text as _sanitize_pill_text
 
 from . import schedule_compliance
 from .schedule_chat_rules import (

@@ -24,6 +24,7 @@ from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ....config import get_settings
+from ....core.services.model_catalog import GEMINI_FLASH_LITE
 from ..er.er_document_parser import ERDocumentParser
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 RESUME_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 RESUME_TEXT_CAP = 15_000
-RESUME_EXTRACT_MODEL = "gemini-3.5-flash-lite"
+RESUME_EXTRACT_MODEL = GEMINI_FLASH_LITE
 RESUME_EXTRACT_TIMEOUT = 60
 
 RESUME_EXTRACT_PROMPT = """Extract candidate information from this resume. Return ONLY valid JSON with these fields:

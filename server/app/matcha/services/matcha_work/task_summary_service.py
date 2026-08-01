@@ -8,34 +8,23 @@ rather than the entangled matcha_work_ai.generate() chat pipeline.
 
 import json
 import logging
-import os
 from typing import Optional
 from uuid import UUID
 
-from google import genai
-from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
-from ....config import get_settings
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
+
 from ....database import get_connection
 
 logger = logging.getLogger(__name__)
 
 # Flash-lite: cheapest/fastest tier — a summary is a one-shot, throwaway read.
-FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
+FLASH_LITE_MODEL = GEMINI_FLASH_LITE
 
 # Cap the activity trail so a long-running ticket doesn't blow the prompt.
 _MAX_TRAIL = 40
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = get_genai_client(api_key=os.getenv("GEMINI_API_KEY") or settings.gemini_api_key)
-    return _client
 
 
 def _meta(raw) -> dict:

@@ -28,6 +28,8 @@ from typing import Any, Iterable, Optional
 
 from google.genai import types
 
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
+
 from .tools import TOOLS, HuumeTool
 
 # Public — agent.py's own `_MODEL` alias reads this (kept there, not
@@ -36,13 +38,13 @@ from .tools import TOOLS, HuumeTool
 # private-name reach-through; every other module-level name in this file
 # that outside code reads (TIERS, FALLBACK_TIER, HINT_INDEX, ...) is public
 # for the same reason.
-FLASH = "gemini-3.6-flash"
+FLASH = GEMINI_FLASH
 # The `lite` tier's model — confirm turns only, never standard/deep. The 3.x
 # generation dropped `thinking_budget`; passing it (even thinking_budget=0,
 # the 2.5-era way to turn thinking off) is a hard 400 INVALID_ARGUMENT on
 # flash-lite. "minimal" is the 3.x thinking-off equivalent (mirrors Cappe's
 # Merlin, `cappe/services/merlin/catalog.py` — same model, same reasoning).
-FLASH_LITE = "gemini-3.5-flash-lite"
+FLASH_LITE = GEMINI_FLASH_LITE
 
 
 @dataclass(frozen=True)

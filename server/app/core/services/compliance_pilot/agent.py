@@ -57,6 +57,7 @@ from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from app.database import get_connection
 
@@ -68,7 +69,7 @@ from app.core.services.compliance_pilot.tools import TOOLS_BY_NAME, tool_declara
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3.6-flash"
+_MODEL = GEMINI_FLASH
 _MAX_MODEL_CALLS = 8
 _WALL_CLOCK_SECONDS = 240.0
 _CALL_TIMEOUT = 60.0

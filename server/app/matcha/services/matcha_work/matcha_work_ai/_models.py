@@ -2,13 +2,14 @@
 keyword heuristic that classifies a turn's thinking level.
 """
 import logging
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 from app.core.services.platform_settings import get_matcha_work_model_mode
 
 logger = logging.getLogger(__name__)
 
 
-FLASH = "gemini-3.6-flash"
-FLASH_LITE = "gemini-3.5-flash-lite"
+FLASH = GEMINI_FLASH
+FLASH_LITE = GEMINI_FLASH_LITE
 
 SUPPORTED_MODELS = {FLASH_LITE, FLASH}
 

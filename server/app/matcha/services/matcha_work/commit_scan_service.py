@@ -19,17 +19,16 @@ parse, fail-closed.
 import fnmatch
 import json
 import logging
-import os
 from typing import Optional
 from uuid import UUID
 
-from google import genai
-from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
-from ....config import get_settings
-from ....database import get_connection
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.core.services.model_json import clean_model_json as _clean_json_text
+from app.matcha.services._shared.gemini import genai_env_client as _get_client
+
+from ....database import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ CONFIDENCE_THRESHOLD = 0.55
 AUTO_COMPLETE_THRESHOLD = 0.85
 
 # Flash-lite: cheapest/fastest tier — these run per-commit and should be cheap.
-FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
+FLASH_LITE_MODEL = GEMINI_FLASH_LITE
 
 # Defense-in-depth caps (the desktop also caps before sending).
 MAX_DIFF_CHARS = 60_000
@@ -137,17 +136,6 @@ def match_changed_files_to_elements(
 # ---------------------------------------------------------------------------
 # Gemini matcher (self-contained, mirrors gemini_leads.py)
 # ---------------------------------------------------------------------------
-
-_client: Optional[genai.Client] = None
-
-
-def _get_client() -> genai.Client:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-        _client = get_genai_client(api_key=api_key)
-    return _client
 
 
 def _build_prompt(commit: dict, candidates: list[dict]) -> str:

@@ -119,13 +119,15 @@ class TestHelpText:
 class TestAnswerQuestion:
     @pytest.mark.asyncio
     async def test_gemini_failure_degrades_to_a_pointer(self, monkeypatch):
-        from app.matcha.services.ems import event_intake
+        from app.matcha.services._shared import gemini as shared_gemini
 
         def _boom():
             raise RuntimeError("Gemini unavailable")
-        # Patch the module that DEFINES _get_client (ask.py imports it
-        # lazily from event_intake), per the repo's patching rule.
-        monkeypatch.setattr(event_intake, "_get_client", _boom)
+        # Patch the module that DEFINES genai_env_client (ask.py imports it
+        # lazily from _shared.gemini as of 2026-07-31 — was event_intake
+        # before the single-genai-client-accessor lift), per the repo's
+        # patching rule.
+        monkeypatch.setattr(shared_gemini, "genai_env_client", _boom)
 
         text = await ask.answer_question("what happened?", [_event()], is_admin=False)
         assert "couldn't pull that up" in text
@@ -133,7 +135,7 @@ class TestAnswerQuestion:
 
     @pytest.mark.asyncio
     async def test_model_asterisks_and_clarify_marker_stripped(self, monkeypatch):
-        from app.matcha.services.ems import event_intake
+        from app.matcha.services._shared import gemini as shared_gemini
 
         class _Resp:
             text = "Couple things: **freezer** ran warm \U0001F914 and a guest slipped."
@@ -148,7 +150,7 @@ class TestAnswerQuestion:
         class _Client:
             aio = _Aio()
 
-        monkeypatch.setattr(event_intake, "_get_client", lambda: _Client())
+        monkeypatch.setattr(shared_gemini, "genai_env_client", lambda: _Client())
 
         text = await ask.answer_question("what happened?", [_event()], is_admin=True)
         assert "*" not in text
