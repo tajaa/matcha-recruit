@@ -1686,6 +1686,18 @@ async def broadcast_reaction_update(
     )
 
 
+async def push_channel_read(channel_id: str, user_id: str) -> None:
+    """Zero the unread badge on a user's OTHER devices — read state is
+    per-user, not per-device, so a read on one device must clear all of
+    them. Called by the WS mark_read handler and by REST GET /channels/{id}
+    (channels.py), which also flips last_read_at."""
+    await manager.send_to_user(UUID(user_id), {
+        "type": "channel_read",
+        "channel_id": channel_id,
+        "user_id": user_id,
+    })
+
+
 async def broadcast_system_message(channel_id: str, message: dict) -> None:
     """Fan out a system (Huume/EMS) message to a channel room. Called from
     a background task, not a connected client — no WebSocket/user context
@@ -2204,11 +2216,7 @@ async def channel_websocket(
                                 UUID(rk), user.id,
                             )
                         # Zero the badge on this user's OTHER devices too.
-                        await manager.send_to_user(user.id, {
-                            "type": "channel_read",
-                            "channel_id": rk,
-                            "user_id": str(user.id),
-                        })
+                        await push_channel_read(rk, str(user.id))
                     except Exception:
                         logger.warning("[Channel WS] mark_read failed", exc_info=True)
 

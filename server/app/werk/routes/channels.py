@@ -85,6 +85,10 @@ class ChannelMessage(BaseModel):
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[UUID] = None
     message_type: str = "user"
+    # Sender's optimistic-UI correlation id — REST now returns it so a
+    # reconnect refetch can reconcile a still-pending local row against the
+    # persisted copy (the WS echo already carried it).
+    client_message_id: Optional[UUID] = None
 
 
 def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
@@ -141,6 +145,7 @@ def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
         deleted_at=m["deleted_at"],
         deleted_by=m["deleted_by"],
         message_type=m["message_type"],
+        client_message_id=m.get("client_message_id"),
     )
 
 
@@ -200,7 +205,7 @@ def _name_subquery(user_id_expr: str) -> str:
 _MSG_SELECT = f"""
     SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
            m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
-           m.message_type,
+           m.message_type, m.client_message_id,
            COALESCE({_name_subquery("m.sender_id")}, 'Huume') AS sender_name,
            u.avatar_url AS sender_avatar_url,
            rm.content AS reply_content, rm.attachments AS reply_attachments,
@@ -211,7 +216,7 @@ _MSG_SELECT = f"""
     LEFT JOIN channel_messages rm ON rm.id = m.reply_to_id
 """
 
-def _msg_query(where: str, order: str = "m.created_at DESC", limit_param: str | None = None) -> str:
+def _msg_query(where: str, order: str = "m.created_at DESC, m.id DESC", limit_param: str | None = None) -> str:
     """Build a channel messages query with reply joins."""
     q = _MSG_SELECT
     q += f" WHERE {where} ORDER BY {order}"
@@ -261,6 +266,9 @@ class ChannelSummary(BaseModel):
     last_message_preview: Optional[str] = None
     is_member: bool = True
     my_role: Optional[str] = None  # current user's channel_role (owner/moderator/member)
+    # Per-member mute: silences the bell/push/sound for this channel except
+    # direct @mentions (enforced server-side in the WS notify fan-out).
+    is_muted: bool = False
     # Channel creator — drives the founder chip on hub cards and the
     # mine/joined/discover grouping (clients compare created_by to self).
     created_by: Optional[UUID] = None
@@ -387,6 +395,7 @@ async def list_channels(
                     ORDER BY msg3.created_at DESC LIMIT 1) AS last_message_preview,
                    cm.user_id IS NOT NULL AS is_member,
                    cm.role AS my_role,
+                   COALESCE(cm.is_muted, false) AS is_muted,
                    ch.created_by,
                    -- Scalar subqueries (not joins): a creator with multiple
                    -- employees rows must not fan the channel list out.
@@ -432,6 +441,7 @@ async def list_channels(
                 last_message_preview=r["last_message_preview"],
                 is_member=r["is_member"],
                 my_role=r["my_role"],
+                is_muted=r["is_muted"],
                 created_by=r["created_by"],
                 created_by_name=r["created_by_name"],
                 created_by_avatar_url=r["created_by_avatar_url"],
@@ -1276,6 +1286,12 @@ async def get_channel(
                 "UPDATE channel_members SET last_read_at = NOW() WHERE channel_id = $1 AND user_id = $2",
                 channel_id, current_user.id,
             )
+            # Zero this user's badge on their other devices. Best-effort.
+            try:
+                from .channels_ws import push_channel_read
+                await push_channel_read(str(channel_id), str(current_user.id))
+            except Exception:
+                pass
 
         return ChannelDetail(
             id=ch["id"],
@@ -1313,6 +1329,7 @@ async def get_channel(
 async def get_channel_messages(
     channel_id: UUID,
     before: Optional[str] = Query(default=None),
+    before_id: Optional[UUID] = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -1343,10 +1360,20 @@ async def get_channel_messages(
                 before_dt = datetime.fromisoformat(before)
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="Invalid 'before' cursor format")
-            rows = await conn.fetch(
-                _msg_query("m.channel_id = $1 AND m.created_at < $2", limit_param="$3"),
-                channel_id, before_dt, limit,
-            )
+            if before_id:
+                # Composite keyset cursor — strict created_at-only comparison
+                # skips rows sharing the boundary timestamp (autocommit burst
+                # inserts land in the same microsecond).
+                rows = await conn.fetch(
+                    _msg_query("m.channel_id = $1 AND (m.created_at, m.id) < ($2, $3)", limit_param="$4"),
+                    channel_id, before_dt, before_id, limit,
+                )
+            else:
+                # Legacy cursor (Espresso) — unchanged behavior.
+                rows = await conn.fetch(
+                    _msg_query("m.channel_id = $1 AND m.created_at < $2", limit_param="$3"),
+                    channel_id, before_dt, limit,
+                )
         else:
             rows = await conn.fetch(
                 _msg_query("m.channel_id = $1", limit_param="$2"),
@@ -1907,6 +1934,29 @@ async def leave_channel(
         )
 
     return {"ok": True}
+
+
+class MuteRequest(BaseModel):
+    muted: bool
+
+
+@router.post("/{channel_id}/mute")
+async def set_channel_mute(
+    channel_id: UUID,
+    body: MuteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Per-member mute: silences the bell/push/sound for this channel except
+    direct @mentions (enforced in the WS notify fan-out). Does not affect
+    live message delivery to an open view."""
+    async with get_connection() as conn:
+        updated = await conn.fetchval(
+            "UPDATE channel_members SET is_muted = $3 WHERE channel_id = $1 AND user_id = $2 RETURNING user_id",
+            channel_id, current_user.id, body.muted,
+        )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Not a member of this channel")
+    return {"ok": True, "muted": body.muted}
 
 
 # ---------------------------------------------------------------------------
