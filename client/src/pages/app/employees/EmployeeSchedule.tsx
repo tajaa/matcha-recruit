@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil,
@@ -71,6 +72,14 @@ function conflictPrompt(err: unknown): string | null {
 }
 
 export default function EmployeeSchedule() {
+  // Deep link from a Huume shift-chat confirmation pill (see
+  // work/pages/ChannelView/systemContent.tsx's `[[shift:<id>:<date>]]`
+  // token) — ?date= opens the right week, ?shift= highlights + scrolls to
+  // the specific shift once it's on screen.
+  const [searchParams] = useSearchParams()
+  const linkedDate = searchParams.get('date') ?? undefined
+  const highlightShiftId = searchParams.get('shift') ?? undefined
+
   const {
     tab, setTab,
     weekStart, setWeekStart,
@@ -84,7 +93,7 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule()
+  } = useEmployeeSchedule(linkedDate)
 
   return (
     // Same page frame as Compliance/Dashboard/Onboarding/Company/OSHA Logs.
@@ -150,6 +159,7 @@ export default function EmployeeSchedule() {
                   rosterFlags={rosterFlags}
                   onPatch={patchShift}
                   onChanged={reload}
+                  highlightShiftId={highlightShiftId}
                 />
               ))}
             </div>
@@ -181,9 +191,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -200,21 +210,29 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged }: {
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
-          <ShiftCard key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags} onPatch={onPatch} onChanged={onChanged} />
+          <ShiftCard
+            key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
+            onPatch={onPatch} onChanged={onChanged}
+            highlighted={s.id === highlightShiftId}
+          />
         ))}
       </div>
     </div>
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [editing, setEditing] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (highlighted) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlighted])
   const assignedIds = new Set(shift.assignments.map((a) => a.employee_id))
   const available = roster.filter((e) => !assignedIds.has(e.id))
   const understaffed = shift.assignments.length < shift.required_staff
@@ -293,7 +311,10 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged }: {
   }
 
   return (
-    <div className={`rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'}`}>
+    <div
+      ref={cardRef}
+      className={`rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'} ${highlighted ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-950' : ''}`}
+    >
       <div className="flex items-center justify-between gap-1">
         <span className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</span>
         <span className="flex items-center gap-1">

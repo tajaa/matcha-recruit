@@ -680,6 +680,7 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
             )
             created_shift_ids.append(shift_id)
             shifts_created.append({
+                "id": str(shift_id), "date": starts_at.date().isoformat(),
                 "label": shift["label"], "when": _fmt_date(starts_at),
                 "assignee_names": assignee_names,
             })
@@ -785,10 +786,19 @@ def clarify_text(question: str, options: list[str]) -> str:
 
 
 def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
+    """A `[[shift:<id>:<date>]]` token trails each created shift — the ONE
+    other markup construct client/.../ChannelView/systemContent.tsx parses
+    alongside `**bold**` (see that file's docstring: closed vocabulary by
+    design). It renders as a link into /app/employee-schedule, deep-linked
+    to that shift's week and highlighting the shift itself, so "1 shift is
+    live" is something the reader can click through to rather than just
+    trust."""
     parts = []
     for s in shifts_created:
         names = ", ".join(s["assignee_names"]) or "open"
-        parts.append(f"**{s['label'].title()}** {s['when']} · {names}")
+        parts.append(
+            f"**{s['label'].title()}** {s['when']} · {names} [[shift:{s['id']}:{s['date']}]]"
+        )
     n = len(shifts_created)
     verb = "is" if n == 1 else "are"
     lines = [

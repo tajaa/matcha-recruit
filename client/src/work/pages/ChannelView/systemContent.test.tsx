@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { isValidElement } from 'react'
+import { Link } from 'react-router-dom'
 import { renderSystemContent, stripEmphasis } from './systemContent'
 
 /** Mirrors the strings composed server-side by
@@ -33,6 +34,43 @@ describe('renderSystemContent', () => {
     const parts = renderSystemContent('📋 Logged **Safety** event.\n🤔 Who was involved?')
     expect(parts[2]).toContain('🤔')
   })
+
+  it('renders a shift-link token as a Link to the deep-linked schedule route', () => {
+    // Mirrors services/scheduling/schedule_chat.py:result_text's
+    // `[[shift:<id>:<date>]]` token.
+    const parts = renderSystemContent(
+      '✅ Done — 1 shift is live (**Closer** Sat Aug 1 · Aisha Kim [[shift:26c4ef29-ca1d-4c59-9719-30219f8e9056:2026-08-01]]).',
+    )
+    const link = parts.find(
+      (p): p is React.ReactElement<{ to: string; children: string }> =>
+        isValidElement(p) && (p.props as { to?: string }).to?.startsWith('/app/employee-schedule') === true,
+    )
+    expect(link).toBeDefined()
+    expect(link!.props.to).toBe(
+      '/app/employee-schedule?date=2026-08-01&shift=26c4ef29-ca1d-4c59-9719-30219f8e9056',
+    )
+    expect(link!.props.children).toBe('View shift →')
+  })
+
+  it('handles bold and a shift-link token together in one pass', () => {
+    // Regression guard: String.split() with two alternatives each carrying
+    // capture groups interleaves ALL groups per match, breaking a naive
+    // i % 2 alternation scheme — this pins the fix.
+    const parts = renderSystemContent(
+      '**Opener** Mon 8/3 · open [[shift:11111111-1111-1111-1111-111111111111:2026-08-03]] and **Closer** Tue 8/4 · open [[shift:22222222-2222-2222-2222-222222222222:2026-08-04]]',
+    )
+    const bolds = parts.filter(
+      (p): p is React.ReactElement<{ children: string }> =>
+        isValidElement(p) && p.type === 'strong',
+    )
+    expect(bolds.map((b) => b.props.children)).toEqual(['Opener', 'Closer'])
+    const links = parts.filter(
+      (p): p is React.ReactElement<{ to: string }> => isValidElement(p) && p.type === Link,
+    )
+    expect(links).toHaveLength(2)
+    expect(links[0].props.to).toContain('11111111-1111-1111-1111-111111111111')
+    expect(links[1].props.to).toContain('22222222-2222-2222-2222-222222222222')
+  })
 })
 
 describe('stripEmphasis', () => {
@@ -44,5 +82,13 @@ describe('stripEmphasis', () => {
 
   it('is a no-op on unmarked text', () => {
     expect(stripEmphasis('plain reply')).toBe('plain reply')
+  })
+
+  it('drops a shift-link token entirely (a raw link is useless in a compact preview)', () => {
+    expect(
+      stripEmphasis(
+        '✅ Done — 1 shift is live (**Closer** Sat Aug 1 · Aisha Kim [[shift:26c4ef29-ca1d-4c59-9719-30219f8e9056:2026-08-01]]).',
+      ),
+    ).toBe('✅ Done — 1 shift is live (Closer Sat Aug 1 · Aisha Kim).')
   })
 })

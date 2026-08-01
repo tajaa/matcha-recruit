@@ -9,9 +9,14 @@ import {
 
 type Tab = 'schedule' | 'templates' | 'requests'
 
-export function useEmployeeSchedule() {
+export function useEmployeeSchedule(initialDate?: string) {
   const [tab, setTab] = useState<Tab>('schedule')
-  const [weekStart, setWeekStart] = useState(() => toISODate(startOfWeekSunday(new Date())))
+  // `initialDate` (from a ?date= deep link — see systemContent.tsx's
+  // shift-link token) opens the week that date falls in, not always "this
+  // week": a shift-chat confirmation can land in a future or past week.
+  const [weekStart, setWeekStart] = useState(() =>
+    toISODate(startOfWeekSunday(initialDate ? new Date(`${initialDate}T00:00:00Z`) : new Date())),
+  )
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
   const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)

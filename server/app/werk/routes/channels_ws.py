@@ -413,7 +413,7 @@ async def _bg_schedule_request(
             build = await schedule_chat.build_proposal(
                 conn, company_id=company_id, channel_id=UUID(channel_id_str),
                 source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
-                parsed=parsed, today=_date.today(), original_content=content,
+                parsed=parsed, today=_date.today(), original_content=strip_mention(content),
             )
             sys_row = await _insert_system_message(conn, channel_id_str, build.pill_text)
             await conn.execute(
