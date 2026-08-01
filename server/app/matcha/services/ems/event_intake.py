@@ -665,6 +665,12 @@ async def apply_reclassification(
     No narrative append, no clarification_rounds bump — fold_answer() above
     already did both, unconditionally.
 
+    urgency is sticky at 'osha': once fold_answer's deterministic regex (or
+    a prior reclassify) has set it, this never downgrades it back — a
+    truncated compose_refinement_content (4000-char cap) or a model pass
+    that simply doesn't re-flag the same OSHA keyword must not silently
+    revert an already-confirmed reportable event.
+
     A no-op (returns None) unless classified["model_ok"] — a Gemini failure
     during refinement must not downgrade an already-classified event back
     to 'uncategorized'; the reporter's answer is already durable via
@@ -679,7 +685,8 @@ async def apply_reclassification(
         SET title = $3, category = $4, severity_hint = $5, doc = $6::jsonb,
             incident_recommendation = $7, incident_reasoning = $8,
             suggested_incident_type = $9, suggested_severity = $10,
-            urgency = $11, protocol_qualifies = $12, protocol_reasoning = $13,
+            urgency = CASE WHEN urgency = 'osha' THEN 'osha' ELSE $11 END,
+            protocol_qualifies = $12, protocol_reasoning = $13,
             updated_at = NOW()
         WHERE id = $1 AND company_id = $2 AND status = 'logged'
         {_REFINEMENT_RETURNING}

@@ -723,10 +723,45 @@ async def _bg_ems_intake(
                     sys_row["id"], event_row["id"],
                 )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-        if event_row.get("urgency"):
-            _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(event_row)))
+        # not_an_event: the model still judged this a non-report (question,
+        # recap, etc.) despite the OSHA-keyword override in
+        # _intake_disposition forcing it to persist — document it, but don't
+        # page leadership over what the model itself flagged as not a real
+        # event (e.g. "did the guest hospitalized last month get a refund?").
+        if event_row.get("urgency") and not classified.get("not_an_event"):
+            await _maybe_notify_urgent(str(company_id), event_row, bypassed_budget=rate_limited)
     except Exception:
         logger.exception("EMS intake failed for message %s", message_id_str)
+
+
+# Small, separate budget for the urgent-notify EMAIL fan-out specifically —
+# distinct from the "ems_event" budget that bounds Gemini spend. The OSHA
+# regex override in _bg_ems_intake/_bg_ems_clarify deliberately bypasses
+# ems_event once it's exhausted (a fatality report must still be logged),
+# but that bypass has no bound of its own: a burst of OSHA-keyword messages
+# during an over-budget hour would each fire an unbounded admin-email
+# fan-out (send_urgent_event_notifications emails every designated/admin
+# contact). Gate the FAN-OUT ONLY — the event itself always persists.
+_OSHA_NOTIFY_BYPASS_LIMIT = 10
+_OSHA_NOTIFY_BYPASS_WINDOW_SECONDS = 3600
+
+
+async def _maybe_notify_urgent(company_id_str: str, event_row: dict, *, bypassed_budget: bool) -> None:
+    """Spawn the urgent-notify fan-out, unless this event only reached
+    urgency via a rate-limit bypass path AND the separate, smaller
+    notify-fan-out budget is also exhausted."""
+    if bypassed_budget:
+        try:
+            await check_rate_limit(company_id_str, "ems_urgent_notify_bypass",
+                                    _OSHA_NOTIFY_BYPASS_LIMIT, _OSHA_NOTIFY_BYPASS_WINDOW_SECONDS)
+        except HTTPException:
+            logger.warning(
+                "EMS: urgent-notify bypass budget exhausted for company %s — "
+                "event %s logged, admin email fan-out skipped",
+                company_id_str, event_row.get("id"),
+            )
+            return
+    _spawn_bg(_bg_ems_urgent_notify(company_id_str, dict(event_row)))
 
 
 async def _bg_ems_urgent_notify(company_id_str: str, event_row: dict) -> None:
@@ -837,8 +872,8 @@ async def _bg_ems_clarify(
                     conn, channel_id_str, update_text(folded),
                 )
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-            if folded.get("urgency") and not claimed["urgency"]:
-                _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(folded)))
+            if folded.get("urgency") and folded.get("urgency") != claimed["urgency"]:
+                await _maybe_notify_urgent(str(company_id), folded, bypassed_budget=True)
             return True
 
         # No connection held across the Gemini call.
@@ -865,8 +900,8 @@ async def _bg_ems_clarify(
                 )
 
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
-        if display.get("urgency") and not claimed["urgency"]:
-            _spawn_bg(_bg_ems_urgent_notify(str(company_id), dict(display)))
+        if display.get("urgency") and display.get("urgency") != claimed["urgency"]:
+            await _maybe_notify_urgent(str(company_id), display, bypassed_budget=False)
         return True
     except Exception:
         logger.exception("EMS clarify failed for reply to message %s", reply_to_id_str)

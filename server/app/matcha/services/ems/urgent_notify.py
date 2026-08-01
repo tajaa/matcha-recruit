@@ -65,8 +65,11 @@ def build_urgent_email(*, urgency: str, company_name: str, title: str,
     # content (the model's own title, or a channel/company name) — escape
     # everything interpolated into the HTML body. `link` must be the
     # absolute app_base_url form here — a relative href is dead in an email
-    # client — but escape it too on principle.
-    subject = f"[{escape(company_name)}] URGENT: {kind}"
+    # client — but escape it too on principle. The SUBJECT is plain text
+    # (a mail header, not HTML), so it must NOT be escape()'d — the send
+    # path already MIME-encodes the header, and escaping here double-
+    # encodes entities (`Bob & Sons` -> `Bob &amp; Sons` in every inbox).
+    subject = f"[{company_name}] URGENT: {kind}"
     osha_clause = _OSHA_EMAIL_CLAUSE if urgency == "osha" else ""
     html = (
         f"<h2>\U0001F6A8 Urgent event flagged by Huume</h2>"
