@@ -19,7 +19,7 @@ COMPACTION_PROMPT = (
 )
 
 
-COMPACTION_MODEL = "gemini-3-flash-preview"
+COMPACTION_MODEL = "gemini-3.6-flash"
 
 
 COMPACTION_THRESHOLD = 30

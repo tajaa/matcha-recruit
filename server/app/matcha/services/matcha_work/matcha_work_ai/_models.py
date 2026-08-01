@@ -7,14 +7,26 @@ from app.core.services.platform_settings import get_matcha_work_model_mode
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_MODELS = {
-    "gemini-3.1-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
+FLASH = "gemini-3.6-flash"
+FLASH_LITE = "gemini-3.5-flash-lite"
+
+SUPPORTED_MODELS = {FLASH_LITE, FLASH}
+
+# Pro-preview retired from matcha-work (product decision, 2026-07-31) — the
+# whole thread harness now runs a two-model fleet. PRO_MODEL kept as an alias
+# to FLASH (not deleted) so the entitlement machinery in _get_model below
+# stays wired for a future pro-class model.
+PRO_MODEL = FLASH
+
+# Old picker ids (still sent by un-migrated web localStorage / Espresso
+# builds until they ship the two-option picker — see MODEL_OPTIONS in
+# client/src/work/components/panels/constants.ts) — normalized to the new
+# fleet BEFORE the SUPPORTED_MODELS check, so a stale client keeps working.
+_MODEL_ALIASES = {
+    "gemini-3-flash-preview": FLASH,
+    "gemini-3.1-flash-lite": FLASH_LITE,
+    "gemini-3.1-pro-preview": FLASH,
 }
-
-
-PRO_MODEL = "gemini-3.1-pro-preview"
 
 
 async def _get_model(
@@ -53,6 +65,8 @@ async def _get_model(
             )
         return False
 
+    model_override = _MODEL_ALIASES.get(model_override, model_override)
+
     if model_override and model_override in SUPPORTED_MODELS:
         if model_override != PRO_MODEL or await _pro_allowed():
             return model_override
@@ -65,7 +79,7 @@ async def _get_model(
     if await _pro_allowed():
         return PRO_MODEL
 
-    return settings.analysis_model
+    return FLASH
 
 
 # ── Auto-thinking heuristic ──
@@ -122,3 +136,21 @@ def classify_thinking_level(
     if len(msg) > 280 or msg.count("\n") > 2:
         return "high"
     return "low"
+
+
+def resolve_turn_model(thinking_level: str, inferred_skill: str, plan_model: str) -> str:
+    """Downgrade to flash-lite ONLY where no document/outbound op is
+    plausible this turn — never inside a skill thread.
+
+    `classify_thinking_level` checks its trivial-phrase set BEFORE the skill
+    check, so a trivial-shaped message ("ok", "yes") inside e.g. an
+    offer_letter thread still classifies thinking_level="none" even though
+    "ok" there can mean "send the draft" (a real `send_draft` op). Gating
+    flash-lite on `inferred_skill == "chat"` (the skill-less default from
+    `_text._infer_skill_from_state`) as well as thinking_level keeps it out
+    of every skill thread — flash-lite only ever sees a turn that can emit
+    at most a plain chat reply, never a structured update.
+    """
+    if thinking_level == "none" and inferred_skill == "chat":
+        return FLASH_LITE
+    return plan_model

@@ -25,7 +25,7 @@ export function useProjectView() {
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3.6-flash')
   const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)
   const [usage24h, setUsage24h] = useState<UsageSummary | null>(null)
 

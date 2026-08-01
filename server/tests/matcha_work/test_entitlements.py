@@ -226,12 +226,16 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_free_cannot_force_pro_override(self):
-        from app.matcha.services.matcha_work.matcha_work_ai import _get_model, PRO_MODEL
+        # Pro-preview is retired from matcha-work (PRO_MODEL == FLASH now) —
+        # a free user "forcing" it falls through the un-entitled branch to
+        # plan selection, which lands on the same FLASH base fallback. The
+        # clamp still fires (it just no longer has a distinct model to deny).
+        from app.matcha.services.matcha_work.matcha_work_ai import FLASH, _get_model, PRO_MODEL
 
         p1, p2 = self._patches(PLAN_FREE)
         with p1, p2:
             model = await _get_model(_Settings(), model_override=PRO_MODEL, user_id="u-1")
-        assert model == _Settings.analysis_model
+        assert model == FLASH
 
     @pytest.mark.asyncio
     async def test_pro_plan_override_honored(self):
@@ -244,14 +248,16 @@ class TestModelClamp:
 
     @pytest.mark.asyncio
     async def test_lite_override_to_flash_is_fine(self):
-        from app.matcha.services.matcha_work.matcha_work_ai import _get_model
+        # Stale/un-migrated clients still send the retired picker id — the
+        # alias map normalizes it to the current fleet's flash model.
+        from app.matcha.services.matcha_work.matcha_work_ai import FLASH, _get_model
 
         p1, p2 = self._patches(PLAN_LITE)
         with p1, p2:
             model = await _get_model(
                 _Settings(), model_override="gemini-3-flash-preview", user_id="u-1"
             )
-        assert model == "gemini-3-flash-preview"
+        assert model == FLASH
 
     @pytest.mark.asyncio
     async def test_business_defaults_to_pro_model(self):
@@ -272,13 +278,17 @@ class TestModelClamp:
         assert model == PRO_MODEL
 
     @pytest.mark.asyncio
-    async def test_free_default_is_analysis_model(self):
-        from app.matcha.services.matcha_work.matcha_work_ai import _get_model
+    async def test_free_default_is_flash(self):
+        # Base fallback is matcha-work's own FLASH constant, not
+        # settings.analysis_model (that setting feeds ~25 unrelated
+        # callsites — ER/IR/interviews/compliance — and matcha-work no
+        # longer shares its model choice with them).
+        from app.matcha.services.matcha_work.matcha_work_ai import FLASH, _get_model
 
         p1, p2 = self._patches(PLAN_FREE)
         with p1, p2:
             model = await _get_model(_Settings(), user_id="u-1")
-        assert model == _Settings.analysis_model
+        assert model == FLASH
 
 
 # ============================================================

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _MAX_HISTORY_MESSAGES = 20
 
 # Flash-lite: cheapest/fastest tier for the Prop repo-chat + draft generation.
-FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 
 _client: Optional[genai.Client] = None
 

@@ -22,7 +22,7 @@ from app.database import get_connection
 logger = logging.getLogger(__name__)
 
 # Flash-lite: cheapest/fastest tier — a title is a one-shot, throwaway read.
-FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 
 _DEFAULT_TITLE = "New Chat"
 _MAX_TITLE_LEN = 80

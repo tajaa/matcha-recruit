@@ -46,7 +46,7 @@ CONFIDENCE_THRESHOLD = 0.55
 AUTO_COMPLETE_THRESHOLD = 0.85
 
 # Flash-lite: cheapest/fastest tier — these run per-commit and should be cheap.
-FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 
 # Defense-in-depth caps (the desktop also caps before sending).
 MAX_DIFF_CHARS = 60_000

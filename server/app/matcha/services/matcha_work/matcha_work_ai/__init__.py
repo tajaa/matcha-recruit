@@ -54,12 +54,16 @@ from ._text import (  # noqa: F401
     _infer_skill_from_state,
 )
 from ._models import (  # noqa: F401
+    FLASH,
+    FLASH_LITE,
     SUPPORTED_MODELS,
     PRO_MODEL,
+    _MODEL_ALIASES,
     _get_model,
     _HIGH_THINK_KEYWORDS,
     _TRIVIAL_PATTERNS,
     classify_thinking_level,
+    resolve_turn_model,
 )
 from .provider import (  # noqa: F401
     _GOOGLE_SEARCH_TOOL,

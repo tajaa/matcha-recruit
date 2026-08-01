@@ -22,7 +22,7 @@ from ....database import get_connection
 logger = logging.getLogger(__name__)
 
 # Flash-lite: cheapest/fastest tier — a summary is a one-shot, throwaway read.
-FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+FLASH_LITE_MODEL = "gemini-3.5-flash-lite"
 
 # Cap the activity trail so a long-running ticket doesn't blow the prompt.
 _MAX_TRAIL = 40

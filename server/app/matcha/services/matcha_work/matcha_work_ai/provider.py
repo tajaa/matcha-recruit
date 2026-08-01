@@ -23,7 +23,7 @@ from google.genai import types
 from app.config import get_settings
 
 from ._fields import BLOG_FIELDS, HANDBOOK_FIELDS, HR_PILOT_FIELDS, OFFER_LETTER_FIELDS, ONBOARDING_FIELDS, POLICY_FIELDS, PRESENTATION_FIELDS, PROJECT_FIELDS, REVIEW_FIELDS, SUPPORTED_AI_MODES, SUPPORTED_AI_OPERATIONS, SUPPORTED_AI_SKILLS, WORKBOOK_FIELDS
-from ._models import _get_model, classify_thinking_level
+from ._models import FLASH_LITE, _get_model, classify_thinking_level, resolve_turn_model
 from ._prompts import MATCHA_WORK_BLOG_DYNAMIC_PROMPT, MATCHA_WORK_BLOG_STATIC_PROMPT, MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE, MATCHA_WORK_STATIC_PROMPT_TEMPLATE
 from ._text import _clean_json_text, _extract_reply_field, _infer_skill_from_state
 from cachetools import TTLCache
@@ -363,6 +363,9 @@ class GeminiProvider(MatchaWorkAIProvider):
             node_mode=node_mode,
             grounded_mode=grounded_mode,
         )
+        # Downgrade to flash-lite only for skill-less trivial turns — see
+        # resolve_turn_model's docstring for why the skill check is required.
+        model = resolve_turn_model(thinking_level, inferred_skill, model)
 
         try:
             response = await asyncio.wait_for(
@@ -410,10 +413,17 @@ class GeminiProvider(MatchaWorkAIProvider):
         cache_name = self._get_or_create_cache(model, static_prompt, company_id)
         logger.info("[TIMING] cache lookup/create %.2fs (cache_name=%s)", _time.monotonic() - _tc0, cache_name)
 
-        # Build thinking_config — "none" → budget=0 (disabled, fastest path);
-        # "low"/"high" → use named level so the model picks an appropriate budget.
+        # Build thinking_config — "none" → budget=0 (disabled, fastest path)
+        # on flash/pro; the 3.x generation dropped thinking_budget entirely
+        # and 0 is a hard 400 INVALID_ARGUMENT on flash-lite, so a "none"
+        # turn resolved to FLASH_LITE (see resolve_turn_model) uses the
+        # thinking-off LEVEL instead. "low"/"high" always use a named level
+        # so the model picks an appropriate budget.
         if thinking_level == "none":
-            thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+            thinking_cfg = (
+                types.ThinkingConfig(thinking_level="minimal") if model == FLASH_LITE
+                else types.ThinkingConfig(thinking_budget=0)
+            )
         else:
             thinking_cfg = types.ThinkingConfig(thinking_level=thinking_level)
         logger.info("[TIMING] thinking_level=%s skill=%s", thinking_level, inferred_skill)
