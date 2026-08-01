@@ -37,6 +37,8 @@ from uuid import UUID
 
 from google.genai import types
 
+from app.matcha.services._shared.pill_text import sanitize_pill_text
+
 from . import categories
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,6 @@ logger = logging.getLogger(__name__)
 _LOOKBACK_DAYS = 120
 _MAX_EVENTS = 25
 _MAX_ANSWER_CHARS = 900
-_QUESTION_MARKER_CHAR = "\U0001F914"  # 🤔 — see event_intake._QUESTION_MARKER
 
 ADMIN_ROLES = ("client", "admin")
 
@@ -180,12 +181,13 @@ async def answer_question(question: str, events: list[dict], *, is_admin: bool) 
         )
         # Newlines survive (the pill renders with whitespace-pre-wrap) but
         # `*` cannot — MessageList parses `**` pairs, so a stray asterisk
-        # from the model would eat the rest of the message as emphasis.
-        answer = (resp.text or "").replace("*", "").strip()[:_MAX_ANSWER_CHARS]
-        # A model answer must never fake an armed clarify question: a reply
+        # from the model would eat the rest of the message as emphasis — and
+        # a model answer must never fake an armed clarify question: a reply
         # to THIS pill has no ems_events row to claim, and extract_question
-        # scans rendered pill text for that marker.
-        answer = answer.replace(_QUESTION_MARKER_CHAR, "").strip()
+        # scans rendered pill text for that marker. sanitize_pill_text
+        # enforces both; keep_newlines=True because answers legitimately use
+        # short dashed lists.
+        answer = sanitize_pill_text(resp.text, _MAX_ANSWER_CHARS, keep_newlines=True)
         if answer:
             return f"\U0001F4CB {answer}"
     except Exception:

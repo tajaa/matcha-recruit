@@ -1,9 +1,10 @@
 """Auto-title a matcha-work thread from its first exchange — Gemini Flash
 Lite condenses the opening user/assistant turn into a short title.
 
-Self-contained Gemini call (mirrors task_summary_service / ticket_draft_service
-/ commit_scan_service) rather than the entangled matcha_work_ai.generate()
-chat pipeline. Fire-and-forget, dispatched from messaging.py's turn pipeline.
+One-shot Gemini call on the shared cached client
+(`services/_shared/gemini.genai_env_client`) rather than the entangled
+matcha_work_ai.generate() chat pipeline. Fire-and-forget, dispatched from
+messaging.py's turn pipeline.
 """
 
 import logging

@@ -19,12 +19,12 @@ import logging
 import os
 from typing import Optional
 
-from google import genai
-from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
-from ....config import get_settings
-from ....core.services.model_catalog import GEMINI_FLASH_LITE
+from app.config import get_settings
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
+from app.matcha.services._shared.gemini import genai_env_client
+
 from ..er.er_document_parser import ERDocumentParser
 
 logger = logging.getLogger(__name__)
@@ -61,11 +61,11 @@ async def parse_resume_text(text: str) -> dict:
     """Run Gemini flash-lite structured extraction on an already-extracted
     resume text blob. Returns a ResumeCandidate-shaped dict.
     """
-    settings = get_settings()
-    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-    if not api_key:
+    # Same key resolution as genai_env_client (env-first), but a distinct
+    # early error message preserved from before the shared-client lift.
+    if not (os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key):
         raise ResumeParseError("GEMINI_API_KEY not configured")
-    client = get_genai_client(api_key=api_key)
+    client = genai_env_client()
     capped = text[:RESUME_TEXT_CAP]
     try:
         resp = await asyncio.wait_for(

@@ -1,8 +1,11 @@
 """Tests for EMS event intake classify/parse + the Gemini-outage fallback.
 
-Patches the genai client on `event_intake` itself (the module that DEFINES
-`_get_client`), per the repo's patch-the-defining-module rule — patching a
-facade re-export would silently no-op and let the call reach a real client.
+Patches `_get_client` on `event_intake` itself. Since 2026-08-01 that name
+is an alias import of `_shared.gemini.genai_env_client`, but event_intake's
+own call sites still resolve `_get_client` through event_intake's module
+globals — so patching HERE is still the binding that intercepts, while
+patching `_shared.gemini.genai_env_client` would NOT affect event_intake
+(module-level `from X import Y` copies the binding at import time).
 
     cd server && ./venv/bin/python -m pytest tests/ems/test_event_intake_parsing.py -q
 """

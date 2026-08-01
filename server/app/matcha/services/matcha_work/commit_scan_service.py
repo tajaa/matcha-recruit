@@ -11,9 +11,9 @@ Flow (all locked decisions honored):
      commit_sha) so re-scanning the same commit is a no-op.
 
 The glob matcher, element matching, and persistence are pure-ish and unit
-testable without a live DB / Gemini (see tests). The AI matcher mirrors the
-`core/services/gemini_leads.py` style: lazy client, JSON-only response, robust
-parse, fail-closed.
+testable without a live DB / Gemini (see tests). The AI matcher uses the
+shared cached client (`services/_shared/gemini.genai_env_client`): JSON-only
+response, robust parse, fail-closed.
 """
 
 import fnmatch
@@ -134,7 +134,7 @@ def match_changed_files_to_elements(
 
 
 # ---------------------------------------------------------------------------
-# Gemini matcher (self-contained, mirrors gemini_leads.py)
+# Gemini matcher (shared client via _shared/gemini)
 # ---------------------------------------------------------------------------
 
 

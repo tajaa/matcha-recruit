@@ -365,7 +365,16 @@ class GeminiProvider(MatchaWorkAIProvider):
         )
         # Downgrade to flash-lite only for skill-less trivial turns — see
         # resolve_turn_model's docstring for why the skill check is required.
+        plan_model = model
         model = resolve_turn_model(thinking_level, inferred_skill, model)
+        # A DOWNGRADED turn skips the context cache: the cache key is
+        # (company, prompt_hash, model), so caching here would fork a second
+        # cached-content object per company for the same static prompt AND
+        # pay a blocking caches.create round-trip on the one turn shape the
+        # downgrade exists to make fast. Keyed on "was downgraded", not on
+        # "model is flash-lite" — a user who picks flash-lite in the header
+        # picker runs real turns on it and should still get the cache.
+        auto_downgraded = model != plan_model
 
         try:
             response = await asyncio.wait_for(
@@ -379,6 +388,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     inferred_skill,
                     company_id,
                     thinking_level,
+                    not auto_downgraded,
                 ),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
@@ -406,26 +416,21 @@ class GeminiProvider(MatchaWorkAIProvider):
         inferred_skill: str,
         company_id: str = "",
         thinking_level: str = "low",
+        use_cache: bool = True,
     ) -> AIResponse:
         import time as _time
-        # Try to cache the static prompt (instructions + company context)
+        # Try to cache the static prompt (instructions + company context).
+        # Skipped on an auto-downgraded turn — see generate()'s
+        # auto_downgraded comment for why.
         _tc0 = _time.monotonic()
-        cache_name = self._get_or_create_cache(model, static_prompt, company_id)
+        cache_name = self._get_or_create_cache(model, static_prompt, company_id) if use_cache else None
         logger.info("[TIMING] cache lookup/create %.2fs (cache_name=%s)", _time.monotonic() - _tc0, cache_name)
 
-        # Build thinking_config — "none" → budget=0 (disabled, fastest path)
-        # on flash/pro; the 3.x generation dropped thinking_budget entirely
-        # and 0 is a hard 400 INVALID_ARGUMENT on flash-lite, so a "none"
-        # turn resolved to FLASH_LITE (see resolve_turn_model) uses the
-        # thinking-off LEVEL instead. "low"/"high" always use a named level
-        # so the model picks an appropriate budget.
-        if thinking_level == "none":
-            thinking_cfg = (
-                types.ThinkingConfig(thinking_level="minimal") if model == FLASH_LITE
-                else types.ThinkingConfig(thinking_budget=0)
-            )
-        else:
-            thinking_cfg = types.ThinkingConfig(thinking_level=thinking_level)
+        # Always a named LEVEL, never thinking_budget — see
+        # model_catalog.GEMINI_FLASH_LITE's canonical note. "minimal" is the
+        # thinking-off level.
+        level = "minimal" if thinking_level == "none" else thinking_level
+        thinking_cfg = types.ThinkingConfig(thinking_level=level)
         logger.info("[TIMING] thinking_level=%s skill=%s", thinking_level, inferred_skill)
 
         _tg0 = _time.monotonic()

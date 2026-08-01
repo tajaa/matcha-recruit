@@ -108,3 +108,18 @@ class TestThinkingConfigOnFlashLite:
         cfg = types.ThinkingConfig(thinking_level="minimal")
         assert cfg.thinking_level == "MINIMAL"
         assert cfg.thinking_budget is None
+
+
+class TestThinkingConfigNeverUsesBudget:
+    def test_call_gemini_source_has_no_thinking_budget(self):
+        # thinking_budget is a 2.5-era field; 0 is a hard 400 on BOTH fleet
+        # models (probed live 2026-08-01). The retired gemini-3-flash-preview
+        # tolerated it, which is how a budget=0 branch survived until the
+        # fleet bump — this pins the whole method against reintroducing one,
+        # not just the flash-lite-only branch that regressed once already.
+        import inspect
+        from app.matcha.services.matcha_work.matcha_work_ai import provider
+        # Substring on the constructor call, not the bare word — the method's
+        # own comments legitimately mention "thinking_budget" as the field
+        # never to use.
+        assert "thinking_budget=" not in inspect.getsource(provider.GeminiProvider._call_gemini)

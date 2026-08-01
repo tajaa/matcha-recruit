@@ -2,24 +2,27 @@
 imports nothing from services/.
 """
 import os
+from typing import Optional
+
+from google import genai
 
 from app.config import get_settings
 from app.core.services.genai_client import get_genai_client
 
-_client = None
+_client: Optional[genai.Client] = None
 
 
-def _genai():
+def _genai() -> genai.Client:
     global _client
     if _client is None:
         _client = get_genai_client()
     return _client
 
 
-_env_client = None
+_env_client: Optional[genai.Client] = None
 
 
-def genai_env_client():
+def genai_env_client() -> genai.Client:
     """Module-cached client for the one-shot Gemini services (EMS intake/ask,
     schedule chat, task summary, thread title, ticket drafts, commit scan).
 

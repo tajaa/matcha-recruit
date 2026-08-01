@@ -16,10 +16,11 @@ Everything past Stage A (Stage B) is deterministic: location/template
 matching, date resolution, and candidate ranking live in the DB-free
 `schedule_chat_rules.py`; this module does the I/O around them.
 
-Mirrors the self-contained genai-client pattern of
-`services/ems/event_intake.py` (one-shot, NOT the Huume agent loop, which
-hard-requires an `mw_threads` row via `store._locked_state_update` — channels
-have no thread to hang state on). State instead persists on
+One-shot Gemini call on the shared cached client
+(`services/_shared/gemini.genai_env_client`), like `services/ems/event_intake.py`
+(NOT the Huume agent loop, which hard-requires an `mw_threads` row via
+`store._locked_state_update` — channels have no thread to hang state on).
+State instead persists on
 `schedule_chat_proposals` (migration `schedchat01`), armed via
 `confirm_message_id` — the same atomic-claim idiom as `ems_events.
 clarify_message_id`.
@@ -41,7 +42,7 @@ from app.core.feature_flags import get_company_features
 from app.core.services.model_json import clean_model_json
 from app.core.services.model_catalog import GEMINI_FLASH_LITE as FLASH_LITE_MODEL
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
-from app.matcha.services.ems._shared import sanitize_pill_text as _sanitize_pill_text
+from app.matcha.services._shared.pill_text import sanitize_pill_text as _sanitize_pill_text
 
 from . import schedule_compliance
 from .schedule_chat_rules import (

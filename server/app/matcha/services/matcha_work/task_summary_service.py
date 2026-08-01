@@ -2,8 +2,9 @@
 current state + recent activity into a short catch-up blurb. For teammates
 deep in the rounds or a new collaborator getting up to speed.
 
-Self-contained Gemini call (mirrors ticket_draft_service / commit_scan_service)
-rather than the entangled matcha_work_ai.generate() chat pipeline.
+One-shot Gemini call on the shared cached client
+(`services/_shared/gemini.genai_env_client`) rather than the entangled
+matcha_work_ai.generate() chat pipeline.
 """
 
 import json

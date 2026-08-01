@@ -24,7 +24,7 @@ from ....core.services.handbook_service import (
     MANDATORY_STATE_TOPIC_RULES,
     STATE_NAMES,
 )
-from ....core.services.model_catalog import GEMINI_FLASH
+from app.core.services.model_catalog import GEMINI_FLASH
 from ....core.services.storage import get_storage
 from ..er.er_document_parser import ERDocumentParser
 from . import matcha_work_document as doc_svc

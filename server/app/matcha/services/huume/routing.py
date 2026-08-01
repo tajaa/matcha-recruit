@@ -39,11 +39,9 @@ from .tools import TOOLS, HuumeTool
 # that outside code reads (TIERS, FALLBACK_TIER, HINT_INDEX, ...) is public
 # for the same reason.
 FLASH = GEMINI_FLASH
-# The `lite` tier's model — confirm turns only, never standard/deep. The 3.x
-# generation dropped `thinking_budget`; passing it (even thinking_budget=0,
-# the 2.5-era way to turn thinking off) is a hard 400 INVALID_ARGUMENT on
-# flash-lite. "minimal" is the 3.x thinking-off equivalent (mirrors Cappe's
-# Merlin, `cappe/services/merlin/catalog.py` — same model, same reasoning).
+# The `lite` tier's model — confirm turns only, never standard/deep.
+# Thinking-off is thinking_level="minimal", never thinking_budget=0 — see
+# model_catalog.GEMINI_FLASH_LITE's canonical note.
 FLASH_LITE = GEMINI_FLASH_LITE
 
 
@@ -178,12 +176,12 @@ def resolve_tier(
 
 
 def thinking_config(level: Optional[str]) -> Optional[types.ThinkingConfig]:
-    """Mirrors matcha_work_ai's own mapping (services/matcha_work/
-    matcha_work_ai/provider.py): `None` omits ThinkingConfig entirely (today's
-    default behavior, unchanged for the `standard` tier); `"none"` sets an
-    explicit zero budget; anything else is a `thinking_level`."""
+    """`None` omits ThinkingConfig entirely (the `standard` tier's behavior);
+    any other value is a named thinking LEVEL — "none" maps to "minimal",
+    the 3.x thinking-off level. Never a thinking_budget: 0 is a hard 400 on
+    both fleet models (see model_catalog.GEMINI_FLASH_LITE's canonical note)."""
     if level is None:
         return None
     if level == "none":
-        return types.ThinkingConfig(thinking_budget=0)
+        return types.ThinkingConfig(thinking_level="minimal")
     return types.ThinkingConfig(thinking_level=level)

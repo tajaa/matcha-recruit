@@ -28,6 +28,7 @@ from google.genai import types
 from app.core.services.model_catalog import GEMINI_FLASH_LITE
 from app.core.services.model_json import clean_model_json
 from app.matcha.services._shared.gemini import genai_env_client as _get_client
+from app.matcha.services._shared.pill_text import sanitize_pill_text as _sanitize_pill_text
 from app.matcha.services.ir.ir_analysis import get_ir_analyzer, IRAnalysisError
 from app.matcha.services.ir.ir_cards import OSHA_EMERGENCY_HOTLINE, OSHA_REPORTING_WINDOW
 # Import from ir_incident_parsing directly (the defining module) — pulling
@@ -35,7 +36,6 @@ from app.matcha.services.ir.ir_cards import OSHA_EMERGENCY_HOTLINE, OSHA_REPORTI
 from app.matcha.services.ir.ir_incident_parsing import _detect_osha_reportable_keywords
 
 from . import categories
-from ._shared import sanitize_pill_text as _sanitize_pill_text
 
 logger = logging.getLogger(__name__)
 

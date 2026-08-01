@@ -151,6 +151,15 @@ def resolve_turn_model(thinking_level: str, inferred_skill: str, plan_model: str
     `_text._infer_skill_from_state`) as well as thinking_level keeps it out
     of every skill thread — flash-lite only ever sees a turn that can emit
     at most a plain chat reply, never a structured update.
+
+    Deliberately applies even when the turn carried an explicit
+    `model_override`: the web client always sends one (localStorage-defaulted
+    picker — see client/src/work/pages/MatchaWorkThread/useThreadController.ts
+    and .../ProjectView/useProjectView.ts), so "only downgrade when no
+    override was sent" would mean "never downgrade on web". The picker sets
+    the model for REAL turns; a trivial skill-less ack has no answer quality
+    to protect, so it stays eligible for the cheap tier regardless of what
+    the picker was set to.
     """
     if thinking_level == "none" and inferred_skill == "chat":
         return FLASH_LITE

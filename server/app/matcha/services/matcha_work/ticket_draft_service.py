@@ -2,8 +2,9 @@
 
 A "Prop" (mw_ticket_drafts) is a feat|fix proposal a collaborator shapes by
 chatting with an AI grounded on an element's code snapshot, then promotes to a
-real kanban ticket. Self-contained Gemini calls (mirror gemini_leads /
-commit_scan_service) rather than the entangled matcha_work_ai.generate()."""
+real kanban ticket. One-shot Gemini calls on the shared cached client
+(`services/_shared/gemini.genai_env_client`) rather than the entangled
+matcha_work_ai.generate()."""
 
 import json
 import logging

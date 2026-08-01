@@ -172,10 +172,13 @@ class TestThinkingConfig:
     def test_none_omits_config(self):
         assert routing.thinking_config(None) is None
 
-    def test_none_level_sets_zero_budget(self):
+    def test_none_level_maps_to_minimal_not_budget(self):
+        # "none" used to set thinking_budget=0 — a hard 400 on both 3.x
+        # fleet models (probed live 2026-08-01). Must be the minimal LEVEL.
         cfg = routing.thinking_config("none")
         assert isinstance(cfg, types.ThinkingConfig)
-        assert cfg.thinking_budget == 0
+        assert cfg.thinking_level == "MINIMAL"
+        assert cfg.thinking_budget is None
 
     def test_high_sets_thinking_level(self):
         cfg = routing.thinking_config("high")

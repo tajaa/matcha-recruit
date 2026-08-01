@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -96,16 +95,14 @@ async def _browse_and_extract_inner(
     url: str, instructions: str, model: str | None = None,
     on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
 ) -> dict:
-    from google import genai
-    from app.core.services.genai_client import get_genai_client
     from google.genai import types
+    from app.matcha.services._shared.gemini import genai_env_client
     from ....config import get_settings
 
     settings = get_settings()
-    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     use_model = model or settings.analysis_model
 
-    client = get_genai_client(api_key=api_key)
+    client = genai_env_client()
 
     config = types.GenerateContentConfig(
         tools=[
