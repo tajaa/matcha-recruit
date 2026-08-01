@@ -3,9 +3,10 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
@@ -18,6 +19,7 @@ from ..services.channel_job_posting_service import (
     cancel_job_posting_subscription,
     send_invitations,
 )
+from ._shared import _USER_NAME_EXPR, resolve_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +28,6 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
-
-# NULLIF+BTRIM wrap is load-bearing: Postgres CONCAT() ignores NULL args, so
-# with no matching `employees` row CONCAT(NULL, ' ', NULL) returns ' ' — a
-# non-NULL string — and COALESCE stops there instead of falling through to
-# a.name/u.email. Blanks every admin-only user's name without it (see the
-# matching fix in werk/routes/channels.py).
-_USER_NAME_EXPR = "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
-
 
 class CreateJobPostingRequest(BaseModel):
     title: str
@@ -61,7 +55,7 @@ class SubmitApplicationRequest(BaseModel):
 
 
 class UpdateApplicationRequest(BaseModel):
-    status: str  # reviewed, shortlisted, rejected
+    status: Literal["reviewed", "shortlisted", "rejected"]
     reviewer_notes: Optional[str] = None
 
 
@@ -92,6 +86,9 @@ async def create_job_posting(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create a new job posting in a channel (owner/mod only)."""
+    # Gate checks first, on their own connection — released before the Stripe
+    # call below (network I/O) so a slow Stripe response doesn't hold a pool
+    # connection idle.
     async with get_connection() as conn:
         role = await _get_member_role(conn, channel_id, current_user.id)
         if role not in ("owner", "moderator"):
@@ -106,67 +103,81 @@ async def create_job_posting(
             raise HTTPException(status_code=404, detail="Channel not found")
         company_id = ch["company_id"]
 
-        features = await conn.fetchval("SELECT enabled_features FROM companies WHERE id = $1", company_id)
+        company_row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
+        )
         from ...core.feature_flags import merge_company_features
-        merged = merge_company_features(features)
+        merged = merge_company_features(company_row["enabled_features"], company_row["signup_source"])
         if not merged.get("channel_job_postings") and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Job postings feature is not enabled for this company")
 
-        # Owner posts skip approval and go straight to draft (then checkout).
-        # Mod posts in someone else's channel land in pending_approval so the
-        # channel owner can vet them before they hit the feed.
-        initial_status = "draft" if role == "owner" else "pending_approval"
+    # Owner posts skip approval and go straight to draft (then checkout).
+    # Mod posts in someone else's channel land in pending_approval so the
+    # channel owner can vet them before they hit the feed.
+    initial_status = "draft" if role == "owner" else "pending_approval"
 
-        # Stripe product/price are created up-front for both paths so the
-        # recruiter can complete checkout as soon as the posting is approved.
-        # Channel-owned fee overrides the platform default; NULL = default.
-        product_id, price_id = await create_job_posting_product_and_price(
-            channel_id=channel_id,
-            channel_name=ch["name"],
-            posting_title=body.title,
-            price_cents=ch["job_posting_fee_cents"],
-        )
+    # Stripe product/price are created up-front for both paths so the
+    # recruiter can complete checkout as soon as the posting is approved.
+    # Channel-owned fee overrides the platform default; NULL = default. No
+    # pool connection is held across this call.
+    product_id, price_id = await create_job_posting_product_and_price(
+        channel_id=channel_id,
+        channel_name=ch["name"],
+        posting_title=body.title,
+        price_cents=ch["job_posting_fee_cents"],
+    )
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO channel_job_postings
-                (channel_id, posted_by, title, description, requirements,
-                 compensation_summary, location, status,
-                 stripe_product_id, stripe_price_id, open_to_all,
-                 approved_by, approved_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                    CASE WHEN $8 = 'draft' THEN $2 END,
-                    CASE WHEN $8 = 'draft' THEN NOW() END)
-            RETURNING id, channel_id, posted_by, title, description, requirements,
-                      compensation_summary, location, status,
-                      stripe_product_id, stripe_price_id, open_to_all,
-                      approved_by, approved_at,
-                      created_at, updated_at
-            """,
-            channel_id, current_user.id, body.title, body.description,
-            body.requirements, body.compensation_summary, body.location,
-            initial_status, product_id, price_id, body.open_to_all,
-        )
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO channel_job_postings
+                    (channel_id, posted_by, title, description, requirements,
+                     compensation_summary, location, status,
+                     stripe_product_id, stripe_price_id, open_to_all,
+                     approved_by, approved_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                        CASE WHEN $8 = 'draft' THEN $2 END,
+                        CASE WHEN $8 = 'draft' THEN NOW() END)
+                RETURNING id, channel_id, posted_by, title, description, requirements,
+                          compensation_summary, location, status,
+                          stripe_product_id, stripe_price_id, open_to_all,
+                          approved_by, approved_at,
+                          created_at, updated_at
+                """,
+                channel_id, current_user.id, body.title, body.description,
+                body.requirements, body.compensation_summary, body.location,
+                initial_status, product_id, price_id, body.open_to_all,
+            )
 
-        # Notify the channel owner when a mod post needs approval.
-        if initial_status == "pending_approval":
-            try:
-                from ...matcha.services import notification_service as notif_svc
-                owner_id = await conn.fetchval(
-                    "SELECT user_id FROM channel_members WHERE channel_id = $1 AND role = 'owner' LIMIT 1",
-                    channel_id,
-                )
-                if owner_id and owner_id != current_user.id:
-                    await notif_svc.create_notification(
-                        user_id=owner_id,
-                        company_id=company_id,
-                        type="channel_job_posting_pending",
-                        title=f"Job posting needs approval: {body.title}",
-                        body=f"{ch['name']} moderator created a new posting awaiting your approval",
-                        link=f"/work/channels/{channel_id}/job-postings/{row['id']}",
+            # Notify the channel owner when a mod post needs approval.
+            if initial_status == "pending_approval":
+                try:
+                    from ...matcha.services import notification_service as notif_svc
+                    owner_id = await conn.fetchval(
+                        "SELECT user_id FROM channel_members WHERE channel_id = $1 AND role = 'owner' LIMIT 1",
+                        channel_id,
                     )
-            except Exception:
-                pass
+                    if owner_id and owner_id != current_user.id:
+                        await notif_svc.create_notification(
+                            user_id=owner_id,
+                            company_id=company_id,
+                            type="channel_job_posting_pending",
+                            title=f"Job posting needs approval: {body.title}",
+                            body=f"{ch['name']} moderator created a new posting awaiting your approval",
+                            link=f"/work/channels/{channel_id}/job-postings/{row['id']}",
+                        )
+                except Exception:
+                    pass
+    except Exception:
+        # The Stripe product/price above was created but never attached to a
+        # posting row — surface it in the logs so it can be cleaned up rather
+        # than silently orphaned.
+        logger.error(
+            "channel_job_postings INSERT failed after Stripe product/price created: product=%s price=%s",
+            product_id, price_id, exc_info=True,
+        )
+        raise
 
     return dict(row)
 
@@ -519,14 +530,7 @@ async def invite_to_posting(
             )
 
         company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
-        inviter_name = await conn.fetchval(
-            f"SELECT {_USER_NAME_EXPR} FROM users u "
-            "LEFT JOIN clients c ON c.user_id = u.id "
-            "LEFT JOIN employees e ON e.user_id = u.id "
-            "LEFT JOIN admins a ON a.user_id = u.id "
-            "WHERE u.id = $1",
-            current_user.id,
-        )
+        inviter_name = await resolve_display_name(conn, current_user.id)
 
     await send_invitations(
         posting_id=posting_id,
@@ -676,28 +680,27 @@ async def apply_to_posting(
             except json.JSONDecodeError:
                 snapshot = {}
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO channel_job_applications
-                (posting_id, applicant_id, cover_letter, status, resume_snapshot)
-            VALUES ($1, $2, $3, 'submitted', $4::jsonb)
-            RETURNING *
-            """,
-            posting_id, current_user.id, body.cover_letter, json.dumps(snapshot),
-        )
+        # The check above is best-effort against a double-click race; the
+        # UNIQUE(posting_id, applicant_id) constraint is the real backstop —
+        # catch it so a race lands as 409, not an unhandled 500.
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO channel_job_applications
+                    (posting_id, applicant_id, cover_letter, status, resume_snapshot)
+                VALUES ($1, $2, $3, 'submitted', $4::jsonb)
+                RETURNING *
+                """,
+                posting_id, current_user.id, body.cover_letter, json.dumps(snapshot),
+            )
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(status_code=409, detail="You have already applied to this posting")
 
         # Send notification to the posting creator
         try:
             from ...matcha.services import notification_service as notif_svc
             company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
-            applicant_name = await conn.fetchval(
-                f"SELECT {_USER_NAME_EXPR} FROM users u "
-                "LEFT JOIN clients c ON c.user_id = u.id "
-                "LEFT JOIN employees e ON e.user_id = u.id "
-                "LEFT JOIN admins a ON a.user_id = u.id "
-                "WHERE u.id = $1",
-                current_user.id,
-            )
+            applicant_name = await resolve_display_name(conn, current_user.id)
             if company_id:
                 await notif_svc.create_notification(
                     user_id=posting["posted_by"],
@@ -774,9 +777,6 @@ async def update_application(
         )
         if not application:
             raise HTTPException(status_code=404, detail="Application not found")
-
-        if body.status not in ("reviewed", "shortlisted", "rejected"):
-            raise HTTPException(status_code=400, detail="Status must be one of: reviewed, shortlisted, rejected")
 
         row = await conn.fetchrow(
             """
