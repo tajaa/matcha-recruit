@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.core.models.auth import CurrentUser
+from app.core.services.model_catalog import GEMINI_FLASH
 from app.matcha.models.dashboard import (
     WageGapDetailsResponse,
     EmployeeWageGapDetail,
@@ -287,7 +288,7 @@ async def _analyze_with_ai(patterns: dict) -> list[dict] | None:
 
         response = await _asyncio.to_thread(
             lambda: client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model=GEMINI_FLASH,
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0.2,

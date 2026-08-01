@@ -30,10 +30,11 @@ from uuid import UUID
 
 from .._shared.citations import _parse_json, validate_citations
 from .._shared.gemini import _genai
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 60
 _MAX_VIOLATIONS = 10
 

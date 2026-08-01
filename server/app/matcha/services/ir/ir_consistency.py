@@ -10,6 +10,8 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
 # ===========================================
@@ -98,7 +100,7 @@ async def _categorize_actions(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,
@@ -155,7 +157,7 @@ async def _generate_insight(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,

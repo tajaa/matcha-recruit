@@ -36,6 +36,7 @@ from app.core.services.genai_client import get_genai_client
 
 from app.database import get_connection
 from app.core.services.change_context import set_change_context
+from app.core.services.model_catalog import GEMINI_FLASH
 
 # NOTE: `legal_defense.validate_citations` / `_parse_json` (the shared, pure gate)
 # are imported LAZILY inside run_chat_turn — a module-level `from app.matcha...`
@@ -44,7 +45,7 @@ from app.core.services.change_context import set_change_context
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 90
 _HISTORY_TURNS = 12
 _MAX_ASK_HITS = 12

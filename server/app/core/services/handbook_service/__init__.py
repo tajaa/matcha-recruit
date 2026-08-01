@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # type-only: the service never depends on FastAPI at runtime
 from app.config import get_settings
 from app.database import get_connection
 from app.core.services.storage import get_storage
+from app.core.services.model_catalog import GEMINI_FLASH
 from app.core.models.handbook import (
     CompanyHandbookProfileInput,
     CompanyHandbookProfileResponse,
@@ -577,7 +578,7 @@ class HandbookService:
         except Exception:
             return None
 
-        model_name = settings.analysis_model or "gemini-3-flash-preview"
+        model_name = settings.analysis_model or GEMINI_FLASH
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(

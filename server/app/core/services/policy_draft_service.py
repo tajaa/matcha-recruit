@@ -12,6 +12,7 @@ from google.genai import types
 from ...config import get_settings
 from ...database import get_connection
 from ..compliance_registry import CATEGORY_KEYS
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 
 
 @dataclass
@@ -215,8 +216,8 @@ async def get_policy_types_for_company(company_id: str) -> List[dict]:
 
 _POLICY_TYPE_MAP = {pt["value"]: pt for pt in POLICY_TYPES}
 
-DEFAULT_MODEL = "gemini-3-flash-preview"
-FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = GEMINI_FLASH
+FALLBACK_MODEL = GEMINI_FLASH_LITE
 
 
 def _get_client() -> genai.Client:

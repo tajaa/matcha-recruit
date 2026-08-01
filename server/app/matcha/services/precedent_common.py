@@ -19,12 +19,13 @@ import re
 from typing import Any, Optional
 
 from ._shared.gemini import is_model_unavailable_error  # noqa: F401 — re-export
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 
 logger = logging.getLogger(__name__)
 
 # Stable fallbacks tried, in order, after the configured primary model when it is
 # unavailable for the current account/project.
-PRECEDENT_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+PRECEDENT_FALLBACK_MODELS = (GEMINI_FLASH_LITE,)
 
 # Timeout for a single precedent semantic-enrichment call (seconds).
 GEMINI_CALL_TIMEOUT = 45
@@ -54,7 +55,7 @@ async def run_semantic_enrichment(
     await rate_limiter.check_limit(domain, "precedent_semantic")
 
     settings = get_settings()
-    primary_model = getattr(settings, "analysis_model", None) or "gemini-3-flash-preview"
+    primary_model = getattr(settings, "analysis_model", None) or GEMINI_FLASH
     model_candidates: list[str] = []
     for m in [primary_model, *PRECEDENT_FALLBACK_MODELS]:
         if m and m not in model_candidates:

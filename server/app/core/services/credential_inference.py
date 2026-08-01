@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
 VALID_DOCUMENT_TYPES = [
@@ -186,7 +188,7 @@ Return ONLY a JSON array of strings, e.g.: ["medical_license", "npi", "health_cl
 No markdown, no explanation — just the JSON array."""
 
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=256),
         )

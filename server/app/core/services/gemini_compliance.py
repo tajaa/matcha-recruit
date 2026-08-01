@@ -27,6 +27,7 @@ from ..compliance_registry import (
     INDUSTRY_TAGS as _MC_INDUSTRY_TAGS,
 )
 from app.core.services.model_json import clean_model_json as _clean_json_text
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 GEMINI_CALL_TIMEOUT = 45
 
 DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
+DEFAULT_LIGHT_MODEL = GEMINI_FLASH
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 

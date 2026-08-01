@@ -22,6 +22,7 @@ import logging
 import os
 from typing import Any, Optional
 from app.core.services.model_json import strip_json_fence as _strip_json_fence
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +477,7 @@ async def expand_scope(
         logger.exception("Gemini client init failed for scope expansion: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", GEMINI_FLASH)
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -844,7 +845,7 @@ async def gap_check(
         logger.exception("Gemini client init failed for gap check: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", GEMINI_FLASH)
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(

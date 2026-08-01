@@ -4,9 +4,10 @@ from ..._shared.citations import _parse_json  # noqa: F401 — re-export, see St
 from ..._shared.pdf import _fmt_dt
 from ..._shared.gemini import _genai  # noqa: F401 — re-export, package imports it from here
 from ..._shared.text import _hum  # noqa: F401 — re-export, package imports it from here
+from app.core.services.model_catalog import GEMINI_FLASH
 
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 90
 _PER_SOURCE_CAP = 100
 _HISTORY_TURNS = 12

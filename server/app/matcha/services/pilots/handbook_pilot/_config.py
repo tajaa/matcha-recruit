@@ -3,10 +3,12 @@ imports from here, this one imports nothing local.
 """
 import logging
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 
 
 _GEMINI_TIMEOUT = 90

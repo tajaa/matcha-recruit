@@ -36,10 +36,11 @@ from .analysis_packs.corpus import validate_edit_proposals  # pure gate, unit-te
 from .._shared.pdf import _PDF_CSS, _esc, _fmt_dt
 from .._shared.gemini import _genai
 from .legal_defense import validate_citations, _parse_json  # pure, unit-tested
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 90
 _HISTORY_TURNS = 12
 _MAX_LINE_ITEMS = 40

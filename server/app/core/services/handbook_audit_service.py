@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 from app.database import get_connection
 from app.core.services.model_json import strip_json_fence as _strip_json_fence
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
@@ -430,7 +431,7 @@ async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
             logger.exception("Could not build PDF Part: %s", exc)
             return []
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", GEMINI_FLASH)
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -522,7 +523,7 @@ async def _grade_state_coverage(
         "- Do not invent statutes; if no specific citation is reliable, use null."
     )
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", GEMINI_FLASH)
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(

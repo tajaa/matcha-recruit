@@ -29,10 +29,11 @@ from .hr_pilot_escalation import EMPLOYEE, classify_message
 from .legal_defense import _parse_json, validate_citations
 from .._shared.gemini import _genai
 from .._shared.text import history_text
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-flash-preview"
+MODEL = GEMINI_FLASH
 _GEMINI_TIMEOUT = 60
 _HISTORY_TURNS = 10
 

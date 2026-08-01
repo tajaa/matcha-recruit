@@ -12,6 +12,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH
 
 from ...config import get_settings
 
@@ -178,8 +179,7 @@ async def analyze_protocol(
         company_context=context_section,
     )
 
-    # Try gemini-3-flash-preview first, fall back to gemini-2.0-flash
-    models = ["gemini-3-flash-preview", "gemini-2.0-flash"]
+    models = [GEMINI_FLASH]
     last_error = None
 
     for model_name in models:

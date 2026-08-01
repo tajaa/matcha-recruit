@@ -45,9 +45,11 @@ from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
-_MODEL = "gemini-3-flash-preview"
+_MODEL = GEMINI_FLASH
 
 # The 4 catalog categories that carry scheduling law. Deliberately NOT
 # `sick_leave` (also in `schedule_compliance.SCHEDULE_CATEGORIES`) — no

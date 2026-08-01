@@ -15,6 +15,7 @@ from typing import Optional, Any, AsyncIterator, Callable
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_json import parse_model_json
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 from app.matcha.services.er.er_case_context import (
     ER_DOC_PER_DOC_CHAR_CAP,
     ER_DOC_TOTAL_CHAR_CAP,
@@ -22,10 +23,7 @@ from app.matcha.services.er.er_case_context import (
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_MODELS = (
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-)
+FALLBACK_MODELS = (GEMINI_FLASH_LITE,)
 
 # ER prompts embed document excerpts up to ER_DOC_TOTAL_CHAR_CAP (600k chars,
 # see _shared.py) — a much larger payload than IR's analyzer calls (45s), so
@@ -545,14 +543,14 @@ class ERAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3-flash-preview",
+        model: str = GEMINI_FLASH,
     ):
         """
         Initialize the ER analyzer.
 
         Args:
             api_key: Gemini API key.
-            model: Model to use for analysis (default: gemini-3-flash-preview).
+            model: Model to use for analysis (default: GEMINI_FLASH).
         """
         self.model = model
         self.client = get_genai_client(api_key=api_key)

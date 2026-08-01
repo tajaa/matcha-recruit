@@ -18,6 +18,8 @@ from datetime import date, timedelta
 from typing import Any, Optional
 from uuid import UUID
 
+from app.core.services.model_catalog import GEMINI_FLASH
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,7 @@ async def _classify_role_via_gemini(
 
         client = get_genai_client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=64),
         )
@@ -347,10 +349,10 @@ async def research_credential_requirements(
         """
         INSERT INTO credential_research_logs
             (company_id, state, city, role_category_id, status, ai_model, triggered_by)
-        VALUES ($1, $2, $3, $4, 'running', 'gemini-3-flash-preview', $5)
+        VALUES ($1, $2, $3, $4, 'running', $5, $6)
         RETURNING id
         """,
-        company_id, state, city, role_category_id, triggered_by,
+        company_id, state, city, role_category_id, GEMINI_FLASH, triggered_by,
     )
 
     try:
@@ -398,7 +400,7 @@ Do NOT fabricate requirements — if unsure, omit."""
 
         client = get_genai_client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=4096),
         )

@@ -16,10 +16,11 @@ from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_MODEL = "gemini-3-flash-preview"
+EXTRACTION_MODEL = GEMINI_FLASH
 
 # Mapping from document_type to the fields we want to extract
 EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {

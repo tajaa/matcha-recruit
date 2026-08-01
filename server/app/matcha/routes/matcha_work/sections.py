@@ -24,6 +24,7 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.matcha.routes.matcha_work.pdf_export import _render_project_pdf
 from app.matcha.routes.matcha_work._shared import _strip_markdown, _verify_project_access
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -503,7 +504,7 @@ Return ONLY the modified SVG code, nothing else. No markdown fences, no explanat
 
     try:
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=GEMINI_FLASH,
             contents=prompt,
         )
         new_svg = response.text.strip()

@@ -15,6 +15,7 @@ from typing import Optional, Any, Callable
 
 from ....core.services.genai_client import get_genai_client
 from ....core.services.rate_limiter import get_rate_limiter, RateLimitExceeded
+from ....core.services.model_catalog import GEMINI_FLASH
 
 
 # ===========================================
@@ -660,7 +661,7 @@ class IRAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3-flash-preview",
+        model: str = GEMINI_FLASH,
     ):
         """
         Initialize the IR analyzer.

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH
 
 
 # ===========================================
@@ -153,7 +154,7 @@ class AccommodationAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3-flash-preview",
+        model: str = GEMINI_FLASH,
     ):
         self.model = model
         self.client = get_genai_client(api_key=api_key)

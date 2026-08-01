@@ -2,6 +2,7 @@ import json
 from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH
 
 
 CULTURE_EXTRACTION_PROMPT = """Analyze this interview transcript where an AI interviewer asked an HR representative about their company culture.
@@ -47,7 +48,7 @@ class CultureAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3-flash-preview",
+        model: str = GEMINI_FLASH,
     ):
         self.model = model
         self.client = get_genai_client(api_key=api_key)

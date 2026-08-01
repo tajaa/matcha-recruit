@@ -3,6 +3,8 @@ Gemini fallback-model list, and the default dimension weights. Leaf.
 """
 import logging
 
+from app.core.services.model_catalog import GEMINI_FLASH_LITE
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,7 +92,7 @@ _UNSOURCED_REASONS: dict[str, str] = {
 }
 
 
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+FALLBACK_MODELS = [GEMINI_FLASH_LITE]
 
 
 DEFAULT_WEIGHTS: dict[str, float] = {

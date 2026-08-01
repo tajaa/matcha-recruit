@@ -8,10 +8,11 @@ import logging
 from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+FALLBACK_MODELS = (GEMINI_FLASH_LITE,)
 
 
 QUESTION_GENERATION_PROMPT = """You are an expert workplace investigator. Generate questions for an investigation interview.
@@ -59,7 +60,7 @@ async def generate_investigation_questions(
     interviewee_role: str,
     prior_transcripts: Optional[list[str]] = None,
     api_key: Optional[str] = None,
-    model: str = "gemini-3-flash-preview",
+    model: str = GEMINI_FLASH,
 ) -> list[dict[str, Any]]:
     """Generate investigation questions for an interviewee.
 

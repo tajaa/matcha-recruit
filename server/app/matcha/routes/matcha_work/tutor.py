@@ -15,6 +15,7 @@ from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
+from app.core.services.model_catalog import GEMINI_FLASH
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -270,7 +271,7 @@ async def check_tutor_utterance(
             prompt = UTTERANCE_CHECK_PROMPT_FR.format(utterance=utterance)
         else:
             prompt = UTTERANCE_CHECK_PROMPT_EN.format(utterance=utterance)
-        response = await client.aio.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        response = await client.aio.models.generate_content(model=GEMINI_FLASH, contents=prompt)
         text = response.text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
