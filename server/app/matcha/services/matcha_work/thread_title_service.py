@@ -100,7 +100,7 @@ async def maybe_autotitle_thread(thread_id: UUID) -> None:
                 config=types.GenerateContentConfig(
                     temperature=0.2,
                     max_output_tokens=60,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
                 ),
             )
         except Exception as e:  # noqa: BLE001 — soft-fail, never surface
