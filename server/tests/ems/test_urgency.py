@@ -69,6 +69,14 @@ class TestFallbackClassification:
         assert out["category"] == "uncategorized"
         assert out["model_ok"] is False
 
+    def test_osha_text_gets_promote_prefill(self):
+        # A rate-limited OSHA row must carry the same promote-modal prefill
+        # a fresh classify_event OSHA row would — otherwise the stored row
+        # disagrees with the frontend's PromoteModal belt-and-suspenders.
+        out = fallback_classification("she was hospitalized after the fall")
+        assert out["suggested_severity"] == "critical"
+        assert out["suggested_incident_type"] == "safety"
+
     def test_plain_text_stays_unflagged(self):
         out = fallback_classification("the ice machine is broken again")
         assert out["urgency"] is None

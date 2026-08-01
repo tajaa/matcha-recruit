@@ -14,6 +14,7 @@ import logging
 from html import escape
 from uuid import UUID
 
+from app.config import get_settings
 from app.database import get_connection
 from app.matcha.services.ems import categories
 from app.matcha.services.ir.ir_cards import OSHA_EMERGENCY_HOTLINE
@@ -62,8 +63,9 @@ def build_urgent_email(*, urgency: str, company_name: str, title: str,
     kind = "possible OSHA-reportable event" if urgency == "osha" else "severe event reported"
     # title/channel_name/company_name trace back to user-typed channel
     # content (the model's own title, or a channel/company name) — escape
-    # everything interpolated into the HTML body. `link` is a same-origin
-    # relative path we build ourselves, but escape it too on principle.
+    # everything interpolated into the HTML body. `link` must be the
+    # absolute app_base_url form here — a relative href is dead in an email
+    # client — but escape it too on principle.
     subject = f"[{escape(company_name)}] URGENT: {kind}"
     osha_clause = _OSHA_EMAIL_CLAUSE if urgency == "osha" else ""
     html = (
@@ -82,9 +84,9 @@ async def send_urgent_event_notifications(*, company_id: UUID, event_row: dict) 
     from app.matcha.services import notification_service as notif_svc
 
     async with get_connection() as conn:
-        company_name = await conn.fetchval(
-            "SELECT name FROM companies WHERE id = $1", company_id,
-        ) or "Your company"
+        company_row = await conn.fetchrow(
+            "SELECT name, enabled_features, signup_source FROM companies WHERE id = $1", company_id,
+        )
         channel_name = await conn.fetchval(
             "SELECT name FROM channels WHERE id = $1", event_row.get("channel_id"),
         ) or "channel"
@@ -96,10 +98,22 @@ async def send_urgent_event_notifications(*, company_id: UUID, event_row: dict) 
         admin_contacts = [dict(r) for r in await conn.fetch(_ADMIN_CONTACTS_SQL, company_id)]
     # -- conn released; notification + email fan-out open their own --
 
+    company_name = (company_row and company_row["name"]) or "Your company"
+    # Werk-Lite tenants live at /werk-lite, not /work — same merge werk
+    # itself uses (channels_ws.py:_ems_company_gate) so the link lands the
+    # admin in the shell they actually have.
+    from app.core.feature_flags import merge_company_features
+    merged = merge_company_features(
+        (company_row and company_row["enabled_features"]) or {},
+        company_row and company_row["signup_source"],
+    )
+    base_path = "/werk-lite" if merged.get("werk_lite") else "/work"
+
     urgency = event_row["urgency"]
     title = event_row.get("title") or categories.category_label(event_row["category"])
     label = categories.category_label(event_row["category"])
-    link = f"/work/events/{event_row['id']}"
+    link = f"{base_path}/events/{event_row['id']}"
+    email_link = f"{get_settings().app_base_url.rstrip('/')}{link}"
     body = (
         "Possibly OSHA-reportable — a fatality must be reported within 8 hours; "
         "hospitalization/amputation/eye loss within 24 hours."
@@ -123,7 +137,7 @@ async def send_urgent_event_notifications(*, company_id: UUID, event_row: dict) 
     recipients = resolve_email_recipients(protocol_row, admin_contacts)
     subject, html = build_urgent_email(
         urgency=urgency, company_name=company_name, title=title,
-        category_label=label, channel_name=channel_name, link=link,
+        category_label=label, channel_name=channel_name, link=email_link,
     )
     await asyncio.gather(
         *[

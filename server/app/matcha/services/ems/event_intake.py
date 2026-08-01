@@ -437,12 +437,25 @@ def apply_urgency_overlay(classified: dict, narrative: str) -> dict:
     return out
 
 
+def _osha_prefill(classified: dict) -> dict:
+    """Deterministic promote-modal prefill for an OSHA-flagged event — holds
+    even when the IR analyzer is also down (suggestions empty). Shared by
+    classify_event (fresh classify) and fallback_classification (rate-limit
+    outage) so a rate-limited OSHA row is never left with a NULL suggested
+    severity/type that a fresh-classify OSHA row wouldn't have."""
+    if classified.get("urgency") == "osha":
+        classified["suggested_severity"] = "critical"
+        classified["suggested_incident_type"] = classified.get("suggested_incident_type") or "safety"
+    return classified
+
+
 def fallback_classification(content: str) -> dict:
     """The outage shape WITH the urgency overlay applied — the zero-Gemini
     path channels_ws uses when the ems_event rate limit rejects a message
     that the OSHA regex flags (an over-budget hour must not lose a
     fatality report)."""
-    return apply_urgency_overlay(dict(_FALLBACK_CLASSIFICATION), content[:_MAX_NARRATIVE_CHARS])
+    classified = apply_urgency_overlay(dict(_FALLBACK_CLASSIFICATION), content[:_MAX_NARRATIVE_CHARS])
+    return _osha_prefill(classified)
 
 
 async def classify_event(content: str, context: list[dict], *, protocol_text: Optional[str] = None) -> dict:
@@ -481,6 +494,14 @@ async def classify_event(content: str, context: list[dict], *, protocol_text: Op
     except Exception:
         logger.warning("EMS: classify failed, logging as uncategorized", exc_info=True)
 
+    if not protocol_text:
+        # No protocol was shown to the model, so any protocol_assessment it
+        # volunteered anyway is invented — without this, a company with no
+        # protocol file could get a pill/banner claiming the event "doesn't
+        # qualify" under a protocol that doesn't exist.
+        classified["protocol_qualifies"] = None
+        classified["protocol_reasoning"] = None
+
     # Deterministic urgency overlay — OUTSIDE the try so the outage path
     # gets it, BEFORE the _ir_suggestions gate so an OSHA-forced
     # incident_recommendation makes the promote-prefill suggestions run.
@@ -491,11 +512,7 @@ async def classify_event(content: str, context: list[dict], *, protocol_text: Op
         classified["suggested_incident_type"] = ir_suggestion.get("suggested_incident_type")
         classified["suggested_severity"] = ir_suggestion.get("suggested_severity")
 
-    if classified["urgency"] == "osha":
-        # Deterministic promote-modal prefill — holds even when the IR
-        # analyzer is also down (suggestions empty).
-        classified["suggested_severity"] = "critical"
-        classified["suggested_incident_type"] = classified.get("suggested_incident_type") or "safety"
+    classified = _osha_prefill(classified)
 
     return classified
 
@@ -610,11 +627,15 @@ async def fold_answer(
             clarification_rounds = clarification_rounds + 1,
             urgency = CASE WHEN $4 THEN 'osha' ELSE urgency END,
             incident_recommendation = incident_recommendation OR $4,
+            incident_reasoning = CASE
+                WHEN $4 AND COALESCE(incident_reasoning, '') = '' THEN $5
+                ELSE incident_reasoning
+            END,
             updated_at = NOW()
         WHERE id = $1 AND company_id = $2 AND status = 'logged'
         {_REFINEMENT_RETURNING}
         """,
-        event_id, company_id, appended, escalate,
+        event_id, company_id, appended, escalate, OSHA_INCIDENT_REASONING,
     )
     if row is None:
         return None

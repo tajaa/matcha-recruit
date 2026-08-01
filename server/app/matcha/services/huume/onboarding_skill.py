@@ -388,7 +388,7 @@ async def _lookup_context_impl(
             rows = await conn.fetch(
                 """
                 SELECT ev.id, ev.title, ev.category, ev.severity_hint, ev.status,
-                       ev.incident_recommendation, ev.incident_id,
+                       ev.incident_recommendation, ev.incident_id, ev.urgency,
                        (ev.clarify_message_id IS NOT NULL AND ev.status = 'logged') AS awaiting_reply,
                        LEFT(ev.narrative, 400) AS narrative, ch.name AS channel_name, ev.created_at
                 FROM ems_events ev LEFT JOIN channels ch ON ch.id = ev.channel_id
@@ -399,7 +399,14 @@ async def _lookup_context_impl(
                 company_id, str(window), query,
             )
             truncated = len(rows) > 20
+            urgent_count = sum(1 for r in rows[:20] if r["urgency"])
             note = "Promote one with promote_ems_event(event_id=...); open detail with show_record('ems_event', ...)."
+            if urgent_count:
+                # Lead with urgent events so the model surfaces them first —
+                # `urgency` ('osha'/'severe') is the same flag that pages
+                # admins at log time; a general "what's going on" question
+                # shouldn't bury an OSHA-reportable event in the list.
+                note = f"{urgent_count} of these are urgent (OSHA-reportable or severe — see urgency). " + note
             if truncated:
                 note += " More events exist in this window than shown — narrow with query or a smaller days window."
             return {

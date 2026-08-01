@@ -553,6 +553,63 @@ class TestClassifyEvent:
         assert classified["model_ok"] is False
 
     @pytest.mark.asyncio
+    async def test_protocol_assessment_dropped_when_no_protocol_shown(self, monkeypatch):
+        """A model that volunteers protocol_assessment despite never being
+        shown a protocol block (protocol_text=None — no company protocol
+        saved, or the message didn't mention "incident") must not have that
+        verdict persisted: it would tell a company with no protocol file
+        that its event "doesn't qualify" under one."""
+        class _FakeResp:
+            text = json.dumps({
+                "category": "guest_experience", "doc": {},
+                "protocol_assessment": {"qualifies": False, "reasoning": "no protocol on file"},
+            })
+
+        class _FakeModels:
+            async def generate_content(self, **kwargs):
+                return _FakeResp()
+
+        class _FakeAio:
+            models = _FakeModels()
+
+        class _FakeClient:
+            aio = _FakeAio()
+
+        monkeypatch.setattr(event_intake, "_get_client", lambda: _FakeClient())
+
+        classified = await event_intake.classify_event(
+            "we had an incident with a guest", [], protocol_text=None,
+        )
+        assert classified["protocol_qualifies"] is None
+        assert classified["protocol_reasoning"] is None
+
+    @pytest.mark.asyncio
+    async def test_protocol_assessment_preserved_when_protocol_shown(self, monkeypatch):
+        class _FakeResp:
+            text = json.dumps({
+                "category": "guest_experience", "doc": {},
+                "protocol_assessment": {"qualifies": True, "reasoning": "matches the definition"},
+            })
+
+        class _FakeModels:
+            async def generate_content(self, **kwargs):
+                return _FakeResp()
+
+        class _FakeAio:
+            models = _FakeModels()
+
+        class _FakeClient:
+            aio = _FakeAio()
+
+        monkeypatch.setattr(event_intake, "_get_client", lambda: _FakeClient())
+
+        classified = await event_intake.classify_event(
+            "we had an incident with a guest", [], protocol_text="Only injuries count",
+        )
+        assert classified["protocol_qualifies"] is True
+        assert classified["protocol_reasoning"] == "matches the definition"
+
+    @pytest.mark.asyncio
     async def test_ir_analysis_error_never_propagates(self, monkeypatch):
         """A raising IR analyzer (even the module's own IRAnalysisError) must
         not escape classify_event — this is the failure mode fixed by
@@ -677,14 +734,15 @@ class _FoldFakeConn:
         if self.update_returns_none:
             return None  # WHERE status='logged' guard missed (promoted/dismissed race)
 
-        event_id, company_id, appended, escalate = args
+        event_id, company_id, appended, escalate, reasoning = args
         now = datetime.now(timezone.utc)
         return {
             "id": event_id, "company_id": company_id,
             "channel_id": uuid4(), "message_id": uuid4(), "reporter_user_id": uuid4(),
             "title": None, "category": "uncategorized", "severity_hint": None,
             "doc": "{}", "narrative": f"original{appended}",
-            "incident_recommendation": bool(escalate), "incident_reasoning": None,
+            "incident_recommendation": bool(escalate),
+            "incident_reasoning": reasoning if escalate else None,
             "suggested_incident_type": None, "suggested_severity": None,
             "urgency": "osha" if escalate else None,
             "protocol_qualifies": None, "protocol_reasoning": None,
@@ -736,9 +794,13 @@ class TestFoldAnswer:
         )
         assert folded["urgency"] == "osha"
         assert folded["incident_recommendation"] is True
-        # The 4th positional UPDATE param is the escalate flag.
+        assert folded["incident_reasoning"] == event_intake.OSHA_INCIDENT_REASONING
+        # The 4th positional UPDATE param is the escalate flag; 5th is the
+        # default reasoning text (only applied by the SQL CASE when the
+        # column was previously empty).
         _, args = conn.fetchrow_calls[0]
         assert args[3] is True
+        assert args[4] == event_intake.OSHA_INCIDENT_REASONING
 
     @pytest.mark.asyncio
     async def test_plain_answer_does_not_escalate(self):

@@ -300,7 +300,10 @@ er_case_brief and ask_er_copilot work on the SAME cases the admin sees on the ER
 lookup_context(topic="events") lists channel-logged EMS events with ids, category, status, and a
 truncated narrative — this is pre-promotion documentation someone typed openly in a channel, not
 yet a legal record, so unlike incidents/er_cases you may relay its narrative content directly.
-Open one in full with show_record("ems_event", ...). An event with awaiting_reply=true is still
+Open one in full with show_record("ems_event", ...). An event's urgency field is 'osha'
+(a deterministic 29 CFR 1904.39 keyword hit) or 'severe' (Huume judged it severe when it was
+logged) — either means admins were already paged; lead with these when summarizing a list rather
+than burying one under routine events. An event with awaiting_reply=true is still
 mid-clarification with its reporter — say so rather than promoting it as if the account were
 finished. To make one a real IR incident, stage promote_ems_event — confirm-first like every
 other write here. After it's confirmed, the new incident becomes this thread's active incident for

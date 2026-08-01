@@ -104,13 +104,22 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
                 : 'Huume judged this event severe — immediate review recommended.'}
             </p>
             <p className="text-xs text-red-200/60 mt-1.5">Admins were notified when this was logged.</p>
+            {(event.suggested_incident_type || event.suggested_severity) && (
+              <p className="text-xs text-red-200/70 mt-1.5">
+                Suggested: {event.suggested_incident_type ?? '—'}
+                {event.suggested_severity ? ` · ${event.suggested_severity} severity` : ''}
+              </p>
+            )}
           </div>
         )}
 
         {/* Incident recommendation banner — visible regardless of the incidents
             feature, so a company that hasn't bought Incidents can still see
-            Huume's judgment call before deciding whether to upgrade. */}
-        {event.incident_recommendation && (
+            Huume's judgment call before deciding whether to upgrade. Skipped
+            when the red urgency banner above already covers it (an OSHA/severe
+            event always carries incident_recommendation=true, and the two
+            banners would otherwise repeat the same 1904.39 sentence). */}
+        {!event.urgency && event.incident_recommendation && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
             <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
               <AlertTriangle className="w-4 h-4 shrink-0" />

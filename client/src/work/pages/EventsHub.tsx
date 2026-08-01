@@ -24,7 +24,7 @@ export default function EventsHub() {
   const { eventId } = useParams<{ eventId: string }>()
   const navigate = useNavigate()
   const base = useWorkBase()
-  const { me, hasFeature } = useMe()
+  const { me, loading: meLoading, hasFeature } = useMe()
   const { toast } = useToast()
   const canReview = canReviewEvents(me?.user?.role)
   const hasIncidents = hasFeature('incidents')
@@ -122,6 +122,17 @@ export default function EventsHub() {
       applyEventUpdate({ ...selectedEvent, status: 'promoted', incident_id: incidentId })
     }
     setShowPromote(false)
+  }
+
+  // meLoading first: canReviewEvents(undefined) reads as "no permission"
+  // before /auth/me resolves, so checking !canReview before meLoading
+  // flashed the denial stub on every hard reload of /work/events.
+  if (meLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-5 h-5 text-w-dim animate-spin" />
+      </div>
+    )
   }
 
   if (!canReview) {

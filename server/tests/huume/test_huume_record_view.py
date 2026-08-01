@@ -131,6 +131,24 @@ class TestModelEmsEventsBatch:
         out = await _model_ems_events_batch(conn, uuid4(), [])
         assert out == {}
 
+    @pytest.mark.asyncio
+    async def test_includes_urgency_and_protocol_qualifies(self):
+        # An admin asking Huume about events must be able to see which ones
+        # were OSHA/severe-flagged, not just incident_recommendation.
+        rid = uuid4()
+        row = {
+            "id": rid, "title": "Fall in stockroom", "category": "safety",
+            "severity_hint": "high", "status": "logged", "incident_recommendation": True,
+            "suggested_incident_type": "safety", "suggested_severity": "critical",
+            "urgency": "osha", "protocol_qualifies": True,
+            "narrative": "Marcus was hospitalized.", "doc": None,
+            "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc),
+        }
+        conn = _FakeFetchConn(fetch_rows=[row])
+        out = await _model_ems_events_batch(conn, uuid4(), [rid])
+        assert out[rid]["urgency"] == "osha"
+        assert out[rid]["protocol_qualifies"] is True
+
 
 class TestBuildEmsEventView:
     @pytest.mark.asyncio
@@ -194,3 +212,43 @@ class TestBuildEmsEventView:
         view = await _build_ems_event_view(conn, uuid4(), rid)
         section = next(s for s in view["sections"] if s["label"] == "People Involved")
         assert section["items"] == ["Jane", "John"]
+
+    @pytest.mark.asyncio
+    async def test_osha_urgency_gets_red_chip(self):
+        rid = uuid4()
+        row = {
+            "id": rid, "company_id": uuid4(), "channel_id": uuid4(), "channel_name": "safety",
+            "message_id": uuid4(), "reporter_user_id": uuid4(), "reporter_name": "Jane Doe",
+            "title": "Fall in stockroom", "category": "safety", "severity_hint": "high",
+            "doc": {}, "narrative": "Marcus was hospitalized.", "incident_recommendation": True,
+            "incident_reasoning": "OSHA reasoning.", "suggested_incident_type": "safety",
+            "suggested_severity": "critical", "status": "logged", "incident_id": None,
+            "urgency": "osha", "protocol_qualifies": None, "protocol_reasoning": None,
+            "awaiting_reply": False, "clarification_rounds": 0,
+            "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc), "updated_at": None,
+        }
+        conn = _FakeFetchConn(fetchrow_result=row)
+        view = await _build_ems_event_view(conn, uuid4(), rid)
+        chip = next(c for c in view["chips"] if c["label"] == "OSHA-reportable")
+        assert chip["tone"] == "red"
+
+    @pytest.mark.asyncio
+    async def test_protocol_assessment_renders_as_section(self):
+        rid = uuid4()
+        row = {
+            "id": rid, "company_id": uuid4(), "channel_id": uuid4(), "channel_name": "front-desk",
+            "message_id": uuid4(), "reporter_user_id": uuid4(), "reporter_name": "Jane Doe",
+            "title": "Guest refund dispute", "category": "guest_experience", "severity_hint": None,
+            "doc": {}, "narrative": "A guest asked for a refund.", "incident_recommendation": True,
+            "incident_reasoning": None, "suggested_incident_type": None, "suggested_severity": None,
+            "status": "logged", "incident_id": None,
+            "urgency": None, "protocol_qualifies": True,
+            "protocol_reasoning": "Matches the refund-dispute clause.",
+            "awaiting_reply": False, "clarification_rounds": 0,
+            "created_at": datetime(2026, 7, 30, tzinfo=timezone.utc), "updated_at": None,
+        }
+        conn = _FakeFetchConn(fetchrow_result=row)
+        view = await _build_ems_event_view(conn, uuid4(), rid)
+        assert not any(c["label"] in ("OSHA-reportable", "Severe") for c in view["chips"])
+        section = next(s for s in view["sections"] if "Qualifies as an incident" in s["label"])
+        assert section["body"] == "Matches the refund-dispute clause."

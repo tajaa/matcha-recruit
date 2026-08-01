@@ -83,3 +83,16 @@ class TestBuildUrgentEmail:
         sentinel = "the exact narrative sentence nobody should see"
         assert sentinel not in subject
         assert sentinel not in html
+
+    def test_absolute_link_renders_as_a_real_href(self):
+        # send_urgent_event_notifications must pass an absolute
+        # app_base_url-prefixed link here — a bare relative path is a dead
+        # CTA in a mail client. This only pins build_urgent_email's own
+        # pass-through; the absolute-vs-relative decision lives in
+        # send_urgent_event_notifications.
+        _, html = build_urgent_email(
+            urgency="osha", company_name="Acme", title="t",
+            category_label="Safety", channel_name="ch",
+            link="https://hey-matcha.com/work/events/123",
+        )
+        assert 'href="https://hey-matcha.com/work/events/123"' in html

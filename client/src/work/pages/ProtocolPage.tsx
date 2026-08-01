@@ -15,7 +15,7 @@ const EMPTY_PROTOCOL: EmsProtocol = {
 }
 
 export default function ProtocolPage() {
-  const { me } = useMe()
+  const { me, loading: meLoading } = useMe()
   const { toast } = useToast()
   const canReview = canReviewEvents(me?.user?.role)
 
@@ -69,6 +69,20 @@ export default function ProtocolPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // meLoading first: canReviewEvents(undefined) reads as "no permission"
+  // before /auth/me resolves, so checking !canReview before meLoading
+  // flashed the denial stub on every hard reload. Note `loading` (the
+  // protocol fetch) never resolves when !canReview — its effect bails
+  // before setLoading(false) — so it must be checked AFTER the denial
+  // branch, never combined with it.
+  if (meLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-5 h-5 text-w-dim animate-spin" />
+      </div>
+    )
   }
 
   if (!canReview) {

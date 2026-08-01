@@ -273,7 +273,8 @@ async def _model_ems_events_batch(conn, company_id: UUID, rids: list[UUID]) -> d
     rows = await conn.fetch(
         """
         SELECT id, title, category, severity_hint, status, incident_recommendation,
-               suggested_incident_type, suggested_severity, narrative, doc, created_at
+               suggested_incident_type, suggested_severity, urgency, protocol_qualifies,
+               narrative, doc, created_at
         FROM ems_events
         WHERE id = ANY($1::uuid[]) AND company_id = $2
         """,
@@ -295,6 +296,9 @@ async def _model_ems_events_batch(conn, company_id: UUID, rids: list[UUID]) -> d
             "incident_recommendation": bool(data.get("incident_recommendation")),
             "suggested_incident_type": data.get("suggested_incident_type"),
             "suggested_severity": data.get("suggested_severity"),
+            # OSHA-reportable/severe — name-free, same as everything else here.
+            "urgency": data.get("urgency"),
+            "protocol_qualifies": data.get("protocol_qualifies"),
             "narrative": narrative[:500],
             "doc": doc or {},
             "created_at": _iso(data.get("created_at")),
@@ -705,6 +709,10 @@ async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[d
     ]
     if data.get("severity_hint"):
         chips.append({"label": data["severity_hint"].title(), "tone": _SEVERITY_TONE.get(data["severity_hint"], "zinc")})
+    if data.get("urgency") == "osha":
+        chips.append({"label": "OSHA-reportable", "tone": "red"})
+    elif data.get("urgency") == "severe":
+        chips.append({"label": "Severe", "tone": "red"})
     if data.get("incident_recommendation"):
         chips.append({"label": "Flagged for incident review", "tone": "orange"})
 
@@ -738,6 +746,13 @@ async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[d
             sections.append({"label": label, "items": [str(v) for v in value if v not in (None, "")]})
     if data.get("incident_reasoning"):
         sections.append({"label": "Incident reasoning", "body": data["incident_reasoning"]})
+    if data.get("protocol_qualifies") is not None and data.get("protocol_reasoning"):
+        label = (
+            "Qualifies as an incident under company protocol"
+            if data["protocol_qualifies"]
+            else "Does not qualify as an incident under company protocol"
+        )
+        sections.append({"label": label, "body": data["protocol_reasoning"]})
 
     return {
         "record_type": "ems_event",
