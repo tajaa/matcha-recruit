@@ -14,6 +14,7 @@ from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
+from ._shared import _USER_NAME_EXPR, resolve_display_name, spawn_bg
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,16 @@ ALLOWED_EXTENSIONS = {
 
 
 async def _process_uploads(files: list[UploadFile]) -> list[dict]:
-    """Validate and upload files to S3. Returns attachment metadata list."""
+    """Validate and upload files to S3. Returns attachment metadata list.
+
+    Extension is the primary gate — an OR check against content type let a
+    spoofed `Content-Type: image/png` on a `.exe` through (browser-supplied
+    content type is untrusted). The read is capped mid-stream via
+    read_upload_capped rather than `await file.read()` first, so an oversize
+    body is rejected at the cap instead of fully materialized in memory.
+    """
+    from ...matcha.services._shared.uploads import read_upload_capped
+
     if len(files) > MAX_FILE_COUNT:
         raise HTTPException(
             status_code=400,
@@ -52,20 +62,17 @@ async def _process_uploads(files: list[UploadFile]) -> list[dict]:
     attachments: list[dict] = []
 
     for file in files:
-        file_bytes = await file.read()
         filename = file.filename or "upload"
         ct = file.content_type or "application/octet-stream"
         ext = os.path.splitext(filename)[1].lower()
-        size = len(file_bytes)
 
-        if ct not in ALLOWED_CONTENT_TYPES and ext not in ALLOWED_EXTENSIONS:
+        if ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
+        if ct not in ALLOWED_CONTENT_TYPES and ct != "application/octet-stream":
             raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
 
-        if size > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large: {filename} ({size // (1024 * 1024)}MB). Maximum is {MAX_FILE_SIZE // (1024 * 1024)}MB.",
-            )
+        file_bytes = await read_upload_capped(file, MAX_FILE_SIZE)
+        size = len(file_bytes)
 
         url = await storage.upload_file(file_bytes, filename, prefix="inbox", content_type=ct)
         attachments.append({
@@ -140,25 +147,6 @@ class UserSearchResult(BaseModel):
     role: str
     avatar_url: Optional[str] = None
     company_name: Optional[str] = None
-
-
-# ---------------------------------------------------------------------------
-# SQL fragments — shared join for resolving display names
-# ---------------------------------------------------------------------------
-
-_USER_NAME_JOIN = """
-    JOIN users u ON u.id = {alias}.user_id
-    LEFT JOIN clients c ON c.user_id = u.id
-    LEFT JOIN employees e ON e.user_id = u.id
-    LEFT JOIN admins a ON a.user_id = u.id
-"""
-
-# NULLIF+BTRIM wrap is load-bearing: Postgres CONCAT() ignores NULL args, so
-# with no matching `employees` row CONCAT(NULL, ' ', NULL) returns ' ' — a
-# non-NULL string — and COALESCE stops there instead of falling through to
-# a.name/u.email. Blanks every admin-only user's name without it (see the
-# matching fix in werk/routes/channels.py).
-_USER_NAME_EXPR = "COALESCE(c.name, NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''), a.name, u.email)"
 
 
 # ---------------------------------------------------------------------------
@@ -451,28 +439,36 @@ async def create_conversation(
         is_group = len(all_participant_ids) > 1
         conversation_id: Optional[UUID] = None
 
-        # For 1:1, check if conversation already exists
-        if not is_group:
-            other_id = all_participant_ids[0]
-            conversation_id = await conn.fetchval(
-                """
-                SELECT ic.id
-                FROM inbox_conversations ic
-                WHERE ic.is_group = false
-                  AND (SELECT COUNT(*) FROM inbox_participants WHERE conversation_id = ic.id) = 2
-                  AND EXISTS (SELECT 1 FROM inbox_participants WHERE conversation_id = ic.id AND user_id = $1)
-                  AND EXISTS (SELECT 1 FROM inbox_participants WHERE conversation_id = ic.id AND user_id = $2)
-                LIMIT 1
-                """,
-                current_user.id,
-                other_id,
-            )
-
         preview = msg_content[:100]
         if not preview and attachments:
             preview = f"[{len(attachments)} attachment{'s' if len(attachments) > 1 else ''}]"
 
         async with conn.transaction():
+            # For 1:1, check if conversation already exists. Locked + moved
+            # inside the transaction (was a plain pre-txn SELECT) — two
+            # concurrent first-DMs between the same pair would otherwise both
+            # see "no existing conversation" and create duplicates.
+            if not is_group:
+                other_id = all_participant_ids[0]
+                lock_pair = sorted((str(current_user.id), str(other_id)))
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    f"inbox-dm:{lock_pair[0]}:{lock_pair[1]}",
+                )
+                conversation_id = await conn.fetchval(
+                    """
+                    SELECT ic.id
+                    FROM inbox_conversations ic
+                    WHERE ic.is_group = false
+                      AND (SELECT COUNT(*) FROM inbox_participants WHERE conversation_id = ic.id) = 2
+                      AND EXISTS (SELECT 1 FROM inbox_participants WHERE conversation_id = ic.id AND user_id = $1)
+                      AND EXISTS (SELECT 1 FROM inbox_participants WHERE conversation_id = ic.id AND user_id = $2)
+                    LIMIT 1
+                    """,
+                    current_user.id,
+                    other_id,
+                )
+
             if conversation_id:
                 # Existing 1:1 — add message
                 msg_row = await conn.fetchrow(
@@ -538,8 +534,7 @@ async def create_conversation(
         # Email notification (outside transaction, best-effort)
         sender_name, _, _ = await _resolve_user_display_name(conn, current_user.id)
         # Fire and forget — don't block response
-        import asyncio
-        asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
+        spawn_bg(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
 
         # Build response
         conv_data = await conn.fetchrow(
@@ -737,8 +732,7 @@ async def send_message(
         sender_name, _, _ = await _resolve_user_display_name(conn, current_user.id)
 
     # Email notification outside DB connection (fire and forget)
-    import asyncio
-    asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
+    spawn_bg(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
 
     msg_attachments = msg["attachments"] if isinstance(msg["attachments"], list) else []
 
@@ -823,34 +817,80 @@ async def search_users(
 
     Same-company users are matched by name or email substring.
     Cross-company users are only matched by exact email address.
+    Platform admins keep the old global substring search.
     """
     async with get_connection() as conn:
         search_pattern = f"%{q}%"
 
-        rows = await conn.fetch(
-            f"""
-            SELECT u.id, u.email, u.role, u.avatar_url,
-                   {_USER_NAME_EXPR} AS name,
-                   co.name AS company_name
-            FROM users u
-            LEFT JOIN clients c ON c.user_id = u.id
-            LEFT JOIN employees e ON e.user_id = u.id
-            LEFT JOIN admins a ON a.user_id = u.id
-            LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
-            WHERE u.id != $1
-              AND u.is_active = true
-              AND (
-                c.name ILIKE $2
-                OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
-                OR a.name ILIKE $2
-                OR u.email ILIKE $2
-              )
-            ORDER BY u.email
-            LIMIT 20
-            """,
-            current_user.id,
-            search_pattern,
-        )
+        if current_user.role == "admin":
+            rows = await conn.fetch(
+                f"""
+                SELECT u.id, u.email, u.role, u.avatar_url,
+                       {_USER_NAME_EXPR} AS name,
+                       co.name AS company_name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
+                WHERE u.id != $1
+                  AND u.is_active = true
+                  AND (
+                    c.name ILIKE $2
+                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
+                    OR a.name ILIKE $2
+                    OR u.email ILIKE $2
+                  )
+                ORDER BY u.email
+                LIMIT 20
+                """,
+                current_user.id,
+                search_pattern,
+            )
+        else:
+            caller_company_id = await conn.fetchval(
+                """
+                SELECT COALESCE(c.company_id, e.org_id)
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                WHERE u.id = $1
+                """,
+                current_user.id,
+            )
+            rows = await conn.fetch(
+                f"""
+                SELECT u.id, u.email, u.role, u.avatar_url,
+                       {_USER_NAME_EXPR} AS name,
+                       co.name AS company_name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
+                WHERE u.id != $1
+                  AND u.is_active = true
+                  AND (
+                    lower(u.email) = lower($3)
+                    OR (
+                      $4::uuid IS NOT NULL
+                      AND COALESCE(c.company_id, e.org_id) = $4
+                      AND (
+                        c.name ILIKE $2
+                        OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
+                        OR a.name ILIKE $2
+                        OR u.email ILIKE $2
+                      )
+                    )
+                  )
+                ORDER BY u.email
+                LIMIT 20
+                """,
+                current_user.id,
+                search_pattern,
+                q,
+                caller_company_id,
+            )
 
         return [
             UserSearchResult(
