@@ -38,12 +38,24 @@ export function useChannelSocket({
 }: UseChannelSocketParams) {
   const { toast } = useToast()
   const lastMarkReadRef = useRef(0)
+  // Throttles the reconnect/wake catch-up refetch (below) — visibilitychange
+  // fires this on every alt-tab back to the app, not just genuine
+  // reconnects, so without a floor a full 50-row history refetch ran on
+  // every single tab focus.
+  const lastCatchupFetchRef = useRef(0)
 
   useEffect(() => {
     if (!channelId || !isMember) return
 
     const socket = getSharedChannelSocket()
     socketRef.current = socket
+    // A ref from a previous channel must not suppress this channel's first
+    // debounced mark-read — otherwise switching channels within the 5s
+    // window silently skips marking the new channel read until the next
+    // inbound message (GET /channels/{id} still covers the initial open,
+    // so impact was small, but this closes the gap for good).
+    lastMarkReadRef.current = 0
+    lastCatchupFetchRef.current = 0
 
     const handleMessage = (msg: ChannelMessage) => {
       if (msg.channel_id !== channelId) return
@@ -154,6 +166,14 @@ export function useChannelSocket({
     // the reported cross-device divergence. Pending rows reconcile by
     // client_message_id, which REST now returns.
     const offConnected = socket.addConnectedListener(() => {
+      // baseSocket's wake handler fires this on every visibilitychange to
+      // 'visible' even when the socket never actually dropped (an already-
+      // open — possibly zombie — socket still emits, so the catch-up path
+      // covers that case too) — so a plain alt-tab back to the app was
+      // refetching the full history on every focus with no floor.
+      const now = Date.now()
+      if (now - lastCatchupFetchRef.current < 15_000) return
+      lastCatchupFetchRef.current = now
       getChannelMessages(channelId)
         .then((fetched) => {
           setMessages((prev) => mergeMessages(prev, fetched))

@@ -17,8 +17,37 @@ type OutboxEntry = {
   reply_to_id?: string
   queued_at: number
 }
-const OUTBOX_KEY = 'channels_outbox_v1'
+const OUTBOX_KEY_PREFIX = 'channels_outbox_v1'
 const OUTBOX_CAP = 50
+// Outbox survived across logins on a shared browser under a single global
+// key — user B's login would replay user A's still-queued send under B's
+// sender_id. Scope the key to the JWT's `sub` claim (decoded client-side,
+// no verification needed — it's a storage namespace, not a security check).
+function _outboxKeyForToken(token: string | null): string {
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+      if (payload?.sub) return `${OUTBOX_KEY_PREFIX}:${payload.sub}`
+    } catch { /* fall through to unscoped key */ }
+  }
+  return OUTBOX_KEY_PREFIX
+}
+function _currentOutboxKey(): string {
+  return _outboxKeyForToken(localStorage.getItem('matcha_access_token'))
+}
+/** Called from api/client.ts's logout, with the token that was still valid
+ * a moment ago (by the time the lazy import resolves, the token is already
+ * cleared, so _currentOutboxKey() would derive the wrong — unscoped — key). */
+export function clearChannelOutbox(tokenAtLogout: string | null) {
+  try {
+    localStorage.removeItem(_outboxKeyForToken(tokenAtLogout))
+  } catch { /* best-effort */ }
+}
+/** Drop entries no live socket ever managed to flush past this age — a
+ * fresh page load can flush before rejoin() re-establishes room membership,
+ * so a message can persist server-side yet never get an echo back (echo is
+ * room-scoped) and sit in localStorage forever with nothing to remove it. */
+const OUTBOX_MAX_AGE_MS = 10 * 60 * 1000
 
 export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
@@ -89,9 +118,11 @@ export class ChannelSocket extends BaseSocket {
     this._flushOutbox()
   }
 
+  private _flushRetryTimeout: ReturnType<typeof setTimeout> | null = null
+
   private _readOutbox(): OutboxEntry[] {
     try {
-      const raw = localStorage.getItem(OUTBOX_KEY)
+      const raw = localStorage.getItem(_currentOutboxKey())
       return raw ? (JSON.parse(raw) as OutboxEntry[]) : []
     } catch {
       return []
@@ -100,7 +131,7 @@ export class ChannelSocket extends BaseSocket {
 
   private _writeOutbox(entries: OutboxEntry[]) {
     try {
-      localStorage.setItem(OUTBOX_KEY, JSON.stringify(entries.slice(-OUTBOX_CAP)))
+      localStorage.setItem(_currentOutboxKey(), JSON.stringify(entries.slice(-OUTBOX_CAP)))
     } catch { /* quota — drop rather than crash the send path */ }
   }
 
@@ -116,11 +147,43 @@ export class ChannelSocket extends BaseSocket {
   }
 
   private _flushOutbox() {
-    const entries = this._readOutbox()
+    if (this._flushRetryTimeout) {
+      clearTimeout(this._flushRetryTimeout)
+      this._flushRetryTimeout = null
+    }
+    const now = Date.now()
+    const all = this._readOutbox()
+    const entries = all.filter((e) => now - e.queued_at < OUTBOX_MAX_AGE_MS)
+    if (entries.length !== all.length) this._writeOutbox(entries)
     if (!entries.length) return
-    const remaining: OutboxEntry[] = []
+    // A queued send's room may not be in joinedRooms yet — on a fresh page
+    // load rejoin() runs before useChannelNotifications has resolved
+    // listChannels, so joinedRooms is still empty the first time this fires.
+    // The message would still persist server-side (membership is DB-checked,
+    // not room_members-checked), but the reply echo is room_members-scoped,
+    // so without this the entry would never get removed and would replay on
+    // every reconnect forever.
+    const rooms = new Set(entries.map((e) => e.channel_id))
+    for (const room of rooms) {
+      if (!this.joinedRooms.has(room)) {
+        this.joinedRooms.add(room)
+        this.send({ type: 'join_room', channel_id: room })
+      }
+    }
+    // Keep EVERY flushed entry in storage regardless of send()'s return
+    // value — a synchronous WebSocket.send() success only means the frame
+    // reached the local send buffer, not that the server accepted it (rate
+    // limiting is discovered later, async, via an 'error' frame). Dropping
+    // an entry here as soon as send() returned true was the actual root
+    // cause of HIGH-1: by the time a rate_limited error frame came back for
+    // entry #11 of an offline-queued burst, this loop had already removed
+    // it from localStorage a moment earlier, making the error handler's
+    // code branch a no-op. Resolution now happens ONLY via removeFromOutbox,
+    // called from the 'message' echo or a permanent 'error' below — a
+    // duplicate send on a later retry is safe by design (server INSERT is
+    // idempotent on (sender_id, client_message_id)).
     for (const e of entries) {
-      const ok = this.send({
+      this.send({
         type: 'message',
         channel_id: e.channel_id,
         content: e.content,
@@ -128,13 +191,26 @@ export class ChannelSocket extends BaseSocket {
         client_message_id: e.client_message_id,
         ...(e.reply_to_id ? { reply_to_id: e.reply_to_id } : {}),
       })
-      if (!ok) remaining.push(e)
     }
-    this._writeOutbox(remaining)
+  }
+
+  /** Re-drain the outbox at roughly the server's token-bucket refill rate
+   * after a rate_limited rejection, instead of bursting the whole queue
+   * again immediately (which would just get rate-limited again). */
+  private _scheduleOutboxRetry() {
+    if (this._flushRetryTimeout) return
+    this._flushRetryTimeout = setTimeout(() => {
+      this._flushRetryTimeout = null
+      this._flushOutbox()
+    }, 1200)
   }
 
   protected clearState() {
     this.joinedRooms.clear()
+    if (this._flushRetryTimeout) {
+      clearTimeout(this._flushRetryTimeout)
+      this._flushRetryTimeout = null
+    }
   }
 
   protected handleMessage(data: Record<string, unknown>) {
@@ -193,9 +269,21 @@ export class ChannelSocket extends BaseSocket {
         break
       case 'error': {
         const cmid = data.client_message_id as string | undefined
-        // Permanently rejected (not a member, over the length cap, rate
-        // limited) — don't replay it forever from the outbox.
-        if (cmid) this.removeFromOutbox(cmid)
+        const code = data.code as string | undefined
+        if (cmid) {
+          if (code === 'rate_limited') {
+            // NOT permanent — the send was throttled, not rejected. Deleting
+            // the entry here (the old behavior) silently and permanently
+            // lost any message past the bucket's burst size on outbox
+            // replay, which is exactly the scenario the outbox exists for.
+            // Leave it queued and re-drain at roughly the refill rate.
+            this._scheduleOutboxRetry()
+          } else {
+            // Permanently rejected (not a member, over the length cap, ...)
+            // — don't replay it forever from the outbox.
+            this.removeFromOutbox(cmid)
+          }
+        }
         this.onServerError?.(data.message as string, {
           channelId: data.channel_id as string | undefined,
           clientMessageId: cmid,

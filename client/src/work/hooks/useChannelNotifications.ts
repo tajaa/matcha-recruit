@@ -72,16 +72,25 @@ export function useChannelNotifications() {
     loadChannels()
     window.addEventListener(CHANNELS_CHANGED_EVENT, loadChannels)
 
+    // Shared 5s debounce for CHANNELS_CHANGED_EVENT — three listeners
+    // (this hook, WorkSidebar, WerkLiteSidebar) each run a full listChannels()
+    // on every dispatch, and push_channel_read fans out to the originating
+    // device too, so an undebounced dispatch from onChannelRead (below) plus
+    // the per-message dispatch here amplified into ~2 undeduped listChannels
+    // storms per 5s per open tab.
+    const dispatchBadgeRefresh = () => {
+      if (Date.now() - lastBadgeRefreshRef.current <= 5000) return
+      lastBadgeRefreshRef.current = Date.now()
+      window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+    }
+
     const handleMessage = (msg: ChannelMessage) => {
       // Sidebar unread badges only refresh on navigation/mount today — nudge
       // the existing CHANNELS_CHANGED_EVENT refetch (debounced to 1/5s) so a
       // message arriving on any channel keeps the badge fresh. Fires even
       // for own messages / muted channels — the count is server-computed,
       // not derived from this listener's own filtering below.
-      if (Date.now() - lastBadgeRefreshRef.current > 5000) {
-        lastBadgeRefreshRef.current = Date.now()
-        window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
-      }
+      dispatchBadgeRefresh()
 
       // Skip our own messages
       if (msg.sender_id === userId) return
@@ -111,9 +120,12 @@ export function useChannelNotifications() {
 
     socket.addMessageListener(handleMessage)
     // Another of this user's devices marked a channel read — refresh the
-    // sidebar so this device's badge zeroes to match.
+    // sidebar so this device's badge zeroes to match. push_channel_read
+    // fans out to every socket of this user INCLUDING the one that just
+    // called markRead, so this fires on the originating device too — same
+    // debounce as the message path.
     socket.onChannelRead = () => {
-      window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+      dispatchBadgeRefresh()
     }
 
     return () => {

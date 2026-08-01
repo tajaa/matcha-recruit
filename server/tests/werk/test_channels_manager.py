@@ -10,7 +10,7 @@ import pytest
 
 from app.werk.routes import channels_ws as ws_mod
 from app.werk.routes.channels_ws import (
-    ChannelConnectionManager, ChannelUser, _should_process_envelope, _TokenBucket,
+    ChannelConnectionManager, ChannelUser, _should_process_envelope, _TokenBucket, _process_envelope,
 )
 
 
@@ -111,6 +111,68 @@ class TestLocalFirstDelivery:
         assert _should_process_envelope({"origin": "w2"}, "w1") is True
         # Pre-deploy envelope without origin: process (rolling restart).
         assert _should_process_envelope({}, "w1") is True
+
+
+class TestProcessEnvelopeUsersKind:
+    @pytest.mark.asyncio
+    async def test_users_envelope_delivers_to_every_local_recipient_concurrently(self, monkeypatch):
+        # _process_envelope reads the module-level `manager` singleton, not a
+        # parameter — swap in a fresh instance for the duration of this test
+        # so it can't see state from another test.
+        m = ChannelConnectionManager()
+        monkeypatch.setattr(ws_mod, "manager", m)
+        uid1, uid2, uid3 = uuid4(), uuid4(), uuid4()
+        ws1, ws2, ws3 = _fake_ws(), _fake_ws(), _fake_ws()
+        await m.connect(ws1, _user(uid1))
+        await m.connect(ws2, _user(uid2))
+        await m.connect(ws3, _user(uid3))
+
+        envelope = {
+            "kind": "users",
+            "origin": "some-other-worker",
+            "messages": {
+                str(uid1): {"type": "notification", "n": 1},
+                str(uid2): {"type": "notification", "n": 2},
+                str(uid3): {"type": "notification", "n": 3},
+            },
+        }
+        await asyncio.wait_for(_process_envelope(envelope), timeout=5)
+        ws1.send_text.assert_awaited()
+        ws2.send_text.assert_awaited()
+        ws3.send_text.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_users_envelope_one_slow_recipient_does_not_block_the_others(self, monkeypatch):
+        # Regression guard for the serial-loop version of this branch: a
+        # single slow/hung local delivery must not delay every other
+        # recipient in the same batch (head-of-line blocking on the shared
+        # per-worker fanout subscriber).
+        m = ChannelConnectionManager()
+        monkeypatch.setattr(ws_mod, "manager", m)
+        uid_slow, uid_fast = uuid4(), uuid4()
+        ws_slow, ws_fast = _fake_ws(), _fake_ws()
+
+        async def _slow_send(*args, **kwargs):
+            await asyncio.sleep(1)
+        ws_slow.send_text = AsyncMock(side_effect=_slow_send)
+
+        await m.connect(ws_slow, _user(uid_slow))
+        await m.connect(ws_fast, _user(uid_fast))
+
+        envelope = {
+            "kind": "users",
+            "origin": "some-other-worker",
+            "messages": {
+                str(uid_slow): {"type": "notification"},
+                str(uid_fast): {"type": "notification"},
+            },
+        }
+        task = asyncio.ensure_future(_process_envelope(envelope))
+        await asyncio.sleep(0.05)
+        # The fast recipient's delivery completed without waiting on the
+        # slow one — proof the two ran concurrently, not one-after-another.
+        ws_fast.send_text.assert_awaited()
+        await asyncio.wait_for(task, timeout=5)
 
 
 class TestTokenBucket:

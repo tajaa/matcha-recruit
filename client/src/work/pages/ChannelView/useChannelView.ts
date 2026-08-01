@@ -83,6 +83,31 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const socketRef = useRef<ChannelSocket | null>(null)
   const lastTypingSentRef = useRef(0)
+  // Guards loadOlder against a double-fire: onScroll can fire more than once
+  // per frame, and setLoadingOlder(true) doesn't take effect until the next
+  // render, so two scroll events in the same tick both saw the old
+  // `loadingOlder` value and both started a fetch with the same cursor.
+  const loadingOlderRef = useRef(false)
+  // 8s pending->failed deadline timers (handleSend/handleRetryMessage) —
+  // tracked so a channel switch or unmount doesn't leave them firing
+  // setMessages against a torn-down view.
+  const pendingDeadlineTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const scheduleFailedDeadline = useCallback((cmid: string) => {
+    const timer = setTimeout(() => {
+      pendingDeadlineTimersRef.current.delete(timer)
+      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid && m.pending ? { ...m, failed: true } : m)))
+    }, 8000)
+    pendingDeadlineTimersRef.current.add(timer)
+  }, [])
+  useEffect(() => {
+    // Channel switch or unmount: any deadline scheduled for the previous
+    // channel's pending rows is now scheduled against rows that no longer
+    // exist in state — clear rather than let it fire a no-op update late.
+    return () => {
+      for (const t of pendingDeadlineTimersRef.current) clearTimeout(t)
+      pendingDeadlineTimersRef.current.clear()
+    }
+  }, [channelId])
 
   // Calls: unified on the LiveKit SFU across every surface (/work, /werk,
   // /werk-lite) — the homegrown WebRTC P2P mesh (useVoiceCall) is retired,
@@ -157,17 +182,27 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
   }, [channelId, scrollToBottom])
 
   const loadOlder = useCallback(async () => {
-    if (!channelId || loadingOlder || !hasMore) return
+    // Synchronous ref guard: onScroll can fire more than once in the same
+    // tick, and `loadingOlder` state doesn't take effect until the next
+    // render, so two scroll events both saw it false and both started a
+    // fetch with the identical cursor — duplicate requests, and a double
+    // scroll-restore jump that could chain into loading yet another page.
+    if (!channelId || loadingOlderRef.current || !hasMore) return
     const oldest = messages.find((m) => !m.pending)
     if (!oldest) return
+    loadingOlderRef.current = true
+    // Preserve the viewport: record height BEFORE setLoadingOlder(true) — the
+    // loader row it mounts adds height that isn't there yet at this point but
+    // IS gone again by the time the prepend lands (same batched update), so
+    // measuring after the fetch (post-loader-mount) undercounted the restore
+    // by the loader row's own height.
+    const container = messagesContainerRef.current
+    const prevHeight = container?.scrollHeight ?? 0
     setLoadingOlder(true)
     try {
       const older = await getChannelMessages(channelId, oldest.created_at, oldest.id)
       if (older.length < 50) setHasMore(false)
       if (older.length) {
-        // Preserve the viewport: record height before the prepend, restore after.
-        const container = messagesContainerRef.current
-        const prevHeight = container?.scrollHeight ?? 0
         setMessages((prev) => mergeMessages(prev, older))
         requestAnimationFrame(() => {
           if (container) container.scrollTop += container.scrollHeight - prevHeight
@@ -176,9 +211,10 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     } catch {
       // transient — next scroll retries
     } finally {
+      loadingOlderRef.current = false
       setLoadingOlder(false)
     }
-  }, [channelId, messages, loadingOlder, hasMore])
+  }, [channelId, messages, hasMore])
 
   // Load payment info
   useEffect(() => {
@@ -268,24 +304,29 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
       // reconnect. Mark failed now so the row visibly needs attention
       // rather than ghosting as pending forever.
       setMessages((prev) => prev.map((m) => (m.client_message_id === cmid ? { ...m, failed: true } : m)))
+    } else {
+      // 8s echo deadline (mirrors Espresso's schedulePendingTimeout): if the
+      // echo hasn't replaced the pending row by then, flip it to failed.
+      // Only meaningful when the frame actually went out — if it didn't,
+      // the row is already marked failed above and this would just be a
+      // wasted no-op update 8s later.
+      scheduleFailedDeadline(cmid)
     }
-    // 8s echo deadline (mirrors Espresso's schedulePendingTimeout): if the
-    // echo hasn't replaced the pending row by then, flip it to failed.
-    window.setTimeout(() => {
-      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid && m.pending ? { ...m, failed: true } : m)))
-    }, 8000)
     setInput('')
     setReplyTo(null)
   }
 
   function handleRetryMessage(msg: ChannelMessage) {
     if (!channelId || !msg.client_message_id) return
-    setMessages((prev) => prev.map((m) => (m.client_message_id === msg.client_message_id ? { ...m, failed: false } : m)))
     const cmid = msg.client_message_id
-    socketRef.current?.sendMessage(channelId, msg.content, msg.attachments, cmid, msg.reply_to_id ?? undefined)
-    window.setTimeout(() => {
-      setMessages((prev) => prev.map((m) => (m.client_message_id === cmid && m.pending ? { ...m, failed: true } : m)))
-    }, 8000)
+    const sent = socketRef.current?.sendMessage(channelId, msg.content, msg.attachments, cmid, msg.reply_to_id ?? undefined) ?? false
+    // Previously ignored `sent` — a retry while still offline cleared
+    // `failed` unconditionally, so the row sat showing "pending" for a full
+    // 8s before flipping back to failed, even though channelSocket already
+    // knew synchronously that the send didn't go out (it re-queued to the
+    // outbox instead).
+    setMessages((prev) => prev.map((m) => (m.client_message_id === cmid ? { ...m, failed: !sent } : m)))
+    if (sent) scheduleFailedDeadline(cmid)
   }
 
   function handleReply(msg: ChannelMessage) {

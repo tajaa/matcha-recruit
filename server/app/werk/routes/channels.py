@@ -297,6 +297,11 @@ class ChannelDetail(BaseModel):
     member_count: int = 0
     is_member: bool = False
     my_role: Optional[str] = None  # current user's channel_role
+    # Per-member mute — mirrors ChannelSummary.is_muted. Without this here,
+    # the channel-header mute toggle had no source of truth on load/reload
+    # and always rendered as "not muted" until the sidebar's separate
+    # listChannels() happened to catch up.
+    is_muted: bool = False
     # Set when this channel is a collab project's discussion chat — lets the
     # client offer "Create ticket" pointed at that project's board.
     project_id: Optional[UUID] = None
@@ -1230,12 +1235,13 @@ async def get_channel(
         # the frontend never gets channel data to render one) instead of
         # showing the "membership lapsed" gate the removal flag exists for.
         membership_row = await conn.fetchrow(
-            "SELECT role, removed_for_inactivity FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            "SELECT role, removed_for_inactivity, COALESCE(is_muted, false) AS is_muted FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
         has_membership_row = membership_row is not None
         is_member = has_membership_row and not membership_row["removed_for_inactivity"]
         my_role = membership_row["role"] if is_member else None
+        is_muted = bool(membership_row["is_muted"]) if has_membership_row else False
 
         # Access control: must either be in the channel's tenant, have ever
         # been a member, or be a platform admin. Otherwise 404 (don't
@@ -1286,43 +1292,50 @@ async def get_channel(
                 "UPDATE channel_members SET last_read_at = NOW() WHERE channel_id = $1 AND user_id = $2",
                 channel_id, current_user.id,
             )
-            # Zero this user's badge on their other devices. Best-effort.
-            try:
-                from .channels_ws import push_channel_read
-                await push_channel_read(str(channel_id), str(current_user.id))
-            except Exception:
-                pass
 
-        return ChannelDetail(
-            id=ch["id"],
-            name=ch["name"],
-            slug=ch["slug"],
-            description=ch["description"],
-            visibility=ch["visibility"],
-            category=ch["category"],
-            is_paid=ch["is_paid"],
-            price_cents=ch["price_cents"],
-            currency=ch["currency"],
-            is_archived=ch["is_archived"],
-            created_by=ch["created_by"],
-            created_at=ch["created_at"],
-            member_count=len(members),
-            is_member=is_member,
-            my_role=my_role,
-            project_id=ch["project_id"],
-            members=[
-                ChannelMember(
-                    user_id=m["user_id"], name=m["name"], email=m["email"],
-                    role=m["role"], channel_role=m["channel_role"] or "member",
-                    avatar_url=m["avatar_url"], joined_at=m["joined_at"],
-                )
-                for m in members
-            ],
-            messages=[
-                _row_to_message(m, reactions_map)
-                for m in reversed(messages)  # Return chronological order
-            ],
-        )
+    # push_channel_read does a Redis publish + up to a 5s-per-socket WS send
+    # (channels_ws.py's manager.send_to_user) — pinning a pool connection
+    # across that turned a fast read into pool contention under a stampede
+    # (everyone opening their channels after a deploy). Fire it after the
+    # connection above has already been released.
+    if is_member:
+        try:
+            from .channels_ws import push_channel_read
+            await push_channel_read(str(channel_id), str(current_user.id))
+        except Exception:
+            pass
+
+    return ChannelDetail(
+        id=ch["id"],
+        name=ch["name"],
+        slug=ch["slug"],
+        description=ch["description"],
+        visibility=ch["visibility"],
+        category=ch["category"],
+        is_paid=ch["is_paid"],
+        price_cents=ch["price_cents"],
+        currency=ch["currency"],
+        is_archived=ch["is_archived"],
+        created_by=ch["created_by"],
+        created_at=ch["created_at"],
+        member_count=len(members),
+        is_member=is_member,
+        my_role=my_role,
+        is_muted=is_muted,
+        project_id=ch["project_id"],
+        members=[
+            ChannelMember(
+                user_id=m["user_id"], name=m["name"], email=m["email"],
+                role=m["role"], channel_role=m["channel_role"] or "member",
+                avatar_url=m["avatar_url"], joined_at=m["joined_at"],
+            )
+            for m in members
+        ],
+        messages=[
+            _row_to_message(m, reactions_map)
+            for m in reversed(messages)  # Return chronological order
+        ],
+    )
 
 
 @router.get("/{channel_id}/messages", response_model=list[ChannelMessage])
@@ -1354,6 +1367,13 @@ async def get_channel_messages(
         )
         if not is_member and current_user.role != "admin":
             raise HTTPException(status_code=404, detail="Channel not found or not a member")
+
+        if before_id and not before:
+            # before_id alone is silently ignored (only consulted inside the
+            # `if before:` branch below) — that reads as "give me the newest
+            # page" instead of erroring, a hard-to-spot pagination bug for
+            # any caller that passes the composite cursor's id half only.
+            raise HTTPException(status_code=400, detail="'before_id' requires 'before'")
 
         if before:
             try:

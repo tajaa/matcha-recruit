@@ -296,6 +296,22 @@ describe('BaseSocket', () => {
     expect(FakeWebSocket.instances.length).toBe(before + 1)
   })
 
+  it('removes its visibilitychange/online listeners on disconnect()', () => {
+    // ProjectSocket/ThreadSocket are constructed per-mount (not process-
+    // lifetime singletons like the shared channel socket) — without this,
+    // every mount left two dead global listeners retaining a closed socket.
+    const addSpy = vi.spyOn(document, 'addEventListener')
+    const removeSpy = vi.spyOn(document, 'removeEventListener')
+    const s = new TestSocket()
+    s.connect()
+    latest().open()
+    const [, visibilityHandler] = addSpy.mock.calls.find(([type]) => type === 'visibilitychange')!
+    s.disconnect()
+    expect(removeSpy).toHaveBeenCalledWith('visibilitychange', visibilityHandler)
+    addSpy.mockRestore()
+    removeSpy.mockRestore()
+  })
+
   it('reconnect backoff includes jitter, staying within [base, base+1000)', () => {
     const s = new TestSocket()
     s.connect()

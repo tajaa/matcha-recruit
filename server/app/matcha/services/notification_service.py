@@ -159,16 +159,38 @@ async def create_notifications_bulk(
         return
     import json as _json
     meta_json = _json.dumps(metadata or {})
-    async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
-            SELECT t.u, t.c, $3, $4, $5, $6, $7::jsonb
-            FROM unnest($1::uuid[], $2::uuid[]) AS t(u, c)
-            RETURNING id, user_id, type, title, body, link, metadata, created_at
-            """,
-            user_ids, company_ids, type, title, body, link, meta_json,
-        )
+    try:
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
+                SELECT t.u, t.c, $3, $4, $5, $6, $7::jsonb
+                FROM unnest($1::uuid[], $2::uuid[]) AS t(u, c)
+                RETURNING id, user_id, type, title, body, link, metadata, created_at
+                """,
+                user_ids, company_ids, type, title, body, link, meta_json,
+            )
+    except Exception:
+        # One-statement-per-batch is the whole point of "bulk", but it also
+        # means one recipient with an unresolvable company_id (both FKs are
+        # NOT NULL) fails the entire INSERT — a 200-member channel would get
+        # zero bells for a message instead of 199. Degrade to the old
+        # per-member loop rather than lose the batch; each recipient is
+        # independently try/excepted so a second bad row still can't wipe
+        # out the rest.
+        logger.warning("bulk notification INSERT failed, falling back to per-member", exc_info=True)
+        for uid, cid in zip(user_ids, company_ids):
+            try:
+                # create_notification does its own WS push + APNs push per
+                # call — return below rather than falling through to the
+                # multicast/batched-APNs sections after this loop, which
+                # would double-push everything this fallback already sent.
+                await create_notification(
+                    user_id=uid, company_id=cid, type=type, title=title, body=body, link=link, metadata=metadata,
+                )
+            except Exception:
+                logger.warning("per-member notification fallback failed for user %s", uid, exc_info=True)
+        return
 
     # One multicast WS envelope for every recipient's bell (same lazy manager
     # import edge create_notification already uses — no new import kind).

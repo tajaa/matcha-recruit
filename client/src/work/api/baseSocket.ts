@@ -41,6 +41,10 @@ export abstract class BaseSocket {
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
   private _closed = false
   private _reconnectAttempts = 0
+  private _onVisibilityChange = () => {
+    if (document.visibilityState === 'visible') this._wake()
+  }
+  private _onOnline = () => this._wake()
 
   constructor() {
     // Laptop sleep / network change recovery. The OS can freeze or kill the
@@ -48,15 +52,19 @@ export abstract class BaseSocket {
     // backoff timer to ~1/min — so on wake, reconnect immediately and (even
     // if the socket looks open) fire connected-listeners so the channel
     // view's reconnect catch-up refetch runs. Espresso does the same via
-    // didBecomeActiveNotification for exactly this reason. Listeners are
-    // never removed: the sockets are process-lifetime singletons.
+    // didBecomeActiveNotification for exactly this reason.
+    //
+    // NOTE: this is only a true process-lifetime singleton for
+    // getSharedChannelSocket(). ProjectSocket/ThreadSocket are constructed
+    // per-mount (useKanbanBoard, useProjectPresence, useThreadCollaboration),
+    // and disconnectSharedChannelSocket() itself replaces the channel
+    // singleton on every logout/login — so these listeners ARE removed in
+    // disconnect() below rather than assumed to outlive the instance.
     if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this._wake()
-      })
+      document.addEventListener('visibilitychange', this._onVisibilityChange)
     }
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => this._wake())
+      window.addEventListener('online', this._onOnline)
     }
   }
 
@@ -220,6 +228,12 @@ export abstract class BaseSocket {
     this.ws?.close()
     this.ws = null
     this.clearState()
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._onVisibilityChange)
+    }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this._onOnline)
+    }
   }
 
   /** Send a frame if the socket is open. Returns false when the frame was

@@ -1061,7 +1061,10 @@ async def _get_channel_name(conn, ch_uuid: UUID) -> Optional[str]:
     if key in _channel_name_cache:
         return _channel_name_cache[key]
     name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", ch_uuid)
-    _channel_name_cache[key] = name
+    # Don't cache a miss/NULL for the full TTL — a transient lookup failure
+    # would otherwise show "#None" in bell titles for up to 60s.
+    if name is not None:
+        _channel_name_cache[key] = name
     return name
 
 # Online presence — written on every WS receive (heartbeat), read by the
@@ -1299,8 +1302,17 @@ class ChannelConnectionManager:
         (create_notifications_bulk) instead of N separate send_to_user calls."""
         if not payloads:
             return
-        for uid, message in payloads.items():
-            await self._local_send_to_user(uid, message)
+        # Concurrent, not serial: a 200-recipient batch awaited one at a time
+        # would block the caller (and, via the fanout envelope below, the
+        # message-delivery subscriber on the OTHER worker — see the
+        # _process_envelope 'users' branch) for as long as the single
+        # slowest socket in the batch takes, reintroducing exactly the
+        # head-of-line blocking the typing/message channel split exists to
+        # avoid.
+        await asyncio.gather(
+            *(self._local_send_to_user(uid, message) for uid, message in payloads.items()),
+            return_exceptions=True,
+        )
         redis = get_redis_cache()
         if redis is None:
             return
@@ -1429,14 +1441,23 @@ async def _process_envelope(envelope: dict) -> None:
             return
         await manager._local_send_to_user(uid, msg)
     elif kind == "users":
-        # Multicast: one envelope, many recipients (bulk notify).
+        # Multicast: one envelope, many recipients (bulk notify). Concurrent
+        # for the same reason as send_to_users above — this runs on the
+        # single serial fanout subscriber, so one slow socket serially
+        # awaited here stalls every other message this worker is about to
+        # dispatch, not just the rest of this batch.
         msgs = envelope.get("messages") or {}
+        targets = []
         for uid_raw, m in msgs.items():
             try:
-                uid = UUID(uid_raw)
+                targets.append((UUID(uid_raw), m))
             except (ValueError, TypeError):
                 continue
-            await manager._local_send_to_user(uid, m)
+        if targets:
+            await asyncio.gather(
+                *(manager._local_send_to_user(uid, m) for uid, m in targets),
+                return_exceptions=True,
+            )
 
 
 async def _subscriber_loop(channel: str, label: str) -> None:
@@ -1524,12 +1545,20 @@ async def _server_ping_loop() -> None:
                 (uid, ws) for uid, ws in targets
                 if now - manager.last_seen.get(ws, now) > _LIVENESS_DEADLINE_SECONDS
             ]
-            for _, ws in stale:
-                try:
-                    await asyncio.wait_for(ws.close(), timeout=2)
-                except Exception:
-                    pass
             if stale:
+                # Concurrent, not serial: this runs BEFORE the keepalive
+                # gather below, so a batch of zombies (a NAT rebind, an LB
+                # event) closed one at a time could burn up to
+                # len(stale) * 2s here before a single server_ping goes out —
+                # cascading a partial outage into healthy clients getting
+                # dropped by intermediaries for missing the very keepalive
+                # this loop exists to send.
+                async def _close(ws: WebSocket) -> None:
+                    try:
+                        await asyncio.wait_for(ws.close(), timeout=2)
+                    except Exception:
+                        pass
+                await asyncio.gather(*(_close(ws) for _, ws in stale), return_exceptions=True)
                 stale_set = {id(ws) for _, ws in stale}
                 targets = [(uid, ws) for uid, ws in targets if id(ws) not in stale_set]
 
@@ -1811,6 +1840,14 @@ async def channel_websocket(
     # to loop `type: message` sends as fast as the DB round-trips allow, each
     # triggering a full room + notification fanout.
     rate = _TokenBucket()
+    # mark_read had no rate check at all (unlike `message`, which does
+    # strictly more work) and no membership check — a buggy or hostile
+    # client looping it acquires a pool connection per frame and can exhaust
+    # the pool, taking down HTTP request handling for the whole worker, not
+    # just channels. Separate, more permissive bucket: the legitimate client
+    # already self-debounces to ~1/5s, this only needs to catch a loop.
+    mark_read_rate = _TokenBucket(burst=5, refill_per_sec=0.5)
+    mark_read_last_written: Dict[str, float] = {}
 
     try:
         while True:
@@ -2165,6 +2202,12 @@ async def channel_websocket(
                                         JOIN users u ON u.id = cm.user_id
                                         LEFT JOIN clients c ON c.user_id = u.id
                                         LEFT JOIN employees e ON e.user_id = u.id
+                                        -- INNER join on companies: mw_notifications.company_id is a
+                                        -- NOT NULL FK, and create_notifications_bulk is one INSERT for
+                                        -- every recipient — one member with an unresolvable company_id
+                                        -- (e.g. a stale employees.org_id) would fail the whole
+                                        -- statement and silently zero the bell for the entire channel.
+                                        JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
                                         WHERE cm.channel_id = $1 AND cm.user_id != $2
                                           AND cm.removed_for_inactivity IS NOT TRUE
                                         """,
@@ -2206,8 +2249,17 @@ async def channel_websocket(
                 # Client sends this (debounced) while sitting in a visible
                 # channel as messages arrive — otherwise last_read_at only
                 # advances on GET /channels/{id} and phantom unread piles up.
+                if not mark_read_rate.allow(time.monotonic()):
+                    continue
                 channel_id = data.get("channel_id")
                 rk = _room_key(channel_id) if channel_id else None
+                # Per-socket coalesce on top of the bucket: skip a redundant
+                # write for a channel already marked read in the last 2s
+                # (matches the client's own debounce floor) rather than
+                # spending a pool connection on it.
+                now_mono = time.monotonic()
+                if rk and now_mono - mark_read_last_written.get(rk, 0) < 2:
+                    continue
                 if rk:
                     try:
                         async with get_connection() as conn:
@@ -2215,6 +2267,7 @@ async def channel_websocket(
                                 "UPDATE channel_members SET last_read_at = NOW() WHERE channel_id = $1 AND user_id = $2",
                                 UUID(rk), user.id,
                             )
+                        mark_read_last_written[rk] = now_mono
                         # Zero the badge on this user's OTHER devices too.
                         await push_channel_read(rk, str(user.id))
                     except Exception:

@@ -28,12 +28,21 @@ async function _tryRefresh(): Promise<boolean> {
 }
 
 function _logout() {
+  // Capture the outgoing user's outbox key SYNCHRONOUSLY — the dynamic
+  // import below resolves as a microtask, after the token removal a few
+  // lines down has already run, so reading the token inside the .then would
+  // always see it gone and clear the wrong (unscoped) key.
+  const outgoingToken = localStorage.getItem('matcha_access_token')
   localStorage.removeItem('matcha_access_token')
   localStorage.removeItem('matcha_refresh_token')
   resetAuthCaches()
-  // Best-effort cleanup of the shared channel WS. Lazy-imported to avoid
-  // a circular dependency between api/client.ts and api/channelSocket.ts.
-  import('../work/api/channelSocket').then((m) => m.disconnectSharedChannelSocket()).catch(() => {})
+  // Best-effort cleanup of the shared channel WS + its durable outbox. Lazy-
+  // imported to avoid a circular dependency between api/client.ts and
+  // api/channelSocket.ts.
+  import('../work/api/channelSocket').then((m) => {
+    m.disconnectSharedChannelSocket()
+    m.clearChannelOutbox(outgoingToken)
+  }).catch(() => {})
   // Guard against a redirect loop: a failed refresh fired from the login page
   // itself would otherwise reassign location to /login repeatedly.
   if (window.location.pathname !== '/login') {
