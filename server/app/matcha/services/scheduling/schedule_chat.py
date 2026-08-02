@@ -594,11 +594,17 @@ async def build_proposal(
 
 def compose_clarify_followup(proposal: dict, answer: str) -> str:
     """The manager's reply to an outstanding clarify question, composed back
-    onto the original request so Stage A can re-parse with full context."""
-    return (
-        f"{proposal.get('original_content', '')}\n"
-        f"(Q: {proposal.get('clarify_question')} A: {answer})"
-    )
+    onto the original request so Stage A can re-parse with full context.
+
+    Includes every prior clarify round, not just the current one — with
+    only the current Q/A appended, a second round (e.g. hours) silently
+    dropped the first round's already-answered question (e.g. location),
+    so Stage A re-derived from the bare original message and re-asked it."""
+    lines = [proposal.get("original_content", "")]
+    for h in proposal.get("clarify_history") or []:
+        lines.append(f"(Q: {h.get('q')} A: {h.get('a')})")
+    lines.append(f"(Q: {proposal.get('clarify_question')} A: {answer})")
+    return "\n".join(lines)
 
 
 async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, features: dict) -> str:
