@@ -423,6 +423,10 @@ def test_missing_chromium_degrades_to_editing_blind(patched):
     assert data["ops"], "the edit still lands without a screenshot"
     assert any(s["label"] == "Preview unavailable" for s in data["steps"])
     assert not any(f["type"] == "error" for f in frames)
+    # Deterministic honesty guard (2026-08-01): ops applied + every screenshot
+    # attempt this turn was blind ⇒ the finish message must say so, regardless
+    # of what the model itself claimed.
+    assert "couldn't render a preview" in data["message"]
 
 
 def test_a_render_failure_is_also_survivable(patched):
@@ -438,6 +442,48 @@ def test_a_render_failure_is_also_survivable(patched):
     )
     data = _result(frames)
     assert any(s["label"] == "Render failed" for s in data["steps"])
+
+
+def test_render_exception_with_applied_ops_also_gets_the_caveat(patched):
+    """Same blind-turn guard, via the OTHER degrade path (a render exception,
+    not a missing browser) — both must count as 'never verified'."""
+
+    def _boom(_blocks, _theme):
+        raise ValueError("template exploded")
+
+    frames, _ = patched(
+        [
+            [("apply_ops", {"ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]'})],
+            [("render_screenshot", {})],
+            [("finish", {"message": "Updated the heading."})],
+        ],
+        render_html=_boom,
+    )
+    data = _result(frames)
+    assert data["ops"]
+    assert "couldn't render a preview" in data["message"]
+
+
+def test_no_caveat_when_a_screenshot_actually_succeeded(patched):
+    frames, _ = patched([
+        [("apply_ops", {"ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]'})],
+        [("render_screenshot", {})],
+        [("finish", {"message": "Done."})],
+    ])
+    data = _result(frames)
+    assert "couldn't render a preview" not in data["message"]
+
+
+def test_no_caveat_when_nothing_was_applied(patched):
+    """A blind screenshot with no ops applied has nothing to caveat — the
+    default 'nothing was changed' message already tells the truth."""
+    frames, _ = patched(
+        [[("render_screenshot", {})], [("finish", {"message": "Nothing to change."})]],
+        screenshot_error="Executable doesn't exist",
+    )
+    data = _result(frames)
+    assert data["ops"] == []
+    assert "couldn't render a preview" not in data["message"]
 
 
 def test_a_prose_turn_ends_the_loop_as_the_message(patched):
@@ -688,4 +734,70 @@ def test_generate_image_quota_exhausted_degrades_the_tool_not_the_turn(patched, 
     assert [o["op"] for o in data["ops"]] == ["set_field"], (
         "the earlier apply_ops must survive a later tool's quota rejection"
     )
-    assert any(s["kind"] == "image" and "quota" in s["label"].lower() for s in data["steps"])
+
+
+# --- generate_image background targeting (2026-08-01 fix) --------------------
+#
+# Regression coverage for the incident: Merlin generated a paper-texture image
+# for a `text` block (no image field), folded it as a bare set_field into a
+# dead 'image' key, told the user "updated its background", and nothing on
+# the page changed. do_generate_image must now (a) validate the target BEFORE
+# spending quota/$ on generation, and (b) fold a background placement as the
+# TWO set_design ops the renderer actually reads (bg.type + bg.image —
+# services/render/design.py only paints bg.image when bg.type == "image").
+
+_TEXT_BLOCKS = [{"id": "t1", "type": "text", "heading": "About Lumière", "body": "Sub"}]
+
+
+def test_generate_image_explicit_bad_field_errors_before_generating(patched, monkeypatch):
+    """An EXPLICIT field the block doesn't have must be rejected without ever
+    calling generate_image — the old code generated first and only discovered
+    the target was wrong (or, worse, silently accepted it) after paying for
+    the image."""
+    calls = _patch_generate_image(monkeypatch)
+    frames, _ = patched([
+        [("generate_image", {"block_id": "t1", "prompt": "paper", "field": "portrait"})],
+        [("finish", {"message": "Could not do that."})],
+    ], blocks=_TEXT_BLOCKS)
+    data = _result(frames)
+    assert calls == [], "no image should have been generated"
+    assert data["ops"] == []
+    image_steps = [s for s in data["steps"] if s["kind"] == "image"]
+    assert image_steps and "invalid" in image_steps[0]["label"].lower()
+
+
+def test_generate_image_defaulted_field_on_fieldless_block_auto_routes_to_background(patched, monkeypatch):
+    """The flagship case: the model asked for the DEFAULT ('image') field on a
+    block type that has none at all. Auto-route to the section background
+    instead of failing — this is the exact request from the incident
+    ("make this text section's background look like handcrafted paper")."""
+    calls = _patch_generate_image(monkeypatch)
+    frames, _ = patched([
+        [("generate_image", {"block_id": "t1", "prompt": "handcrafted paper texture"})],
+        [("finish", {"message": "Gave the section a paper-texture background."})],
+    ], blocks=_TEXT_BLOCKS)
+    data = _result(frames)
+
+    assert len(calls) == 1, "exactly one generation — the field/background check runs before the API call"
+    assert data["ops"] == [
+        {"op": "set_design", "block": "t1", "group": "bg", "key": "type", "value": "image"},
+        {"op": "set_design", "block": "t1", "group": "bg", "key": "image",
+         "value": "https://cdn.example.test/g.png"},
+    ]
+    image_steps = [s for s in data["steps"] if s["kind"] == "image"]
+    assert image_steps and image_steps[0]["label"].endswith("→ background")
+    assert image_steps[0]["image_url"] == "https://cdn.example.test/g.png"
+
+
+def test_generate_image_background_true_wins_even_on_a_block_with_an_image_field(patched, monkeypatch):
+    """`background: true` is an explicit request, not a fallback — it must
+    take the bg.type/bg.image path even on a block (hero) that HAS a content
+    image field, not silently fall back to set_field."""
+    _patch_generate_image(monkeypatch)
+    frames, _ = patched([
+        [("generate_image", {"block_id": "b1", "prompt": "sunset", "background": True})],
+        [("finish", {"message": "Done."})],
+    ])
+    data = _result(frames)
+    assert [o["op"] for o in data["ops"]] == ["set_design", "set_design"]
+    assert [o["key"] for o in data["ops"]] == ["type", "image"]

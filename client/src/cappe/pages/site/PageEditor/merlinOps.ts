@@ -52,9 +52,12 @@ export type MerlinOp =
   | { op: 'canvas_update'; block: string; el: string; patch: Partial<CappeCanvasElement> }
   | { op: 'canvas_remove'; block: string; el: string }
   // Server-validated, CLIENT-executed asynchronously: useMerlin generates the
-  // image via the endpoint, then applies the URL as a follow-up set_field.
-  // applyMerlinOps (a synchronous fold) never mutates state for it.
-  | { op: 'generate_image'; block: string; field: string; prompt: string; aspect?: string; image_size?: string }
+  // image via the endpoint, then applies the URL as a follow-up op — a
+  // set_field for a content field, or (background) the set_design
+  // bg.type/bg.image pair for a section background. applyMerlinOps (a
+  // synchronous fold) never mutates state for it. `field` is optional: the
+  // server drops it when `background` is true.
+  | { op: 'generate_image'; block: string; field?: string; background?: boolean; prompt: string; aspect?: string; image_size?: string }
 
 export type MerlinOpResult = { ok: boolean; summary: string }
 export type MerlinApplyResult = {

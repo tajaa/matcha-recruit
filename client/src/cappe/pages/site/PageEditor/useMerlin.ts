@@ -673,17 +673,26 @@ export function useMerlin(
         )
         if (sentForPageId !== pageIdRef.current || sentSession !== sessionRef.current) return
         const cur = getSnapshot()
-        const applied = applyMerlinOps(cur.blocks, cur.theme, [
-          { op: 'set_field', block: g.block, path: g.field, value: gen.url },
-        ])
+        // bg.image only renders when bg.type is also "image" (render/design.py)
+        // — always set both, same pair the agent loop folds server-side
+        // (agent.py:do_generate_image). A bare set_field into a background
+        // target would land in a dead key, same failure the agent path had.
+        const placeOps: MerlinOp[] = g.background
+          ? [
+              { op: 'set_design', block: g.block, group: 'bg', key: 'type', value: 'image' },
+              { op: 'set_design', block: g.block, group: 'bg', key: 'image', value: gen.url },
+            ]
+          : [{ op: 'set_field', block: g.block, path: g.field ?? 'image', value: gen.url }]
+        const applied = applyMerlinOps(cur.blocks, cur.theme, placeOps)
         const changed = applied.blocks !== cur.blocks
         if (changed) {
           onApply({ blocks: applied.blocks, theme: applied.theme, blocksChanged: true, themeChanged: false })
         }
+        const targetLabel = g.background ? 'background' : (g.field ?? 'image')
         setMessages((m) => [...m, {
           role: 'assistant',
           content: changed ? 'Generated and placed the image.' : 'Generated the image, but its target section is gone.',
-          results: [{ ok: changed, summary: changed ? `Image → ${g.field}` : 'Target section not found' }],
+          results: [{ ok: changed, summary: changed ? `Image → ${targetLabel}` : 'Target section not found' }],
           noChanges: !changed,
         }])
       } catch (e) {

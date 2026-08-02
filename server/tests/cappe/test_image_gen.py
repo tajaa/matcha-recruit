@@ -42,14 +42,53 @@ def test_generate_image_valid_with_explicit_field_and_aspect():
     assert len(v) == 1 and not r and v[0]["aspect"] == "1:1"
 
 
-def test_generate_image_rejects_block_without_an_image_field():
-    v, r = _op(block="txt1", prompt="x")   # text block has no image field
-    assert not v and "not an image field" in r[0]["reason"]
+def test_generate_image_on_a_fieldless_block_auto_routes_to_background():
+    # text has no image field at all — the DEFAULTED field target auto-routes
+    # to the section background instead of failing the op (2026-08-01: the
+    # agent loop folded this straight into the dead 'image' key on a text
+    # block and told the user it worked; see agent.py:do_generate_image).
+    v, r = _op(block="txt1", prompt="handcrafted paper texture")
+    assert len(v) == 1 and not r
+    assert v[0]["background"] is True
+    assert "field" not in v[0]
+
+
+def test_generate_image_explicit_background_drops_field():
+    v, r = _op(block="txt1", prompt="x", background=True)
+    assert len(v) == 1 and not r
+    assert v[0]["background"] is True
+    assert "field" not in v[0]
+
+
+def test_generate_image_background_wins_even_on_a_block_with_an_image_field():
+    v, r = _op(block="hero1", prompt="x", background=True)
+    assert len(v) == 1 and not r
+    assert v[0]["background"] is True
+
+
+def test_generate_image_background_refused_on_non_premium():
+    v, r = validate_ops(
+        [{"op": "generate_image", "block": "txt1", "prompt": "x", "background": True}],
+        _BLOCKS, premium=False,
+    )
+    assert not v and "Pro feature" in r[0]["reason"]
+
+
+def test_generate_image_auto_route_refused_on_non_premium():
+    v, r = validate_ops(
+        [{"op": "generate_image", "block": "txt1", "prompt": "x"}],
+        _BLOCKS, premium=False,
+    )
+    assert not v and "Pro" in r[0]["reason"]
 
 
 def test_generate_image_rejects_non_image_field():
+    # An EXPLICIT bad field (as opposed to a defaulted one) still fails
+    # outright — the op named a specific field the model expected to work,
+    # so silently redirecting to the background would surprise it.
     v, r = _op(block="hero1", field="heading", prompt="x")
     assert not v and "not an image field" in r[0]["reason"]
+    assert "background" in r[0]["reason"]  # hints the escape hatch
 
 
 def test_generate_image_rejects_unknown_block():

@@ -156,6 +156,10 @@ _GENERAL_RULES: tuple[str, ...] = (
     "At most 20 ops at a time. Prefer editing an existing block over removing and recreating it.",
     "Never invent a block type or field name outside the catalog below.",
     'If the request is unclear or nothing needs to change, return an empty "ops" array with a clarifying "message".',
+    'When the user reports a change did not apply or looks wrong (often attaching a screenshot of the page), '
+    'the conversation history may be stale — an earlier turn can claim a change that never actually rendered. '
+    'Trust the CURRENT blocks/theme JSON and the screenshot over any prior claim of success: diagnose what '
+    'actually rendered, then emit the ops that fix it.',
     "Output ONLY the JSON object. No markdown fences, no commentary.",
 )
 

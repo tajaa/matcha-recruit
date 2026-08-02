@@ -57,6 +57,18 @@ def test_build_prompt_carries_design_principles_and_color_token_vocab():
     assert "wireframe" in prompt   # the anti-pattern rule made it in
 
 
+def test_build_prompt_teaches_stale_history_diagnosis():
+    """2026-08-01 fix: a user reporting 'this didn't apply' must be told the
+    conversation history can be stale — otherwise the model trusts its own
+    prior 'I updated the background' claim over the current block state."""
+    prompt = _build_prompt(
+        message="the background didn't apply", history=[], blocks=_BLOCKS, theme={},
+        business_name=None, business_type=None, feedback=None,
+    )
+    assert "did not apply" in prompt
+    assert "may be stale" in prompt
+
+
 def test_build_prompt_includes_history_and_feedback():
     prompt = _build_prompt(
         message="now bigger",

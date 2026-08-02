@@ -13,7 +13,9 @@ This module closes that loop. Gemini gets five tools and iterates:
     render_screenshot→ render that copy to HTML, screenshot it, hand back the PNG
     inspect_block    → full-fidelity JSON for one block (the prompt is compacted)
     generate_image   → generate (optionally from a user attachment), fold as a
-                        set_field, hand back the PNG so the model can judge it
+                        set_field (or, for a section background, the
+                        set_design bg.type/bg.image pair), hand back the PNG
+                        so the model can judge it
     finish           → stop, with the message shown to the user
 
 Nothing here writes a page. The working copy is throwaway; what returns to the
@@ -66,7 +68,7 @@ from .catalog import (
     DEFAULT_AI_IMAGE_SIZE,
     MODEL_TIERS,
 )
-from .ops import validate_ops
+from .ops import image_field_error, image_fields, validate_ops
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +207,8 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
         types.FunctionDeclaration(
             name="generate_image",
             description=(
-                "Generate an AI image and set it as an existing block's image field. "
+                "Generate an AI image and place it into an existing block — either a "
+                "content image field, or the section's background. "
                 "Expand the user's request into a full photographic brief before calling "
                 "this — subject, setting, framing/composition, and lighting — rather than "
                 "forwarding their bare phrase; a one-line prompt tends to produce a "
@@ -222,7 +225,23 @@ def _tool_declarations() -> list[types.FunctionDeclaration]:
                     "block_id": types.Schema(type=types.Type.STRING),
                     "field": types.Schema(
                         type=types.Type.STRING,
-                        description="The image field to set, e.g. 'image'. Defaults to 'image'.",
+                        description=(
+                            "The content image field to set, e.g. 'image'. Defaults to "
+                            "'image'. Only valid on blocks that HAVE an image field (e.g. "
+                            "hero, split) — for a section background on any other block "
+                            "type, use background instead."
+                        ),
+                    ),
+                    "background": types.Schema(
+                        type=types.Type.BOOLEAN,
+                        description=(
+                            "true = use the generated image as the SECTION'S BACKGROUND "
+                            "(works on every block type; sets the bg.type/bg.image design "
+                            "keys for you). Omit/false = fill the content image field named "
+                            "by field. After a background placement, render_screenshot and "
+                            "check the text still reads; add bg.overlay / bg.overlayOpacity "
+                            "via apply_ops if it doesn't."
+                        ),
                     ),
                     "prompt": types.Schema(type=types.Type.STRING),
                     "aspect": types.Schema(
@@ -289,6 +308,12 @@ sections; only the one you named with block_id is guaranteed to be in frame). Fo
 design request, screenshot at least once before finishing, always with block_id set to what you \
 changed. For a pure copy edit (changing words only) a screenshot is optional; omit block_id only \
 when judging the WHOLE page (e.g. after a theme swap).
+
+When the user says a change didn't apply or looks wrong — often with a screenshot of the page \
+attached — treat their evidence as ground truth over the conversation history: a prior turn may \
+have claimed a change that never rendered. Diagnose from the CURRENT blocks JSON, their \
+screenshot, and a fresh render_screenshot of the section in question; apply the fix; then \
+screenshot the fixed section before finishing.
 
 Never claim in `finish` that you did something you did not actually apply. If you could not \
 do what was asked, apply nothing and say so plainly — that is far better than substituting \
@@ -408,6 +433,13 @@ async def run_merlin_agent(
 
     model_calls = 0
     screenshots = 0
+    # Deterministic (not model-dependent) honesty guard: whether the model
+    # ever actually SAW a render this turn, vs. only tried and failed. Used at
+    # result assembly below to caveat a claimed success it never verified —
+    # the second half of the 2026-08-01 incident (a false "it worked" message
+    # is a prompt-following failure the model can repeat; this can't be forgotten).
+    screenshot_ok = False
+    screenshot_failed = False
     started = time.monotonic()
 
     def elapsed() -> float:
@@ -516,7 +548,7 @@ async def run_merlin_agent(
 
     async def do_screenshot(args: dict[str, Any]):
         """Returns (function_response payload, step frame, png bytes | None)."""
-        nonlocal screenshots
+        nonlocal screenshots, screenshot_ok, screenshot_failed
         from ..browser_pool import ScreenshotUnavailable, screenshot_html
 
         viewport = args.get("viewport") or "desktop"
@@ -560,6 +592,7 @@ async def run_merlin_agent(
             # Chromium missing or crashed. The turn continues blind rather than
             # failing — that's still today's behavior, not a regression.
             logger.warning("Merlin screenshot unavailable: %s", exc)
+            screenshot_failed = True
             return (
                 {"error": "screenshot unavailable on this server — proceed without it"},
                 {"kind": "screenshot", "label": "Preview unavailable"},
@@ -567,12 +600,14 @@ async def run_merlin_agent(
             )
         except Exception as exc:  # noqa: BLE001 — never-raises contract
             logger.warning("Merlin render failed: %s", exc)
+            screenshot_failed = True
             return (
                 {"error": "could not render the page — proceed without a screenshot"},
                 {"kind": "screenshot", "label": "Render failed"},
                 None,
             )
         screenshots += 1
+        screenshot_ok = True
         step = {
             "kind": "screenshot",
             "label": f"Rendered {viewport} preview — {focus_label}" if focus_label
@@ -627,7 +662,8 @@ async def run_merlin_agent(
 
         block_id = args.get("block_id")
         prompt = str(args.get("prompt") or "").strip()
-        field = str(args.get("field") or "image")
+        field_given = args.get("field")
+        field = str(field_given or "image")
         aspect = args.get("aspect") if args.get("aspect") in AI_ASPECT_RATIOS else None
         image_size = args.get("image_size") if args.get("image_size") in AI_IMAGE_SIZES else DEFAULT_AI_IMAGE_SIZE
 
@@ -638,6 +674,38 @@ async def run_merlin_agent(
             return {"error": "prompt is required"}, {}, None
         if len(prompt) > AI_IMAGE_PROMPT_MAX:
             return {"error": f"prompt too long (max {AI_IMAGE_PROMPT_MAX} chars)"}, {}, None
+
+        # Resolve WHERE this lands before spending any quota/$ generating it —
+        # the 2026-08-01 incident was a claimed background write landing in a
+        # dead `image` key on a `text` block (no image field at all), because
+        # this tool folded a raw set_field without ever checking the target
+        # was valid. Mirrors _v_generate_image's single-shot check (ops.py).
+        btype = target.get("type")
+        background = args.get("background") is True
+        reroute_note: Optional[str] = None
+        if not background:
+            target_err = image_field_error(btype, field)
+            if target_err is not None:
+                if field_given is None and not image_fields(btype):
+                    # Default placement on a block with no image field at all
+                    # — the section background is the only target that can
+                    # render it, so route there instead of burning a turn on
+                    # an error round-trip. ("make this text section look like
+                    # handcrafted paper" is exactly this case.)
+                    background = True
+                    reroute_note = (
+                        f"{btype} blocks have no image field — placed as the "
+                        "section background (bg.type + bg.image) instead"
+                    )
+                else:
+                    # No premium check needed here: the agent loop only runs
+                    # on AGENT_TIERS (regular/max), which the route clamps to
+                    # premium plans — a free account never reaches this tool.
+                    return (
+                        {"error": target_err + " — pass background: true to place it as the section background"},
+                        {"kind": "image", "label": "Skipped — invalid image target"},
+                        None,
+                    )
 
         reference: Optional[list[tuple[bytes, str]]] = None
         idx = args.get("attachment_index")
@@ -685,17 +753,40 @@ async def run_merlin_agent(
                 None,
             )
 
-        applied = apply_ops(
-            work_blocks, work_theme,
-            [{"op": "set_field", "block": block_id, "path": field, "value": url}],
-        )
-        work_blocks, work_theme = applied.blocks, applied.theme
-        op_log.append({"op": "set_field", "block": block_id, "path": field, "value": url})
-
+        if background:
+            fold = [
+                {"op": "set_design", "block": block_id, "group": "bg", "key": "type", "value": "image"},
+                {"op": "set_design", "block": block_id, "group": "bg", "key": "image", "value": url},
+            ]
+        else:
+            fold = [{"op": "set_field", "block": block_id, "path": field, "value": url}]
         cost = AI_IMAGE_SIZE_COST_ESTIMATE.get(image_size, "")
+        applied = apply_ops(work_blocks, work_theme, fold)
+        if not all(r.get("ok") for r in applied.results):
+            # Reachable only via a same-turn race (e.g. the block was removed
+            # by an earlier op this turn). The step still carries image_url so
+            # the panel's "Apply to…" menu can rescue the paid generation.
+            reason = next(r["summary"] for r in applied.results if not r.get("ok"))
+            return (
+                {"error": f"image generated but not placed: {reason}", "url": url},
+                {
+                    "kind": "image",
+                    "label": f"Generated image ({image_size}, {IMAGE_MODEL}, {cost}) — placement failed",
+                    "image_url": url, "prompt": prompt, "aspect": aspect or "16:9", "image_size": image_size,
+                },
+                png,
+            )
+        work_blocks, work_theme = applied.blocks, applied.theme
+        op_log.extend(fold)
+
+        placed_note = "The image attached to this response is what was generated and placed."
+        if reroute_note:
+            placed_note = reroute_note + ". " + placed_note
+        elif background:
+            placed_note += " Screenshot to verify the text still reads against it — bg.overlay / bg.overlayOpacity are available via apply_ops if not."
+        target_label = "background" if background else field
         return (
-            {"placed": True, "url": url,
-             "note": "The image attached to this response is what was generated and placed."},
+            {"placed": True, "url": url, "note": placed_note},
             # image_url lets the panel show what was generated (same field the
             # screenshot step already uses for its thumbnail) — and now also
             # drives the panel's "Apply to…" menu, so the user can re-target
@@ -707,7 +798,7 @@ async def run_merlin_agent(
             # actually renders — so "which model, roughly what did that cost"
             # is visible in the transcript itself, not just on /admin/ai-usage.
             {
-                "kind": "image", "label": f"Generated image ({image_size}, {IMAGE_MODEL}, {cost}) → {field}",
+                "kind": "image", "label": f"Generated image ({image_size}, {IMAGE_MODEL}, {cost}) → {target_label}",
                 "image_url": url,
                 "prompt": prompt, "aspect": aspect or "16:9", "image_size": image_size,
             },
@@ -863,6 +954,15 @@ async def run_merlin_agent(
     if not final_message:
         final_message = (
             "Here's what I changed." if op_log else "I couldn't complete that — nothing was changed."
+        )
+    if op_log and screenshot_failed and not screenshot_ok:
+        # The incident's second half: the model finished claiming success it
+        # never actually SAW (every render_screenshot attempt this turn
+        # degraded — no Chromium, or a render error). Deterministic, not a
+        # prompt instruction the model can forget under a different tier/turn.
+        final_message = final_message.rstrip() + (
+            " (Note: I couldn't render a preview to verify these changes visually — "
+            "please double-check the page.)"
         )
 
     yield {

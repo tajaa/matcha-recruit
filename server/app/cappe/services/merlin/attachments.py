@@ -129,8 +129,13 @@ def caption_lines(attachments: list[dict[str, Any]]) -> Optional[str]:
     lines = [
         "The user attached the following image(s), in order. They may want one "
         "PLACED on the page (use its URL as an image field's value), used as a "
-        "STYLE REFERENCE (match its look with design ops), or used as INPUT to "
-        "image generation. Decide from what they asked.",
+        "STYLE REFERENCE (match its look with design ops), used as INPUT to "
+        "image generation — or it may be a FEEDBACK SCREENSHOT: a capture of "
+        "THIS page showing a problem (\"this didn't apply\", \"this looks "
+        "wrong\"). For a feedback screenshot, compare it against the current "
+        "blocks/theme JSON, diagnose what actually rendered, and emit the ops "
+        "that fix it — do NOT treat it as a style reference to imitate. "
+        "Decide from what they asked.",
     ]
     for i, att in enumerate(attachments):
         lines.append(f"Attachment {i + 1}: {att['url']}")

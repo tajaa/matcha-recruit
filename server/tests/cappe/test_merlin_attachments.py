@@ -170,3 +170,15 @@ def test_caption_lines_numbers_attachments_for_tool_reference():
 
 def test_caption_lines_is_none_for_no_attachments():
     assert caption_lines([]) is None
+
+
+def test_caption_lines_teaches_the_feedback_use():
+    """A pasted screenshot of the page reporting a problem must be read as
+    evidence to diagnose against — not as a style reference to imitate (the
+    2026-08-01 fix: without this, "here's my broken page" reads as a moodboard)."""
+    text = caption_lines([{"url": "https://assets.example.test/a.jpg", "mime": "image/jpeg", "data": b""}])
+    assert "FEEDBACK SCREENSHOT" in text
+    # the original three uses must survive alongside the new one
+    assert "PLACED" in text
+    assert "STYLE REFERENCE" in text
+    assert "image generation" in text

@@ -285,14 +285,20 @@ def _v_set_field(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     return _validate_field_value(raw, block, head, kind, parts[1:], btype)
 
 
+# `_design` is stripped on save for non-premium plans (gate_content), so
+# applying it in-editor would look like it worked and then vanish on Save.
+# Shared by every op that writes into `_design` — set_design, set_design_bulk,
+# and generate_image's background=true path (that one folds to two set_design
+# ops client-side, so it inherits the same gate).
+_NON_PREMIUM_DESIGN_REASON = "section design and animation are a Pro feature — upgrade to use them"
+
+
 def _v_set_design(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     block = ctx.by_id.get(_sid(raw.get("block")))
     if block is None:
         return "block id not found"
     if not ctx.premium:
-        # `_design` is stripped on save for non-premium plans, so applying
-        # it in-editor would look like it worked and then vanish.
-        return "section design and animation are a Pro feature — upgrade to use them"
+        return _NON_PREMIUM_DESIGN_REASON
     group = _sid(raw.get("group"))
     spec = DESIGN_GROUPS.get(group) if group else None
     if spec is None:
@@ -311,7 +317,7 @@ def _v_set_design_bulk(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]
     one block. Exists so "make everything dark and moody" costs 1 op instead
     of N × groups-changed, comfortably inside MAX_OPS_PER_TURN."""
     if not ctx.premium:
-        return "section design and animation are a Pro feature — upgrade to use them"
+        return _NON_PREMIUM_DESIGN_REASON
     targets_raw = raw.get("blocks")
     if targets_raw == "all":
         target_ids = sorted(ctx.by_id)
@@ -476,30 +482,34 @@ def _v_apply_section_preset(raw: dict[str, Any], ctx: ValidationCtx) -> Optional
     return _v_add_block(raw, ctx)
 
 
-def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
-    """AI image generation targeting an existing block's image field. Validated
-    server-side (block/field/prompt/aspect) but EXECUTED CLIENT-SIDE: generation
-    is a slow async round-trip, and applyMerlinOps is a synchronous pure fold, so
-    the client generates via POST /sites/{id}/generate-image then applies the URL
-    as a follow-up set_field. Not premium-gated here — the endpoint's daily quota
-    (free taste + paid headroom) is the cost guard, same as the editor button.
+def image_fields(block_type: Any) -> list[str]:
+    """Top-level image-kind field names on a block type ([] for unknown types
+    or a type with none — e.g. text, faq, stats)."""
+    fields = BLOCK_FIELDS.get(block_type) if isinstance(block_type, str) else None
+    if not fields:
+        return []
+    return [name for name, kind in fields.items() if kind == "image"]
 
-    Targets a block in `ctx.by_id`, which holds both real snapshot blocks and
-    any synthetic same-turn adds `_v_add_block` registered under their model-
-    given `id` — so a same-turn `add_block(id="new-1")` + `generate_image` on
-    "new-1" resolves normally. An id no earlier op registered still degrades
-    to 'block id not found'."""
-    block = ctx.by_id.get(_sid(raw.get("block")))
-    if block is None:
-        return "block id not found"
-    btype = block.get("type")
-    fields = BLOCK_FIELDS.get(btype) if isinstance(btype, str) else None
+
+def image_field_error(block_type: Any, field: str) -> Optional[str]:
+    """None when `field` is a valid top-level image-kind field on `block_type`,
+    else the rejection reason. Shared by _v_generate_image (single-shot) and
+    the agent loop's generate_image tool (agent.py:do_generate_image) — the
+    agent tool folding a set_field the validator would have rejected is
+    exactly the 2026-08-01 invisible-paper-texture incident (a claimed
+    "background" write landing in a dead key on a block with no image field)."""
+    fields = BLOCK_FIELDS.get(block_type) if isinstance(block_type, str) else None
     if fields is None:
-        return f"unknown block type '{btype}'"
-    field = _sid(raw.get("field")) or "image"
+        return f"unknown block type '{block_type}'"
     if fields.get(field) != "image":
-        return f"'{field}' is not an image field on a {btype} block"
-    raw["field"] = field  # normalize the default so the client sees an explicit target
+        return f"'{field}' is not an image field on a {block_type} block"
+    return None
+
+
+def _check_generate_image_prompt_and_media(raw: dict[str, Any]) -> Optional[str]:
+    """The part of generate_image validation independent of WHERE the result
+    lands (content field vs. background): prompt presence/length, and the
+    degrade-don't-fail cleanup of aspect/image_size."""
     prompt = raw.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
         return "missing image prompt"
@@ -517,6 +527,54 @@ def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
     if image_size is not None and not (isinstance(image_size, str) and image_size in AI_IMAGE_SIZES):
         raw.pop("image_size", None)
     return None
+
+
+def _v_generate_image(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
+    """AI image generation targeting an existing block — either a content image
+    field, or (background=true) the section's background. Validated server-side
+    but EXECUTED CLIENT-SIDE: generation is a slow async round-trip, and
+    applyMerlinOps is a synchronous pure fold, so the client generates via
+    POST /sites/{id}/generate-image then applies the result as follow-up ops
+    (a set_field for a content field, or the set_design bg.type/bg.image pair
+    for a background — see useMerlin.ts:runImageOps). The endpoint's daily
+    quota (free taste + paid headroom) is the field-target cost guard, same as
+    the editor button; the background target additionally needs the same
+    premium gate as set_design, since it folds to _design keys that are
+    stripped on save for free plans.
+
+    Targets a block in `ctx.by_id`, which holds both real snapshot blocks and
+    any synthetic same-turn adds `_v_add_block` registered under their model-
+    given `id` — so a same-turn `add_block(id="new-1")` + `generate_image` on
+    "new-1" resolves normally. An id no earlier op registered still degrades
+    to 'block id not found'."""
+    block = ctx.by_id.get(_sid(raw.get("block")))
+    if block is None:
+        return "block id not found"
+    btype = block.get("type")
+
+    if raw.get("background") is True:
+        if not ctx.premium:
+            return _NON_PREMIUM_DESIGN_REASON
+        raw.pop("field", None)  # background ignores/replaces any field target
+        return _check_generate_image_prompt_and_media(raw)
+
+    field = _sid(raw.get("field")) or "image"
+    err = image_field_error(btype, field)
+    if err is not None:
+        if raw.get("field") is None and not image_fields(btype):
+            # The model asked for the DEFAULT placement on a block with no
+            # image field at all — the section background is the only target
+            # that can render it, so route there instead of failing the op.
+            # ("make this text section look like handcrafted paper" is
+            # exactly this case.)
+            if not ctx.premium:
+                return err + " — and section backgrounds are a Pro design feature"
+            raw["background"] = True
+            raw.pop("field", None)
+            return _check_generate_image_prompt_and_media(raw)
+        return err + ' — or pass "background": true to place it as the section background'
+    raw["field"] = field  # normalize the default so the client sees an explicit target
+    return _check_generate_image_prompt_and_media(raw)
 
 
 def _v_duplicate_block(raw: dict[str, Any], ctx: ValidationCtx) -> Optional[str]:
@@ -774,12 +832,16 @@ MERLIN_OPS: tuple[MerlinOp, ...] = (
     MerlinOp(
         name="generate_image",
         validate=_v_generate_image,
-        prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","prompt":"<what to depict>","aspect":"16:9","image_size":"2K"}',
+        prompt_shape='{"op":"generate_image","block":"<id>","field":"<imageField>","background":false,"prompt":"<what to depict>","aspect":"16:9","image_size":"2K"}',
         prompt_rules=(
             "generate_image creates an AI image and places it in a block's image field "
             "(field defaults to \"image\"; on a hero that's the full-bleed background). Use it when the "
             "user asks to generate/create/imagine a photo or background — NOT for stock the user will "
-            "supply. Can target a block added earlier in this same turn if that add_block gave it an \"id\". "
+            "supply. For a SECTION BACKGROUND on any other block type, pass \"background\": true instead "
+            "of field — most blocks (text, faq, stats, …) have no image field, and a background needs the "
+            "bg design keys, which this op then sets for you. After a background change, consider "
+            "bg.overlay/bg.overlayOpacity so text stays legible. Can target a block added earlier in this "
+            "same turn if that add_block gave it an \"id\". "
             "aspect is one of: " + ", ".join(sorted(AI_ASPECT_RATIOS)) + ". "
             "image_size is one of: " + ", ".join(AI_IMAGE_SIZES) + " — omit to default to 2K, which is "
             "sharp enough for a full-bleed section background; only go to 4K if the user explicitly asks "
