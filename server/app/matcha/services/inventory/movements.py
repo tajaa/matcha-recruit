@@ -134,6 +134,8 @@ async def adjust_item_count(conn, *, item_id: UUID, company_id: UUID, quantity, 
         "SELECT current_quantity FROM inventory_items WHERE id = $1 AND company_id = $2",
         item_id, company_id,
     )
+    if old is None:
+        raise ValueError("item not found")
     old_qty = old["current_quantity"]
     new_qty = float(quantity)
     delta = None if old_qty is None else new_qty - float(old_qty)

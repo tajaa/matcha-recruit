@@ -34,7 +34,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
   const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
-  const showInventory = hasFeature('inventory')
+  const showInventory = canReviewEvents(me?.user?.role) && hasFeature('inventory')
 
   const {
     channels, setChannels,

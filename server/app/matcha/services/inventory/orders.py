@@ -1,9 +1,20 @@
 """DB service for the inventory order queue."""
 
+import json
 from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory import movements as movements_service
+
+
+def decode_suggestion(value):
+    """asyncpg returns JSONB as str (no jsonb codec registered app-wide)."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return None
+    return value
 
 
 async def stage_order(
@@ -28,9 +39,11 @@ async def stage_order(
         RETURNING *
         """,
         company_id, item_id, channel_id, source_message_id, created_by,
-        suggested_quantity, suggestion,
+        suggested_quantity, json.dumps(suggestion) if suggestion is not None else None,
     )
-    return dict(row)
+    result = dict(row)
+    result["suggestion"] = decode_suggestion(result.get("suggestion"))
+    return result
 
 
 async def approve_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None) -> Optional[dict]:
@@ -45,7 +58,11 @@ async def approve_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID
         """,
         order_id, user_id, quantity, company_id,
     )
-    return dict(row) if row else None
+    if row is None:
+        return None
+    result = dict(row)
+    result["suggestion"] = decode_suggestion(result.get("suggestion"))
+    return result
 
 
 async def cancel_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID) -> Optional[dict]:
@@ -53,12 +70,16 @@ async def cancel_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID)
         """
         UPDATE inventory_orders
         SET status = 'cancelled', confirm_message_id = NULL, updated_at = NOW()
-        WHERE id = $1 AND company_id = $3 AND status IN ('queued', 'ordered')
+        WHERE id = $1 AND company_id = $2 AND status IN ('queued', 'ordered')
         RETURNING *
         """,
-        order_id, user_id, company_id,
+        order_id, company_id,
     )
-    return dict(row) if row else None
+    if row is None:
+        return None
+    result = dict(row)
+    result["suggestion"] = decode_suggestion(result.get("suggestion"))
+    return result
 
 
 async def mark_received(conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None) -> Optional[dict]:
@@ -86,4 +107,6 @@ async def mark_received(conn, *, order_id: UUID, company_id: UUID, user_id: UUID
         """,
         order_id, user_id, received_qty, movement["id"],
     )
-    return dict(row)
+    result = dict(row)
+    result["suggestion"] = decode_suggestion(result.get("suggestion"))
+    return result

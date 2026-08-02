@@ -97,7 +97,7 @@ export async function patchItem(
     archived: boolean
   }>,
 ) {
-  return api.put<InventoryItem>(`/inventory/items/${itemId}`, body)
+  return api.patch<InventoryItem>(`/inventory/items/${itemId}`, body)
 }
 
 // ── Movements ──

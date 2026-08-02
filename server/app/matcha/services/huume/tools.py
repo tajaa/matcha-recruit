@@ -93,9 +93,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "you're unsure whether the candidate already has one, or before "
         "building a plan to check what integrations are actually connected. "
         "Use show_record with an id from a list here (incident/er_case/"
-        "employee/credential/inventory) to open that record in the admin's "
-        "side panel. topic='inventory' lists stock items with current count "
-        "and any open order.",
+        "employee/credential/inventory_item) to open that record in the "
+        "admin's side panel. topic='inventory' lists stock items with "
+        "current count and any open order.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
             "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),

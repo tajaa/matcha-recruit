@@ -489,6 +489,7 @@ async def _bg_inventory_request(
 
         sys_row = None
         item_rows = []
+        osha_dual_write = False
         stripped = strip_mention(content)
 
         async with get_connection() as conn:
@@ -504,7 +505,7 @@ async def _bg_inventory_request(
                     return
 
                 if fallback_classification(content).get("urgency") == "osha":
-                    await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+                    osha_dual_write = True
 
                 features = await _schedule_company_features(conn, company_id)
                 role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
@@ -520,6 +521,9 @@ async def _bg_inventory_request(
 
         if company_id is None:
             return
+
+        if osha_dual_write:
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
 
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
@@ -636,108 +640,117 @@ async def _bg_inventory_reply(
         sys_row = None
 
         async with get_connection() as conn:
-            claimed_order = await conn.fetchrow(
-                """
-                UPDATE inventory_orders SET confirm_message_id = NULL, updated_at = NOW()
-                WHERE confirm_message_id = $1 AND status = 'queued'
-                  AND created_at > NOW() - INTERVAL '7 days'
-                RETURNING id, company_id, item_id, suggested_quantity, quantity, suggestion
-                """,
-                reply_uuid,
-            )
-            if claimed_order is not None:
-                claim_happened = True
-                item = await conn.fetchrow(
-                    "SELECT name FROM inventory_items WHERE id = $1", claimed_order["item_id"],
-                )
-                features = await _schedule_company_features(conn, claimed_order["company_id"])
-                role = await conn.fetchval("SELECT role FROM users WHERE id = $1", sender_uuid)
-                verdict = evaluate_inventory_action(role=role, features=features, stage="approve_order")
-                if not verdict.ok:
-                    await conn.execute(
-                        "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
-                        reply_uuid, claimed_order["id"],
-                    )
-                    sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
-                else:
-                    action = parse_confirm_reply(stripped)
-                    if action == "confirm":
-                        row = await orders_service.approve_order(
-                            conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
-                            user_id=sender_uuid, quantity=claimed_order["quantity"],
-                        )
-                        sys_row = await _insert_system_message(
-                            conn, channel_id_str, pills.order_confirmed_pill(item["name"], row["quantity"]),
-                        )
-                    elif action == "cancel":
-                        await orders_service.cancel_order(
-                            conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
-                            user_id=sender_uuid,
-                        )
-                        sys_row = await _insert_system_message(
-                            conn, channel_id_str, pills.order_cancelled_pill(item["name"]),
-                        )
-                    else:
-                        new_qty = parse_quantity_reply(stripped)
-                        if new_qty is not None:
-                            await conn.execute(
-                                "UPDATE inventory_orders SET quantity = $1 WHERE id = $2",
-                                new_qty, claimed_order["id"],
-                            )
-                            pill_text = pills.stockout_pill(item["name"], claimed_order["suggestion"], new_qty)
-                        else:
-                            pill_text = pills.rearm_pill()
-                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
-                        await conn.execute(
-                            "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
-                            sys_row["id"], claimed_order["id"],
-                        )
-
-            else:
-                claimed_movement = await conn.fetchrow(
+            async with conn.transaction():
+                claimed_order = await conn.fetchrow(
                     """
-                    UPDATE inventory_movements SET clarify_message_id = NULL
-                    WHERE clarify_message_id = $1
+                    UPDATE inventory_orders SET confirm_message_id = NULL, updated_at = NOW()
+                    WHERE confirm_message_id = $1 AND channel_id = $2 AND status = 'queued'
                       AND created_at > NOW() - INTERVAL '7 days'
-                    RETURNING id, company_id, item_id, clarify_rounds
+                    RETURNING id, company_id, item_id, suggested_quantity, quantity, suggestion
                     """,
-                    reply_uuid,
+                    reply_uuid, UUID(channel_id_str),
                 )
-                if claimed_movement is not None:
+                if claimed_order is not None:
                     claim_happened = True
                     item = await conn.fetchrow(
-                        "SELECT name, current_quantity FROM inventory_items WHERE id = $1",
-                        claimed_movement["item_id"],
+                        "SELECT name FROM inventory_items WHERE id = $1", claimed_order["item_id"],
                     )
-                    qty = parse_quantity_reply(stripped)
-                    if qty is not None:
-                        await movements_service.amend_movement_quantity(
-                            conn, movement_id=claimed_movement["id"], quantity=qty, user_id=sender_uuid,
+                    features = await _schedule_company_features(conn, claimed_order["company_id"])
+                    role = await conn.fetchval("SELECT role FROM users WHERE id = $1", sender_uuid)
+                    verdict = evaluate_inventory_action(role=role, features=features, stage="approve_order")
+                    if not verdict.ok:
+                        await conn.execute(
+                            "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                            reply_uuid, claimed_order["id"],
                         )
-                        new_item = await conn.fetchrow(
-                            "SELECT current_quantity FROM inventory_items WHERE id = $1",
+                        sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                    else:
+                        action = parse_confirm_reply(stripped)
+                        if action == "confirm":
+                            row = await orders_service.approve_order(
+                                conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
+                                user_id=sender_uuid, quantity=claimed_order["quantity"],
+                            )
+                            if row is None:
+                                sys_row = await _insert_system_message(
+                                    conn, channel_id_str,
+                                    "\U0001F4E6 That order was already handled — check the Inventory page.",
+                                )
+                            else:
+                                sys_row = await _insert_system_message(
+                                    conn, channel_id_str, pills.order_confirmed_pill(item["name"], row["quantity"]),
+                                )
+                        elif action == "cancel":
+                            await orders_service.cancel_order(
+                                conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
+                                user_id=sender_uuid,
+                            )
+                            sys_row = await _insert_system_message(
+                                conn, channel_id_str, pills.order_cancelled_pill(item["name"]),
+                            )
+                        else:
+                            new_qty = parse_quantity_reply(stripped)
+                            if new_qty is not None:
+                                await conn.execute(
+                                    "UPDATE inventory_orders SET quantity = $1 WHERE id = $2",
+                                    new_qty, claimed_order["id"],
+                                )
+                                pill_text = pills.stockout_pill(
+                                    item["name"], orders_service.decode_suggestion(claimed_order["suggestion"]), new_qty,
+                                )
+                            else:
+                                pill_text = pills.rearm_pill()
+                            sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                            await conn.execute(
+                                "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                                sys_row["id"], claimed_order["id"],
+                            )
+
+                else:
+                    claimed_movement = await conn.fetchrow(
+                        """
+                        UPDATE inventory_movements SET clarify_message_id = NULL
+                        WHERE clarify_message_id = $1 AND channel_id = $2
+                          AND created_at > NOW() - INTERVAL '7 days'
+                        RETURNING id, company_id, item_id, clarify_rounds
+                        """,
+                        reply_uuid, UUID(channel_id_str),
+                    )
+                    if claimed_movement is not None:
+                        claim_happened = True
+                        item = await conn.fetchrow(
+                            "SELECT name, current_quantity FROM inventory_items WHERE id = $1",
                             claimed_movement["item_id"],
                         )
-                        sys_row = await _insert_system_message(
-                            conn, channel_id_str,
-                            pills.movement_pill(item["name"], qty, new_item["current_quantity"], None, False),
-                        )
-                    elif claimed_movement["clarify_rounds"] < 2:
-                        await conn.execute(
-                            "UPDATE inventory_movements SET clarify_rounds = clarify_rounds + 1 WHERE id = $1",
-                            claimed_movement["id"],
-                        )
-                        pill_text = pills.quantity_question(pills.rearm_pill())
-                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
-                        await conn.execute(
-                            "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
-                            sys_row["id"], claimed_movement["id"],
-                        )
-                    else:
-                        sys_row = await _insert_system_message(
-                            conn, channel_id_str,
-                            f"\U0001F4E6 Couldn't pin down the count for {item['name']} — set it on the Inventory page.",
-                        )
+                        qty = parse_quantity_reply(stripped)
+                        if qty is not None:
+                            await movements_service.amend_movement_quantity(
+                                conn, movement_id=claimed_movement["id"], quantity=qty, user_id=sender_uuid,
+                            )
+                            new_item = await conn.fetchrow(
+                                "SELECT current_quantity FROM inventory_items WHERE id = $1",
+                                claimed_movement["item_id"],
+                            )
+                            sys_row = await _insert_system_message(
+                                conn, channel_id_str,
+                                pills.movement_pill(item["name"], qty, new_item["current_quantity"], None, False),
+                            )
+                        elif claimed_movement["clarify_rounds"] < 2:
+                            await conn.execute(
+                                "UPDATE inventory_movements SET clarify_rounds = clarify_rounds + 1 WHERE id = $1",
+                                claimed_movement["id"],
+                            )
+                            pill_text = pills.quantity_question(pills.rearm_pill())
+                            sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                            await conn.execute(
+                                "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                                sys_row["id"], claimed_movement["id"],
+                            )
+                        else:
+                            sys_row = await _insert_system_message(
+                                conn, channel_id_str,
+                                f"\U0001F4E6 Couldn't pin down the count for {item['name']} — set it on the Inventory page.",
+                            )
 
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))

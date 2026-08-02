@@ -32,6 +32,7 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
   }, [itemId])
 
   async function handleAdjust() {
+    if (countInput.trim() === '') return
     const value = Number(countInput)
     if (Number.isNaN(value)) return
     try {

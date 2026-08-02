@@ -5,7 +5,6 @@ staging) happens in server/app/werk/routes/channels_ws.py; this router is
 the /work Inventory page's REST surface plus manual item/order management.
 """
 
-from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -50,8 +49,8 @@ async def list_items(include_archived: bool = False, company_id: UUID = Depends(
             open_order = OrderOut(
                 id=r["order_id"], item_id=r["id"], status=r["order_status"],
                 suggested_quantity=r["order_suggested_quantity"], quantity=r["order_quantity"],
-                suggestion=r["order_suggestion"], created_at=r["order_created_at"],
-                updated_at=r["order_updated_at"],
+                suggestion=orders_service.decode_suggestion(r["order_suggestion"]),
+                created_at=r["order_created_at"], updated_at=r["order_updated_at"],
             )
         base = {k: v for k, v in dict(r).items() if not k.startswith("order_")}
         items.append(InventoryItemOut(**{**base, "open_order": open_order}))
@@ -173,7 +172,9 @@ async def list_orders(status: Optional[str] = None, company_id: UUID = Depends(g
             rows = await conn.fetch(
                 "SELECT * FROM inventory_orders WHERE company_id = $1 ORDER BY created_at DESC", company_id,
             )
-    return OrderListResponse(orders=[OrderOut(**dict(r)) for r in rows])
+    return OrderListResponse(orders=[
+        OrderOut(**{**dict(r), "suggestion": orders_service.decode_suggestion(r["suggestion"])}) for r in rows
+    ])
 
 
 @router.post("/orders", response_model=OrderOut, status_code=201)
@@ -182,7 +183,8 @@ async def create_order(body: OrderCreate, company_id: UUID = Depends(get_client_
     async with get_connection() as conn:
         row = await orders_service.stage_order(
             conn, company_id=company_id, item_id=body.item_id, channel_id=None, source_message_id=None,
-            created_by=user.id, suggestion={"suggested_quantity": float(body.quantity)} if body.quantity else None,
+            created_by=user.id,
+            suggestion={"suggested_quantity": float(body.quantity)} if body.quantity is not None else None,
         )
     return OrderOut(**row)
 
@@ -238,7 +240,7 @@ async def list_suggestions(company_id: UUID = Depends(get_client_company_id),
         for item in items:
             movement_rows = await conn.fetch(
                 "SELECT kind, quantity, quantity_delta, created_at FROM inventory_movements "
-                "WHERE item_id = $1 ORDER BY created_at ASC",
+                "WHERE item_id = $1 AND created_at > NOW() - INTERVAL '90 days' ORDER BY created_at ASC",
                 item["id"],
             )
             suggestion = suggest_order([dict(m) for m in movement_rows], datetime.now(timezone.utc))
