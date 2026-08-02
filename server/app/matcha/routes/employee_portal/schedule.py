@@ -5,7 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
-from app.matcha.models.scheduling.employee_schedule import ScheduleRequestCreate
+from app.matcha.models.scheduling.employee_schedule import (
+    AvailabilityReplace, ScheduleRequestCreate,
+)
 from app.matcha.dependencies import require_employee_record
 
 from ._shared import _schedule_dep
@@ -116,6 +118,48 @@ async def create_my_schedule_request(
             f"{REQUEST_SELECT} WHERE r.id = $1", request_id,
         )
     return serialize_request(dict(row))
+
+
+@router.get("/me/schedule/availability", dependencies=_schedule_dep)
+async def get_my_availability(employee: dict = Depends(require_employee_record)):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT weekday, start_time, end_time FROM schedule_employee_availability "
+            "WHERE company_id = $1 AND employee_id = $2 ORDER BY weekday, start_time",
+            employee["org_id"], employee["id"],
+        )
+    return {"windows": [
+        {"weekday": r["weekday"], "start_time": str(r["start_time"])[:5],
+         "end_time": str(r["end_time"])[:5]} for r in rows]}
+
+
+@router.put("/me/schedule/availability", dependencies=_schedule_dep)
+async def replace_my_availability(
+    body: AvailabilityReplace,
+    employee: dict = Depends(require_employee_record),
+):
+    """Full replacement. Empty windows list clears availability entirely
+    (= back to fully available)."""
+    from app.matcha.routes.employee_schedule._shared import log_audit
+
+    company_id = employee["org_id"]
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM schedule_employee_availability WHERE company_id = $1 AND employee_id = $2",
+                company_id, employee["id"],
+            )
+            for w in body.windows:
+                await conn.execute(
+                    "INSERT INTO schedule_employee_availability "
+                    "(company_id, employee_id, weekday, start_time, end_time) "
+                    "VALUES ($1,$2,$3,$4,$5)",
+                    company_id, employee["id"], w.weekday, w.start_time, w.end_time,
+                )
+            await log_audit(conn, company_id, "availability", employee["id"],
+                            employee.get("user_id"), "availability.update",
+                            {"windows": len(body.windows), "actor": "employee"})
+    return {"saved": len(body.windows)}
 
 
 @router.delete("/me/schedule/requests/{request_id}", dependencies=_schedule_dep)

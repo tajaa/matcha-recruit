@@ -193,3 +193,46 @@ class RequestReview(BaseModel):
     review_notes: Optional[str] = Field(None, max_length=2000)
     # Approve a swap even if the target employee has an overlapping shift.
     force: bool = False
+
+
+class AvailabilityWindow(BaseModel):
+    weekday: Weekday
+    start_time: time
+    end_time: time
+
+    @model_validator(mode="after")
+    def _check_order(self) -> "AvailabilityWindow":
+        if self.end_time <= self.start_time:
+            raise ValueError("end_time must be after start_time")
+        return self
+
+
+class AvailabilityReplace(BaseModel):
+    """Full-replacement weekly availability (PUT semantics — the stored set
+    becomes exactly this list). Empty list = clear = fully available."""
+
+    windows: list[AvailabilityWindow] = Field(default_factory=list, max_length=42)
+
+    @model_validator(mode="after")
+    def _check_overlaps(self) -> "AvailabilityReplace":
+        by_day: dict[int, list[AvailabilityWindow]] = {}
+        for w in self.windows:
+            by_day.setdefault(w.weekday, []).append(w)
+        for day, ws in by_day.items():
+            ws.sort(key=lambda w: w.start_time)
+            for a, b in zip(ws, ws[1:]):
+                if b.start_time < a.end_time:
+                    raise ValueError(f"overlapping windows on weekday {day}")
+        return self
+
+
+class DuplicateShift(BaseModel):
+    """Copy one shift onto other calendar dates (drafts)."""
+
+    target_dates: list[date] = Field(..., min_length=1, max_length=31)
+    include_assignments: bool = True
+
+    @model_validator(mode="after")
+    def _dedupe(self) -> "DuplicateShift":
+        self.target_dates = sorted(set(self.target_dates))
+        return self

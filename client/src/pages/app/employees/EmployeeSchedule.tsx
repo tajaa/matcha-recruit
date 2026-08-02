@@ -2,15 +2,15 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
-import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
-  generateFromTemplate, fetchRequests, reviewRequest,
+  generateFromTemplate, fetchRequests, reviewRequest, duplicateShift,
 } from '../../../api/employees/employeeSchedule'
+import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
   Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
@@ -26,50 +26,6 @@ import { useMe } from '../../../hooks/useMe'
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-interface ComplianceViolation {
-  check: string
-  severity: string
-  message: string
-  statute?: string | null
-}
-
-interface ForceableDetail {
-  code?: string
-  message?: string
-  conflicts?: { starts_at: string; ends_at: string; role: string | null }[]
-  violations?: ComplianceViolation[]
-}
-
-/** A 409 the admin can override → confirm() text. Anything else → null (it gets
- *  surfaced as an error instead of silently swallowed). */
-function conflictPrompt(err: unknown): string | null {
-  if (!(err instanceof ApiError) || err.status !== 409) return null
-  const detail = (err.body as { detail?: ForceableDetail } | null)?.detail
-  if (detail?.code === 'schedule_conflict') {
-    const lines = (detail.conflicts ?? []).map(
-      (c) => `• ${fmtDayLabel(c.starts_at)} ${fmtTime(c.starts_at)}–${fmtTime(c.ends_at)}${c.role ? ` (${c.role})` : ''}`,
-    )
-    return `Already scheduled during this time:\n${lines.join('\n')}\n\nAssign anyway?`
-  }
-  if (detail?.code === 'shift_full') {
-    return `${detail.message ?? 'This shift is already fully staffed.'}\n\nAssign anyway?`
-  }
-  if (detail?.code === 'schedule_compliance') {
-    // Advisory scheduling-law flags (meal break, overtime, min rest, Fair
-    // Workweek notice/clopening). A hard minor-hour limit comes back as a 422
-    // (schedule_compliance_block) instead and is surfaced as a non-overridable
-    // error by errorMessage().
-    const violations = detail.violations ?? []
-    const lines = violations.map((v) => `• ${v.message}${v.statute ? ` [${v.statute}]` : ''}`)
-    const allFairWorkweek = violations.length > 0 && violations.every((v) => v.check?.startsWith('fair_workweek_'))
-    const lead = allFairWorkweek
-      ? 'This change may trigger Fair Workweek obligations:'
-      : 'This shift may not comply with scheduling law:'
-    return `${lead}\n${lines.join('\n')}\n\nSchedule anyway?`
-  }
-  return null
-}
 
 export default function EmployeeSchedule() {
   // Deep link from a Huume shift-chat confirmation pill (see
@@ -160,6 +116,7 @@ export default function EmployeeSchedule() {
                   onPatch={patchShift}
                   onChanged={reload}
                   highlightShiftId={highlightShiftId}
+                  weekDays={days}
                 />
               ))}
             </div>
@@ -191,9 +148,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -214,6 +171,7 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
             key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
             onPatch={onPatch} onChanged={onChanged}
             highlighted={s.id === highlightShiftId}
+            weekDays={weekDays}
           />
         ))}
       </div>
@@ -221,14 +179,17 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [copyDays, setCopyDays] = useState<Set<string>>(new Set())
+  const [copyAssignments, setCopyAssignments] = useState(true)
   const cardRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (highlighted) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -294,6 +255,21 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
           toast(errorMessage(forcedErr), 'error')
         }
       }
+    } finally { setBusy(false) }
+  }
+  async function duplicate() {
+    setBusy(true)
+    try {
+      const res = await duplicateShift(shift.id, [...copyDays], copyAssignments)
+      toast(`Copied to ${res.created} day${res.created === 1 ? '' : 's'}`, 'success')
+      if (res.dropped.length) {
+        toast(res.dropped.map((d) => `${d.name || 'Assignee'} skipped ${d.date}: ${d.reason}`).join('\n'), 'info')
+      }
+      setCopyOpen(false)
+      setCopyDays(new Set())
+      onChanged()
+    } catch (err) {
+      toast(errorMessage(err), 'error')
     } finally { setBusy(false) }
   }
 
@@ -374,11 +350,54 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         {shift.status !== 'cancelled' && (
           <button onClick={() => { setPickerOpen(false); setEditing(true) }} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"><Pencil className="h-3 w-3" /> Edit</button>
         )}
+        {shift.status !== 'cancelled' && (
+          <button onClick={() => { setPickerOpen(false); setCopyOpen((v) => !v) }} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"><Copy className="h-3 w-3" /> Copy</button>
+        )}
         {shift.status === 'draft' && (
           <button onClick={() => act(() => publishShift(shift.id))} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300"><Send className="h-3 w-3" /> Publish</button>
         )}
         <button onClick={remove} disabled={busy} className="inline-flex items-center gap-1 text-[11px] text-zinc-600 hover:text-red-400 ml-auto"><Trash2 className="h-3 w-3" /></button>
       </div>
+
+      {copyOpen && (
+        <div className="mt-2 border-t border-zinc-800 pt-2 space-y-2">
+          <div className="flex gap-1">
+            {weekDays.map((d) => {
+              const wd = new Date(`${d}T00:00:00Z`).getUTCDay()
+              const isSource = d === shift.starts_at.slice(0, 10)
+              const selected = copyDays.has(d)
+              return (
+                <button
+                  key={d}
+                  disabled={isSource}
+                  onClick={() => setCopyDays((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(d)) next.delete(d); else next.add(d)
+                    return next
+                  })}
+                  className={`w-8 py-1 rounded-md text-[10px] border ${
+                    isSource ? 'opacity-30 border-zinc-800 text-zinc-600'
+                      : selected ? 'bg-emerald-600 border-emerald-500 text-white'
+                      : 'border-zinc-700 text-zinc-400 hover:text-zinc-100'
+                  }`}
+                >
+                  {WEEKDAY_LABELS[wd][0]}
+                </button>
+              )
+            })}
+          </div>
+          <label className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+            <input type="checkbox" checked={copyAssignments} onChange={(e) => setCopyAssignments(e.target.checked)} />
+            Copy assignments
+          </label>
+          <button
+            onClick={duplicate} disabled={busy || copyDays.size === 0}
+            className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-2.5 py-1.5 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />} Copy to {copyDays.size || ''} day{copyDays.size === 1 ? '' : 's'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

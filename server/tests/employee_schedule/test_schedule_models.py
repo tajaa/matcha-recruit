@@ -12,6 +12,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.matcha.models.scheduling.employee_schedule import (
+    AvailabilityReplace,
+    AvailabilityWindow,
+    DuplicateShift,
     GenerateFromTemplate,
     PublishRange,
     ScheduleRequestCreate,
@@ -168,3 +171,53 @@ def test_valid_training_shift():
     )
     assert shift.kind == "training"
     assert str(shift.training_requirement_id) == REQ_ID
+
+
+# ── availability ─────────────────────────────────────────────────────────────
+
+def test_availability_window_end_before_start_is_rejected():
+    with pytest.raises(ValidationError):
+        AvailabilityWindow(weekday=1, start_time=time(16, 0), end_time=time(8, 0))
+
+
+def test_availability_window_equal_start_end_is_rejected():
+    with pytest.raises(ValidationError):
+        AvailabilityWindow(weekday=1, start_time=time(8, 0), end_time=time(8, 0))
+
+
+def test_availability_replace_rejects_overlap_same_weekday():
+    with pytest.raises(ValidationError):
+        AvailabilityReplace(windows=[
+            AvailabilityWindow(weekday=1, start_time=time(8, 0), end_time=time(13, 0)),
+            AvailabilityWindow(weekday=1, start_time=time(12, 0), end_time=time(17, 0)),
+        ])
+
+
+def test_availability_replace_accepts_adjacent_windows():
+    replace = AvailabilityReplace(windows=[
+        AvailabilityWindow(weekday=1, start_time=time(9, 0), end_time=time(12, 0)),
+        AvailabilityWindow(weekday=1, start_time=time(12, 0), end_time=time(17, 0)),
+    ])
+    assert len(replace.windows) == 2
+
+
+def test_availability_replace_accepts_empty_list():
+    replace = AvailabilityReplace(windows=[])
+    assert replace.windows == []
+
+
+# ── duplicate shift ──────────────────────────────────────────────────────────
+
+def test_duplicate_shift_dedupes_and_sorts_dates():
+    dup = DuplicateShift(target_dates=["2026-08-05", "2026-08-03", "2026-08-05"])
+    assert dup.target_dates == [date(2026, 8, 3), date(2026, 8, 5)]
+
+
+def test_duplicate_shift_rejects_empty_dates():
+    with pytest.raises(ValidationError):
+        DuplicateShift(target_dates=[])
+
+
+def test_duplicate_shift_rejects_too_many_dates():
+    with pytest.raises(ValidationError):
+        DuplicateShift(target_dates=[f"2026-08-{d:02d}" for d in range(1, 33)])

@@ -14,7 +14,7 @@ from app.database import get_connection
 from app.core.feature_flags import get_company_features
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import (
-    ShiftCreate, ShiftUpdate, PublishRange,
+    ShiftCreate, ShiftUpdate, PublishRange, DuplicateShift,
 )
 from ...services.scheduling.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
@@ -25,6 +25,8 @@ from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
+    fetch_availability, availability_violations, raise_outside_availability,
+    shift_window_on_date,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -167,6 +169,11 @@ async def create_shift(body: ShiftCreate,
                 training_enabled=bool(company_features.get("training")),
             )
 
+        avail_map: dict = {}
+        if body.employee_ids and not force:
+            avail_map = await fetch_availability(
+                conn, company_id, list(dict.fromkeys(body.employee_ids)))
+
         forced: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
@@ -176,6 +183,10 @@ async def create_shift(body: ShiftCreate,
                 )
                 if conflicts:
                     raise_conflict(emp_id, conflicts)
+                avail = availability_violations(
+                    avail_map.get(emp_id, {}), body.starts_at, body.ends_at)
+                if avail:
+                    raise_outside_availability(emp_id, avail)
             violations = await check_shift_compliance(
                 conn, company_id, location_id=body.location_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
@@ -212,6 +223,95 @@ async def create_shift(body: ShiftCreate,
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
         return await fetch_shift_by_id(conn, company_id, shift_id)
+
+
+@router.post("/shifts/{shift_id}/duplicate")
+async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
+                          current_user=Depends(require_admin_or_client)):
+    """Copy a shift onto other dates as drafts. Assignments are copied when
+    include_assignments; an assignee with a conflict or outside availability
+    on a target date is dropped for that copy and reported in `dropped` —
+    the bulk-create convention (same as template generation and the @huume
+    chat flow): never a per-date 409, warnings/drops surface in the body."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        src = await conn.fetchrow(
+            "SELECT * FROM schedule_shifts WHERE id = $1 AND company_id = $2",
+            shift_id, company_id,
+        )
+        if not src:
+            raise HTTPException(status_code=404, detail="Shift not found")
+        if src["status"] == "cancelled":
+            raise HTTPException(status_code=409, detail="Cannot duplicate a cancelled shift")
+        for d in body.target_dates:
+            if d == src["starts_at"].date():
+                raise HTTPException(
+                    status_code=422, detail="Target date equals the source shift's date")
+
+        employee_ids: list[UUID] = []
+        names: dict[str, str] = {}
+        if body.include_assignments:
+            rows = await conn.fetch(
+                "SELECT a.employee_id, e.first_name, e.last_name "
+                "FROM schedule_shift_assignments a JOIN employees e ON e.id = a.employee_id "
+                "WHERE a.shift_id = $1",
+                shift_id,
+            )
+            employee_ids = [r["employee_id"] for r in rows]
+            names = {str(r["employee_id"]): f"{r['first_name']} {r['last_name']}".strip() for r in rows}
+        avail_map = await fetch_availability(conn, company_id, employee_ids)
+
+        # kind='training' needs the requirement row for create_shift_core's hooks
+        training_requirement = None
+        if src["training_requirement_id"]:
+            tr = await conn.fetchrow(
+                "SELECT id, title, training_type, frequency_months "
+                "FROM training_requirements WHERE id = $1 AND company_id = $2",
+                src["training_requirement_id"], company_id,
+            )
+            training_requirement = dict(tr) if tr else None
+
+        first_start, first_end = shift_window_on_date(
+            src["starts_at"], src["ends_at"], body.target_dates[0])
+        compliance_warnings = await check_shift_compliance(
+            conn, company_id, location_id=src["location_id"],
+            starts_at=first_start, ends_at=first_end,
+            break_minutes=src["break_minutes"] or 0, shift_kind=src["kind"],
+        )
+
+        dropped: list[dict] = []
+        created_ids: list[UUID] = []
+        async with conn.transaction():
+            for d in body.target_dates:
+                new_start, new_end = shift_window_on_date(src["starts_at"], src["ends_at"], d)
+                surviving: list[UUID] = []
+                for eid in employee_ids:
+                    conflicts = await find_conflicts(conn, company_id, eid, new_start, new_end)
+                    avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
+                    if conflicts or avail:
+                        dropped.append({
+                            "date": d.isoformat(), "employee_id": str(eid),
+                            "name": names.get(str(eid), ""),
+                            "reason": "outside their logged availability" if avail
+                                      else "already scheduled during this time",
+                        })
+                        continue
+                    surviving.append(eid)
+                new_id = await create_shift_core(
+                    conn, company_id,
+                    location_id=src["location_id"], role=src["role"], department=src["department"],
+                    starts_at=new_start, ends_at=new_end,
+                    break_minutes=src["break_minutes"], required_staff=src["required_staff"],
+                    color=src["color"], notes=src["notes"], kind=src["kind"],
+                    training_requirement=training_requirement,
+                    training_requirement_id=src["training_requirement_id"],
+                    employee_ids=surviving, created_by=current_user.id, status="draft",
+                    audit_details={"source": "duplicate", "source_shift_id": str(shift_id)},
+                )
+                created_ids.append(new_id)
+        shifts = [await fetch_shift_by_id(conn, company_id, i) for i in created_ids]
+    return {"created": len(created_ids), "shifts": shifts,
+            "dropped": dropped, "compliance_warnings": compliance_warnings}
 
 
 @router.put("/shifts/{shift_id}")
@@ -282,6 +382,10 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     credential_templates_enabled=bool(company_features.get("credential_templates")),
                     training_enabled=bool(company_features.get("training")),
                 )
+            avail_map: dict = {}
+            if assignees and retimed and not force:
+                avail_map = await fetch_availability(
+                    conn, company_id, [row["employee_id"] for row in assignees])
             for row in assignees:
                 emp = row["employee_id"]
                 if retimed and not force:
@@ -291,6 +395,9 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     )
                     if conflicts:
                         raise_conflict(emp, conflicts)
+                    avail = availability_violations(avail_map.get(emp, {}), new_start, new_end)
+                    if avail:
+                        raise_outside_availability(emp, avail)
                 violations = await check_shift_compliance(
                     conn, company_id, location_id=new_location,
                     starts_at=new_start, ends_at=new_end,

@@ -92,6 +92,30 @@ async def find_conflicts(
     ]
 
 
+async def fetch_availability(
+    conn, company_id: UUID, employee_ids: list[UUID],
+) -> dict:
+    """{employee_id: {weekday: [(start_time, end_time), ...]}} — employees
+    with no rows map to {} (= fully available per
+    schedule_rules.availability_violations)."""
+    out: dict = {eid: {} for eid in employee_ids}
+    if not employee_ids:
+        return out
+    rows = await conn.fetch(
+        """
+        SELECT employee_id, weekday, start_time, end_time
+        FROM schedule_employee_availability
+        WHERE company_id = $1 AND employee_id = ANY($2::uuid[])
+        ORDER BY weekday, start_time
+        """,
+        company_id, employee_ids,
+    )
+    for r in rows:
+        out[r["employee_id"]].setdefault(r["weekday"], []).append(
+            (r["start_time"], r["end_time"]))
+    return out
+
+
 async def create_shift_core(
     conn,
     company_id: UUID,

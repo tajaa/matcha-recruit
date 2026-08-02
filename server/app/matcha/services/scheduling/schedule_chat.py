@@ -56,9 +56,12 @@ from .schedule_chat_rules import (
     resolve_week,
 )
 from .schedule_intelligence import fetch_lapse_items
-from .schedule_rules import INACTIVE_EMPLOYMENT_STATUSES, sunday_indexed_weekday, template_windows
+from .schedule_rules import (
+    INACTIVE_EMPLOYMENT_STATUSES, availability_violations, sunday_indexed_weekday,
+    template_windows,
+)
 from .shift_compliance import _approved_db_rules, _week_hours, check_shift_compliance
-from .shift_writes import create_shift_core, find_conflicts, log_audit
+from .shift_writes import create_shift_core, fetch_availability, find_conflicts, log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -499,9 +502,13 @@ async def build_proposal(
         )[: max(0, _CANDIDATE_CAP - len(pinned_rows))]
         survivors = pinned_rows + other_rows
 
+        avail_map = await fetch_availability(conn, company_id, [r["id"] for r in survivors])
+
         contexts: list[CandidateContext] = []
         for r in survivors:
             eid = r["id"]
+            if availability_violations(avail_map.get(eid, {}), starts_at, ends_at):
+                continue  # not schedulable — same treatment as inactive employees
             name = f"{r['first_name']} {r['last_name']}".strip()
             conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
             violations = await check_shift_compliance(
@@ -634,12 +641,14 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
         UUID(a["employee_id"]) for shift in proposal["shifts"] for a in shift["assignees"]
     ]
     lapse_map: dict = {}
+    avail_map: dict = {}
     if all_employee_ids:
         lapse_map = await fetch_lapse_items(
             conn, company_id, list(dict.fromkeys(all_employee_ids)),
             credential_templates_enabled=credential_templates_enabled,
             training_enabled=training_enabled,
         )
+        avail_map = await fetch_availability(conn, company_id, list(dict.fromkeys(all_employee_ids)))
 
     async with conn.transaction():
         for shift in proposal["shifts"]:
@@ -653,6 +662,7 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
             for a in shift["assignees"]:
                 eid = UUID(a["employee_id"])
                 conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)
+                avail = availability_violations(avail_map.get(eid, {}), starts_at, ends_at)
                 violations = await check_shift_compliance(
                     conn, company_id, location_id=location_id,
                     starts_at=starts_at, ends_at=ends_at,
@@ -661,10 +671,12 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
                     fw_event="assign", fw_shift_published=True,
                 )
                 block = next((v for v in violations if v.get("severity") == "block"), None)
-                if conflicts or block:
+                if conflicts or block or avail:
                     if block:
                         statute = f" ({block['statute']})" if block.get("statute") else ""
                         reason = f"{block['message']}{statute}"
+                    elif avail:
+                        reason = "this is outside their logged availability"
                     else:
                         reason = "they picked up a conflicting shift in the meantime"
                     dropped.append({"name": a["name"], "label": shift["label"], "reason": reason})

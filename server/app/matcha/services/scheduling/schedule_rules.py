@@ -121,6 +121,69 @@ def shift_full_detail(assigned: int, required_staff: int) -> dict:
     }
 
 
+def _minutes(t: time) -> int:
+    return t.hour * 60 + t.minute
+
+
+def availability_violations(
+    windows_by_weekday: dict[int, list[tuple[time, time]]],
+    starts_at: datetime, ends_at: datetime,
+) -> list[dict]:
+    """Portions of [starts_at, ends_at) not covered by the employee's weekly
+    availability. Empty dict = fully available (no availability logged) = [].
+    Weekday keys are Sun=0..Sat=6, same as the template weekday mask. A
+    window's end_time of 23:59 counts as covering through midnight, so
+    '00:00-23:59' means all day. A day-segment must be covered by a SINGLE
+    window (windows are validated non-overlapping at write time; contiguous-
+    window stitching is deliberately out of scope). Times are the same UTC
+    wall-clock convention as shift timestamps — no tz conversion."""
+    if not windows_by_weekday:
+        return []
+    violations: list[dict] = []
+    cursor = starts_at
+    while cursor < ends_at:
+        day_end = datetime.combine(
+            cursor.date() + timedelta(days=1), time.min, tzinfo=cursor.tzinfo)
+        seg_end = min(ends_at, day_end)
+        seg_start_min = _minutes(cursor.time())
+        seg_end_min = 24 * 60 if seg_end == day_end else _minutes(seg_end.time())
+        weekday = sunday_indexed_weekday(cursor.date())
+        windows = windows_by_weekday.get(weekday, [])
+        covered = any(
+            _minutes(w_start) <= seg_start_min
+            and seg_end_min <= (24 * 60 if w_end >= time(23, 59) else _minutes(w_end))
+            for (w_start, w_end) in windows
+        )
+        if not covered:
+            desc = ", ".join(f"{str(s)[:5]}–{str(e)[:5]}" for s, e in windows) or "not available"
+            violations.append({
+                "date": cursor.date().isoformat(),
+                "weekday": weekday,
+                "message": f"{cursor.date().isoformat()}: outside logged availability ({desc})",
+            })
+        cursor = seg_end
+    return violations
+
+
+def availability_detail(employee_id: UUID, violations: list[dict]) -> dict:
+    """409 body for scheduling outside availability — forceable, same shape
+    family as conflict_detail/shift_full_detail."""
+    return {
+        "code": "outside_availability",
+        "message": "Employee is not available during this time",
+        "employee_id": str(employee_id),
+        "violations": violations,
+    }
+
+
+def shift_window_on_date(starts_at: datetime, ends_at: datetime, target: date) -> tuple[datetime, datetime]:
+    """The same shift window re-anchored to `target`: preserves time-of-day
+    and duration, so an overnight shift keeps its +1-day end. Pure day
+    arithmetic on UTC wall-clock timestamps — no DST concerns."""
+    shift_by = timedelta(days=(target - starts_at.date()).days)
+    return starts_at + shift_by, ends_at + shift_by
+
+
 def compliance_warning_detail(violations: list[dict]) -> dict:
     """409 body for advisory scheduling-compliance flags — forceable, same shape
     family as conflict/shift_full. The frontend keys on `code` to offer the

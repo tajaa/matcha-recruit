@@ -34,6 +34,8 @@ _EXPECTED_ROUTES = {
     ("/me/pto/request", ("POST",)),
     ("/me/pto/request/{request_id}", ("DELETE",)),
     ("/me/schedule", ("GET",)),
+    ("/me/schedule/availability", ("GET",)),
+    ("/me/schedule/availability", ("PUT",)),
     ("/me/schedule/requests", ("GET",)),
     ("/me/schedule/requests", ("POST",)),
     ("/me/schedule/requests/{request_id}", ("DELETE",)),
@@ -50,7 +52,7 @@ _EXPECTED_ROUTES = {
 def test_route_table_matches_pre_split_snapshot():
     routes = {(r.path, tuple(sorted(r.methods))) for r in employee_portal.router.routes}
     assert routes == _EXPECTED_ROUTES
-    assert len(employee_portal.router.routes) == 33
+    assert len(employee_portal.router.routes) == 35
 
 
 def test_dep_lists_are_shared_singletons():

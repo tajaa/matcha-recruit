@@ -11,14 +11,14 @@ Employee-facing self-service portal. Split from a 1,727-line flat `employee_port
 | `profile.py` | `GET/PATCH /me`, `GET /me/tasks` | 3 |
 | `pto.py` | `/me/pto*` — balance summary, request, cancel (`time_off`) | 3 |
 | `leave.py` | `/me/leave*` + `LEAVE_TYPES` | 5 |
-| `schedule.py` | `/me/schedule*` — published shifts + swap/drop/unavailability (`employee_schedule`) | 4 |
+| `schedule.py` | `/me/schedule*` — published shifts + swap/drop/unavailability + recurring weekly availability (`employee_schedule`) | 6 |
 | `documents.py` | `/me/documents*` incl. handbook content + e-sign | 4 |
 | `policies.py` | `/policies*` (`policies`) | 2 |
 | `onboarding.py` | `/onboarding*` + `OnboardingTaskResponse` / `OnboardingProgress` | 2 |
 | `priorities.py` | `/priorities*` — priority task list + completion | 2 |
 | `credential_documents.py` | `/me/credential-documents` upload + list | 2 |
 | `benefits.py` | `/me/benefits*` — elections + life events (`benefits_admin`) | 6 |
-| **Total** | | **33 routes** |
+| **Total** | | **35 routes** (33 at the 2026-07-26 split + 2 availability routes added 2026-08-02) |
 
 ## Package router pattern
 

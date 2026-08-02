@@ -16,10 +16,11 @@ from fastapi import HTTPException
 
 from ...dependencies import get_client_company_id
 from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
-    INACTIVE_EMPLOYMENT_STATUSES, build_patch, conflict_detail, shift_full_detail,
+    INACTIVE_EMPLOYMENT_STATUSES, availability_detail, availability_violations,
+    build_patch, conflict_detail, shift_full_detail, shift_window_on_date,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
-    _iso, find_conflicts, log_audit,
+    _iso, fetch_availability, find_conflicts, log_audit,
 )
 
 _SHIFT_COLS = (
@@ -190,6 +191,11 @@ def raise_shift_full(assigned: int, required_staff: int) -> None:
     raise HTTPException(
         status_code=409, detail=shift_full_detail(assigned, required_staff)
     )
+
+
+def raise_outside_availability(employee_id: UUID, violations: list[dict]) -> None:
+    """409 the frontend can force through, same shape as raise_conflict."""
+    raise HTTPException(status_code=409, detail=availability_detail(employee_id, violations))
 
 
 async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):

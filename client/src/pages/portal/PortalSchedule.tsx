@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff, AlertTriangle } from 'lucide-react'
+import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff, AlertTriangle, Clock } from 'lucide-react'
 import { useToast } from '../../components/ui'
 import {
   fetchMySchedule, fetchMyRequests, createMyRequest, cancelMyRequest,
+  fetchMyAvailability, saveMyAvailability, type AvailabilityWindow,
 } from '../../api/employees/employeeSchedule'
 import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
 import {
-  REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate,
+  REQUEST_TONE, errorMessage, fmtTime, fmtDayLabel as fmtDay, addDays, toISODate, WEEKDAY_LABELS,
 } from '../../types/employeeSchedule'
 
 function todayISO(): string {
@@ -94,6 +95,8 @@ export default function PortalSchedule() {
         ))}
       </section>
 
+      <AvailabilityEditor />
+
       <UnavailableForm onDone={load} />
 
       <section>
@@ -168,6 +171,94 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
         </div>
       )}
     </div>
+  )
+}
+
+interface AvailabilityRow { enabled: boolean; start: string; end: string }
+
+const DEFAULT_ROWS: AvailabilityRow[] = WEEKDAY_LABELS.map(() => ({
+  enabled: false, start: '09:00', end: '17:00',
+}))
+
+function AvailabilityEditor() {
+  const { toast } = useToast()
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [rows, setRows] = useState<AvailabilityRow[]>(DEFAULT_ROWS)
+  const [busy, setBusy] = useState(false)
+
+  async function ensureLoaded() {
+    if (loaded) return
+    try {
+      const { windows } = await fetchMyAvailability()
+      const next = DEFAULT_ROWS.map((r) => ({ ...r }))
+      // v1 edits one window per day — a weekday with multiple stored windows
+      // shows only the first; saving overwrites the rest for that day.
+      for (const w of windows) {
+        next[w.weekday] = { enabled: true, start: w.start_time, end: w.end_time }
+      }
+      setRows(next)
+      setLoaded(true)
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    }
+  }
+
+  async function save() {
+    setBusy(true)
+    try {
+      const windows: AvailabilityWindow[] = rows
+        .map((r, weekday) => ({ ...r, weekday }))
+        .filter((r) => r.enabled)
+        .map((r) => ({ weekday: r.weekday, start_time: r.start, end_time: r.end }))
+      await saveMyAvailability(windows)
+      toast('Availability saved', 'success')
+    } catch (err) {
+      toast(errorMessage(err), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <button
+        onClick={() => { setOpen((v) => !v); void ensureLoaded() }}
+        className="inline-flex items-center gap-2 text-sm text-zinc-200 hover:text-white"
+      >
+        <Clock className="h-4 w-4 text-zinc-400" /> My weekly availability
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          <p className="text-[11px] text-zinc-500">No days checked = available anytime.</p>
+          {rows.map((row, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 w-14 shrink-0">
+                <input
+                  type="checkbox" checked={row.enabled}
+                  onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, enabled: e.target.checked } : r))}
+                />
+                <span className="text-xs text-zinc-300">{WEEKDAY_LABELS[i]}</span>
+              </label>
+              <input
+                type="time" value={row.start} disabled={!row.enabled}
+                onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, start: e.target.value } : r))}
+                className={`${inputCls} disabled:opacity-40`}
+              />
+              <span className="text-zinc-600">–</span>
+              <input
+                type="time" value={row.end} disabled={!row.enabled}
+                onChange={(e) => setRows((rs) => rs.map((r, j) => j === i ? { ...r, end: e.target.value } : r))}
+                className={`${inputCls} disabled:opacity-40`}
+              />
+            </div>
+          ))}
+          <button onClick={save} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-3 py-1.5 disabled:opacity-50">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
+          </button>
+        </div>
+      )}
+    </section>
   )
 }
 

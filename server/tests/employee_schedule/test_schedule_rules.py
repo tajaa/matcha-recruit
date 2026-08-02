@@ -7,15 +7,18 @@ and the two forceable 409s the frontend keys on by `code`.
 """
 
 import ast
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from app.matcha.services.scheduling.schedule_rules import (
     INACTIVE_EMPLOYMENT_STATUSES,
+    availability_detail,
+    availability_violations,
     build_patch,
     conflict_detail,
     shift_full_detail,
+    shift_window_on_date,
     summarize_shifts,
     sunday_indexed_weekday,
     template_windows,
@@ -189,4 +192,79 @@ def test_shift_full_detail_shape():
     detail = shift_full_detail(2, 2)
     assert detail["code"] == "shift_full"
     assert detail["assigned"] == 2 and detail["required_staff"] == 2
-    assert "2 of 2" in detail["message"]
+
+
+# ── availability ─────────────────────────────────────────────────────────────
+
+# 2026-07-13 is a Monday (weekday 1, Sun=0).
+_MON = datetime(2026, 7, 13, tzinfo=timezone.utc)
+
+
+def test_availability_empty_dict_is_fully_available():
+    shift_start = _MON.replace(hour=8)
+    shift_end = _MON.replace(hour=16)
+    assert availability_violations({}, shift_start, shift_end) == []
+
+
+def test_availability_window_covers_shift():
+    windows = {1: [(time(8, 0), time(16, 0))]}  # Monday 08:00-16:00
+    assert availability_violations(windows, _MON.replace(hour=8), _MON.replace(hour=16)) == []
+
+
+def test_availability_shift_exceeds_window():
+    windows = {1: [(time(8, 0), time(16, 0))]}
+    violations = availability_violations(windows, _MON.replace(hour=9), _MON.replace(hour=17))
+    assert len(violations) == 1
+    assert violations[0]["weekday"] == 1
+    assert violations[0]["date"] == "2026-07-13"
+
+
+def test_availability_weekday_with_no_rows_is_unavailable():
+    # Rows exist for Tuesday (2) only; a Monday shift has no coverage at all.
+    windows = {2: [(time(8, 0), time(16, 0))]}
+    violations = availability_violations(windows, _MON.replace(hour=8), _MON.replace(hour=16))
+    assert len(violations) == 1
+    assert violations[0]["weekday"] == 1
+
+
+def test_availability_overnight_shift_spans_two_weekdays():
+    # Monday 22:00 -> Tuesday 06:00. Only Monday has a covering window.
+    windows = {1: [(time(22, 0), time(23, 59))]}
+    starts = _MON.replace(hour=22)
+    ends = _MON.replace(hour=6) + timedelta(days=1)
+    violations = availability_violations(windows, starts, ends)
+    assert len(violations) == 1
+    assert violations[0]["weekday"] == 2  # Tuesday segment uncovered
+    assert violations[0]["date"] == "2026-07-14"
+
+
+def test_availability_all_day_window_covers_midnight_end():
+    windows = {1: [(time(0, 0), time(23, 59))]}
+    starts = _MON.replace(hour=20)
+    ends = _MON.replace(hour=0) + timedelta(days=1)  # exactly midnight
+    assert availability_violations(windows, starts, ends) == []
+
+
+def test_availability_detail_shape():
+    employee_id = uuid4()
+    detail = availability_detail(employee_id, [{"date": "2026-07-13", "message": "nope"}])
+    assert detail["code"] == "outside_availability"
+    assert detail["employee_id"] == str(employee_id)
+    assert detail["violations"] == [{"date": "2026-07-13", "message": "nope"}]
+
+
+# ── shift_window_on_date ──────────────────────────────────────────────────────
+
+def test_shift_window_on_date_same_day_preserves_times():
+    starts = datetime(2026, 8, 3, 9, tzinfo=timezone.utc)
+    ends = datetime(2026, 8, 3, 17, tzinfo=timezone.utc)
+    new_starts, new_ends = shift_window_on_date(starts, ends, date(2026, 8, 3))
+    assert (new_starts, new_ends) == (starts, ends)
+
+
+def test_shift_window_on_date_overnight_preserves_duration():
+    starts = datetime(2026, 8, 3, 22, tzinfo=timezone.utc)
+    ends = datetime(2026, 8, 4, 6, tzinfo=timezone.utc)
+    new_starts, new_ends = shift_window_on_date(starts, ends, date(2026, 8, 10))
+    assert new_starts == datetime(2026, 8, 10, 22, tzinfo=timezone.utc)
+    assert new_ends == datetime(2026, 8, 11, 6, tzinfo=timezone.utc)

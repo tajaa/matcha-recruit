@@ -20,6 +20,7 @@ from ...services.training.training_assignment import evaluate_scheduled_role_rul
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
+    fetch_availability, availability_violations, raise_outside_availability,
 )
 from ._compliance import check_shift_compliance, raise_for_violations
 
@@ -125,6 +126,13 @@ async def review_request(request_id: UUID, body: RequestReview,
                     )
                     if conflicts:
                         raise_conflict(req["target_employee_id"], conflicts)
+                    avail_map = await fetch_availability(
+                        conn, company_id, [req["target_employee_id"]])
+                    avail = availability_violations(
+                        avail_map[req["target_employee_id"]],
+                        window["starts_at"], window["ends_at"])
+                    if avail:
+                        raise_outside_availability(req["target_employee_id"], avail)
                 if window:
                     # Approving a swap is an assignment write like any other —
                     # without this, a swap was the one path that bypassed the

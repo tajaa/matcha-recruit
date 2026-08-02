@@ -39,6 +39,19 @@ export function publishRange(start: string, end: string) {
   )
 }
 
+/** Bulk convention (same as generateFromTemplate): never a per-date 409 — a
+ *  conflicting or unavailable assignee is dropped for that copy and named in
+ *  `dropped`, the shift is still created as an open draft. */
+export function duplicateShift(id: string, targetDates: string[], includeAssignments = true) {
+  return api.post<{
+    created: number
+    shifts: Shift[]
+    dropped: { date: string; employee_id: string; name: string; reason: string }[]
+    compliance_warnings: { message: string }[]
+  }>(`/employee-schedule/shifts/${id}/duplicate`,
+     { target_dates: targetDates, include_assignments: includeAssignments })
+}
+
 // ---- Admin: assignments ----
 
 export function assignEmployee(shiftId: string, employeeId: string, force = false) {
@@ -108,6 +121,18 @@ export function generateFromTemplate(id: string, startDate: string, endDate: str
   )
 }
 
+// ---- Admin: availability ----
+
+export interface AvailabilityWindow { weekday: number; start_time: string; end_time: string }
+
+export function fetchEmployeeAvailability(employeeId: string) {
+  return api.get<{ windows: AvailabilityWindow[] }>(`/employee-schedule/availability/${employeeId}`)
+}
+
+export function saveEmployeeAvailability(employeeId: string, windows: AvailabilityWindow[]) {
+  return api.put<{ saved: number }>(`/employee-schedule/availability/${employeeId}`, { windows })
+}
+
 // ---- Admin: request review ----
 
 export function fetchRequests(status?: string) {
@@ -148,4 +173,12 @@ export function createMyRequest(payload: MyRequestPayload) {
 
 export function cancelMyRequest(id: string) {
   return api.delete<{ status: string; request_id: string }>(`/v1/portal/me/schedule/requests/${id}`)
+}
+
+export function fetchMyAvailability() {
+  return api.get<{ windows: AvailabilityWindow[] }>('/v1/portal/me/schedule/availability')
+}
+
+export function saveMyAvailability(windows: AvailabilityWindow[]) {
+  return api.put<{ saved: number }>('/v1/portal/me/schedule/availability', { windows })
 }

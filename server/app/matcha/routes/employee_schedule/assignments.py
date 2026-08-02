@@ -14,6 +14,7 @@ from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
+    fetch_availability, availability_violations, raise_outside_availability,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
@@ -41,6 +42,11 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 raise_conflict(body.employee_id, conflicts)
             if shift["assigned_count"] >= shift["required_staff"]:
                 raise_shift_full(shift["assigned_count"], shift["required_staff"])
+            avail_map = await fetch_availability(conn, company_id, [body.employee_id])
+            avail = availability_violations(
+                avail_map[body.employee_id], shift["starts_at"], shift["ends_at"])
+            if avail:
+                raise_outside_availability(body.employee_id, avail)
         # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
         # overridden, advisories (409) can.
         violations = await check_shift_compliance(
