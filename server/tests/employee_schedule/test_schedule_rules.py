@@ -192,6 +192,7 @@ def test_shift_full_detail_shape():
     detail = shift_full_detail(2, 2)
     assert detail["code"] == "shift_full"
     assert detail["assigned"] == 2 and detail["required_staff"] == 2
+    assert "2 of 2" in detail["message"]
 
 
 # ── availability ─────────────────────────────────────────────────────────────

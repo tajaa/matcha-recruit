@@ -263,7 +263,8 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
       const res = await duplicateShift(shift.id, [...copyDays], copyAssignments)
       toast(`Copied to ${res.created} day${res.created === 1 ? '' : 's'}`, 'success')
       if (res.dropped.length) {
-        toast(res.dropped.map((d) => `${d.name || 'Assignee'} skipped ${d.date}: ${d.reason}`).join('\n'), 'info')
+        // Toast renders in a plain <span> — '\n' would collapse, so join inline.
+        toast(res.dropped.map((d) => `${d.name || 'Assignee'} skipped ${d.date}: ${d.reason}`).join('; '), 'info')
       }
       setCopyOpen(false)
       setCopyDays(new Set())

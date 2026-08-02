@@ -507,7 +507,13 @@ async def build_proposal(
         contexts: list[CandidateContext] = []
         for r in survivors:
             eid = r["id"]
-            if availability_violations(avail_map.get(eid, {}), starts_at, ends_at):
+            # Pinned employees skip this filter too (same rule as the busy
+            # pre-filter above) — if they're proposed anyway, execute-time
+            # re-check drops them with an "outside their logged availability"
+            # reason instead of them silently vanishing from the proposal.
+            if str(eid) not in pinned and availability_violations(
+                avail_map.get(eid, {}), starts_at, ends_at
+            ):
                 continue  # not schedulable — same treatment as inactive employees
             name = f"{r['first_name']} {r['last_name']}".strip()
             conflicts = await find_conflicts(conn, company_id, eid, starts_at, ends_at)

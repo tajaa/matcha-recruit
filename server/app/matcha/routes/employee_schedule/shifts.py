@@ -232,7 +232,9 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
     include_assignments; an assignee with a conflict or outside availability
     on a target date is dropped for that copy and reported in `dropped` —
     the bulk-create convention (same as template generation and the @huume
-    chat flow): never a per-date 409, warnings/drops surface in the body."""
+    chat flow): never a per-date 409, warnings/drops surface in the body.
+    `compliance_warnings` is computed for the first target date only, as a
+    representative sample — weekday-dependent rules may differ per date."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         src = await conn.fetchrow(
