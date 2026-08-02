@@ -138,3 +138,87 @@ Write migrations that survive that:
 - **Don't bypass `require_feature`.** Frontends will URL-hop to a feature page; the gate is what surfaces the upsell instead of 403.
 - **Don't trust client-supplied `company_id`/`org_id`.** Always derive from `current_user` and verify ownership of the requested resource.
 - **Don't define helpers in the route file when a service exists.** AI analyzers, signature providers, storage, email — all live under `services/` and are instantiated via getters.
+
+## Symbol map (backend)
+
+Moved from root `CLAUDE.md`'s Symbol Map section.
+
+### Auth + identity
+
+- Backend auth deps → `server/app/core/dependencies.py` (`require_admin`, `require_candidate`) + `server/app/matcha/dependencies.py` (`require_client`, `require_employee`, `require_admin_or_client`, `get_client_company_id`)
+- Public-token interview WS auth → `server/app/core/services/auth.py:create_interview_ws_token`
+
+### Email + notifications
+
+- Email service (Gmail API + MailerSend) → `server/app/core/services/email/` (`EmailService`, `get_email_service()`)
+- Reserved-domain guard (blocks `@example.com` / `*.test` / `*.invalid`) → `server/app/core/services/email/_shared.py:_is_reserved_test_domain`
+- Employee invitation send → `server/app/core/services/email/employee.py:send_employee_invitation_email` (callsite: `server/app/matcha/services/employees/invitations.py:_send_invitation_with_conn`)
+- IR lifecycle notifications → `server/app/matcha/services/ir/ir_notifications.py:send_ir_notifications_task` (aliased through `routes/ir_incidents/_shared.py`)
+- Onboarding reminder cron → `server/app/workers/tasks/onboarding_reminders.py`
+
+### Feature gating + tiers
+
+- Backend default flags → `server/app/core/feature_flags.py:DEFAULT_COMPANY_FEATURES`
+- Backend feature dep → `server/app/matcha/dependencies.py:require_feature`
+
+### IR (Incident Reporting)
+
+- Backend package overview → `server/app/matcha/routes/ir_incidents/CLAUDE.md`
+- IR orchestrator (Gemini prompt + intent detection) → `server/app/matcha/services/ir/ir_ai_orchestrator.py:generate_guidance`
+- IR Copilot close-incident helper (server) → `server/app/matcha/services/ir/ir_copilot_flow.py:_close_incident_via_copilot` (re-exported by `routes/ir_incidents/copilot.py`)
+- IR analysis runners (categorize / severity / root-cause / etc.) → `server/app/matcha/routes/ir_incidents/ai_analysis.py`
+- Policy mapping helpers → `server/app/matcha/routes/ir_incidents/ai_analysis.py:_auto_map_policy_violations` + `_get_handbook_policy_entries`
+- Anonymous IR intake → `server/app/matcha/routes/intake/inbound_email.py` (public `/report/:token` endpoint)
+- Anonymous report token mgmt → `server/app/matcha/routes/ir_incidents/anonymous_reporting.py`
+
+### EMS (channel-logged events)
+
+- Intake classify + urgency overlay → `server/app/matcha/services/ems/event_intake.py` (`classify_event`, `apply_urgency_overlay`, `fallback_classification`)
+- Urgent-event fan-out (in-app + email) → `server/app/matcha/services/ems/urgent_notify.py:send_urgent_event_notifications`
+- Company protocol file (fetch/upsert + prompt excerpt) → `server/app/matcha/services/ems/protocols.py`
+- WS dispatch (intake + clarify) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify`
+
+### Employees
+
+- Employee CRUD → `server/app/matcha/routes/employees/crud.py` (10 routes; package split 2026-05-16 — see `server/app/matcha/routes/employees/CLAUDE.md`)
+- Bulk CSV upload → `server/app/matcha/routes/employees/bulk_upload.py:bulk_upload_employees_csv`
+- Send invitation → `server/app/matcha/services/employees/invitations.py:_send_invitation_with_conn` (callable from single + bulk + multi-batch paths, via `routes/employees/_shared.py:send_single_invitation`)
+- Auto-invitation toggle (per-company setting) → `onboarding_notification_settings.auto_send_invitation` column
+
+### Billing + Stripe
+
+- Stripe checkout endpoints → `server/app/core/routes/resources/checkout.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/work/billing.py` (matcha-work)
+- Stripe webhook handler → `server/app/core/routes/billing/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
+- Personal Matcha-work checkout → `server/app/matcha/routes/work/billing.py:POST /api/checkout/personal`
+- Token packs → `server/app/matcha/routes/work/billing.py:POST /api/checkout`
+- Lite checkout redirect is **URL-based** — backend returns `checkout_url`, FE does `window.location.href = checkout_url` (`TenantSidebar.tsx`); **no `loadStripe`/publishable key/`redirectToCheckout` anywhere**, so swapping Stripe keys needs no frontend rebuild. Lite pricing = DB table `matcha_lite_pricing` (`services/matcha_lite_pricing.py`, admin-configurable; code fallback `$50/block-of-10`, min 1/max 300).
+**Prod Stripe config (keys, accounts, mode) — non-obvious:**
+- Prod Stripe keys live in **`~/matcha/.env.backend` on the app EC2** (`54.177.107.107`), read at container start via `docker run --env-file .env.backend`. NOT in the repo, NOT in AWS Secrets Manager (the `AWS_SECRETS_MANAGER_SECRET_ID` path in `config.py:load_settings` exists but is unused — prod uses the plain `.env.backend`). Local dev keys are in `server/.env`.
+- **No deploy script overwrites `.env.backend`** — `update-ec2.sh` only scps `docker-compose.yml` + runs `deploy-backend-bluegreen.sh` (which pulls `:latest` and `--env-file`s the host `.env.backend`). So a host-side key edit **persists across `build-and-push.sh` + `update-ec2.sh`**. To reload env without shipping new code, recreate the backend container pinned to its current image id (skip `docker pull`) — the bluegreen script always pulls `:latest`.
+- **Two Stripe accounts** (keys are per-account): dev/local = **Matcha Technologies LLC** (`acct_1S2GdG…`), prod historically = **Ahnimal** (`acct_1QcZE2…`, the legacy/discontinued sister product). As of 2026-07-04 prod `.env.backend` was switched to **Matcha Technologies LLC test-mode** keys (backup of the old Ahnimal keys at `~/matcha/.env.backend.bak.ahnimal-*`). Test webhook endpoint in the Matcha-Tech account → `https://hey-matcha.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.deleted`, `invoice.paid`, `checkout.session.expired`).
+- **Prod is in Stripe TEST mode** (pre-customer) — real cards are rejected. **Before go-live:** put Matcha-Tech **live** keys in `.env.backend` + register a **live** webhook endpoint (different `whsec_`) in the Matcha-Tech live dashboard, then recreate the backend. Test/live keys + webhook endpoints are per-mode and must be swapped as a matched pair (secret key + webhook secret + endpoint) or activation webhooks fail signature.
+
+### Compliance + jurisdictions
+
+- Compliance check service → `server/app/core/services/compliance_service/`
+- Jurisdiction-aware preemption logic → same file, search `preemption`
+- Compliance research worker → `server/app/workers/tasks/compliance_checks.py`
+- Legislation watch cron → `server/app/workers/tasks/legislation_watch.py`
+
+### Matcha-work (collaborative AI workspace)
+
+- Backend routes → `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03 — see its CLAUDE.md; 203 routes)
+- Project service → `server/app/matcha/services/matcha_work/project_service/`
+- AI directives → `server/app/matcha/services/matcha_work/matcha_work_ai/` (facade package since 2026-07-27: `provider.py` is the Gemini provider, `_prompts.py` the prompt literals, `_fields.py` the per-skill write whitelists, `_models.py` model selection, plus `compaction.py` / `task_draft.py` / `_images.py` / `_text.py`)
+- Channels (WS) → `server/app/werk/routes/channels.py` + `channels_ws.py` (+ `channels` / `channel_members` tables)
+
+### Database access
+
+- Connection pool helper → `server/app/database/pool.py:get_connection` (re-exported as `app.database.get_connection`)
+- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database/bootstrap/__init__.py:init_db`
+- Alembic migrations → `server/alembic/versions/*`
+
+### Routing assembly
+
+- Backend route aggregator → `server/app/matcha/routes/__init__.py`
+- IR-incidents package router → `server/app/matcha/routes/ir_incidents/__init__.py` (re-exports `crud.router` as the package router)

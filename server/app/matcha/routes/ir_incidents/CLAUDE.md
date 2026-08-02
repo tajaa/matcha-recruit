@@ -117,3 +117,29 @@ Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule p
 - `server/tests/test_ir_copilot_smoke.py` — copilot smoke that imports modules without booting the app.
 - Run: `cd server && ./venv/bin/python -m pytest tests/ir_incidents/ tests/test_ir_copilot_smoke.py -q`
 - Don't add tests that boot the full FastAPI app + DB unless you're prepared to require the SSH tunnel — keep unit tests fast (current suite is 132 tests / 0.4s).
+
+## Feature flags (full specs, moved from root CLAUDE.md)
+
+## `ir_voice_intake` (default ❌)
+
+**Voice dictation on the IR create form** (all IR products — shared `IRCreateIncidentModal`). Optional "Dictate" button: the reporter records a spoken account → one Gemini multimodal call transcribes + extracts the form fields (`services/ir/ir_voice_parser.py`) → prefills description / reporter / date / location / witnesses + a suggested type/severity hint, which the user **reviews and edits before submitting** (never auto-creates — it's a legal record). Audio captured as WAV via the existing PCM AudioWorklet (Gemini rejects `MediaRecorder` webm/opus). Gates `POST /ir/incidents/voice/parse` (2-segment, stacks on the `incidents` gate) + the button (`hasFeature('ir_voice_intake')`). Default off; admin-toggle; NOT bundled.
+
+## `osha_logs` (default ✅)
+
+Interactive OSHA 300/301/300A recordkeeping within IR (`ir_incidents/osha/`, a package since 2026-07-27). Default on — forced **off** for the no-roster `matcha_lite_essentials` config (no employee roster to log injured persons against). Sub-gates the interactive-only endpoints (300 log JSON, 301 form, privacy cases, 300A PDF, AI recordability determination) via a per-route `_gate=Depends(require_feature("osha_logs"))`; the CSV/export endpoints instead ride `osha_logs` OR `osha_export` (see that flag) via `require_any_feature` on the `osha/` sub-router include. Gates the full `/app/ir/osha` page (export-only tenants get a stripped view — see `osha_export`) + the OSHA Logs sidebar entry.
+
+## `osha_export` (default ❌)
+
+**CSV-download-only** slice of OSHA logging, split out of `osha_logs` (2026-07-30) so `/admin/products` can compose "OSHA export without the interactive log UI" (e.g. a cheap Lite tier). Gates 300-log CSV, 300A view/save/CSV, and the manual (non-AI) recordability write — together with `osha_logs` via `require_any_feature("osha_logs","osha_export")` on the `osha/` `logs.py`/`summary_300a.py`/`recordability.py` sub-routers. **Default OFF, deliberately additive** — every existing `osha_logs` tenant already passes the `require_any_feature` check without this flag stored, so it needs no backfill; a tenant with `osha_logs` off (essentials, or an admin toggle) must NOT silently regain OSHA capability, which a default-True would have caused. Not in `FEATURE_REQUIRES` — see `ir_copilot`'s row for why.
+
+## `ir_magic_links` (default ✅)
+
+**All public token intake** for IR: anonymous company-wide `/report/:token`, per-location `/intake/:token`, and single-use `/request-info/:token`, plus their admin-side token-mgmt routers (`anonymous_reporting.py`, `info_requests.py`). Split out of `incidents` (2026-07-30) so `/admin/products` can compose without it. **Default ON and deliberately SUBTRACTIVE** (unlike the OSHA pair above) — its parent is `incidents` itself, and the `ir_incidents` router mount already requires that, so an any()-with-incidents gate would be a no-op; the only way to withhold it is a stored explicit `False` (a materialized product tenant, or an admin toggle). Consequence: every `enabled_features` write that stomps the whole dict to `False` and then re-grants `incidents` (`TIER_SIGNUP_PRESETS["matcha_lite"/"matcha_lite_essentials"/"matcha_x"/"ir_only_self_serve"]`, and the matching branches in `routes/auth/register_business.py`) must ALSO re-grant this flag, or the stomp silently denies it — caught by review on PR #103 after the initial default-True-with-no-reassertion version broke every real Lite/X/IR signup. The public endpoints in `routes/intake/inbound_email.py` read the company's **raw stored** `enabled_features` (not the merged/overlaid shape) and treat a missing key as **allowed** (matches the default) — only an explicit `False` blocks them; see `_public_intake_allowed`.
+
+## `ir_copilot` (default ✅)
+
+IR Copilot chat **and** the per-incident AI analysis runners (categorize/severity/root-cause/recommendations/similar/policy-mapping), split out of `incidents` (2026-07-30) as one combined sellable unit. Same subtractive-default rules as `ir_magic_links` — see that row. Neither this flag nor `ir_magic_links` is in `FEATURE_REQUIRES`: the route-level gates already make them inert without `incidents`, and enforcing the dependency there broke `PATCH /admin/company-features` (couldn't disable `incidents` on any company with a default-True dependent) and `PATCH .../tier` for `tier="bespoke"` (whose preset carries the pair True with no `incidents` key at all) — also caught on PR #103.
+
+## `osha_auto_report` (default ❌)
+
+**Electronic ITA submission** (`osha/ita.py` — validate/export.csv/credentials/submit/submissions; already built, just re-gated), split out of `osha_logs` so it can be priced/withheld separately from the log UI. Default off, additive, same rationale as `osha_export`.

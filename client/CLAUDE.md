@@ -206,3 +206,43 @@ tell that nothing was checked.
 - **Don't put product-tier logic in pages.** Centralize in `utils/tier.ts` + `TenantSidebar.tsx`.
 - **Don't introduce a new CSS framework or design system.** Match Tailwind classes used in neighboring components.
 - **Don't generate test data with realistic-looking fake email domains.** See the test-data rule in root CLAUDE.md — the server hard-blocks reserved RFC 2606 domains, but the primary mitigation is not inventing realistic fakes in the first place.
+
+## Symbol map (frontend)
+
+Moved from root `CLAUDE.md`'s Symbol Map section.
+
+### Auth + identity
+
+- JWT auth flow + token refresh → `client/src/api/client.ts`
+- User state + role/feature checks → `client/src/hooks/useMe.ts` (`useMe()`, `hasRole()`, `hasFeature()`)
+- Tier helpers → `client/src/utils/tier.ts` (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`)
+- Sidebar dispatch (the only place that picks shell) → `client/src/components/sidebars/TenantSidebar.tsx`
+
+### Feature gating + tiers
+
+- Frontend gate → `client/src/components/shared/FeatureGate.tsx` (renders `<UpgradeUpsellCard>` instead of 403)
+- Upgrade upsell card → `client/src/components/shared/UpgradeUpsellCard.tsx`
+
+### IR (Incident Reporting)
+
+- IR Copilot panel (frontend) → `client/src/components/ir/IRCopilotPanel.tsx`
+- IR Copilot card schema → `client/src/components/ir/IRCopilotCard.tsx:5` (`CopilotCardAction.type` union)
+- IR detail page → `client/src/pages/app/ir/IRDetail.tsx`
+
+### EMS (channel-logged events)
+
+- Protocol editor page (frontend) → `client/src/work/pages/ProtocolPage.tsx`
+
+### Employees
+
+- Bulk upload modal (frontend) → `client/src/components/employees/BulkUploadModal.tsx`
+- Multi-batch add modal (frontend) → `client/src/components/employees/MultiBatchModal.tsx`
+
+### Matcha-work (collaborative AI workspace)
+
+- Web surface → `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`
+- macOS desktop client (Espresso, formerly Werk) → `platforms/desktop/Espresso/` (SwiftUI, bundle `com.ahnimal.matcha`)
+
+### Routing assembly
+
+- Frontend route registration → `client/src/routes/AppRoutes.tsx` (per-app trees in `client/src/routes/`; `App.tsx` is the composition root)

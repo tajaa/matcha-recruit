@@ -21,3 +21,13 @@ The reverse edge (`matcha → werk`) is exactly 2 sites, both lazy in-function i
 ## Cross-cutting rules
 
 DB safety rules, test-data email domain rules, and deploy rules are in root `CLAUDE.md` — they apply here unchanged, not restated.
+
+## Feature flags (full specs, moved from root CLAUDE.md)
+
+## `werk_lite` (default ❌)
+
+**Werk Lite** — standalone business work-chat surface at `/werk-lite` with its **own login** (`/werk-lite/login` → same `/api/auth/login`, lands all roles on `/werk-lite`; `WerkLiteAuthGuard` redirects unauthenticated there, not the main `/login`). Channel chat + LiveKit audio/video calls + collaborative kanban boards only (Slack/Teams-style). **Whole-company** access, not admin-only: business admins (`role='client'`) AND employees (`role='employee'`) — `/auth/me` carries `enabled_features` for both. Boards are matcha-work projects, so the kanban backend needs `matcha_work` too — a Werk-Lite company needs **both** `werk_lite` + `matcha_work`. Employee board access is via the new `require_company_member` dep on the project view + task/subtask routes (company-scoped); board *creation*/rename stays admin/client. Entry: `<FeatureGate flag="werk_lite">` + a `ClientSidebar` AI-group entry (admins). Not in any tier overlay.
+
+## `werk_lite_calls_all_members` (default ❌)
+
+Werk Lite call-start policy. `false` = only admins/business-admins start calls; `true` = any channel member starts. Joining is always open to members. Only consulted for `werk_lite` companies, in `channel_calls.start_call` (which also skips the per-user Werk Pro gate for werk-lite).
