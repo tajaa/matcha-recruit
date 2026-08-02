@@ -16,7 +16,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from ...config import settings
+from ...config import get_settings
 from ...database import get_connection
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ async def _get_client():
     global _client, _disabled_logged
     if _client is not None:
         return _client
+    settings = get_settings()
     configured = all([
         settings.apns_key_id,
         settings.apns_team_id,

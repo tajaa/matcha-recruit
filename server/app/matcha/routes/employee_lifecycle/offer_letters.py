@@ -486,7 +486,10 @@ async def _send_employer_result_email(
         return
     if result == "matched":
         subject = f"Offer Accepted — {position_title}"
-        body = f"<p>Great news! Your offer to <strong>{candidate_name}</strong> for <strong>{position_title}</strong> was accepted at <strong>${matched_salary:,.2f}</strong>.</p>"
+        if matched_salary is not None:
+            body = f"<p>Great news! Your offer to <strong>{candidate_name}</strong> for <strong>{position_title}</strong> was accepted at <strong>${matched_salary:,.2f}</strong>.</p>"
+        else:
+            body = f"<p>Great news! Your offer to <strong>{candidate_name}</strong> for <strong>{position_title}</strong> was accepted.</p>"
     elif result == "no_match_low":
         subject = f"Salary Range Not Matched — {position_title}"
         body = f"<p>{candidate_name} submitted their range for <strong>{position_title}</strong>, but the ranges didn't overlap — your offer was below their range.</p>"
@@ -955,7 +958,7 @@ async def accept_candidate_offer(token: str, payload: OfferAcceptRequest, reques
                 candidate_name=updated.get("candidate_name") or "Candidate",
                 position_title=updated.get("position_title") or "",
                 result="matched",
-                matched_salary=None,
+                matched_salary=float(updated["matched_salary"]) if updated.get("matched_salary") else None,
                 rounds_remaining=0,
             )
     except Exception:
