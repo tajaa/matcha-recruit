@@ -259,6 +259,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `ir_copilot` | ✅ | IR Copilot chat + AI analysis runners. Subtractive default like `ir_magic_links`; deliberately not in `FEATURE_REQUIRES`. → `server/app/matcha/routes/ir_incidents/CLAUDE.md` |
 | `employee_schedule` | ❌ | Shift scheduling over the roster — templates, swap/drop/unavailability requests, forceable-409 conflict rules. Paid add-on. → `server/app/matcha/services/scheduling/CLAUDE.md` |
 | `schedule_intelligence` | ❌ | Deterministic analytics over `employee_schedule` — incident correlation, Fair Workweek exposure (NYC+LA only), pretext shield, qualified coverage. NOT bundled. → `server/app/matcha/services/scheduling/CLAUDE.md` |
+| `inventory` | ❌ | Channel-driven inventory tracking via `@huume` — auto-created items, append-only movement ledger, internal order queue (queued→ordered→received) with in-channel confirm; full `/work` Inventory page. NOT bundled. → `server/app/matcha/services/inventory/CLAUDE.md` |
 `incidents` and `employees` are not in the defaults — they're flipped on by tier-specific flows (Matcha-lite Stripe webhook, IR-only signup) or admin toggle.
 
 **Tier bundles** (read-time via `TIER_REQUIRED_FEATURES` overlay in `feature_flags.py`, except Pro which stores at signup):
@@ -283,6 +284,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **ER Copilot** (`matcha/routes/er_copilot/` — 11-file package since 2026-07-06; see `er_copilot/CLAUDE.md`) — employment-relations case mgmt.
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
 - **Interviews** (`matcha/services/`) — voice interviews via Gemini Live API.
+- **Inventory** (`matcha/services/inventory/` + `matcha/routes/inventory.py`) — channel-driven stock tracking via `@huume` (auto-created items, append-only movement ledger, internal order queue with in-channel confirm). WS dispatch in `werk/routes/channels_ws.py:_bg_inventory_request`/`_bg_inventory_reply`, intent classification in `services/ems/intent.py`'s `INVENTORY` case. → full spec: `server/app/matcha/services/inventory/CLAUDE.md`
 
 ## Background Workers (Celery)
 
@@ -432,6 +434,7 @@ This repo is configured for Claude Code with subtree docs, hooks, and project sl
 | `server/app/workers/CLAUDE.md` | handbook_watch spec + pool-free rule + task deep detail |
 | `server/app/werk/CLAUDE.md` | werk import boundary + werk_lite/werk_lite_calls_all_members specs |
 | `server/app/matcha/services/benefits/CLAUDE.md` | benefits_admin feature spec |
+| `server/app/matcha/services/inventory/CLAUDE.md` | inventory feature spec |
 
 Subtree docs compose with this root file. When working in a subtree, the nearer doc has the specific conventions; this root has the cross-cutting product/database/test-data rules.
 

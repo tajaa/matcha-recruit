@@ -337,6 +337,11 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # toggle grid / featureCatalog.ts, which already list them; toggling
     # either is currently a no-op read-side.
     "interview_prep": False,
+    # Channel-driven inventory tracking via @huume ("we gifted some cookies",
+    # "we ran out of salads") — auto-created items, append-only movement
+    # ledger, internal order queue with in-channel confirm. Gates the
+    # /inventory router + the /work Inventory page. See
+    # services/inventory/CLAUDE.md for the full spec. NOT bundled.
     "inventory": False,
 }
 
@@ -741,6 +746,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
     "werk_lite": ("matcha_work",),
     "ems": ("matcha_work",),
+    "inventory": ("matcha_work",),
 }
 
 

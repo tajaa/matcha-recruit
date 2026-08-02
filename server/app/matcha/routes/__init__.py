@@ -44,6 +44,7 @@ from .risk_assessment import router as risk_assessment_router
 from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
 from .ems import router as ems_router
+from .inventory import router as inventory_router
 from ..dependencies import require_feature, require_any_feature
 from ...core.dependencies import require_admin
 
@@ -149,6 +150,11 @@ matcha_router.include_router(labor_relations_router, prefix="/labor", tags=["lab
 # additionally requires `incidents` (checked in evaluate_promote, not here).
 matcha_router.include_router(ems_router, prefix="/ems", tags=["ems"],
                              dependencies=[Depends(require_feature("ems"))])
+
+# Inventory — channel-driven stock tracking via @huume + the /work Inventory
+# page's REST surface (items, movement ledger, order queue).
+matcha_router.include_router(inventory_router, prefix="/inventory", tags=["inventory"],
+                             dependencies=[Depends(require_feature("inventory"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 # Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)

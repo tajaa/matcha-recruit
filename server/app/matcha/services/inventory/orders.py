@@ -1,0 +1,89 @@
+"""DB service for the inventory order queue."""
+
+from typing import Optional
+from uuid import UUID
+
+from app.matcha.services.inventory import movements as movements_service
+
+
+async def stage_order(
+    conn, *, company_id: UUID, item_id: UUID, channel_id: Optional[UUID],
+    source_message_id: Optional[UUID], created_by: Optional[UUID], suggestion: Optional[dict],
+) -> dict:
+    """A repeat stockout re-points the confirm pill at the SAME queued
+    order (partial unique index uniq_inventory_orders_open enforces one
+    queued order per item) rather than erroring or duplicating."""
+    suggested_quantity = suggestion.get("suggested_quantity") if suggestion else None
+    row = await conn.fetchrow(
+        """
+        INSERT INTO inventory_orders (
+            company_id, item_id, channel_id, source_message_id, created_by,
+            suggested_quantity, quantity, suggestion
+        ) VALUES ($1, $2, $3, $4, $5, $6, $6, $7)
+        ON CONFLICT (item_id) WHERE status = 'queued'
+        DO UPDATE SET suggestion = EXCLUDED.suggestion,
+                      suggested_quantity = EXCLUDED.suggested_quantity,
+                      quantity = EXCLUDED.quantity,
+                      updated_at = NOW()
+        RETURNING *
+        """,
+        company_id, item_id, channel_id, source_message_id, created_by,
+        suggested_quantity, suggestion,
+    )
+    return dict(row)
+
+
+async def approve_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None) -> Optional[dict]:
+    row = await conn.fetchrow(
+        """
+        UPDATE inventory_orders
+        SET status = 'ordered', quantity = COALESCE($3, quantity),
+            approved_by = $2, approved_at = NOW(), ordered_at = NOW(),
+            confirm_message_id = NULL, updated_at = NOW()
+        WHERE id = $1 AND company_id = $4 AND status = 'queued'
+        RETURNING *
+        """,
+        order_id, user_id, quantity, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def cancel_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID) -> Optional[dict]:
+    row = await conn.fetchrow(
+        """
+        UPDATE inventory_orders
+        SET status = 'cancelled', confirm_message_id = NULL, updated_at = NOW()
+        WHERE id = $1 AND company_id = $3 AND status IN ('queued', 'ordered')
+        RETURNING *
+        """,
+        order_id, user_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def mark_received(conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None) -> Optional[dict]:
+    order = await conn.fetchrow(
+        "SELECT * FROM inventory_orders WHERE id = $1 AND company_id = $2 AND status IN ('queued', 'ordered')",
+        order_id, company_id,
+    )
+    if order is None:
+        return None
+    received_qty = float(quantity) if quantity is not None else float(order["quantity"] or 0)
+
+    inserted = await movements_service.record_movements(
+        conn, company_id=company_id, channel_id=order["channel_id"], source_message_id=None,
+        recorded_by=user_id, kind="in", narrative="Order received", note=None,
+        lines=[{"item_id": order["item_id"], "quantity": received_qty, "estimated": False}],
+    )
+    movement = inserted[0]
+    row = await conn.fetchrow(
+        """
+        UPDATE inventory_orders
+        SET status = 'received', received_by = $2, received_at = NOW(),
+            received_quantity = $3, receipt_movement_id = $4, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        """,
+        order_id, user_id, received_qty, movement["id"],
+    )
+    return dict(row)

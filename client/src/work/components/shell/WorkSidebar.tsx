@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package } from 'lucide-react'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
@@ -34,6 +34,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
   const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
+  const showInventory = hasFeature('inventory')
 
   const {
     channels, setChannels,
@@ -251,6 +252,21 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             >
               <BookOpenCheck size={14} strokeWidth={1.6} />
               Protocol
+            </button>
+          )}
+
+          {/* Inventory (channel-driven stock tracking via @huume) */}
+          {showInventory && (
+            <button
+              onClick={() => navigate(`${base}/inventory`)}
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/inventory`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <Package size={14} strokeWidth={1.6} />
+              Inventory
             </button>
           )}
 

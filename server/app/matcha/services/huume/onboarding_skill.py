@@ -127,6 +127,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "documents": "employees",
     "events": "ems",
     "offers": "offer_letters",
+    "inventory": "inventory",
 }
 
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
@@ -414,6 +415,26 @@ async def _lookup_context_impl(
                 "window_days": window,
                 "counts_by_status": {r["status"]: r["count"] for r in counts},
                 "events": [dict(r) for r in rows[:20]],
+                "note": note,
+            }
+        if topic == "inventory":
+            rows = await conn.fetch(
+                """
+                SELECT it.id, it.name, it.current_quantity, it.unit, o.status AS order_status
+                FROM inventory_items it
+                LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
+                WHERE it.company_id = $1 AND it.archived_at IS NULL
+                ORDER BY it.name LIMIT 21
+                """,
+                company_id,
+            )
+            truncated = len(rows) > 20
+            note = "Open a full item with show_record('inventory_item', ...)."
+            if truncated:
+                note += " More items exist than shown — narrow with query."
+            return {
+                "topic": "inventory",
+                "items": [dict(r) for r in rows[:20]],
                 "note": note,
             }
         if topic == "pto_leave":

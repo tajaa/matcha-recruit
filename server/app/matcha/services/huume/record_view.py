@@ -37,6 +37,7 @@ RECORD_REQUIRED_FEATURE: dict[str, str] = {
     "credential": "credential_templates",
     "discipline": "discipline",
     "ems_event": "ems",
+    "inventory_item": "inventory",
 }
 
 # Working-set cap on the side panel — also the per-call cap on show_record,
@@ -306,6 +307,31 @@ async def _model_ems_events_batch(conn, company_id: UUID, rids: list[UUID]) -> d
     return out
 
 
+async def _model_inventory_items_batch(conn, company_id: UUID, rids: list[UUID]) -> dict[UUID, dict[str, Any]]:
+    if not rids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT it.id, it.name, it.current_quantity, it.unit, o.status AS order_status
+        FROM inventory_items it
+        LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
+        WHERE it.id = ANY($1::uuid[]) AND it.company_id = $2
+        """,
+        rids, company_id,
+    )
+    out: dict[UUID, dict[str, Any]] = {}
+    for row in rows:
+        data = dict(row)
+        out[data["id"]] = {
+            "record_id": str(data["id"]),
+            "label": data.get("name"),
+            "current_quantity": float(data["current_quantity"]) if data.get("current_quantity") is not None else None,
+            "unit": data.get("unit"),
+            "record_status": data.get("order_status") or "no open order",
+        }
+    return out
+
+
 _MODEL_BATCH_BUILDERS = {
     "incident": _model_incidents_batch,
     "er_case": _model_er_cases_batch,
@@ -313,6 +339,7 @@ _MODEL_BATCH_BUILDERS = {
     "credential": _model_credentials_batch,
     "discipline": _model_disciplines_batch,
     "ems_event": _model_ems_events_batch,
+    "inventory_item": _model_inventory_items_batch,
 }
 # Kept for the record-type-parity test (SHOW_RECORD_TYPES == _MODEL_BUILDERS
 # == ... == _VIEW_BUILDERS) — same key set as _MODEL_BATCH_BUILDERS.
@@ -766,6 +793,49 @@ async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[d
     }
 
 
+async def _build_inventory_item_view(conn, company_id: UUID, rid: UUID) -> Optional[dict[str, Any]]:
+    item = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1 AND company_id = $2", rid, company_id)
+    if not item:
+        return None
+    data = dict(item)
+    movement_rows = await conn.fetch(
+        "SELECT * FROM inventory_movements WHERE item_id = $1 ORDER BY created_at DESC LIMIT 10", rid,
+    )
+    order = await conn.fetchrow(
+        "SELECT * FROM inventory_orders WHERE item_id = $1 AND status = 'queued'", rid,
+    )
+
+    chips = [{"label": data.get("unit") or "unit", "tone": "zinc"}]
+    if data.get("current_quantity") is not None:
+        chips.append({"label": f"{data['current_quantity']} in stock", "tone": "zinc"})
+    else:
+        chips.append({"label": "count unknown", "tone": "amber"})
+    if order:
+        chips.append({"label": "Order queued", "tone": "orange"})
+
+    meta = [{"label": "Created", "value": _iso(data.get("created_at")) or "—"}]
+
+    sections = [{
+        "label": "Recent movements",
+        "items": [
+            f"{m['kind']}: {m['quantity']} — {m['narrative']}" for m in movement_rows
+        ] or ["No movements yet"],
+    }]
+    if order:
+        sections.append({"label": "Open order", "body": f"{order['quantity']} queued"})
+
+    return {
+        "record_type": "inventory_item",
+        "record_id": str(data["id"]),
+        "title": data.get("name"),
+        "subtitle": None,
+        "chips": chips,
+        "meta": meta,
+        "sections": sections,
+        "link": f"/work/inventory/{data['id']}",
+    }
+
+
 _VIEW_BUILDERS = {
     "incident": _build_incident_view,
     "er_case": _build_er_case_view,
@@ -773,6 +843,7 @@ _VIEW_BUILDERS = {
     "credential": _build_credential_view,
     "discipline": _build_discipline_view,
     "ems_event": _build_ems_event_view,
+    "inventory_item": _build_inventory_item_view,
 }
 
 

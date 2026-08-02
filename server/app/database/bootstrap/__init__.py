@@ -27,6 +27,7 @@ from app.database.bootstrap.matcha_work import create_matcha_work
 from app.database.bootstrap.training import create_training
 from app.database.bootstrap.misc_tail import create_misc_tail
 from app.database.bootstrap.ems import create_ems
+from app.database.bootstrap.inventory import create_inventory
 
 
 async def init_db():
@@ -65,5 +66,6 @@ async def init_db():
         await create_training(conn)
         await create_misc_tail(conn)
         await create_ems(conn)
+        await create_inventory(conn)
 
         print("[DB] Tables initialized")

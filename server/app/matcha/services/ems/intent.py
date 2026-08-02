@@ -28,6 +28,7 @@ ASK = "ask"
 HELP = "help"
 LINK = "link"
 SCHEDULE = "schedule"
+INVENTORY = "inventory"
 
 # Leading "@huume" / "@Huume:" the sender typed to address the bot. Stripped
 # before matching so every pattern below can anchor on ^.
@@ -140,6 +141,27 @@ _SCHEDULE_PATTERNS = (
     rf"^(?:add|set ?up|create|build|make|book)\b(?:\s+\S+){{0,6}}\s+{_SHIFT_NOUN}\b",
 )
 
+# The inventory ask — deduct/receive/stockout/order stock. Bias-to-LOG
+# stands here too: patterns deliberately exclude bare "gave"/"used" so
+# "we gave John a written warning" and "someone used the slicer and got
+# hurt" still LOG.
+_INVENTORY_PATTERNS = (
+    # OUT — gifted/comped/donated/wasted stock, explicitly, not a bare verb.
+    r"^(?:we|i)(?:'ve| have| just|'ve just| have just)? "
+    r"(?:gifted|gave away|comped|donated|handed out|used up|went through|"
+    r"threw (?:out|away)|tossed|wasted)\b",
+    # STOCKOUT / LOW — "we ran out of salads again", "we're low on cups".
+    r"^(?:we|i)(?:'re|'ve| are| have| am)?\s*(?:completely |all |totally |almost )?"
+    r"(?:ran out of|run out of|out of|used the last of|have no more|"
+    r"running low on|low on)\b",
+    # RECEIPT — "we received the produce order", "we restocked napkins".
+    r"^(?:we|i)(?: just)? (?:received|restocked|got in|"
+    r"got (?:a|the|our) (?:delivery|shipment|order)(?: of)?)\b",
+    # ORDER REQUEST — tense-exact like SCHEDULE's \bneed\b (never "needed").
+    r"^(?:we|i)(?:'ll| will)? need to (?:order|re-?order|re-?stock|buy)\b",
+)
+_INVENTORY_RE = tuple(re.compile(p, re.IGNORECASE) for p in _INVENTORY_PATTERNS)
+
 _HELP_RE = tuple(re.compile(p, re.IGNORECASE) for p in _HELP_PATTERNS)
 _RECALL_RE = tuple(re.compile(p, re.IGNORECASE) for p in _RECALL_PATTERNS)
 _LINK_RE = tuple(re.compile(p, re.IGNORECASE) for p in _LINK_PATTERNS)
@@ -180,7 +202,10 @@ def classify_intent(content: str) -> str:
     interrogative too). SCHEDULE is checked before RECALL so "can you
     schedule two people for Saturday" never lands in ASK — RECALL's
     show/list/tell/remind/summarize/recap/find/pull/look verb set doesn't
-    overlap schedule/staff/book/add."""
+    overlap schedule/staff/book/add. INVENTORY is checked after SCHEDULE
+    and before RECALL for the same reason — its own verb set
+    (gifted/ran out/received/need to order) doesn't overlap SCHEDULE's
+    shift vocabulary or RECALL's show/list/tell set."""
     text = strip_mention(content)
     if not text:
         return HELP  # a bare "@huume" is someone poking it to see what it is
@@ -196,6 +221,10 @@ def classify_intent(content: str) -> str:
     for pattern in _SCHEDULE_RE:
         if pattern.search(text):
             return SCHEDULE
+
+    for pattern in _INVENTORY_RE:
+        if pattern.search(text):
+            return INVENTORY
 
     for pattern in _RECALL_RE:
         if pattern.search(text):

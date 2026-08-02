@@ -178,6 +178,13 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Company protocol file (fetch/upsert + prompt excerpt) → `server/app/matcha/services/ems/protocols.py`
 - WS dispatch (intake + clarify) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify`
 
+### Inventory (channel stock tracking)
+
+- Intent classification → `server/app/matcha/services/ems/intent.py` (`INVENTORY` constant + `_INVENTORY_RE`)
+- WS dispatch (request + confirm/clarify reply) → `server/app/werk/routes/channels_ws.py:_bg_inventory_request` / `_bg_inventory_reply`
+- Service package (matching, reorder math, rules, pills, extraction, DB services) → `server/app/matcha/services/inventory/`
+- REST router (items/movements/orders/suggestions) → `server/app/matcha/routes/inventory.py`
+
 ### Employees
 
 - Employee CRUD → `server/app/matcha/routes/employees/crud.py` (10 routes; package split 2026-05-16 — see `server/app/matcha/routes/employees/CLAUDE.md`)

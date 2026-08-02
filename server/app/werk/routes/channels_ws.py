@@ -192,6 +192,26 @@ async def _ems_flag_enabled(conn, company_id) -> bool:
     return _ems_row_allowed(row)
 
 
+def _inventory_row_allowed(row) -> bool:
+    """Same shape as _ems_row_allowed, keyed on the `inventory` flag."""
+    if not row or row["is_personal"]:
+        return False
+    from app.core.feature_flags import merge_company_features
+    return bool(merge_company_features(row["enabled_features"], row["signup_source"]).get("inventory"))
+
+
+async def _inventory_company_gate(conn, channel_id_str: str):
+    row = await conn.fetchrow(
+        """
+        SELECT ch.company_id, comp.is_personal, comp.enabled_features, comp.signup_source
+        FROM channels ch JOIN companies comp ON comp.id = ch.company_id
+        WHERE ch.id = $1
+        """,
+        UUID(channel_id_str),
+    )
+    return row["company_id"] if _inventory_row_allowed(row) else None
+
+
 async def _ems_first_time_hint(conn, channel_id_str: str) -> str:
     """`ask.FIRST_TIME_HINT` the FIRST time Huume logs something in a given
     channel, "" every time after — this is how people find out it does more
@@ -448,6 +468,283 @@ async def _bg_schedule_request(
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
         logger.exception("schedule chat request failed for message %s", message_id_str)
+
+
+async def _bg_inventory_request(
+    channel_id_str: str, message_id_str: str, sender_user_id_str: str, content: str,
+) -> None:
+    """"@huume we gifted some cookies to Elizabeth" / "@huume we ran out of
+    salads again" — INVENTORY-classified channel message. Same off-hot-path
+    contract as _bg_schedule_request. Two connection blocks: the Gemini
+    extraction call must not run with a pooled connection held."""
+    try:
+        from app.matcha.services.ems.event_intake import fallback_classification
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.inventory import movements as movements_service
+        from app.matcha.services.inventory import orders as orders_service
+        from app.matcha.services.inventory import pills
+        from app.matcha.services.inventory.extraction import extract_inventory
+        from app.matcha.services.inventory.reorder import suggest_order
+        from app.matcha.services.inventory.rules import evaluate_inventory_action
+
+        sys_row = None
+        item_rows = []
+        stripped = strip_mention(content)
+
+        async with get_connection() as conn:
+            company_id = await _inventory_company_gate(conn, channel_id_str)
+            if company_id is None:
+                ems_company_id = await _ems_company_gate(conn, channel_id_str)
+                delegate = ems_company_id is not None
+            else:
+                delegate = False
+                try:
+                    await check_rate_limit(str(company_id), "inventory_event", 30, 3600)
+                except HTTPException:
+                    return
+
+                if fallback_classification(content).get("urgency") == "osha":
+                    await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+
+                features = await _schedule_company_features(conn, company_id)
+                role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
+                verdict = evaluate_inventory_action(role=role, features=features, stage="movement")
+                if not verdict.ok:
+                    sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                elif sys_row is None:
+                    item_rows = await movements_service.list_item_names(conn, company_id)
+
+        if delegate:
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+            return
+
+        if company_id is None:
+            return
+
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return
+
+        item_names = [r["name"] for r in item_rows]
+        extracted = await extract_inventory(stripped, item_names)
+
+        if not extracted.get("actionable"):
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+            return
+
+        kind = extracted.get("kind", "movement")
+        lines = extracted.get("lines") or []
+
+        async with get_connection() as conn:
+            if kind in ("movement", "receipt"):
+                movement_kind = "in" if kind == "receipt" else "out"
+                resolved_lines = []
+                for line in lines:
+                    item = await movements_service.find_or_create_item(
+                        conn, company_id, line.get("item_name", ""), created_by=UUID(sender_user_id_str),
+                    )
+                    qty = line.get("quantity")
+                    estimated = qty is None
+                    resolved_lines.append({
+                        "item_id": item["id"], "quantity": 1 if estimated else qty, "estimated": estimated,
+                    })
+                inserted = await movements_service.record_movements(
+                    conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                    source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
+                    kind=movement_kind, lines=resolved_lines, narrative=stripped,
+                    note=extracted.get("recipient_note"),
+                )
+                if not inserted:
+                    return
+                first = inserted[0]
+                item_row = await conn.fetchrow(
+                    "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
+                )
+                pill_text = pills.movement_pill(
+                    item_row["name"], first["quantity"], item_row["current_quantity"],
+                    extracted.get("recipient_note"), first["quantity_estimated"],
+                )
+                single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
+                if single_unknown:
+                    pill_text = pills.quantity_question(pill_text)
+                sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                if single_unknown:
+                    await conn.execute(
+                        "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                        sys_row["id"], inserted[0]["id"],
+                    )
+
+            else:  # stockout / order_request
+                item_name = lines[0].get("item_name") if lines else stripped
+                item = await movements_service.find_or_create_item(
+                    conn, company_id, item_name, created_by=UUID(sender_user_id_str),
+                )
+                if kind == "stockout":
+                    await movements_service.record_movements(
+                        conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                        source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
+                        kind="stockout", lines=[{"item_id": item["id"], "quantity": None, "estimated": False}],
+                        narrative=stripped, note=None,
+                    )
+                history_rows = await conn.fetch(
+                    "SELECT kind, quantity, quantity_delta, created_at FROM inventory_movements "
+                    "WHERE item_id = $1 ORDER BY created_at ASC",
+                    item["id"],
+                )
+                from datetime import datetime, timezone
+                suggestion = suggest_order([dict(r) for r in history_rows], datetime.now(timezone.utc))
+                order_qty = suggestion.get("suggested_quantity") if suggestion else None
+
+                order = await orders_service.stage_order(
+                    conn, company_id=company_id, item_id=item["id"], channel_id=UUID(channel_id_str),
+                    source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
+                    suggestion=suggestion,
+                )
+                pill_text = pills.stockout_pill(item["name"], suggestion, order_qty)
+                sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                await conn.execute(
+                    "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], order["id"],
+                )
+
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+    except Exception:
+        logger.exception("inventory chat request failed for message %s", message_id_str)
+
+
+async def _bg_inventory_reply(
+    channel_id_str: str, reply_to_id_str: str, sender_user_id_str: str, content: str,
+) -> bool:
+    """Fold a reply-to-an-inventory-pill into its order or clarify-armed
+    movement. Same claim-then-act, exception-safe contract as
+    _bg_schedule_reply — returns True iff a claim matched (order OR
+    movement), so _bg_ems_dispatch knows whether to still try the mention
+    fork. No Gemini call anywhere in this path."""
+    claim_happened = False
+    try:
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.inventory import movements as movements_service
+        from app.matcha.services.inventory import orders as orders_service
+        from app.matcha.services.inventory import pills
+        from app.matcha.services.inventory.rules import evaluate_inventory_action, parse_quantity_reply
+        from app.matcha.services.scheduling.schedule_chat_rules import parse_confirm_reply
+
+        reply_uuid = UUID(reply_to_id_str)
+        sender_uuid = UUID(sender_user_id_str)
+        stripped = strip_mention(content)
+        sys_row = None
+
+        async with get_connection() as conn:
+            claimed_order = await conn.fetchrow(
+                """
+                UPDATE inventory_orders SET confirm_message_id = NULL, updated_at = NOW()
+                WHERE confirm_message_id = $1 AND status = 'queued'
+                  AND created_at > NOW() - INTERVAL '7 days'
+                RETURNING id, company_id, item_id, suggested_quantity, quantity, suggestion
+                """,
+                reply_uuid,
+            )
+            if claimed_order is not None:
+                claim_happened = True
+                item = await conn.fetchrow(
+                    "SELECT name FROM inventory_items WHERE id = $1", claimed_order["item_id"],
+                )
+                features = await _schedule_company_features(conn, claimed_order["company_id"])
+                role = await conn.fetchval("SELECT role FROM users WHERE id = $1", sender_uuid)
+                verdict = evaluate_inventory_action(role=role, features=features, stage="approve_order")
+                if not verdict.ok:
+                    await conn.execute(
+                        "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                        reply_uuid, claimed_order["id"],
+                    )
+                    sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                else:
+                    action = parse_confirm_reply(stripped)
+                    if action == "confirm":
+                        row = await orders_service.approve_order(
+                            conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
+                            user_id=sender_uuid, quantity=claimed_order["quantity"],
+                        )
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str, pills.order_confirmed_pill(item["name"], row["quantity"]),
+                        )
+                    elif action == "cancel":
+                        await orders_service.cancel_order(
+                            conn, order_id=claimed_order["id"], company_id=claimed_order["company_id"],
+                            user_id=sender_uuid,
+                        )
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str, pills.order_cancelled_pill(item["name"]),
+                        )
+                    else:
+                        new_qty = parse_quantity_reply(stripped)
+                        if new_qty is not None:
+                            await conn.execute(
+                                "UPDATE inventory_orders SET quantity = $1 WHERE id = $2",
+                                new_qty, claimed_order["id"],
+                            )
+                            pill_text = pills.stockout_pill(item["name"], claimed_order["suggestion"], new_qty)
+                        else:
+                            pill_text = pills.rearm_pill()
+                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                        await conn.execute(
+                            "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                            sys_row["id"], claimed_order["id"],
+                        )
+
+            else:
+                claimed_movement = await conn.fetchrow(
+                    """
+                    UPDATE inventory_movements SET clarify_message_id = NULL
+                    WHERE clarify_message_id = $1
+                      AND created_at > NOW() - INTERVAL '7 days'
+                    RETURNING id, company_id, item_id, clarify_rounds
+                    """,
+                    reply_uuid,
+                )
+                if claimed_movement is not None:
+                    claim_happened = True
+                    item = await conn.fetchrow(
+                        "SELECT name, current_quantity FROM inventory_items WHERE id = $1",
+                        claimed_movement["item_id"],
+                    )
+                    qty = parse_quantity_reply(stripped)
+                    if qty is not None:
+                        await movements_service.amend_movement_quantity(
+                            conn, movement_id=claimed_movement["id"], quantity=qty, user_id=sender_uuid,
+                        )
+                        new_item = await conn.fetchrow(
+                            "SELECT current_quantity FROM inventory_items WHERE id = $1",
+                            claimed_movement["item_id"],
+                        )
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str,
+                            pills.movement_pill(item["name"], qty, new_item["current_quantity"], None, False),
+                        )
+                    elif claimed_movement["clarify_rounds"] < 2:
+                        await conn.execute(
+                            "UPDATE inventory_movements SET clarify_rounds = clarify_rounds + 1 WHERE id = $1",
+                            claimed_movement["id"],
+                        )
+                        pill_text = pills.quantity_question(pills.rearm_pill())
+                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                        await conn.execute(
+                            "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                            sys_row["id"], claimed_movement["id"],
+                        )
+                    else:
+                        sys_row = await _insert_system_message(
+                            conn, channel_id_str,
+                            f"\U0001F4E6 Couldn't pin down the count for {item['name']} — set it on the Inventory page.",
+                        )
+
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        return claim_happened
+    except Exception:
+        logger.exception("inventory chat reply failed for %s", reply_to_id_str)
+        return claim_happened
 
 
 async def _bg_schedule_reply(
@@ -1013,8 +1310,13 @@ async def _bg_ems_dispatch(
         )
         if claimed:
             return
+        claimed = await _bg_inventory_reply(
+            channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
+        )
+        if claimed:
+            return
     if has_huume_mention:
-        from app.matcha.services.ems.intent import LINK, LOG, SCHEDULE, classify_intent
+        from app.matcha.services.ems.intent import INVENTORY, LINK, LOG, SCHEDULE, classify_intent
 
         intent = classify_intent(content)
         if intent == LOG:
@@ -1023,6 +1325,8 @@ async def _bg_ems_dispatch(
             await _bg_ems_link(channel_id_str, sender_user_id_str)
         elif intent == SCHEDULE:
             await _bg_schedule_request(channel_id_str, message_id_str, sender_user_id_str, content)
+        elif intent == INVENTORY:
+            await _bg_inventory_request(channel_id_str, message_id_str, sender_user_id_str, content)
         else:
             await _bg_ems_ask(channel_id_str, sender_user_id_str, content, intent)
 

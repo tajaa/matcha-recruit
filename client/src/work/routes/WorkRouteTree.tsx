@@ -12,6 +12,7 @@ import ConnectionsPanel from '../components/shell/ConnectionsPanel'
 import Inbox from '../pages/Inbox'
 import EventsHub from '../pages/EventsHub'
 import ProtocolPage from '../pages/ProtocolPage'
+import InventoryHub from '../pages/InventoryHub'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -52,6 +53,16 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             <Route path="events" element={<EventsHub />} />
             <Route path="events/:eventId" element={<EventsHub />} />
             <Route path="protocol" element={<ProtocolPage />} />
+          </Route>
+          <Route
+            element={
+              <FeatureGate feature="inventory" label="Inventory">
+                <Outlet />
+              </FeatureGate>
+            }
+          >
+            <Route path="inventory" element={<InventoryHub />} />
+            <Route path="inventory/:itemId" element={<InventoryHub />} />
           </Route>
           <Route path=":threadId" element={<MatchaWorkThread />} />
           <Route path="projects/:projectId" element={<ProjectView />} />

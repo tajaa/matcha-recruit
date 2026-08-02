@@ -27,12 +27,12 @@ LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents", "er_cases",
     "pto_leave", "policies", "discipline", "compliance", "documents", "events",
-    "wage_floors",
+    "wage_floors", "inventory",
 )
 
 # record_type values show_record accepts — the single source both the tool
 # schema's enum and record_view.py's dispatch table read from.
-SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "discipline", "ems_event")
+SHOW_RECORD_TYPES = ("incident", "er_case", "employee", "credential", "discipline", "ems_event", "inventory_item")
 
 
 @dataclass(frozen=True)
@@ -93,7 +93,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "you're unsure whether the candidate already has one, or before "
         "building a plan to check what integrations are actually connected. "
         "Use show_record with an id from a list here (incident/er_case/"
-        "employee/credential) to open that record in the admin's side panel.",
+        "employee/credential/inventory) to open that record in the admin's "
+        "side panel. topic='inventory' lists stock items with current count "
+        "and any open order.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
             "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),
@@ -110,7 +112,8 @@ TOOLS: tuple[HuumeTool, ...] = (
         "where the admin reads and keeps them, not your reply. record_type: "
         "incident (ids from lookup_context topic='incidents'), er_case "
         "(topic='er_cases'), employee (topic='roster' or 'employee'), "
-        "credential (topic='credentials'). Never guess an id.",
+        "credential (topic='credentials'), inventory_item "
+        "(topic='inventory'). Never guess an id.",
         properties={
             "record_type": types.Schema(type=types.Type.STRING, enum=list(SHOW_RECORD_TYPES)),
             "record_ids": types.Schema(
