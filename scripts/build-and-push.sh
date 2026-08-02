@@ -56,6 +56,7 @@ BUILD_GUMMLOCAL_FRONTEND=false
 BUILD_AGENT=false
 REMOTE_DISPATCH=false
 REMOTE_HOTFIX=false
+REMOTE_WATCH=false
 LANDING_BUILD_VERSION="0"
 # Captured once in main() before any build runs. Both build_image and
 # push_image reference this so a commit that lands mid-run (e.g. user
@@ -142,14 +143,21 @@ OPTIONS:
     --agent                Build the matcha-agent sandbox image
     --all                  Build all images (matcha + gummfit + gumm-local + agent)
     --remote               Skip local docker entirely — dispatch the GitHub Actions
-                           deploy.yml workflow instead (gh CLI required) and stream
-                           its progress. Maps --backend-only/--frontend-only/(none)
-                           to the workflow's target=backend/frontend/matcha. Not
-                           valid with --gummfit*/--gumm-local*/--agent/--all.
+                           deploy.yml workflow instead (gh CLI required) for the
+                           CURRENT branch (must be pushed). Maps
+                           --backend-only/--frontend-only/(none) to the workflow's
+                           target=backend/frontend/matcha. Prints the run URL and
+                           returns immediately — the build+deploy runs on GitHub,
+                           safe to close your laptop. Use --watch to stream
+                           progress instead. Not valid with
+                           --gummfit*/--gumm-local*/--agent/--all.
     --hotfix               With --remote: pass hotfix=true to the workflow (pull +
                            blue/green swap only, skips nginx sync/backup/pruning).
                            No effect without --remote (update-ec2.sh has its own
                            --hotfix for the local path).
+    --watch                With --remote: stream the dispatched run's progress
+                           (gh run watch) instead of returning immediately.
+                           No effect without --remote.
     -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES (required):
@@ -192,9 +200,11 @@ EXAMPLES:
     $0 --agent
 
     # Dispatch the GitHub Actions workflow instead of building locally
+    # (deploys the current branch, returns immediately)
     $0 --remote
     $0 --remote --backend-only
     $0 --remote --hotfix
+    $0 --remote --watch   # stream progress instead of returning immediately
 EOF
 }
 
@@ -224,6 +234,10 @@ parse_args() {
                 ;;
             --hotfix)
                 REMOTE_HOTFIX=true
+                shift
+                ;;
+            --watch)
+                REMOTE_WATCH=true
                 shift
                 ;;
             --backend-only)
@@ -664,51 +678,66 @@ dispatch_remote_deploy() {
         exit 1
     fi
 
+    local branch
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [ -z "$branch" ] || [ "$branch" = "HEAD" ]; then
+        log_error "Detached HEAD — check out a branch before dispatching (deploy.yml runs the ref you pass it)."
+        exit 1
+    fi
+
     log_info "Target: $target"
+    log_info "Branch: $branch"
     log_info "Hotfix: $REMOTE_HOTFIX"
 
-    # The workflow builds from origin/main, not this working tree — a local
+    # The workflow builds from origin/<branch>, not this working tree — a local
     # commit or uncommitted change won't be what actually deploys. Warn, but
-    # don't block: dispatching main-as-is is often exactly what's wanted.
-    git fetch origin main -q 2>/dev/null || log_warning "Could not fetch origin/main to check for drift"
+    # don't block: dispatching the branch as-pushed is often exactly what's wanted.
+    git fetch origin "$branch" -q 2>/dev/null || log_warning "Could not fetch origin/$branch to check for drift"
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-        log_warning "Working tree has uncommitted changes — the workflow deploys origin/main, not this tree."
+        log_warning "Working tree has uncommitted changes — the workflow deploys origin/$branch, not this tree."
     fi
     local local_head remote_head
     local_head=$(git rev-parse HEAD 2>/dev/null || echo "")
-    remote_head=$(git rev-parse origin/main 2>/dev/null || echo "")
+    remote_head=$(git rev-parse "origin/$branch" 2>/dev/null || echo "")
     if [ -n "$local_head" ] && [ -n "$remote_head" ] && [ "$local_head" != "$remote_head" ]; then
-        log_warning "Local HEAD (${local_head:0:7}) differs from origin/main (${remote_head:0:7}) — push first if you want this commit deployed."
+        log_warning "Local HEAD (${local_head:0:7}) differs from origin/$branch (${remote_head:0:7}) — push first if you want this commit deployed."
+    elif [ -z "$remote_head" ]; then
+        log_warning "origin/$branch not found — push the branch first (gh workflow run needs it on GitHub)."
     fi
 
-    log_info "Dispatching deploy.yml (target=${target}, hotfix=${REMOTE_HOTFIX})..."
-    if ! gh workflow run deploy.yml --ref main -f target="$target" -f hotfix="$REMOTE_HOTFIX"; then
-        log_error "Failed to dispatch workflow"
+    log_info "Dispatching deploy.yml (target=${target}, hotfix=${REMOTE_HOTFIX}, ref=${branch})..."
+    if ! gh workflow run deploy.yml --ref "$branch" -f target="$target" -f hotfix="$REMOTE_HOTFIX"; then
+        log_error "Failed to dispatch workflow — is '$branch' pushed to origin with .github/workflows/deploy.yml present?"
         exit 1
     fi
 
     # `gh workflow run` doesn't return a run id, so poll for the run it just
-    # created rather than guessing a fixed sleep.
+    # created rather than guessing a fixed sleep. Scope to this branch so a
+    # concurrent run dispatched from elsewhere isn't picked up instead.
     log_info "Waiting for the run to appear..."
     local run_id="" attempt=0
     while [ -z "$run_id" ] && [ "$attempt" -lt 15 ]; do
         sleep 2
-        run_id=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId,status,createdAt \
-            --jq '.[0].databaseId' 2>/dev/null || echo "")
+        run_id=$(gh run list --workflow=deploy.yml --branch "$branch" --limit 1 \
+            --json databaseId,status,createdAt --jq '.[0].databaseId' 2>/dev/null || echo "")
         attempt=$((attempt + 1))
     done
 
     if [ -z "$run_id" ]; then
-        log_warning "Could not locate the new run automatically. Check: gh run list --workflow=deploy.yml"
+        log_warning "Could not locate the new run automatically. Check: gh run list --workflow=deploy.yml --branch $branch"
         exit 0
     fi
 
     local run_url
     run_url=$(gh run view "$run_id" --json url --jq '.url' 2>/dev/null || echo "")
     log_success "Run started: ${run_url:-#$run_id}"
-    log_info "Streaming progress (Ctrl-C stops watching, not the run)..."
 
-    gh run watch "$run_id" --exit-status
+    if [ "$REMOTE_WATCH" = true ]; then
+        log_info "Streaming progress (Ctrl-C stops watching, not the run)..."
+        gh run watch "$run_id" --exit-status
+    else
+        log_info "Not watching — build+deploy continues on GitHub. Follow along with: gh run watch $run_id"
+    fi
 }
 
 # Main execution
