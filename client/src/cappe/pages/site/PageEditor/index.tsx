@@ -116,7 +116,7 @@ export default function PageEditor() {
   // click-select for the selectedBlock context above, but no inline edit /
   // drag-reorder / element move-resize), regardless of whichever sub-editor
   // was active before Merlin opened.
-  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, merlin.open ? 'form' : editMode, handleDropImage)
+  const canvas = useCanvasBridge(blocks, setBlocks, previewIframeRef, reservedRight, merlin.open ? 'form' : editMode, handleDropImage, merlin.open)
 
   // Refresh Merlin's view of live editor state every render. Assigned here
   // rather than at the useRef because `canvas` (the block selection) is
@@ -164,6 +164,19 @@ export default function PageEditor() {
       return { label: `"${preview}" in ${blockLabel} ${fieldLabel}`, onClear: () => canvas.setSelection(null) }
     }
     return { label: `${blockLabel} ${fieldLabel}`, onClear: () => canvas.setSelection(null) }
+  })()
+  // A section clicked while a Merlin context is already active and sticky —
+  // staged rather than applied (useCanvasBridge.ts / selectionContext.ts).
+  // Renders as an amber "Work on X instead?" row above the active chip.
+  const pendingChip = (() => {
+    const p = canvas.pendingSelection
+    if (!p) return null
+    const t = blocks.find((b) => b._k === p.blockKey)?.type
+    return {
+      label: (t ? BLOCK_SCHEMAS[t]?.label : null) ?? 'section',
+      onConfirm: canvas.confirmPendingSelection,
+      onDismiss: canvas.dismissPendingSelection,
+    }
   })()
 
   // Reverse sync: clicking a page element while the drawer is open probes which
@@ -423,7 +436,13 @@ export default function PageEditor() {
           />
         )}
         <ThemeDrawer themeEditor={themeEditor} designerUnlocked={designerUnlocked} bridge={themeBridge} probe={themeProbe} />
-        <MerlinDrawer merlin={merlin} selectedLabel={selectedLabel} selectionChip={selectionChip} />
+        <MerlinDrawer
+          merlin={merlin}
+          selectedLabel={selectedLabel}
+          selectionChip={selectionChip}
+          pendingChip={pendingChip}
+          onClearSelected={canvas.clearSelectedContext}
+        />
         </div>
       </div>
     </SiteCtx.Provider>

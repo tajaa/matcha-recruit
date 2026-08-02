@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import type { CappeBlock, CappeCanvasElement } from '../../../types'
 import { CV_MAX_ELEMENTS, cvEls, cvNextY, cvNewElement, isCanvasBlock } from './canvasHelpers'
 import { applyFieldPath } from './merlinOps'
+import { decideSelect, decideSelectionUpdate, type PendingSelection } from './selectionContext'
 
 /** `cz-selection` payload from the runtime (canvas.js:postSelection), resolved
  *  to the block's stable `_k` id at RECEIPT time (inside this hook's message
@@ -48,6 +49,14 @@ export function useCanvasBridge(
    *  outside this hook (it needs `merlin.applyImageTo`, a sibling hook in
    *  index.tsx), so it's a callback rather than local state here. */
   onDropImage?: (blockIdx: number, url: string) => void,
+  /** Merlin is open: selection context is STICKY — a click on a different
+   *  section stages a pending switch (confirmPendingSelection /
+   *  dismissPendingSelection below) instead of repointing immediately, and an
+   *  empty cz-selection shape can't silently downgrade a finer one to
+   *  nothing. See selectionContext.ts for the decision logic. Form/Canvas
+   *  editing without Merlin keeps today's immediate click-to-select — the
+   *  floating inspector must follow clicks there. */
+  stickySelection = false,
 ) {
   const [selBlock, setSelBlock] = useState<number | null>(null)
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
@@ -56,6 +65,10 @@ export function useCanvasBridge(
   // of selElement (freeform canvas resize/drag state): a text-range highlight
   // inside a canvas heading sets both, a plain section click sets neither.
   const [selection, setSelection] = useState<CanvasSelection | null>(null)
+  // A different section clicked while stickySelection is on and a context is
+  // already active — parked here until the panel's "Switch" confirms it (or
+  // its ✕ dismisses it, leaving the current context untouched).
+  const [pendingSel, setPendingSel] = useState<PendingSelection | null>(null)
   const [canvasBp, setCanvasBp] = useState<'d' | 'm'>('d')            // freeform canvas: editing desktop vs mobile
   const [popPos, setPopPos] = useState<{ top: number; left: number }>({ top: 96, left: 96 })
   // Once the user drags the floating inspector, keep it where they put it (don't
@@ -93,10 +106,14 @@ export function useCanvasBridge(
   const blocksRef = useRef<CappeBlock[]>([])
   const selElementRef = useRef<string | null>(null)
   const canvasBpRef = useRef<'d' | 'm'>('d')
+  const stickyRef = useRef(stickySelection)
+  const pendingSelRef = useRef<PendingSelection | null>(null)
   selBlockRef.current = selBlock
   blocksRef.current = blocks
   selElementRef.current = selElement
   canvasBpRef.current = canvasBp
+  stickyRef.current = stickySelection
+  pendingSelRef.current = pendingSel
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
   const editModeRef = useRef(editMode)
   editModeRef.current = editMode
@@ -129,7 +146,14 @@ export function useCanvasBridge(
   // Merlin turn address a block that no longer exists.
   useEffect(() => {
     setSelection((s) => (s && !blocks.some((b) => b._k === s.block) ? null : s))
+    setPendingSel((p) => (p && !blocks.some((b) => b._k === p.blockKey) ? null : p))
   }, [blocks])
+
+  // Sticky mode just turned off (Merlin closed) — a staged switch has no UI
+  // left to confirm/dismiss it, so drop it rather than leave it dangling.
+  useEffect(() => {
+    if (!stickySelection) setPendingSel(null)
+  }, [stickySelection])
 
   // Canvas bridge: the framed runtime posts selection/edit/reorder events; we
   // validate by source identity (the iframe is opaque-origin, so `e.origin` is
@@ -155,6 +179,21 @@ export function useCanvasBridge(
           break
         }
         case 'cz-select': {
+          const decision = decideSelect({
+            sticky: stickyRef.current,
+            currentBlock: selBlockRef.current,
+            incomingBlock: d.block,
+            incomingKey: blocksRef.current[d.block]?._k as string | undefined,
+          })
+          if (decision.action === 'stage') {
+            // Park the switch — don't touch selBlock/selection/highlight yet.
+            // The panel's "Switch" button calls confirmPendingSelection below;
+            // its ✕ calls dismissPendingSelection, leaving the current
+            // context exactly as it was.
+            setPendingSel(decision.pending)
+            break
+          }
+          setPendingSel(null)  // an applied select supersedes any staged switch
           setSelBlock(d.block)
           setSelectSeq((n) => n + 1)
           const onEl = isCanvasBlock(blocksRef.current[d.block]) && d.field != null
@@ -180,10 +219,25 @@ export function useCanvasBridge(
           // a delete) means "can't tell what this points at now", not "the
           // user's existing selection is gone" — leave it alone rather than
           // wiping a still-valid highlight.
-          setSelection((s) => (blockKey ? {
+          if (!blockKey) break
+          const next: CanvasSelection = {
             block: blockKey, field: d.field ?? null, element: d.element ?? null, kind: d.kind || 'text',
             start: d.start ?? null, end: d.end ?? null, text: d.text ?? null,
-          } : s))
+          }
+          const verdict = decideSelectionUpdate({ sticky: stickyRef.current, pending: pendingSelRef.current, next })
+          if (verdict === 'stage') {
+            // Detail for the block already staged as pending — ride it there
+            // so Switch applies the full context, not just the bare section.
+            setPendingSel((p) => (p ? { ...p, selection: next } : p))
+            break
+          }
+          if (verdict === 'ignore') {
+            // Sticky + an empty shape (dead-space click inside the CURRENT
+            // section): this used to silently downgrade a fine "Editing: …"
+            // chip to nothing. Ignore it — the existing selection stands.
+            break
+          }
+          setSelection(next)
           break
         }
         case 'cz-edit': {
@@ -287,10 +341,45 @@ export function useCanvasBridge(
     return () => window.removeEventListener('message', onMsg)
   }, [])
 
+  // The panel's "Switch" button — apply the staged section as the real
+  // context. Re-resolves the pending `_k` at confirm time (not the click
+  // time it was staged): a Merlin edit landing in between is fine, and a
+  // block that got deleted in between just makes this a no-op (the
+  // staleness effect above will have already cleared pendingSel).
+  const confirmPendingSelection = () => {
+    const p = pendingSel
+    setPendingSel(null)
+    if (!p) return
+    const idx = blocks.findIndex((b) => b._k === p.blockKey)
+    if (idx === -1) return
+    setSelBlock(idx)
+    setSelElement(null)
+    setSelection(p.selection)
+    setSelectSeq((n) => n + 1)
+    postToCanvas({ type: 'cz-highlight', block: idx })
+  }
+  // The panel's ✕ on the pending row — keep the current context, discard
+  // what was staged.
+  const dismissPendingSelection = () => setPendingSel(null)
+  // The coarse chip's ✕ — full context dismissal. Previously unreachable in
+  // Merlin mode (only CanvasModeView's floating-inspector close button sent
+  // cz-clear, and that view isn't rendered under Merlin).
+  const clearSelectedContext = () => {
+    setSelBlock(null)
+    setSelElement(null)
+    setSelection(null)
+    setPendingSel(null)
+    postToCanvas({ type: 'cz-clear' })
+  }
+
   return {
     selBlock, setSelBlock,
     selElement, setSelElement,
     selection, setSelection,
+    pendingSelection: pendingSel,
+    confirmPendingSelection,
+    dismissPendingSelection,
+    clearSelectedContext,
     canvasBp, setCanvasBreakpoint,
     popPos,
     panelDragged,

@@ -424,7 +424,9 @@ function SlashMenu({ items, activeIndex, onHover, onPick }: {
   )
 }
 
-export function MerlinDrawer({ merlin, selectedLabel, selectionChip = null }: {
+export function MerlinDrawer({
+  merlin, selectedLabel, selectionChip = null, pendingChip = null, onClearSelected = null,
+}: {
   merlin: ReturnType<typeof useMerlin>
   selectedLabel: string | null
   /** The finer-grained highlight chip ("'Fresh' in Hero heading") — set
@@ -433,6 +435,14 @@ export function MerlinDrawer({ merlin, selectedLabel, selectionChip = null }: {
    *  tests and any caller that hasn't wired selection yet just get the
    *  existing selectedLabel chip. */
   selectionChip?: { label: string; onClear: () => void } | null
+  /** A DIFFERENT section clicked while a context is already active (sticky
+   *  selection — see useCanvasBridge.ts/selectionContext.ts). Renders as an
+   *  amber "Work on X instead?" row ABOVE the active chip: Switch applies it,
+   *  the ✕ keeps what's currently selected. */
+  pendingChip?: { label: string; onConfirm: () => void; onDismiss: () => void } | null
+  /** Full dismissal of the coarse "Working on X" chip — previously nothing
+   *  could clear it in Merlin mode. */
+  onClearSelected?: (() => void) | null
 }) {
   const premium = usePremium()
   const {
@@ -847,15 +857,42 @@ export function MerlinDrawer({ merlin, selectedLabel, selectionChip = null }: {
           </div>
 
           <div className="border-t border-zinc-800 p-3">
+            {/* A DIFFERENT section clicked while a context is already active
+                (sticky selection while Merlin is open) — staged, not applied.
+                Rendered above the active chip since the question is whether
+                to switch AWAY from it, not a replacement for it. */}
+            {pendingChip && (
+              <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-amber-700/30 bg-amber-500/[0.06] px-2.5 py-1.5 text-[11px] text-amber-300">
+                <MousePointerClick className="h-3 w-3 shrink-0" />
+                <span className="flex-1 truncate">
+                  Work on <strong className="font-semibold">{pendingChip.label}</strong> instead?
+                </span>
+                <button
+                  onClick={pendingChip.onConfirm}
+                  className="shrink-0 rounded border border-amber-600/40 px-1.5 py-0.5 font-medium text-amber-200 hover:bg-amber-500/10"
+                >
+                  Switch
+                </button>
+                <button
+                  onClick={pendingChip.onDismiss}
+                  className="shrink-0 rounded p-0.5 text-amber-300/70 hover:bg-amber-500/10 hover:text-amber-200"
+                  title="Keep current selection"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )}
             {/* Acknowledges the editor's current selection — "this is what
                 your next message will act on" — so a request like "make this
                 warmer" has an obvious referent instead of the user wondering
                 whether Merlin knows what "this" is. selectionChip (a specific
                 field/element) takes priority over the coarser selectedLabel
                 (a bare section) — same content either way, differing only in
-                copy and whether a clear button applies. */}
+                copy and whether a clear button applies. selectedLabel's clear
+                now falls through to onClearSelected — previously hardcoded
+                null, so the coarse chip was undismissable. */}
             {(selectionChip || selectedLabel) && (() => {
-              const chip = selectionChip ?? { label: selectedLabel as string, onClear: null }
+              const chip = selectionChip ?? { label: selectedLabel as string, onClear: onClearSelected ?? null }
               return (
                 <div
                   key={chip.label}
