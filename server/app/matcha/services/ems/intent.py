@@ -133,12 +133,21 @@ _SCHEDULE_PATTERNS = (
     # so "I need a shift recap" (recap noun AFTER the shift noun) is a
     # recall ask (see _RECALL_PATTERNS), not a staffing request, the same
     # as "I need a weekly recap of the schedule" (recap noun before it).
-    rf"^(?:i|we)(?:'ll|'d| will| would)? (?:need|want|gotta|have to|need to get)\b"
+    rf"(?:^|[.!?]\s+)(?:i|we)(?:'ll|'d| will| would)? (?:need|want|gotta|have to|need to get)\b"
     rf"(?!.*\b(?:recap|summary|rundown|roundup)\b)"
     rf"(?:(?!\bto (?:report|log|file|talk|discuss|flag)\b).)*?\b{_SHIFT_NOUN}\b",
     r"^(?:can|could|will|would) (?:you|u) (?:schedule|staff|book|add|set ?up|put)\b",
     r"^schedule\b",
-    rf"^(?:add|set ?up|create|build|make|book)\b(?:\s+\S+){{0,6}}\s+{_SHIFT_NOUN}\b",
+    rf"(?:^|[.!?]\s+)(?:add|set ?up|create|build|make|book)\b(?:\s+\S+){{0,6}}\s+{_SHIFT_NOUN}\b",
+    # push/assign only count when the sentence reaches a shift noun —
+    # "can you push the meeting notes" must stay LOG. ass?i(?:gn|ng)
+    # additionally absorbs the real-world typo "assing". The lead-in
+    # allows a short throwaway clause before the verb ("how about now,
+    # can you...") without opening this up to mid-message false hits —
+    # bounded to a few words, not a bare .search() over the whole text.
+    rf"(?:^|^.{{0,20}}?,\s*)(?:can|could|will|would) (?:you|u) "
+    rf"(?:push|re-?ass?i(?:gn|ng)|ass?i(?:gn|ng))\b"
+    rf"(?:(?!\bto (?:report|log|file)\b).)*?\b{_SHIFT_NOUN}\b",
 )
 
 # The inventory ask — deduct/receive/stockout/order stock. Bias-to-LOG

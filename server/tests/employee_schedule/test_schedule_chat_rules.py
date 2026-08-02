@@ -16,6 +16,7 @@ from app.matcha.services.scheduling.schedule_chat_rules import (
     match_template,
     parse_confirm_reply,
     rank_candidates,
+    resolve_clarify_answer,
     resolve_dates,
     resolve_week,
 )
@@ -139,6 +140,32 @@ class TestMatchLocation:
     def test_empty_hint_empty_string(self):
         out = match_location("", LOCATIONS[:1])
         assert [l["id"] for l in out] == ["1"]
+
+
+class TestResolveClarifyAnswer:
+    OPTS1 = ["Sunset Smile Dental — Wilshire (Los Angeles)"]
+    OPTS2 = [
+        "Sunset Smile Dental — Wilshire (Los Angeles)",
+        "Sunset Smile Dental — La Jolla (San Diego)",
+    ]
+
+    def test_affirmative_single_option_snaps_and_strips_city(self):
+        assert resolve_clarify_answer("Yes", self.OPTS1) == "Sunset Smile Dental — Wilshire"
+
+    def test_affirmative_two_options_unchanged(self):
+        assert resolve_clarify_answer("yes", self.OPTS2) == "yes"
+
+    def test_unique_containment_match_snaps(self):
+        assert resolve_clarify_answer("wilshire", self.OPTS2) == "Sunset Smile Dental — Wilshire"
+
+    def test_ambiguous_containment_unchanged(self):
+        assert resolve_clarify_answer("sunset smile", self.OPTS2) == "sunset smile"
+
+    def test_affirmative_plus_extra_text_uses_containment_path(self):
+        assert resolve_clarify_answer("Yes, wilshire", self.OPTS1) == "Sunset Smile Dental — Wilshire"
+
+    def test_no_options_passthrough(self):
+        assert resolve_clarify_answer("8am to 4pm", []) == "8am to 4pm"
 
 
 class TestMatchTemplate:

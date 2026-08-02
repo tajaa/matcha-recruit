@@ -35,6 +35,17 @@ class TestScheduleRequests:
     def test_staffing_requests_schedule(self, message):
         assert classify_intent(message) == SCHEDULE
 
+    @pytest.mark.parametrize("message", [
+        # verbatim prod misroutes, 2026-08-02 — preamble sentence + push/assign verbs
+        "@huume okay lets try this day by day then. We need to create a schedule "
+        "for tomorrow. I need two openers starting at 8am. Closers leave at 6pm.",
+        "@huume can you push to the schedule though? Lets add two openers to start",
+        "@huume can you assing employees to the open shifts for 8/3?",
+        "@huume how about now, can you assing employees to the 8/3 shifts?",
+    ])
+    def test_prod_misroutes_now_schedule(self, message):
+        assert classify_intent(message) == SCHEDULE
+
 
 class TestReportsStillLog:
     """Reports that mention schedule-adjacent words but are documentation,
@@ -49,6 +60,8 @@ class TestReportsStillLog:
         "@huume closing went long because the register crashed",
         "@huume I need the manager to know the freezer died",
         "@huume staff meeting got heated today",
+        "@huume can you push the meeting notes to the team",
+        "@huume we used the slicer and someone got hurt",
     ])
     def test_reports_log(self, message):
         assert classify_intent(message) == LOG

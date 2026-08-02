@@ -798,7 +798,7 @@ async def _bg_schedule_reply(
         from app.matcha.services.ems.intent import strip_mention
         from app.matcha.services.scheduling import schedule_chat
         from app.matcha.services.scheduling.schedule_chat_rules import (
-            evaluate_schedule_proposal, parse_confirm_reply,
+            evaluate_schedule_proposal, parse_confirm_reply, resolve_clarify_answer,
         )
 
         reply_uuid = UUID(reply_to_id_str)
@@ -898,7 +898,9 @@ async def _bg_schedule_reply(
                     # outstanding question and needs a fresh Gemini parse,
                     # which must not run with this connection held.
                     need_reparse = True
-                    composed = schedule_chat.compose_clarify_followup(proposal, content)
+                    snapped = resolve_clarify_answer(
+                        strip_mention(content), proposal.get("clarify_options") or [])
+                    composed = schedule_chat.compose_clarify_followup(proposal, snapped)
 
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))

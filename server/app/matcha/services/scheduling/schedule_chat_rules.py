@@ -203,6 +203,42 @@ def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
     return [loc for s, loc in scored if s == top]
 
 
+_AFFIRMATIVE_WORD = r"(?:yes|yeah|yep|sure|ok(?:ay)?|correct|that(?: one)?|the first(?: one)?|first)"
+_AFFIRMATIVE_RE = re.compile(rf"{_AFFIRMATIVE_WORD}[.!\s]*", re.IGNORECASE)
+_AFFIRMATIVE_LEAD_RE = re.compile(rf"^{_AFFIRMATIVE_WORD}[,.!\s]+", re.IGNORECASE)
+_OPTION_CITY_SUFFIX = re.compile(r"\s*\([^)]*\)\s*$")
+
+
+def resolve_clarify_answer(answer: str, options: list[str]) -> str:
+    """Snap a clarify reply onto one of the offered options when it
+    unambiguously selects one; otherwise return the reply unchanged for
+    the Gemini re-parse. Bare affirmative + exactly one option = that
+    option ("Yes" answering a single-choice question — a real transcript
+    burned a clarify round exactly this way). Otherwise a case-insensitive
+    containment match hitting exactly one option wins. The trailing
+    " (City)" that build_proposal appends to location options is stripped
+    from the snapped value so it token-matches the business_locations
+    name in match_location."""
+    text = (answer or "").strip()
+    if not options:
+        return text
+    snapped: Optional[str] = None
+    if len(options) == 1 and _AFFIRMATIVE_RE.fullmatch(text):
+        snapped = options[0]
+    else:
+        # Strip a leading "Yes, " so a reply that both affirms and names
+        # the choice ("Yes, wilshire") still hits the containment check
+        # below on its substantive remainder.
+        remainder = _AFFIRMATIVE_LEAD_RE.sub("", text, count=1) or text
+        low = remainder.lower()
+        hits = [o for o in options if low in o.lower() or o.lower() in low]
+        if len(hits) == 1:
+            snapped = hits[0]
+    if snapped is None:
+        return text
+    return _OPTION_CITY_SUFFIX.sub("", snapped).strip()
+
+
 def _stem(word: str) -> str:
     """Naive suffix strip so "opener"/"opening"/"openers" all reduce to
     "open" and "closer"/"closing" reduce to "clos" — just enough to match a
