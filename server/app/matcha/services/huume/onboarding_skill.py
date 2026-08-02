@@ -719,7 +719,7 @@ async def execute_send_offer(*, company_id: UUID, actor_user_id: Optional[UUID],
             return {"status": "error", "message": "This offer has no candidate email set — add one before sending."}
 
         token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
         updated = await conn.fetchrow(
             """
             UPDATE offer_letters

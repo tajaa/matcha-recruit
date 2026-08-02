@@ -533,7 +533,7 @@ async def send_range_offer(
         if offer["status"] not in ("draft", "sent"):
             raise HTTPException(status_code=400, detail="Offer must be in draft or sent state")
         token = secrets.token_urlsafe(32)
-        expires_at = dt.now(timezone.utc) + timedelta(days=7)
+        expires_at = dt.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
         updated = await conn.fetchrow(
             """
             UPDATE offer_letters
@@ -1025,7 +1025,7 @@ async def re_negotiate_offer(
         if current_round >= max_rounds:
             raise HTTPException(status_code=400, detail="Maximum negotiation rounds reached")
         new_token = secrets.token_urlsafe(32)
-        expires_at = dt.now(timezone.utc) + timedelta(days=7)
+        expires_at = dt.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7)
         new_min = payload.salary_range_min if payload.salary_range_min is not None else offer.get("salary_range_min")
         new_max = payload.salary_range_max if payload.salary_range_max is not None else offer.get("salary_range_max")
         updated = await conn.fetchrow(
