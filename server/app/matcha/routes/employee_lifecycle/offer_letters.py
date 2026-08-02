@@ -688,29 +688,55 @@ async def _notify_huume_thread_of_offer_event(
     offer: dict, *, event: str, detail: str,
 ) -> None:
     """Best-effort: post a system notice into the matcha-work thread that
-    originated this offer (reuses `mw_threads.linked_offer_letter_id` — the
-    same offer<->thread link the classic `offer_letter` skill sets via
-    `save_offer_letter_draft`, so this fires for any thread that drafted the
-    offer, Huume or not), and bell-notify the thread's creator. Never raises
-    — a candidate's click must not 500 because a thread got deleted or a WS
-    push hiccuped.
+    originated this offer, and bell-notify the thread's creator plus any
+    designated HR approvers. Never raises — a candidate's click must not 500
+    because a thread got deleted or a WS push hiccuped. `thread_id` is bound
+    before the try body so the except's own logging can't itself raise.
+
+    Thread lookup prefers `offer_letters.source_thread_id` (set once, at
+    draft time, never repointed — see `draft_offer_letter`/
+    `save_offer_letter_draft`) and falls back to the older
+    `mw_threads.linked_offer_letter_id` reverse lookup for pre-migration
+    rows. The reverse lookup is fragile — that column is one slot per
+    thread, repointed by whichever offer was drafted there most recently —
+    which is exactly the bug `source_thread_id` exists to fix.
 
     `event` is 'accepted' | 'declined'.
     """
+    thread_id = None
     try:
         from app.matcha.services.matcha_work.matcha_work_document import (
             add_message, apply_update,
         )
-        from app.matcha.services.notification_service import create_notification
+        from app.matcha.services.notification_service import create_notifications_bulk
 
         async with get_connection() as conn:
-            thread = await conn.fetchrow(
-                "SELECT id, created_by FROM mw_threads WHERE linked_offer_letter_id = $1 AND company_id = $2",
-                offer["id"], offer["company_id"],
+            thread = None
+            if offer.get("source_thread_id"):
+                thread = await conn.fetchrow(
+                    "SELECT id, created_by FROM mw_threads WHERE id = $1 AND company_id = $2",
+                    offer["source_thread_id"], offer["company_id"],
+                )
+            if not thread:
+                thread = await conn.fetchrow(
+                    "SELECT id, created_by FROM mw_threads WHERE linked_offer_letter_id = $1 AND company_id = $2",
+                    offer["id"], offer["company_id"],
+                )
+            if not thread:
+                return
+            thread_id = thread["id"]
+
+            approver_rows = await conn.fetch(
+                """
+                SELECT u.id FROM clients c JOIN users u ON u.id = c.user_id
+                WHERE c.company_id = $1 AND u.role = 'client' AND u.is_active = true
+                  AND c.is_hr_approver = true
+                """,
+                offer["company_id"],
             )
-        if not thread:
-            return
-        thread_id = thread["id"]
+        recipient_ids = {r["id"] for r in approver_rows}
+        if thread["created_by"]:
+            recipient_ids.add(thread["created_by"])
 
         await apply_update(
             thread_id,
@@ -736,15 +762,15 @@ async def _notify_huume_thread_of_offer_event(
         except Exception:
             logger.debug("[Huume] thread broadcast skipped for %s", thread_id, exc_info=True)
 
-        creator_id = thread["created_by"]
-        if creator_id:
-            await create_notification(
-                user_id=creator_id,
-                company_id=offer["company_id"],
+        if recipient_ids:
+            recipient_list = list(recipient_ids)
+            await create_notifications_bulk(
+                user_ids=recipient_list,
+                company_ids=[offer["company_id"]] * len(recipient_list),
                 type="huume_offer",
                 title=f"Offer {event}",
                 body=detail,
-                link=f"/work/threads/{thread_id}",
+                link=f"/work/{thread_id}",
                 metadata={"offer_id": str(offer["id"]), "event": event},
             )
     except Exception:

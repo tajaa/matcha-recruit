@@ -625,11 +625,16 @@ async def _lookup_context_impl(
 async def draft_offer_letter(
     *, company_id: UUID, thread_id: UUID, offer_id: Optional[str] = None, **fields: Any,
 ) -> dict[str, Any]:
-    """Create or update a `status='draft'` offer letter and link the
-    thread to it via `mw_threads.linked_offer_letter_id` (the same column
-    the classic offer_letter skill uses). Never sends anything — that's the
-    separate staged `send_offer` action. Agent-facing tool wrapper — opens
-    its own connection."""
+    """Create or update a `status='draft'` offer letter. Links the thread
+    to the offer two ways: `mw_threads.linked_offer_letter_id` (the same
+    column the classic offer_letter skill uses — one slot per thread,
+    still needed for "is this thread materialized") and the offer's own
+    `source_thread_id` (set once, never repointed — the durable side of
+    the link that `_notify_huume_thread_of_offer_event` resolves from,
+    since a second draft in the same thread would otherwise repoint
+    `linked_offer_letter_id` away from the first candidate). Never sends
+    anything — that's the separate staged `send_offer` action. Agent-facing
+    tool wrapper — opens its own connection."""
     from app.database import get_connection
     async with get_connection() as conn:
         return await _draft_offer_letter_impl(conn, company_id=company_id, thread_id=thread_id, offer_id=offer_id, **fields)
@@ -658,14 +663,15 @@ async def _draft_offer_letter_impl(
                 start_date = COALESCE($5, start_date),
                 employment_type = COALESCE($6, employment_type),
                 location = COALESCE($7, location),
+                source_thread_id = COALESCE(source_thread_id, $8),
                 updated_at = NOW()
-            WHERE id = $8 AND company_id = $9 AND status = 'draft'
+            WHERE id = $9 AND company_id = $10 AND status = 'draft'
             RETURNING *
             """,
             fields.get("candidate_name"), fields.get("candidate_email"),
             fields.get("position_title"), fields.get("salary"), start_date,
             fields.get("employment_type"), fields.get("location"),
-            offer_id, company_id,
+            thread_id, offer_id, company_id,
         )
         if not row:
             return {"status": "error", "message": "That offer isn't a draft (or doesn't exist), so it can't be edited here."}
@@ -678,9 +684,10 @@ async def _draft_offer_letter_impl(
             """
             INSERT INTO offer_letters (
                 candidate_name, position_title, company_name, company_id,
-                salary, start_date, employment_type, location, candidate_email, status
+                salary, start_date, employment_type, location, candidate_email, status,
+                source_thread_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', $10)
             RETURNING *
             """,
             candidate_name, position_title, company_name, company_id,
@@ -688,6 +695,7 @@ async def _draft_offer_letter_impl(
             fields.get("employment_type") or "Full-Time Exempt",
             fields.get("location") or "Remote",
             fields.get("candidate_email"),
+            thread_id,
         )
         await conn.execute(
             "UPDATE mw_threads SET linked_offer_letter_id = $1, updated_at = NOW() WHERE id = $2",

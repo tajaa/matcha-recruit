@@ -81,9 +81,10 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                         salary_range_min = $30,
                         salary_range_max = $31,
                         candidate_email = $32,
+                        source_thread_id = COALESCE(source_thread_id, $33),
                         status = 'draft',
                         updated_at = NOW()
-                    WHERE id = $33 AND company_id = $34
+                    WHERE id = $34 AND company_id = $35
                     RETURNING id, status, updated_at
                     """,
                     payload["candidate_name"],
@@ -118,6 +119,7 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                     payload["salary_range_min"],
                     payload["salary_range_max"],
                     payload["candidate_email"],
+                    thread_id,
                     existing_offer_id,
                     company_id,
                 )
@@ -134,7 +136,8 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                         benefits_wellness, benefits_pto_vacation, benefits_pto_sick,
                         benefits_holidays, benefits_other,
                         contingency_background_check, contingency_credit_check, contingency_drug_screening,
-                        company_logo_url, salary_range_min, salary_range_max, candidate_email
+                        company_logo_url, salary_range_min, salary_range_max, candidate_email,
+                        source_thread_id
                     )
                     VALUES (
                         $1, $2, $3, $4, 'draft',
@@ -145,7 +148,8 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                         $22, $23, $24,
                         $25, $26,
                         $27, $28, $29,
-                        $30, $31, $32, $33
+                        $30, $31, $32, $33,
+                        $34
                     )
                     RETURNING id, status, updated_at
                     """,
@@ -182,6 +186,7 @@ async def save_offer_letter_draft(thread_id: UUID, company_id: UUID) -> dict:
                     payload["salary_range_min"],
                     payload["salary_range_max"],
                     payload["candidate_email"],
+                    thread_id,
                 )
 
             await conn.execute(

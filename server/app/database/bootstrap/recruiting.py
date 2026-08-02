@@ -318,8 +318,6 @@ async def create_recruiting(conn):
             END $$;
         """)
         # Huume offer-letter sign/accept columns — migration huume01
-        # (offer->thread linkage reuses the existing mw_threads.linked_offer_letter_id,
-        # not a new column here)
         await conn.execute("""
             ALTER TABLE offer_letters
                 ADD COLUMN IF NOT EXISTS signed_name VARCHAR(255),
@@ -329,6 +327,15 @@ async def create_recruiting(conn):
                 ADD COLUMN IF NOT EXISTS decline_reason TEXT,
                 ADD COLUMN IF NOT EXISTS signed_pdf_storage_path TEXT,
                 ADD COLUMN IF NOT EXISTS employee_id UUID REFERENCES employees(id) ON DELETE SET NULL;
+        """)
+        # Forward link from an offer letter back to the Huume/matcha-work
+        # thread that drafted it — migration offthread01. No inline
+        # REFERENCES here: create_recruiting() runs before create_matcha_work()
+        # in bootstrap/__init__.py, so mw_threads doesn't exist yet on a
+        # fresh DB; the FK is enforced by the real migration instead.
+        await conn.execute("""
+            ALTER TABLE offer_letters
+                ADD COLUMN IF NOT EXISTS source_thread_id UUID
         """)
 
         # Tracked companies table (company watchlist)
