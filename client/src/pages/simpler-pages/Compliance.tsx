@@ -19,7 +19,7 @@ import { COMPLIANCE_JSON_LD } from './Compliance/data'
 // — already lazy at App.tsx, so neither reaches the apex `/` chunk.
 const PricingContactModal = lazy(() =>
   import('../../components/marketing/PricingContactModal').then((m) => ({
-    default: m.PricingContactModal,
+    default: m?.PricingContactModal ?? (() => null),
   })),
 )
 

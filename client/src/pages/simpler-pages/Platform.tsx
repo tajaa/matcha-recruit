@@ -14,7 +14,7 @@ import { PLATFORM_JSON_LD } from './Platform/data'
 
 const PricingContactModal = lazy(() =>
   import('../../components/marketing/PricingContactModal').then((m) => ({
-    default: m.PricingContactModal,
+    default: m?.PricingContactModal ?? (() => null),
   })),
 )
 

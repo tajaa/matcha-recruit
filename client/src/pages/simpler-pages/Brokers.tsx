@@ -16,7 +16,7 @@ import { CtaBand } from './Brokers/CtaBand'
 
 const PricingContactModal = lazy(() =>
   import('../../components/marketing/PricingContactModal').then((m) => ({
-    default: m.PricingContactModal,
+    default: m?.PricingContactModal ?? (() => null),
   })),
 )
 

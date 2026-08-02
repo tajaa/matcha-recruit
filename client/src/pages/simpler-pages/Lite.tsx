@@ -15,7 +15,7 @@ import { LITE_JSON_LD } from './Lite/data'
 
 const PricingContactModal = lazy(() =>
   import('../../components/marketing/PricingContactModal').then((m) => ({
-    default: m.PricingContactModal,
+    default: m?.PricingContactModal ?? (() => null),
   })),
 )
 

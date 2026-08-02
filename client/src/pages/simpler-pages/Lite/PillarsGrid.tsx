@@ -10,7 +10,7 @@ import { CONTAINER, EYEBROW, SECTION_Y } from '../../home/layout'
 import { Reveal } from '../../home/PageChrome'
 
 const OshaLogInstrument = lazy(() =>
-  import('../../home/instruments/OshaLogInstrument').then((m) => ({ default: m.OshaLogInstrument })),
+  import('../../home/instruments/OshaLogInstrument').then((m) => ({ default: m?.OshaLogInstrument ?? (() => null) })),
 )
 
 const OSHA_FALLBACK = (

@@ -8,7 +8,7 @@ import { Reveal } from "./PageChrome";
 // chunk — and now that the carousel lives below the fold rather than inside the
 // hero, the boundary is honest: it genuinely isn't needed for first paint.
 const ProductCarousel = lazy(() =>
-  import("./ProductCarousel").then((m) => ({ default: m.ProductCarousel })),
+  import("./ProductCarousel").then((m) => ({ default: m?.ProductCarousel ?? (() => null) })),
 );
 
 /**

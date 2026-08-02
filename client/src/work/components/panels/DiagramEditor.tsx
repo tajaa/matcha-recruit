@@ -5,7 +5,7 @@ import { useDiagramEditor } from './useDiagramEditor'
 import type { DiagramData } from './useDiagramEditor'
 
 const Excalidraw = lazy(() =>
-  import('@excalidraw/excalidraw').then((m) => ({ default: m.Excalidraw }))
+  import('@excalidraw/excalidraw').then((m) => ({ default: m?.Excalidraw ?? (() => null) }))
 )
 
 type Props = {

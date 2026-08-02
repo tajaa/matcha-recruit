@@ -20,8 +20,7 @@ applyTheme(getTheme())
 // utils/staleChunk for the shared detection + one-shot guard (ErrorBoundary
 // uses the same guard for React.lazy failures that bypass this event).
 window.addEventListener('vite:preloadError', (event) => {
-  event.preventDefault()
-  reloadForStaleChunk()
+  if (reloadForStaleChunk()) event.preventDefault()
 })
 
 createRoot(document.getElementById('root')!).render(

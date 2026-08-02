@@ -15,7 +15,7 @@ import { CTABand } from "./CTABand";
 // the visitor clicks a demo CTA — so it has no business in the eager chunk.
 const PricingContactModal = lazy(() =>
   import("../../components/marketing/PricingContactModal").then((m) => ({
-    default: m.PricingContactModal,
+    default: m?.PricingContactModal ?? (() => null),
   })),
 );
 
