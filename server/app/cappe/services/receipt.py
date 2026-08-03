@@ -86,6 +86,31 @@ def _items_rows_html(items: list[dict], currency: str) -> str:
     return "".join(out)
 
 
+def _ship_to_html(shipping_address) -> str:
+    """Render the Ship-to block from the persisted Stripe shipping_details.
+    Accepts str-or-dict (asyncpg JSONB); every field HTML-escaped."""
+    addr = shipping_address
+    if isinstance(addr, str):
+        try:
+            addr = json.loads(addr)
+        except ValueError:
+            addr = None
+    if not isinstance(addr, dict):
+        return ""
+    a = addr.get("address") or {}
+    city_line = ", ".join(str(x) for x in [a.get("city"), a.get("state")] if x)
+    if a.get("postal_code"):
+        city_line = f"{city_line} {a['postal_code']}".strip()
+    lines = [addr.get("name"), a.get("line1"), a.get("line2"), city_line, a.get("country")]
+    rows = "".join(f"<div>{escape(str(x))}</div>" for x in lines if x)
+    if not rows:
+        return ""
+    return (
+        '<div style="margin:20px 0 8px;font-size:13px;color:#3f3f46;">'
+        '<div style="color:#71717a;">Ship to</div>' + rows + "</div>"
+    )
+
+
 def build_receipt_html(order: dict, items: list[dict]) -> str:
     """Printable receipt document (light theme for paper / PDF)."""
     cur = order.get("currency") or "USD"
@@ -97,8 +122,10 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     cust_email = escape(str(order.get("customer_email") or ""))
     subtotal = int(order.get("subtotal_cents") or 0)
     tax = int(order.get("tax_cents") or 0)
-    total = int(order.get("total_cents") or (subtotal + tax))
+    shipping = int(order.get("shipping_cents") or 0)
+    total = int(order.get("total_cents") or (subtotal + tax + shipping))
     tax_label = escape(str(order.get("tax_label") or "Tax"))
+    shipping_label = escape(str(order.get("shipping_label") or "Shipping"))
     pay_ref = escape(str(order.get("stripe_payment_intent") or order.get("payment_ref") or ""))
 
     tax_row = (
@@ -106,6 +133,12 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
         f'<td style="padding:4px 0;text-align:right;width:120px;">{_fmt(tax, cur)}</td></tr>'
         if tax > 0 else ""
     )
+    shipping_row = (
+        f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">{shipping_label}</td>'
+        f'<td style="padding:4px 0;text-align:right;width:120px;">{_fmt(shipping, cur)}</td></tr>'
+        if shipping > 0 else ""
+    )
+    ship_to = _ship_to_html(order.get("shipping_address"))
     return f"""\
 <!doctype html><html><head><meta charset="utf-8"><style>
   @page {{ size: A4; margin: 28mm 20mm; }}
@@ -122,6 +155,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     <div style="color:#71717a;">Billed to</div><div>{cust}</div>
     {f'<div style="color:#71717a;">{cust_email}</div>' if cust and cust_email and cust != cust_email else ''}
   </div>
+  {ship_to}
   <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px;">
     <thead><tr style="color:#71717a;font-size:12px;text-transform:uppercase;">
       <th style="text-align:left;padding:6px 0;border-bottom:2px solid #18181b;">Item</th>
@@ -135,6 +169,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     <tr><td style="padding:4px 0;text-align:right;color:#71717a;">Subtotal</td>
       <td style="padding:4px 0;text-align:right;width:120px;">{_fmt(subtotal, cur)}</td></tr>
     {tax_row}
+    {shipping_row}
     <tr><td style="padding:8px 0;text-align:right;font-weight:700;border-top:2px solid #18181b;">Total</td>
       <td style="padding:8px 0;text-align:right;font-weight:700;border-top:2px solid #18181b;">{_fmt(total, cur)}</td></tr>
   </tbody></table>
@@ -148,9 +183,10 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
     Returns (order_dict, pdf_bytes) or None if the order is missing."""
     order = await conn.fetchrow(
         """SELECT o.id, o.customer_email, o.customer_name, o.currency, o.subtotal_cents,
-                  o.tax_cents, o.total_cents, o.receipt_number, o.payment_ref,
+                  o.tax_cents, o.shipping_cents, o.shipping_address, o.total_cents,
+                  o.receipt_number, o.payment_ref,
                   o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id,
-                  s.name AS business_name, s.tax_label
+                  s.name AS business_name, s.tax_label, s.shipping_label
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
             WHERE o.id = $1""",
         order_id,
