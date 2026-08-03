@@ -57,7 +57,7 @@ def _is_platform_dataset(row) -> bool:
 # Bundled sample datasets for the Examples tab's live demo — small, self-contained
 # CSVs shipped with the server (not user data), one per analyzer-pack domain, so
 # clicking an example shows a real computed-and-cited answer, not a mockup.
-_DEMO_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "analysis_pilot_demos"
+_DEMO_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "analysis_pilot_demos"
 _DEMO_DATASETS = {
     "volatility": "fund_prices_weekly.csv",
     "financial": "quarterly_financials.csv",
@@ -470,11 +470,14 @@ async def load_demo_dataset(session_id: str, body: DemoDatasetIn, request: Reque
 
     async with get_connection() as conn:
         await _load_session(conn, session_id, company_id)
-        existing = await conn.fetchrow(
-            "SELECT * FROM analysis_pilot_datasets WHERE session_id = $1 AND filename = $2",
+        existing_id = await conn.fetchval(
+            "SELECT id FROM analysis_pilot_datasets WHERE session_id = $1 AND filename = $2",
             session_id, filename)
-        if existing:
-            return _dataset_out(dict(existing))
+        if existing_id:
+            # _load_dataset parses the jsonb columns — a raw SELECT * row would
+            # hand _dataset_out strings (no jsonb codec on the pool).
+            return _dataset_out(await _load_dataset(conn, session_id, str(existing_id)))
+        await check_rate_limit(str(company_id), "analysis_pilot_upload", 40, 3600)
         storage_path = await get_storage().upload_private_file(
             data, filename, prefix=f"analysis-pilot/{session_id}", content_type="text/csv")
         row = await conn.fetchrow(
@@ -560,8 +563,10 @@ async def patch_dataset(session_id: str, dataset_id: str, body: DatasetPatch, re
     try:
         if body.reextract:
             # Recovery path: transient Gemini failure at upload must not be
-            # terminal — re-run the extraction from the stored original.
+            # terminal — re-run the extraction from the stored original. Same
+            # Gemini spend as an upload extraction, so meter the same bucket.
             audit_action = "reextract"
+            await check_rate_limit(str(company_id), "analysis_pilot_upload", 40, 3600)
             raw = await get_storage().download_file(d["storage_path"])
             result = await ap.extract_dataset(raw, "", is_pdf=True, filename=d["filename"])
             extraction = result["extraction"]

@@ -11,6 +11,7 @@ chat turn, packet generation, download, and share is written to
 `legal_matter_audit_log` (legal-grade trail).
 """
 
+import asyncio
 import json
 import logging
 import secrets
@@ -271,10 +272,16 @@ async def update_matter(matter_id: str, body: MatterUpdate, request: Request, cu
         for i, (k, v) in enumerate(fields.items(), start=1):
             sets.append(f"{k} = ${i}")
             vals.append(v)
-        vals.append(matter_id)
-        closed = ", closed_at = NOW()" if fields.get("status") == "closed" else ""
+        vals.extend([matter_id, company_id])
+        if fields.get("status") == "closed":
+            closed = ", closed_at = NOW()"
+        elif fields.get("status") in ("active", "draft"):
+            closed = ", closed_at = NULL"   # reopening clears the stale timestamp
+        else:
+            closed = ""
         await conn.execute(
-            f"UPDATE legal_matters SET {', '.join(sets)}, updated_at = NOW(){closed} WHERE id = ${len(vals)}",
+            f"UPDATE legal_matters SET {', '.join(sets)}, updated_at = NOW(){closed} "
+            f"WHERE id = ${len(vals) - 1} AND company_id = ${len(vals)}",
             *vals,
         )
         await _audit(conn, matter_id, current_user, request, "update", {"fields": list(fields.keys())})
@@ -311,6 +318,9 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
     # Pre-work in one connection; release it before the long Gemini call.
     async with get_connection() as conn:
         matter = await _load_matter(conn, matter_id, company_id)
+        # 404 before consuming budget (same rule as /research); 40/hr matches
+        # the other pilot chat surfaces.
+        await check_rate_limit(str(company_id), "legal_chat", 40, 3600)
         history = await _load_messages(conn, matter_id)
         features = await _features(conn, company_id)
         corpus = await ld.gather_evidence(
@@ -322,6 +332,28 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
         )
         await _audit(conn, matter_id, current_user, request, "message", {"role": "user"})
 
+    async def _persist(payload: dict):
+        """Persist the assistant turn (+ validated evidence map) on a fresh
+        connection. Wrapped in asyncio.shield by the caller so a client
+        disconnect right after the result is produced doesn't drop the
+        (already-generated) turn."""
+        async with get_connection() as c2:
+            await c2.execute(
+                "INSERT INTO legal_matter_messages (matter_id, role, content, metadata) "
+                "VALUES ($1, 'assistant', $2, $3)",
+                matter_id, payload.get("assistant_text", ""),
+                json.dumps({
+                    "evidence_map": payload.get("evidence_map"),
+                    "open_questions": payload.get("open_questions"),
+                    "dropped_citations": payload.get("dropped_citations"),
+                    "intake_requests": payload.get("intake_requests"),
+                    "ready_for_analysis": payload.get("ready_for_analysis"),
+                }),
+            )
+            await c2.execute(
+                "UPDATE legal_matters SET updated_at = NOW() WHERE id = $1", matter_id
+            )
+
     async def event_stream():
         result_payload = None
         try:
@@ -332,25 +364,11 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
         except Exception:
             logger.exception("legal_defense: chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Analysis failed.'})}\n\n"
-        # Persist the assistant turn (+ validated evidence map) after streaming.
+        # Persist after streaming. shield() so a disconnect at this point still
+        # commits the completed turn (the Gemini tokens were already spent).
         if result_payload:
             try:
-                async with get_connection() as c2:
-                    await c2.execute(
-                        "INSERT INTO legal_matter_messages (matter_id, role, content, metadata) "
-                        "VALUES ($1, 'assistant', $2, $3)",
-                        matter_id, result_payload.get("assistant_text", ""),
-                        json.dumps({
-                            "evidence_map": result_payload.get("evidence_map"),
-                            "open_questions": result_payload.get("open_questions"),
-                            "dropped_citations": result_payload.get("dropped_citations"),
-                            "intake_requests": result_payload.get("intake_requests"),
-                            "ready_for_analysis": result_payload.get("ready_for_analysis"),
-                        }),
-                    )
-                    await c2.execute(
-                        "UPDATE legal_matters SET updated_at = NOW() WHERE id = $1", matter_id
-                    )
+                await asyncio.shield(_persist(result_payload))
             except Exception:
                 logger.exception("legal_defense: failed to persist assistant message")
         yield "data: [DONE]\n\n"
