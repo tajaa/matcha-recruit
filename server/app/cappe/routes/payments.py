@@ -8,6 +8,7 @@ onboarding + the paid-order webhook.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 from uuid import UUID
@@ -31,6 +32,15 @@ from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 logger = logging.getLogger("cappe.payments")
 
 router = APIRouter()
+
+
+def extract_shipping_details(obj: dict) -> Optional[dict]:
+    """Newer Stripe API versions nest the buyer's address under
+    collected_information.shipping_details; older ones put it at top level.
+    Read both; None when absent either way. Works on raw event payloads and
+    retrieved StripeObject sessions alike (both are dict-like)."""
+    collected = obj.get("collected_information") or {}
+    return collected.get("shipping_details") or obj.get("shipping_details") or None
 
 
 class ConnectLinkRequest(BaseModel):
@@ -170,12 +180,20 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                 fee = int(fee) if fee is not None else None
             except (TypeError, ValueError):
                 fee = None
+            ship = extract_shipping_details(obj)
+            if ship is None and obj.get("id"):
+                try:
+                    sess = await get_cappe_stripe().retrieve_checkout_session(event_account_id, obj["id"])
+                    ship = extract_shipping_details(sess)
+                except CappeStripeError:
+                    ship = None  # best-effort; never block marking the order paid
             async with get_connection() as conn:
                 row = await conn.fetchrow(
                     """UPDATE cappe_orders o
                           SET status = 'paid', paid_at = NOW(),
                               stripe_payment_intent = $2, payment_ref = $2,
                               platform_fee_cents = COALESCE($3, platform_fee_cents),
+                              shipping_address = COALESCE($5::jsonb, o.shipping_address),
                               updated_at = NOW()
                         FROM cappe_sites s, cappe_accounts a
                         WHERE o.id = $1 AND o.status = 'pending'
@@ -183,6 +201,7 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                           AND a.stripe_account_id = $4
                         RETURNING o.id, o.site_id, o.customer_email, o.customer_name""",
                     oid, payment_intent, fee, event_account_id,
+                    json.dumps(dict(ship)) if ship else None,
                 )
             if row is not None:
                 # Issue the receipt (assign number → render PDF → email) after
