@@ -44,6 +44,20 @@ def order_subtotal(line_items: Iterable[tuple[int, int]]) -> int:
     return sum(int(price) * int(qty) for price, qty in line_items)
 
 
+def compute_shipping_cents(
+    *, has_physical: bool, subtotal_cents: int, flat_cents: int,
+    free_threshold_cents: int | None,
+) -> int:
+    """Flat per-site shipping for carts with a physical line; zero when the
+    free-shipping threshold is met. Threshold compares the GOODS subtotal
+    (pre-tax), matching what the buyer sees advertised ("free over $50")."""
+    if not has_physical or flat_cents <= 0:
+        return 0
+    if free_threshold_cents is not None and subtotal_cents >= free_threshold_cents:
+        return 0
+    return flat_cents
+
+
 def _minute_multiplier(
     minute_t: time, weekday: int, rules: Sequence[dict]
 ) -> float:
@@ -497,22 +511,32 @@ async def create_public_order(site, body, background) -> dict:
             # Tax (per-site rate, applied to physical/taxable lines only). Added
             # as a Stripe line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
-                "SELECT tax_rate_bps, tax_label FROM cappe_sites WHERE id = $1", site["id"]
+                "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
+                "shipping_free_threshold_cents, shipping_label "
+                "FROM cappe_sites WHERE id = $1", site["id"]
             )
             tax_rate_bps = int(tax_cfg["tax_rate_bps"]) if tax_cfg else 0
             tax_label = (tax_cfg["tax_label"] if tax_cfg else None) or "Tax"
             taxable = sum(unit * qty for (_p, _t, unit, qty, f, *_r) in line_rows if f == "physical")
             tax_cents = (taxable * tax_rate_bps) // 10000 if tax_rate_bps > 0 else 0
-            total_cents = subtotal + tax_cents
+            has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
+            shipping_cents = compute_shipping_cents(
+                has_physical=has_physical,
+                subtotal_cents=subtotal,
+                flat_cents=int(tax_cfg["shipping_flat_cents"]) if tax_cfg else 0,
+                free_threshold_cents=tax_cfg["shipping_free_threshold_cents"] if tax_cfg else None,
+            )
+            shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
+            total_cents = subtotal + tax_cents + shipping_cents
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
-                        total_cents, currency, note, requires_approval)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9)
-                   RETURNING id, status, subtotal_cents, tax_cents, total_cents, currency,
-                             access_token, requires_approval""",
-                site["id"], email, body.customer_name, subtotal, tax_cents, total_cents,
-                order_currency or "USD", body.note, order_requires_approval,
+                        shipping_cents, total_cents, currency, note, requires_approval)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9, $10)
+                   RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
+                             currency, access_token, requires_approval""",
+                site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
+                total_cents, order_currency or "USD", body.note, order_requires_approval,
             )
             for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids in line_rows:
                 await conn.execute(
@@ -580,6 +604,14 @@ async def create_public_order(site, body, background) -> dict:
                 cancel_url=body.cancel_url,
                 metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
                 customer_email=email or None,
+                collect_shipping_address=has_physical,
+                shipping_option=(
+                    {
+                        "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",
+                        "amount_cents": order["shipping_cents"],
+                    }
+                    if has_physical else None
+                ),
             )
             checkout_url = sess.get("url")
             async with get_connection() as conn:
