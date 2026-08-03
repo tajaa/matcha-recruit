@@ -35,6 +35,7 @@ info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>
 '<h2 class="cz-pd__name">'+RT.esc(p.name)+'</h2>'+
 '<div class="cz-pd__price">'+priceHtml+'</div>'+
 (p.description?'<p class="cz-pd__desc">'+RT.esc(p.description)+'</p>':'')+
+(p.fulfillment==='physical'?'<p class="cz-msg">Shipping calculated at checkout.</p>':'')+
 optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
 '<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1" data-qty />'+

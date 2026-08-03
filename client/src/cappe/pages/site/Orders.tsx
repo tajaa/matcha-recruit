@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock } from 'lucide-react'
+import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock, Truck } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import StripeConnectCard from '../../components/StripeConnectCard'
@@ -125,6 +125,26 @@ export default function Orders() {
               </div>
               {openId === o.id && (
                 <div className="space-y-2 bg-zinc-950 px-12 py-3">
+                  {o.shipping_address && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
+                      <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-400"><Truck className="h-3.5 w-3.5" /> Ship to</div>
+                      {o.shipping_address.name && <div>{o.shipping_address.name}</div>}
+                      {o.shipping_address.address?.line1 && <div>{o.shipping_address.address.line1}</div>}
+                      {o.shipping_address.address?.line2 && <div>{o.shipping_address.address.line2}</div>}
+                      <div>
+                        {[o.shipping_address.address?.city, o.shipping_address.address?.state].filter(Boolean).join(', ')}{' '}
+                        {o.shipping_address.address?.postal_code || ''}
+                      </div>
+                      {o.shipping_address.address?.country && <div>{o.shipping_address.address.country}</div>}
+                    </div>
+                  )}
+                  {(o.shipping_address != null || o.items.some((i) => i.fulfillment === 'physical')) && (
+                    <TrackingEditor
+                      siteId={siteId || ''}
+                      order={o}
+                      onSaved={(u) => setOrders((os) => (os || []).map((x) => (x.id === o.id ? u : x)))}
+                    />
+                  )}
                   {o.items.length === 0 ? (
                     <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
                   ) : (
@@ -180,5 +200,58 @@ export default function Orders() {
         </div>
       )}
     </SurfaceShell>
+  )
+}
+
+function TrackingEditor({ siteId, order, onSaved }: {
+  siteId: string
+  order: CappeOrder
+  onSaved: (o: CappeOrder) => void
+}) {
+  const [carrier, setCarrier] = useState(order.carrier || '')
+  const [tracking, setTracking] = useState(order.tracking_number || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function save() {
+    setSaving(true); setError(null)
+    try {
+      const updated = await cappeApi.patch<CappeOrder>(
+        `/sites/${siteId}/orders/${order.id}`,
+        { carrier: carrier.trim() || null, tracking_number: tracking.trim() || null },
+      )
+      onSaved({ ...updated, items: order.items })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save tracking')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+      <input
+        value={carrier}
+        onChange={(e) => setCarrier(e.target.value)}
+        maxLength={40}
+        placeholder="Carrier — e.g. USPS"
+        className="w-36 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500"
+      />
+      <input
+        value={tracking}
+        onChange={(e) => setTracking(e.target.value)}
+        maxLength={120}
+        placeholder="Tracking number"
+        className="min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 placeholder:text-zinc-500"
+      />
+      <button
+        onClick={save}
+        disabled={saving}
+        className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+      >
+        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
+      </button>
+      {error && <span className="text-xs text-red-400">{error}</span>}
+    </div>
   )
 }

@@ -4,6 +4,7 @@ import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle } from
 import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
+import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../types'
@@ -131,6 +132,7 @@ export default function Shop() {
     <SurfaceShell title="Shop" subtitle="Anything you sell — goods, downloads, services, or bookable sessions.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
       <TaxSettingsCard siteId={siteId || ''} />
+      <ShippingSettingsCard siteId={siteId || ''} />
 
       <form onSubmit={addProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="grid gap-3 sm:grid-cols-3">

@@ -65,6 +65,9 @@ export type CappeSite = {
   tax_rate_bps?: number | null
   tax_label?: string | null
   receipt_prefix?: string | null
+  shipping_flat_cents?: number | null
+  shipping_free_threshold_cents?: number | null
+  shipping_label?: string | null
   listed?: boolean
   directory_category?: string | null
   directory_tags?: string[]
@@ -342,6 +345,18 @@ export type CappeOrderItem = {
   booking_id: string | null
 }
 
+export type CappeShippingAddress = {
+  name?: string | null
+  address?: {
+    line1?: string | null
+    line2?: string | null
+    city?: string | null
+    state?: string | null
+    postal_code?: string | null
+    country?: string | null
+  } | null
+}
+
 export type CappeOrder = {
   id: string
   site_id: string
@@ -350,6 +365,10 @@ export type CappeOrder = {
   status: 'pending' | 'paid' | 'fulfilled' | 'cancelled' | 'refunded' | 'declined'
   subtotal_cents: number
   tax_cents: number
+  shipping_cents: number
+  shipping_address?: CappeShippingAddress | null
+  carrier?: string | null
+  tracking_number?: string | null
   total_cents: number | null
   receipt_number: string | null
   currency: string
