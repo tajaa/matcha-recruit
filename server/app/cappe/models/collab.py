@@ -88,6 +88,17 @@ class CampaignUpsert(BaseModel):
     status: Optional[Literal["active", "archived"]] = None
 
 
+class CampaignPatch(BaseModel):
+    """Partial update — CampaignUpsert.title is required (create-only), so
+    PATCH needs its own all-optional shape rather than reusing it."""
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    description: Optional[str] = Field(default=None, max_length=4000)
+    budget_min_cents: Optional[int] = Field(default=None, ge=0)
+    budget_max_cents: Optional[int] = Field(default=None, ge=0)
+    deliverable_notes: Optional[str] = Field(default=None, max_length=2000)
+    status: Optional[Literal["active", "archived"]] = None
+
+
 class Campaign(BaseModel):
     id: UUID
     title: str

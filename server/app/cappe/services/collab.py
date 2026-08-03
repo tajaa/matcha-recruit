@@ -179,11 +179,13 @@ async def accept_offer(conn, offer_row, side: str) -> None:
         )
         deliverable_ids[d["idx"]] = did
 
+    has_on_accept_due = False
     if terms.compensation_cents > 0:
         payment_rows = build_payment_rows(terms, len(deliverable_rows))
         for p in payment_rows:
             deliverable_id = deliverable_ids.get(p["deliverable_idx"]) if p["deliverable_idx"] is not None else None
             is_due_now = p["trigger"] == "on_accept"
+            has_on_accept_due = has_on_accept_due or is_due_now
             await conn.execute(
                 """INSERT INTO cappe_collab_payments
                        (offer_id, idx, label, amount_cents, trigger, deliverable_id, status, due_at)
@@ -192,9 +194,12 @@ async def accept_offer(conn, offer_row, side: str) -> None:
                 deliverable_id, "due" if is_due_now else "scheduled",
                 datetime.utcnow() if is_due_now else None,
             )
-    else:
-        # Gifting collab: nothing to fund, so nothing to wait for — go
-        # straight to active ("underway").
+
+    if not has_on_accept_due:
+        # Gifting collab (no payment rows) or a per_deliverable schedule
+        # (nothing due until the first approval): nothing blocks work
+        # starting, so go straight to active ("underway") instead of
+        # waiting on a webhook that will never fire an on_accept payment.
         await conn.execute(
             "UPDATE cappe_collab_offers SET status='active', updated_at=NOW() WHERE id=$1",
             offer_row["id"],

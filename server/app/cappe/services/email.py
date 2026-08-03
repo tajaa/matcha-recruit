@@ -452,3 +452,175 @@ async def send_cappe_booking_cancelled_email(
     html = _email_shell(f"Booking cancelled — {e_site}", body, cta_label="View bookings", cta_url=dashboard_url)
     text = f"{customer_name or 'A customer'} cancelled {type_name} — {when_label} on {site_name}.\n\n{dashboard_url}"
     await _send(to_email, to_name, f"Booking cancelled — {site_name}", html, text, label="booking cancelled")
+
+
+# ── transactional: creator marketplace collabs ───────────────────────────────
+
+async def send_cappe_offer_received_email(
+    to_email: str, to_name: str | None, brand_name: str, offer_title: str, link: str,
+) -> None:
+    """New brand offer, to the creator. Best-effort."""
+    e_brand, e_title = escape(brand_name or "A brand"), escape(offer_title)
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_brand}</b> sent you a collab offer: <b style="color:#fafafa;">{e_title}</b>.</p>'
+    )
+    html = _email_shell(f"New brand offer: {e_title}", body, cta_label="View offer", cta_url=link)
+    text = f"{brand_name} sent you a collab offer: {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"New brand offer: {offer_title}", html, text, label="offer received")
+
+
+async def send_cappe_offer_counter_email(
+    to_email: str, to_name: str | None, counterpart_name: str, offer_title: str, link: str,
+) -> None:
+    """New terms proposed by the other side. Best-effort."""
+    e_who, e_title = escape(counterpart_name or "The other side"), escape(offer_title)
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_who}</b> proposed new terms on <b style="color:#fafafa;">{e_title}</b>.</p>'
+    )
+    html = _email_shell(f"New terms proposed on {e_title}", body, cta_label="Review terms", cta_url=link)
+    text = f"{counterpart_name} proposed new terms on {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"New terms proposed on {offer_title}", html, text, label="offer counter")
+
+
+async def send_cappe_offer_accepted_email(
+    to_email: str, to_name: str | None, offer_title: str, link: str, *, funding_due: bool,
+) -> None:
+    """Offer accepted. `funding_due=True` (brand copy) appends the fund-now nudge."""
+    e_title = escape(offer_title)
+    extra = (
+        '<p style="margin:14px 0 0;font-size:13px;color:#a1a1aa;">The first installment is now due.</p>'
+        if funding_due else ""
+    )
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'Terms are locked on <b style="color:#fafafa;">{e_title}</b>.</p>{extra}'
+    )
+    cta_label = "Fund now" if funding_due else "View collab"
+    html = _email_shell(f"Offer accepted: {e_title}", body, cta_label=cta_label, cta_url=link, accent="#10b981")
+    text = f"Offer accepted: {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"Offer accepted: {offer_title}", html, text, label="offer accepted")
+
+
+async def send_cappe_offer_closed_email(
+    to_email: str, to_name: str | None, offer_title: str, verb: str, reason: str | None, link: str,
+) -> None:
+    """verb in {'declined', 'withdrawn', 'cancelled'}. Best-effort."""
+    e_title = escape(offer_title)
+    e_reason = f'<p style="margin:8px 0 0;font-size:13px;color:#a1a1aa;">{escape(reason)}</p>' if reason else ""
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_title}</b> was {escape(verb)}.</p>{e_reason}'
+    )
+    html = _email_shell(f"Offer {verb}: {e_title}", body, cta_label="View offer", cta_url=link, accent="#71717a")
+    text = f"Offer {verb}: {offer_title}.\n" + (f"{reason}\n" if reason else "") + f"\n{link}"
+    await _send(to_email, to_name, f"Offer {verb}: {offer_title}", html, text, label="offer closed")
+
+
+async def send_cappe_collab_message_email(
+    to_email: str, to_name: str | None, from_name: str, offer_title: str, body_text: str, link: str,
+) -> None:
+    """New chat message on an offer. Best-effort."""
+    e_from, e_title = escape(from_name or "The other side"), escape(offer_title)
+    snippet = (body_text or "")[:300]
+    e_snippet = escape(snippet)
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_from}</b> on <b style="color:#fafafa;">{e_title}</b>:</p>'
+        f'<div style="border-left:3px solid #71717a;padding:8px 0 8px 14px;color:#fafafa;font-size:14px;">{e_snippet}</div>'
+    )
+    html = _email_shell(f"{e_from} on {e_title}", body, cta_label="Reply", cta_url=link)
+    text = f"{from_name} on {offer_title}:\n{snippet}\n\n{link}"
+    await _send(to_email, to_name, f"{from_name} on {offer_title}", html, text, label="collab message")
+
+
+async def send_cappe_deliverable_submitted_email(
+    to_email: str, to_name: str | None, offer_title: str, deliverable_label: str, link: str,
+) -> None:
+    """A deliverable was submitted, to the brand. Best-effort."""
+    e_title, e_label = escape(offer_title), escape(deliverable_label)
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{e_label}</b> was submitted for review on {e_title}.</p>'
+    )
+    html = _email_shell(f"Deliverable submitted — {e_title}", body, cta_label="Review", cta_url=link)
+    text = f"{deliverable_label} was submitted for review on {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"Deliverable submitted — {offer_title}", html, text, label="deliverable submitted")
+
+
+async def send_cappe_deliverable_decision_email(
+    to_email: str, to_name: str | None, offer_title: str, deliverable_label: str,
+    approved: bool, note: str | None, link: str,
+) -> None:
+    """Approval or revision-request decision on a deliverable, to the creator."""
+    e_title, e_label = escape(offer_title), escape(deliverable_label)
+    if approved:
+        heading = f"Deliverable approved 🎉"
+        body = f'<p style="margin:0;font-size:15px;color:#d4d4d8;"><b style="color:#fafafa;">{e_label}</b> was approved on {e_title}.</p>'
+        accent = "#10b981"
+    else:
+        heading = "Changes requested"
+        note_html = f'<p style="margin:8px 0 0;font-size:13px;color:#a1a1aa;">{escape(note)}</p>' if note else ""
+        body = (
+            f'<p style="margin:0;font-size:15px;color:#d4d4d8;">Changes requested on '
+            f'<b style="color:#fafafa;">{e_label}</b> ({e_title}).</p>{note_html}'
+        )
+        accent = "#f59e0b"
+    html = _email_shell(heading, body, cta_label="View collab", cta_url=link, accent=accent)
+    text = f"{heading}: {deliverable_label} on {offer_title}.\n" + (f"{note}\n" if note else "") + f"\n{link}"
+    await _send(to_email, to_name, f"{heading} — {offer_title}", html, text, label="deliverable decision")
+
+
+async def send_cappe_collab_payment_due_email(
+    to_email: str, to_name: str | None, offer_title: str, label: str, amount_cents: int, link: str,
+) -> None:
+    """To the BRAND: an installment is now due."""
+    e_title, e_label, amount = escape(offer_title), escape(label), fmt_money(amount_cents)
+    body = (
+        f'<p style="margin:0;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{escape(amount)}</b> is due for <b style="color:#fafafa;">{e_label}</b> on {e_title}.</p>'
+    )
+    html = _email_shell(f"Payment due — {e_title}", body, cta_label="Pay now", cta_url=link, accent="#f59e0b")
+    text = f"{amount} is due for {label} on {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"Payment due — {offer_title}", html, text, label="collab payment due")
+
+
+async def send_cappe_collab_paid_email(
+    to_email: str, to_name: str | None, offer_title: str, label: str, amount_cents: int, link: str,
+) -> None:
+    """To the CREATOR: an installment was paid."""
+    e_title, e_label, amount = escape(offer_title), escape(label), fmt_money(amount_cents)
+    body = (
+        f'<p style="margin:0;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{escape(amount)}</b> for <b style="color:#fafafa;">{e_label}</b> on {e_title} just landed.</p>'
+    )
+    html = _email_shell(f"You got paid — {e_title}", body, cta_label="View collab", cta_url=link, accent="#10b981")
+    text = f"{amount} for {label} on {offer_title} just landed.\n\n{link}"
+    await _send(to_email, to_name, f"You got paid — {offer_title}", html, text, label="collab paid")
+
+
+async def send_cappe_collab_completed_email(
+    to_email: str, to_name: str | None, offer_title: str, link: str,
+) -> None:
+    """Both sides, on offer completion."""
+    e_title = escape(offer_title)
+    body = f'<p style="margin:0;font-size:15px;color:#d4d4d8;"><b style="color:#fafafa;">{e_title}</b> is complete — every deliverable approved, every payment settled.</p>'
+    html = _email_shell(f"Collab completed: {e_title}", body, cta_label="View collab", cta_url=link, accent="#10b981")
+    text = f"Collab completed: {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"Collab completed: {offer_title}", html, text, label="collab completed")
+
+
+async def send_cappe_collab_payment_nudge_email(
+    to_email: str, to_name: str | None, offer_title: str, label: str, amount_cents: int, link: str,
+) -> None:
+    """Creator-triggered reminder to the brand about an overdue installment."""
+    e_title, e_label, amount = escape(offer_title), escape(label), fmt_money(amount_cents)
+    body = (
+        f'<p style="margin:0;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'A reminder: <b style="color:#fafafa;">{escape(amount)}</b> is still due for '
+        f'<b style="color:#fafafa;">{e_label}</b> on {e_title}.</p>'
+    )
+    html = _email_shell(f"Reminder: payment due — {e_title}", body, cta_label="Pay now", cta_url=link, accent="#f59e0b")
+    text = f"Reminder: {amount} is still due for {label} on {offer_title}.\n\n{link}"
+    await _send(to_email, to_name, f"Reminder: payment due — {offer_title}", html, text, label="collab payment nudge")

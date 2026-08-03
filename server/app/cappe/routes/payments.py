@@ -24,7 +24,7 @@ from app.core.services.stripe_events import (
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
-from ..services.email import dashboard_url
+from ..services.email import dashboard_url, send_cappe_collab_paid_email
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -195,6 +195,39 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                     order_id, event_account_id,
                 )
 
+        collab_payment_id = meta.get("collab_payment_id")
+        if collab_payment_id and event_account_id:
+            try:
+                cpid = UUID(str(collab_payment_id))
+            except (ValueError, TypeError):
+                cpid = None
+            if cpid is not None:
+                async with get_connection() as conn:
+                    crow = await conn.fetchrow(
+                        """UPDATE cappe_collab_payments cp
+                              SET status = 'paid', paid_at = NOW(),
+                                  stripe_payment_intent = $2, updated_at = NOW()
+                             FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
+                            WHERE cp.id = $1 AND cp.status IN ('due', 'processing')
+                              AND o.id = cp.offer_id AND p.id = o.creator_profile_id
+                              AND ca.id = p.account_id AND ca.stripe_account_id = $3
+                        RETURNING cp.offer_id, cp.trigger, cp.label, cp.amount_cents""",
+                        cpid, obj.get("payment_intent"), event_account_id,
+                    )
+                    if crow is not None:
+                        if crow["trigger"] == "on_accept":
+                            await conn.execute(
+                                "UPDATE cappe_collab_offers SET status = 'active', "
+                                "last_action_at = NOW(), updated_at = NOW() "
+                                "WHERE id = $1 AND status = 'accepted'", crow["offer_id"])
+                        from ..services.collab import check_completion
+                        await check_completion(conn, crow["offer_id"])
+                if crow is not None:
+                    background.add_task(_notify_collab_paid, crow["offer_id"], crow["label"], crow["amount_cents"])
+                else:
+                    logger.warning("cappe collab webhook: payment %s not matched to account %s",
+                                   collab_payment_id, event_account_id)
+
     elif etype == "account.updated":
         acct_id = obj.get("id") or event.get("account")
         if acct_id:
@@ -206,3 +239,22 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                 )
 
     return {"received": True}
+
+
+async def _notify_collab_paid(offer_id: UUID, label: str, amount_cents: int) -> None:
+    """Creator-side 'you got paid' notice after a collab installment clears."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT o.title AS offer_title, ca.email, ca.name
+                 FROM cappe_collab_offers o
+                 JOIN cappe_creator_profiles p ON p.id = o.creator_profile_id
+                 JOIN cappe_accounts ca ON ca.id = p.account_id
+                WHERE o.id = $1""",
+            offer_id,
+        )
+    if row is None:
+        return
+    await send_cappe_collab_paid_email(
+        row["email"], row["name"], row["offer_title"], label, amount_cents,
+        dashboard_url(f"/creator/deals/{offer_id}"),
+    )
