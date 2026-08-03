@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Store, User, MailCheck } from 'lucide-react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Loader2, Store, User, Sparkles, MailCheck } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import type { CappeAccountType, CappeSignupResponse } from '../types'
+
+const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
 
 const ACCOUNT_TYPES: {
   value: CappeAccountType
@@ -23,12 +25,21 @@ const ACCOUNT_TYPES: {
     title: 'Just me',
     blurb: 'A solo pro — get booked, sell sessions, services and downloads.',
   },
+  {
+    value: 'creator',
+    icon: Sparkles,
+    title: 'A creator',
+    blurb: 'Influencer or content creator — get discovered, get brand deals, get paid.',
+  },
 ]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
 export default function CappeSignup() {
   const navigate = useNavigate()
-  const [accountType, setAccountType] = useState<CappeAccountType>('business')
+  const [params] = useSearchParams()
+  const [accountType, setAccountType] = useState<CappeAccountType>(
+    params.get('type') === 'creator' ? 'creator' : 'business',
+  )
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -61,7 +72,7 @@ export default function CappeSignup() {
       if (res.access_token && res.refresh_token) {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
-        navigate('/cappe/sites', { replace: true })
+        navigate(postAuthHome(res.account?.account_type), { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -121,7 +132,7 @@ export default function CappeSignup() {
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
           <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
                 const active = accountType === value
                 return (

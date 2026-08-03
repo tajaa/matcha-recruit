@@ -5,6 +5,8 @@ import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import type { CappeTokenResponse } from '../types'
 
+const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
+
 export default function CappeLogin() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -23,7 +25,7 @@ export default function CappeLogin() {
       const res = await cappePublicPost<CappeTokenResponse>('/auth/login', { email, password })
       setCappeTokens(res.access_token, res.refresh_token)
       invalidateCappeMeCache()
-      navigate('/cappe/sites', { replace: true })
+      navigate(postAuthHome(res.account?.account_type), { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong.'
       // Backend's unverified-account 403 carries "confirm your email".

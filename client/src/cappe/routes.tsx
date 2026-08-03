@@ -12,6 +12,15 @@ import CappeSites from './pages/CappeSites'
 import CappeOnboardingWizard from './onboarding/CappeOnboardingWizard'
 import CappeTemplates from './pages/CappeTemplates'
 import CappeSiteEditor from './pages/CappeSiteEditor'
+import CreatorsLanding from './creators/CreatorsLanding'
+
+const CreatorDirectory = lazy(() => import('./creators/CreatorDirectory'))
+const CreatorPublicProfile = lazy(() => import('./creators/CreatorPublicProfile'))
+const CreatorHome = lazy(() => import('./creators/CreatorHome'))
+const CreatorDeals = lazy(() => import('./creators/CreatorDeals'))
+const CreatorEarnings = lazy(() => import('./creators/CreatorEarnings'))
+const BrandCollabs = lazy(() => import('./creators/BrandCollabs'))
+const OfferDetailPage = lazy(() => import('./creators/OfferDetailPage'))
 
 // The site-builder sub-tree, lazily. PageEditor alone is ~1.5k LOC of canvas
 // editor, and every one of these was eager — so hitting /cappe/login downloaded
@@ -47,6 +56,10 @@ export default function CappeRoutes() {
             CappeLayout gate: it is browsed by visitors with no account, and its
             data comes from the unauthenticated /public/directory endpoints. */}
         <Route path="discover" element={<CappeDiscover />} />
+        {/* Public creator marketplace: landing, directory, profiles. */}
+        <Route path="for-creators" element={<CreatorsLanding />} />
+        <Route path="creators" element={<CreatorDirectory />} />
+        <Route path="creators/:handle" element={<CreatorPublicProfile />} />
         <Route path="website-setup" element={<CappeSignup />} />
         <Route path="login" element={<CappeLogin />} />
         <Route path="verify" element={<CappeVerify />} />
@@ -72,6 +85,13 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/clients" element={<Clients />} />
           <Route path="sites/:siteId/reviews" element={<Reviews />} />
           <Route path="sites/:siteId/blog" element={<Blog />} />
+          {/* Creator marketplace: creator self-service + brand-side collabs. */}
+          <Route path="creator" element={<CreatorHome />} />
+          <Route path="creator/deals" element={<CreatorDeals />} />
+          <Route path="creator/deals/:offerId" element={<OfferDetailPage />} />
+          <Route path="creator/earnings" element={<CreatorEarnings />} />
+          <Route path="collabs" element={<BrandCollabs />} />
+          <Route path="collabs/:offerId" element={<OfferDetailPage />} />
         </Route>
       </Routes>
     </Suspense>
