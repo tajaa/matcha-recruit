@@ -6,7 +6,11 @@ tests/huume/test_huume_actions.py for the sibling huume envelope.
 """
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
+import pytest
+
+from app.matcha.services.ems import promote
 from app.matcha.services.ems.promote import (
     PromoteRaceError, evaluate_promote, naive_occurred_at, shape_witnesses,
 )
@@ -111,3 +115,107 @@ class TestEvaluatePromote:
         v = evaluate_promote(role="client", features=FEATURES_ON, event_status="dismissed")
         assert v.kind == "refuse"
         assert v.http_status == 409
+
+
+class _FakeConn:
+    """Just enough of asyncpg's Connection for promote_event's two
+    post-create_incident_core writes (the UPDATE ems_events status stamp +
+    the audit-log INSERT) — no real DB."""
+
+    def __init__(self):
+        self.executed = []
+
+    async def fetchrow(self, query, *args):
+        assert "UPDATE ems_events" in query
+        return {"id": args[0]}  # non-None => not a promote race
+
+    async def execute(self, query, *args):
+        self.executed.append((query, args))
+        return "INSERT 0 1"
+
+
+class TestPromoteEventLocationPassthrough:
+    """oploc01: the store captured at intake (ems_events.location_id) must
+    carry forward onto the created IR incident's real location_id FK —
+    dropping it here would silently lose store attribution at the exact
+    point it matters (the incident, and downstream the OSHA 300
+    establishment)."""
+
+    @pytest.mark.asyncio
+    async def test_event_location_id_reaches_create_incident_core(self, monkeypatch):
+        captured = {}
+
+        async def fake_create_incident_core(conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4()}, []
+
+        monkeypatch.setattr(promote, "create_incident_core", fake_create_incident_core)
+
+        store_id = uuid4()
+        event = {
+            "id": uuid4(), "title": "Spill", "created_at": datetime(2026, 8, 1, 12, 0),
+            "location_id": store_id, "suggested_incident_type": None, "suggested_severity": None,
+            "narrative": "Something spilled", "doc": {},
+        }
+        conn = _FakeConn()
+
+        await promote.promote_event(
+            conn, company_id=uuid4(), event=event, channel_name="wilshire-floor",
+            reporter_name="Jane", overrides={}, actor_user_id=uuid4(), actor_email=None,
+        )
+
+        assert captured["location_id"] == store_id
+
+    @pytest.mark.asyncio
+    async def test_no_channel_location_passes_none(self, monkeypatch):
+        captured = {}
+
+        async def fake_create_incident_core(conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4()}, []
+
+        monkeypatch.setattr(promote, "create_incident_core", fake_create_incident_core)
+
+        event = {
+            "id": uuid4(), "title": "Spill", "created_at": datetime(2026, 8, 1, 12, 0),
+            "location_id": None, "suggested_incident_type": None, "suggested_severity": None,
+            "narrative": "Something spilled", "doc": {},
+        }
+        conn = _FakeConn()
+
+        await promote.promote_event(
+            conn, company_id=uuid4(), event=event, channel_name=None,
+            reporter_name="Jane", overrides={}, actor_user_id=uuid4(), actor_email=None,
+        )
+
+        assert captured["location_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_free_text_location_override_is_independent(self, monkeypatch):
+        # `location` (free-text override/display) and `location_id` (real
+        # FK from the channel scope) are separate create_incident_core
+        # kwargs — one must not clobber the other.
+        captured = {}
+
+        async def fake_create_incident_core(conn, **kwargs):
+            captured.update(kwargs)
+            return {"id": uuid4()}, []
+
+        monkeypatch.setattr(promote, "create_incident_core", fake_create_incident_core)
+
+        store_id = uuid4()
+        event = {
+            "id": uuid4(), "title": "Spill", "created_at": datetime(2026, 8, 1, 12, 0),
+            "location_id": store_id, "suggested_incident_type": None, "suggested_severity": None,
+            "narrative": "Something spilled", "doc": {},
+        }
+        conn = _FakeConn()
+
+        await promote.promote_event(
+            conn, company_id=uuid4(), event=event, channel_name="wilshire-floor",
+            reporter_name="Jane", overrides={"location": "Back of house"},
+            actor_user_id=uuid4(), actor_email=None,
+        )
+
+        assert captured["location"] == "Back of house"
+        assert captured["location_id"] == store_id

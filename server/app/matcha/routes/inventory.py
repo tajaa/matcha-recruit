@@ -128,9 +128,17 @@ async def patch_item(item_id: UUID, body: InventoryItemPatch,
 
         fields, values = [], []
         if body.name is not None:
+            normalized = normalize_name(body.name)
+            dup = await conn.fetchval(
+                "SELECT id FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 "
+                "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL AND id != $4",
+                company_id, normalized, item["location_id"], item_id,
+            )
+            if dup:
+                raise HTTPException(409, "An item with this name already exists.")
             values.append(body.name)
             fields.append(f"name = ${len(values) + 1}")
-            values.append(normalize_name(body.name))
+            values.append(normalized)
             fields.append(f"normalized_name = ${len(values) + 1}")
         if body.unit is not None:
             values.append(body.unit)

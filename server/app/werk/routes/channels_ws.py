@@ -213,17 +213,26 @@ async def _inventory_company_gate(conn, channel_id_str: str):
 
 
 async def _channel_location(conn, channel_id_str: str):
-    """(location_id, location_name) when the channel is store-scoped,
-    (None, None) otherwise. Gates stay untouched — their company_id return
-    is consumed at 6+ sites; this is a separate indexed lookup callers make
-    only while already holding a conn."""
+    """(location_id, location_name) when the channel is store-scoped to an
+    ACTIVE store, (None, None) otherwise. Gates stay untouched — their
+    company_id return is consumed at 6+ sites; this is a separate indexed
+    lookup callers make only while already holding a conn.
+
+    Deactivated store == unscoped here, not "keep dispatching to it": the
+    binding itself is untouched on the channel row (a reactivation restores
+    scoping with no re-pick needed), but ems/inventory stop stamping and
+    resolving against a store nobody can act on anymore. Matches
+    `schedule_chat_rules.apply_channel_default_location`, which falls
+    through to the normal clarify path for the same stale-binding case —
+    the two must agree on what "deactivated" means."""
     row = await conn.fetchrow(
         "SELECT ch.location_id, bl.name AS location_name "
-        "FROM channels ch LEFT JOIN business_locations bl ON bl.id = ch.location_id "
+        "FROM channels ch LEFT JOIN business_locations bl "
+        "ON bl.id = ch.location_id AND bl.is_active = TRUE "
         "WHERE ch.id = $1",
         UUID(channel_id_str),
     )
-    if not row or row["location_id"] is None:
+    if not row or row["location_name"] is None:
         return None, None
     return row["location_id"], row["location_name"]
 

@@ -1199,6 +1199,39 @@ async def delete_location(location_id: UUID, company_id: UUID) -> bool:
                 detail=f"Cannot delete: {active_count} active employee{'s' if active_count != 1 else ''} assigned to this location.",
             )
 
+        # Ops store scope (oploc01): channels/inventory_items/ems_events all
+        # FK to business_locations with ON DELETE SET NULL. A hard delete
+        # while any of these reference the location either silently unbinds
+        # a channel's dispatch scope, erases historical event attribution,
+        # or — for inventory_items — can violate uniq_inventory_items_name
+        # if the now-NULL row collides with an existing company-wide item,
+        # turning this into an unexplained 500. Block and point at
+        # deactivation (is_active=false) instead, same as every other flow.
+        blockers = await conn.fetchrow(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM channels WHERE location_id = $1) AS channels,
+                (SELECT COUNT(*) FROM inventory_items WHERE location_id = $1 AND archived_at IS NULL) AS items,
+                (SELECT COUNT(*) FROM ems_events WHERE location_id = $1) AS events
+            """,
+            location_id,
+        )
+        blocking_parts = []
+        if blockers["channels"]:
+            blocking_parts.append(f"{blockers['channels']} channel(s)")
+        if blockers["items"]:
+            blocking_parts.append(f"{blockers['items']} inventory item(s)")
+        if blockers["events"]:
+            blocking_parts.append(f"{blockers['events']} logged event(s)")
+        if blocking_parts:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot delete: {', '.join(blocking_parts)} still reference this location. "
+                    "Deactivate it instead."
+                ),
+            )
+
         result = await conn.execute(
             "DELETE FROM business_locations WHERE id = $1 AND company_id = $2",
             location_id,

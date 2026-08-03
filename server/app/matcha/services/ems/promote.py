@@ -122,6 +122,12 @@ async def promote_event(
     severity = overrides.get("severity") or event.get("suggested_severity")
     occurred_at = naive_occurred_at(overrides.get("occurred_at") or event["created_at"])
     location = overrides.get("location")
+    # The store captured at intake (channels.location_id, stamped onto the
+    # event — see oploc01) carries forward as the incident's real FK, same
+    # as the location magic-link intake. `location` above stays the
+    # free-text override/display string; the two are independent fields on
+    # create_incident_core.
+    location_id = event.get("location_id")
     witnesses = shape_witnesses(overrides.get("witnesses"))
 
     incident_row, bg_tasks = await create_incident_core(
@@ -134,6 +140,7 @@ async def promote_event(
         incident_type=incident_type,
         severity=severity,
         location=location,
+        location_id=location_id,
         witnesses=witnesses,
         created_by=str(actor_user_id),
         actor_user_id=str(actor_user_id),

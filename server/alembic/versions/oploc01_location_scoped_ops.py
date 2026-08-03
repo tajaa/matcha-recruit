@@ -10,9 +10,13 @@ NULLS NOT DISTINCT makes (company, NULL, name) collide exactly like the old
 Requires PostgreSQL 15+ (NULLS NOT DISTINCT). Prod is PG 15.18.
 
 ON DELETE SET NULL on inventory_items.location_id can violate the unique
-index if a deleted location's item names collide with another store's —
-acceptable: every existing flow deactivates locations (is_active=false),
-never deletes them.
+index if a deleted location's item names collide with another store's (or
+company-wide) item. `delete_location` (compliance_service/_locations.py)
+now blocks the delete at the app layer whenever any channel/inventory_item/
+ems_event still references the location, pointing the caller at
+deactivation (is_active=false) instead — but that is an application-level
+guard, not a DB constraint, so anything that DELETEs business_locations
+directly (a script, a future admin tool) can still hit the same 23505.
 
 NOTE: the alembic history on this branch has multiple heads; down_revision
 is `empavail01`, a verified leaf at authoring time (2026-08-02).
