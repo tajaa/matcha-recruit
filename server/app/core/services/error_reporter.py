@@ -116,9 +116,13 @@ def _row_args(row: dict) -> tuple:
     )
 
 
-async def _upsert_async(row: dict) -> None:
-    from ...database import get_connection  # lazy: avoid circular import at module load
-    async with get_connection() as conn:
+async def _upsert_async(row: dict, *, force_direct: bool = False) -> None:
+    # connection_or_direct, not get_connection: this handler is installed in
+    # every Celery worker (workers are pool-free by design) and must also work
+    # from a fresh private loop (see _upsert_sync_celery), where a pooled
+    # connection would belong to the wrong event loop.
+    from ...database import connection_or_direct  # lazy: avoid circular import at module load
+    async with connection_or_direct(force_direct=force_direct) as conn:
         inserted = await conn.fetchval(_INSERT_SQL, *_row_args(row))
     # Only alert on a genuinely new fingerprint (xmax = 0). Repeat occurrences
     # bump the counter without re-emailing. Never let a notify failure
@@ -136,7 +140,10 @@ def _upsert_sync_celery(row: dict) -> None:
     Runs completely outside any running loop so it's safe for sync contexts."""
     loop = asyncio.new_event_loop()
     try:
-        loop.run_until_complete(_upsert_async(row))
+        # force_direct: this private loop is never the pool's loop — in the
+        # API process a pool exists but its connections are bound to the main
+        # loop; in a worker there is no pool at all.
+        loop.run_until_complete(_upsert_async(row, force_direct=True))
     finally:
         loop.close()
 
