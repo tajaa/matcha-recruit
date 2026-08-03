@@ -226,15 +226,32 @@ async def _channel_location(conn, channel_id_str: str):
     through to the normal clarify path for the same stale-binding case —
     the two must agree on what "deactivated" means."""
     row = await conn.fetchrow(
-        "SELECT ch.location_id, bl.name AS location_name "
+        "SELECT bl.id AS location_id, bl.name AS location_name "
         "FROM channels ch LEFT JOIN business_locations bl "
-        "ON bl.id = ch.location_id AND bl.is_active = TRUE "
+        "ON bl.id = ch.location_id AND bl.is_active IS NOT FALSE "
         "WHERE ch.id = $1",
         UUID(channel_id_str),
     )
-    if not row or row["location_name"] is None:
+    if not row or row["location_id"] is None:
         return None, None
     return row["location_id"], row["location_name"]
+
+
+async def _channel_bound_to_inactive_location(conn, channel_id_str: str) -> bool:
+    """True when the channel is bound to a store that has since gone
+    inactive. Inventory must block on this rather than treat it like an
+    unscoped channel (which `_channel_location` does) — falling through to
+    `location_id=None` there means `find_or_create_item` auto-creates a
+    company-wide twin of an existing store item, permanently forking the
+    stock ledger. EMS/schedule_chat don't need this: their fallthrough is a
+    clarify question, not a write."""
+    row = await conn.fetchrow(
+        "SELECT ch.location_id, bl.is_active FROM channels ch "
+        "LEFT JOIN business_locations bl ON bl.id = ch.location_id "
+        "WHERE ch.id = $1",
+        UUID(channel_id_str),
+    )
+    return bool(row and row["location_id"] is not None and row["is_active"] is False)
 
 
 async def _ems_first_time_hint(conn, channel_id_str: str) -> str:
@@ -539,6 +556,12 @@ async def _bg_inventory_request(
                 verdict = evaluate_inventory_action(role=role, features=features, stage="movement")
                 if not verdict.ok:
                     sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                elif location_id is None and await _channel_bound_to_inactive_location(conn, channel_id_str):
+                    sys_row = await _insert_system_message(
+                        conn, channel_id_str,
+                        "\U0001F4E6 This channel's store is deactivated, so inventory tracking is paused here. "
+                        "Ask an admin to reactivate the store or rebind this channel.",
+                    )
                 elif sys_row is None:
                     item_rows = await movements_service.list_item_names(conn, company_id, location_id)
 
@@ -940,6 +963,18 @@ async def _bg_schedule_reply(
 
         # No connection held across the Gemini re-parse call.
         parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
+
+        # This reply is the answer to the location clarify question and was
+        # already resolved (snapped) against the offered options — force it
+        # through rather than trust the Gemini re-parse to notice it in
+        # `composed`'s prose. Otherwise a miss here reads as "no hint", and
+        # apply_channel_default_location's "explicit hint always wins"
+        # silently loses to the channel's default store.
+        if (
+            parsed is not None and proposal.get("clarify_question") == "Which location did you mean?"
+            and snapped and not (parsed.get("location_hint") or "").strip()
+        ):
+            parsed["location_hint"] = snapped
 
         async with get_connection() as conn2:
             if parsed is None:

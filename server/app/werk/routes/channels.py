@@ -381,7 +381,7 @@ async def _assert_channel_location(conn, company_id: UUID, location_id: Optional
         return
     ok = await conn.fetchval(
         "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
-        "AND is_active = TRUE AND is_company_wide = FALSE",
+        "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
         location_id, company_id,
     )
     if not ok:
@@ -498,7 +498,7 @@ async def list_channel_locations(current_user: CurrentUser = Depends(require_adm
     async with get_connection() as conn:
         rows = await conn.fetch(
             "SELECT id, name, city, state FROM business_locations "
-            "WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE "
+            "WHERE company_id = $1 AND is_active IS NOT FALSE AND is_company_wide = FALSE "
             "ORDER BY name NULLS LAST, city",
             company_id,
         )

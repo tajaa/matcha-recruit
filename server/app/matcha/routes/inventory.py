@@ -67,7 +67,7 @@ async def create_item(body: InventoryItemCreate, company_id: UUID = Depends(get_
         if body.location_id is not None:
             ok = await conn.fetchval(
                 "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
-                "AND is_active = TRUE AND is_company_wide = FALSE",
+                "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
                 body.location_id, company_id,
             )
             if not ok:
@@ -96,7 +96,10 @@ async def get_item(item_id: UUID, company_id: UUID = Depends(get_client_company_
                     _=Depends(require_admin_or_client)):
     async with get_connection() as conn:
         item = await conn.fetchrow(
-            "SELECT * FROM inventory_items WHERE id = $1 AND company_id = $2", item_id, company_id,
+            "SELECT it.*, bl.name AS location_name FROM inventory_items it "
+            "LEFT JOIN business_locations bl ON bl.id = it.location_id "
+            "WHERE it.id = $1 AND it.company_id = $2",
+            item_id, company_id,
         )
         if item is None:
             raise HTTPException(404, "Item not found.")

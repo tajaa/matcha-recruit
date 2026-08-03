@@ -5,16 +5,21 @@ import InviteManager from './InviteManager'
 import {
   updatePaidSettings,
   updateChannelPrice,
+  updateChannel,
+  listChannelLocations,
   getMemberActivity,
   getChannelRevenue,
   getChannelPaymentInfo,
 } from '../../api/channels'
-import type { MemberActivity, ChannelRevenue } from '../../api/channels'
+import type { MemberActivity, ChannelRevenue, ChannelLocation } from '../../api/channels'
 
 interface Props {
   channelId: string
   channelName: string
   isPaid: boolean
+  myRole: string
+  locationId: string | null | undefined
+  onLocationUpdated: (locationId: string | null) => void
   onClose: () => void
 }
 
@@ -31,6 +36,9 @@ export default function ChannelSettingsPanel({
   channelId,
   channelName,
   isPaid,
+  myRole,
+  locationId,
+  onLocationUpdated,
   onClose,
 }: Props) {
   const [members, setMembers] = useState<MemberActivity[]>([])
@@ -42,6 +50,30 @@ export default function ChannelSettingsPanel({
   const [priceDraftDollars, setPriceDraftDollars] = useState<string>('')
   const [priceSaving, setPriceSaving] = useState(false)
   const [priceError, setPriceError] = useState<string>('')
+  const [locations, setLocations] = useState<ChannelLocation[]>([])
+  const [locationDraft, setLocationDraft] = useState(locationId || '')
+  const [locationSaving, setLocationSaving] = useState(false)
+
+  useEffect(() => {
+    listChannelLocations().then(setLocations).catch(() => setLocations([]))
+  }, [])
+
+  useEffect(() => {
+    setLocationDraft(locationId || '')
+  }, [locationId])
+
+  const handleLocationSave = async (value: string) => {
+    setLocationDraft(value)
+    setLocationSaving(true)
+    try {
+      await updateChannel(channelId, { location_id: value || null })
+      onLocationUpdated(value || null)
+    } catch {
+      setLocationDraft(locationId || '')
+    } finally {
+      setLocationSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!isPaid) return
@@ -104,6 +136,28 @@ export default function ChannelSettingsPanel({
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {myRole === 'owner' && locations.length > 0 && (
+        <section className="p-4 border-b border-zinc-800 space-y-2">
+          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+            Store location
+          </h3>
+          <select
+            value={locationDraft}
+            disabled={locationSaving}
+            onChange={(e) => handleLocationSave(e.target.value)}
+            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-emerald-600 disabled:opacity-50"
+          >
+            <option value="">— Company-wide —</option>
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}{l.city ? ` (${l.city})` : ''}</option>
+            ))}
+          </select>
+          <p className="text-[10px] text-zinc-600 leading-relaxed">
+            Huume scopes events, inventory, and scheduling in this channel to the store.
+          </p>
+        </section>
+      )}
 
       {!isPaid ? (
         <div className="flex-1 flex items-center justify-center px-4">

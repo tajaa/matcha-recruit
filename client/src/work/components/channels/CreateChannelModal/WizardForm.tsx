@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   X, Loader2, Hash, ChevronRight, ChevronLeft, Check,
 } from 'lucide-react'
-import { createChannel } from '../../../api/channels'
-import type { PaidChannelConfig } from '../../../api/channels'
+import { createChannel, listChannelLocations } from '../../../api/channels'
+import type { PaidChannelConfig, ChannelLocation } from '../../../api/channels'
 import type { AccessModel, Props } from './types'
 import { STEP_LABELS, getApplicableSteps } from './constants'
 import { StepBasics } from './StepBasics'
@@ -23,6 +23,12 @@ export function WizardForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'invite_only' | 'private'>('public')
+  const [locations, setLocations] = useState<ChannelLocation[]>([])
+  const [locationId, setLocationId] = useState('')
+
+  useEffect(() => {
+    listChannelLocations().then(setLocations).catch(() => setLocations([]))
+  }, [])
 
   // Step 2: Access model
   const [accessModel, setAccessModel] = useState<AccessModel>('free')
@@ -86,7 +92,10 @@ export function WizardForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
           inactivity_warning_days: warningDays,
         }
       }
-      const ch = await createChannel(name.trim(), description.trim() || undefined, visibility, paidConfig)
+      const ch = await createChannel(
+        name.trim(), description.trim() || undefined, visibility, paidConfig,
+        undefined, locationId || undefined,
+      )
       onCreated(ch)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create channel')
@@ -133,6 +142,9 @@ export function WizardForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
               setDescription={setDescription}
               visibility={visibility}
               setVisibility={setVisibility}
+              locations={locations}
+              locationId={locationId}
+              setLocationId={setLocationId}
             />
           )}
           {currentStep === 2 && (

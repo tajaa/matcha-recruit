@@ -51,6 +51,9 @@ export default function ChannelModals({
           channelId={channel.id}
           channelName={channel.name}
           isPaid={paymentInfo?.is_paid ?? false}
+          myRole={channel.my_role ?? 'member'}
+          locationId={channel.location_id}
+          onLocationUpdated={(location_id) => setChannel({ ...channel, location_id })}
           onClose={() => setShowSettings(false)}
         />
       )}
