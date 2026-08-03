@@ -102,7 +102,8 @@ async def public_order_receipt(token: str, request: Request):
     await check_rate_limit(client_ip(request), "cappe_receipt", 30, 60)
     async with get_connection() as conn:
         order = await conn.fetchrow(
-            "SELECT id, status, customer_email, customer_name, subtotal_cents, currency, created_at "
+            "SELECT id, status, customer_email, customer_name, subtotal_cents, "
+            "shipping_cents, carrier, tracking_number, currency, created_at "
             "FROM cappe_orders WHERE access_token = $1",
             token,
         )
@@ -126,6 +127,9 @@ async def public_order_receipt(token: str, request: Request):
         customer_name=order["customer_name"],
         subtotal_cents=order["subtotal_cents"],
         currency=order["currency"],
+        shipping_cents=order["shipping_cents"],
+        carrier=order["carrier"],
+        tracking_number=order["tracking_number"],
         created_at=order["created_at"],
         items=[
             {
