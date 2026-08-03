@@ -55,6 +55,20 @@ function _scrub(value: unknown, maxLen = 500): string | undefined {
   return s.replace(JWT_RE, '[redacted-jwt]').slice(0, maxLen)
 }
 
+// Last X-Request-ID seen on a response, noted by client.ts. Best-effort
+// correlation hint for a subsequent crash report — not a strict causal link,
+// since other requests can happen between the noted one and an eventual JS
+// error — but it's usually the request that just failed.
+let _lastRequestId: string | null = null
+
+export function noteRequestId(id: string | null): void {
+  if (id) _lastRequestId = id
+}
+
+export function getLastRequestId(): string | null {
+  return _lastRequestId
+}
+
 let _inFlight = 0
 
 async function _send(payload: ClientErrorPayload): Promise<void> {
@@ -98,14 +112,17 @@ async function _send(payload: ClientErrorPayload): Promise<void> {
         api_endpoint: payload.api_endpoint
           ? _scrub(payload.api_endpoint.split(/[?#]/)[0])
           : undefined,
-        context: payload.context
-          ? Object.fromEntries(
-              Object.entries(payload.context).map(([k, v]) => [
-                k,
-                typeof v === 'number' || typeof v === 'boolean' ? v : _scrub(v),
-              ]),
-            )
-          : undefined,
+        context: (() => {
+          const scrubbed = payload.context
+            ? Object.fromEntries(
+                Object.entries(payload.context).map(([k, v]) => [
+                  k,
+                  typeof v === 'number' || typeof v === 'boolean' ? v : _scrub(v),
+                ]),
+              )
+            : undefined
+          return _lastRequestId ? { ...scrubbed, request_id: _lastRequestId } : scrubbed
+        })(),
       }),
       // No-await on response — fire and forget
       keepalive: true,

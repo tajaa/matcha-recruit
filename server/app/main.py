@@ -22,9 +22,30 @@ os.environ.setdefault("FONTCONFIG_PATH", "/etc/fonts")
 # every `logger.info` in services/routes falls through to the root logger
 # at WARNING and gets silently dropped. Override with LOG_LEVEL env.
 _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Stamp every log record with the current request's correlation ID (see
+# core/request_context.py) so `[rid=xxxxxxxx]` in a stdout line can be
+# grepped against the same field on the resulting server_error_reports row.
+# A record factory (not a per-logger Filter) covers every logger in the
+# process uniformly, including third-party ones. Celery configures its own
+# logging separately and never references %(request_id)s, so this is a
+# no-op there — request_id_var just reads its "-" default.
+from .core.request_context import RequestIDMiddleware, request_id_var  # noqa: E402
+
+_base_log_record_factory = logging.getLogRecordFactory()
+
+
+def _request_id_log_record_factory(*args, **kwargs):
+    record = _base_log_record_factory(*args, **kwargs)
+    record.request_id = request_id_var.get()
+    return record
+
+
+logging.setLogRecordFactory(_request_id_log_record_factory)
+
 logging.basicConfig(
     level=getattr(logging, _log_level, logging.INFO),
-    format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
+    format="%(asctime)s %(name)s [%(levelname)s] [rid=%(request_id)s] %(message)s",
 )
 
 
@@ -249,6 +270,7 @@ _cors_kwargs: dict = dict(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 # Only allow the wildcard localhost regex in development
 if _debug:
@@ -560,6 +582,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         request_status=500,
     )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+# Registered last so it ends up OUTERMOST (Starlette wraps user middleware in
+# reverse registration order) — the request ID must exist before
+# capture_errors, track_api_usage, add_security_headers, or any route code
+# runs, so every log line and error report for this connection can see it.
+app.add_middleware(RequestIDMiddleware)
 
 
 # Import and include domain routers

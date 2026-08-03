@@ -1,5 +1,5 @@
 import { resetAuthCaches } from './authReset'
-import { reportApiError } from './errorReporter'
+import { noteRequestId, reportApiError } from './errorReporter'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
@@ -110,6 +110,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: _buildHeaders(init, token),
   })
+  noteRequestId(res.headers.get('x-request-id'))
 
   if (res.status === 401 && token) {
     // Deduplicate concurrent refresh attempts
@@ -125,6 +126,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         headers: _buildHeaders(init, newToken),
       })
+      noteRequestId(retry.headers.get('x-request-id'))
       if (!retry.ok) {
         // A 401 on the retry means the freshly-refreshed token is also
         // rejected — the session is truly dead. Clear it and bounce to login
@@ -196,13 +198,16 @@ async function _fetchWithRefresh(url: string, init: RequestInit = {}): Promise<R
     headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), ...init.headers },
   })
   const res = await fetch(url, withAuth(token))
+  noteRequestId(res.headers.get('x-request-id'))
   if (res.status !== 401 || !token) return res
   if (!_refreshing) {
     _refreshing = _tryRefresh().finally(() => { _refreshing = null })
   }
   const ok = await _refreshing
   if (!ok) { _logout(); return res }
-  return fetch(url, withAuth(localStorage.getItem('matcha_access_token')))
+  const retry = await fetch(url, withAuth(localStorage.getItem('matcha_access_token')))
+  noteRequestId(retry.headers.get('x-request-id'))
+  return retry
 }
 
 /** Trigger a browser download from a binary Response.

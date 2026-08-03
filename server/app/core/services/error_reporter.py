@@ -187,6 +187,15 @@ def report_server_error(
         exc_type_name = type(exception).__name__ if exception is not None else None
         fp = _fingerprint(kind, exc_type_name, message, traceback_str)
 
+        # Merge in the current request's correlation ID (if any) so a stdout
+        # log line's [rid=xxxxxxxx] can be traced to the row it produced.
+        # Absent outside a request (Celery, startup) — request_id_var reads
+        # its "-" default there and this is a no-op.
+        from ..request_context import request_id_var  # lazy: avoid import-order coupling
+        rid = request_id_var.get()
+        if rid != "-":
+            context = {**(context or {}), "request_id": rid}
+
         context_json: Optional[str] = None
         if context:
             try:
