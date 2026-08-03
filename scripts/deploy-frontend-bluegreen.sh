@@ -67,6 +67,21 @@ echo "[deploy] current=$CUR_PORT (container: ${OLD_CONTAINER:-none}) -> new=$NEW
 
 docker pull "$IMAGE"
 
+# See deploy-backend-bluegreen.sh for why this is gated rather than always-on:
+# awslogs resolves credentials at container start, and failing there stops the
+# container from running at all. Ordered rollout: deploy/cloudwatch/README.md.
+LOG_ARGS=(--log-opt max-size=50m --log-opt max-file=3)
+if [ "${MATCHA_LOG_DRIVER:-json-file}" = "awslogs" ]; then
+    LOG_ARGS=(
+        --log-driver awslogs
+        --log-opt "awslogs-region=${AWS_REGION}"
+        --log-opt "awslogs-group=/matcha/frontend"
+        --log-opt "awslogs-stream=${NEW_CONTAINER}"
+        --log-opt mode=non-blocking
+        --log-opt max-buffer-size=4m
+    )
+fi
+
 docker rm -f "$NEW_CONTAINER" > /dev/null 2>&1 || true
 docker run -d \
     --name "$NEW_CONTAINER" \
@@ -76,8 +91,7 @@ docker run -d \
     -e "WS_URL=${WS_URL:-ws://localhost:8002}" \
     --restart unless-stopped \
     --memory=64m \
-    --log-opt max-size=50m \
-    --log-opt max-file=3 \
+    "${LOG_ARGS[@]}" \
     "$IMAGE"
 
 echo "[deploy] waiting for $NEW_CONTAINER to answer on :$NEW_PORT..."

@@ -84,6 +84,30 @@ fi
 
 docker pull "$IMAGE"
 
+# Container stdout ships to CloudWatch Logs only when MATCHA_LOG_DRIVER=awslogs
+# is set in ~/matcha/.env; otherwise it stays on local json-file. Gated on
+# purpose: the awslogs driver resolves AWS credentials at CONTAINER START, and
+# a failure there makes `docker run` refuse to start the container at all — so
+# flipping this on before the instance has a role carrying logs:PutLogEvents
+# breaks the deploy, not just the logging. Ordered rollout (IAM role first):
+# deploy/cloudwatch/README.md. Rollback is unsetting the var.
+#
+# Stream name = the port-suffixed container name, so the 8002/8003 blue-green
+# pair keeps two stable streams that append across deploys instead of dying
+# with each removed container (the reason logs vanished on every deploy).
+LOG_ARGS=(--log-opt max-size=50m --log-opt max-file=3)
+if [ "${MATCHA_LOG_DRIVER:-json-file}" = "awslogs" ]; then
+    LOG_ARGS=(
+        --log-driver awslogs
+        --log-opt "awslogs-region=${AWS_REGION}"
+        --log-opt "awslogs-group=/matcha/backend"
+        --log-opt "awslogs-stream=${NEW_CONTAINER}"
+        # Never let a CloudWatch outage block the app's stdout writes.
+        --log-opt mode=non-blocking
+        --log-opt max-buffer-size=4m
+    )
+fi
+
 docker rm -f "$NEW_CONTAINER" > /dev/null 2>&1 || true
 # --network-alias matcha-backend: the port-suffixed container name
 # (matcha-backend-8002/-8003) is NOT resolvable as "matcha-backend" on the
@@ -103,8 +127,7 @@ docker run -d \
     -v /home/ec2-user/matcha/analytics:/app/analytics:ro \
     --restart unless-stopped \
     --memory=1g \
-    --log-opt max-size=50m \
-    --log-opt max-file=3 \
+    "${LOG_ARGS[@]}" \
     "$IMAGE"
 
 echo "[deploy] waiting for $NEW_CONTAINER to answer on :$NEW_PORT/health..."

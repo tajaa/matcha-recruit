@@ -177,11 +177,19 @@ update_matcha() {
     log_info "Syncing docker-compose.yml..."
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new docker-compose.yml \
         "$EC2_USER@$EC2_HOST:~/matcha/docker-compose.yml"
+    # Worker CloudWatch-logging override. Only takes effect when the host's
+    # .env sets MATCHA_LOG_DRIVER=awslogs (see the compose_files shell snippet
+    # below and deploy/cloudwatch/README.md) — syncing it unconditionally just
+    # keeps the host copy current.
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new docker-compose.logging.yml \
+        "$EC2_USER@$EC2_HOST:~/matcha/docker-compose.logging.yml"
 
     if [ "$UPDATE_BACKEND" = true ]; then
         # matcha-worker isn't in the request path — no need to blue-green it,
         # pre_cleanup() already stops it gracefully (60s) before this runs.
-        ssh_cmd "cd ~/matcha && docker-compose --profile worker pull matcha-worker && docker-compose --profile worker up -d --no-deps matcha-worker"
+        # The compose_files list picks up the awslogs override only when the
+        # host opted in; otherwise the worker stays on json-file.
+        ssh_cmd "cd ~/matcha && compose_files='-f docker-compose.yml' && grep -qs '^MATCHA_LOG_DRIVER=awslogs' .env && compose_files=\"\$compose_files -f docker-compose.logging.yml\"; docker-compose \$compose_files --profile worker pull matcha-worker && docker-compose \$compose_files --profile worker up -d --no-deps matcha-worker"
         deploy_backend_zero_downtime
     fi
 

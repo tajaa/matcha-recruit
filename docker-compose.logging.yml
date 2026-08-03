@@ -1,0 +1,24 @@
+# CloudWatch Logs override for the Celery worker — EC2 ONLY.
+#
+# Kept out of the base docker-compose.yml on purpose: with this merged in,
+# `docker-compose up` needs resolvable AWS credentials or the container
+# refuses to start, which would break every local dev environment. The base
+# file stays on json-file; update-ec2.sh layers this file on top only when
+# MATCHA_LOG_DRIVER=awslogs is set in ~/matcha/.env on the host.
+#
+# The backend and frontend don't appear here — they deploy via `docker run`
+# in the blue-green scripts, which build their own --log-driver args from the
+# same env flag.
+#
+# Ordered rollout (IAM instance role FIRST): deploy/cloudwatch/README.md
+services:
+  matcha-worker:
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-west-1}
+        awslogs-group: /matcha/worker
+        awslogs-stream: matcha-worker
+        # Never let a CloudWatch outage block the worker's stdout writes.
+        mode: non-blocking
+        max-buffer-size: 4m
