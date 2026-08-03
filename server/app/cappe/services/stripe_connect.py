@@ -41,6 +41,28 @@ def platform_fee_cents(amount_cents: int) -> int:
     return max(0, (amount_cents * bps) // 10_000)
 
 
+# Gummfit storefronts are US-facing. Per-site country config is a deliberate
+# later one-column follow-up, not scope here.
+CAPPE_SHIPPING_COUNTRIES = ["US"]
+
+
+def build_shipping_options(shipping_option: Optional[dict], currency: str) -> Optional[list[dict]]:
+    """Translate {label, amount_cents} into Stripe's shipping_options shape.
+    A 0-amount option is still emitted so the buyer sees the 'Free shipping' row."""
+    if shipping_option is None:
+        return None
+    return [{
+        "shipping_rate_data": {
+            "type": "fixed_amount",
+            "display_name": (shipping_option.get("label") or "Shipping")[:100],
+            "fixed_amount": {
+                "amount": max(0, int(shipping_option["amount_cents"])),
+                "currency": (currency or "usd").lower(),
+            },
+        }
+    }]
+
+
 class CappeStripe:
     def __init__(self):
         self.settings = get_settings()
@@ -111,6 +133,8 @@ class CappeStripe:
         cancel_url: str,
         metadata: dict[str, str],
         customer_email: Optional[str] = None,
+        collect_shipping_address: bool = False,
+        shipping_option: Optional[dict] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
         taking a platform `application_fee_amount`. Returns the Session.
@@ -121,11 +145,21 @@ class CappeStripe:
         computed it again for the actual charge. Both read the same global
         setting, so they agreed by luck; with a per-plan rate they could
         diverge, and the persisted number would be a lie about money.
+
+        With `collect_shipping_address`, Stripe collects the buyer's address
+        (US only) and `shipping_option` renders as a real shipping row included
+        in amount_total; the fee stays on the goods subtotal.
         """
         self._ensure_key()
         fee = max(0, int(application_fee_cents))
 
         def _create():
+            extra: dict[str, Any] = {}
+            if collect_shipping_address:
+                extra["shipping_address_collection"] = {"allowed_countries": CAPPE_SHIPPING_COUNTRIES}
+                opts = build_shipping_options(shipping_option, currency)
+                if opts:
+                    extra["shipping_options"] = opts
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,
@@ -140,12 +174,26 @@ class CappeStripe:
                 # stripe_account header → the charge happens on the business's
                 # connected account; the fee is swept to the platform.
                 stripe_account=account_id,
+                **extra,
             )
 
         try:
             return await asyncio.to_thread(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
+
+    async def retrieve_checkout_session(self, account_id: str, session_id: str):
+        """Fetch a Checkout Session from the connected account (webhook fallback
+        when the event payload omits shipping details)."""
+        self._ensure_key()
+
+        def _get():
+            return stripe.checkout.Session.retrieve(session_id, stripe_account=account_id)
+
+        try:
+            return await asyncio.to_thread(_get)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to retrieve checkout session: {exc}") from exc
 
     # ── Platform checkout (our own revenue — domains, plans; NO Connect) ───
     async def create_platform_checkout_session(
