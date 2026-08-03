@@ -68,9 +68,36 @@ def generate_case_number() -> str:
 def _queue_risk_assessment_refresh(background_tasks: BackgroundTasks, company_id: UUID | None) -> None:
     if not company_id:
         return
-    from ..employees import _refresh_risk_assessment
+    background_tasks.add_task(_dispatch_risk_refresh, company_id)
 
-    background_tasks.add_task(_refresh_risk_assessment, company_id)
+
+async def _dispatch_risk_refresh(company_id: UUID) -> None:
+    """Celery-first: coalesce bursts via a redis NX lock, dispatch to the
+    worker, and fall back to running in-process so the refresh still happens
+    with the worker down. Runs after the response is sent (BackgroundTasks),
+    so none of this — including the celery_available() probe — sits on the
+    request path."""
+    from ....core.services.redis_cache import get_redis_cache
+
+    redis = get_redis_cache()
+    if redis is not None:
+        try:
+            fresh = await redis.set(f"risk-refresh:{company_id}", "1", nx=True, ex=90)
+            if not fresh:
+                return  # a refresh for this company is already queued or just ran
+        except Exception:
+            pass  # coalescing is an optimization, never a gate
+
+    if await celery_available():
+        try:
+            from app.workers.tasks.risk_assessment import refresh_company_risk_assessment
+            refresh_company_risk_assessment.delay(str(company_id))
+            return
+        except Exception as exc:
+            logger.warning("Celery dispatch of risk refresh failed (%s), running in-process", exc)
+
+    from ..employees import _refresh_risk_assessment
+    await _refresh_risk_assessment(company_id)
 
 
 # Re-export (refactor round 2, stage 3) — the real implementation now lives

@@ -145,43 +145,32 @@ async def get_case_metrics(
         company_filter = "(company_id = $1 OR company_id IS NULL)" if is_admin else "company_id = $1"
         date_filter = f"created_at >= NOW() - interval '{int(days)} days'"
 
-        # Total cases
-        total = await conn.fetchval(
-            f"SELECT COUNT(*) FROM er_cases WHERE {company_filter} AND {date_filter}",
+        # One pass over the matching rows instead of 5 round trips — ER case
+        # volume per tenant is naturally bounded (manual investigations, not
+        # a high-volume table), so aggregating in Python is cheap and avoids
+        # GROUPING SETS' "aggregated-away NULL" vs "real NULL" ambiguity.
+        rows = await conn.fetch(
+            f"SELECT status, category, outcome, created_at::date as d FROM er_cases WHERE {company_filter} AND {date_filter}",
             company_id,
         )
 
-        # By status
-        status_rows = await conn.fetch(
-            f"SELECT status, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} GROUP BY status",
-            company_id,
-        )
-        by_status = {r["status"]: r["cnt"] for r in status_rows}
-
-        # By category
-        cat_rows = await conn.fetch(
-            f"SELECT category, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} AND category IS NOT NULL GROUP BY category",
-            company_id,
-        )
-        by_category = {r["category"]: r["cnt"] for r in cat_rows}
-
-        # By outcome
-        out_rows = await conn.fetch(
-            f"SELECT outcome, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} AND outcome IS NOT NULL GROUP BY outcome",
-            company_id,
-        )
-        by_outcome = {r["outcome"]: r["cnt"] for r in out_rows}
-
-        # Daily trend
-        trend_rows = await conn.fetch(
-            f"SELECT created_at::date as d, COUNT(*) as cnt FROM er_cases WHERE {company_filter} AND {date_filter} GROUP BY d ORDER BY d",
-            company_id,
-        )
-        trend = [{"date": str(r["d"]), "count": r["cnt"]} for r in trend_rows]
+        by_status: dict[str, int] = {}
+        by_category: dict[str, int] = {}
+        by_outcome: dict[str, int] = {}
+        by_day: dict[str, int] = {}
+        for r in rows:
+            by_status[r["status"]] = by_status.get(r["status"], 0) + 1
+            if r["category"] is not None:
+                by_category[r["category"]] = by_category.get(r["category"], 0) + 1
+            if r["outcome"] is not None:
+                by_outcome[r["outcome"]] = by_outcome.get(r["outcome"], 0) + 1
+            day_key = str(r["d"])
+            by_day[day_key] = by_day.get(day_key, 0) + 1
+        trend = [{"date": d, "count": c} for d, c in sorted(by_day.items())]
 
         return {
             "period_days": days,
-            "total_cases": total or 0,
+            "total_cases": len(rows),
             "by_status": by_status,
             "by_category": by_category,
             "by_outcome": by_outcome,

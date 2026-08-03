@@ -109,98 +109,112 @@ async def get_retaliation_risk(
         if not isinstance(involved, list):
             involved = []
 
-        events: list[dict[str, Any]] = []
-        at_risk = False
-
+        # Validate involved_employees entries once, up front, instead of a
+        # per-employee query loop (3 round trips x N employees).
+        emp_ids: list[UUID] = []
         for entry in involved:
             if not isinstance(entry, dict):
                 continue
             emp_id_str = entry.get("employee_id")
             if not emp_id_str:
                 continue
-
             try:
-                emp_id = UUID(str(emp_id_str))
+                emp_ids.append(UUID(str(emp_id_str)))
             except (ValueError, TypeError):
                 continue
 
+        events: list[dict[str, Any]] = []
+        at_risk = False
+
+        if emp_ids:
             # Scoped to the caller's company: involved_employees is free-form
             # JSONB, so an entry carrying another tenant's employee id must
             # resolve to nothing rather than leak that employee's name and
             # adverse-action history (same guard as er_case_context.py).
-            emp_row = await conn.fetchrow(
-                "SELECT first_name, last_name FROM employees WHERE id = $1 AND org_id::text = $2::text",
-                emp_id,
+            name_rows = await conn.fetch(
+                "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[]) AND org_id::text = $2::text",
+                emp_ids,
                 str(company_id),
             )
-            if not emp_row:
-                continue
-            first = emp_row["first_name"] or ""
-            last = emp_row["last_name"] or ""
-            emp_name = f"{first} {last}".strip() or "Unknown"
+            names: dict[UUID, str] = {}
+            for r in name_rows:
+                first = r["first_name"] or ""
+                last = r["last_name"] or ""
+                names[r["id"]] = f"{first} {last}".strip() or "Unknown"
 
-            # Check progressive_discipline after case creation
-            try:
-                disc_rows = await conn.fetch(
-                    """
-                    SELECT id, discipline_type, issued_date
-                    FROM progressive_discipline
-                    WHERE employee_id = $1 AND company_id = $2
-                      AND issued_date >= $3
-                    ORDER BY issued_date ASC
-                    """,
-                    emp_id, company_id, case_created,
-                )
+            # Entries with no matching (in-company) employee are skipped
+            # entirely — the discipline/offboarding checks below never see them.
+            valid_ids = list(names.keys())
+
+            if valid_ids:
+                try:
+                    disc_rows = await conn.fetch(
+                        """
+                        SELECT employee_id, discipline_type, issued_date
+                        FROM progressive_discipline
+                        WHERE employee_id = ANY($1::uuid[]) AND company_id = $2
+                          AND issued_date >= $3
+                        ORDER BY employee_id, issued_date ASC
+                        """,
+                        valid_ids, company_id, case_created,
+                    )
+                except Exception:
+                    logger.warning("progressive_discipline query failed for retaliation risk check")
+                    disc_rows = []
+
                 for row in disc_rows:
                     issued = row["issued_date"]
-                    if issued:
-                        if isinstance(issued, date) and not isinstance(issued, datetime):
-                            issued_dt = datetime.combine(issued, datetime.min.time(), tzinfo=timezone.utc)
-                        elif issued.tzinfo is None:
-                            issued_dt = issued.replace(tzinfo=timezone.utc)
-                        else:
-                            issued_dt = issued
-                        days_since = (issued_dt - case_created).days
-                        events.append({
-                            "employee_id": str(emp_id),
-                            "employee_name": emp_name,
-                            "event_type": f"discipline:{row['discipline_type']}",
-                            "event_date": issued.isoformat() if hasattr(issued, 'isoformat') else str(issued),
-                            "days_since_case": days_since,
-                        })
-                        at_risk = True
-            except Exception:
-                logger.warning("progressive_discipline query failed for retaliation risk check")
+                    if not issued:
+                        continue
+                    emp_id = row["employee_id"]
+                    if isinstance(issued, date) and not isinstance(issued, datetime):
+                        issued_dt = datetime.combine(issued, datetime.min.time(), tzinfo=timezone.utc)
+                    elif issued.tzinfo is None:
+                        issued_dt = issued.replace(tzinfo=timezone.utc)
+                    else:
+                        issued_dt = issued
+                    days_since = (issued_dt - case_created).days
+                    events.append({
+                        "employee_id": str(emp_id),
+                        "employee_name": names[emp_id],
+                        "event_type": f"discipline:{row['discipline_type']}",
+                        "event_date": issued.isoformat() if hasattr(issued, 'isoformat') else str(issued),
+                        "days_since_case": days_since,
+                    })
+                    at_risk = True
 
-            # Check involuntary offboarding after case creation
-            try:
-                offb_rows = await conn.fetch(
-                    """
-                    SELECT id, started_at
-                    FROM offboarding_cases
-                    WHERE employee_id = $1 AND is_voluntary = false
-                      AND started_at >= $2
-                      AND org_id = $3
-                    ORDER BY started_at ASC
-                    """,
-                    emp_id, case_created, company_id,
-                )
+                try:
+                    offb_rows = await conn.fetch(
+                        """
+                        SELECT employee_id, started_at
+                        FROM offboarding_cases
+                        WHERE employee_id = ANY($1::uuid[]) AND is_voluntary = false
+                          AND started_at >= $2
+                          AND org_id = $3
+                        ORDER BY employee_id, started_at ASC
+                        """,
+                        valid_ids, case_created, company_id,
+                    )
+                except Exception:
+                    logger.warning("offboarding_cases query failed for retaliation risk check")
+                    offb_rows = []
+
                 for row in offb_rows:
                     started = row["started_at"]
-                    if started:
-                        if started.tzinfo is None:
-                            started = started.replace(tzinfo=timezone.utc)
-                        days_since = (started - case_created).days
-                        events.append({
-                            "employee_id": str(emp_id),
-                            "employee_name": emp_name,
-                            "event_type": "involuntary_termination",
-                            "event_date": started.isoformat(),
-                            "days_since_case": days_since,
-                        })
-                        at_risk = True
-            except Exception:
-                logger.warning("offboarding_cases query failed for retaliation risk check")
+                    if not started:
+                        continue
+                    emp_id = row["employee_id"]
+                    if started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
+                    days_since = (started - case_created).days
+                    events.append({
+                        "employee_id": str(emp_id),
+                        "employee_name": names[emp_id],
+                        "event_type": "involuntary_termination",
+                        "event_date": started.isoformat(),
+                        "days_since_case": days_since,
+                    })
+                    at_risk = True
 
         # Sort events by days_since_case ascending
         events.sort(key=lambda x: x["days_since_case"])

@@ -21,7 +21,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
-from app.database import get_connection
+
+# connection_or_direct, not get_connection: compute_risk_assessment must run
+# both in the API (pooled) and inside a Celery worker (pool-free by design —
+# see server/app/workers/CLAUDE.md). Same pattern as rate_limiter.py.
+from app.database import connection_or_direct as get_connection
 
 from ._config import (  # noqa: F401
     COMPLIANCE_CRITICAL_ALERT_POINTS,

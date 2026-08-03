@@ -28,6 +28,19 @@ FINAL_KEEP = 8
 GEMINI_CALL_TIMEOUT = 45
 SIMILARITY_MIN_SCORE = 0.50
 
+
+def _as_naive_utc(dt):
+    """Normalize to naive UTC. er_cases timestamps are 'timestamp without time
+    zone'; values that round-tripped through JSON parse back aware, and asyncpg
+    refuses to bind an aware datetime into a naive column (DataError)."""
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
 # Default scoring weights (total = 1.0) — overridable via platform_settings
 DEFAULT_SIMILARITY_WEIGHTS = {
     "category": 0.30,
@@ -309,11 +322,9 @@ async def batch_check_outcome_effectiveness(
     checks = []
     for cand in candidates:
         cand_id = str(cand["id"])
-        closed_at = cand.get("closed_at")
+        closed_at = _as_naive_utc(cand.get("closed_at"))
         if not closed_at:
             continue
-        if isinstance(closed_at, str):
-            closed_at = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
         company_id = cand.get("company_id")
         category = cand.get("category")
         if not company_id or not category:
@@ -403,7 +414,8 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
             current["intake_context"] = {}
 
     company_id = current.get("company_id")
-    lookback = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_MONTHS * 30)
+    # Bound into created_at (timestamp without time zone) below — must be naive.
+    lookback = _as_naive_utc(datetime.now(timezone.utc) - timedelta(days=LOOKBACK_MONTHS * 30))
 
     yield {"type": "phase", "step": "querying_history", "message": "Querying case history..."}
 
@@ -546,14 +558,10 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
         )
 
         # Resolution days
-        created_at = cand.get("created_at")
-        closed_at = cand.get("closed_at")
+        created_at = _as_naive_utc(cand.get("created_at"))
+        closed_at = _as_naive_utc(cand.get("closed_at"))
         resolution_days = None
         if created_at and closed_at:
-            if isinstance(created_at, str):
-                created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            if isinstance(closed_at, str):
-                closed_at = datetime.fromisoformat(closed_at.replace("Z", "+00:00"))
             delta = closed_at - created_at
             resolution_days = max(0, delta.days)
 

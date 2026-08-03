@@ -6,13 +6,13 @@ shared by multiple submodules in the employees package. Extracted from
 """
 import json
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import BackgroundTasks, HTTPException
 
-from app.database import get_connection
+from app.database import get_connection, connection_or_direct
 from app.core.us_states import US_STATE_CODES
 from app.core.services.compliance_service import ensure_location_for_employee
 from app.core.services.email import get_email_service
@@ -265,10 +265,33 @@ async def _auto_send_invitation(
 
 
 async def _refresh_risk_assessment(company_id: UUID) -> None:
-    """Background task: recompute risk assessment snapshot after a wage change."""
+    """Recompute risk assessment snapshot after a wage change or ER case
+    mutation. Runs in either the API process (FastAPI BackgroundTasks) or a
+    Celery worker (connection_or_direct makes every DB call pool-free-safe).
+
+    Debounced: dimensions are skipped entirely if the last snapshot is under a
+    minute old (collapses rapid-fire edits to one recompute), and the
+    expensive Gemini recommendations pass only reruns every 10 minutes even
+    when dimensions do refresh — the scheduled sweep never runs it at all.
+    """
+    async with connection_or_direct() as conn:
+        last_computed = await conn.fetchval(
+            "SELECT computed_at FROM risk_assessment_snapshots WHERE company_id = $1",
+            company_id,
+        )
+    age_seconds = None
+    if last_computed is not None:
+        aware_last = last_computed if last_computed.tzinfo else last_computed.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - aware_last).total_seconds()
+        if age_seconds < 60:
+            logger.info(
+                "Risk refresh for company %s skipped — snapshot is %ds old", company_id, int(age_seconds),
+            )
+            return
+
     # Pass 1: save updated dimensions immediately so violations reflect right away
     try:
-        async with get_connection() as conn:
+        async with connection_or_direct() as conn:
             weights = await load_risk_weights(conn)
         result = await compute_risk_assessment(company_id, weights=weights)
         from dataclasses import asdict as _asdict
@@ -277,7 +300,7 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
             default=str,
         )
         weights_json = json.dumps(weights)
-        async with get_connection() as conn:
+        async with connection_or_direct() as conn:
             await conn.execute(
                 """
                 INSERT INTO risk_assessment_snapshots
@@ -315,11 +338,16 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
         logger.exception("Background risk assessment refresh failed for company %s", company_id)
         return
 
-    # Pass 2: update recommendations (best-effort, won't block violation updates)
+    # Pass 2: update recommendations (best-effort, won't block violation
+    # updates). Debounced separately and more loosely than pass 1 — the
+    # consulting prose doesn't need to track every edit, just stay fresh.
+    if age_seconds is not None and age_seconds < 600:
+        logger.info("Recommendations refresh for company %s skipped — last run %ds ago", company_id, int(age_seconds))
+        return
     try:
         from app.config import get_settings
         consultation = await generate_recommendations(result, get_settings())
-        async with get_connection() as conn:
+        async with connection_or_direct() as conn:
             await conn.execute(
                 """
                 UPDATE risk_assessment_snapshots SET

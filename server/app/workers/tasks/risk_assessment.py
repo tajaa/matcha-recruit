@@ -198,3 +198,20 @@ def enqueue_scheduled_risk_assessments(self) -> dict:
     except Exception as e:
         print(f"[Risk Assessment Scheduler] Failed to enqueue assessments: {e}")
         raise self.retry(exc=e, countdown=60)
+
+
+@celery_app.task(bind=True, max_retries=1)
+def refresh_company_risk_assessment(self, company_id: str):
+    """Event-driven refresh, dispatched from er_copilot on case create/update/
+    delete. Unlike run_risk_assessment_task above, this runs the full
+    _refresh_risk_assessment (dimensions + debounced Gemini recommendations)
+    so an ER case edit updates the same snapshot fields a manual run would."""
+    from uuid import UUID
+    from app.matcha.routes.employees import _refresh_risk_assessment
+
+    try:
+        asyncio.run(_refresh_risk_assessment(UUID(company_id)))
+        return {"company_id": company_id, "status": "success"}
+    except Exception as e:
+        print(f"[Risk Refresh] Failed for company {company_id}: {e}")
+        raise self.retry(exc=e, countdown=30)

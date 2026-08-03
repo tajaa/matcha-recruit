@@ -9,6 +9,7 @@ from .onboarding_reminders import run_onboarding_reminders
 from .risk_assessment import (
     run_risk_assessment_task,
     enqueue_scheduled_risk_assessments,
+    refresh_company_risk_assessment,
 )
 from .healthcare_research import run_healthcare_research
 from .oncology_research import run_oncology_research
@@ -21,6 +22,7 @@ __all__ = [
     "run_onboarding_reminders",
     "run_risk_assessment_task",
     "enqueue_scheduled_risk_assessments",
+    "refresh_company_risk_assessment",
     "run_healthcare_research",
     "run_oncology_research",
 ]
