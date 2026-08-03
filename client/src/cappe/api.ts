@@ -7,6 +7,8 @@ import type {
   CappeDirectoryCategories,
   CappeDirectoryPage,
   CappeDirectoryQuery,
+  PublicCreatorPage,
+  PublicCreatorProfile,
 } from './types'
 
 const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
@@ -229,4 +231,36 @@ export function fetchCappeDirectory(query: CappeDirectoryQuery = {}) {
 
 export function fetchCappeDirectoryCategories() {
   return cappePublicGet<CappeDirectoryCategories>('/public/directory/categories')
+}
+
+// --- Creator marketplace directory (public) -----------------------------------
+
+export type PublicCreatorQuery = {
+  niche?: string
+  platform?: string
+  min_followers?: number
+  max_rate_cents?: number
+  location?: string
+  q?: string
+  verified_only?: boolean
+  limit?: number
+  offset?: number
+}
+
+function _publicCreatorQueryString(query: PublicCreatorQuery): string {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '' || value === false) continue
+    params.set(key, String(value))
+  }
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
+export function fetchPublicCreators(query: PublicCreatorQuery = {}) {
+  return cappePublicGet<PublicCreatorPage>(`/public/creators${_publicCreatorQueryString(query)}`)
+}
+
+export function fetchPublicCreator(handle: string) {
+  return cappePublicGet<PublicCreatorProfile>(`/public/creators/${encodeURIComponent(handle)}`)
 }

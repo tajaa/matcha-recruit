@@ -2,7 +2,7 @@
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
-export type CappeAccountType = 'business' | 'personal'
+export type CappeAccountType = 'business' | 'personal' | 'creator'
 
 export type CappeAccount = {
   id: string
@@ -766,4 +766,311 @@ export type CappeSetupConversationSummary = {
   title: string
   created_at: string
   updated_at: string
+}
+
+// --- Creator marketplace ------------------------------------------------------
+
+export const CREATOR_NICHES = [
+  'fitness', 'beauty', 'fashion', 'food', 'travel', 'tech', 'gaming',
+  'music', 'art', 'parenting', 'finance', 'health', 'sports', 'comedy',
+  'education', 'lifestyle', 'outdoors', 'pets', 'diy', 'other',
+] as const
+
+export const SOCIAL_PLATFORMS = ['instagram', 'tiktok', 'youtube', 'x', 'twitch', 'facebook', 'linkedin', 'other'] as const
+export const DELIVERABLE_TYPES = ['post', 'reel', 'story', 'video', 'short', 'stream', 'ugc', 'blog', 'other'] as const
+
+export const PAYMENT_SCHEDULES = [
+  { value: 'upfront', label: 'Upfront', blurb: '100% when the offer is accepted' },
+  { value: 'split_50_50', label: '50 / 50', blurb: 'Half on acceptance, half when all deliverables are approved' },
+  { value: 'per_deliverable', label: 'Per deliverable', blurb: 'Each deliverable pays out on approval' },
+] as const
+
+export const fmtCents = (c: number | null | undefined, currency = 'usd') =>
+  ((c ?? 0) / 100).toLocaleString('en-US', { style: 'currency', currency: currency.toUpperCase() })
+
+export type CreatorSocial = {
+  id: string
+  platform: string
+  handle: string
+  url: string
+  follower_count: number | null
+  engagement_rate: number | null
+  audit_status: 'unverified' | 'verified' | 'flagged' | string
+  verified_follower_count: number | null
+  audited_at: string | null
+  sort_order: number
+}
+
+export type CreatorSocialInput = {
+  platform: string
+  handle: string
+  url: string
+  follower_count?: number | null
+  engagement_rate?: number | null
+  sort_order?: number
+}
+
+export type CreatorPortfolioItem = {
+  id: string
+  title: string
+  description: string | null
+  media_url: string | null
+  media_type: 'image' | 'video' | null
+  external_url: string | null
+  brand_name: string | null
+  metrics: Record<string, unknown>
+  sort_order: number
+  created_at: string
+}
+
+export type CreatorPortfolioInput = {
+  title: string
+  description?: string | null
+  media_url?: string | null
+  media_type?: 'image' | 'video' | null
+  external_url?: string | null
+  brand_name?: string | null
+  metrics?: Record<string, unknown>
+  sort_order?: number
+}
+
+export type CreatorRate = {
+  id: string
+  deliverable_type: string
+  platform: string
+  price_cents: number
+  negotiable: boolean
+  notes: string | null
+  sort_order: number
+}
+
+export type CreatorRateInput = {
+  deliverable_type: string
+  platform: string
+  price_cents: number
+  negotiable?: boolean
+  notes?: string | null
+  sort_order?: number
+}
+
+export type CreatorProfileMe = {
+  id: string
+  handle: string
+  display_name: string
+  avatar_url: string | null
+  cover_url: string | null
+  bio: string | null
+  location: string | null
+  niches: string[]
+  languages: string[]
+  open_to_offers: boolean
+  status: 'draft' | 'pending_review' | 'published' | 'rejected' | 'suspended' | string
+  review_note: string | null
+  submitted_at: string | null
+  published_at: string | null
+  reach_verified: boolean
+  reach_audited_at: string | null
+  socials: CreatorSocial[]
+  portfolio: CreatorPortfolioItem[]
+  rates: CreatorRate[]
+}
+
+export type PublicCreatorCard = {
+  handle: string
+  display_name: string
+  avatar_url: string | null
+  cover_url: string | null
+  bio: string | null
+  location: string | null
+  niches: string[]
+  reach_verified: boolean
+  max_followers: number
+  min_rate_cents: number | null
+  platforms: string[]
+}
+
+export type PublicCreatorProfile = {
+  id: string
+  handle: string
+  display_name: string
+  avatar_url: string | null
+  cover_url: string | null
+  bio: string | null
+  location: string | null
+  niches: string[]
+  languages: string[]
+  open_to_offers: boolean
+  reach_verified: boolean
+  reach_audited_at: string | null
+  socials: CreatorSocial[]
+  portfolio: CreatorPortfolioItem[]
+  rates: CreatorRate[]
+}
+
+export type PublicCreatorPage = {
+  creators: PublicCreatorCard[]
+  total: number
+}
+
+// --- Collabs (brand<->creator offers) -----------------------------------------
+
+export type PaymentSchedule = 'upfront' | 'split_50_50' | 'per_deliverable'
+export type OfferStatus =
+  | 'sent' | 'negotiating' | 'accepted' | 'active' | 'completed'
+  | 'declined' | 'withdrawn' | 'cancelled'
+
+export type TermsDeliverable = {
+  type: string
+  platform: string
+  quantity: number
+  spec: string | null
+  due_date: string | null
+}
+
+export type TermsUsageRights = {
+  scope: 'organic' | 'paid'
+  duration_months: number | null
+  whitelisting: boolean
+}
+
+export type TermsExclusivity = {
+  category: string
+  duration_months: number
+}
+
+export type CollabTerms = {
+  compensation_cents: number
+  payment_schedule: PaymentSchedule
+  deliverables: TermsDeliverable[]
+  usage_rights: TermsUsageRights
+  exclusivity: TermsExclusivity | null
+  revision_rounds: number
+  approval_required: boolean
+  ftc_disclosure: boolean
+  start_date: string | null
+  end_date: string | null
+  notes: string | null
+}
+
+export type Campaign = {
+  id: string
+  title: string
+  description: string | null
+  budget_min_cents: number | null
+  budget_max_cents: number | null
+  deliverable_notes: string | null
+  status: 'active' | 'archived' | string
+  offer_count: number
+  created_at: string
+}
+
+export type OfferRevision = {
+  id: string
+  revision_no: number
+  proposed_by: 'brand' | 'creator'
+  terms: CollabTerms
+  message: string | null
+  created_at: string
+}
+
+export type OfferMessage = {
+  id: string
+  sender: 'brand' | 'creator'
+  body: string
+  revision_id: string | null
+  created_at: string
+}
+
+export type Deliverable = {
+  id: string
+  idx: number
+  type: string
+  platform: string
+  spec: string | null
+  due_date: string | null
+  status: 'pending' | 'submitted' | 'revision_requested' | 'approved' | string
+  submission_url: string | null
+  submission_note: string | null
+  proof_media_url: string | null
+  submitted_at: string | null
+  revision_count: number
+  review_note: string | null
+  approved_at: string | null
+}
+
+export type CollabPayment = {
+  id: string
+  idx: number
+  label: string
+  amount_cents: number
+  currency: string
+  trigger: 'on_accept' | 'on_all_approved' | 'on_deliverable'
+  deliverable_id: string | null
+  status: 'scheduled' | 'due' | 'processing' | 'paid' | 'failed' | 'refunded' | 'cancelled' | string
+  fee_cents: number | null
+  due_at: string | null
+  paid_at: string | null
+}
+
+export type OfferListItem = {
+  id: string
+  title: string
+  status: OfferStatus | string
+  payment_schedule: PaymentSchedule | null
+  total_cents: number | null
+  currency: string
+  campaign_id: string | null
+  brand_name: string | null
+  creator_handle: string
+  creator_display_name: string
+  creator_avatar_url: string | null
+  last_action_at: string
+  created_at: string
+}
+
+export type DealCheckSeverity = 'good' | 'caution' | 'warning'
+
+export type DealCheckItem = {
+  key: string
+  severity: DealCheckSeverity
+  title: string
+  detail: string
+}
+
+export type BrandStats = {
+  completed_collabs: number
+  brand_cancelled: number
+  in_progress: number
+  avg_hours_to_pay: number | null
+}
+
+export type OfferDetail = OfferListItem & {
+  side: 'brand' | 'creator'
+  accepted_revision_id: string | null
+  declined_reason: string | null
+  cancelled_by: 'brand' | 'creator' | null
+  cancel_reason: string | null
+  revisions: OfferRevision[]
+  messages: OfferMessage[]
+  deliverables: Deliverable[]
+  payments: CollabPayment[]
+  creator_payouts_ready: boolean
+  deal_check: DealCheckItem[] | null
+  brand_stats: BrandStats | null
+}
+
+export type OfferPage = {
+  offers: OfferListItem[]
+  total: number
+}
+
+export type EarningsRow = {
+  offer_id: string
+  offer_title: string
+  brand_name: string | null
+  label: string
+  amount_cents: number
+  fee_cents: number | null
+  status: string
+  paid_at: string | null
 }

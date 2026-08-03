@@ -40,6 +40,24 @@ export const statusBadge: Record<string, string> = {
   unsubscribed: 'bg-zinc-800 text-zinc-500',
   refunded: 'bg-zinc-800 text-zinc-500',
   bounced: 'bg-red-500/15 text-red-400',
+  // Creator marketplace: collab offers, deliverables, payments, profile review.
+  negotiating: 'bg-amber-500/15 text-amber-400',
+  accepted: 'bg-sky-500/15 text-sky-400',
+  completed: 'bg-sky-500/15 text-sky-400',
+  declined: 'bg-zinc-800 text-zinc-500',
+  withdrawn: 'bg-zinc-800 text-zinc-500',
+  submitted: 'bg-amber-500/15 text-amber-400',
+  revision_requested: 'bg-orange-500/15 text-orange-400',
+  approved: 'bg-emerald-500/15 text-emerald-400',
+  due: 'bg-amber-500/15 text-amber-400',
+  processing: 'bg-amber-500/15 text-amber-400',
+  failed: 'bg-red-500/15 text-red-400',
+  pending_review: 'bg-amber-500/15 text-amber-400',
+  rejected: 'bg-red-500/15 text-red-400',
+  suspended: 'bg-red-500/15 text-red-400',
+  flagged: 'bg-red-500/15 text-red-400',
+  verified: 'bg-emerald-500/15 text-emerald-400',
+  unverified: 'bg-zinc-800 text-zinc-400',
 }
 
 export const badgeFor = (status: string): string =>
