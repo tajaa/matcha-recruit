@@ -19,6 +19,8 @@ from ._shared import (
     MAX_UPLOAD_SIZE,
     log_audit,
     _verify_case_company,
+    celery_available,
+    _BG_TASKS,
 )
 
 router = APIRouter()
@@ -127,23 +129,19 @@ async def upload_document(
 
         # Queue Celery task for processing (with sync fallback)
         task_id = None
-        celery_available = False
-        try:
-            from app.workers.tasks.er_document_processing import process_er_document
-            # Check if Celery broker AND workers are available
-            from app.workers.celery_app import celery_app
-            ping_responses = celery_app.control.ping(timeout=1)
-            if not ping_responses:
-                raise RuntimeError("No Celery workers responded to ping")
-            task = process_er_document.delay(str(row["id"]), str(case_id))
-            task_id = task.id
-            celery_available = True
-            logger.info(f"Queued document {row['id']} for Celery processing, task_id={task_id}")
-        except Exception as e:
-            logger.warning(f"Celery unavailable ({e}), will process document synchronously")
+        queued = False
+        if await celery_available():
+            try:
+                from app.workers.tasks.er_document_processing import process_er_document
+                task = process_er_document.delay(str(row["id"]), str(case_id))
+                task_id = task.id
+                queued = True
+                logger.info(f"Queued document {row['id']} for Celery processing, task_id={task_id}")
+            except Exception as e:
+                logger.warning(f"Celery dispatch failed ({e}), will process document synchronously")
 
         # Fallback: process in background if Celery not available
-        if not celery_available:
+        if not queued:
             async def _background_process(doc_id: str, c_id: str):
                 """Process document in background, updating status on completion/failure."""
                 try:
@@ -178,7 +176,9 @@ async def upload_document(
                             doc_id,
                         )
 
-            asyncio.create_task(_background_process(str(row["id"]), str(case_id)))
+            _bg_task = asyncio.create_task(_background_process(str(row["id"]), str(case_id)))
+            _BG_TASKS.add(_bg_task)
+            _bg_task.add_done_callback(_BG_TASKS.discard)
 
         document = ERDocumentResponse(
             id=row["id"],
@@ -337,47 +337,45 @@ async def reprocess_document(
         )
 
     # Queue for processing
-    try:
-        from app.workers.tasks.er_document_processing import process_er_document
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = process_er_document.delay(str(doc_id), str(case_id))
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Document queued for reprocessing",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), processing synchronously")
-        # Fallback to synchronous processing
+    if await celery_available():
         try:
-            from app.workers.tasks.er_document_processing import _process_document
-            await _process_document(str(doc_id), str(case_id))
+            from app.workers.tasks.er_document_processing import process_er_document
+            task = process_er_document.delay(str(doc_id), str(case_id))
             return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message="Document reprocessed successfully",
+                task_id=task.id,
+                status="queued",
+                message="Document queued for reprocessing",
             )
-        except Exception as sync_error:
-            logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
-            error_detail = str(sync_error).strip() or "Document reprocessing failed"
-            if len(error_detail) > 1000:
-                error_detail = error_detail[:997] + "..."
-            async with get_connection() as err_conn:
-                await err_conn.execute(
-                    """UPDATE er_case_documents
-                       SET processing_status = 'failed', processing_error = $1
-                       WHERE id = $2""",
-                    error_detail,
-                    doc_id,
-                )
-            return TaskStatusResponse(
-                task_id=None,
-                status="failed",
-                message="Reprocessing failed",
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), processing synchronously")
+
+    # Fallback to synchronous processing
+    try:
+        from app.workers.tasks.er_document_processing import _process_document
+        await _process_document(str(doc_id), str(case_id))
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message="Document reprocessed successfully",
+        )
+    except Exception as sync_error:
+        logger.error(f"Reprocess failed: {sync_error}", exc_info=True)
+        error_detail = str(sync_error).strip() or "Document reprocessing failed"
+        if len(error_detail) > 1000:
+            error_detail = error_detail[:997] + "..."
+        async with get_connection() as err_conn:
+            await err_conn.execute(
+                """UPDATE er_case_documents
+                   SET processing_status = 'failed', processing_error = $1
+                   WHERE id = $2""",
+                error_detail,
+                doc_id,
             )
+        return TaskStatusResponse(
+            task_id=None,
+            status="failed",
+            message="Reprocessing failed",
+        )
 
 
 @router.post("/{case_id}/documents/reprocess-all")
@@ -393,7 +391,6 @@ async def reprocess_all_documents(
 
     async with get_connection() as conn:
         await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
-        # Find all documents that need processing
         docs = await conn.fetch(
             """
             SELECT id, filename, processing_status
@@ -403,43 +400,44 @@ async def reprocess_all_documents(
             case_id,
         )
 
-        if not docs:
-            return {
-                "status": "no_action",
-                "message": "No pending or failed documents to reprocess",
-                "processed": 0,
-            }
+    if not docs:
+        return {
+            "status": "no_action",
+            "message": "No pending or failed documents to reprocess",
+            "processed": 0,
+        }
 
-        results = []
-        for doc in docs:
-            doc_id = doc["id"]
-            try:
-                # Reset status
-                await conn.execute(
+    results = []
+    for doc in docs:
+        doc_id = doc["id"]
+        try:
+            async with get_connection() as reset_conn:
+                await reset_conn.execute(
                     "UPDATE er_case_documents SET processing_status = 'pending', processing_error = NULL WHERE id = $1",
                     doc_id,
                 )
-                # Delete existing chunks
-                await conn.execute("DELETE FROM er_evidence_chunks WHERE document_id = $1", doc_id)
+                await reset_conn.execute("DELETE FROM er_evidence_chunks WHERE document_id = $1", doc_id)
 
-                # Process synchronously (most reliable)
-                from app.workers.tasks.er_document_processing import _process_document
-                await _process_document(str(doc_id), str(case_id))
-                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "completed"})
-            except Exception as e:
-                logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
-                error_detail = str(e).strip() or "Document processing failed"
-                if len(error_detail) > 1000:
-                    error_detail = error_detail[:997] + "..."
-                await conn.execute(
+            # Processed outside any pooled connection — parse + Gemini can take minutes.
+            from app.workers.tasks.er_document_processing import _process_document
+            await _process_document(str(doc_id), str(case_id))
+            results.append({"id": str(doc_id), "filename": doc["filename"], "status": "completed"})
+        except Exception as e:
+            logger.error(f"Failed to reprocess document {doc_id}: {e}", exc_info=True)
+            error_detail = str(e).strip() or "Document processing failed"
+            if len(error_detail) > 1000:
+                error_detail = error_detail[:997] + "..."
+            async with get_connection() as err_conn:
+                await err_conn.execute(
                     "UPDATE er_case_documents SET processing_status = 'failed', processing_error = $1 WHERE id = $2",
                     error_detail,
                     doc_id,
                 )
-                results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed"})
+            results.append({"id": str(doc_id), "filename": doc["filename"], "status": "failed"})
 
+    async with get_connection() as audit_conn:
         await log_audit(
-            conn,
+            audit_conn,
             str(case_id),
             str(current_user.id),
             "documents_batch_reprocessed",
@@ -449,14 +447,14 @@ async def reprocess_all_documents(
             request.client.host if request.client else None,
         )
 
-        completed = sum(1 for r in results if r["status"] == "completed")
-        return {
-            "status": "completed",
-            "message": f"Reprocessed {completed}/{len(docs)} documents",
-            "processed": completed,
-            "total": len(docs),
-            "results": results,
-        }
+    completed = sum(1 for r in results if r["status"] == "completed")
+    return {
+        "status": "completed",
+        "message": f"Reprocessed {completed}/{len(docs)} documents",
+        "processed": completed,
+        "total": len(docs),
+        "results": results,
+    }
 
 
 @router.delete("/{case_id}/documents/{doc_id}")
@@ -474,7 +472,7 @@ async def delete_document(
     async with get_connection() as conn:
         await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
         doc = await conn.fetchrow(
-            "SELECT filename FROM er_case_documents WHERE id = $1 AND case_id = $2",
+            "SELECT filename, file_path FROM er_case_documents WHERE id = $1 AND case_id = $2",
             doc_id,
             case_id,
         )
@@ -495,7 +493,15 @@ async def delete_document(
             request.client.host if request.client else None,
         )
 
-        return {"status": "deleted", "document_id": str(doc_id)}
+    # Best-effort: drop the stored object now its row is gone. A storage
+    # failure must not fail the delete (mirrors revoke_share_link).
+    if doc["file_path"]:
+        try:
+            await get_storage().delete_file(doc["file_path"])
+        except Exception as exc:
+            logger.warning("Failed to delete S3 object for document %s: %s", doc_id, exc)
+
+    return {"status": "deleted", "document_id": str(doc_id)}
 
 
 # ===========================================

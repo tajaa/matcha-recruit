@@ -16,6 +16,7 @@ from ._shared import (
     logger,
     log_audit,
     _verify_case_company,
+    celery_available,
 )
 
 router = APIRouter()
@@ -58,40 +59,29 @@ async def generate_timeline(
             request.client.host if request.client else None,
         )
 
-    # Try to queue analysis task via Celery, fall back to sync
-    celery_available = False
-    try:
-        from app.workers.tasks.er_analysis import run_timeline_analysis
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = run_timeline_analysis.delay(str(case_id), model_override=model)
-        celery_available = True
-        logger.info(f"Queued timeline analysis for case {case_id}, task_id={task.id}")
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Timeline analysis queued",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), running timeline analysis synchronously")
+    if await celery_available():
+        try:
+            from app.workers.tasks.er_analysis import run_timeline_analysis
+            task = run_timeline_analysis.delay(str(case_id), model_override=model)
+            logger.info(f"Queued timeline analysis for case {case_id}, task_id={task.id}")
+            return TaskStatusResponse(task_id=task.id, status="queued", message="Timeline analysis queued")
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), running timeline analysis synchronously")
 
     # Fallback: run synchronously
-    if not celery_available:
-        try:
-            from app.workers.tasks.er_analysis import _run_timeline_analysis
-            logger.info(f"Starting synchronous timeline analysis for case {case_id}")
-            result = await _run_timeline_analysis(str(case_id), model_override=model)
-            logger.info(f"Timeline analysis completed for case {case_id}: {result}")
-            return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message=f"Timeline analysis completed: {result.get('events_found', 0)} events found",
-            )
-        except Exception as sync_error:
-            logger.error(f"Timeline analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Timeline analysis failed: {sync_error}")
+    try:
+        from app.workers.tasks.er_analysis import _run_timeline_analysis
+        logger.info(f"Starting synchronous timeline analysis for case {case_id}")
+        result = await _run_timeline_analysis(str(case_id), model_override=model)
+        logger.info(f"Timeline analysis completed for case {case_id}: {result}")
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message=f"Timeline analysis completed: {result.get('events_found', 0)} events found",
+        )
+    except Exception as sync_error:
+        logger.error(f"Timeline analysis failed for case {case_id}: {sync_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Timeline analysis failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/timeline")
@@ -183,40 +173,29 @@ async def generate_discrepancies(
             request.client.host if request.client else None,
         )
 
-    # Try to queue analysis task via Celery, fall back to sync
-    celery_available = False
-    try:
-        from app.workers.tasks.er_analysis import run_discrepancy_analysis
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = run_discrepancy_analysis.delay(str(case_id), model_override=model)
-        celery_available = True
-        logger.info(f"Queued discrepancy analysis for case {case_id}, task_id={task.id}")
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Discrepancy analysis queued",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), running discrepancy analysis synchronously")
+    if await celery_available():
+        try:
+            from app.workers.tasks.er_analysis import run_discrepancy_analysis
+            task = run_discrepancy_analysis.delay(str(case_id), model_override=model)
+            logger.info(f"Queued discrepancy analysis for case {case_id}, task_id={task.id}")
+            return TaskStatusResponse(task_id=task.id, status="queued", message="Discrepancy analysis queued")
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), running discrepancy analysis synchronously")
 
     # Fallback: run synchronously
-    if not celery_available:
-        try:
-            from app.workers.tasks.er_analysis import _run_discrepancy_analysis
-            logger.info(f"Starting synchronous discrepancy analysis for case {case_id}")
-            result = await _run_discrepancy_analysis(str(case_id), model_override=model)
-            logger.info(f"Discrepancy analysis completed for case {case_id}: {result}")
-            return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message=f"Discrepancy analysis completed: {result.get('discrepancies_found', 0)} discrepancies found",
-            )
-        except Exception as sync_error:
-            logger.error(f"Discrepancy analysis failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Discrepancy analysis failed: {sync_error}")
+    try:
+        from app.workers.tasks.er_analysis import _run_discrepancy_analysis
+        logger.info(f"Starting synchronous discrepancy analysis for case {case_id}")
+        result = await _run_discrepancy_analysis(str(case_id), model_override=model)
+        logger.info(f"Discrepancy analysis completed for case {case_id}: {result}")
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message=f"Discrepancy analysis completed: {result.get('discrepancies_found', 0)} discrepancies found",
+        )
+    except Exception as sync_error:
+        logger.error(f"Discrepancy analysis failed for case {case_id}: {sync_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Discrepancy analysis failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/discrepancies")
@@ -324,40 +303,29 @@ async def run_policy_check(
             request.client.host if request.client else None,
         )
 
-    # Try to queue analysis task via Celery, fall back to sync
-    celery_available = False
-    try:
-        from app.workers.tasks.er_analysis import run_policy_check as run_policy_check_task
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = run_policy_check_task.delay(str(case_id), model_override=model)
-        celery_available = True
-        logger.info(f"Queued policy check for case {case_id}, task_id={task.id}")
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Policy check queued",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), running policy check synchronously")
+    if await celery_available():
+        try:
+            from app.workers.tasks.er_analysis import run_policy_check as run_policy_check_task
+            task = run_policy_check_task.delay(str(case_id), model_override=model)
+            logger.info(f"Queued policy check for case {case_id}, task_id={task.id}")
+            return TaskStatusResponse(task_id=task.id, status="queued", message="Policy check queued")
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), running policy check synchronously")
 
     # Fallback: run synchronously
-    if not celery_available:
-        try:
-            from app.workers.tasks.er_analysis import _run_policy_check
-            logger.info(f"Starting synchronous policy check for case {case_id}")
-            result = await _run_policy_check(str(case_id), model_override=model)
-            logger.info(f"Policy check completed for case {case_id}: {result}")
-            return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message=f"Policy check completed: {result.get('violations_found', 0)} violations found",
-            )
-        except Exception as sync_error:
-            logger.error(f"Policy check failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Policy check failed: {sync_error}")
+    try:
+        from app.workers.tasks.er_analysis import _run_policy_check
+        logger.info(f"Starting synchronous policy check for case {case_id}")
+        result = await _run_policy_check(str(case_id), model_override=model)
+        logger.info(f"Policy check completed for case {case_id}: {result}")
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message=f"Policy check completed: {result.get('violations_found', 0)} violations found",
+        )
+    except Exception as sync_error:
+        logger.error(f"Policy check failed for case {case_id}: {sync_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Policy check failed: {sync_error}")
 
 
 @router.get("/{case_id}/analysis/policy-check")
@@ -420,13 +388,16 @@ async def analyze_similar_cases(
     if company_id is None:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    # Verify before the stream opens — raising inside the generator lands after
+    # the 200 and the SSE headers are already on the wire.
+    async with get_connection() as verify_conn:
+        await _verify_case_company(verify_conn, case_id, company_id, current_user.role == "admin")
+
     async def event_stream():
         def sse(data: dict) -> str:
             return f"data: {json.dumps(data, default=str)}\n\n"
 
         async with get_connection() as conn:
-            await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
-
             use_cache = not refresh
 
             if use_cache:
@@ -488,18 +459,18 @@ async def analyze_similar_cases(
 
                     yield sse({"type": "complete", "message": "Analysis complete", "result": result_data})
 
-            yield "data: [DONE]\n\n"
+                    # Audit log — before [DONE] so a client disconnect can't skip it.
+                    try:
+                        await log_audit(
+                            conn, str(case_id), str(current_user.id),
+                            "analysis_requested",
+                            entity_type="analysis",
+                            details={"analysis_type": "similar_cases"},
+                        )
+                    except Exception:
+                        pass
 
-            # Audit log
-            try:
-                await log_audit(
-                    conn, str(case_id), str(current_user.id),
-                    "analysis_requested",
-                    entity_type="analysis",
-                    details={"analysis_type": "similar_cases"},
-                )
-            except Exception:
-                pass
+            yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

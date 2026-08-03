@@ -15,11 +15,11 @@ Mounted in `routes/__init__.py`: `router` at `/er/cases` (gated by `require_feat
 | `notes.py` | Case notes: list + create | 2 |
 | `documents.py` | Document upload, list, get, reprocess, reprocess-all, delete | 6 |
 | `analysis.py` | AI analysis: timeline, discrepancies, policy-check, similar-cases (each post + get) | 8 |
-| `guidance.py` | AI guidance: suggested guidance (get/post/stream) + outcome analysis (stream/post) | 5 |
+| `guidance.py` | AI guidance: suggested guidance (get/post) + outcome analysis (stream) | 3 |
 | `search.py` | Evidence search (RAG over case documents) | 1 |
 | `reports.py` | Report generation: summary, determination letter, report fetch | 3 |
 | `case_views.py` | Read-only case views: audit log, retaliation risk, investigation interviews, linked incidents, claims-readiness PDF | 5 |
-| **Total** | | **43 routes** (41 `router` + 2 `public_router`) |
+| **Total** | | **41 routes** (39 `router` + 2 `public_router`) |
 
 ## Package router pattern
 

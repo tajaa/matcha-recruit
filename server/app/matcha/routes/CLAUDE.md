@@ -19,7 +19,7 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `onboarding/invitations.py` | `/invitations` | Token-based invite acceptance |
 | `employee_lifecycle/offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
 | `interviews.py` | — (no prefix, no gate) | Recruiting interviews (create/get/list/analysis) + the voice-interview WS handler. The 8 `/tutor/*` session + admin-metrics routes moved to `matcha_work/tutor_sessions.py` (2026-07-27) — same `interviews` table as the thread-scoped voice tutor — but are still mounted **here-style**: as a sibling of this router, unprefixed and ungated. `platforms/ios/MatchaTutor` hard-codes `/tutor/sessions` + `/api/ws/interview`, and the `matcha_work` mount's `require_feature` gate would 403 callers these routes never gated; re-prefixing needs an iOS release in lockstep |
-| `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 43 routes; see `er_copilot/CLAUDE.md`) |
+| `er_copilot/` | `/er/cases` (+ `/shared/er-export`) | Employee Relations case mgmt + AI — **package** (split 2026-07-06, 41 routes; see `er_copilot/CLAUDE.md`) |
 | `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (87 routes; `osha/` is a nested split since 2026-07-27), see `ir_incidents/CLAUDE.md` |
 | `onboarding/ir.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |

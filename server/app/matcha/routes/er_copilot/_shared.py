@@ -4,9 +4,11 @@ Split from the flat er_copilot.py into per-concern submodules; these utilities
 are imported by crud / documents / export / analysis / guidance / search /
 reports / notes / case_views via ``from ._shared import ...``.
 """
+import asyncio
 import json
 import logging
 import secrets
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -17,6 +19,40 @@ logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
+_celery_probe: tuple[float, bool] | None = None
+_CELERY_PROBE_TTL = 30.0
+
+
+async def celery_available() -> bool:
+    """Thread-wrapped, TTL-cached Celery liveness probe.
+
+    The ping is a blocking broker round-trip; caching it keeps a burst of
+    uploads from paying it repeatedly. A negative result is cached too, so a
+    worker that just came up is ignored for up to TTL seconds — acceptable
+    because every caller falls back to synchronous processing.
+    """
+    global _celery_probe
+    now = time.monotonic()
+    if _celery_probe is not None and now - _celery_probe[0] < _CELERY_PROBE_TTL:
+        return _celery_probe[1]
+
+    def _ping() -> bool:
+        from app.workers.celery_app import celery_app
+        return bool(celery_app.control.ping(timeout=1))
+
+    try:
+        ok = await asyncio.to_thread(_ping)
+    except Exception as exc:
+        logger.warning("Celery probe failed: %s", exc)
+        ok = False
+    _celery_probe = (now, ok)
+    return ok
+
+
+# Strong refs for fire-and-forget tasks — the event loop holds only a weak
+# reference, so an unreferenced task can be collected mid-run.
+_BG_TASKS: set[asyncio.Task] = set()
+
 
 # ===========================================
 # Helper Functions
@@ -25,7 +61,7 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 def generate_case_number() -> str:
     """Generate a unique case number."""
     now = datetime.now(timezone.utc)
-    random_suffix = secrets.token_hex(2).upper()
+    random_suffix = secrets.token_hex(4).upper()
     return f"ER-{now.year}-{now.month:02d}-{random_suffix}"
 
 

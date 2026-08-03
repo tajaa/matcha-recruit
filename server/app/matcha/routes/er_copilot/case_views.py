@@ -124,16 +124,20 @@ async def get_retaliation_risk(
             except (ValueError, TypeError):
                 continue
 
-            # Get employee name
+            # Scoped to the caller's company: involved_employees is free-form
+            # JSONB, so an entry carrying another tenant's employee id must
+            # resolve to nothing rather than leak that employee's name and
+            # adverse-action history (same guard as er_case_context.py).
             emp_row = await conn.fetchrow(
-                "SELECT first_name, last_name FROM employees WHERE id = $1",
+                "SELECT first_name, last_name FROM employees WHERE id = $1 AND org_id::text = $2::text",
                 emp_id,
+                str(company_id),
             )
-            emp_name = "Unknown"
-            if emp_row:
-                first = emp_row["first_name"] or ""
-                last = emp_row["last_name"] or ""
-                emp_name = f"{first} {last}".strip() or "Unknown"
+            if not emp_row:
+                continue
+            first = emp_row["first_name"] or ""
+            last = emp_row["last_name"] or ""
+            emp_name = f"{first} {last}".strip() or "Unknown"
 
             # Check progressive_discipline after case creation
             try:
@@ -176,9 +180,10 @@ async def get_retaliation_risk(
                     FROM offboarding_cases
                     WHERE employee_id = $1 AND is_voluntary = false
                       AND started_at >= $2
+                      AND org_id = $3
                     ORDER BY started_at ASC
                     """,
-                    emp_id, case_created,
+                    emp_id, case_created, company_id,
                 )
                 for row in offb_rows:
                     started = row["started_at"]

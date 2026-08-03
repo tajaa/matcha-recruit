@@ -1,4 +1,5 @@
 """Case export + share links (authed) and public share-link download."""
+import asyncio
 import base64
 import os
 import secrets
@@ -33,7 +34,7 @@ class ExportCaseFileRequest(BaseModel):
 
 class CreateShareLinkRequest(BaseModel):
     password: str = Field(..., min_length=4, max_length=128)
-    expires_in_days: Optional[int] = Field(None, ge=0, le=365)
+    expires_in_days: Optional[int] = Field(None, ge=1, le=365)
 
 
 class ShareLinkResponse(BaseModel):
@@ -185,7 +186,7 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
         raise
     except Exception as exc:
         logger.error("Export failed for case %s during data/HTML phase: %s", case_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Export preparation failed: {exc}")
+        raise HTTPException(status_code=500, detail="Export preparation failed")
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -222,41 +223,45 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
 </body></html>"""
 
     try:
-        from ....core.services.pdf import render_pdf
-        pdf_bytes = render_pdf(html)
+        from ....core.services.pdf import render_pdf_async
+        pdf_bytes = await render_pdf_async(html)
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
     except Exception as exc:
         logger.error("PDF generation failed for case %s: %s", case_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
+        raise HTTPException(status_code=500, detail="PDF generation failed")
 
     try:
         from pypdf import PdfReader, PdfWriter
-        reader = PdfReader(BytesIO(pdf_bytes))
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
 
-        # Append original PDF attachments after the report pages
-        for att_bytes in attachment_pdfs:
-            try:
-                att_reader = PdfReader(BytesIO(att_bytes))
-                for page in att_reader.pages:
-                    writer.add_page(page)
-            except Exception as att_exc:
-                logger.warning("Skipping unreadable PDF attachment in export: %s", att_exc)
+        def _merge_and_encrypt() -> bytes:
+            reader = PdfReader(BytesIO(pdf_bytes))
+            writer = PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
 
-        writer.encrypt(password)
+            # Append original PDF attachments after the report pages
+            for att_bytes in attachment_pdfs:
+                try:
+                    att_reader = PdfReader(BytesIO(att_bytes))
+                    for page in att_reader.pages:
+                        writer.add_page(page)
+                except Exception as att_exc:
+                    logger.warning("Skipping unreadable PDF attachment in export: %s", att_exc)
 
-        output = BytesIO()
-        writer.write(output)
-        output.seek(0)
-        encrypted_bytes = output.read()
+            writer.encrypt(password)
+
+            output = BytesIO()
+            writer.write(output)
+            output.seek(0)
+            return output.read()
+
+        encrypted_bytes = await asyncio.to_thread(_merge_and_encrypt)
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF encryption not available (pypdf not installed)")
     except Exception as exc:
         logger.error("PDF encryption failed for case %s: %s", case_id, exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"PDF encryption failed: {exc}")
+        raise HTTPException(status_code=500, detail="PDF encryption failed")
 
     filename = f"ER-Case-{case_number}.pdf"
     return encrypted_bytes, filename

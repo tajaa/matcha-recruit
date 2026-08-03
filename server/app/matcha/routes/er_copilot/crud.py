@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query, R
 from ....database import get_connection
 from ...dependencies import require_admin_or_client, get_client_company_id
 from ....core.models.auth import CurrentUser
+from ....core.services.storage import get_storage
 from app.matcha.models.er.case import (
     ERCaseCreate,
     ERCaseUpdate,
@@ -23,6 +24,7 @@ from ._shared import (
     _verify_case_company,
     _normalize_intake_context,
     _normalize_json_list,
+    logger,
 )
 
 router = APIRouter()
@@ -328,8 +330,9 @@ async def update_case(
             params.append(case.status)
             param_count += 1
 
-            if case.status == "closed":
-                updates.append("closed_at = NOW()")
+            # Symmetric: reopening must clear the timestamp, or the case still
+            # reads as closed to every consumer of closed_at.
+            updates.append("closed_at = NOW()" if case.status == "closed" else "closed_at = NULL")
 
         if case.assigned_to is not None:
             updates.append(f"assigned_to = ${param_count}")
@@ -444,6 +447,20 @@ async def delete_case(
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
+        # Collect stored objects before the cascade drops the rows that name them.
+        doc_paths = [
+            r["file_path"] for r in await conn.fetch(
+                "SELECT file_path FROM er_case_documents WHERE case_id = $1 AND file_path IS NOT NULL",
+                case_id,
+            )
+        ]
+        export_paths = [
+            r["storage_path"] for r in await conn.fetch(
+                "SELECT storage_path FROM er_case_export_links WHERE case_id = $1 AND storage_path IS NOT NULL",
+                case_id,
+            )
+        ]
+
         # Delete case (cascades to documents, chunks, analysis)
         await conn.execute(
             f"DELETE FROM er_cases WHERE id = $1 AND {company_filter}",
@@ -465,7 +482,14 @@ async def delete_case(
 
         _queue_risk_assessment_refresh(background_tasks, company_id)
 
-        return {"status": "deleted", "case_id": str(case_id)}
+    storage = get_storage()
+    for path in doc_paths + export_paths:
+        try:
+            await storage.delete_file(path)
+        except Exception as exc:
+            logger.warning("Failed to delete S3 object %s for deleted case %s: %s", path, case_id, exc)
+
+    return {"status": "deleted", "case_id": str(case_id)}
 
 
 # ===========================================

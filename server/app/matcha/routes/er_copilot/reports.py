@@ -16,6 +16,7 @@ from ._shared import (
     logger,
     log_audit,
     _verify_case_company,
+    celery_available,
 )
 
 router = APIRouter()
@@ -45,40 +46,29 @@ async def generate_summary_report(
             request.client.host if request.client else None,
         )
 
-    # Try to queue task via Celery, fall back to sync
-    celery_available = False
-    try:
-        from app.workers.tasks.er_analysis import generate_summary_report as generate_summary_task
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = generate_summary_task.delay(str(case_id), str(current_user.id))
-        celery_available = True
-        logger.info(f"Queued summary report for case {case_id}, task_id={task.id}")
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Summary report generation queued",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), generating summary report synchronously")
+    if await celery_available():
+        try:
+            from app.workers.tasks.er_analysis import generate_summary_report as generate_summary_task
+            task = generate_summary_task.delay(str(case_id), str(current_user.id))
+            logger.info(f"Queued summary report for case {case_id}, task_id={task.id}")
+            return TaskStatusResponse(task_id=task.id, status="queued", message="Summary report generation queued")
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), generating summary report synchronously")
 
     # Fallback: run synchronously
-    if not celery_available:
-        try:
-            from app.workers.tasks.er_analysis import _generate_summary_report
-            logger.info(f"Starting synchronous summary report generation for case {case_id}")
-            result = await _generate_summary_report(str(case_id), str(current_user.id))
-            logger.info(f"Summary report generated for case {case_id}: {result}")
-            return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message="Summary report generated successfully",
-            )
-        except Exception as sync_error:
-            logger.error(f"Summary report generation failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Summary report generation failed")
+    try:
+        from app.workers.tasks.er_analysis import _generate_summary_report
+        logger.info(f"Starting synchronous summary report generation for case {case_id}")
+        result = await _generate_summary_report(str(case_id), str(current_user.id))
+        logger.info(f"Summary report generated for case {case_id}: {result}")
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message="Summary report generated successfully",
+        )
+    except Exception as sync_error:
+        logger.error(f"Summary report generation failed for case {case_id}: {sync_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Summary report generation failed")
 
 
 @router.post("/{case_id}/reports/determination", response_model=TaskStatusResponse)
@@ -120,48 +110,41 @@ async def generate_determination_letter(
             request.client.host if request.client else None,
         )
 
-    # Try to queue task via Celery, fall back to sync
-    celery_available = False
-    try:
-        from app.workers.tasks.er_analysis import generate_determination_letter as generate_determination_task
-        from app.workers.celery_app import celery_app
-        ping_responses = celery_app.control.ping(timeout=1)
-        if not ping_responses:
-            raise RuntimeError("No Celery workers responded to ping")
-        task = generate_determination_task.delay(
-            str(case_id),
-            report_request.determination,
-            str(current_user.id),
-        )
-        celery_available = True
-        logger.info(f"Queued determination letter for case {case_id}, task_id={task.id}")
-        return TaskStatusResponse(
-            task_id=task.id,
-            status="queued",
-            message="Determination letter generation queued",
-        )
-    except Exception as e:
-        logger.warning(f"Celery unavailable ({e}), generating determination letter synchronously")
-
-    # Fallback: run synchronously
-    if not celery_available:
+    if await celery_available():
         try:
-            from app.workers.tasks.er_analysis import _generate_determination_letter
-            logger.info(f"Starting synchronous determination letter generation for case {case_id}")
-            result = await _generate_determination_letter(
+            from app.workers.tasks.er_analysis import generate_determination_letter as generate_determination_task
+            task = generate_determination_task.delay(
                 str(case_id),
                 report_request.determination,
                 str(current_user.id),
             )
-            logger.info(f"Determination letter generated for case {case_id}: {result}")
+            logger.info(f"Queued determination letter for case {case_id}, task_id={task.id}")
             return TaskStatusResponse(
-                task_id=None,
-                status="completed",
-                message="Determination letter generated successfully",
+                task_id=task.id,
+                status="queued",
+                message="Determination letter generation queued",
             )
-        except Exception as sync_error:
-            logger.error(f"Determination letter generation failed for case {case_id}: {sync_error}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Determination letter generation failed")
+        except Exception as e:
+            logger.warning(f"Celery dispatch failed ({e}), generating determination letter synchronously")
+
+    # Fallback: run synchronously
+    try:
+        from app.workers.tasks.er_analysis import _generate_determination_letter
+        logger.info(f"Starting synchronous determination letter generation for case {case_id}")
+        result = await _generate_determination_letter(
+            str(case_id),
+            report_request.determination,
+            str(current_user.id),
+        )
+        logger.info(f"Determination letter generated for case {case_id}: {result}")
+        return TaskStatusResponse(
+            task_id=None,
+            status="completed",
+            message="Determination letter generated successfully",
+        )
+    except Exception as sync_error:
+        logger.error(f"Determination letter generation failed for case {case_id}: {sync_error}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Determination letter generation failed")
 
 
 @router.get("/{case_id}/reports/{report_type}")
