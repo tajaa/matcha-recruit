@@ -15,6 +15,7 @@ from .billing import router as billing_router
 from .blog import router as blog_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
+from .creators import router as creators_router
 from .discounts import router as discounts_router
 from .domains import router as domains_router
 from .forms import router as forms_router
@@ -80,6 +81,7 @@ cappe_router.include_router(merlin_router)
 cappe_router.include_router(merlin_setup_router)
 cappe_router.include_router(messages_router)
 cappe_router.include_router(clients_router)
+cappe_router.include_router(creators_router)
 cappe_router.include_router(blog_router)
 cappe_router.include_router(uploads_router)
 
