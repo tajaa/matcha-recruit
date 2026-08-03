@@ -58,9 +58,7 @@ async def create_case_core(
 
     bg_callables: list = []
     if row["company_id"]:
-        # Lazy: routes.employees is a routes-layer module (services importing
-        # routes), same pattern as the original code used before this move.
-        from app.matcha.routes.employees import _refresh_risk_assessment
-        bg_callables.append((_refresh_risk_assessment, (row["company_id"],), {}))
+        from app.matcha.services.risk_analytics.risk_assessment_service.refresh import refresh_risk_snapshot
+        bg_callables.append((refresh_risk_snapshot, (row["company_id"],), {}))
 
     return dict(row), bg_callables

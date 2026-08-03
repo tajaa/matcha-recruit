@@ -116,9 +116,9 @@ async def _save_analysis_result(
     )
     if company_id:
         try:
-            from app.matcha.routes.employees import _refresh_risk_assessment
+            from app.matcha.services.risk_analytics.risk_assessment_service.refresh import refresh_risk_snapshot
 
-            await _refresh_risk_assessment(company_id)
+            await refresh_risk_snapshot(company_id)
         except Exception:
             logger.exception(
                 "Failed to refresh risk assessment after %s analysis for ER case %s",

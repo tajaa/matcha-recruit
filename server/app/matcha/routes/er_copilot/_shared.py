@@ -82,9 +82,16 @@ async def _dispatch_risk_refresh(company_id: UUID) -> None:
     redis = get_redis_cache()
     if redis is not None:
         try:
-            fresh = await redis.set(f"risk-refresh:{company_id}", "1", nx=True, ex=90)
+            # TTL is a crash backstop only, not the coalescing mechanism — the
+            # run itself deletes this key on completion (refresh.py), so a
+            # slower-than-TTL run can't let a second recompute start under it.
+            fresh = await redis.set(f"risk-refresh:{company_id}", "1", nx=True, ex=300)
             if not fresh:
-                return  # a refresh for this company is already queued or just ran
+                # A refresh for this company is already running. Leave a
+                # follow-up marker so the in-flight run reruns once more after
+                # it finishes, instead of silently dropping this trigger.
+                await redis.set(f"risk-refresh-followup:{company_id}", "1", ex=600)
+                return
         except Exception:
             pass  # coalescing is an optimization, never a gate
 
@@ -96,8 +103,8 @@ async def _dispatch_risk_refresh(company_id: UUID) -> None:
         except Exception as exc:
             logger.warning("Celery dispatch of risk refresh failed (%s), running in-process", exc)
 
-    from ..employees import _refresh_risk_assessment
-    await _refresh_risk_assessment(company_id)
+    from app.matcha.services.risk_analytics.risk_assessment_service.refresh import refresh_risk_snapshot
+    await refresh_risk_snapshot(company_id)
 
 
 # Re-export (refactor round 2, stage 3) — the real implementation now lives

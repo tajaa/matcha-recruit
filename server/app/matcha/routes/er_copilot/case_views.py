@@ -89,11 +89,20 @@ async def get_retaliation_risk(
 
         # Get the case details
         case_row = await conn.fetchrow(
-            "SELECT id, created_at, involved_employees FROM er_cases WHERE id = $1",
+            "SELECT id, created_at, involved_employees, company_id FROM er_cases WHERE id = $1",
             case_id,
         )
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
+
+        # Scope employee/discipline/offboarding lookups to the CASE's own
+        # company, not the caller's — for admins, get_client_company_id
+        # resolves to an arbitrary company (oldest by created_at), and
+        # _verify_case_company deliberately admits legacy company_id IS NULL
+        # cases, so filtering on the caller's company silently emptied
+        # `events` and reported at_risk=false. Falls back to the caller's
+        # company only for those legacy NULL-company-id rows.
+        scope_company = case_row["company_id"] or company_id
 
         case_created = case_row["created_at"]
         if case_created and case_created.tzinfo is None:
@@ -134,7 +143,7 @@ async def get_retaliation_risk(
             name_rows = await conn.fetch(
                 "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[]) AND org_id::text = $2::text",
                 emp_ids,
-                str(company_id),
+                str(scope_company),
             )
             names: dict[UUID, str] = {}
             for r in name_rows:
@@ -156,7 +165,7 @@ async def get_retaliation_risk(
                           AND issued_date >= $3
                         ORDER BY employee_id, issued_date ASC
                         """,
-                        valid_ids, company_id, case_created,
+                        valid_ids, scope_company, case_created,
                     )
                 except Exception:
                     logger.warning("progressive_discipline query failed for retaliation risk check")
@@ -193,7 +202,7 @@ async def get_retaliation_risk(
                           AND org_id = $3
                         ORDER BY employee_id, started_at ASC
                         """,
-                        valid_ids, case_created, company_id,
+                        valid_ids, case_created, scope_company,
                     )
                 except Exception:
                     logger.warning("offboarding_cases query failed for retaliation risk check")

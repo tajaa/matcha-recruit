@@ -397,6 +397,9 @@ async def analyze_similar_cases(
         def sse(data: dict) -> str:
             return f"data: {json.dumps(data, default=str)}\n\n"
 
+        # Cache check on a pooled conn — released as soon as this block exits,
+        # well before any Gemini call.
+        cached = None
         async with get_connection() as conn:
             use_cache = not refresh
 
@@ -412,8 +415,6 @@ async def analyze_similar_cases(
                 if case_updated_at and cached_generated_at and case_updated_at > cached_generated_at:
                     use_cache = False
 
-            # Check cache first
-            cached = None
             if use_cache:
                 cached = await conn.fetchrow(
                     """
@@ -423,19 +424,25 @@ async def analyze_similar_cases(
                     """,
                     case_id,
                 )
-            if cached:
-                analysis = cached["analysis_data"]
-                if isinstance(analysis, str):
-                    analysis = json.loads(analysis)
-                analysis["from_cache"] = True
-                analysis["cache_reason"] = f"Cached from {cached['generated_at'].isoformat() if cached['generated_at'] else 'unknown'}"
-                yield sse({"type": "cached", "message": "Using cached results", "result": analysis})
-                yield "data: [DONE]\n\n"
-                return
 
-            # Stream fresh analysis
-            from ...services.er.er_precedent import find_similar_cases_stream
+        if cached:
+            analysis = cached["analysis_data"]
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            analysis["from_cache"] = True
+            analysis["cache_reason"] = f"Cached from {cached['generated_at'].isoformat() if cached['generated_at'] else 'unknown'}"
+            yield sse({"type": "cached", "message": "Using cached results", "result": analysis})
+            yield "data: [DONE]\n\n"
+            return
 
+        # Fresh analysis: a dedicated direct (non-pool) connection for the
+        # whole ~45s Gemini pipeline — pool is max_size=10, so holding a
+        # pooled slot here would let 10 concurrent streams starve the process
+        # (the same failure mode fixed in reprocess_all_documents).
+        from ...services.er.er_precedent import find_similar_cases_stream
+        from ....database import connection_or_direct
+
+        async with connection_or_direct(force_direct=True) as conn:
             async for event in find_similar_cases_stream(str(case_id), conn):
                 if event["type"] == "phase":
                     yield sse(event)

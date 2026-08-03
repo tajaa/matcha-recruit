@@ -207,10 +207,10 @@ def refresh_company_risk_assessment(self, company_id: str):
     _refresh_risk_assessment (dimensions + debounced Gemini recommendations)
     so an ER case edit updates the same snapshot fields a manual run would."""
     from uuid import UUID
-    from app.matcha.routes.employees import _refresh_risk_assessment
+    from app.matcha.services.risk_analytics.risk_assessment_service.refresh import refresh_risk_snapshot
 
     try:
-        asyncio.run(_refresh_risk_assessment(UUID(company_id)))
+        asyncio.run(refresh_risk_snapshot(UUID(company_id)))
         return {"company_id": company_id, "status": "success"}
     except Exception as e:
         print(f"[Risk Refresh] Failed for company {company_id}: {e}")
