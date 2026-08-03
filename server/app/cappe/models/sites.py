@@ -69,6 +69,10 @@ class CappeSiteUpdate(BaseModel):
     is_multi_location: Optional[bool] = None
     tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
     tax_label: Optional[str] = Field(default=None, max_length=40)
+    shipping_flat_cents: Optional[int] = Field(default=None, ge=0)
+    # Explicit null clears the threshold (model_fields_set gate in the route).
+    shipping_free_threshold_cents: Optional[int] = Field(default=None, ge=0)
+    shipping_label: Optional[str] = Field(default=None, max_length=40)
     receipt_prefix: Optional[str] = Field(default=None, max_length=12)
 
 
@@ -104,6 +108,9 @@ class CappeSite(BaseModel):
     is_multi_location: bool = False
     tax_rate_bps: int = 0
     tax_label: str = "Tax"
+    shipping_flat_cents: int = 0
+    shipping_free_threshold_cents: Optional[int] = None
+    shipping_label: str = "Shipping"
     receipt_prefix: Optional[str] = None
     # Discover directory. `listed` is the tenant's own opt-out; the platform-side
     # `directory_blocked` takedown is deliberately NOT exposed here — a suspended

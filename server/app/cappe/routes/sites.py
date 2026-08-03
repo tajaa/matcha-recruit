@@ -50,7 +50,9 @@ router = APIRouter()
 _SITE_COLS = (
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
     "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
-    "tax_rate_bps, tax_label, receipt_prefix, "
+    "tax_rate_bps, tax_label, "
+    "shipping_flat_cents, shipping_free_threshold_cents, shipping_label, "
+    "receipt_prefix, "
     "listed, directory_category, directory_tags, directory_blurb, directory_confirmed_at, "
     "published_at, created_at, updated_at"
 )
@@ -291,6 +293,13 @@ async def update_site(
             add("tax_rate_bps", body.tax_rate_bps)
         if body.tax_label is not None:
             add("tax_label", body.tax_label)
+        if body.shipping_flat_cents is not None:
+            add("shipping_flat_cents", body.shipping_flat_cents)
+        if "shipping_free_threshold_cents" in body.model_fields_set:
+            # model_fields_set (not `is not None`) so explicit null CLEARS the threshold
+            add("shipping_free_threshold_cents", body.shipping_free_threshold_cents)
+        if body.shipping_label is not None:
+            add("shipping_label", body.shipping_label.strip() or "Shipping")
         if body.receipt_prefix is not None:
             add("receipt_prefix", body.receipt_prefix or None)
         if body.status is not None:
