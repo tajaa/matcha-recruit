@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 # A product is a general "offering"; `fulfillment` decides how it's delivered.
 #   physical - shipped good (uses inventory)
@@ -162,6 +162,10 @@ class CappeOrder(BaseModel):
     status: str
     subtotal_cents: int
     tax_cents: int = 0
+    shipping_cents: int = 0
+    shipping_address: Optional[dict[str, Any]] = None
+    carrier: Optional[str] = None
+    tracking_number: Optional[str] = None
     total_cents: Optional[int] = None
     receipt_number: Optional[str] = None
     currency: str
@@ -194,7 +198,29 @@ class CappeRequestSummary(BaseModel):
 
 
 class CappeOrderStatusUpdate(BaseModel):
-    status: Literal["pending", "paid", "fulfilled", "cancelled", "refunded"]
+    """Order PATCH body — status transition and/or tracking edit. All fields
+    optional so a tracking-only PATCH never touches status (and so never
+    triggers restock); at least one field must be present. Explicit null
+    carrier/tracking clears the column (build_patch semantics)."""
+    status: Optional[Literal["pending", "paid", "fulfilled", "cancelled", "refunded"]] = None
+    carrier: Optional[str] = Field(default=None, max_length=40)
+    tracking_number: Optional[str] = Field(default=None, max_length=120)
+
+    @field_validator("carrier", "tracking_number")
+    @classmethod
+    def _strip_to_none(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return v.strip() or None
+
+    @model_validator(mode="after")
+    def _validate_fields(self):
+        # status=None-explicit would SET status = NULL via build_patch → reject.
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        if self.status is None and not ({"carrier", "tracking_number"} & self.model_fields_set):
+            raise ValueError("Provide status, carrier, or tracking_number")
+        return self
 
 
 class CappeDeliverableUpdate(BaseModel):

@@ -45,7 +45,8 @@ _PRODUCT_COLS = (
 )
 _ORDER_COLS = (
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
-    "tax_cents, total_cents, receipt_number, "
+    "tax_cents, shipping_cents, total_cents, receipt_number, "
+    "shipping_address, carrier, tracking_number, "
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "metadata, created_at, updated_at"
 )
@@ -110,6 +111,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
 def _order_row(row, items=None) -> dict:
     d = dict(row)
     d["metadata"] = loads(row["metadata"])
+    d["shipping_address"] = loads(row["shipping_address"]) or None  # loads() maps NULL→{}; keep None
     d["items"] = items or []
     return d
 
@@ -408,12 +410,20 @@ async def update_order_status(
             )
             if current is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+            sets, args = build_patch(body, ("status", "carrier", "tracking_number"))
+            sets.append("updated_at = NOW()")
+            args.extend([order_id, site_id])
             order = await conn.fetchrow(
-                f"""UPDATE cappe_orders SET status = $1, updated_at = NOW()
-                    WHERE id = $2 AND site_id = $3 RETURNING {_ORDER_COLS}""",
-                body.status, order_id, site_id,
+                f"""UPDATE cappe_orders SET {', '.join(sets)}
+                    WHERE id = ${len(args) - 1} AND site_id = ${len(args)}
+                    RETURNING {_ORDER_COLS}""",
+                *args,
             )
-            if current["status"] in _RESTOCK_FROM_STATUSES and body.status in _RESTOCK_TO_STATUSES:
+            if (
+                body.status is not None
+                and current["status"] in _RESTOCK_FROM_STATUSES
+                and body.status in _RESTOCK_TO_STATUSES
+            ):
                 await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
             items = await conn.fetch(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
