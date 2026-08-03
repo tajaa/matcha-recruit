@@ -7,9 +7,12 @@ for the highest-trust compliance data layer.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_structured_data_fetch() -> dict:
@@ -45,5 +48,5 @@ def fetch_structured_data_sources(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Structured Data Fetch] Failed: {e}")
+        logger.exception("[Structured Data Fetch] Failed")
         raise self.retry(exc=e, countdown=300)  # Retry in 5 minutes

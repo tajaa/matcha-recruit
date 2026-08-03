@@ -7,12 +7,15 @@ Bulk send is kept off the web worker for deliverability + request-lifecycle
 reasons.
 """
 import asyncio
+import logging
 import os
 
 from app.cappe.services.campaigns import deliverable_recipients, personalize_unsubscribe
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 THROTTLE_SECONDS = 0.1
 
@@ -83,6 +86,6 @@ def run_cappe_campaign_send(self, campaign_id: str) -> dict:
         result = asyncio.run(_run(campaign_id))
         print(f"[Cappe Campaign Send] Completed: {result}")
         return {"status": "success", **result}
-    except Exception as exc:
-        print(f"[Cappe Campaign Send] Failed: {exc}")
+    except Exception:
+        logger.exception("[Cappe Campaign Send] Failed for campaign %s", campaign_id)
         raise

@@ -10,11 +10,14 @@ accuracy and avoid Gemini rate-limit pressure.
 """
 
 import asyncio
+import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error, publish_task_progress
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_medical_compliance_research(jurisdiction_id: str) -> dict:
@@ -72,7 +75,7 @@ def run_medical_compliance_research(self, jurisdiction_id: str) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Worker] Failed medical compliance research for jurisdiction {jurisdiction_id}: {e}")
+        logger.exception("[Worker] Failed medical compliance research for jurisdiction %s", jurisdiction_id)
 
         publish_task_error(
             channel="admin:medical_compliance_research",

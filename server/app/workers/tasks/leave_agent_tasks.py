@@ -5,9 +5,12 @@ This scheduler runs periodic return-to-work and accommodation stall checks.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_leave_agent_orchestration() -> dict:
@@ -46,5 +49,5 @@ def run_leave_agent_orchestration(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Leave Agent] Failed: {e}")
+        logger.exception("[Leave Agent] Failed")
         raise self.retry(exc=e, countdown=60)

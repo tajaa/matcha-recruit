@@ -6,11 +6,14 @@ Handles document parsing, PII scrubbing, chunking, and embedding generation.
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error, publish_task_progress
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 # Chunks embedded + inserted per batch. Bounds peak memory to one batch of
 # 768-dim vectors rather than the whole document's embedding matrix.
@@ -32,7 +35,7 @@ def _publish_progress_safe(**kwargs: Any) -> None:
     try:
         publish_task_progress(**kwargs)
     except Exception as exc:  # pragma: no cover - best effort
-        print(f"[Worker] progress publish failed (ignored): {exc}")
+        logger.warning("[Worker] progress publish failed (ignored): %s", exc)
 
 
 async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:

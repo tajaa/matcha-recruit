@@ -5,10 +5,13 @@ Runs daily; emails assigned owners when their compliance action due date is appr
 """
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 # How many days ahead to look for upcoming deadlines
 REMINDER_LOOKAHEAD_DAYS = 2
@@ -122,7 +125,7 @@ async def _run_compliance_action_reminders() -> dict:
                 else:
                     failed += 1
             except Exception as exc:
-                print(f"[Compliance Action Reminders] Error sending to {row['owner_email']}: {exc}")
+                logger.warning("[Compliance Action Reminders] Error sending to %s: %s", row["owner_email"], exc)
                 failed += 1
 
         return {"checked": len(rows), "sent": sent, "failed": failed}
@@ -141,5 +144,5 @@ def run_compliance_action_reminders(self) -> dict:
         print(f"[Compliance Action Reminders] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Compliance Action Reminders] Failed: {exc}")
+        logger.exception("[Compliance Action Reminders] Failed")
         raise self.retry(exc=exc, countdown=60)

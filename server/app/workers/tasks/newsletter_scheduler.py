@@ -12,10 +12,13 @@ and the claim is a single UPDATE so two beats can't double-send.
 """
 
 import asyncio
+import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _dispatch_newsletter_scheduler() -> dict:
@@ -50,7 +53,7 @@ async def _dispatch_newsletter_scheduler() -> dict:
             # benign — skip silently.
             continue
         except Exception as exc:
-            print(f"[Newsletter Scheduler] Send failed for {newsletter_id}: {exc}")
+            logger.warning("[Newsletter Scheduler] Send failed for %s: %s", newsletter_id, exc)
             # Roll back to scheduled so the next beat retries, but bump the
             # scheduled_at by 5 minutes so we don't hot-loop on a broken
             # newsletter every cycle.
@@ -79,5 +82,5 @@ def run_newsletter_scheduler(self):
     try:
         return asyncio.run(_dispatch_newsletter_scheduler())
     except Exception as e:
-        print(f"[Newsletter Scheduler] Task failed: {e}")
+        logger.exception("[Newsletter Scheduler] Task failed")
         raise self.retry(exc=e, countdown=120)

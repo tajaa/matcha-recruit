@@ -32,12 +32,15 @@ Scheduler-gated on `scheduler_settings.task_key = 'vertical_coverage_sweep'`,
 seeded DISABLED.
 """
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 CHANNEL = "vertical_coverage"
 
@@ -260,7 +263,7 @@ async def _notify(company_id, result: Dict[str, Any]) -> None:
             subject=subject, html_content=html,
         )
     except Exception as exc:
-        print(f"[Vertical Sweep] Email failed for company {company_id}: {exc}")
+        logger.warning("[Vertical Sweep] Email failed for company %s: %s", company_id, exc)
 
 
 async def _dispatch(force: bool = False) -> Dict[str, Any]:
@@ -312,7 +315,7 @@ async def _dispatch(force: bool = False) -> Dict[str, Any]:
             result = await _sweep_company(company["id"], budget)
         except Exception as exc:
             # One company's failure must not abort the sweep.
-            print(f"[Vertical Sweep] {company['name']}: {exc}")
+            logger.warning("[Vertical Sweep] %s: %s", company["name"], exc)
             swept.append({"company": company["name"], "error": str(exc)})
             continue
 
@@ -339,7 +342,7 @@ def run_vertical_coverage_sweep(self, force: bool = False):
         result = asyncio.run(_dispatch(force=force))
     except Exception as exc:
         publish_task_error(CHANNEL, "vertical_coverage_sweep", "scheduled", str(exc))
-        print(f"[Vertical Sweep] Task failed: {exc}")
+        logger.exception("[Vertical Sweep] Task failed")
         raise
 
     print(f"[Vertical Sweep] Completed: {result}")

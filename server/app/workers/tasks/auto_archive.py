@@ -6,9 +6,12 @@ Only processes status='active' rows. Idempotent.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_auto_archive() -> dict:
@@ -61,5 +64,5 @@ def run_auto_archive(self):
         result = asyncio.run(_run_auto_archive())
         return result
     except Exception as e:
-        print(f"[AutoArchive] Task failed: {e}")
+        logger.exception("[AutoArchive] Task failed")
         raise self.retry(exc=e, countdown=120)

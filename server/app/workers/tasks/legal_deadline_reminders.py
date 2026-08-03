@@ -10,10 +10,13 @@ scheduler_settings row, default disabled (repo convention).
 
 import asyncio
 import json
+import logging
 from datetime import date
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 # "Within N days" buckets, narrowest first. One reminder per bucket per
 # matter: a matter due in 6 days gets the 7-day nudge (even if the worker
@@ -113,7 +116,7 @@ async def _run_legal_deadline_reminders() -> dict:
                 else:
                     failed += 1
             except Exception as exc:
-                print(f"[Legal Deadline Reminders] Error sending to {row['owner_email']}: {exc}")
+                logger.warning("[Legal Deadline Reminders] Error sending to %s: %s", row["owner_email"], exc)
                 failed += 1
 
         return {"checked": len(rows), "sent": sent, "failed": failed}
@@ -130,5 +133,5 @@ def run_legal_deadline_reminders(self) -> dict:
         print(f"[Legal Deadline Reminders] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Legal Deadline Reminders] Failed: {exc}")
+        logger.exception("[Legal Deadline Reminders] Failed")
         raise self.retry(exc=exc, countdown=60)

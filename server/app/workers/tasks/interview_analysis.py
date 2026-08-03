@@ -7,12 +7,15 @@ to return immediately while analysis runs in the background.
 
 import asyncio
 import json
+import logging
 from typing import Any, Optional
 from uuid import UUID as _UUID
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _analyze_interview(
@@ -339,7 +342,7 @@ async def _link_to_er_case_and_upload_transcript(
                 from app.workers.tasks.er_document_processing import process_er_document
                 process_er_document.delay(str(doc_id), str(er_case_id))
             except Exception as e:
-                print(f"[Worker] Failed to queue ER document processing: {e}")
+                logger.warning("[Worker] Failed to queue ER document processing: %s", e)
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -396,7 +399,7 @@ def analyze_interview_async(
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Worker] Failed to analyze interview {interview_id}: {e}")
+        logger.exception("[Worker] Failed to analyze interview %s", interview_id)
 
         # Notify frontend of error (only for company interviews)
         if company_id:

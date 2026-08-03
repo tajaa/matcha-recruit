@@ -172,5 +172,5 @@ def run_location_fips_backfill(self, force: bool = False) -> Dict[str, Any]:
         print(f"[FIPS Backfill] {result}")
         return result
     except Exception as e:
-        print(f"[FIPS Backfill] Failed: {e}")
+        logger.exception("[FIPS Backfill] Failed")
         raise self.retry(exc=e, countdown=300)

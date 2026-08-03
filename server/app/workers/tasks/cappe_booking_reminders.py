@@ -6,6 +6,7 @@ confirmed booking. Claim-before-send (stamp reminder_sent_at, only send if the
 claim won) so the 15-min re-dispatch never double-sends.
 """
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from app.cappe.services.email import (
@@ -18,6 +19,8 @@ from app.core.services.email._shared import _is_reserved_test_domain
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 REMINDER_WINDOW_HOURS = 24
 DEFAULT_MAX_PER_CYCLE = 200
@@ -100,5 +103,5 @@ def run_cappe_booking_reminders(self) -> dict:
         print(f"[Cappe Booking Reminders] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Cappe Booking Reminders] Failed: {exc}")
+        logger.exception("[Cappe Booking Reminders] Failed")
         raise self.retry(exc=exc, countdown=60)

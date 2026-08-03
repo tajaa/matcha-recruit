@@ -7,9 +7,12 @@ stale jurisdictions that may need review.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_pattern_recognition() -> dict:
@@ -42,5 +45,5 @@ def run_pattern_recognition(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Pattern Recognition] Failed: {e}")
+        logger.exception("[Pattern Recognition] Failed")
         raise self.retry(exc=e, countdown=120)

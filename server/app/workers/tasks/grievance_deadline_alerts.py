@@ -10,9 +10,12 @@ alert as sent so a re-fire won't re-notify.
 
 import asyncio
 import html as html_lib
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 
 async def _resolve_recipients(conn, row) -> list[tuple[str, str]]:
@@ -107,7 +110,7 @@ async def _dispatch() -> dict:
                         to_email=email, to_name=name, subject=subject, html_content=html,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[Grievance Deadlines] email to {email} failed: {exc}")
+                    logger.warning("[Grievance Deadlines] email to %s failed: %s", email, exc)
 
             # Mark alerted; flip truly-missed steps so the dashboard reflects it.
             if overdue:
@@ -136,5 +139,5 @@ def run_grievance_deadline_alerts(self):
     try:
         return asyncio.run(_dispatch())
     except Exception as e:
-        print(f"[Grievance Deadlines] Task failed: {e}")
+        logger.exception("[Grievance Deadlines] Task failed")
         raise self.retry(exc=e, countdown=120)

@@ -12,12 +12,15 @@ Trend rules + the cooldown decision are pure functions (`evaluate_trends`,
 """
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from app.matcha.services.ir.ir_wc_metrics import compute_wc_metrics
+
+logger = logging.getLogger(__name__)
 
 # ── Tunables (code constants per design; no per-broker settings UI) ──────────
 COOLDOWN_DAYS = 1               # re-email once per day until broker marks viewed
@@ -256,7 +259,7 @@ async def _run_broker_risk_alerts() -> dict:
                     m = await compute_wc_metrics(conn, company_id)
                     metrics_cache[company_id] = m
                 except Exception as exc:
-                    print(f"[Broker Risk Alerts] metrics failed for company {company_id}: {exc}")
+                    logger.warning("[Broker Risk Alerts] metrics failed for company %s: %s", company_id, exc)
                     metrics_cache[company_id] = None
             metrics = metrics_cache[company_id]
             if not metrics:
@@ -416,5 +419,5 @@ def run_broker_risk_alerts(self) -> dict:
         print(f"[Broker Risk Alerts] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Broker Risk Alerts] Failed: {exc}")
+        logger.exception("[Broker Risk Alerts] Failed")
         raise self.retry(exc=exc, countdown=60)

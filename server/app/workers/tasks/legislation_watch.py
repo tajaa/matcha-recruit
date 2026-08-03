@@ -7,9 +7,12 @@ upcoming legislation changes.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_legislation_watch() -> dict:
@@ -42,5 +45,5 @@ def run_legislation_watch(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Legislation Watch] Failed: {e}")
+        logger.exception("[Legislation Watch] Failed")
         raise self.retry(exc=e, countdown=120)

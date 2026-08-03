@@ -7,9 +7,12 @@ where `expires_at <= NOW() AND status = 'active'`.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _dispatch_discipline_expiry() -> dict:
@@ -34,5 +37,5 @@ def run_discipline_expiry(self):
         result = asyncio.run(_dispatch_discipline_expiry())
         return result
     except Exception as e:
-        print(f"[Discipline Expiry] Task failed: {e}")
+        logger.exception("[Discipline Expiry] Task failed")
         raise self.retry(exc=e, countdown=120)

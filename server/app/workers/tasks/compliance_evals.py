@@ -12,10 +12,13 @@ it, enabling the row would run a full network sweep every hour.
 """
 
 import asyncio
+import logging
 from typing import List, Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
+
+logger = logging.getLogger(__name__)
 
 MIN_SCHEDULED_INTERVAL_DAYS = 6
 CHANNEL = "admin:compliance_evals"

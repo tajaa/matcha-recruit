@@ -6,11 +6,14 @@ via the systemd timer that restarts the Celery worker every 15 minutes.
 """
 
 import asyncio
+import logging
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_single_freshness_check(handbook_id: str, company_id: str) -> dict:
@@ -84,7 +87,7 @@ async def _dispatch_freshness_checks() -> dict:
                     "impacted_sections": result.get("impacted_sections", 0),
                 })
         except Exception as e:
-            print(f"[Handbook Freshness] Error checking handbook {hb_id}: {e}")
+            logger.warning("[Handbook Freshness] Error checking handbook %s: %s", hb_id, e)
 
     # Send email notifications for outdated handbooks
     for item in outdated_handbooks:
@@ -95,7 +98,7 @@ async def _dispatch_freshness_checks() -> dict:
                 item["impacted_sections"],
             )
         except Exception as e:
-            print(f"[Handbook Freshness] Error sending notification for {item['handbook_id']}: {e}")
+            logger.warning("[Handbook Freshness] Error sending notification for %s: %s", item["handbook_id"], e)
 
     return {"checked": checked, "outdated": len(outdated_handbooks)}
 
@@ -149,5 +152,5 @@ def run_handbook_freshness_checks(self):
         print(f"[Handbook Freshness] Completed: {result}")
         return result
     except Exception as e:
-        print(f"[Handbook Freshness] Task failed: {e}")
+        logger.exception("[Handbook Freshness] Task failed")
         raise self.retry(exc=e, countdown=120)

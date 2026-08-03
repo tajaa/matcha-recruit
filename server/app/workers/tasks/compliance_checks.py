@@ -7,11 +7,14 @@ triggers the dispatcher, which enqueues individual checks for due locations.
 """
 
 import asyncio
+import logging
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_check(location_id: str, company_id: str, check_type: str = "scheduled") -> dict:
@@ -78,7 +81,7 @@ async def _enqueue_due_checks() -> dict:
             try:
                 run_compliance_check_task.delay(loc_id, comp_id, "scheduled")
             except Exception as e:
-                print(f"[Compliance Scheduler] Failed to enqueue check for location {loc_id}: {e}")
+                logger.warning("[Compliance Scheduler] Failed to enqueue check for location %s: %s", loc_id, e)
                 continue
 
             await conn.execute(
@@ -164,7 +167,7 @@ def run_compliance_check_task(
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Worker] Failed compliance check for location {location_id}: {e}")
+        logger.exception("[Worker] Failed compliance check for location %s", location_id)
 
         publish_task_error(
             channel=f"company:{company_id}",
@@ -192,7 +195,7 @@ def enqueue_scheduled_compliance_checks(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Compliance Scheduler] Failed to enqueue checks: {e}")
+        logger.exception("[Compliance Scheduler] Failed to enqueue checks")
         raise self.retry(exc=e, countdown=60)
 
 
@@ -212,5 +215,5 @@ def run_deadline_escalation(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Compliance Escalation] Failed: {e}")
+        logger.exception("[Compliance Escalation] Failed")
         raise self.retry(exc=e, countdown=60)

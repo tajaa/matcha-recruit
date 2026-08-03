@@ -6,11 +6,14 @@ create_leave_deadlines — called when a leave request is approved to seed deadl
 """
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 # FMLA-related leave types that get the full notice/certification deadline set.
@@ -108,7 +111,7 @@ async def _check_deadlines() -> dict:
                     await leave_agent.on_deadline_approaching(deadline_id)
                 except Exception as e:
                     # Deadline escalation must complete even if notification fanout fails.
-                    print(f"[Leave Deadlines] LeaveAgent notification failed for deadline {deadline_id}: {e}")
+                    logger.warning("[Leave Deadlines] LeaveAgent notification failed for deadline %s: %s", deadline_id, e)
 
         return {
             "checked": len(rows),
@@ -222,7 +225,7 @@ def check_leave_deadlines(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Leave Deadlines] Failed: {e}")
+        logger.exception("[Leave Deadlines] Failed")
         raise self.retry(exc=e, countdown=60)
 
 
@@ -237,7 +240,7 @@ def create_leave_deadlines(self, leave_request_id: str) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Leave Deadlines] Failed to create deadlines for {leave_request_id}: {e}")
+        logger.exception("[Leave Deadlines] Failed to create deadlines for %s", leave_request_id)
 
         publish_task_error(
             channel="system",

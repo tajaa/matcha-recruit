@@ -5,6 +5,7 @@ Runs on worker startup when the onboarding_reminders scheduler is enabled.
 """
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from app.matcha.services.onboarding.onboarding_reminder_logic import (
@@ -22,6 +23,8 @@ from app.matcha.services.onboarding.onboarding_reminder_logic import (
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 LOOKAHEAD_DAYS = 30
 
@@ -292,5 +295,5 @@ def run_onboarding_reminders(self) -> dict:
         print(f"[Onboarding Reminders] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Onboarding Reminders] Failed: {exc}")
+        logger.exception("[Onboarding Reminders] Failed")
         raise self.retry(exc=exc, countdown=60)

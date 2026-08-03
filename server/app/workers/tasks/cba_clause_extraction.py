@@ -9,10 +9,13 @@ advisory until a human confirms it.
 
 import asyncio
 import json
+import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 def _as_list(jsonb_val) -> list:
@@ -99,7 +102,7 @@ async def _extract(cba_id: str) -> dict:
                 "UPDATE lr_cbas SET extraction_status = 'failed', updated_at = NOW() WHERE id = $1",
                 cba["id"],
             )
-            print(f"[CBA Extraction] {cba_id} failed: {exc}")
+            logger.warning("[CBA Extraction] %s failed: %s", cba_id, exc)
             raise
     finally:
         await conn.close()
@@ -111,5 +114,5 @@ def run_cba_clause_extraction(self, cba_id: str):
     try:
         return asyncio.run(_extract(cba_id))
     except Exception as e:
-        print(f"[CBA Extraction] Task error for {cba_id}: {e}")
+        logger.exception("[CBA Extraction] Task error for %s", cba_id)
         raise self.retry(exc=e, countdown=60)

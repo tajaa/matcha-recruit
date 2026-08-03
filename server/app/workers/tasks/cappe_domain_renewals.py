@@ -12,9 +12,12 @@ Gated on `scheduler_settings.task_key = 'cappe_domain_renewals'`. Idempotent:
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 # Start attempting renewal this many days before expiry (the dunning window).
 _RENEW_WINDOW_DAYS = 14
@@ -63,7 +66,7 @@ async def _dispatch_cappe_domain_renewals() -> dict:
             )
         except CappeStripeError as exc:
             failed += 1
-            print(f"[Cappe Renewals] {r['domain']}: charge failed: {exc}")
+            logger.warning("[Cappe Renewals] %s: charge failed: %s", r["domain"], exc)
             # Past expiry + still can't collect → lapse it and stop our Porkbun cost.
             if r["past_due"]:
                 conn2 = await get_db_connection()
@@ -103,5 +106,5 @@ def run_cappe_domain_renewals(self):
     try:
         return asyncio.run(_dispatch_cappe_domain_renewals())
     except Exception as e:
-        print(f"[Cappe Renewals] Task failed: {e}")
+        logger.exception("[Cappe Renewals] Task failed")
         raise self.retry(exc=e, countdown=300)

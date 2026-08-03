@@ -9,12 +9,15 @@ expensive Gemini recommendations call.
 
 import asyncio
 import json
+import logging
 from dataclasses import asdict
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 
 async def _get_weights(conn) -> dict[str, float]:
@@ -131,7 +134,7 @@ async def _enqueue_due_assessments() -> dict:
             try:
                 run_risk_assessment_task.delay(comp_id)
             except Exception as e:
-                print(f"[Risk Assessment Scheduler] Failed to enqueue assessment for company {comp_id}: {e}")
+                logger.warning("[Risk Assessment Scheduler] Failed to enqueue assessment for company %s: %s", comp_id, e)
                 continue
 
             enqueued += 1
@@ -168,7 +171,7 @@ def run_risk_assessment_task(self, company_id: str) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Worker] Failed risk assessment for company {company_id}: {e}")
+        logger.exception("[Worker] Failed risk assessment for company %s", company_id)
 
         publish_task_error(
             channel=f"company:{company_id}",
@@ -196,7 +199,7 @@ def enqueue_scheduled_risk_assessments(self) -> dict:
         return {"status": "success", **result}
 
     except Exception as e:
-        print(f"[Risk Assessment Scheduler] Failed to enqueue assessments: {e}")
+        logger.exception("[Risk Assessment Scheduler] Failed to enqueue assessments")
         raise self.retry(exc=e, countdown=60)
 
 
@@ -213,5 +216,5 @@ def refresh_company_risk_assessment(self, company_id: str):
         asyncio.run(refresh_risk_snapshot(UUID(company_id)))
         return {"company_id": company_id, "status": "success"}
     except Exception as e:
-        print(f"[Risk Refresh] Failed for company {company_id}: {e}")
+        logger.exception("[Risk Refresh] Failed for company %s", company_id)
         raise self.retry(exc=e, countdown=30)

@@ -13,9 +13,12 @@ than downgraded.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _dispatch_cappe_comp_expiry() -> dict:
@@ -43,5 +46,5 @@ def run_cappe_comp_expiry(self):
     try:
         return asyncio.run(_dispatch_cappe_comp_expiry())
     except Exception as e:
-        print(f"[Cappe Comps] Task failed: {e}")
+        logger.exception("[Cappe Comps] Task failed")
         raise self.retry(exc=e, countdown=300)

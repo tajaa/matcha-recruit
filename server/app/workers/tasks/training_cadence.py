@@ -18,12 +18,15 @@ After each insert batch, fans out assignment emails (best-effort).
 """
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from app.core.feature_flags import get_company_features
 from app.matcha.services.training.training_assignment import resolve_audience, assign_training
+
+logger = logging.getLogger(__name__)
 
 
 async def _send_assignment_email(employee_email: str, employee_name: str, training_title: str, due_date) -> None:
@@ -46,7 +49,7 @@ async def _send_assignment_email(employee_email: str, employee_name: str, traini
             login_url=login_url,
         )
     except Exception as exc:
-        print(f"[Training Cadence] Email failed for {employee_email}: {exc}")
+        logger.warning("[Training Cadence] Email failed for %s: %s", employee_email, exc)
 
 
 async def _dispatch_training_cadence() -> dict:
@@ -226,7 +229,7 @@ async def _dispatch_training_cadence() -> dict:
                 )
                 notifications_sent += 1
             except Exception as exc:
-                print(f"[Training Cadence] Notify error: {exc}")
+                logger.warning("[Training Cadence] Notify error: %s", exc)
 
     finally:
         await conn.close()
@@ -247,5 +250,5 @@ def run_training_cadence(self):
     try:
         return asyncio.run(_dispatch_training_cadence())
     except Exception as e:
-        print(f"[Training Cadence] Task failed: {e}")
+        logger.exception("[Training Cadence] Task failed")
         raise self.retry(exc=e, countdown=120)

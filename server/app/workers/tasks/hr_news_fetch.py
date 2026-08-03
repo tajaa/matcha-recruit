@@ -5,9 +5,12 @@ worker can pull fresh items in addition to the on-demand admin trigger.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 
 async def _run_refresh() -> dict:
@@ -29,5 +32,5 @@ def run_hr_news_fetch(self) -> dict:
         print(f"[HR News Fetch] Completed: {result}")
         return {"status": "success", **result}
     except Exception as e:
-        print(f"[HR News Fetch] Failed: {e}")
+        logger.exception("[HR News Fetch] Failed")
         raise self.retry(exc=e, countdown=120)

@@ -29,9 +29,12 @@ DISABLED, migration discipapp01).
 
 import asyncio
 import json
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
+
+logger = logging.getLogger(__name__)
 
 # Only incidents closed within this window are candidates — an incident
 # closed a year ago isn't worth a fresh Gemini call today, and bounding the
@@ -289,7 +292,7 @@ async def _run_discipline_policy_sweep() -> dict:
                     conn, company_id=incident["company_id"], incident=incident,
                 )
             except Exception:  # noqa: BLE001
-                print(f"[Discipline Policy Sweep] check failed for incident {incident['id']}")
+                logger.warning("[Discipline Policy Sweep] check failed for incident %s", incident["id"])
                 continue
 
             if not result.get("available"):
@@ -302,7 +305,7 @@ async def _run_discipline_policy_sweep() -> dict:
             try:
                 await persist_policy_check(conn, incident_id=incident["id"], result=result)
             except Exception:  # noqa: BLE001
-                print(f"[Discipline Policy Sweep] persist failed for incident {incident['id']}")
+                logger.warning("[Discipline Policy Sweep] persist failed for incident %s", incident["id"])
 
             violations = result.get("violations") or []
             if not violations:
@@ -326,7 +329,7 @@ async def _run_discipline_policy_sweep() -> dict:
             except _AlreadyStamped:
                 pass
             except Exception:  # noqa: BLE001
-                print(f"[Discipline Policy Sweep] thread open failed for incident {incident['id']}")
+                logger.warning("[Discipline Policy Sweep] thread open failed for incident %s", incident["id"])
 
         return {
             "scanned": len(rows), "checked": checked, "findings": findings, "threads_opened": opened,
@@ -344,5 +347,5 @@ def run_discipline_policy_sweep(self) -> dict:
         print(f"[Discipline Policy Sweep] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[Discipline Policy Sweep] Failed: {exc}")
+        logger.exception("[Discipline Policy Sweep] Failed")
         raise self.retry(exc=exc, countdown=60)

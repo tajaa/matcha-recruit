@@ -20,10 +20,13 @@ Admin-triggered only; no scheduler row. Re-freezing on a cadence is drift
 detection, which is a different task with a different question to answer.
 """
 import asyncio
+import logging
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
+
+logger = logging.getLogger(__name__)
 
 CHANNEL = "admin:scope_registry"
 

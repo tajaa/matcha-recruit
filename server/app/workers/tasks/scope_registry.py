@@ -16,10 +16,13 @@ its own if one completed recently, so enabling the row doesn't re-crawl .gov
 every hour; the research cycle is capped per-run by MAX_UNITS_PER_CYCLE.
 """
 import asyncio
+import logging
 from typing import Optional
 
 from ..celery_app import celery_app
 from ..notifications import publish_task_complete, publish_task_error
+
+logger = logging.getLogger(__name__)
 
 MIN_SCHEDULED_INTERVAL_DAYS = 6
 CHANNEL = "admin:scope_registry"
@@ -105,7 +108,7 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
             try:
                 classify_authority_index.delay(index_slug=slug)
             except Exception as exc:
-                print(f"[scope_registry] reclassify dispatch failed for {slug}: {exc}")
+                logger.warning("[scope_registry] reclassify dispatch failed for %s: %s", slug, exc)
 
     def _dispatch_body_fetch(result: dict) -> None:
         """An ingested citation without its text is a link-out, and RESEARCH
@@ -126,7 +129,7 @@ def ingest_authority_index(index_slug: Optional[str] = None, trigger_source: str
             try:
                 fetch_authority_bodies.delay(index_slug=r["slug"], triggered_by="ingest")
             except Exception as exc:
-                print(f"[scope_registry] body-fetch dispatch failed for {r.get('slug')}: {exc}")
+                logger.warning("[scope_registry] body-fetch dispatch failed for %s: %s", r.get("slug"), exc)
 
     try:
         result = asyncio.run(_run())

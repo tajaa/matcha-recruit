@@ -8,9 +8,12 @@ enabled_features value is the merged value — safe to filter in SQL.
 """
 
 import asyncio
+import logging
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _dispatch_coi_expiry() -> dict:
@@ -54,7 +57,7 @@ async def _dispatch_coi_expiry() -> dict:
             await _send_expiry_alert(str(row["company_id"]), row)
             alerted += 1
         except Exception as e:
-            print(f"[COI Expiry] Alert failed for cert {row['id']}: {e}")
+            logger.warning("[COI Expiry] Alert failed for cert %s: %s", row["id"], e)
     return {"checked": len(rows), "alerted": alerted}
 
 
@@ -95,5 +98,5 @@ def run_coi_expiry_sweep(self):
         print(f"[COI Expiry] Completed: {result}")
         return result
     except Exception as e:
-        print(f"[COI Expiry] Task failed: {e}")
+        logger.exception("[COI Expiry] Task failed")
         raise self.retry(exc=e, countdown=120)

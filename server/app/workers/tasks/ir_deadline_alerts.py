@@ -20,11 +20,14 @@ sweeps 2–5 dedupe via ir_deadline_alert_log (incident_id, alert_kind, sent_on)
 """
 
 import asyncio
+import logging
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from app.core.services.company_contacts import get_company_admin_contacts
+
+logger = logging.getLogger(__name__)
 
 # CAPA: how many days ahead of due_date to start nudging.
 CAPA_LOOKAHEAD_DAYS = 2
@@ -154,7 +157,7 @@ async def _sweep_capa(conn, email_service, today, limit) -> dict:
                 )
                 any_ok = any_ok or bool(ok)
             except Exception as exc:  # noqa: BLE001
-                print(f"[IR Deadline Alerts] CAPA email error to {rc['email']}: {exc}")
+                logger.warning("[IR Deadline Alerts] CAPA email error to %s: %s", rc["email"], exc)
         if any_ok:
             await conn.execute(
                 "UPDATE ir_corrective_actions SET reminder_sent_at = $1 WHERE id = $2",
@@ -219,7 +222,7 @@ async def _sweep_stale_incidents(conn, email_service, today, limit) -> dict:
                 )
                 any_ok = any_ok or bool(ok)
             except Exception as exc:  # noqa: BLE001
-                print(f"[IR Deadline Alerts] Stale email error to {rc['email']}: {exc}")
+                logger.warning("[IR Deadline Alerts] Stale email error to %s: %s", rc["email"], exc)
         if any_ok:
             await _record_sent(conn, r["incident_id"], r["company_id"], "stale_critical", today)
             sent += 1
@@ -283,7 +286,7 @@ async def _sweep_unclassified_recordable(conn, email_service, today, limit) -> d
                 )
                 any_ok = any_ok or bool(ok)
             except Exception as exc:  # noqa: BLE001
-                print(f"[IR Deadline Alerts] Recordable email error to {rc['email']}: {exc}")
+                logger.warning("[IR Deadline Alerts] Recordable email error to %s: %s", rc["email"], exc)
         if any_ok:
             await _record_sent(conn, r["incident_id"], r["company_id"], "unclassified_recordable", today)
             sent += 1
@@ -334,7 +337,7 @@ async def _sweep_osha_emergency(conn, email_service, today, limit) -> dict:
                 )
                 any_ok = any_ok or bool(ok)
             except Exception as exc:  # noqa: BLE001
-                print(f"[IR Deadline Alerts] OSHA emergency email error to {rc['email']}: {exc}")
+                logger.warning("[IR Deadline Alerts] OSHA emergency email error to %s: %s", rc["email"], exc)
         if any_ok:
             await _record_sent(conn, r["incident_id"], r["company_id"], "osha_emergency", today)
             sent += 1
@@ -410,7 +413,7 @@ async def _sweep_training_overdue(conn, email_service, today, limit) -> dict:
                 )
                 any_ok = any_ok or bool(ok)
             except Exception as exc:  # noqa: BLE001
-                print(f"[IR Deadline Alerts] Training overdue email error to {rc['email']}: {exc}")
+                logger.warning("[IR Deadline Alerts] Training overdue email error to %s: %s", rc["email"], exc)
         if any_ok:
             await _record_sent(conn, incident_id, first["company_id"], "training_overdue", today)
             sent += 1
@@ -459,5 +462,5 @@ def run_ir_deadline_alerts(self) -> dict:
         print(f"[IR Deadline Alerts] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[IR Deadline Alerts] Failed: {exc}")
+        logger.exception("[IR Deadline Alerts] Failed")
         raise self.retry(exc=exc, countdown=60)

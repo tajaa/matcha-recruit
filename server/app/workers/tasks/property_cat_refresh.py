@@ -12,10 +12,13 @@ building); this task only owns scheduling + the per-cycle cap.
 """
 
 import asyncio
+import logging
 from uuid import UUID
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 _STALE_DAYS = 90
 _DEFAULT_CAP = 20
@@ -47,7 +50,7 @@ async def _refresh(building_id=None, cap: int = _DEFAULT_CAP) -> dict:
                 await property_cat.enrich_building(conn, r["id"])
                 ok += 1
             except Exception as exc:  # noqa: BLE001 - one building must not abort the sweep
-                print(f"[Property Cat] building {r['id']} failed: {exc}")
+                logger.warning("[Property Cat] building %s failed: %s", r["id"], exc)
         return {"processed": ok, "selected": len(rows)}
     finally:
         await conn.close()
@@ -61,5 +64,5 @@ def refresh_property_cat(self, building_id=None) -> dict:
         print(f"[Property Cat] Refresh complete: {result}")
         return {"status": "success", **result}
     except Exception as e:  # noqa: BLE001
-        print(f"[Property Cat] Refresh failed: {e}")
+        logger.exception("[Property Cat] Refresh failed")
         raise self.retry(exc=e, countdown=300)

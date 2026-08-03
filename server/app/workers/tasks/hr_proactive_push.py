@@ -32,11 +32,14 @@ for why the two dedupe shapes differ.
 
 import asyncio
 import json
+import logging
 from datetime import date, timedelta
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_settings_row
 from .leave_deadline_checks import FMLA_LEAVE_TYPES
+
+logger = logging.getLogger(__name__)
 
 # How far ahead of each deadline to open the thread. A week is long enough to
 # arrange coverage or schedule a conversation, short enough that the thread is
@@ -417,7 +420,7 @@ async def _deliver(conn, *, company_id, employee_id, trigger_kind, subject_id,
         # Concurrent run delivered it; its transaction rolled back cleanly.
         return False
     except Exception:  # noqa: BLE001
-        print(f"[HR Proactive Push] {trigger_kind} failed for subject {subject_id}")
+        logger.warning("[HR Proactive Push] %s failed for subject %s", trigger_kind, subject_id)
         return False
     budget["remaining"] -= 1
     return True
@@ -614,5 +617,5 @@ def run_hr_proactive_push(self) -> dict:
         print(f"[HR Proactive Push] Completed: {result}")
         return {"status": "success", **result}
     except Exception as exc:
-        print(f"[HR Proactive Push] Failed: {exc}")
+        logger.exception("[HR Proactive Push] Failed")
         raise self.retry(exc=exc, countdown=60)
