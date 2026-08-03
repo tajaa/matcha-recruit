@@ -1,9 +1,12 @@
 """HTTP utilities with retry logic for Tier 1 structured data fetching."""
 
 import asyncio
+import logging
 from typing import Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 # Retry configuration
@@ -73,7 +76,12 @@ async def fetch_with_retry(
             last_error = e
             if attempt < max_retries - 1:
                 wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                print(f"[HTTP] Timeout, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(
+                    "[HTTP] Timeout, retrying in %ss (attempt %s/%s)",
+                    wait_time,
+                    attempt + 1,
+                    max_retries,
+                )
                 await asyncio.sleep(wait_time)
             else:
                 raise
@@ -85,7 +93,13 @@ async def fetch_with_retry(
             last_error = e
             if attempt < max_retries - 1:
                 wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                print(f"[HTTP] Error {e.response.status_code}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(
+                    "[HTTP] Error %s, retrying in %ss (attempt %s/%s)",
+                    e.response.status_code,
+                    wait_time,
+                    attempt + 1,
+                    max_retries,
+                )
                 await asyncio.sleep(wait_time)
             else:
                 raise
@@ -94,7 +108,12 @@ async def fetch_with_retry(
             last_error = e
             if attempt < max_retries - 1:
                 wait_time = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                print(f"[HTTP] Request error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                logger.warning(
+                    "[HTTP] Request error, retrying in %ss (attempt %s/%s)",
+                    wait_time,
+                    attempt + 1,
+                    max_retries,
+                )
                 await asyncio.sleep(wait_time)
             else:
                 raise

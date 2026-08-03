@@ -283,8 +283,8 @@ async def run_compliance_check_stream(
                                     "type": "facility_inference",
                                     "message": f"Detected: {inference['entity_type']}",
                                 }
-                    except Exception as e:
-                        print(f"[Facility Inference] Error during auto-inference: {e}")
+                    except Exception:
+                        logger.exception("[Facility Inference] Error during auto-inference")
 
             # ============================================================
             # TIER 1: Check for fresh structured data from authoritative sources
@@ -674,10 +674,10 @@ async def run_compliance_check_stream(
                         ):
                             yield evt
                         requirements = refresh_task.result() or requirements
-                    except Exception as refresh_error:
-                        print(
-                            "[Compliance] Repository refresh failed for "
-                            f"{location.city}, {location.state}: {refresh_error}"
+                    except Exception:
+                        logger.exception(
+                            "[Compliance] Repository refresh failed for %s, %s",
+                            location.city, location.state,
                         )
 
                     missing_after_refresh = _missing_required_categories(requirements)
@@ -792,9 +792,9 @@ async def run_compliance_check_stream(
                                 conn, jurisdiction_id, triggered_reqs, research_source="gemini"
                             )
                             requirements.extend(triggered_reqs)
-                    except Exception as e:
+                    except Exception:
                         failed_profile_keys.add(profile.key)
-                        print(f"[Tier 4] Error researching {profile.key}: {e}")
+                        logger.warning("[Tier 4] Error researching %s", profile.key, exc_info=True)
 
             # ── Gap detection: flag missing specialty policies for admin ──
             if activated_profiles:
@@ -838,8 +838,11 @@ async def run_compliance_check_stream(
                                         "source": "gemini_inference",
                                     },
                                 )
-                            except Exception as e:
-                                print(f"[Gap Detection] Error creating alert for {cat}/{profile.key}: {e}")
+                            except Exception:
+                                logger.warning(
+                                    "[Gap Detection] Error creating alert for %s/%s",
+                                    cat, profile.key, exc_info=True,
+                                )
 
             if not requirements:
                 await conn.execute(
@@ -960,15 +963,15 @@ async def run_compliance_check_stream(
             if alert_count > 0:
                 try:
                     await _send_bulk_alert_email(company_id, location_id, alert_count)
-                except Exception as e:
-                    print(f"[Compliance] Bulk alert email error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Bulk alert email error")
 
             # Auto-embed new/updated jurisdiction requirements for RAG Q&A
             try:
                 from app.core.services.compliance_embedding_pipeline import embed_updated_requirements
                 asyncio.create_task(embed_updated_requirements(conn, jurisdiction_id))
-            except Exception as e:
-                print(f"[Compliance] Embedding update error: {e}")
+            except Exception:
+                logger.exception("[Compliance] Embedding update error")
 
             # Yield per-requirement status events
             new_keys = {_compute_requirement_key(r) for r in requirements}
@@ -1029,8 +1032,8 @@ async def run_compliance_check_stream(
                     async for evt in _heartbeat_while(verify_task):
                         yield evt
                     verification_results = verify_task.result()
-                except Exception as e:
-                    print(f"[Compliance] Batch verification failed: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Batch verification failed")
                     verification_results = [
                         VerificationResult(
                             confirmed=False,
@@ -1216,8 +1219,8 @@ async def run_compliance_check_stream(
                             "type": "legislation",
                             "message": f"Found {leg_count} upcoming legislative change(s)",
                         }
-                except Exception as e:
-                    print(f"[Compliance] Legislation scan error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Legislation scan error")
 
             # Deadline escalation
             try:
@@ -1227,8 +1230,8 @@ async def run_compliance_check_stream(
                         "type": "escalation",
                         "message": f"Escalated {escalated} deadline(s)",
                     }
-            except Exception as e:
-                print(f"[Compliance] Deadline escalation error: {e}")
+            except Exception:
+                logger.exception("[Compliance] Deadline escalation error")
 
             # Generate plain-English impact summaries for change alerts
             if alert_changes_for_summary:
@@ -1256,8 +1259,8 @@ async def run_compliance_check_stream(
                     await batch_generate_impact_summaries(
                         alert_changes_for_summary, loc_dict, company_ctx, conn
                     )
-                except Exception as e:
-                    print(f"[Compliance] Impact summary generation error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Impact summary generation error")
 
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
@@ -1339,7 +1342,7 @@ async def run_compliance_check_stream(
                     }
         except Exception as e:
             # Vertical scoping is additive — never fail a check over it.
-            print(f"[Compliance] Vertical fill failed for {location_name}: {e}")
+            logger.warning("[Compliance] Vertical fill failed for %s", location_name, exc_info=True)
             yield {"type": "warning", "message": f"Vertical scoping incomplete: {e}"}
 
     from app.config import get_settings as _get_settings
@@ -1350,8 +1353,8 @@ async def run_compliance_check_stream(
                 location=location,
                 change_items=change_email_items,
             )
-        except Exception as e:
-            print(f"[Compliance] Error notifying admins about compliance changes: {e}")
+        except Exception:
+            logger.exception("[Compliance] Error notifying admins about compliance changes")
 
     yield {
         "type": "completed",
@@ -1480,8 +1483,8 @@ async def run_compliance_check_background(
                                     f"[Facility Inference] Auto-set {inference['entity_type']} "
                                     f"for {location.name or location.city}"
                                 )
-                    except Exception as e:
-                        print(f"[Facility Inference] Error during auto-inference: {e}")
+                    except Exception:
+                        logger.exception("[Facility Inference] Error during auto-inference")
 
             # TIER 1: Check for fresh structured data from authoritative sources
             from app.core.services.structured_data import StructuredDataService
@@ -1718,10 +1721,10 @@ async def run_compliance_check_background(
                             current_requirements=requirements,
                             missing_categories=missing_categories,
                         )
-                    except Exception as refresh_error:
-                        print(
-                            f"[Compliance] Source-of-truth refresh failed for {location.city}, {location.state}: "
-                            f"{refresh_error}"
+                    except Exception:
+                        logger.exception(
+                            "[Compliance] Source-of-truth refresh failed for %s, %s",
+                            location.city, location.state,
                         )
 
                     missing_after_refresh = _missing_required_categories(requirements)
@@ -1814,9 +1817,9 @@ async def run_compliance_check_background(
                                 conn, jurisdiction_id, triggered_reqs, research_source="gemini"
                             )
                             requirements.extend(triggered_reqs)
-                    except Exception as e:
+                    except Exception:
                         failed_profile_keys_bg.add(profile.key)
-                        print(f"[Tier 4] Error researching {profile.key}: {e}")
+                        logger.warning("[Tier 4] Error researching %s", profile.key, exc_info=True)
 
             # ── Gap detection: flag missing specialty policies for admin ──
             if activated_profiles_bg:
@@ -1859,8 +1862,11 @@ async def run_compliance_check_background(
                                         "source": "gemini_inference",
                                     },
                                 )
-                            except Exception as e:
-                                print(f"[Gap Detection] Error creating alert for {cat}/{profile.key}: {e}")
+                            except Exception:
+                                logger.warning(
+                                    "[Gap Detection] Error creating alert for %s/%s",
+                                    cat, profile.key, exc_info=True,
+                                )
 
             if not requirements:
                 await conn.execute(
@@ -1932,8 +1938,8 @@ async def run_compliance_check_background(
             if alert_count > 0:
                 try:
                     await _send_bulk_alert_email(company_id, location_id, alert_count)
-                except Exception as e:
-                    print(f"[Compliance] Bulk alert email error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Bulk alert email error")
 
             # Collect (alert_id, change_info) for batch impact summary generation
             bg_alert_changes: list[tuple] = []
@@ -2062,14 +2068,14 @@ async def run_compliance_check_background(
                         conn, location_id, company_id, legislation_items
                     )
                     alert_count += leg_count
-                except Exception as e:
-                    print(f"[Compliance] Background legislation scan error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Background legislation scan error")
 
             # Deadline escalation
             try:
                 await escalate_upcoming_deadlines(conn, company_id)
-            except Exception as e:
-                print(f"[Compliance] Background escalation error: {e}")
+            except Exception:
+                logger.exception("[Compliance] Background escalation error")
 
             # Generate impact summaries for change alerts (background)
             if bg_alert_changes:
@@ -2093,8 +2099,8 @@ async def run_compliance_check_background(
                     await batch_generate_impact_summaries(
                         bg_alert_changes, loc_dict, company_ctx, conn
                     )
-                except Exception as e:
-                    print(f"[Compliance] Background impact summary error: {e}")
+                except Exception:
+                    logger.exception("[Compliance] Background impact summary error")
 
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
@@ -2118,8 +2124,8 @@ async def run_compliance_check_background(
                 location=location,
                 change_items=change_email_items,
             )
-        except Exception as e:
-            print(f"[Compliance] Error notifying admins about compliance changes: {e}")
+        except Exception:
+            logger.exception("[Compliance] Error notifying admins about compliance changes")
 
     return {"new": new_count, "updated": updated_count, "alerts": alert_count}
 

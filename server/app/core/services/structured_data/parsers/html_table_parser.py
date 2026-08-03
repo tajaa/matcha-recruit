@@ -1,5 +1,6 @@
 """HTML table parser for structured data sources like DOL, NCSL, EPI."""
 
+import logging
 from typing import Optional
 
 import httpx
@@ -11,6 +12,8 @@ except ImportError:
 
 from ..http_utils import fetch_with_retry
 from .base import BaseParser, ParsedRequirement
+
+logger = logging.getLogger(__name__)
 
 
 class HTMLTableParser(BaseParser):
@@ -56,10 +59,10 @@ class HTMLTableParser(BaseParser):
 
             content = response.text
         except httpx.HTTPError as e:
-            print(f"[HTML Parser] HTTP error fetching {source_url}: {e}")
+            logger.warning("[HTML Parser] HTTP error fetching %s: %s", source_url, e)
             return []
         except Exception as e:
-            print(f"[HTML Parser] Error fetching {source_url}: {e}")
+            logger.warning("[HTML Parser] Error fetching %s: %s", source_url, e)
             return []
 
         return self._parse_html_content(content, source_url, parser_config)
@@ -93,7 +96,7 @@ class HTMLTableParser(BaseParser):
                 requirements.extend(reqs)
 
         except Exception as e:
-            print(f"[HTML Parser] Error parsing HTML: {e}")
+            logger.warning("[HTML Parser] Error parsing HTML: %s", e)
 
         print(f"[HTML Parser] Parsed {len(requirements)} requirements from {source_url}")
         return requirements
@@ -228,7 +231,7 @@ class HTMLTableParser(BaseParser):
             )
 
         except Exception as e:
-            print(f"[HTML Parser] Error parsing row: {e}")
+            logger.warning("[HTML Parser] Error parsing row: %s", e)
             return None
 
     @staticmethod

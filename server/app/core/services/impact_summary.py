@@ -6,6 +6,7 @@ deterministic template when the model is unavailable or rate-limited.
 
 import asyncio
 import json
+import logging
 import os
 from datetime import date
 from typing import Any, Optional
@@ -16,6 +17,8 @@ from app.core.services.genai_client import get_genai_client
 from google.genai import types
 
 from ...config import get_settings
+
+logger = logging.getLogger(__name__)
 
 LITE_MODEL = "gemini-3.1-flash-lite"
 GENERATION_TIMEOUT = 15  # seconds
@@ -132,7 +135,7 @@ async def generate_impact_summary(
         return text or _fallback_summary(change_info, location)
 
     except Exception as exc:
-        print(f"[Impact Summary] Gemini failed, using fallback: {exc}")
+        logger.warning("[Impact Summary] Gemini failed, using fallback: %s", exc)
         return _fallback_summary(change_info, location)
 
 

@@ -698,9 +698,10 @@ class GeminiComplianceService:
                     and idx < len(model_candidates) - 1
                 ):
                     next_model = model_candidates[idx + 1]
-                    print(
-                        f"[Gemini Compliance] Model '{model}' unavailable for this call; "
-                        f"trying fallback '{next_model}'"
+                    logger.warning(
+                        "[Gemini Compliance] Model '%s' unavailable for this call; trying fallback '%s'",
+                        model,
+                        next_model,
                     )
                     last_exc = exc
                     continue
@@ -969,12 +970,12 @@ class GeminiComplianceService:
                 return normalized_rows
             except GeminiExhaustedError as e:
                 if "timed out" in str(e).lower():
-                    print(f"[Gemini Compliance] {category} timed out")
+                    logger.warning("[Gemini Compliance] %s timed out", category)
                     return _TIMED_OUT
-                print(f"[Gemini Compliance] {category} exhausted: {e}")
+                logger.warning("[Gemini Compliance] %s exhausted: %s", category, e)
                 return []
             except Exception as e:
-                print(f"[Gemini Compliance] {category} error: {e}")
+                logger.warning("[Gemini Compliance] %s error: %s", category, e)
                 return []
 
         # Run categories in parallel with throttled concurrency to avoid
@@ -1114,7 +1115,9 @@ class GeminiComplianceService:
                         req["title"] = req["title"][:200]
                     all_requirements.append(req)
             except Exception as e:
-                print(f"[Triggered Research] Error researching {profile_key}/{category}: {e}")
+                logger.warning(
+                    "[Triggered Research] Error researching %s/%s: %s", profile_key, category, e
+                )
 
         print(
             f"[Triggered Research] {profile_key}: {len(all_requirements)} requirements "
@@ -1182,8 +1185,8 @@ Return ONLY valid JSON, no markdown fences or explanation text.
             except (ValueError, TypeError):
                 result["confidence"] = 0.0
             return result
-        except Exception as e:
-            print(f"[Facility Inference] Error inferring profile for {company_name}: {e}")
+        except Exception:
+            logger.exception("[Facility Inference] Error inferring profile for %s", company_name)
             return None
 
     async def discover_jurisdiction_sources(
@@ -1246,10 +1249,10 @@ Focus on the most authoritative sources (state labor departments, city wage offi
             return sources
 
         except GeminiExhaustedError as e:
-            print(f"[Gemini Compliance] Source discovery exhausted: {e}")
+            logger.warning("[Gemini Compliance] Source discovery exhausted: %s", e)
             return []
-        except Exception as e:
-            print(f"[Gemini Compliance] Source discovery error: {e}")
+        except Exception:
+            logger.exception("[Gemini Compliance] Source discovery error")
             return []
 
     async def verify_compliance_change(
@@ -1318,14 +1321,14 @@ Be conservative with confidence scores:
             )
 
         except GeminiExhaustedError as e:
-            print(f"[Gemini Compliance] {e}")
+            logger.warning("[Gemini Compliance] %s", e)
             return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification exhausted retries: {e}")
         except Exception as e:
             error_msg = str(e)
             if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
-                print(f"[Gemini Compliance] Verification API Key/Permission error: {e}")
+                logger.exception("[Gemini Compliance] Verification API Key/Permission error")
             else:
-                print(f"[Gemini Compliance] Verification error: {e}")
+                logger.exception("[Gemini Compliance] Verification error")
             return VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Verification failed: {e}")
 
     async def verify_compliance_change_adaptive(
@@ -1396,7 +1399,7 @@ Be conservative with confidence scores:
             try:
                 await get_rate_limiter().check_and_record("gemini_compliance", f"adaptive_verify_{title[:30]}")
             except RateLimitExceeded:
-                print(f"[Gemini Compliance] Rate limit hit during adaptive retry, returning first result")
+                logger.warning("[Gemini Compliance] Rate limit hit during adaptive retry, returning first result")
                 return first
 
             tools = [types.Tool(google_search=types.GoogleSearch())]
@@ -1433,7 +1436,7 @@ Be conservative with confidence scores:
             return first
 
         except Exception as e:
-            print(f"[Gemini Compliance] Adaptive retry failed: {e}")
+            logger.warning("[Gemini Compliance] Adaptive retry failed: %s", e)
             return first
 
     async def verify_compliance_changes_batch(
@@ -1525,7 +1528,7 @@ You MUST return exactly {len(changes)} results, one for each change listed above
             try:
                 await get_rate_limiter().check_and_record("gemini_compliance", f"batch_verify_{jurisdiction_name[:20]}")
             except RateLimitExceeded:
-                print(f"[Gemini Compliance] Rate limit hit during batch verification")
+                logger.warning("[Gemini Compliance] Rate limit hit during batch verification")
                 return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation="Rate limit exceeded")] * len(changes)
 
             tools = [types.Tool(google_search=types.GoogleSearch())]
@@ -1577,7 +1580,7 @@ You MUST return exactly {len(changes)} results, one for each change listed above
             return verification_results
 
         except Exception as e:
-            print(f"[Gemini Compliance] Batch verification error: {e}")
+            logger.exception("[Gemini Compliance] Batch verification error")
             return [VerificationResult(confirmed=False, confidence=0.0, sources=[], explanation=f"Batch verification failed: {e}")] * len(changes)
 
     async def scan_upcoming_legislation(
@@ -1663,16 +1666,16 @@ Return an empty array if no upcoming legislation is found.
             return upcoming
 
         except GeminiExhaustedError as e:
-            print(f"[Gemini Compliance] Legislation scan exhausted: {e}")
+            logger.warning("[Gemini Compliance] Legislation scan exhausted: %s", e)
             return []
         except Exception as e:
             error_msg = str(e)
             if "API_KEY" in error_msg.upper() or "PERMISSION" in error_msg.upper():
-                print(f"[Gemini Compliance] API Key/Permission error: {e}")
+                logger.exception("[Gemini Compliance] API Key/Permission error")
             elif "QUOTA" in error_msg.upper() or "RATE" in error_msg.upper():
-                print(f"[Gemini Compliance] Rate limit/quota error: {e}")
+                logger.warning("[Gemini Compliance] Rate limit/quota error: %s", e)
             else:
-                print(f"[Gemini Compliance] Error scanning legislation: {e}")
+                logger.exception("[Gemini Compliance] Error scanning legislation")
             return []
 
 

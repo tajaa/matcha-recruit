@@ -12,6 +12,8 @@ Main orchestrator for the executive lead generation workflow:
 """
 
 import json
+import logging
+
 import httpx
 from datetime import datetime
 from typing import Optional, List
@@ -29,6 +31,8 @@ from ..models.leads_agent import (
 )
 from .contact_finder import get_contact_finder
 from .gemini_leads import get_gemini_leads_service
+
+logger = logging.getLogger(__name__)
 
 
 class LeadsAgentService:
@@ -254,8 +258,8 @@ class LeadsAgentService:
                     LeadPriority.MEDIUM.value,
                 )
                 return True, False
-            except Exception as e:
-                print(f"    - SAVE ERROR: {str(e)}")
+            except Exception:
+                logger.exception("[LeadsAgent] Lead save failed")
                 return False, False
     
     async def reanalyze_lead(self, lead_id: UUID) -> Optional[Lead]:
@@ -540,8 +544,8 @@ class LeadsAgentService:
                     for item in data.get("organic_results", []):
                         snippets.append(f"Title: {item.get('title')}\nSnippet: {item.get('snippet')}\nLink: {item.get('link')}\n")
                     search_results_text = "\n".join(snippets)
-        except Exception as e:
-            print(f"[LeadsAgent] Search API failed: {e}")
+        except Exception:
+            logger.exception("[LeadsAgent] Search API failed")
             return None
             
         if not search_results_text:
@@ -858,9 +862,9 @@ class LeadsAgentService:
                 )
                 
                 return self._row_to_email(row)
-            except Exception as e:
+            except Exception:
                 # Log error but don't fail
-                print(f"[LeadsAgent] Email send failed: {e}")
+                logger.exception("[LeadsAgent] Email send failed")
                 return None
     
     # ===========================================

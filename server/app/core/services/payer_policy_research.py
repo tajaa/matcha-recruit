@@ -6,11 +6,14 @@ Falls back for non-Medicare payers (Aetna, UHC, BCBS, Cigna, etc.).
 """
 
 import json
+import logging
 from typing import Optional
 
 import asyncpg
 
 from .gemini_compliance import GeminiComplianceService
+
+logger = logging.getLogger(__name__)
 
 
 RESEARCH_PROMPT_TEMPLATE = """You are a medical coding and insurance policy expert.
@@ -68,8 +71,8 @@ async def research_payer_policy(
             max_retries=1,
             label=f"Payer policy: {payer_name} / {procedure}",
         )
-    except Exception as e:
-        print(f"[Payer Research] Gemini failed for {payer_name}/{procedure}: {e}")
+    except Exception:
+        logger.exception("[Payer Research] Gemini failed for %s/%s", payer_name, procedure)
         return None
 
     if not result or not isinstance(result, dict):
@@ -140,6 +143,6 @@ async def research_payer_policy(
             from .payer_policy_embedding_pipeline import embed_updated_policies
             await embed_updated_policies(conn)
         except Exception as e:
-            print(f"[Payer Research] Embedding failed: {e}")
+            logger.warning("[Payer Research] Embedding failed: %s", e)
 
     return dict(row) if row else None

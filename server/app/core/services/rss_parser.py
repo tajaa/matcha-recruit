@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 from datetime import datetime
 from typing import List, Optional, Tuple
 from uuid import UUID
@@ -12,6 +13,8 @@ try:
     import feedparser
 except ImportError:
     feedparser = None
+
+logger = logging.getLogger(__name__)
 
 # Keywords for detecting relevance of RSS items to labor law compliance
 RELEVANCE_KEYWORDS = {
@@ -143,10 +146,10 @@ async def fetch_feed(feed_url: str, timeout: float = 30.0) -> List[dict]:
             response.raise_for_status()
             content = response.text
     except httpx.HTTPError as e:
-        print(f"[RSS Parser] HTTP error fetching {feed_url}: {e}")
+        logger.warning("[RSS Parser] HTTP error fetching %s: %s", feed_url, e)
         return []
     except Exception as e:
-        print(f"[RSS Parser] Error fetching {feed_url}: {e}")
+        logger.warning("[RSS Parser] Error fetching %s: %s", feed_url, e)
         return []
 
     # Parse the feed content

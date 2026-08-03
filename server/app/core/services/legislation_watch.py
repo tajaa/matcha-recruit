@@ -2,11 +2,14 @@
 
 import asyncio
 import json
+import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 
 from .rss_parser import process_feed
+
+logger = logging.getLogger(__name__)
 
 # Relevance threshold for triggering Gemini analysis
 RELEVANCE_THRESHOLD = 0.3
@@ -136,13 +139,15 @@ Be conservative - only mark as relevant if there's a clear legislative/regulator
         return data
 
     except asyncio.TimeoutError:
-        print(f"[Legislation Watch] Gemini timeout analyzing: {item.get('title', '?')[:50]}")
+        logger.warning(
+            "[Legislation Watch] Gemini timeout analyzing: %s", item.get("title", "?")[:50]
+        )
         return None
     except json.JSONDecodeError as e:
-        print(f"[Legislation Watch] Gemini JSON error: {e}")
+        logger.warning("[Legislation Watch] Gemini JSON error: %s", e)
         return None
     except Exception as e:
-        print(f"[Legislation Watch] Gemini error: {e}")
+        logger.warning("[Legislation Watch] Gemini error: %s", e)
         return None
 
 
@@ -339,7 +344,9 @@ async def run_legislation_watch_cycle(conn) -> dict:
 
         except Exception as e:
             errors.append(f"{feed['feed_name']}: {str(e)}")
-            print(f"[Legislation Watch] Error processing {feed['feed_name']}: {e}")
+            logger.warning(
+                "[Legislation Watch] Error processing %s: %s", feed["feed_name"], e
+            )
 
     # Mark all remaining unprocessed low-relevance items as processed
     await conn.execute(

@@ -15,6 +15,7 @@ Data Flow:
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Optional
 from uuid import UUID
@@ -32,6 +33,7 @@ from .circuit_breaker import circuit_breaker
 from .parsers import get_parser, ParsedRequirement
 from .sources import get_source_for_jurisdiction
 
+logger = logging.getLogger(__name__)
 
 # Retry configuration
 MAX_RETRIES = 3
@@ -283,13 +285,13 @@ class StructuredDataService:
 
         except Exception as e:
             error_msg = str(e)[:500]
-            print(f"[Tier 1] Error fetching {source_key}: {error_msg}")
+            logger.warning("[Tier 1] Error fetching %s: %s", source_key, error_msg)
             await self._update_source_status(conn, source_id, "error", error_msg)
 
             # Record failure with circuit breaker
             circuit_opened = await circuit_breaker.record_failure(conn, source_id)
             if circuit_opened:
-                print(f"[Tier 1] Circuit breaker opened for {source_key}")
+                logger.warning("[Tier 1] Circuit breaker opened for %s", source_key)
 
             await log_fetch_error(conn, source_id, error_msg, triggered_by="scheduler")
             return {"status": "error", "error": error_msg, "source": source_key}
@@ -411,7 +413,7 @@ class StructuredDataService:
                 )
                 count += 1
             except Exception as e:
-                print(f"[Tier 1] Error upserting {req.jurisdiction_key}: {e}")
+                logger.warning("[Tier 1] Error upserting %s: %s", req.jurisdiction_key, e)
 
         return count
 

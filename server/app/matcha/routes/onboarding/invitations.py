@@ -3,6 +3,7 @@ Public routes for accepting employee invitations.
 These routes do not require authentication.
 """
 
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -16,6 +17,8 @@ from ....core.services.auth import (
     create_refresh_token,
 )
 from ....core.services.email import EmailService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -199,9 +202,9 @@ async def accept_invitation(token: str, request: AcceptInvitationRequest):
                 company_name=invitation["company_name"],
                 login_email=invitation["email"],
             )
-        except Exception as e:
-            print(
-                f"[Email] Failed to send welcome email after invitation acceptance: {e}"
+        except Exception:
+            logger.exception(
+                "[Email] Failed to send welcome email after invitation acceptance"
             )
 
         return AcceptInvitationResponse(

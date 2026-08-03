@@ -417,9 +417,12 @@ async def research_specialization_for_jurisdiction(
                     await _write(reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
-        except Exception as e:
+        except Exception:
             failed_categories.extend(batch)
-            print(f"[Specialization Research] Error researching {batch_label} for {location_name}: {e}")
+            logger.warning(
+                "[Specialization Research] Error researching %s for %s",
+                batch_label, location_name, exc_info=True,
+            )
 
     if penalties_stripped:
         # Grounded runs drop penalty blocks not backed by the fetched corpus; the

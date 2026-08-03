@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import time
 from typing import Any, Optional
@@ -10,6 +11,8 @@ from typing import Any, Optional
 import httpx
 
 from ...config import get_settings
+
+logger = logging.getLogger(__name__)
 
 POLYMARKET_SEARCH = "https://gamma-api.polymarket.com/public-search"
 
@@ -182,7 +185,7 @@ Include up to 6 real bills per keyword. Only include bills you can verify exist 
             )
             return _parse_gemini_json(response.text or "")
         except Exception as e:
-            print(f"[LegTracker] Gemini grounding batch {kw_batch}: {e}")
+            logger.warning("[LegTracker] Gemini grounding batch %s: %s", kw_batch, e)
             return []
 
     results = await asyncio.gather(*[_search_batch(b) for b in batches])
@@ -262,7 +265,7 @@ async def search_polymarket_match(bill_title: str, client: httpx.AsyncClient) ->
                         "url": f"https://polymarket.com/event/{event.get('slug', '')}",
                     }
     except Exception as e:
-        print(f"[LegTracker] Polymarket search '{query}': {e}")
+        logger.warning("[LegTracker] Polymarket search '%s': %s", query, e)
     return None
 
 
@@ -301,7 +304,7 @@ Respond in JSON only: {{"probability": 0.XX, "reasoning": "1-2 sentence explanat
         prob = max(0.0, min(1.0, float(result.get("probability", 0.1))))
         return {"probability": prob, "reasoning": result.get("reasoning", "")}
     except Exception as e:
-        print(f"[LegTracker] Gemini probability estimate: {e}")
+        logger.warning("[LegTracker] Gemini probability estimate: %s", e)
         return None
 
 

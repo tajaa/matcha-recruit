@@ -204,8 +204,8 @@ async def _send_single_alert_email(
         return
     try:
         await _send_alert_email_impl(company_id, location_id, 1)
-    except Exception as e:
-        print(f"[Compliance] Failed to send single alert email: {e}")
+    except Exception:
+        logger.warning("[Compliance] Failed to send single alert email", exc_info=True)
 
 
 
@@ -226,8 +226,8 @@ async def _send_bulk_alert_email(
         return
     try:
         await _send_alert_email_impl(company_id, location_id, alert_count)
-    except Exception as e:
-        print(f"[Compliance] Failed to send bulk alert email for {alert_count} alerts: {e}")
+    except Exception:
+        logger.exception("[Compliance] Failed to send bulk alert email for %s alerts", alert_count)
 
 
 

@@ -2,12 +2,15 @@
 
 import csv
 import io
+import logging
 from typing import Optional
 
 import httpx
 
 from ..http_utils import fetch_with_retry
 from .base import BaseParser, ParsedRequirement
+
+logger = logging.getLogger(__name__)
 
 
 class CSVParser(BaseParser):
@@ -44,10 +47,10 @@ class CSVParser(BaseParser):
 
             content = response.text
         except httpx.HTTPError as e:
-            print(f"[CSV Parser] HTTP error fetching {source_url}: {e}")
+            logger.warning("[CSV Parser] HTTP error fetching %s: %s", source_url, e)
             return []
         except Exception as e:
-            print(f"[CSV Parser] Error fetching {source_url}: {e}")
+            logger.warning("[CSV Parser] Error fetching %s: %s", source_url, e)
             return []
 
         return self._parse_csv_content(content, source_url, parser_config)
@@ -78,7 +81,7 @@ class CSVParser(BaseParser):
                     requirements.append(req)
 
         except Exception as e:
-            print(f"[CSV Parser] Error parsing CSV: {e}")
+            logger.warning("[CSV Parser] Error parsing CSV: %s", e)
 
         print(f"[CSV Parser] Parsed {len(requirements)} requirements from {source_url}")
         return requirements
@@ -158,7 +161,7 @@ class CSVParser(BaseParser):
             )
 
         except Exception as e:
-            print(f"[CSV Parser] Error parsing row: {e}")
+            logger.warning("[CSV Parser] Error parsing row: %s", e)
             return None
 
     @staticmethod

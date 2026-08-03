@@ -1,6 +1,7 @@
 """Chat WebSocket handler for real-time messaging."""
 
 import asyncio
+import logging
 from typing import Dict, Set
 from uuid import UUID
 import json
@@ -11,6 +12,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 from ....database import get_connection
 from ...models.chat import ChatUserPublic, ChatMessage
 from .auth import decode_chat_token
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -306,8 +309,8 @@ async def chat_websocket(
 
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        print(f"[Chat WS] Error: {e}")
+    except Exception:
+        logger.exception("[Chat WS] Error")
     finally:
         await manager.disconnect(websocket, user.id)
 

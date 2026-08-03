@@ -16,6 +16,8 @@ from app.core.models.blog import (
 )
 from app.core.services.storage import get_storage
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # -----------------------------------------------------------------------------
@@ -172,7 +174,7 @@ async def upload_blog_image(
         )
         return {"url": url}
     except Exception as e:
-        print(f"[Blog Upload Error] {type(e).__name__}: {str(e)}")
+        logger.exception("[Blog Upload Error] %s", type(e).__name__)
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))

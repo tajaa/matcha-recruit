@@ -1,10 +1,13 @@
 """HR News aggregation service — fetches articles from HR industry RSS feeds."""
 
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Optional
 
 from .rss_parser import fetch_feed, compute_item_hash
+
+logger = logging.getLogger(__name__)
 
 
 # HR news RSS feeds (free, no API key needed).
@@ -128,7 +131,7 @@ async def refresh_feeds(conn) -> dict:
         try:
             items = await fetch_feed(feed_url)
         except Exception as e:
-            print(f"[HR News] Error fetching {feed_name}: {e}")
+            logger.warning("[HR News] Error fetching %s: %s", feed_name, e)
             feed_results.append({"source": feed_name, "error": str(e), "new": 0})
             continue
 

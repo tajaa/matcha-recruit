@@ -8,6 +8,7 @@ AI-powered analysis for the Leads Agent workflow:
 """
 
 import json
+import logging
 import os
 import re
 from typing import Optional, List
@@ -24,6 +25,9 @@ from ..models.leads_agent import (
     Contact,
     SearchRequest,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiLeadsService:
@@ -449,11 +453,11 @@ Respond with a JSON object:
             return json.loads(text)
 
         except RateLimitExceeded:
-            print(f"[Gemini] Rate limit hit during find_decision_maker")
+            logger.warning("[Gemini] Rate limit hit during find_decision_maker")
             return None
-        except Exception as e:
+        except Exception:
             raw = response.text if 'response' in locals() and hasattr(response, 'text') else 'N/A'
-            print(f"[Gemini] Error finding decision maker: {e}. Raw: {raw}")
+            logger.exception("[Gemini] Error finding decision maker. Raw: %s", raw)
             return None
 
 

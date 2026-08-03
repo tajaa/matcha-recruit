@@ -1,11 +1,14 @@
 """Audit logging for Tier 1 structured data operations."""
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 
 class AuditEventType:
@@ -73,7 +76,7 @@ async def log_tier1_event(
         )
     except Exception as e:
         # Don't let audit logging failures break the main flow
-        print(f"[Audit] Failed to log event {event_type}: {e}")
+        logger.warning("[Audit] Failed to log event %s: %s", event_type, e)
 
 
 async def log_fetch_start(

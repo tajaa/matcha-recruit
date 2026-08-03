@@ -134,5 +134,5 @@ async def generate_investigation_questions(
             return questions
         return []
     except json.JSONDecodeError:
-        print(f"[IRQuestions] Failed to parse questions JSON: {text[:200]}")
+        logger.warning("[IRQuestions] Failed to parse questions JSON: %s", text[:200])
         return []

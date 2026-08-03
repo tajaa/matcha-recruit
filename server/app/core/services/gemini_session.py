@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
 
@@ -9,6 +10,8 @@ from google.genai import types
 from .rate_limiter import get_rate_limiter, RateLimitExceeded
 
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language", "investigation", "phone_call"]
 
@@ -869,9 +872,9 @@ class GeminiLiveSession:
 
                 await asyncio.sleep(0.05)
 
-        except Exception as e:
+        except Exception:
             if not self._closed:
-                print(f"[Gemini] Receive error: {e}")
+                logger.exception("[Gemini] Receive error")
 
     _audio_send_count = 0
 
@@ -891,7 +894,7 @@ class GeminiLiveSession:
             if self._audio_send_count % 50 == 0:
                 print(f"[Gemini] Sent audio #{self._audio_send_count}: {len(pcm_data)} bytes")
         except Exception as e:
-            print(f"[Gemini] Failed to send audio: {e}")
+            logger.warning("[Gemini] Failed to send audio: %s", e)
 
     async def send_text(self, text: str) -> None:
         """Send a text message to trigger model response."""
@@ -899,7 +902,7 @@ class GeminiLiveSession:
             try:
                 await self.session.send_realtime_input(text=text)
             except Exception as e:
-                print(f"[Gemini] Failed to send text: {e}")
+                logger.warning("[Gemini] Failed to send text: %s", e)
 
     async def receive_responses(self) -> AsyncIterator[GeminiResponse]:
         """Yield responses from the queue."""

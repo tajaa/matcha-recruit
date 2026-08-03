@@ -1,8 +1,11 @@
 import json
+import logging
 from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH
+
+logger = logging.getLogger(__name__)
 
 
 CULTURE_EXTRACTION_PROMPT = """Analyze this interview transcript where an AI interviewer asked an HR representative about their company culture.
@@ -76,8 +79,9 @@ class CultureAnalyzer:
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
-            print(f"[CultureAnalyzer] Failed to parse JSON: {e}")
-            print(f"[CultureAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[CultureAnalyzer] Failed to parse JSON: %s. Raw response: %s", e, text
+            )
             # Return a minimal structure
             return {
                 "culture_summary": text[:500] if text else "Unable to extract culture data",
@@ -110,6 +114,6 @@ class CultureAnalyzer:
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
-            print(f"[CultureAnalyzer] Failed to parse aggregated JSON: {e}")
+            logger.warning("[CultureAnalyzer] Failed to parse aggregated JSON: %s", e)
             # Return the first profile as fallback
             return culture_data_list[0]

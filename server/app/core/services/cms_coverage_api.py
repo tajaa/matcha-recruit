@@ -9,12 +9,15 @@ No API key required. License agreement token needed for LCD/article endpoints.
 
 import html
 import json
+import logging
 import re
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 async def _log_payer_changes(conn, policy_id, existing: dict, changes: list, source: str = "cms_ingest"):
@@ -167,7 +170,7 @@ class CMSCoverageAPI:
         try:
             ncd = await self.get_ncd(ncd_id, version)
         except Exception as e:
-            print(f"[CMS API] Failed to fetch NCD {ncd_id}: {e}")
+            logger.warning("[CMS API] Failed to fetch NCD %s: %s", ncd_id, e)
             return None
 
         if not ncd:
@@ -276,7 +279,7 @@ class CMSCoverageAPI:
         try:
             lcd = await self.get_lcd(lcd_id, version)
         except Exception as e:
-            print(f"[CMS API] Failed to fetch LCD {lcd_id}: {e}")
+            logger.warning("[CMS API] Failed to fetch LCD %s: %s", lcd_id, e)
             return None
 
         if not lcd:
@@ -316,9 +319,11 @@ class CMSCoverageAPI:
                         if code_id and code_id not in diagnosis_codes:
                             diagnosis_codes.append(code_id)
                 except Exception as e:
-                    print(f"[CMS API] Failed to fetch codes for article {article_id}: {e}")
+                    logger.warning(
+                        "[CMS API] Failed to fetch codes for article %s: %s", article_id, e
+                    )
         except Exception as e:
-            print(f"[CMS API] Failed to fetch related docs for LCD {lcd_id}: {e}")
+            logger.warning("[CMS API] Failed to fetch related docs for LCD %s: %s", lcd_id, e)
 
         # Determine coverage status
         coverage_status = "conditional"

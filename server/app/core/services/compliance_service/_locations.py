@@ -678,8 +678,7 @@ async def ensure_location_for_employee(
                         lid, cid, check_type="auto_derive", allow_live_research=True,
                     )
                 except Exception:
-                    import traceback
-                    print(f"[Compliance] Background compliance check failed for location {lid}: {traceback.format_exc()}")
+                    logger.exception("[Compliance] Background compliance check failed for location %s", lid)
             background_tasks.add_task(_safe_compliance_bg)
     else:
         # 4c. Unknown jurisdiction → queue for admin review, do NOT trigger check

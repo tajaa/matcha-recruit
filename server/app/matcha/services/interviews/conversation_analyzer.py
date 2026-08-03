@@ -9,11 +9,14 @@ Analyzes interview transcripts to evaluate:
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Any
 
 from app.core.services.genai_client import get_genai_client
 from app.core.services.model_catalog import GEMINI_FLASH
+
+logger = logging.getLogger(__name__)
 
 
 CULTURE_INTERVIEW_ANALYSIS_PROMPT = """Analyze this culture interview transcript where an AI interviewer asked an HR representative about their company culture.
@@ -687,8 +690,9 @@ class ConversationAnalyzer:
             analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
             return analysis
         except json.JSONDecodeError as e:
-            print(f"[ConversationAnalyzer] Failed to parse JSON: {e}")
-            print(f"[ConversationAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[ConversationAnalyzer] Failed to parse JSON: %s. Raw response: %s", e, text
+            )
             # Return a minimal fallback structure
             return {
                 "coverage_completeness": {
@@ -740,8 +744,11 @@ class ConversationAnalyzer:
             analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
             return analysis
         except json.JSONDecodeError as e:
-            print(f"[ConversationAnalyzer] Failed to parse screening JSON: {e}")
-            print(f"[ConversationAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[ConversationAnalyzer] Failed to parse screening JSON: %s. Raw response: %s",
+                e,
+                text,
+            )
             # Return a minimal fallback structure for screening
             return {
                 "communication_clarity": {
@@ -798,8 +805,11 @@ class ConversationAnalyzer:
             analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
             return analysis
         except json.JSONDecodeError as e:
-            print(f"[ConversationAnalyzer] Failed to parse tutor interview JSON: {e}")
-            print(f"[ConversationAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[ConversationAnalyzer] Failed to parse tutor interview JSON: %s. Raw response: %s",
+                e,
+                text,
+            )
             return {
                 "response_quality": {
                     "overall_score": 0,
@@ -864,8 +874,11 @@ class ConversationAnalyzer:
             analysis["language"] = language
             return analysis
         except json.JSONDecodeError as e:
-            print(f"[ConversationAnalyzer] Failed to parse tutor language JSON: {e}")
-            print(f"[ConversationAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[ConversationAnalyzer] Failed to parse tutor language JSON: %s. Raw response: %s",
+                e,
+                text,
+            )
             return {
                 "fluency_pace": {
                     "overall_score": 0,
@@ -942,8 +955,11 @@ class ConversationAnalyzer:
             analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
             return analysis
         except json.JSONDecodeError as e:
-            print(f"[ConversationAnalyzer] Failed to parse investigation JSON: {e}")
-            print(f"[ConversationAnalyzer] Raw response: {text}")
+            logger.warning(
+                "[ConversationAnalyzer] Failed to parse investigation JSON: %s. Raw response: %s",
+                e,
+                text,
+            )
             return {
                 "key_facts": [],
                 "credibility_notes": [],

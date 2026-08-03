@@ -177,7 +177,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         # UndefinedTableError when migration zzzz5d6e7f8g9 hasn't run yet.
         # Don't block boot — broadcast routes will surface a clear DB error.
-        print(f"[Matcha] Skipping channel_broadcasts cleanup: {type(e).__name__}: {e}")
+        logger.warning(
+            "[Matcha] Skipping channel_broadcasts cleanup: %s: %s", type(e).__name__, e
+        )
 
     # Initialize Redis notification manager (for worker task notifications)
     await init_notification_manager(settings.redis_url)

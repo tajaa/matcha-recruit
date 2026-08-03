@@ -1,4 +1,5 @@
 """Employee document view/sign, incl. handbook acknowledgment content."""
+import logging
 from typing import Optional
 from uuid import UUID
 
@@ -11,6 +12,8 @@ from app.matcha.models.employees.employee import (
     EmployeeDocumentResponse, EmployeeDocumentListResponse, SignDocumentRequest,
 )
 from app.matcha.dependencies import require_employee_record
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -202,8 +205,10 @@ async def sign_document(
                 signature_data=request.signature_data,
                 ip_address=client_ip,
             )
-        except Exception as exc:
-            print(f"[Policy] Failed to sync employee policy signature for admin tracking: {exc}")
+        except Exception:
+            logger.exception(
+                "[Policy] Failed to sync employee policy signature for admin tracking"
+            )
 
         return EmployeeDocumentResponse(
             id=updated["id"],

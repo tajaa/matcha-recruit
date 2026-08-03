@@ -193,9 +193,9 @@ async def _research_healthcare_requirements_for_jurisdiction(
                 )
             else:
                 print(f"[Healthcare Research]   -> No results for {category}")
-        except Exception as e:
+        except Exception:
             failed_categories.append(category)
-            print(f"[Healthcare Research]   -> Error researching {category}: {e}")
+            logger.warning("[Healthcare Research]   -> Error researching %s", category, exc_info=True)
 
     print(
         f"[Healthcare Research] Complete for {location_name}: {total_new} new, "
@@ -228,8 +228,8 @@ async def _research_healthcare_requirements_for_jurisdiction(
                 # Collect unique profiles across all linked locations
                 for profile in get_activated_profiles(fa):
                     all_facility_attrs.add(profile.key)
-    except Exception as e:
-        print(f"[Healthcare Research] Error loading facility attributes: {e}")
+    except Exception:
+        logger.exception("[Healthcare Research] Error loading facility attributes")
         all_facility_attrs = set()
 
     if all_facility_attrs:
@@ -280,8 +280,11 @@ async def _research_healthcare_requirements_for_jurisdiction(
                         f"[Healthcare Research]   -> {len(triggered_reqs)} "
                         f"{profile.label}-specific requirements saved"
                     )
-            except Exception as e:
-                print(f"[Healthcare Research]   -> Error in triggered research for {profile.key}: {e}")
+            except Exception:
+                logger.warning(
+                    "[Healthcare Research]   -> Error in triggered research for %s",
+                    profile.key, exc_info=True,
+                )
 
     return {
         "new": total_new,
@@ -398,9 +401,9 @@ async def _research_oncology_requirements_for_jurisdiction(
         else:
             print(f"[Oncology Research]   -> No results returned")
             failed_categories = list(missing)
-    except Exception as e:
+    except Exception:
         failed_categories = list(missing)
-        print(f"[Oncology Research]   -> Error: {e}")
+        logger.exception("[Oncology Research]   -> Error researching %s", location_name)
 
     print(
         f"[Oncology Research] Complete for {location_name}: {total_new} new, "
@@ -527,9 +530,9 @@ async def _research_life_sciences_requirements_for_jurisdiction(
         else:
             print(f"[Life Sciences Research]   -> No results returned")
             failed_categories = list(missing)
-    except Exception as e:
+    except Exception:
         failed_categories = list(missing)
-        print(f"[Life Sciences Research]   -> Error: {e}")
+        logger.exception("[Life Sciences Research]   -> Error researching %s", location_name)
 
     print(
         f"[Life Sciences Research] Complete for {location_name}: {total_new} new, "
@@ -677,9 +680,9 @@ async def _research_medical_compliance_for_jurisdiction(
             else:
                 print(f"[Medical Compliance]   -> No results for batch")
                 failed_categories.extend(batch)
-        except Exception as e:
+        except Exception:
             failed_categories.extend(batch)
-            print(f"[Medical Compliance]   -> Error researching batch: {e}")
+            logger.warning("[Medical Compliance]   -> Error researching batch %s", batch, exc_info=True)
 
     print(
         f"[Medical Compliance] Complete for {location_name}: {total_new} new, "

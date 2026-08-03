@@ -582,7 +582,12 @@ async def interview_websocket(
                 )
                 if not is_transient or attempt == 1:
                     raise
-                print(f"[Interview {interview_id}] Gemini transient error on connect (attempt {attempt + 1}): {e}; retrying")
+                logger.warning(
+                    "[Interview %s] Gemini transient error on connect (attempt %s): %s; retrying",
+                    interview_id,
+                    attempt + 1,
+                    e,
+                )
                 try:
                     await gemini_session.close()
                 except Exception:
