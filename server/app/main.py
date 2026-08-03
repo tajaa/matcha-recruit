@@ -27,12 +27,33 @@ logging.basicConfig(
     format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
 )
 
+
+class _HealthAccessLogFilter(logging.Filter):
+    """Drop uvicorn access-log lines for /health — polled every few seconds by
+    the docker healthcheck and the blue-green deploy gate, and it drowns out
+    everything else in the 30MB container log budget. Exact-match on the
+    quoted request line so it can't also swallow a real route that merely
+    starts with "health" (e.g. healthcare_research)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return '"GET /health ' not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthAccessLogFilter())
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 logger = logging.getLogger(__name__)
+
+# Dedicated logger for the unhandled-exception paths below. Named separately
+# (not "app.main") and added to error_reporter._IGNORED_LOGGERS so logging it
+# for stdout/traceback visibility never creates a second, phantom
+# server_error_reports row alongside the explicit report_server_error() call
+# these paths already make.
+_unhandled_logger = logging.getLogger("matcha.unhandled")
 
 from .config import get_settings, load_settings
 from .core.services.error_reporter import install_error_logging, report_server_error
@@ -442,11 +463,22 @@ async def capture_errors(request: Request, call_next):
         response = await call_next(request)
         return response
     except Exception as exc:
+        if getattr(request.state, "error_reported", False):
+            # unhandled_exception_handler already logged + persisted this
+            # exact exception (response had already started streaming, so
+            # ExceptionMiddleware re-raised after handling it) — propagate
+            # without a duplicate report.
+            raise
         user_id = getattr(request.state, "user_id", None)
         user_role = getattr(request.state, "user_role", None)
         company_id = getattr(request.state, "company_id", None)
         real_exc = _unwrap_excgroup(exc)
         traceback_str = _format_exc_chain(exc)
+        _unhandled_logger.error(
+            "Unhandled %s on %s %s", type(real_exc).__name__, request.method, request.url.path,
+            exc_info=real_exc,
+        )
+        request.state.error_reported = True
         # Legacy error_logs insert (keeps existing admin page working)
         try:
             async with get_connection() as conn:
@@ -492,9 +524,15 @@ async def capture_errors(request: Request, call_next):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Persist unhandled exceptions and return 500."""
+    if getattr(request.state, "error_reported", False):
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
     real_exc = _unwrap_excgroup(exc)
     traceback_str = _format_exc_chain(exc)
-    logger.error("Unhandled %s on %s %s: %s", type(real_exc).__name__, request.method, request.url.path, real_exc)
+    _unhandled_logger.error(
+        "Unhandled %s on %s %s", type(real_exc).__name__, request.method, request.url.path,
+        exc_info=real_exc,
+    )
+    request.state.error_reported = True
     try:
         async with get_connection() as conn:
             await conn.execute(

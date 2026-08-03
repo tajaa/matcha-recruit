@@ -1,5 +1,6 @@
 """Celery application configuration."""
 
+import logging
 import os
 from celery import Celery
 from celery.signals import worker_ready, task_failure, worker_process_init
@@ -7,6 +8,8 @@ from dotenv import load_dotenv
 
 # Load environment variables for worker process
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 # Get Redis URL from environment
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -57,6 +60,7 @@ celery_app = Celery(
         "app.workers.tasks.hr_proactive_push",
         "app.workers.tasks.scope_registry",
         "app.workers.tasks.source_snapshots",
+        "app.workers.tasks.debug_error",
     ],
 )
 
@@ -115,6 +119,73 @@ def _is_scheduler_enabled(task_key: str) -> bool:
     return asyncio.run(_check())
 
 
+def _scheduler_flags(task_keys: list) -> dict:
+    """Batch version of _is_scheduler_enabled — one round-trip for the whole
+    worker-ready dispatch instead of one per task."""
+    import asyncio
+    from app.workers.utils import get_db_connection
+
+    async def _check():
+        conn = await get_db_connection()
+        try:
+            rows = await conn.fetch(
+                "SELECT task_key, enabled FROM scheduler_settings WHERE task_key = ANY($1::text[])",
+                task_keys,
+            )
+            return {row["task_key"]: row["enabled"] for row in rows}
+        except Exception:
+            return {}
+        finally:
+            await conn.close()
+
+    return asyncio.run(_check())
+
+
+# (task_key, module_path, callable_name) — every entry is dispatched via
+# `.delay()` when its scheduler_settings row is enabled. task_key is the
+# scheduler_settings primary key; module/callable are imported lazily at
+# dispatch time so a broken task module can't block the rest of the batch.
+_SCHEDULED_TASKS = [
+    ("structured_data_fetch", "app.workers.tasks.structured_data_fetch", "fetch_structured_data_sources"),
+    ("compliance_checks", "app.workers.tasks.compliance_checks", "enqueue_scheduled_compliance_checks"),
+    ("deadline_escalation", "app.workers.tasks.compliance_checks", "run_deadline_escalation"),
+    ("property_cat_refresh", "app.workers.tasks.property_cat_refresh", "refresh_property_cat"),
+    ("legislation_watch", "app.workers.tasks.legislation_watch", "run_legislation_watch"),
+    ("scope_registry_authority", "app.workers.tasks.scope_registry", "sync_all_authority_indexes"),
+    ("scope_registry_research", "app.workers.tasks.scope_registry", "run_scheduled_research_cycle"),
+    ("pattern_recognition", "app.workers.tasks.pattern_recognition", "run_pattern_recognition"),
+    ("leave_deadline_checks", "app.workers.tasks.leave_deadline_checks", "check_leave_deadlines"),
+    ("leave_agent_orchestration", "app.workers.tasks.leave_agent_tasks", "run_leave_agent_orchestration"),
+    ("onboarding_reminders", "app.workers.tasks.onboarding_reminders", "run_onboarding_reminders"),
+    ("compliance_action_reminders", "app.workers.tasks.compliance_action_reminders", "run_compliance_action_reminders"),
+    ("legal_deadline_reminders", "app.workers.tasks.legal_deadline_reminders", "run_legal_deadline_reminders"),
+    ("handbook_freshness", "app.workers.tasks.handbook_freshness", "run_handbook_freshness_checks"),
+    ("coi_expiry", "app.workers.tasks.coi_expiry", "run_coi_expiry_sweep"),
+    ("vertical_coverage_sweep", "app.workers.tasks.vertical_coverage_sweep", "run_vertical_coverage_sweep"),
+    ("location_fips_backfill", "app.workers.tasks.location_fips_backfill", "run_location_fips_backfill"),
+    ("risk_assessment", "app.workers.tasks.risk_assessment", "enqueue_scheduled_risk_assessments"),
+    ("discipline_expiry", "app.workers.tasks.discipline_expiry", "run_discipline_expiry"),
+    ("discipline_policy_sweep", "app.workers.tasks.discipline_policy_sweep", "run_discipline_policy_sweep"),
+    ("grievance_deadline_alerts", "app.workers.tasks.grievance_deadline_alerts", "run_grievance_deadline_alerts"),
+    ("hr_proactive_push", "app.workers.tasks.hr_proactive_push", "run_hr_proactive_push"),
+    ("ir_deadline_alerts", "app.workers.tasks.ir_deadline_alerts", "run_ir_deadline_alerts"),
+    # Fires on every worker restart; the task itself declines unless the last
+    # scheduled run is older than MIN_SCHEDULED_INTERVAL_DAYS.
+    ("compliance_evals", "app.workers.tasks.compliance_evals", "run_scheduled_compliance_evals"),
+    ("auto_archive", "app.workers.tasks.auto_archive", "run_auto_archive"),
+    ("newsletter_scheduler", "app.workers.tasks.newsletter_scheduler", "run_newsletter_scheduler"),
+    ("hr_news_fetch", "app.workers.tasks.hr_news_fetch", "run_hr_news_fetch"),
+    ("training_cadence", "app.workers.tasks.training_cadence", "run_training_cadence"),
+    ("broker_risk_alerts", "app.workers.tasks.broker_risk_alerts", "run_broker_risk_alerts"),
+    ("broker_milestones", "app.workers.tasks.broker_milestones", "run_broker_milestones"),
+    ("benefit_eligibility_sync", "app.workers.tasks.benefit_eligibility_sync", "run_benefit_eligibility_sync"),
+    ("benefit_enrollment_notifications", "app.workers.tasks.benefit_enrollment_notifications", "run_benefit_enrollment_notifications"),
+    ("cappe_booking_reminders", "app.workers.tasks.cappe_booking_reminders", "run_cappe_booking_reminders"),
+    ("cappe_domain_renewals", "app.workers.tasks.cappe_domain_renewals", "run_cappe_domain_renewals"),
+    ("cappe_comp_expiry", "app.workers.tasks.cappe_comp_expiry", "run_cappe_comp_expiry"),
+]
+
+
 @worker_ready.connect
 def on_worker_ready(**kwargs):
     """Auto-dispatch scheduled compliance checks on every worker startup.
@@ -123,252 +194,37 @@ def on_worker_ready(**kwargs):
     effectively runs the dispatcher on a 15-minute schedule without
     needing celery-beat infrastructure.
     """
-    from app.workers.tasks.compliance_checks import (
-        enqueue_scheduled_compliance_checks,
-        run_deadline_escalation,
-    )
+    import importlib
+
     from app.workers.tasks.er_document_processing import reset_stale_er_documents
-    from app.workers.tasks.legislation_watch import run_legislation_watch
-    from app.workers.tasks.leave_agent_tasks import run_leave_agent_orchestration
-    from app.workers.tasks.onboarding_reminders import run_onboarding_reminders
-    from app.workers.tasks.pattern_recognition import run_pattern_recognition
-    from app.workers.tasks.structured_data_fetch import fetch_structured_data_sources
 
     # Not scheduler-gated: a single cheap, idempotent UPDATE that repairs rows
     # a previous worker death stranded in 'processing'. Gating it behind a
     # default-disabled scheduler_settings row would defeat its purpose.
     reset_stale_er_documents.delay()
 
-    if _is_scheduler_enabled("structured_data_fetch"):
-        fetch_structured_data_sources.delay()
-    else:
-        print("[Worker] Structured data fetch scheduler is disabled, skipping.")
+    task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
+    flags = _scheduler_flags(task_keys)
 
-    if _is_scheduler_enabled("compliance_checks"):
-        enqueue_scheduled_compliance_checks.delay()
-    else:
-        print("[Worker] Compliance checks scheduler is disabled, skipping.")
+    dispatched, disabled, failed = [], [], []
+    for task_key, module_path, callable_name in _SCHEDULED_TASKS:
+        if not flags.get(task_key, False):
+            disabled.append(task_key)
+            continue
+        try:
+            module = importlib.import_module(module_path)
+            getattr(module, callable_name).delay()
+            dispatched.append(task_key)
+        except Exception:
+            failed.append(task_key)
+            logger.exception("[Worker] Failed to dispatch scheduled task %s", task_key)
 
-    if _is_scheduler_enabled("deadline_escalation"):
-        run_deadline_escalation.delay()
-    else:
-        print("[Worker] Deadline escalation scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("property_cat_refresh"):
-        from app.workers.tasks.property_cat_refresh import refresh_property_cat
-        refresh_property_cat.delay()
-    else:
-        print("[Worker] Property cat refresh scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("legislation_watch"):
-        run_legislation_watch.delay()
-    else:
-        print("[Worker] Legislation watch scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("scope_registry_authority"):
-        from app.workers.tasks.scope_registry import sync_all_authority_indexes
-        sync_all_authority_indexes.delay()
-    else:
-        print("[Worker] Scope registry authority sync scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("scope_registry_research"):
-        from app.workers.tasks.scope_registry import run_scheduled_research_cycle
-        run_scheduled_research_cycle.delay()
-    else:
-        print("[Worker] Scope registry research cycle scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("pattern_recognition"):
-        run_pattern_recognition.delay()
-    else:
-        print("[Worker] Pattern recognition scheduler is disabled, skipping.")
-
-    from app.workers.tasks.leave_deadline_checks import check_leave_deadlines
-
-    if _is_scheduler_enabled("leave_deadline_checks"):
-        check_leave_deadlines.delay()
-    else:
-        print("[Worker] Leave deadline checks scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("leave_agent_orchestration"):
-        run_leave_agent_orchestration.delay()
-    else:
-        print("[Worker] Leave agent orchestration scheduler is disabled, skipping.")
-
-    if _is_scheduler_enabled("onboarding_reminders"):
-        run_onboarding_reminders.delay()
-    else:
-        print("[Worker] Onboarding reminders scheduler is disabled, skipping.")
-
-    from app.workers.tasks.compliance_action_reminders import run_compliance_action_reminders
-
-    if _is_scheduler_enabled("compliance_action_reminders"):
-        run_compliance_action_reminders.delay()
-    else:
-        print("[Worker] Compliance action reminders scheduler is disabled, skipping.")
-
-    from app.workers.tasks.legal_deadline_reminders import run_legal_deadline_reminders
-
-    if _is_scheduler_enabled("legal_deadline_reminders"):
-        run_legal_deadline_reminders.delay()
-    else:
-        print("[Worker] Legal deadline reminders scheduler is disabled, skipping.")
-
-    from app.workers.tasks.handbook_freshness import run_handbook_freshness_checks
-
-    if _is_scheduler_enabled("handbook_freshness"):
-        run_handbook_freshness_checks.delay()
-    else:
-        print("[Worker] Handbook freshness checks scheduler is disabled, skipping.")
-
-    from app.workers.tasks.coi_expiry import run_coi_expiry_sweep
-
-    if _is_scheduler_enabled("coi_expiry"):
-        run_coi_expiry_sweep.delay()
-    else:
-        print("[Worker] COI expiry scheduler is disabled, skipping.")
-
-    from app.workers.tasks.vertical_coverage_sweep import run_vertical_coverage_sweep
-
-    if _is_scheduler_enabled("vertical_coverage_sweep"):
-        run_vertical_coverage_sweep.delay()
-    else:
-        print("[Worker] Vertical coverage sweep scheduler is disabled, skipping.")
-
-    from app.workers.tasks.location_fips_backfill import run_location_fips_backfill
-
-    if _is_scheduler_enabled("location_fips_backfill"):
-        run_location_fips_backfill.delay()
-    else:
-        print("[Worker] Location FIPS backfill scheduler is disabled, skipping.")
-
-    from app.workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
-
-    if _is_scheduler_enabled("risk_assessment"):
-        enqueue_scheduled_risk_assessments.delay()
-    else:
-        print("[Worker] Risk assessment scheduler is disabled, skipping.")
-
-    from app.workers.tasks.discipline_expiry import run_discipline_expiry
-
-    if _is_scheduler_enabled("discipline_expiry"):
-        run_discipline_expiry.delay()
-    else:
-        print("[Worker] Discipline expiry scheduler is disabled, skipping.")
-
-    from app.workers.tasks.discipline_policy_sweep import run_discipline_policy_sweep
-
-    if _is_scheduler_enabled("discipline_policy_sweep"):
-        run_discipline_policy_sweep.delay()
-    else:
-        print("[Worker] Discipline policy sweep scheduler is disabled, skipping.")
-
-    from app.workers.tasks.grievance_deadline_alerts import run_grievance_deadline_alerts
-
-    if _is_scheduler_enabled("grievance_deadline_alerts"):
-        run_grievance_deadline_alerts.delay()
-    else:
-        print("[Worker] Grievance deadline alerts scheduler is disabled, skipping.")
-
-    from app.workers.tasks.hr_proactive_push import run_hr_proactive_push
-
-    if _is_scheduler_enabled("hr_proactive_push"):
-        run_hr_proactive_push.delay()
-        print("[Worker Ready] Dispatched hr_proactive_push")
-    else:
-        print("[Worker Ready] hr_proactive_push disabled, skipping")
-
-    from app.workers.tasks.ir_deadline_alerts import run_ir_deadline_alerts
-
-    if _is_scheduler_enabled("ir_deadline_alerts"):
-        run_ir_deadline_alerts.delay()
-    else:
-        print("[Worker] IR deadline alerts scheduler is disabled, skipping.")
-
-    from app.workers.tasks.compliance_evals import run_scheduled_compliance_evals
-
-    # Fires on every worker restart (hourly cron); the task itself declines unless
-    # the last scheduled run is older than MIN_SCHEDULED_INTERVAL_DAYS.
-    if _is_scheduler_enabled("compliance_evals"):
-        run_scheduled_compliance_evals.delay()
-    else:
-        print("[Worker] Compliance evals scheduler is disabled, skipping.")
-
-    from app.workers.tasks.auto_archive import run_auto_archive
-
-    if _is_scheduler_enabled("auto_archive"):
-        run_auto_archive.delay()
-    else:
-        print("[Worker] Auto-archive scheduler is disabled, skipping.")
-
-    from app.workers.tasks.newsletter_scheduler import run_newsletter_scheduler
-
-    if _is_scheduler_enabled("newsletter_scheduler"):
-        run_newsletter_scheduler.delay()
-    else:
-        print("[Worker] Newsletter scheduler is disabled, skipping.")
-
-    from app.workers.tasks.hr_news_fetch import run_hr_news_fetch
-
-    if _is_scheduler_enabled("hr_news_fetch"):
-        run_hr_news_fetch.delay()
-    else:
-        print("[Worker] HR news fetch scheduler is disabled, skipping.")
-
-    from app.workers.tasks.training_cadence import run_training_cadence
-
-    if _is_scheduler_enabled("training_cadence"):
-        run_training_cadence.delay()
-    else:
-        print("[Worker] Training cadence scheduler is disabled, skipping.")
-
-    from app.workers.tasks.broker_risk_alerts import run_broker_risk_alerts
-
-    if _is_scheduler_enabled("broker_risk_alerts"):
-        run_broker_risk_alerts.delay()
-    else:
-        print("[Worker] Broker risk alerts scheduler is disabled, skipping.")
-
-    from app.workers.tasks.broker_milestones import run_broker_milestones
-
-    if _is_scheduler_enabled("broker_milestones"):
-        run_broker_milestones.delay()
-    else:
-        print("[Worker] Broker milestones scheduler is disabled, skipping.")
-
-    from app.workers.tasks.benefit_eligibility_sync import run_benefit_eligibility_sync
-
-    if _is_scheduler_enabled("benefit_eligibility_sync"):
-        run_benefit_eligibility_sync.delay()
-    else:
-        print("[Worker] Benefit eligibility sync scheduler is disabled, skipping.")
-
-    from app.workers.tasks.benefit_enrollment_notifications import run_benefit_enrollment_notifications
-
-    if _is_scheduler_enabled("benefit_enrollment_notifications"):
-        run_benefit_enrollment_notifications.delay()
-    else:
-        print("[Worker] Benefit enrollment notifications scheduler is disabled, skipping.")
-
-    from app.workers.tasks.cappe_booking_reminders import run_cappe_booking_reminders
-
-    if _is_scheduler_enabled("cappe_booking_reminders"):
-        run_cappe_booking_reminders.delay()
-    else:
-        print("[Worker] Cappe booking reminders scheduler is disabled, skipping.")
-
-    from app.workers.tasks.cappe_domain_renewals import run_cappe_domain_renewals
-
-    if _is_scheduler_enabled("cappe_domain_renewals"):
-        run_cappe_domain_renewals.delay()
-    else:
-        print("[Worker] Cappe domain renewals scheduler is disabled, skipping.")
-
-    from app.workers.tasks.cappe_comp_expiry import run_cappe_comp_expiry
-
-    if _is_scheduler_enabled("cappe_comp_expiry"):
-        run_cappe_comp_expiry.delay()
-    else:
-        print("[Worker] Cappe comp expiry scheduler is disabled, skipping.")
+    logger.info(
+        "[Worker] scheduler dispatch — dispatched=%s disabled=%s failed=%s",
+        ",".join(dispatched) or "none",
+        ",".join(disabled) or "none",
+        ",".join(failed) or "none",
+    )
 
 
 # ── Server error reporter integration ───────────────────────────────────────
@@ -388,9 +244,9 @@ def _install_error_reporter(**kwargs):
     try:
         from app.config import load_settings
         load_settings()
-        print("[Worker] Settings loaded")
-    except Exception as e:
-        print(f"[Worker] Failed to load settings: {e}")
+        logger.info("[Worker] Settings loaded")
+    except Exception:
+        logger.exception("[Worker] Failed to load settings")
 
     # NOTE: deliberately do NOT call app.database.init_pool() here.
     # Celery tasks each run via asyncio.run() which creates a NEW event
@@ -404,9 +260,10 @@ def _install_error_reporter(**kwargs):
     try:
         from app.core.services.error_reporter import install_error_logging
         install_error_logging(source="celery")
-        print("[Worker] Server error reporter installed")
-    except Exception as e:
-        print(f"[Worker] Failed to install error reporter: {e}")
+        logger.info("[Worker] Server error reporter installed")
+    except Exception:
+        # Can't rely on the DB handler here — it's what failed to install.
+        logger.exception("[Worker] Failed to install error reporter")
 
 
 @task_failure.connect
@@ -431,5 +288,5 @@ def _on_task_failure(
                 "kwargs": kwargs,
             },
         )
-    except Exception as e:
-        print(f"[Worker] Failed to report task failure: {e}")
+    except Exception:
+        logger.exception("[Worker] Failed to report task failure")

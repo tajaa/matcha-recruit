@@ -83,6 +83,16 @@ function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
 /** Thrown on any non-ok response from request(). Carries the HTTP status
  *  alongside the message so callers can branch on status (e.g. 429) instead
  *  of pattern-matching the message string. */
+// Expected client-input/business-rule/auth statuses — reporting these floods
+// the server_error_reports table with things like "Employee is already
+// scheduled during this time" (409) that aren't bugs, or 401/403 (auth
+// conditions handled by refresh/logout below, not application errors).
+// Report only 5xx, network failures (status 0), and anything unexpected.
+const _EXPECTED_STATUSES = new Set([400, 401, 402, 403, 404, 409, 410, 422, 429])
+export function _shouldReportStatus(status: number): boolean {
+  return status === 0 || status >= 500 || !_EXPECTED_STATUSES.has(status)
+}
+
 export class ApiError extends Error {
   status: number
   body: unknown
@@ -126,9 +136,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         const retryBody = await retry.json().catch(() => null)
         const msg = (typeof retryBody?.detail === 'string' ? retryBody.detail : retryBody?.detail?.message)
           || `${retry.status} ${retry.statusText}`
-        // 401/403 are auth conditions (handled by refresh/logout), not bugs —
-        // don't pollute the error reporter with them.
-        if (path !== '/client-errors' && retry.status !== 401 && retry.status !== 403) {
+        if (path !== '/client-errors' && _shouldReportStatus(retry.status)) {
           reportApiError({ endpoint: path, status: retry.status, message: msg, body: retryBody })
         }
         throw new ApiError(msg, retry.status, retryBody)
@@ -160,9 +168,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } else {
       msg = `${res.status} ${res.statusText || 'Request failed'}`
     }
-    // Skip 401/403 — auth conditions, not application errors (the no-token
-    // case lands here since the refresh path above requires an existing token).
-    if (path !== '/client-errors' && res.status !== 401 && res.status !== 403) {
+    if (path !== '/client-errors' && _shouldReportStatus(res.status)) {
       reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
     }
     throw new ApiError(msg, res.status, errBody)

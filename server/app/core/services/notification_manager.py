@@ -2,9 +2,12 @@
 
 import asyncio
 import json
+import logging
 from typing import Any
 
 from fastapi import WebSocket
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationManager:
@@ -29,7 +32,7 @@ class NotificationManager:
 
         self._redis = aioredis.from_url(redis_url)
         self._pubsub = self._redis.pubsub()
-        print("[NotificationManager] Connected to Redis for pub/sub")
+        logger.info("[NotificationManager] Connected to Redis for pub/sub")
 
     async def subscribe(self, websocket: WebSocket, channel: str) -> None:
         """Subscribe a WebSocket client to a channel."""
@@ -37,23 +40,23 @@ class NotificationManager:
             self._connections[channel] = []
             # Subscribe to the Redis channel
             await self._pubsub.subscribe(channel)
-            print(f"[NotificationManager] Subscribed to Redis channel: {channel}")
+            logger.info("[NotificationManager] Subscribed to Redis channel: %s", channel)
 
         self._connections[channel].append(websocket)
-        print(f"[NotificationManager] WebSocket subscribed to {channel}")
+        logger.debug("[NotificationManager] WebSocket subscribed to %s", channel)
 
     async def unsubscribe(self, websocket: WebSocket, channel: str) -> None:
         """Unsubscribe a WebSocket client from a channel."""
         if channel in self._connections:
             if websocket in self._connections[channel]:
                 self._connections[channel].remove(websocket)
-                print(f"[NotificationManager] WebSocket unsubscribed from {channel}")
+                logger.debug("[NotificationManager] WebSocket unsubscribed from %s", channel)
 
             # If no more clients on this channel, unsubscribe from Redis
             if not self._connections[channel]:
                 await self._pubsub.unsubscribe(channel)
                 del self._connections[channel]
-                print(f"[NotificationManager] Unsubscribed from Redis channel: {channel}")
+                logger.info("[NotificationManager] Unsubscribed from Redis channel: %s", channel)
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Remove a WebSocket from all channels."""
@@ -67,12 +70,12 @@ class NotificationManager:
         for channel in channels_to_remove:
             await self._pubsub.unsubscribe(channel)
             del self._connections[channel]
-            print(f"[NotificationManager] Unsubscribed from Redis channel: {channel}")
+            logger.info("[NotificationManager] Unsubscribed from Redis channel: %s", channel)
 
     async def start_listener(self) -> None:
         """Start the background task to listen for Redis messages."""
         self._listener_task = asyncio.create_task(self._listen())
-        print("[NotificationManager] Started Redis listener")
+        logger.info("[NotificationManager] Started Redis listener")
 
     async def stop_listener(self) -> None:
         """Stop the background listener task."""
@@ -83,7 +86,7 @@ class NotificationManager:
             except asyncio.CancelledError:
                 pass
             self._listener_task = None
-            print("[NotificationManager] Stopped Redis listener")
+            logger.info("[NotificationManager] Stopped Redis listener")
 
     async def _listen(self) -> None:
         """Background task to listen for Redis messages and forward to WebSockets."""
@@ -102,8 +105,8 @@ class NotificationManager:
                     await self._broadcast(channel, data)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            print(f"[NotificationManager] Listener error: {e}")
+        except Exception:
+            logger.exception("[NotificationManager] Listener error")
 
     async def _broadcast(self, channel: str, data: str) -> None:
         """Broadcast a message to all WebSockets subscribed to a channel."""
@@ -128,7 +131,7 @@ class NotificationManager:
             await self._pubsub.close()
         if self._redis:
             await self._redis.close()
-        print("[NotificationManager] Closed Redis connection")
+        logger.info("[NotificationManager] Closed Redis connection")
 
     async def broadcast_to_channel(self, channel: str, message: dict[str, Any]) -> None:
         """Directly broadcast a message to a channel (without Redis)."""

@@ -118,8 +118,12 @@ async def report_client_error(
         log_message = (body.message or "").replace("\n", " ").replace("\r", " ")[:500]
         log_stack = (body.stack or "").replace("\n", " | ")[:1000]
 
-        # Log it so it's immediately visible in container logs
-        logger.error(
+        # WARNING, not error: this insert already persists to client_error_reports
+        # below, which is the durable record. Logging at ERROR would also trip
+        # ServerErrorDBHandler (attached to root at ERROR), phantom-duplicating
+        # every client report into server_error_reports too. Still visible in
+        # container logs at the default LOG_LEVEL=INFO.
+        logger.warning(
             "[CLIENT-%s] %s | user=%s | url=%s | api=%s(%s) | stack=%s",
             body.kind.upper(),
             log_message,

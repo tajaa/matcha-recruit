@@ -243,6 +243,12 @@ _IGNORED_LOGGERS = {
     "watchfiles.main",
     "watchfiles",
     "matcha.error_reporter",
+    # main.py's unhandled-exception paths log here for stdout/traceback
+    # visibility, then call report_server_error() explicitly themselves —
+    # without this, the DB handler would also fire off that same log record
+    # and create a second, differently-classified ("unhandled") row for the
+    # exact same exception.
+    "matcha.unhandled",
 }
 
 

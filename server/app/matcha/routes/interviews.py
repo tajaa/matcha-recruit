@@ -2,6 +2,9 @@ from typing import Optional
 from uuid import UUID
 import asyncio
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
 
@@ -687,28 +690,27 @@ async def interview_websocket(
                 if audio_data:
                     audio_frame_count += 1
                     if audio_frame_count % 50 == 0:
-                        print(f"[Interview {interview_id}] Audio frame #{audio_frame_count}: {len(audio_data)} bytes")
+                        logger.debug("[Interview %s] Audio frame #%s: %s bytes", interview_id, audio_frame_count, len(audio_data))
                     await gemini_session.send_audio(audio_data)
 
         if session_timeout and not session_timeout.done():
             session_timeout.cancel()
 
     except WebSocketDisconnect:
-        print(f"[Interview {interview_id}] Client disconnected")
+        logger.info("[Interview %s] Client disconnected", interview_id)
     except RuntimeError as e:
         if "disconnect" in str(e).lower() or "receive" in str(e).lower():
-            print(f"[Interview {interview_id}] Client disconnected (RuntimeError)")
+            logger.info("[Interview %s] Client disconnected (RuntimeError)", interview_id)
         else:
-            print(f"[Interview {interview_id}] RuntimeError: {e}")
+            logger.warning("[Interview %s] RuntimeError: %s", interview_id, e)
             try:
                 await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
             except Exception:
                 pass
     except Exception as e:
-        import traceback
         error_type = e.__class__.__name__
         error_msg = str(e)
-        print(f"[Interview {interview_id}] Error ({error_type}): {error_msg}\n{traceback.format_exc()}")
+        logger.exception("[Interview %s] Error (%s): %s", interview_id, error_type, error_msg)
         
         # Format a user-friendly error message
         friendly_error = "An unexpected error occurred connecting to the AI."
