@@ -18,6 +18,8 @@ export interface EmsEvent {
   company_id: string
   channel_id: string | null
   channel_name: string | null
+  location_id: string | null
+  location_name: string | null
   message_id: string | null
   reporter_user_id: string | null
   reporter_name: string | null

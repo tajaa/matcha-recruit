@@ -203,6 +203,24 @@ def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
     return [loc for s, loc in scored if s == top]
 
 
+def apply_channel_default_location(
+    matched: list[dict],
+    hint: Optional[str],
+    channel_location_id,
+    locations: list[dict],
+) -> list[dict]:
+    """Channel store scope as the default: with NO explicit location hint, a
+    store-scoped channel resolves to its own location — skipping the 'Which
+    location?' clarify. An explicit hint ALWAYS wins, even when it names a
+    DIFFERENT store ('unless asked otherwise'). A stale channel location
+    (deactivated → absent from `locations`) falls through to the normal
+    match/clarify path."""
+    if (hint or "").strip() or not channel_location_id:
+        return matched
+    default = [l for l in locations if str(l.get("id")) == str(channel_location_id)]
+    return default or matched
+
+
 _AFFIRMATIVE_WORD = r"(?:yes|yeah|yep|sure|ok(?:ay)?|correct|that(?: one)?|the first(?: one)?|first)"
 _AFFIRMATIVE_RE = re.compile(rf"{_AFFIRMATIVE_WORD}[.!\s]*", re.IGNORECASE)
 _AFFIRMATIVE_LEAD_RE = re.compile(rf"^{_AFFIRMATIVE_WORD}[,.!\s]+", re.IGNORECASE)

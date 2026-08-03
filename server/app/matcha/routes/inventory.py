@@ -31,11 +31,13 @@ async def list_items(include_archived: bool = False, company_id: UUID = Depends(
         clause = "" if include_archived else "AND archived_at IS NULL"
         rows = await conn.fetch(
             f"""
-            SELECT it.*, o.id AS order_id, o.status AS order_status,
+            SELECT it.*, bl.name AS location_name,
+                   o.id AS order_id, o.status AS order_status,
                    o.suggested_quantity AS order_suggested_quantity, o.quantity AS order_quantity,
                    o.suggestion AS order_suggestion, o.created_at AS order_created_at,
                    o.updated_at AS order_updated_at
             FROM inventory_items it
+            LEFT JOIN business_locations bl ON bl.id = it.location_id
             LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
             WHERE it.company_id = $1 {clause}
             ORDER BY it.name
@@ -62,20 +64,29 @@ async def create_item(body: InventoryItemCreate, company_id: UUID = Depends(get_
                        user=Depends(require_admin_or_client)):
     normalized = normalize_name(body.name)
     async with get_connection() as conn:
+        if body.location_id is not None:
+            ok = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
+                "AND is_active = TRUE AND is_company_wide = FALSE",
+                body.location_id, company_id,
+            )
+            if not ok:
+                raise HTTPException(404, "Location not found.")
         existing = await conn.fetchval(
-            "SELECT id FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 AND archived_at IS NULL",
-            company_id, normalized,
+            "SELECT id FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 "
+            "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL",
+            company_id, normalized, body.location_id,
         )
         if existing:
             raise HTTPException(409, "An item with this name already exists.")
         row = await conn.fetchrow(
             """
             INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
-                                         low_stock_threshold, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *
+                                         low_stock_threshold, created_by, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
             """,
             company_id, body.name, normalized, body.unit, body.current_quantity,
-            body.low_stock_threshold, user.id,
+            body.low_stock_threshold, user.id, body.location_id,
         )
     return InventoryItemOut(**dict(row))
 

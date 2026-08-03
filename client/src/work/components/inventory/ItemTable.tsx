@@ -30,7 +30,12 @@ export default function ItemTable({ items }: { items: InventoryItem[] }) {
               onClick={() => navigate(`${base}/inventory/${item.id}`)}
               className="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900"
             >
-              <td className="px-4 py-2">{item.name}</td>
+              <td className="px-4 py-2">
+                {item.name}
+                {item.location_name && (
+                  <span className="ml-2 text-xs text-zinc-400 dark:text-zinc-500">· {item.location_name}</span>
+                )}
+              </td>
               <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">{item.unit ?? '—'}</td>
               <td className="px-4 py-2">
                 {item.current_quantity !== null ? item.current_quantity : <span className="text-zinc-400">unknown</span>}

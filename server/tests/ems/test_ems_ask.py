@@ -87,7 +87,7 @@ class TestNoEventsText:
         # record, and it points at the wrong next step.
         text = ask.no_events_text(filtered=True)
         assert "Nothing's been logged" not in text
-        assert "Events" in text
+        assert "Ops" in text
 
     def test_unfiltered_invites_a_report(self):
         text = ask.no_events_text(filtered=False)
@@ -102,8 +102,9 @@ class TestHelpText:
         assert "reply" in text.lower()
 
     def test_employee_help_omits_the_events_tab(self):
-        # The Events tab is admin-only (routes/ems.py) — pointing an
-        # employee at a 403 is worse than not mentioning it.
+        # The Events tab (now under the "Ops" sidebar group) is admin-only
+        # (routes/ems.py) — pointing an employee at a 403 is worse than not
+        # mentioning it.
         assert "promote" not in ask.help_text(is_admin=False).lower()
 
     def test_admin_help_mentions_promotion(self):

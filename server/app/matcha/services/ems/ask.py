@@ -156,7 +156,7 @@ def no_events_text(*, filtered: bool) -> str:
     if filtered:
         return (
             "\U0001F4CB Nothing I can pull up here. If something was reported, "
-            "an admin can see the full picture in Events."
+            "an admin can see the full picture in Ops."
         )
     return (
         "\U0001F4CB Nothing's been logged in this channel yet. Tell me what "
@@ -194,7 +194,7 @@ async def answer_question(question: str, events: list[dict], *, is_admin: bool) 
         logger.warning("EMS: ask answer generation failed", exc_info=True)
     return (
         "\U0001F4CB I couldn't pull that up just now — everything logged here "
-        "is still on file in Events."
+        "is still on file in Ops."
     )
 
 
@@ -213,7 +213,7 @@ def help_text(*, is_admin: bool) -> str:
     ]
     if is_admin:
         lines.append(
-            "• Everything logged is reviewable in Events, where you can "
+            "• Everything logged is reviewable in Ops, where you can "
             "promote something into a formal incident",
         )
     return "\n".join(lines)

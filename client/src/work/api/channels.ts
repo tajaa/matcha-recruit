@@ -7,6 +7,8 @@ export interface ChannelSummary {
   description: string | null
   visibility: string
   category?: string | null
+  location_id?: string | null
+  location_name?: string | null
   member_count: number
   unread_count: number
   last_message_at: string | null
@@ -126,6 +128,8 @@ export interface ChannelDetail {
   description: string | null
   visibility: string
   category?: string | null
+  location_id?: string | null
+  location_name?: string | null
   is_paid: boolean
   price_cents: number | null
   currency: string
@@ -199,9 +203,10 @@ export const createChannel = async (
   visibility: string = 'public',
   paidConfig?: PaidChannelConfig,
   category?: string,
+  locationId?: string,
 ) => {
   const res = await api.post<ChannelDetail>('/channels', {
-    name, description, visibility, category, paid_config: paidConfig,
+    name, description, visibility, category, paid_config: paidConfig, location_id: locationId,
   })
   window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
   return res
@@ -242,8 +247,20 @@ export const leaveChannel = async (id: string) => {
   return res
 }
 
-export const updateChannel = (id: string, updates: { name?: string; description?: string }) =>
-  api.patch<ChannelSummary>(`/channels/${id}`, updates)
+export const updateChannel = (
+  id: string,
+  updates: { name?: string; description?: string; visibility?: string; category?: string; location_id?: string | null },
+) => api.patch<ChannelSummary>(`/channels/${id}`, updates)
+
+export interface ChannelLocation {
+  id: string
+  name: string
+  city: string | null
+  state: string | null
+}
+
+export const listChannelLocations = () =>
+  api.get<ChannelLocation[]>('/channels/locations')
 
 export async function uploadChannelFiles(channelId: string, files: File[]): Promise<ChannelAttachment[]> {
   const token = await ensureFreshToken()

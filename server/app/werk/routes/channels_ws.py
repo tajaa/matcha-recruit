@@ -212,6 +212,22 @@ async def _inventory_company_gate(conn, channel_id_str: str):
     return row["company_id"] if _inventory_row_allowed(row) else None
 
 
+async def _channel_location(conn, channel_id_str: str):
+    """(location_id, location_name) when the channel is store-scoped,
+    (None, None) otherwise. Gates stay untouched — their company_id return
+    is consumed at 6+ sites; this is a separate indexed lookup callers make
+    only while already holding a conn."""
+    row = await conn.fetchrow(
+        "SELECT ch.location_id, bl.name AS location_name "
+        "FROM channels ch LEFT JOIN business_locations bl ON bl.id = ch.location_id "
+        "WHERE ch.id = $1",
+        UUID(channel_id_str),
+    )
+    if not row or row["location_id"] is None:
+        return None, None
+    return row["location_id"], row["location_name"]
+
+
 async def _ems_first_time_hint(conn, channel_id_str: str) -> str:
     """`ask.FIRST_TIME_HINT` the FIRST time Huume logs something in a given
     channel, "" every time after — this is how people find out it does more
@@ -490,6 +506,7 @@ async def _bg_inventory_request(
         sys_row = None
         item_rows = []
         osha_dual_write = False
+        location_id = None
         stripped = strip_mention(content)
 
         async with get_connection() as conn:
@@ -507,13 +524,14 @@ async def _bg_inventory_request(
                 if fallback_classification(content).get("urgency") == "osha":
                     osha_dual_write = True
 
+                location_id, _ = await _channel_location(conn, channel_id_str)
                 features = await _schedule_company_features(conn, company_id)
                 role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
                 verdict = evaluate_inventory_action(role=role, features=features, stage="movement")
                 if not verdict.ok:
                     sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
                 elif sys_row is None:
-                    item_rows = await movements_service.list_item_names(conn, company_id)
+                    item_rows = await movements_service.list_item_names(conn, company_id, location_id)
 
         if delegate:
             await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
@@ -545,7 +563,8 @@ async def _bg_inventory_request(
                 resolved_lines = []
                 for line in lines:
                     item = await movements_service.find_or_create_item(
-                        conn, company_id, line.get("item_name", ""), created_by=UUID(sender_user_id_str),
+                        conn, company_id, line.get("item_name", ""),
+                        created_by=UUID(sender_user_id_str), location_id=location_id,
                     )
                     qty = line.get("quantity")
                     estimated = qty is None
@@ -581,7 +600,8 @@ async def _bg_inventory_request(
             else:  # stockout / order_request
                 item_name = lines[0].get("item_name") if lines else stripped
                 item = await movements_service.find_or_create_item(
-                    conn, company_id, item_name, created_by=UUID(sender_user_id_str),
+                    conn, company_id, item_name,
+                    created_by=UUID(sender_user_id_str), location_id=location_id,
                 )
                 if kind == "stockout":
                     await movements_service.record_movements(
@@ -998,11 +1018,14 @@ async def _bg_ems_intake(
             context = await gather_intake_context(
                 conn, UUID(channel_id_str), UUID(message_id_str),
             )
+            location_id, location_name = await _channel_location(conn, channel_id_str)
         # No connection held across the Gemini calls.
         if rate_limited:
             classified = fallback_classification(content)  # zero Gemini calls
         else:
-            classified = await classify_event(content, context, protocol_text=protocol_text)
+            classified = await classify_event(
+                content, context, protocol_text=protocol_text, location_name=location_name,
+            )
 
         # Model-side backstop for the deterministic classify_intent gate:
         # the regex layer routed this to LOG, but the model itself read the
@@ -1038,6 +1061,7 @@ async def _bg_ems_intake(
                 reporter_user_id=UUID(reporter_user_id_str),
                 content=content,
                 classified=classified,
+                location_id=location_id,
             )
             if event_row is None:
                 return  # dedupe hit (ON CONFLICT on message_id) — nothing to confirm
@@ -1192,6 +1216,7 @@ async def _bg_ems_clarify(
                 # reporter had said them.
                 question = extract_question(question_row["content"]) if question_row else ""
                 context = await gather_intake_context(conn, UUID(channel_id_str), reply_uuid)
+                _, location_name = await _channel_location(conn, channel_id_str)
 
                 protocol_text = None
                 if mentions_incident(claimed["narrative"]) or mentions_incident(content):
@@ -1215,7 +1240,9 @@ async def _bg_ems_clarify(
 
         # No connection held across the Gemini call.
         refinement_content = compose_refinement_content(claimed["narrative"], question, content)
-        classified = await classify_event(refinement_content, context, protocol_text=protocol_text)
+        classified = await classify_event(
+            refinement_content, context, protocol_text=protocol_text, location_name=location_name,
+        )
 
         async with get_connection() as conn:
             reclassified = await apply_reclassification(

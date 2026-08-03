@@ -185,6 +185,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         openProjects={() => sections.open('projects')}
         openChats={() => sections.open('chats')}
         showEvents={showEvents}
+        showInventory={showInventory}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -219,6 +220,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             <Home size={14} strokeWidth={1.6} />
             Home
           </button>
+
+          {(showEvents || showInventory) && (
+            <div className="mt-2 px-2.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-w-dim">Ops</div>
+          )}
 
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (

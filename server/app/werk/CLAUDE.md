@@ -4,7 +4,7 @@ Werk / Werk-Lite's real-time layer: channel chat, LiveKit audio/video calls, cha
 
 ## Layout
 
-- `routes/channels.py` + `channels_ws.py` — channel CRUD + WebSocket fan-out (`channels_ws.py` owns `manager`, the live object matcha imports back for notification fan-out)
+- `routes/channels.py` + `channels_ws.py` — channel CRUD + WebSocket fan-out (`channels_ws.py` owns `manager`, the live object matcha imports back for notification fan-out). `channels.location_id` (migration `oploc01`) optionally binds a channel to a `business_locations` row — `POST/GET/PATCH /channels` accept/return it, `GET /channels/locations` is the store picker (active, non-`is_company_wide` rows only). `channels_ws._channel_location(conn, channel_id_str)` is the one lookup every @huume dispatch handler uses to thread that scope into `ems`/`inventory`/`schedule_chat`.
 - `routes/channel_calls.py` — LiveKit call start/join, invite-only via `channel_call_invites`
 - `routes/channel_broadcasts.py`, `channel_job_postings.py`, `inbox.py`
 - `services/channel_job_posting_service.py`, `channel_payment_service.py`, `inactivity_worker.py`

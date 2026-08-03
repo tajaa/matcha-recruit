@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, CheckCircle2, ExternalLink, Hash, HelpCircle, Loader2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, Hash, HelpCircle, Loader2, MapPin, XCircle } from 'lucide-react'
 import { EMS_CATEGORY_LABELS, type EmsEvent } from '../../api/events'
 
 interface EventDetailProps {
@@ -52,6 +52,12 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
               <span className="flex items-center gap-0.5">
                 <Hash className="w-3 h-3" />
                 {event.channel_name}
+              </span>
+            )}
+            {event.location_name && (
+              <span className="flex items-center gap-0.5">
+                <MapPin className="w-3 h-3" />
+                {event.location_name}
               </span>
             )}
             {event.reporter_name && <span>Reported by {event.reporter_name}</span>}

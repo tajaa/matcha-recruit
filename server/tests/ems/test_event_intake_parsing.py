@@ -40,7 +40,7 @@ class _FakeConn:
              title, category, severity_hint, doc_json, narrative,
              incident_recommendation, incident_reasoning,
              suggested_incident_type, suggested_severity,
-             urgency, protocol_qualifies, protocol_reasoning) = args
+             urgency, protocol_qualifies, protocol_reasoning, location_id) = args
             now = datetime.now(timezone.utc)
             return {
                 "id": uuid4(), "company_id": company_id, "channel_id": channel_id,
@@ -52,7 +52,7 @@ class _FakeConn:
                 "suggested_incident_type": suggested_incident_type,
                 "suggested_severity": suggested_severity,
                 "urgency": urgency, "protocol_qualifies": protocol_qualifies,
-                "protocol_reasoning": protocol_reasoning,
+                "protocol_reasoning": protocol_reasoning, "location_id": location_id,
                 "status": "logged", "created_at": now, "updated_at": now,
             }
         raise AssertionError(f"unexpected fetchrow: {q}")
@@ -293,7 +293,7 @@ class TestConfirmationText:
 
     def test_falls_back_without_ack(self):
         text = event_intake._confirmation_text({"category": "equipment", "incident_recommendation": False})
-        assert text == "\U0001F4CB Logged this as **Equipment** (visible to HR admins in Events)."
+        assert text == "\U0001F4CB Logged this as **Equipment** (visible to HR admins in Ops)."
 
     def test_emphasizes_only_the_category(self):
         # `**` is the ONLY markup the channel renderer parses
@@ -902,3 +902,20 @@ class TestApplyReclassification:
         )
         assert reclassified is None
         assert conn.executed == []
+
+
+class TestLocationPromptLine:
+    def test_prompt_names_the_store(self):
+        p = event_intake._build_classify_prompt("spill in aisle 3", [], location_name="La Jolla")
+        assert "## CHANNEL STORE SCOPE" in p
+        assert "scoped to the store location: La Jolla" in p
+
+    def test_no_location_no_block(self):
+        p = event_intake._build_classify_prompt("spill in aisle 3", [])
+        assert "CHANNEL STORE SCOPE" not in p
+
+    def test_location_block_precedes_the_message(self):
+        # Reference data must land before "## MESSAGE TO LOG", never after —
+        # anything after the message block reads as part of the message.
+        p = event_intake._build_classify_prompt("spill", [], location_name="La Jolla")
+        assert p.index("CHANNEL STORE SCOPE") < p.index("## MESSAGE TO LOG")

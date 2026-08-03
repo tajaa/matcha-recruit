@@ -6,7 +6,7 @@ import { renderSystemContent, stripEmphasis } from './systemContent'
 /** Mirrors the strings composed server-side by
  *  services/ems/event_intake.py:_confirmation_text and the two
  *  "Updated ... event" strings in werk/routes/channels_ws.py. */
-const PILL = '📋 Logged **Operational** event (visible to HR admins in Events).'
+const PILL = '📋 Logged **Operational** event (visible to HR admins in Ops).'
 
 describe('renderSystemContent', () => {
   it('splits a Huume pill into plain / bold / plain', () => {
@@ -15,7 +15,7 @@ describe('renderSystemContent', () => {
     expect(parts[0]).toBe('📋 Logged ')
     expect(isValidElement(parts[1])).toBe(true)
     expect((parts[1] as React.ReactElement<{ children: string }>).props.children).toBe('Operational')
-    expect(parts[2]).toBe(' event (visible to HR admins in Events).')
+    expect(parts[2]).toBe(' event (visible to HR admins in Ops).')
   })
 
   it('leaves text with no markers as a single plain segment', () => {
@@ -76,7 +76,7 @@ describe('renderSystemContent', () => {
 describe('stripEmphasis', () => {
   it('removes the markers but keeps the word', () => {
     expect(stripEmphasis(PILL)).toBe(
-      '📋 Logged Operational event (visible to HR admins in Events).',
+      '📋 Logged Operational event (visible to HR admins in Ops).',
     )
   })
 

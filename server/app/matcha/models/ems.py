@@ -12,6 +12,8 @@ class EmsEventOut(BaseModel):
     company_id: UUID
     channel_id: Optional[UUID] = None
     channel_name: Optional[str] = None
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
     message_id: Optional[UUID] = None
     reporter_user_id: Optional[UUID] = None
     reporter_name: Optional[str] = None

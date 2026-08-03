@@ -257,6 +257,10 @@ class ChannelSummary(BaseModel):
     description: Optional[str] = None
     visibility: str = "public"
     category: Optional[str] = None
+    # Store scope (business_locations). @huume dispatch in a location-scoped
+    # channel constrains events/inventory/schedule-chat to this store.
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
     is_paid: bool = False
     price_cents: Optional[int] = None
     currency: Optional[str] = None
@@ -288,6 +292,8 @@ class ChannelDetail(BaseModel):
     description: Optional[str] = None
     visibility: str = "public"
     category: Optional[str] = None
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
     is_paid: bool = False
     price_cents: Optional[int] = None
     currency: str = "usd"
@@ -322,6 +328,7 @@ class CreateChannelRequest(BaseModel):
     visibility: str = "public"
     category: Optional[str] = None
     paid_config: Optional[PaidChannelConfig] = None
+    location_id: Optional[UUID] = None
 
 
 class CreateInviteRequest(BaseModel):
@@ -366,6 +373,21 @@ async def _get_company_id(current_user: CurrentUser) -> UUID:
     return company_id
 
 
+async def _assert_channel_location(conn, company_id: UUID, location_id: Optional[UUID]) -> None:
+    """404 unless the location belongs to this company, is active, and is
+    not the is_company_wide sentinel row (admin-onboarding scope marker,
+    never a real store — zzzz_a01)."""
+    if location_id is None:
+        return
+    ok = await conn.fetchval(
+        "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
+        "AND is_active = TRUE AND is_company_wide = FALSE",
+        location_id, company_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -385,6 +407,8 @@ async def list_channels(
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
                    ch.category,
+                   ch.location_id,
+                   (SELECT bl.name FROM business_locations bl WHERE bl.id = ch.location_id) AS location_name,
                    COALESCE(ch.is_paid, false) AS is_paid,
                    (SELECT COUNT(*) FROM channel_members WHERE channel_id = ch.id) AS member_count,
                    CASE WHEN cm.user_id IS NOT NULL THEN
@@ -439,6 +463,8 @@ async def list_channels(
                 description=r["description"],
                 visibility=r["visibility"],
                 category=r["category"],
+                location_id=r["location_id"],
+                location_name=r["location_name"],
                 is_paid=r["is_paid"],
                 member_count=r["member_count"],
                 unread_count=r["unread_count"],
@@ -462,6 +488,25 @@ async def list_channel_categories():
     """Allowed category values for channel creation/filtering. Public so the
     web + werk creation UIs can fetch the canonical list without hard-coding."""
     return list(CHANNEL_CATEGORIES)
+
+
+@router.get("/locations")
+async def list_channel_locations(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Active, non-sentinel business_locations for the caller's company —
+    the store picker for location-scoped channels."""
+    company_id = await _get_company_id(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, city, state FROM business_locations "
+            "WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE "
+            "ORDER BY name NULLS LAST, city",
+            company_id,
+        )
+    return [
+        {"id": str(r["id"]), "name": r["name"] or r["city"] or "Unnamed",
+         "city": r["city"], "state": r["state"]}
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -692,6 +737,11 @@ async def create_channel(
         visibility = body.visibility if body.visibility in ("public", "private", "invite_only") else "public"
         category = _normalize_category(body.category)
 
+        # Store scope: business tenants only — personal (individual) accounts
+        # have no business_locations to bind to.
+        location_id = body.location_id if current_user.role in ("client", "admin") else None
+        await _assert_channel_location(conn, company_id, location_id)
+
         # Handle paid channel setup
         is_paid = False
         price_cents = None
@@ -724,12 +774,12 @@ async def create_channel(
         row = await conn.fetchrow(
             """
             INSERT INTO channels (company_id, name, slug, description, created_by, visibility, category,
-                is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility, category
+                is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility, category, location_id
             """,
             company_id, name, slug, body.description, current_user.id, visibility, category,
-            is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days,
+            is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days, location_id,
         )
 
         if is_paid:
@@ -762,6 +812,10 @@ async def create_channel(
             description=row["description"],
             visibility=row["visibility"] or "public",
             category=row["category"],
+            location_id=row["location_id"],
+            location_name=(await conn.fetchval(
+                "SELECT name FROM business_locations WHERE id = $1", row["location_id"],
+            )) if row["location_id"] else None,
             is_paid=is_paid,
             price_cents=price_cents,
             currency=currency,
@@ -1213,6 +1267,7 @@ async def get_channel(
     async with get_connection() as conn:
         ch = await conn.fetchrow(
             "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency, "
+            "location_id, (SELECT bl.name FROM business_locations bl WHERE bl.id = channels.location_id) AS location_name, "
             "(SELECT p.id FROM mw_projects p WHERE p.project_data->>'discussion_channel_id' = channels.id::text LIMIT 1) AS project_id "
             "FROM channels WHERE id = $1",
             channel_id,
@@ -1312,6 +1367,8 @@ async def get_channel(
         description=ch["description"],
         visibility=ch["visibility"],
         category=ch["category"],
+        location_id=ch["location_id"],
+        location_name=ch["location_name"],
         is_paid=ch["is_paid"],
         price_cents=ch["price_cents"],
         currency=ch["currency"],
@@ -1810,6 +1867,7 @@ class UpdateChannelRequest(BaseModel):
     description: Optional[str] = None
     visibility: Optional[str] = None
     category: Optional[str] = None
+    location_id: Optional[UUID] = None  # null = clear back to company-wide
 
 
 @router.patch("/{channel_id}", response_model=ChannelSummary)
@@ -1837,6 +1895,10 @@ async def update_channel(
         # Only owner can change visibility
         if body.visibility is not None and my_role != "owner" and not is_admin:
             raise HTTPException(status_code=403, detail="Only the channel owner can change visibility")
+
+        # Changing the store redirects where @huume writes inventory/events — owner-only, like visibility.
+        if "location_id" in body.model_fields_set and my_role != "owner" and not is_admin:
+            raise HTTPException(status_code=403, detail="Only the channel owner can change the store location")
 
         sets = []
         params: list = []
@@ -1874,6 +1936,12 @@ async def update_channel(
             params.append(normalized)
             idx += 1
 
+        if "location_id" in body.model_fields_set:
+            await _assert_channel_location(conn, row["company_id"], body.location_id)
+            sets.append(f"location_id = ${idx}")
+            params.append(body.location_id)
+            idx += 1
+
         if not sets:
             raise HTTPException(status_code=400, detail="No updates provided")
 
@@ -1889,6 +1957,8 @@ async def update_channel(
             SELECT c.id, c.name, c.slug, c.description,
                    COALESCE(c.visibility, 'public') AS visibility,
                    c.category,
+                   c.location_id,
+                   (SELECT bl.name FROM business_locations bl WHERE bl.id = c.location_id) AS location_name,
                    COALESCE(c.is_paid, false) AS is_paid,
                    c.price_cents,
                    COALESCE(c.currency, 'usd') AS currency,

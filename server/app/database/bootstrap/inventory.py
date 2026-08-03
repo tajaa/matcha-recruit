@@ -19,13 +19,25 @@ async def create_inventory(conn):
             auto_created BOOLEAN NOT NULL DEFAULT FALSE,
             created_by UUID REFERENCES users(id) ON DELETE SET NULL,
             archived_at TIMESTAMPTZ,
+            location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    # Store scope for per-location catalogs (matches Alembic migration
+    # oploc01). Guard kept separate from the CREATE TABLE above so an
+    # existing pre-oploc01 table also picks up the column.
+    await conn.execute("""
+        ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS location_id UUID
+        REFERENCES business_locations(id) ON DELETE SET NULL
+    """)
+    # NULLS NOT DISTINCT makes (company, NULL, name) collide exactly like
+    # the pre-oploc01 (company, name) index — a company-wide item still has
+    # one row, a store item is scoped to its own location_id.
     await conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_items_name
-        ON inventory_items (company_id, normalized_name) WHERE archived_at IS NULL
+        ON inventory_items (company_id, location_id, normalized_name)
+        NULLS NOT DISTINCT WHERE archived_at IS NULL
     """)
 
     await conn.execute("""

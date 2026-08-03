@@ -1,4 +1,4 @@
-import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
 
@@ -17,6 +17,7 @@ interface Props {
   openProjects: () => void
   openChats: () => void
   showEvents: boolean
+  showInventory: boolean
   loggedEventsCount: number
 }
 
@@ -36,6 +37,7 @@ export default function CollapsedRail({
   openProjects,
   openChats,
   showEvents,
+  showInventory,
   loggedEventsCount,
 }: Props) {
   return (
@@ -77,6 +79,26 @@ export default function CollapsedRail({
               {formatEventsBadge(loggedEventsCount, true)}
             </span>
           )}
+        </button>
+      )}
+
+      {showEvents && (
+        <button
+          onClick={() => navigate(`${base}/protocol`)}
+          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/protocol`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+          title="Protocol"
+        >
+          <BookOpenCheck size={16} />
+        </button>
+      )}
+
+      {showInventory && (
+        <button
+          onClick={() => navigate(`${base}/inventory`)}
+          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+          title="Inventory"
+        >
+          <Package size={16} />
         </button>
       )}
 

@@ -28,6 +28,8 @@ class InventoryItemOut(BaseModel):
     low_stock_threshold: Optional[Decimal] = None
     auto_created: bool
     archived_at: Optional[datetime] = None
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     open_order: Optional[OrderOut] = None
@@ -38,6 +40,7 @@ class InventoryItemCreate(BaseModel):
     unit: Optional[str] = None
     current_quantity: Optional[Decimal] = None
     low_stock_threshold: Optional[Decimal] = None
+    location_id: Optional[UUID] = None
 
 
 class InventoryItemPatch(BaseModel):

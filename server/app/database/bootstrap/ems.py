@@ -37,9 +37,17 @@ async def create_ems(conn):
             token_usage JSONB,
             clarify_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
             clarification_rounds SMALLINT NOT NULL DEFAULT 0,
+            location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+    """)
+    # Store scope for events logged in a location-scoped channel (matches
+    # Alembic migration oploc01). Guard kept separate from the CREATE TABLE
+    # above so an existing pre-oploc01 table also picks up the column.
+    await conn.execute("""
+        ALTER TABLE ems_events ADD COLUMN IF NOT EXISTS location_id UUID
+        REFERENCES business_locations(id) ON DELETE SET NULL
     """)
     await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_ems_events_company

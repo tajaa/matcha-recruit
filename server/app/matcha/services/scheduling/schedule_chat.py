@@ -48,6 +48,7 @@ from . import schedule_compliance
 from .schedule_chat_rules import (
     CandidateContext,
     NeedsClarify,
+    apply_channel_default_location,
     build_adhoc_spec,
     match_location,
     match_template,
@@ -309,6 +310,13 @@ async def build_proposal(
             "I don't see any locations set up yet — add one under Company, then try again."
         )
     matched = match_location(parsed.get("location_hint"), locations)
+    if channel_id is not None:
+        channel_location_id = await conn.fetchval(
+            "SELECT location_id FROM channels WHERE id = $1", channel_id,
+        )
+        matched = apply_channel_default_location(
+            matched, parsed.get("location_hint"), channel_location_id, locations,
+        )
     if len(matched) != 1:
         options = [
             f"{(l.get('name') or l.get('address') or 'Unnamed')} ({l.get('city')})"

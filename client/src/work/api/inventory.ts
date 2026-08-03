@@ -24,6 +24,8 @@ export interface InventoryItem {
   low_stock_threshold: number | null
   auto_created: boolean
   archived_at: string | null
+  location_id: string | null
+  location_name: string | null
   created_at: string
   updated_at: string
   open_order: InventoryOrder | null
@@ -79,6 +81,7 @@ export async function createItem(body: {
   unit?: string
   current_quantity?: number
   low_stock_threshold?: number
+  location_id?: string
 }) {
   return api.post<InventoryItem>('/inventory/items', body)
 }

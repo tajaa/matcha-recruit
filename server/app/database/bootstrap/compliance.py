@@ -42,6 +42,15 @@ async def create_compliance(conn):
             ADD COLUMN IF NOT EXISTS next_auto_check TIMESTAMP
         """)
 
+        # Sentinel marker for the company-wide "location" row some onboarding
+        # flows create (zzzz_a01_admin_onboarding_scope) — never a real
+        # store. Pickers (channel/store scoping, business_locations lookups
+        # meant for physical sites) must filter this out.
+        await conn.execute("""
+            ALTER TABLE business_locations
+            ADD COLUMN IF NOT EXISTS is_company_wide BOOLEAN NOT NULL DEFAULT FALSE
+        """)
+
         # Per-location anonymous "magic link" tokens backing the public incident
         # intake form (/intake/{token}). Single-use (used_at set on first submit),
         # one current link per (company_id, location_id) — regenerate rotates the

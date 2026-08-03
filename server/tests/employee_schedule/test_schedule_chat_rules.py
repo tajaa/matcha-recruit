@@ -11,6 +11,7 @@ import pytest
 from app.matcha.services.scheduling.schedule_chat_rules import (
     CandidateContext,
     NeedsClarify,
+    apply_channel_default_location,
     build_adhoc_spec,
     match_location,
     match_template,
@@ -309,3 +310,34 @@ class TestParseConfirmReply:
 
     def test_empty_string_is_other(self):
         assert parse_confirm_reply("") == "other"
+
+
+LOC_A = {"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "name": "Wilshire", "city": "LA"}
+LOC_B = {"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "name": "Sunset", "city": "LA"}
+
+
+class TestApplyChannelDefaultLocation:
+    def test_unscoped_channel_is_a_noop(self):
+        assert apply_channel_default_location([], None, None, [LOC_A, LOC_B]) == []
+
+    def test_channel_default_resolves_without_a_hint(self):
+        # Both empty-hint outcomes (0 matches and >1 matches) collapse to
+        # the channel's own store — this is the clarify round being skipped.
+        assert apply_channel_default_location([], "", LOC_B["id"], [LOC_A, LOC_B]) == [LOC_B]
+        assert apply_channel_default_location([LOC_A, LOC_B], None, LOC_B["id"], [LOC_A, LOC_B]) == [LOC_B]
+
+    def test_explicit_hint_always_wins(self):
+        # "unless asked otherwise": a hint naming the OTHER store is honored.
+        matched = [LOC_A]
+        assert apply_channel_default_location(matched, "wilshire", LOC_B["id"], [LOC_A, LOC_B]) is matched
+
+    def test_stale_channel_location_falls_through(self):
+        # Deactivated store: absent from the active list → normal clarify path.
+        matched = [LOC_A, LOC_B]
+        assert apply_channel_default_location(
+            matched, "", "cccccccc-cccc-cccc-cccc-cccccccccccc", [LOC_A, LOC_B],
+        ) is matched
+
+    def test_uuid_vs_str_id_comparison(self):
+        from uuid import UUID
+        assert apply_channel_default_location([], "", UUID(LOC_B["id"]), [LOC_A, LOC_B]) == [LOC_B]

@@ -45,7 +45,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="channels/:channelId" element={<ChannelView />} />
           <Route
             element={
-              <FeatureGate feature="ems" label="Events">
+              <FeatureGate feature="ems" label="Ops — Events">
                 <Outlet />
               </FeatureGate>
             }
@@ -56,7 +56,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           </Route>
           <Route
             element={
-              <FeatureGate feature="inventory" label="Inventory">
+              <FeatureGate feature="inventory" label="Ops — Inventory">
                 <Outlet />
               </FeatureGate>
             }

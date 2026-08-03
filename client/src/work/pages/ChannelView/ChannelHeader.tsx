@@ -1,4 +1,4 @@
-import { Hash, Users, Phone, MoreHorizontal } from 'lucide-react'
+import { Hash, Users, Phone, MoreHorizontal, MapPin } from 'lucide-react'
 import type { ChannelDetail, ChannelPaymentInfo } from '../../api/channels'
 import type { useLiveKitCall } from '../../hooks/useLiveKitCall'
 import type { HeaderAction } from './types'
@@ -39,6 +39,11 @@ export default function ChannelHeader({
           {channel?.name}
           {paymentInfo?.is_paid && (
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-w-accent/15 text-w-accent">$</span>
+          )}
+          {channel?.location_name && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-w-accent/15 text-w-accent">
+              <MapPin size={10} /> {channel.location_name}
+            </span>
           )}
         </h2>
         {channel?.description && (

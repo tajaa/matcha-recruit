@@ -6,34 +6,45 @@ from uuid import UUID
 from app.matcha.services.inventory.matching import best_match, normalize_name
 
 
-async def list_item_names(conn, company_id: UUID) -> list[dict]:
+async def list_item_names(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
+    """Items visible in a store scope. A store-scoped channel sees its own
+    items plus legacy company-wide (location_id IS NULL) rows; an unscoped
+    channel (location_id=None) sees ONLY company-wide rows — two stores'
+    same-named items would otherwise be indistinguishable to best_match.
+    The /inventory page keeps listing everything (its own query)."""
     rows = await conn.fetch(
-        "SELECT id, name, normalized_name FROM inventory_items "
-        "WHERE company_id = $1 AND archived_at IS NULL",
-        company_id,
+        "SELECT id, name, normalized_name, location_id FROM inventory_items "
+        "WHERE company_id = $1 AND archived_at IS NULL "
+        "AND (location_id IS NULL OR location_id = $2)",
+        company_id, location_id,
     )
     return [dict(r) for r in rows]
 
 
-async def find_or_create_item(conn, company_id: UUID, raw_name: str, *, created_by: Optional[UUID]) -> dict:
-    existing = await list_item_names(conn, company_id)
+async def find_or_create_item(
+    conn, company_id: UUID, raw_name: str, *,
+    created_by: Optional[UUID], location_id: Optional[UUID] = None,
+) -> dict:
+    existing = await list_item_names(conn, company_id, location_id)
     match = best_match(raw_name, existing)
     if match is not None:
+        # May resolve to a shared NULL-location legacy item — intended.
         row = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1", match["id"])
         return dict(row)
 
     normalized = normalize_name(raw_name)
     await conn.execute(
         """
-        INSERT INTO inventory_items (company_id, name, normalized_name, auto_created, created_by)
-        VALUES ($1, $2, $3, TRUE, $4)
-        ON CONFLICT (company_id, normalized_name) WHERE archived_at IS NULL DO NOTHING
+        INSERT INTO inventory_items (company_id, location_id, name, normalized_name, auto_created, created_by)
+        VALUES ($1, $2, $3, $4, TRUE, $5)
+        ON CONFLICT (company_id, location_id, normalized_name) WHERE archived_at IS NULL DO NOTHING
         """,
-        company_id, raw_name.strip(), normalized, created_by,
+        company_id, location_id, raw_name.strip(), normalized, created_by,
     )
     row = await conn.fetchrow(
-        "SELECT * FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 AND archived_at IS NULL",
-        company_id, normalized,
+        "SELECT * FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 "
+        "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL",
+        company_id, normalized, location_id,
     )
     return dict(row)
 

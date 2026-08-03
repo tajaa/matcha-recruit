@@ -238,6 +238,10 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             Home
           </button>
 
+          {(showEvents || showInventory) && (
+            <div className="mt-2 px-2.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-w-dim">Ops</div>
+          )}
+
           {showEvents && (
             <button
               onClick={() => navigate(`${base}/events`)}

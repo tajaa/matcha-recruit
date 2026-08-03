@@ -134,6 +134,12 @@ async def create_misc_tail(conn):
                 ON channels(company_id, category)
                 WHERE category IS NOT NULL
         """)
+        # Store-location scope for Ops channel dispatch (matches Alembic migration oploc01).
+        await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL")
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channels_location
+                ON channels(location_id) WHERE location_id IS NOT NULL
+        """)
         # Backfill: set channel creators as owners
         await conn.execute("""
             UPDATE channel_members cm SET role = 'owner'

@@ -51,7 +51,8 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
     label: 'Matcha Work',
     features: {
       matcha_work: 'Matcha Work',
-      inventory: 'Inventory',
+      ems: 'Ops — Events (channel event logging via @huume) — needs Matcha Work too',
+      inventory: 'Ops — Inventory (channel stock tracking via @huume) — needs Matcha Work too',
       werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
       werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
@@ -95,6 +96,8 @@ export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
  */
 export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
+  ems: ['matcha_work'],
+  inventory: ['matcha_work'],
   werk_lite: ['matcha_work'],
   // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately
   // NOT here even though each needs incidents/osha_logs to do anything — see

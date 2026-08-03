@@ -16,6 +16,7 @@ _NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u
 
 EVENT_SELECT = f"""
     SELECT ev.id, ev.company_id, ev.channel_id, ch.name AS channel_name,
+           ev.location_id, bl.name AS location_name,
            ev.message_id, ev.reporter_user_id, {_NAME_EXPR} AS reporter_name,
            ev.title, ev.category, ev.severity_hint, ev.doc, ev.narrative,
            ev.incident_recommendation, ev.incident_reasoning,
@@ -27,6 +28,7 @@ EVENT_SELECT = f"""
            ev.created_at, ev.updated_at
     FROM ems_events ev
     LEFT JOIN channels ch ON ch.id = ev.channel_id
+    LEFT JOIN business_locations bl ON bl.id = ev.location_id
     LEFT JOIN users u ON u.id = ev.reporter_user_id
     LEFT JOIN clients c ON c.user_id = u.id
     LEFT JOIN employees e ON e.user_id = u.id

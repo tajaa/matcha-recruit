@@ -40,6 +40,21 @@ RECORD_REQUIRED_FEATURE: dict[str, str] = {
     "inventory_item": "inventory",
 }
 
+
+async def _work_base_path(conn, company_id: UUID) -> str:
+    """/werk-lite for werk-lite tenants, /work otherwise — same merge
+    urgent_notify.py uses, so panel links land in the shell the admin
+    actually has."""
+    from app.core.feature_flags import merge_company_features
+
+    row = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id,
+    )
+    merged = merge_company_features(
+        row["enabled_features"] if row else {}, row["signup_source"] if row else None,
+    )
+    return "/werk-lite" if merged.get("werk_lite") else "/work"
+
 # Working-set cap on the side panel — also the per-call cap on show_record,
 # so a single wildly over-broad request can't blow past it either.
 MAX_OPEN_RECORDS = 8
@@ -312,8 +327,10 @@ async def _model_inventory_items_batch(conn, company_id: UUID, rids: list[UUID])
         return {}
     rows = await conn.fetch(
         """
-        SELECT it.id, it.name, it.current_quantity, it.unit, o.status AS order_status
+        SELECT it.id, it.name, it.current_quantity, it.unit, bl.name AS location_name,
+               o.status AS order_status
         FROM inventory_items it
+        LEFT JOIN business_locations bl ON bl.id = it.location_id
         LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
         WHERE it.id = ANY($1::uuid[]) AND it.company_id = $2
         """,
@@ -327,6 +344,7 @@ async def _model_inventory_items_batch(conn, company_id: UUID, rids: list[UUID])
             "label": data.get("name"),
             "current_quantity": float(data["current_quantity"]) if data.get("current_quantity") is not None else None,
             "unit": data.get("unit"),
+            "location": data.get("location_name"),
             "record_status": data.get("order_status") or "no open order",
         }
     return out
@@ -789,7 +807,7 @@ async def _build_ems_event_view(conn, company_id: UUID, rid: UUID) -> Optional[d
         "chips": chips,
         "meta": meta,
         "sections": sections,
-        "link": f"/work/events/{data['id']}",
+        "link": f"{await _work_base_path(conn, company_id)}/events/{data['id']}",
     }
 
 
@@ -812,6 +830,12 @@ async def _build_inventory_item_view(conn, company_id: UUID, rid: UUID) -> Optio
         chips.append({"label": "count unknown", "tone": "amber"})
     if order:
         chips.append({"label": "Order queued", "tone": "orange"})
+    if data.get("location_id"):
+        location_name = await conn.fetchval(
+            "SELECT name FROM business_locations WHERE id = $1", data["location_id"],
+        )
+        if location_name:
+            chips.append({"label": location_name, "tone": "zinc"})
 
     meta = [{"label": "Created", "value": _iso(data.get("created_at")) or "—"}]
 
@@ -832,7 +856,7 @@ async def _build_inventory_item_view(conn, company_id: UUID, rid: UUID) -> Optio
         "chips": chips,
         "meta": meta,
         "sections": sections,
-        "link": f"/work/inventory/{data['id']}",
+        "link": f"{await _work_base_path(conn, company_id)}/inventory/{data['id']}",
     }
 
 

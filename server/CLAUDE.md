@@ -177,6 +177,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Urgent-event fan-out (in-app + email) → `server/app/matcha/services/ems/urgent_notify.py:send_urgent_event_notifications`
 - Company protocol file (fetch/upsert + prompt excerpt) → `server/app/matcha/services/ems/protocols.py`
 - WS dispatch (intake + clarify) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify`
+- Channel store scope lookup (used by every @huume dispatch handler) → `server/app/werk/routes/channels_ws.py:_channel_location`
 
 ### Inventory (channel stock tracking)
 
@@ -184,6 +185,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - WS dispatch (request + confirm/clarify reply) → `server/app/werk/routes/channels_ws.py:_bg_inventory_request` / `_bg_inventory_reply`
 - Service package (matching, reorder math, rules, pills, extraction, DB services) → `server/app/matcha/services/inventory/`
 - REST router (items/movements/orders/suggestions) → `server/app/matcha/routes/inventory.py`
+- Per-location item resolution → `server/app/matcha/services/inventory/movements.py:list_item_names` / `find_or_create_item`
 
 ### Employees
 

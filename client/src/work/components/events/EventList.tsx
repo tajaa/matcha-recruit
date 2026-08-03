@@ -59,6 +59,7 @@ export function EventList({ events, selectedId, onSelect }: EventListProps) {
             <p className="text-sm text-w-text truncate">{label}</p>
             <p className="text-xs text-w-faint truncate mt-0.5">
               {event.channel_name ? `#${event.channel_name}` : 'Unknown channel'}
+              {event.location_name ? ` · ${event.location_name}` : ''}
               {event.reporter_name ? ` · ${event.reporter_name}` : ''}
             </p>
           </button>

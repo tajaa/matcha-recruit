@@ -190,7 +190,7 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
             <Meta label="Location" value={action.location} />
           </div>
           <Prose>{action.title}</Prose>
-          <p className="text-[11px] opacity-60">Files the logged event as a real IR incident — the original event stays in Events.</p>
+          <p className="text-[11px] opacity-60">Files the logged event as a real IR incident — the original event stays in Ops.</p>
         </>
       )}
     </div>

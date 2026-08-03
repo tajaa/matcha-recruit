@@ -70,7 +70,7 @@ export default function WerkLiteRoutes() {
               <Route path="channels/:channelId" element={<ChannelView />} />
               <Route
                 element={
-                  <FeatureGate feature="ems" label="Events">
+                  <FeatureGate feature="ems" label="Ops — Events">
                     <Outlet />
                   </FeatureGate>
                 }
@@ -81,7 +81,7 @@ export default function WerkLiteRoutes() {
               </Route>
               <Route
                 element={
-                  <FeatureGate feature="inventory" label="Inventory">
+                  <FeatureGate feature="inventory" label="Ops — Inventory">
                     <Outlet />
                   </FeatureGate>
                 }

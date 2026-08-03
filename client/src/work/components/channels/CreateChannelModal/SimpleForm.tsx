@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Loader2, Hash, Globe, Lock, UserPlus } from 'lucide-react'
-import { createChannel } from '../../../api/channels'
+import { createChannel, listChannelLocations, type ChannelLocation } from '../../../api/channels'
 import type { Props } from './types'
 
 /* ─── Simple (non-wizard) flow ─── */
@@ -9,8 +9,14 @@ export function SimpleForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'invite_only' | 'private'>('public')
+  const [locations, setLocations] = useState<ChannelLocation[]>([])
+  const [locationId, setLocationId] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    listChannelLocations().then(setLocations).catch(() => setLocations([]))
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -18,7 +24,10 @@ export function SimpleForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
     setCreating(true)
     setError('')
     try {
-      const ch = await createChannel(name.trim(), description.trim() || undefined, visibility)
+      const ch = await createChannel(
+        name.trim(), description.trim() || undefined, visibility,
+        undefined, undefined, locationId || undefined,
+      )
       onCreated(ch)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create channel')
@@ -63,6 +72,22 @@ export function SimpleForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>)
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600 resize-none"
             />
           </div>
+          {locations.length > 0 && (
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1">Store location (optional)</label>
+              <select
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-600"
+              >
+                <option value="">— Company-wide —</option>
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}{l.city ? ` (${l.city})` : ''}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-zinc-500">Huume scopes events, inventory, and scheduling in this channel to the store.</p>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-zinc-400 mb-1.5">Visibility</label>
             <div className="flex gap-2">

@@ -229,9 +229,10 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - IR Copilot card schema → `client/src/components/ir/IRCopilotCard.tsx:5` (`CopilotCardAction.type` union)
 - IR detail page → `client/src/pages/app/ir/IRDetail.tsx`
 
-### EMS (channel-logged events)
+### EMS (channel-logged events) — "Ops" in the UI
 
 - Protocol editor page (frontend) → `client/src/work/pages/ProtocolPage.tsx`
+- Store-location picker for channel creation → `client/src/work/api/channels.ts:listChannelLocations`
 
 ### Employees
 
