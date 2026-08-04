@@ -12,7 +12,7 @@ import asyncio
 
 import pytest
 
-from app.matcha.services.ems import channel_agent
+from app.matcha.services.ems import channel_agent, channel_grounding
 
 
 def _run(coro):
@@ -299,6 +299,137 @@ class TestStageInventoryOrder:
         assert result["pending_order_id"] is None
         assert "Inventory isn't set up here" in result["message"]
 
+class TestCoverageTool:
+    def test_declared_only_for_admin_with_schedule_reachable(self, monkeypatch):
+        client = _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(text="nothing to check")], text="nothing to check"),
+        ])
+        _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"employee_schedule": True}, asker_role="client", is_admin=True,
+        )))
+        names = {d.name for d in client.calls[0]["config"].tools[0].function_declarations}
+        assert "find_shift_coverage" in names
+
+    def test_not_declared_for_employee(self, monkeypatch):
+        client = _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(text="nothing to check")], text="nothing to check"),
+        ])
+        _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"employee_schedule": True}, asker_role="employee", is_admin=False,
+        )))
+        tools = client.calls[0]["config"].tools
+        names = {d.name for d in tools[0].function_declarations} if tools else set()
+        assert "find_shift_coverage" not in names
+
+    def test_hallucinated_call_from_non_admin_is_refused_server_side(self, monkeypatch):
+        # Even if the model calls find_shift_coverage despite never being
+        # offered it, run_coverage_lookup's own is_admin re-check refuses —
+        # the declaration is advisory, not the enforcement boundary.
+        db_calls = []
+
+        async def fake_find(conn, **kwargs):
+            db_calls.append(kwargs)
+            return {"shifts": [], "role_note": None}
+
+        monkeypatch.setattr(
+            "app.matcha.services.scheduling.coverage.find_coverage_candidates", fake_find,
+        )
+        client = _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(function_call=_FnCall("find_shift_coverage", {"date": "2026-08-05"}))]),
+            _Resp(parts=[_Part(text="Can't help with that here.")], text="Can't help with that here."),
+        ])
+
+        _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"employee_schedule": True}, asker_role="employee", is_admin=False,
+        )))
+        assert db_calls == []
+        second_call_contents = client.calls[1]["contents"]
+        function_response_text = second_call_contents[-1].parts[0].function_response.response["result"]
+        assert "admins" in function_response_text.lower()
+
+    def test_admin_coverage_call_reaches_the_module_and_renders(self, monkeypatch):
+        import datetime
+
+        async def fake_find(conn, **kwargs):
+            return {
+                "shifts": [{
+                    "starts_at": datetime.datetime(2026, 8, 5, 8, 0, tzinfo=datetime.timezone.utc),
+                    "ends_at": datetime.datetime(2026, 8, 5, 16, 0, tzinfo=datetime.timezone.utc),
+                    "role": "Front Desk", "required_staff": 1,
+                    "assignees": ["Aisha Kim"],
+                    "candidates": [{"name": "Dana Whitfield", "week_hours": 16.0,
+                                     "job_title": "Front Desk", "title_mismatch": False, "flags": []}],
+                }],
+                "role_note": None,
+            }
+
+        monkeypatch.setattr(
+            "app.matcha.services.scheduling.coverage.find_coverage_candidates", fake_find,
+        )
+        _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(function_call=_FnCall("find_shift_coverage", {"date": "2026-08-05"}))]),
+            _Resp(parts=[_Part(text="Dana Whitfield can cover.")], text="Dana Whitfield can cover."),
+        ])
+
+        result = _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"employee_schedule": True}, asker_role="client", is_admin=True,
+        )))
+        assert "Dana Whitfield" in result["message"]
+
+    def test_coverage_answer_carries_the_shift_link_token(self, monkeypatch):
+        # channel_grounding.run_coverage_lookup's own text->model round-trip
+        # can't be trusted to relay a [[shift:id:date]] token (the model
+        # rewrites tool results into prose) — channel_agent staples it onto
+        # the final message itself, same distrust-the-relay posture as
+        # stage_inventory_order posting its pill verbatim.
+        shift_id = "22222222-2222-2222-2222-222222222222"
+
+        async def fake_run_coverage(conn, **kwargs):
+            return {
+                "text": "Dana Whitfield is free.", "degraded": False,
+                "shift_links": [{"id": shift_id, "date": "2026-08-05"}],
+            }
+
+        monkeypatch.setattr(channel_grounding, "run_coverage_lookup", fake_run_coverage)
+        _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(function_call=_FnCall("find_shift_coverage", {"date": "2026-08-05"}))]),
+            _Resp(parts=[_Part(text="Dana Whitfield can cover.")], text="Dana Whitfield can cover."),
+        ])
+
+        result = _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"employee_schedule": True}, asker_role="client", is_admin=True,
+        )))
+        assert f"[[shift:{shift_id}:2026-08-05]]" in result["message"]
+
+    def test_no_coverage_call_means_no_link_token(self, monkeypatch):
+        _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(text="Nothing to check.")], text="Nothing to check."),
+        ])
+        result = _run(channel_agent.answer_channel_question(**_base_kwargs(is_admin=True, features={})))
+        assert "[[shift:" not in result["message"]
+
+    def test_system_prompt_carries_todays_date(self, monkeypatch):
+        client = _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(text="ok")], text="ok"),
+        ])
+        _run(channel_agent.answer_channel_question(**_base_kwargs(is_admin=True, features={})))
+        instr = client.calls[0]["config"].system_instruction
+        assert "Today is" in instr
+
+    def test_configs_never_use_thinking_budget_zero(self, monkeypatch):
+        # thinking_budget: 0 is a hard 400 on 3.x models — see
+        # huume/routing.py's own comment. thinking_level is the off switch.
+        client = _install(monkeypatch, responses=[
+            _Resp(parts=[_Part(text="ok")], text="ok"),
+        ])
+        _run(channel_agent.answer_channel_question(**_base_kwargs()))
+        config = client.calls[0]["config"]
+        assert config.max_output_tokens == 2000
+        assert str(config.thinking_config.thinking_level).lower().endswith("low")
+        assert config.thinking_config.thinking_budget is None
+
+
+class TestStageInventoryOrderStoreDeactivated:
     def test_stage_tool_refused_when_channel_store_is_deactivated(self, monkeypatch):
         called = []
 

@@ -149,6 +149,43 @@ def _render_credentials(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_coverage(result: dict[str, Any]) -> str:
+    """Currently-assigned names + ranked free candidates for each published
+    shift on the asked date, plus a verbatim handoff sentence so the model
+    can chain straight into the existing SCHEDULE-intent confirm flow
+    without a second round-trip — coverage itself never writes anything."""
+    shifts = result.get("shifts") or []
+    if not shifts:
+        return ""
+    lines = []
+    if result.get("role_note"):
+        lines.append(result["role_note"])
+    for s in shifts:
+        when = s["starts_at"].strftime("%a %b %d, %I:%M%p") if s.get("starts_at") else "unknown time"
+        ends = s["ends_at"].strftime("%I:%M%p") if s.get("ends_at") else "?"
+        role = s.get("role") or "Shift"
+        who = ", ".join(s.get("assignees") or []) or "unassigned"
+        lines.append(f"- [{when}–{ends}] {role} (currently: {who})")
+        cands = s.get("candidates") or []
+        if not cands:
+            lines.append("  no one free to cover this one")
+            continue
+        cand_bits = []
+        for c in cands:
+            bits = [f"{c['week_hours']:.0f}h this week"]
+            if c.get("flags"):
+                bits.append("; ".join(c["flags"]))
+            if c.get("title_mismatch"):
+                bits.append(f"different role: {c.get('job_title') or 'unlisted'}")
+            cand_bits.append(f"{c['name']} ({'; '.join(bits)})")
+        lines.append("  free to cover: " + "; ".join(cand_bits))
+    lines.append(
+        'To assign someone, say: "@huume schedule NAME for the ROLE on DATE" '
+        "and I'll set it up."
+    )
+    return "\n".join(lines)
+
+
 def _render_pto(result: dict[str, Any]) -> str:
     """Who's out and when they're back — never WHY. `leave_type` (medical/
     FMLA/etc) next to a name is the exact disclosure `hr_ops_skill.py`'s
@@ -304,6 +341,67 @@ async def run_topic_lookup(
     return {"text": _sanitize_block(text), "degraded": False}
 
 
+async def run_coverage_lookup(
+    conn, *, company_id: UUID, features: Optional[dict[str, Any]], is_admin: bool,
+    location_id: Optional[UUID], location_unavailable: bool = False,
+    date_str: str, role: Optional[str] = None,
+) -> dict[str, Any]:
+    """Execute one model-requested `find_shift_coverage(date, role?)` call —
+    the enforcement point `channel_agent.py`'s tool loop calls for that tool.
+    Same posture as `run_topic_lookup`: the model's date/role arguments are
+    advisory only, admin/feature/location gates and date parsing are all
+    re-checked here before any SQL runs. Coverage rides the `schedule` topic's
+    feature gate (it's the same underlying data, just recombined) and is
+    admin-only regardless of `schedule`'s own `admin_only=False` — a "who's
+    free" suggestion is a staffing judgment call, not portal-parity read
+    access."""
+    from datetime import date as _date, timedelta as _timedelta
+
+    from app.matcha.services.huume.onboarding_skill import topic_allowed
+    from app.matcha.services.scheduling.coverage import find_coverage_candidates
+
+    if not is_admin:
+        return {"text": "That's only available to admins in this channel.", "degraded": False, "shift_links": []}
+    if not topic_allowed("schedule", features):
+        return {"text": "That isn't enabled for this company.", "degraded": False, "shift_links": []}
+    if location_unavailable:
+        return {
+            "text": "This channel's store is deactivated, so that data is paused here — "
+                    "an admin can reactivate the store or rebind this channel.",
+            "degraded": False, "shift_links": [],
+        }
+    try:
+        target = _date.fromisoformat((date_str or "").strip())
+    except ValueError:
+        return {"text": "I need a date like 2026-08-05 for that.", "degraded": False, "shift_links": []}
+    today = _date.today()
+    if target < today - _timedelta(days=1) or target > today + _timedelta(days=60):
+        return {"text": "I need a date like 2026-08-05 for that.", "degraded": False, "shift_links": []}
+    try:
+        result = await find_coverage_candidates(
+            conn, company_id=company_id, target_date=target, location_id=location_id,
+            role_hint=(role or "").strip() or None, features=features,
+        )
+    except Exception:
+        logger.exception("channel_grounding: coverage lookup failed for company %s", company_id)
+        return {"text": "That lookup failed just now — try again in a bit.", "degraded": True, "shift_links": []}
+    # Shift ids/dates for the [[shift:id:date]] deep-link token
+    # (systemContent.tsx's ONLY link vocabulary) — collected here, not left
+    # for the model to relay: the loop rewrites tool results into its own
+    # prose, so a token embedded in `text` would not reliably survive
+    # (same reasoning stage_inventory_order posts its pill VERBATIM instead
+    # of trusting a second model call). channel_agent.py staples these onto
+    # the final answer itself, after the model has had its say.
+    shift_links = [
+        {"id": str(s["id"]), "date": s["starts_at"].date().isoformat()}
+        for s in (result.get("shifts") or []) if s.get("id") and s.get("starts_at")
+    ]
+    text = _render_coverage(result)
+    if not text:
+        return {"text": f"No published shifts on {target.isoformat()}.", "degraded": False, "shift_links": []}
+    return {"text": _sanitize_block(text), "degraded": False, "shift_links": shift_links}
+
+
 def help_lines(
     *, features: Optional[dict[str, Any]], is_admin: bool, location_unavailable: bool = False,
 ) -> list[str]:
@@ -322,4 +420,6 @@ def help_lines(
         if t.location_scoped and location_unavailable:
             continue
         lines.append(f"• {t.help_line}")
+    if is_admin and topic_allowed("schedule", features) and not location_unavailable:
+        lines.append('• Suggest who can cover a shift ("@huume who can cover tomorrow?") (admins only)')
     return lines

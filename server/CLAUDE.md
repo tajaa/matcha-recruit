@@ -179,6 +179,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - WS dispatch (intake + clarify + ask) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify` / `_bg_ems_ask`
 - Channel store scope lookup (used by every @huume dispatch handler) → `server/app/werk/routes/channels_ws.py:_channel_location`
 - Channel `@huume` ASK grounding (bounded tool-calling loop beyond `ems_events`) → `server/app/matcha/services/ems/channel_agent.py:answer_channel_question`, policy registry at `server/app/matcha/services/ems/channel_grounding.py:run_topic_lookup`
+- Channel `@huume` "who can cover a shift" → `server/app/matcha/services/ems/channel_grounding.py:run_coverage_lookup` → `server/app/matcha/services/scheduling/coverage.py:find_coverage_candidates`
 
 ### Inventory (channel stock tracking)
 

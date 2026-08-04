@@ -251,7 +251,20 @@ class TestHelpLines:
 
     def test_admin_with_everything_on_sees_every_line(self):
         lines = channel_grounding.help_lines(features=_all_features_on(), is_admin=True)
-        assert len(lines) == len(channel_grounding.CHANNEL_TOPICS)
+        # +1: the coverage ("who can cover a shift") bullet, which isn't a
+        # CHANNEL_TOPICS row (it rides the schedule topic's gate instead).
+        assert len(lines) == len(channel_grounding.CHANNEL_TOPICS) + 1
+        assert any("who can cover" in line for line in lines)
+
+    def test_coverage_line_excluded_for_employee(self):
+        lines = channel_grounding.help_lines(features=_all_features_on(), is_admin=False)
+        assert not any("who can cover" in line for line in lines)
+
+    def test_coverage_line_excluded_when_store_deactivated(self):
+        lines = channel_grounding.help_lines(
+            features=_all_features_on(), is_admin=True, location_unavailable=True,
+        )
+        assert not any("who can cover" in line for line in lines)
 
 
 class TestRenderFunctions:
@@ -306,3 +319,148 @@ class TestIncidentsTitleHonesty:
         t = channel_grounding.CHANNEL_TOPICS_BY_NAME["incidents"]
         assert "no names" not in t.title.lower()
         assert "may name people" in t.title.lower()
+
+
+class TestRenderCoverage:
+    def test_empty_shifts(self):
+        assert channel_grounding._render_coverage({"shifts": []}) == ""
+
+    def test_includes_candidates_flags_mismatch_and_handoff(self):
+        import datetime
+        result = {
+            "shifts": [{
+                "starts_at": datetime.datetime(2026, 8, 5, 8, 0, tzinfo=datetime.timezone.utc),
+                "ends_at": datetime.datetime(2026, 8, 5, 16, 0, tzinfo=datetime.timezone.utc),
+                "role": "Front Desk", "required_staff": 1,
+                "assignees": ["Aisha Kim"],
+                "candidates": [
+                    {"name": "Dana Whitfield", "week_hours": 16.0, "job_title": "Front Desk",
+                     "title_mismatch": False, "flags": []},
+                    {"name": "Ravi Malik", "week_hours": 20.0, "job_title": "Hygienist",
+                     "title_mismatch": True, "flags": ["Infection control training lapsed"]},
+                ],
+            }],
+            "role_note": None,
+        }
+        text = channel_grounding._render_coverage(result)
+        assert "Aisha Kim" in text
+        assert "Dana Whitfield" in text
+        assert "Ravi Malik" in text
+        assert "Infection control training lapsed" in text
+        assert "different role" in text
+        assert "@huume schedule NAME for the ROLE on DATE" in text
+
+    def test_role_note_surfaces_when_present(self):
+        result = {"shifts": [{
+            "starts_at": None, "ends_at": None, "role": None, "required_staff": 1,
+            "assignees": [], "candidates": [],
+        }], "role_note": 'Nothing matched "opener" — showing every published shift that day instead.'}
+        text = channel_grounding._render_coverage(result)
+        assert "Nothing matched" in text
+
+    def test_no_candidates_says_so(self):
+        result = {"shifts": [{
+            "starts_at": None, "ends_at": None, "role": "Opener", "required_staff": 1,
+            "assignees": ["Aisha Kim"], "candidates": [],
+        }], "role_note": None}
+        text = channel_grounding._render_coverage(result)
+        assert "no one free to cover" in text
+
+
+class TestRunCoverageLookup:
+    def test_non_admin_refused(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=False,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert "admins" in result["text"]
+        assert result["degraded"] is False
+
+    def test_feature_off_refused(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features={}, is_admin=True,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert "isn't enabled" in result["text"]
+
+    def test_dead_store_refused(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, location_unavailable=True, date_str="2026-08-05",
+        ))
+        assert "deactivated" in result["text"]
+
+    def test_bad_date_refused(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, date_str="not-a-date",
+        ))
+        assert "2026-08-05" in result["text"] or "I need a date" in result["text"]
+
+    def test_far_future_date_refused(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, date_str="2099-01-01",
+        ))
+        assert "I need a date" in result["text"]
+
+    def test_lookup_failure_degrades_not_all_clear(self, monkeypatch):
+        async def boom(conn, **kwargs):
+            raise RuntimeError("db exploded")
+
+        monkeypatch.setattr(
+            "app.matcha.services.scheduling.coverage.find_coverage_candidates", boom,
+        )
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert result["degraded"] is True
+        assert "failed" in result["text"].lower()
+
+    def test_success_renders_and_sanitizes(self, monkeypatch):
+        async def fake_find(conn, **kwargs):
+            return {"shifts": [], "role_note": None}
+
+        monkeypatch.setattr(
+            "app.matcha.services.scheduling.coverage.find_coverage_candidates", fake_find,
+        )
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert "No published shifts on 2026-08-05" in result["text"]
+        assert result["degraded"] is False
+        assert result["shift_links"] == []
+
+    def test_success_returns_shift_links_for_the_client_deep_link_token(self, monkeypatch):
+        import datetime
+        shift_id = "11111111-1111-1111-1111-111111111111"
+
+        async def fake_find(conn, **kwargs):
+            return {
+                "shifts": [{
+                    "id": shift_id,
+                    "starts_at": datetime.datetime(2026, 8, 5, 8, 0, tzinfo=datetime.timezone.utc),
+                    "ends_at": datetime.datetime(2026, 8, 5, 16, 0, tzinfo=datetime.timezone.utc),
+                    "role": "Front Desk", "required_staff": 1,
+                    "assignees": [], "candidates": [],
+                }],
+                "role_note": None,
+            }
+
+        monkeypatch.setattr(
+            "app.matcha.services.scheduling.coverage.find_coverage_candidates", fake_find,
+        )
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=True,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert result["shift_links"] == [{"id": shift_id, "date": "2026-08-05"}]
+
+    def test_refusal_paths_never_carry_shift_links(self):
+        result = _run(channel_grounding.run_coverage_lookup(
+            None, company_id="c1", features=_all_features_on(), is_admin=False,
+            location_id=None, date_str="2026-08-05",
+        ))
+        assert result["shift_links"] == []
