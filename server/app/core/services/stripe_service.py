@@ -436,6 +436,65 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Matcha Lite checkout: {exc}") from exc
 
+    async def create_tellus_brand_checkout(
+        self,
+        brand_id: UUID,
+        location_count: int,
+        amount_cents: int,
+        success_url: str,
+        cancel_url: str,
+    ):
+        """Subscription checkout for a Tell-Us brand, priced by store location.
+
+        Pricing is resolved by the caller (server/app/core/services/matcha_lite_pricing.py,
+        product_code='tellus_brand') and passed in as `amount_cents` — this
+        function stays DB-free, matching the rest of this module.
+        Webhook catches metadata.type == 'tellus_brand' and flips tellus_brands.plan_status.
+        """
+        self._ensure_secret_key()
+
+        metadata = {
+            "brand_id": str(brand_id),
+            "type": "tellus_brand",
+            "location_count": str(location_count),
+            "amount_cents": str(amount_cents),
+            "mode": "subscription",
+        }
+
+        product_description = (
+            f"Tell-Us brand subscription ({location_count} "
+            f"store{'s' if location_count != 1 else ''}). Auto-renews monthly."
+        )
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=success_url,
+                cancel_url=cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Tell-Us Brand",
+                                "description": product_description,
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Tell-Us brand checkout: {exc}") from exc
+
     async def create_lite_addon_checkout(
         self,
         company_id: UUID,

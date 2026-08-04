@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { Award, Gift, LogOut, MessageSquare, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
+import { Award, CreditCard, Gift, LogOut, MessageSquare, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 
 const CONSUMER_NAV = [
@@ -15,7 +15,12 @@ const BRAND_NAV = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
+  { to: '/brand/billing', label: 'Billing', icon: CreditCard },
   { to: '/brand/settings', label: 'Settings', icon: Settings },
+]
+
+const BRAND_PENDING_NAV = [
+  { to: '/brand/billing', label: 'Billing', icon: CreditCard },
 ]
 
 function navLinkClass({ isActive }: { isActive: boolean }) {
@@ -29,7 +34,9 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
 export function Layout({ children }: { children: ReactNode }) {
   const { account, logout } = useAccount()
   const navigate = useNavigate()
-  const nav = account?.account_type === 'brand' ? BRAND_NAV : CONSUMER_NAV
+  const isBrand = account?.account_type === 'brand'
+  const isPendingBrand = isBrand && account?.plan_status !== 'active'
+  const nav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
 
   return (
     <div className="flex min-h-screen">

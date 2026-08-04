@@ -3,8 +3,10 @@ import { api } from '../client'
 
 // Product codes priced through this table: the two Lite variants that share
 // the /lite/signup page + checkout (standard, with an employee roster;
-// Essentials, no roster/no OSHA logs), standalone Matcha Compliance, and the
-// Lite add-ons (block_size=1 ⇒ per-employee/month) — each priced independently.
+// Essentials, no roster/no OSHA logs), standalone Matcha Compliance, the
+// Lite add-ons (block_size=1 ⇒ per-employee/month), and Tell-Us brand billing
+// (block_size=1 ⇒ per-store/month — "headcount" fields mean store count here)
+// — each priced independently.
 export type MatchaLiteProductCode =
   | 'matcha_lite'
   | 'matcha_lite_essentials'
@@ -12,6 +14,7 @@ export type MatchaLiteProductCode =
   | 'addon_voice_intake'
   | 'addon_hris_sync'
   | 'addon_handbook_watch'
+  | 'tellus_brand'
 
 export interface MatchaLitePricingConfig {
   price_per_block_cents: number

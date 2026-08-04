@@ -19,13 +19,25 @@ import BrandFeedback from './pages/brand/Feedback'
 import BrandStores from './pages/brand/Stores'
 import BrandListings from './pages/brand/Listings'
 import BrandSettings from './pages/brand/Settings'
+import BrandBilling from './pages/brand/Billing'
 
-function Protected({ children, requireType }: { children: React.ReactNode; requireType?: 'consumer' | 'brand' }) {
+// Where an authenticated brand lands: /brand/billing if unpaid (or plan_status
+// unset — a defensive fallback, e.g. mid-migration data), else the dashboard.
+function brandHome(planStatus: string | null | undefined) {
+  return planStatus === 'active' ? '/brand/feedback' : '/brand/billing'
+}
+
+function Protected({
+  children, requireType, allowUnpaid,
+}: { children: React.ReactNode; requireType?: 'consumer' | 'brand'; allowUnpaid?: boolean }) {
   const { account, loading } = useAccount()
   if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
   if (!account) return <Navigate to="/login" replace />
   if (requireType && account.account_type !== requireType) {
-    return <Navigate to={account.account_type === 'brand' ? '/brand/feedback' : '/'} replace />
+    return <Navigate to={account.account_type === 'brand' ? brandHome(account.plan_status) : '/'} replace />
+  }
+  if (requireType === 'brand' && !allowUnpaid && account.plan_status !== 'active') {
+    return <Navigate to="/brand/billing" replace />
   }
   return <Layout>{children}</Layout>
 }
@@ -34,7 +46,7 @@ function Home() {
   const { account, loading } = useAccount()
   if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
   if (!account) return <Navigate to="/login" replace />
-  if (account.account_type === 'brand') return <Navigate to="/brand/feedback" replace />
+  if (account.account_type === 'brand') return <Navigate to={brandHome(account.plan_status)} replace />
   return <Protected requireType="consumer"><Rewards /></Protected>
 }
 
@@ -56,6 +68,7 @@ export default function App() {
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
 
       {/* Brand */}
+      <Route path="/brand/billing" element={<Protected requireType="brand" allowUnpaid><BrandBilling /></Protected>} />
       <Route path="/brand/feedback" element={<Protected requireType="brand"><BrandFeedback /></Protected>} />
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />

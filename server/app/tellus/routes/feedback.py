@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
-from ..dependencies import require_brand
+from ..dependencies import require_paid_brand
 from ..models.tellus import (
     TellusAccount,
     TellusFeedbackStats,
@@ -28,7 +28,7 @@ router = APIRouter()
 
 @router.get("/feedback", response_model=list[TellusReport])
 async def list_feedback(
-    account: TellusAccount = Depends(require_brand),
+    account: TellusAccount = Depends(require_paid_brand),
     store_id: Optional[UUID] = Query(default=None),
     status_filter: Optional[str] = Query(default=None, alias="status"),
     sentiment: Optional[str] = Query(default=None),
@@ -53,7 +53,7 @@ async def list_feedback(
 
 
 @router.get("/feedback/stats", response_model=TellusFeedbackStats)
-async def feedback_stats(account: TellusAccount = Depends(require_brand)):
+async def feedback_stats(account: TellusAccount = Depends(require_paid_brand)):
     """Sentiment + category rollup for the brand dashboard header."""
     async with get_connection() as conn:
         agg = await conn.fetchrow(
@@ -80,7 +80,7 @@ async def feedback_stats(account: TellusAccount = Depends(require_brand)):
 
 
 @router.get("/feedback/{report_id}", response_model=TellusReport)
-async def get_feedback(report_id: UUID, account: TellusAccount = Depends(require_brand)):
+async def get_feedback(report_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         row = await get_owned_report(conn, report_id, account.brand_id)
         return await serialize_report(conn, row)
@@ -88,7 +88,7 @@ async def get_feedback(report_id: UUID, account: TellusAccount = Depends(require
 
 @router.patch("/feedback/{report_id}/status", response_model=TellusReport)
 async def update_status(
-    report_id: UUID, body: TellusReportStatusUpdate, account: TellusAccount = Depends(require_brand)
+    report_id: UUID, body: TellusReportStatusUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
         await get_owned_report(conn, report_id, account.brand_id)
@@ -103,7 +103,7 @@ async def update_status(
 @router.post("/feedback/{report_id}/reward", response_model=TellusReport)
 async def decide_reward(
     report_id: UUID, body: TellusRewardDecision, background: BackgroundTasks,
-    account: TellusAccount = Depends(require_brand),
+    account: TellusAccount = Depends(require_paid_brand),
 ):
     """Manual reward mode: approve (points credit through the same idempotent
     award path as auto mode) or reject a pending submission. 409 unless the
@@ -157,7 +157,7 @@ async def decide_reward(
 
 @router.patch("/feedback/{report_id}/moderation", response_model=TellusReport)
 async def moderate(
-    report_id: UUID, body: TellusReportModerate, account: TellusAccount = Depends(require_brand)
+    report_id: UUID, body: TellusReportModerate, account: TellusAccount = Depends(require_paid_brand)
 ):
     """Brand flags/removes abusive UGC (review finding G). A removed report is
     hidden from the default list; the media stays in S3 for takedown audit."""

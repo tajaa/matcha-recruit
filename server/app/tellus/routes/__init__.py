@@ -8,6 +8,7 @@ auth + public-intake sub-routers are intentionally unauthenticated.
 from fastapi import APIRouter
 
 from .auth import router as auth_router
+from .billing import router as billing_router
 from .feedback import router as feedback_router
 from .gamification import router as gamification_router
 from .grants import router as grants_router
@@ -38,5 +39,6 @@ tellus_router.include_router(gamification_router)
 tellus_router.include_router(links_router)
 tellus_router.include_router(feedback_router)
 tellus_router.include_router(grants_router)
+tellus_router.include_router(billing_router)
 
 __all__ = ["tellus_router"]

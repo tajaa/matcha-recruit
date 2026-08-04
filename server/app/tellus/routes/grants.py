@@ -6,7 +6,7 @@ feedback. One grant per report (idempotent on the report id).
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from ...database import get_connection
-from ..dependencies import require_brand
+from ..dependencies import require_paid_brand
 from ..models.tellus import TellusAccount, TellusGrantRequest
 from ..services.email import send_tellus_points_email
 from ..services.points_service import award_points
@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/grants", status_code=status.HTTP_201_CREATED)
 async def grant_points(
     body: TellusGrantRequest, background: BackgroundTasks,
-    account: TellusAccount = Depends(require_brand),
+    account: TellusAccount = Depends(require_paid_brand),
 ):
     """Grant bonus points to the reporter of a report this brand owns."""
     async with get_connection() as conn:

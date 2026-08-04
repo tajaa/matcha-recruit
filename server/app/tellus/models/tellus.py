@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 AccountType = Literal["consumer", "brand"]
 ReportCategory = Literal["service", "cleanliness", "facilities", "safety", "compliment", "other"]
@@ -21,10 +21,22 @@ class TellusSignup(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     display_name: Optional[str] = Field(default=None, max_length=255)
     account_type: AccountType = "consumer"
-    # Brand-only: name of the brand to create on signup.
+    # Brand-only: name of the brand to create on signup + how many stores it
+    # bills for (tellus_brands.location_count — paid per-location, see
+    # routes/billing.py). Not used for consumer signups.
     brand_name: Optional[str] = Field(default=None, max_length=255)
+    location_count: Optional[int] = Field(default=None, ge=1, le=500)
     city: Optional[str] = Field(default=None, max_length=120)
     state: Optional[str] = Field(default=None, max_length=60)
+
+    @model_validator(mode="after")
+    def _require_brand_fields(self) -> "TellusSignup":
+        if self.account_type == "brand":
+            if not self.brand_name or not self.brand_name.strip():
+                raise ValueError("brand_name is required for brand signups")
+            if self.location_count is None:
+                raise ValueError("location_count is required for brand signups")
+        return self
 
 
 class TellusLogin(BaseModel):
@@ -56,6 +68,9 @@ class TellusAccount(BaseModel):
     leaderboard_opt_in: bool = True
     # Populated for brand accounts (the brand they own).
     brand_id: Optional[UUID] = None
+    # Brand billing state — null for consumer accounts.
+    plan_status: Optional[str] = None
+    location_count: Optional[int] = None
 
 
 class TellusTokenResponse(BaseModel):

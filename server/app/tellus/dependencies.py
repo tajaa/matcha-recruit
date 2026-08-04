@@ -46,7 +46,7 @@ async def require_tellus_account(
         row = await conn.fetchrow(
             """SELECT a.id, a.email, a.display_name, a.account_type, a.status,
                       a.city, a.state, a.leaderboard_opt_in, a.tokens_valid_after,
-                      b.id AS brand_id
+                      b.id AS brand_id, b.plan_status, b.location_count
                FROM tellus_accounts a
                LEFT JOIN tellus_brands b ON b.owner_account_id = a.id
                WHERE a.id = $1""",
@@ -76,6 +76,8 @@ async def require_tellus_account(
         state=row["state"],
         leaderboard_opt_in=row["leaderboard_opt_in"],
         brand_id=row["brand_id"],
+        plan_status=row["plan_status"],
+        location_count=row["location_count"],
     )
 
 
@@ -104,5 +106,22 @@ async def require_brand(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="No brand is set up for this account yet.",
+        )
+    return account
+
+
+async def require_paid_brand(
+    account: TellusAccount = Depends(require_brand),
+) -> TellusAccount:
+    """Require a brand account with an active paid subscription.
+
+    Gates the brand dashboard (stores, feedback, listings) — billing.py and
+    the brand profile GET stay on require_brand so a pending brand can still
+    see its own status and pay.
+    """
+    if account.plan_status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This brand account does not have an active subscription.",
         )
     return account

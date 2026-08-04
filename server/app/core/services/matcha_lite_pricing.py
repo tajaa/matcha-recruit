@@ -23,8 +23,10 @@ SELECT_COLUMNS = """
 
 # Product codes priced via this table: the two Lite variants (share the
 # /lite/signup page + /checkout/lite endpoint), standalone Matcha Compliance
-# (/compliance/signup + /checkout/compliance), and the Lite add-ons
-# (/checkout/lite-addon — see services/lite_addons.py; block_size=1 ⇒ PEPM).
+# (/compliance/signup + /checkout/compliance), the Lite add-ons
+# (/checkout/lite-addon — see services/lite_addons.py; block_size=1 ⇒ PEPM),
+# and Tell-Us brand billing (server/app/tellus/routes/billing.py; block_size=1
+# ⇒ flat per-store — "headcount" here means store count, not employees).
 PRODUCT_CODES = (
     "matcha_lite",
     "matcha_lite_essentials",
@@ -32,6 +34,7 @@ PRODUCT_CODES = (
     "addon_voice_intake",
     "addon_hris_sync",
     "addon_handbook_watch",
+    "tellus_brand",
 )
 
 _FALLBACK_DEFAULTS = {
@@ -43,6 +46,7 @@ _FALLBACK_DEFAULTS = {
     "addon_voice_intake": dict(price_per_block_cents=100, block_size=1, min_headcount=1, max_headcount=300),
     "addon_hris_sync": dict(price_per_block_cents=200, block_size=1, min_headcount=1, max_headcount=300),
     "addon_handbook_watch": dict(price_per_block_cents=100, block_size=1, min_headcount=1, max_headcount=300),
+    "tellus_brand": dict(price_per_block_cents=2900, block_size=1, min_headcount=1, max_headcount=500),
 }
 
 

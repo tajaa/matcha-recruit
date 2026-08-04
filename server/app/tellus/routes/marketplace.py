@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
-from ..dependencies import require_brand, require_consumer
+from ..dependencies import require_consumer, require_paid_brand
 from ..models.tellus import (
     TellusAccount,
     TellusListing,
@@ -68,7 +68,7 @@ async def redeem(
 # ── Brand: listing management ───────────────────────────────────────────────────
 
 @router.get("/listings", response_model=list[TellusListing])
-async def list_listings(account: TellusAccount = Depends(require_brand)):
+async def list_listings(account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         rows = await conn.fetch(
             "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
@@ -80,7 +80,7 @@ async def list_listings(account: TellusAccount = Depends(require_brand)):
 
 
 @router.post("/listings", response_model=TellusListing, status_code=status.HTTP_201_CREATED)
-async def create_listing(body: TellusListingCreate, account: TellusAccount = Depends(require_brand)):
+async def create_listing(body: TellusListingCreate, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """INSERT INTO tellus_reward_listings
@@ -97,7 +97,7 @@ async def create_listing(body: TellusListingCreate, account: TellusAccount = Dep
 
 @router.patch("/listings/{listing_id}", response_model=TellusListing)
 async def update_listing(
-    listing_id: UUID, body: TellusListingUpdate, account: TellusAccount = Depends(require_brand)
+    listing_id: UUID, body: TellusListingUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
         owned = await conn.fetchval(
@@ -124,7 +124,7 @@ async def update_listing(
 
 
 @router.delete("/listings/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_listing(listing_id: UUID, account: TellusAccount = Depends(require_brand)):
+async def delete_listing(listing_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
     """Soft-delete: deactivate so outstanding redemptions keep resolving."""
     async with get_connection() as conn:
         res = await conn.execute(
@@ -139,7 +139,7 @@ async def delete_listing(listing_id: UUID, account: TellusAccount = Depends(requ
 # ── Brand: redemption verification ──────────────────────────────────────────────
 
 @router.get("/listings/{listing_id}/redemptions", response_model=list[TellusRedemption])
-async def listing_redemptions(listing_id: UUID, account: TellusAccount = Depends(require_brand)):
+async def listing_redemptions(listing_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         owned = await conn.fetchval(
             "SELECT 1 FROM tellus_reward_listings WHERE id = $1 AND brand_id = $2",
@@ -158,7 +158,7 @@ async def listing_redemptions(listing_id: UUID, account: TellusAccount = Depends
 
 @router.patch("/redemptions/{redemption_id}", response_model=TellusRedemption)
 async def verify_redemption(
-    redemption_id: UUID, body: TellusRedemptionStatusUpdate, account: TellusAccount = Depends(require_brand)
+    redemption_id: UUID, body: TellusRedemptionStatusUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
     """Brand marks a redemption redeemed (claimed at the counter) / cancelled /
     expired. Scoped to a listing this brand owns."""

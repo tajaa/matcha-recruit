@@ -2,6 +2,8 @@
 
 export type AccountType = 'consumer' | 'brand'
 
+export type BrandPlanStatus = 'pending' | 'active' | 'past_due' | 'canceled'
+
 export interface TellusAccount {
   id: string
   email: string
@@ -12,6 +14,9 @@ export interface TellusAccount {
   state: string | null
   leaderboard_opt_in: boolean
   brand_id: string | null
+  // Brand billing state — null for consumer accounts.
+  plan_status: BrandPlanStatus | null
+  location_count: number | null
 }
 
 export interface TokenResponse {
@@ -210,6 +215,25 @@ export interface LeaderboardEntry {
   lifetime_points: number
   level: number
   is_you: boolean
+}
+
+export interface BrandPricing {
+  price_per_location_cents: number
+  min_locations: number
+  max_locations: number
+}
+
+export interface BrandBillingStatus {
+  plan_status: BrandPlanStatus
+  location_count: number
+  store_count: number
+  price_per_location_cents: number
+  monthly_total_cents: number
+}
+
+export interface CheckoutResponse {
+  checkout_url: string
+  stripe_session_id: string
 }
 
 export interface TellusNotification {

@@ -14,6 +14,7 @@ const PRODUCT_TABS: { code: MatchaLiteProductCode; label: string }[] = [
   { code: 'addon_voice_intake', label: 'Add-on: Voice Intake' },
   { code: 'addon_hris_sync', label: 'Add-on: HRIS Sync' },
   { code: 'addon_handbook_watch', label: 'Add-on: Handbook Watch' },
+  { code: 'tellus_brand', label: 'Tell-Us (per store)' },
 ]
 
 export default function MatchaLitePricingPanel() {
@@ -56,11 +57,16 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   const [minHeadcount, setMinHeadcount] = useState('')
   const [maxHeadcount, setMaxHeadcount] = useState('')
 
-  // Compliance and the add-ons are flat per-head pricing modeled as
-  // block_size=1 in this step-function table — lock the field so an admin
-  // can't accidentally turn them back into a step function (e.g. block_size=5
-  // would silently change the effective rate without changing price_per_block).
-  const isFlatRate = productCode === 'matcha_compliance' || productCode.startsWith('addon_')
+  // Compliance, the add-ons, and Tell-Us are flat per-head (or per-store)
+  // pricing modeled as block_size=1 in this step-function table — lock the
+  // field so an admin can't accidentally turn them back into a step function
+  // (e.g. block_size=5 would silently change the effective rate without
+  // changing price_per_block).
+  const isFlatRate =
+    productCode === 'matcha_compliance' || productCode === 'tellus_brand' || productCode.startsWith('addon_')
+  // The table's columns say "headcount" everywhere — Tell-Us reuses them to
+  // mean store count. Swap the unit word in the UI only.
+  const unit = productCode === 'tellus_brand' ? 'store' : 'employee'
 
   useEffect(() => {
     fetchMatchaLitePricingAdmin(productCode)
@@ -160,14 +166,23 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               disabled={isFlatRate}
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             />
-            {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — priced flat per employee</span>}
+            {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — priced flat per {unit}</span>}
           </label>
         </div>
-        {perHeadEquivalent && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/employee/month</p>}
+        {perHeadEquivalent && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/{unit}/month</p>}
+        {productCode === 'tellus_brand' && (
+          <p className="text-xs text-amber-500">
+            Checkout mints an inline Stripe price at signup time — changing this only affects new
+            checkouts. Existing brand subscriptions keep their original amount until they cancel
+            and re-subscribe.
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Min headcount</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              Min {productCode === 'tellus_brand' ? 'stores' : 'headcount'}
+            </span>
             <input
               type="number"
               min={1}
@@ -178,7 +193,9 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
             />
           </label>
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Max headcount</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              Max {productCode === 'tellus_brand' ? 'stores' : 'headcount'}
+            </span>
             <input
               type="number"
               min={1}
@@ -214,7 +231,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
             />
           </label>
           {saleActive && effectivePerHead && (
-            <p className="mt-1 text-xs text-emerald-400">≈ ${effectivePerHead}/employee/month while the sale is active</p>
+            <p className="mt-1 text-xs text-emerald-400">≈ ${effectivePerHead}/{unit}/month while the sale is active</p>
           )}
         </div>
 

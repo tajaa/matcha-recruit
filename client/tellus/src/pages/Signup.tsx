@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { tellusPublicPost } from '../api/tellusClient'
+import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
-import type { AccountType, SignupResponse } from '../api/types'
+import type { AccountType, BrandPricing, SignupResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
 
 export default function Signup() {
@@ -14,11 +14,24 @@ export default function Signup() {
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [brandName, setBrandName] = useState('')
+  const [locationCount, setLocationCount] = useState('1')
+  const [pricing, setPricing] = useState<BrandPricing | null>(null)
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
   const [err, setErr] = useState('')
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (type !== 'brand' || pricing) return
+    tellusPublicGet<BrandPricing>('/billing/pricing').then(setPricing).catch(() => {})
+  }, [type, pricing])
+
+  const locationCountNum = parseInt(locationCount, 10)
+  const monthlyTotalCents =
+    pricing && !isNaN(locationCountNum) && locationCountNum > 0
+      ? locationCountNum * pricing.price_per_location_cents
+      : null
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -27,6 +40,7 @@ export default function Signup() {
       const res = await tellusPublicPost<SignupResponse>('/auth/signup', {
         email, password, display_name: displayName || null, account_type: type,
         brand_name: type === 'brand' ? brandName : null,
+        location_count: type === 'brand' ? locationCountNum : null,
         city: type === 'consumer' ? city : null,
         state: type === 'consumer' ? state : null,
       })
@@ -34,7 +48,7 @@ export default function Signup() {
         setSent(true)
       } else if (res.access_token && res.refresh_token && res.account) {
         setSession({ access_token: res.access_token, refresh_token: res.refresh_token, expires_in: res.expires_in ?? 0, account: res.account })
-        navigate('/')
+        navigate(type === 'brand' ? '/brand/billing' : '/')
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Signup failed')
@@ -76,7 +90,24 @@ export default function Signup() {
           <Input label="Password" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
           <Input label="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Optional" />
           {type === 'brand' ? (
-            <Input label="Brand name" required value={brandName} onChange={(e) => setBrandName(e.target.value)} />
+            <>
+              <Input label="Brand name" required value={brandName} onChange={(e) => setBrandName(e.target.value)} />
+              <Input
+                label="Number of stores"
+                type="number"
+                min={1}
+                required
+                value={locationCount}
+                onChange={(e) => setLocationCount(e.target.value)}
+              />
+              {pricing && monthlyTotalCents !== null && (
+                <p className="text-sm text-tu-dim">
+                  {locationCountNum} store{locationCountNum === 1 ? '' : 's'} × $
+                  {(pricing.price_per_location_cents / 100).toFixed(2)}/mo = $
+                  <span className="font-semibold text-tu-text">{(monthlyTotalCents / 100).toFixed(2)}/mo</span>
+                </p>
+              )}
+            </>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <Input label="City" value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Austin" />

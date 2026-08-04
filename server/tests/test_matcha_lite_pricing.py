@@ -67,6 +67,7 @@ def test_product_codes_has_standard_and_essentials():
         "addon_voice_intake",
         "addon_hris_sync",
         "addon_handbook_watch",
+        "tellus_brand",
     )
 
 

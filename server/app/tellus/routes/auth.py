@@ -45,7 +45,8 @@ _VERIFY_TTL_HOURS = 24
 async def _load_account(conn, account_id: UUID) -> TellusAccount:
     row = await conn.fetchrow(
         """SELECT a.id, a.email, a.display_name, a.account_type, a.status,
-                  a.city, a.state, a.leaderboard_opt_in, b.id AS brand_id
+                  a.city, a.state, a.leaderboard_opt_in, b.id AS brand_id,
+                  b.plan_status, b.location_count
            FROM tellus_accounts a
            LEFT JOIN tellus_brands b ON b.owner_account_id = a.id
            WHERE a.id = $1""",
@@ -55,6 +56,7 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
         id=row["id"], email=row["email"], display_name=row["display_name"],
         account_type=row["account_type"], status=row["status"], city=row["city"],
         state=row["state"], leaderboard_opt_in=row["leaderboard_opt_in"], brand_id=row["brand_id"],
+        plan_status=row["plan_status"], location_count=row["location_count"],
     )
 
 
@@ -114,8 +116,8 @@ async def signup(body: TellusSignup, request: Request, background: BackgroundTas
             if body.account_type == "brand":
                 brand_name = (body.brand_name or body.display_name or "My Brand").strip() or "My Brand"
                 await conn.execute(
-                    "INSERT INTO tellus_brands (owner_account_id, name) VALUES ($1, $2)",
-                    account_id, brand_name,
+                    "INSERT INTO tellus_brands (owner_account_id, name, location_count) VALUES ($1, $2, $3)",
+                    account_id, brand_name, body.location_count,
                 )
             else:
                 await conn.execute(

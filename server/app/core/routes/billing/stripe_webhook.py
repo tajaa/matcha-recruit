@@ -441,6 +441,39 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         company_id_str, exc,
                     )
 
+        elif session_mode == "subscription" and meta.get("type") == "tellus_brand":
+            # ── Tell-Us brand subscription (paid per store location) ───────
+            # Re-raises on DB error (unlike most branches below) — this is a
+            # paid-access path: leaving a brand.plan_status stuck at 'pending'
+            # after a real Stripe charge means a paying customer can't reach
+            # their dashboard. Release-and-retry via the outer wrapper is the
+            # correct recovery, matching the channel-sub / job-posting policy
+            # documented in this function's docstring.
+            brand_id_str = meta.get("brand_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            stripe_customer_id = str(event_object.get("customer") or "")
+            if brand_id_str:
+                try:
+                    from app.database import get_connection as _gc
+                    brand_id = UUID(brand_id_str)
+                    async with _gc() as conn:
+                        await conn.execute(
+                            """UPDATE tellus_brands
+                               SET plan_status = 'active', stripe_customer_id = $2,
+                                   stripe_subscription_id = $3, activated_at = NOW(),
+                                   updated_at = NOW()
+                               WHERE id = $1""",
+                            brand_id, stripe_customer_id, stripe_sub_id,
+                        )
+                    logger.info(
+                        "Tell-Us brand activated: brand=%s sub=%s", brand_id_str, stripe_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to activate Tell-Us brand %s: %s", brand_id_str, exc,
+                    )
+                    raise
+
         elif session_mode == "subscription" and meta.get("type") == "custom_product":
             # ── Admin-composed product (/admin/products) signup payment ────
             # The product row — NOT the metadata — decides which feature flags
@@ -697,6 +730,17 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
             except Exception as exc:
                 logger.error("Job posting payment failure handler error: %s", exc)
 
+            try:
+                from app.database import get_connection as _gc
+                async with _gc() as conn:
+                    await conn.execute(
+                        """UPDATE tellus_brands SET plan_status = 'past_due', updated_at = NOW()
+                           WHERE stripe_subscription_id = $1 AND plan_status = 'active'""",
+                        stripe_sub_id,
+                    )
+            except Exception as exc:
+                logger.error("Tell-Us brand payment failure handler error: %s", exc)
+
     # ── Monthly invoice paid → reset token budget ────────────────────────────
     elif event_type == "invoice.paid":
         stripe_sub_id = str(event_object.get("subscription") or "")
@@ -779,6 +823,17 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 await handle_job_posting_canceled(stripe_sub_id)
             except Exception as exc:
                 logger.error("Job posting cancellation handler error: %s", exc)
+
+            try:
+                from app.database import get_connection as _gc
+                async with _gc() as conn:
+                    await conn.execute(
+                        """UPDATE tellus_brands SET plan_status = 'canceled', updated_at = NOW()
+                           WHERE stripe_subscription_id = $1""",
+                        stripe_sub_id,
+                    )
+            except Exception as exc:
+                logger.error("Tell-Us brand cancellation handler error: %s", exc)
 
             # Fetch before canceling to get company_id and pack_id
             sub = await billing_service.get_subscription_by_stripe_id(stripe_sub_id)

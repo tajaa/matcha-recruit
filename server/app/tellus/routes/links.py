@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from ...core.services.redis_cache import client_ip
 from ...database import get_connection
-from ..dependencies import require_brand
+from ..dependencies import require_brand, require_paid_brand
 from ..models.tellus import (
     TellusAccount,
     TellusBrand,
@@ -44,7 +44,7 @@ async def get_brand(account: TellusAccount = Depends(require_brand)):
 
 
 @router.patch("/brand", response_model=TellusBrand)
-async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends(require_brand)):
+async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE tellus_brands
@@ -59,7 +59,7 @@ async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends
 # ── Stores ────────────────────────────────────────────────────────────────────
 
 @router.get("/stores", response_model=list[TellusStore])
-async def list_stores(account: TellusAccount = Depends(require_brand)):
+async def list_stores(account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         rows = await conn.fetch(
             "SELECT * FROM tellus_stores WHERE brand_id = $1 ORDER BY created_at", account.brand_id
@@ -68,23 +68,40 @@ async def list_stores(account: TellusAccount = Depends(require_brand)):
 
 
 @router.post("/stores", response_model=TellusStore, status_code=status.HTTP_201_CREATED)
-async def create_store(body: TellusStoreCreate, account: TellusAccount = Depends(require_brand)):
+async def create_store(body: TellusStoreCreate, account: TellusAccount = Depends(require_paid_brand)):
     geo = None
     if body.city or body.address:
         geo = await geocode_location(body.city or "", body.state, body.zipcode, body.address)
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO tellus_stores (brand_id, name, address, city, state, zipcode, lat, lng)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *""",
-            account.brand_id, body.name, body.address, body.city, body.state, body.zipcode,
-            geo["lat"] if geo else None, geo["lng"] if geo else None,
-        )
+        async with conn.transaction():
+            # Lock the brand row so two concurrent creates can't both pass
+            # the cap check before either insert commits.
+            location_count = await conn.fetchval(
+                "SELECT location_count FROM tellus_brands WHERE id = $1 FOR UPDATE", account.brand_id
+            )
+            store_count = await conn.fetchval(
+                "SELECT count(*) FROM tellus_stores WHERE brand_id = $1", account.brand_id
+            )
+            if store_count >= location_count:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Store limit reached ({store_count}/{location_count}). "
+                        "Update your plan in Billing to add more stores."
+                    ),
+                )
+            row = await conn.fetchrow(
+                """INSERT INTO tellus_stores (brand_id, name, address, city, state, zipcode, lat, lng)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *""",
+                account.brand_id, body.name, body.address, body.city, body.state, body.zipcode,
+                geo["lat"] if geo else None, geo["lng"] if geo else None,
+            )
     return TellusStore(**dict(row))
 
 
 @router.patch("/stores/{store_id}", response_model=TellusStore)
 async def update_store(
-    store_id: UUID, body: TellusStoreUpdate, account: TellusAccount = Depends(require_brand)
+    store_id: UUID, body: TellusStoreUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
         await get_owned_store(conn, store_id, account.brand_id)
@@ -100,7 +117,7 @@ async def update_store(
 
 
 @router.delete("/stores/{store_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_store(store_id: UUID, account: TellusAccount = Depends(require_brand)):
+async def delete_store(store_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         await get_owned_store(conn, store_id, account.brand_id)
         await conn.execute("DELETE FROM tellus_stores WHERE id = $1 AND brand_id = $2", store_id, account.brand_id)
@@ -119,7 +136,7 @@ def _serialize_link(row) -> TellusLink:
 
 
 @router.get("/links", response_model=list[TellusLink])
-async def list_links(account: TellusAccount = Depends(require_brand)):
+async def list_links(account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT l.*, s.name AS store_name
@@ -132,7 +149,7 @@ async def list_links(account: TellusAccount = Depends(require_brand)):
 
 @router.post("/links", response_model=TellusLink, status_code=status.HTTP_201_CREATED)
 async def create_link(
-    body: TellusLinkCreate, request: Request, account: TellusAccount = Depends(require_brand)
+    body: TellusLinkCreate, request: Request, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
         if body.store_id is not None:
@@ -158,7 +175,7 @@ async def create_link(
 
 @router.post("/links/{link_id}/revoke", response_model=TellusLink)
 async def revoke_link(
-    link_id: UUID, request: Request, account: TellusAccount = Depends(require_brand)
+    link_id: UUID, request: Request, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
         async with conn.transaction():
