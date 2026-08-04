@@ -229,6 +229,7 @@ export interface BrandBillingStatus {
   store_count: number
   price_per_location_cents: number
   monthly_total_cents: number
+  price_available: boolean
 }
 
 export interface CheckoutResponse {

@@ -38,6 +38,7 @@ class TellusBillingStatus(BaseModel):
     store_count: int
     price_per_location_cents: int
     monthly_total_cents: int
+    price_available: bool
 
 
 class TellusCheckoutRequest(BaseModel):
@@ -76,13 +77,14 @@ async def get_billing_status(account: TellusAccount = Depends(require_brand)):
         )
         pricing = await get_matcha_lite_pricing(conn, product_code=_PRODUCT_CODE)
 
-    amount_cents = compute_matcha_lite_price_cents(pricing, row["location_count"]) or 0
+    amount_cents = compute_matcha_lite_price_cents(pricing, row["location_count"])
     return TellusBillingStatus(
         plan_status=row["plan_status"],
         location_count=row["location_count"],
         store_count=store_count,
         price_per_location_cents=pricing.effective_price_per_block_cents,
-        monthly_total_cents=amount_cents,
+        monthly_total_cents=amount_cents or 0,
+        price_available=amount_cents is not None,
     )
 
 
@@ -90,18 +92,11 @@ async def get_billing_status(account: TellusAccount = Depends(require_brand)):
 async def update_locations(
     body: TellusLocationUpdateRequest, account: TellusAccount = Depends(require_brand)
 ):
-    """Fix the store count before paying. Locked once the subscription is active —
-    changing it post-payment means cancel + re-checkout (see billing panel note
-    on the admin pricing page: prices/quantities mint into Stripe at checkout time)."""
+    """Set the target store count. For a pending/past_due/canceled brand this is the
+    pre-checkout count. For an active brand, raising it here only updates the target —
+    it doesn't change what Stripe bills until the brand goes through /billing/checkout
+    again, which replaces the existing subscription at the new count."""
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT plan_status FROM tellus_brands WHERE id = $1", account.brand_id
-        )
-        if row["plan_status"] != "pending":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Store count can only be changed before checkout. Contact support to change an active plan.",
-            )
         await conn.execute(
             "UPDATE tellus_brands SET location_count = $2, updated_at = NOW() WHERE id = $1",
             account.brand_id, body.location_count,
@@ -115,10 +110,9 @@ async def create_checkout(body: TellusCheckoutRequest, account: TellusAccount = 
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT plan_status, location_count FROM tellus_brands WHERE id = $1", account.brand_id
+            "SELECT plan_status, location_count, stripe_subscription_id FROM tellus_brands WHERE id = $1",
+            account.brand_id,
         )
-        if row["plan_status"] == "active":
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This brand already has an active subscription")
         pricing = await get_matcha_lite_pricing(conn, product_code=_PRODUCT_CODE)
 
     location_count = row["location_count"]
@@ -129,6 +123,13 @@ async def create_checkout(body: TellusCheckoutRequest, account: TellusAccount = 
             detail=f"Store count outside {pricing.min_headcount}-{pricing.max_headcount} — please contact us for pricing",
         )
 
+    # An active/past_due brand hitting checkout again is raising its store count —
+    # the new session replaces the existing subscription rather than stacking a
+    # second one (mirrors the Essentials→Lite upgrade cancel-then-activate pattern).
+    old_subscription_id = (
+        row["stripe_subscription_id"] if row["plan_status"] in ("active", "past_due") else None
+    )
+
     stripe_service = StripeService()
     try:
         session = await stripe_service.create_tellus_brand_checkout(
@@ -137,6 +138,7 @@ async def create_checkout(body: TellusCheckoutRequest, account: TellusAccount = 
             amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            old_subscription_id=old_subscription_id,
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -443,6 +443,7 @@ class StripeService:
         amount_cents: int,
         success_url: str,
         cancel_url: str,
+        old_subscription_id: Optional[str] = None,
     ):
         """Subscription checkout for a Tell-Us brand, priced by store location.
 
@@ -450,6 +451,12 @@ class StripeService:
         product_code='tellus_brand') and passed in as `amount_cents` — this
         function stays DB-free, matching the rest of this module.
         Webhook catches metadata.type == 'tellus_brand' and flips tellus_brands.plan_status.
+
+        `old_subscription_id`, when set, is a still-live Stripe subscription this
+        checkout is meant to replace (raising the store count on an active/past_due
+        brand). It rides along in metadata so the webhook can cancel it once the new
+        session activates — same cancel-then-activate pattern as the Essentials→Lite
+        upgrade, so we never end up with two live subscriptions for one brand.
         """
         self._ensure_secret_key()
 
@@ -460,6 +467,8 @@ class StripeService:
             "amount_cents": str(amount_cents),
             "mode": "subscription",
         }
+        if old_subscription_id:
+            metadata["old_subscription_id"] = old_subscription_id
 
         product_description = (
             f"Tell-Us brand subscription ({location_count} "

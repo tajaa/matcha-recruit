@@ -452,6 +452,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
             brand_id_str = meta.get("brand_id") or ""
             stripe_sub_id = str(event_object.get("subscription") or "")
             stripe_customer_id = str(event_object.get("customer") or "")
+            old_subscription_id = meta.get("old_subscription_id") or ""
             if brand_id_str:
                 try:
                     from app.database import get_connection as _gc
@@ -468,6 +469,22 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                     logger.info(
                         "Tell-Us brand activated: brand=%s sub=%s", brand_id_str, stripe_sub_id,
                     )
+                    # This checkout was an upgrade over an existing subscription
+                    # (raised store count while active/past_due) — cancel the old
+                    # one now that the new one is live, so the brand never ends
+                    # up double-billed. Non-fatal: the new sub is already active,
+                    # and a dedupe-released retry would re-run activation for
+                    # nothing.
+                    if old_subscription_id and old_subscription_id != stripe_sub_id:
+                        try:
+                            from app.core.services.stripe_service import StripeService
+                            await StripeService().cancel_subscription(old_subscription_id, at_period_end=False)
+                        except Exception as cancel_exc:
+                            logger.error(
+                                "Tell-Us brand upgrade: failed to cancel old Stripe sub %s "
+                                "for brand %s — cancel/refund manually: %s",
+                                old_subscription_id, brand_id_str, cancel_exc,
+                            )
                 except Exception as exc:
                     logger.error(
                         "Failed to activate Tell-Us brand %s: %s", brand_id_str, exc,
@@ -748,6 +765,23 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
         billing_reason = str(event_object.get("billing_reason") or "")
 
         if stripe_sub_id and stripe_invoice_id and billing_reason == "subscription_cycle":
+            # A past_due Tell-Us brand whose card gets fixed in Stripe (dunning
+            # retry succeeds) lands here, not in checkout.session.completed —
+            # there's no new checkout session, just a renewed invoice on the
+            # same subscription. Flip it back to active so require_paid_brand
+            # stops 402ing the dashboard. Symmetric with invoice.payment_failed's
+            # active→past_due flip below.
+            try:
+                from app.database import get_connection as _gc3
+                async with _gc3() as conn:
+                    await conn.execute(
+                        """UPDATE tellus_brands SET plan_status = 'active', updated_at = NOW()
+                           WHERE stripe_subscription_id = $1 AND plan_status = 'past_due'""",
+                        stripe_sub_id,
+                    )
+            except Exception as exc:
+                logger.error("Tell-Us brand payment recovery handler error: %s", exc)
+
             # Check if this is a channel subscription renewal
             try:
                 from app.werk.services.channel_payment_service import handle_subscription_renewed
