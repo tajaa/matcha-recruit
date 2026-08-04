@@ -97,7 +97,9 @@ def _ship_to_html(shipping_address) -> str:
             addr = None
     if not isinstance(addr, dict):
         return ""
-    a = addr.get("address") or {}
+    a = addr.get("address")
+    if not isinstance(a, dict):
+        a = {}
     city_line = ", ".join(str(x) for x in [a.get("city"), a.get("state")] if x)
     if a.get("postal_code"):
         city_line = f"{city_line} {a['postal_code']}".strip()

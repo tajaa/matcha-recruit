@@ -273,7 +273,9 @@ class CappeOrderReceipt(BaseModel):
     customer_name: Optional[str] = None
     subtotal_cents: int
     currency: str
+    tax_cents: int = 0
     shipping_cents: int = 0
+    total_cents: Optional[int] = None
     carrier: Optional[str] = None
     tracking_number: Optional[str] = None
     created_at: datetime

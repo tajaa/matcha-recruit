@@ -36,6 +36,18 @@ from ..services.entitlements import require_fulfillment, resolve_entitlements
 _RESTOCK_FROM_STATUSES = {"pending", "paid", "fulfilled"}
 _RESTOCK_TO_STATUSES = {"cancelled", "refunded"}
 
+
+def should_restock(current_status: str, new_status: str | None) -> bool:
+    """A restock reverses a stock decrement, so it depends on the transition,
+    not the destination. `new_status=None` is a tracking-only PATCH — it never
+    touches stock."""
+    return (
+        new_status is not None
+        and current_status in _RESTOCK_FROM_STATUSES
+        and new_status in _RESTOCK_TO_STATUSES
+    )
+
+
 router = APIRouter()
 
 _PRODUCT_COLS = (
@@ -419,11 +431,7 @@ async def update_order_status(
                     RETURNING {_ORDER_COLS}""",
                 *args,
             )
-            if (
-                body.status is not None
-                and current["status"] in _RESTOCK_FROM_STATUSES
-                and body.status in _RESTOCK_TO_STATUSES
-            ):
+            if should_restock(current["status"], body.status):
                 await restock_order(conn, site_id=site_id, order_id=order_id, reason="restock")
             items = await conn.fetch(
                 f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",

@@ -44,16 +44,49 @@ def order_subtotal(line_items: Iterable[tuple[int, int]]) -> int:
     return sum(int(price) * int(qty) for price, qty in line_items)
 
 
+def build_stripe_line_items(
+    line_rows: Iterable[tuple], currency: str, tax_cents: int, tax_label: str,
+) -> list[dict]:
+    """Cart lines as Stripe `price_data` line items, plus tax as its own line
+    (shipping rides `shipping_options`, not a line item — see
+    build_shipping_options). Sum of these unit_amount×quantity equals
+    `subtotal_cents + tax_cents`; adding `shipping_cents` from
+    `shipping_options` brings the charge to `total_cents`."""
+    line_items = [
+        {
+            "price_data": {
+                "currency": currency,
+                "unit_amount": int(unit),
+                "product_data": {"name": (title or "Item")[:250]},
+            },
+            "quantity": int(qty),
+        }
+        for (_pid, title, unit, qty, *_r) in line_rows
+    ]
+    if tax_cents and tax_cents > 0:
+        line_items.append({
+            "price_data": {
+                "currency": currency,
+                "unit_amount": int(tax_cents),
+                "product_data": {"name": tax_label[:120]},
+            },
+            "quantity": 1,
+        })
+    return line_items
+
+
 def compute_shipping_cents(
-    *, has_physical: bool, subtotal_cents: int, flat_cents: int,
+    *, has_physical: bool, goods_subtotal_cents: int, flat_cents: int,
     free_threshold_cents: int | None,
 ) -> int:
-    """Flat per-site shipping for carts with a physical line; zero when the
-    free-shipping threshold is met. Threshold compares the GOODS subtotal
-    (pre-tax), matching what the buyer sees advertised ("free over $50")."""
-    if not has_physical or flat_cents <= 0:
+    """Flat per-site shipping for carts with a paid physical line; zero when the
+    free-shipping threshold is met. Both the gate and the threshold compare the
+    GOODS subtotal (physical lines, pre-tax) — the same base the tax math uses,
+    and what "free shipping over $50" means to a buyer. A goods subtotal of 0
+    (giveaway item, or a cart Stripe will never charge for) never ships paid."""
+    if not has_physical or flat_cents <= 0 or goods_subtotal_cents <= 0:
         return 0
-    if free_threshold_cents is not None and subtotal_cents >= free_threshold_cents:
+    if free_threshold_cents is not None and goods_subtotal_cents >= free_threshold_cents:
         return 0
     return flat_cents
 
@@ -522,7 +555,7 @@ async def create_public_order(site, body, background) -> dict:
             has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
             shipping_cents = compute_shipping_cents(
                 has_physical=has_physical,
-                subtotal_cents=subtotal,
+                goods_subtotal_cents=taxable,
                 flat_cents=int(tax_cfg["shipping_flat_cents"]) if tax_cfg else 0,
                 free_threshold_cents=tax_cfg["shipping_free_threshold_cents"] if tax_cfg else None,
             )
@@ -572,28 +605,9 @@ async def create_public_order(site, body, background) -> dict:
         # Computed ONCE here and handed to Stripe, so the number persisted on
         # the order is the same number Stripe actually takes.
         fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
-        line_items = [
-            {
-                "price_data": {
-                    "currency": cur,
-                    "unit_amount": int(unit),
-                    "product_data": {"name": (title or "Item")[:250]},
-                },
-                "quantity": int(qty),
-            }
-            for (_pid, title, unit, qty, *_r) in line_rows
-        ]
         # Tax as its own line so the charged amount equals the receipt total.
         # The 2% platform fee stays on the goods subtotal (amount_cents below).
-        if order["tax_cents"] and order["tax_cents"] > 0:
-            line_items.append({
-                "price_data": {
-                    "currency": cur,
-                    "unit_amount": int(order["tax_cents"]),
-                    "product_data": {"name": tax_label[:120]},
-                },
-                "quantity": 1,
-            })
+        line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)
         try:
             sess = await get_cappe_stripe().create_checkout_session(
                 account_id=owner["stripe_account_id"],
@@ -634,12 +648,12 @@ async def create_public_order(site, body, background) -> dict:
         if email and await check_recipient_send_ok(email):
             background.add_task(
                 send_cappe_order_receipt_email, email, body.customer_name, site["name"],
-                items_summary, order["subtotal_cents"], order["currency"], order["requires_approval"],
+                items_summary, order["total_cents"], order["currency"], order["requires_approval"],
             )
         if owner and owner["email"]:
             background.add_task(
                 send_cappe_order_alert_email, owner["email"], owner["name"], site["name"],
-                body.customer_name, order["subtotal_cents"], order["currency"],
+                body.customer_name, order["total_cents"], order["currency"],
                 dashboard_url(f"/sites/{site['id']}/orders"),
             )
 

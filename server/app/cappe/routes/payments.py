@@ -181,7 +181,7 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
             except (TypeError, ValueError):
                 fee = None
             ship = extract_shipping_details(obj)
-            if ship is None and obj.get("id"):
+            if ship is None and obj.get("shipping_cost") and obj.get("id"):
                 try:
                     sess = await get_cappe_stripe().retrieve_checkout_session(event_account_id, obj["id"])
                     ship = extract_shipping_details(sess)

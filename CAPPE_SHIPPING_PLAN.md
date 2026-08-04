@@ -94,7 +94,7 @@ def downgrade() -> None:
     op.execute("ALTER TABLE cappe_sites DROP COLUMN IF EXISTS shipping_flat_cents")
 ```
 
-**⚠️ Author + commit only. Do NOT run `alembic upgrade` — user applies via `migrate-dev.sh`/`migrate-prod.sh`.** Commit the migration before applying to ANY database (server/CLAUDE.md rule). Migration must be applied before the code deploys (code INSERTs/SELECTs the new columns).
+**⚠️ Author + commit only. Do NOT run `alembic upgrade` — user applies via `migrate-dev.sh`/`migrate-prod.sh`.** Commit the migration before applying to ANY database (server/CLAUDE.md rule). Migration must be applied before the code deploys (code INSERTs/SELECTs the new columns) — and the blast radius is bigger than shipping alone: `_SITE_COLS` (Step 8c) gains three columns that flow through every `GET`/`PUT /sites/{site_id}`, so an unmigrated DB 500s on the **whole Cappe site-settings surface**, not just the shop tab.
 
 ## Step 2 — `server/app/cappe/services/commerce.py`
 
@@ -102,15 +102,17 @@ def downgrade() -> None:
 
 ```python
 def compute_shipping_cents(
-    *, has_physical: bool, subtotal_cents: int, flat_cents: int,
+    *, has_physical: bool, goods_subtotal_cents: int, flat_cents: int,
     free_threshold_cents: int | None,
 ) -> int:
-    """Flat per-site shipping for carts with a physical line; zero when the
-    free-shipping threshold is met. Threshold compares the GOODS subtotal
-    (pre-tax), matching what the buyer sees advertised ("free over $50")."""
-    if not has_physical or flat_cents <= 0:
+    """Flat per-site shipping for carts with a paid physical line; zero when the
+    free-shipping threshold is met. Both the gate and the threshold compare the
+    GOODS subtotal (physical lines, pre-tax) — the same base the tax math uses,
+    and what "free shipping over $50" means to a buyer. A goods subtotal of 0
+    (giveaway item, or a cart Stripe will never charge for) never ships paid."""
+    if not has_physical or flat_cents <= 0 or goods_subtotal_cents <= 0:
         return 0
-    if free_threshold_cents is not None and subtotal_cents >= free_threshold_cents:
+    if free_threshold_cents is not None and goods_subtotal_cents >= free_threshold_cents:
         return 0
     return flat_cents
 ```
@@ -130,13 +132,15 @@ def compute_shipping_cents(
             has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
             shipping_cents = compute_shipping_cents(
                 has_physical=has_physical,
-                subtotal_cents=subtotal,
+                goods_subtotal_cents=taxable,
                 flat_cents=int(tax_cfg["shipping_flat_cents"]) if tax_cfg else 0,
                 free_threshold_cents=tax_cfg["shipping_free_threshold_cents"] if tax_cfg else None,
             )
             shipping_label = (tax_cfg["shipping_label"] if tax_cfg else None) or "Shipping"
             total_cents = subtotal + tax_cents + shipping_cents
 ```
+
+(`goods_subtotal_cents=taxable`, not `subtotal` — `taxable` is the physical-only sum computed two lines above for tax; a mixed cart's digital/service/booking lines must not count toward the shipping gate or threshold, and `taxable <= 0` covers the free-item edge case in one guard — see the risk bullet below.)
 
 (`has_physical` / `shipping_label` are function-scope — still visible in the Stripe branch below the transaction.)
 
@@ -180,7 +184,9 @@ def compute_shipping_cents(
 
 Shipping is **not** a line item — it rides Stripe `shipping_options` (real shipping row in Checkout, "Free" at 0, included in `amount_total`; charge equals `total_cents` by construction). `fee` stays on `pay_total = order["subtotal_cents"]` — **no change** to :539/:550.
 
-**2e — fallback path (:594-612): no change.** `shipping_cents` is already inside `total_cents`; no address exists because no Stripe session ran (same quirk as tax in the fallback receipt email, which shows `subtotal_cents`).
+**2e — fallback path (:594-612): notify with `order["total_cents"]`.** `shipping_cents` is already inside `total_cents`; no address exists because no Stripe session ran. `send_cappe_order_receipt_email`/`send_cappe_order_alert_email` take a `total_cents` parameter — pass `order["total_cents"]`, not `order["subtotal_cents"]` (the original tax-only version of this line under-reported by tax; shipping made the gap larger, so both are fixed together here).
+
+**2f — line-items extraction.** The Stripe `line_items` build (cart lines + tax line) is a pure function of `(line_rows, currency, tax_cents, tax_label)` with no I/O — pull it out as `build_stripe_line_items` next to `compute_shipping_cents` so the money invariant (`sum(line_items) + shipping_cents == total_cents`) is unit-testable without a DB. The Stripe-branch call site becomes `line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label)`.
 
 ## Step 3 — `server/app/cappe/services/stripe_connect.py`
 
@@ -320,7 +326,11 @@ def extract_shipping_details(obj: dict) -> Optional[dict]:
             except (TypeError, ValueError):
                 fee = None
             ship = extract_shipping_details(obj)
-            if ship is None and obj.get("id"):
+            # `shipping_cost` is only set on sessions that had a shipping_options
+            # entry attached, i.e. physical orders (see build_shipping_options) —
+            # gate the retrieve on it so a digital/service webhook, the common
+            # case, never makes a synchronous Stripe round-trip it can't use.
+            if ship is None and obj.get("shipping_cost") and obj.get("id"):
                 try:
                     sess = await get_cappe_stripe().retrieve_checkout_session(event_account_id, obj["id"])
                     ship = extract_shipping_details(sess)
@@ -492,7 +502,9 @@ def _ship_to_html(shipping_address) -> str:
             addr = None
     if not isinstance(addr, dict):
         return ""
-    a = addr.get("address") or {}
+    a = addr.get("address")
+    if not isinstance(a, dict):  # JSONB is caller-controlled; never trust its shape
+        a = {}
     city_line = ", ".join(str(x) for x in [a.get("city"), a.get("state")] if x)
     if a.get("postal_code"):
         city_line = f"{city_line} {a['postal_code']}".strip()
@@ -877,9 +889,11 @@ import pytest  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
 from app.cappe.models.shop import CappeOrderStatusUpdate  # noqa: E402
+from app.cappe.routes._shared import build_patch  # noqa: E402
 from app.cappe.routes.payments import extract_shipping_details  # noqa: E402
-from app.cappe.services.commerce import compute_shipping_cents  # noqa: E402
-from app.cappe.services.receipt import build_receipt_html  # noqa: E402
+from app.cappe.routes.shop import should_restock  # noqa: E402
+from app.cappe.services.commerce import build_stripe_line_items, compute_shipping_cents  # noqa: E402
+from app.cappe.services.receipt import _ship_to_html, build_receipt_html  # noqa: E402
 from app.cappe.services.stripe_connect import build_shipping_options  # noqa: E402
 
 
@@ -887,39 +901,55 @@ from app.cappe.services.stripe_connect import build_shipping_options  # noqa: E4
 
 def test_shipping_zero_without_physical():
     assert compute_shipping_cents(
-        has_physical=False, subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
+        has_physical=False, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
     ) == 0
 
 
 def test_shipping_flat_applied_to_physical():
     assert compute_shipping_cents(
-        has_physical=True, subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
+        has_physical=True, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
     ) == 700
 
 
 def test_shipping_zero_when_rate_unset():
     assert compute_shipping_cents(
-        has_physical=True, subtotal_cents=5000, flat_cents=0, free_threshold_cents=None
+        has_physical=True, goods_subtotal_cents=5000, flat_cents=0, free_threshold_cents=None
     ) == 0
 
 
 def test_shipping_threshold_met_exactly():
     # Boundary: >= not >
     assert compute_shipping_cents(
-        has_physical=True, subtotal_cents=5000, flat_cents=700, free_threshold_cents=5000
+        has_physical=True, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=5000
     ) == 0
 
 
 def test_shipping_threshold_not_met():
     assert compute_shipping_cents(
-        has_physical=True, subtotal_cents=4999, flat_cents=700, free_threshold_cents=5000
+        has_physical=True, goods_subtotal_cents=4999, flat_cents=700, free_threshold_cents=5000
     ) == 700
 
 
 def test_shipping_threshold_zero_means_always_free():
     assert compute_shipping_cents(
-        has_physical=True, subtotal_cents=1, flat_cents=700, free_threshold_cents=0
+        has_physical=True, goods_subtotal_cents=1, flat_cents=700, free_threshold_cents=0
     ) == 0
+
+
+def test_shipping_zero_when_goods_subtotal_zero():
+    # A free-item physical cart never ships paid, even with no threshold set —
+    # otherwise an order could persist shipping_cents > 0 with no payable amount.
+    assert compute_shipping_cents(
+        has_physical=True, goods_subtotal_cents=0, flat_cents=700, free_threshold_cents=None
+    ) == 0
+
+
+def test_shipping_threshold_ignores_non_physical_lines():
+    # Threshold compares the GOODS subtotal only — a $60 booking shouldn't earn
+    # free shipping on a $10 physical line against a $50 threshold.
+    assert compute_shipping_cents(
+        has_physical=True, goods_subtotal_cents=1000, flat_cents=700, free_threshold_cents=5000
+    ) == 700
 
 
 # --- build_shipping_options --------------------------------------------------
@@ -967,6 +997,89 @@ def test_extract_shipping_absent_returns_none():
     assert extract_shipping_details({}) is None
     assert extract_shipping_details({"collected_information": {}}) is None
     assert extract_shipping_details({"collected_information": None}) is None
+
+
+# --- should_restock -----------------------------------------------------------
+
+def test_should_restock_tracking_only_patch_never_restocks():
+    # new_status=None is what a tracking-only PATCH passes — must be a no-op
+    # regardless of current status, or a carrier/tracking edit would credit stock.
+    assert should_restock("paid", None) is False
+    assert should_restock("pending", None) is False
+
+
+def test_should_restock_on_reversing_transition():
+    assert should_restock("paid", "cancelled") is True
+    assert should_restock("fulfilled", "refunded") is True
+
+
+def test_should_restock_false_when_nothing_to_reverse():
+    # Already cancelled/declined: no decrement outstanding to reverse.
+    assert should_restock("cancelled", "cancelled") is False
+
+
+def test_should_restock_false_for_non_reversing_transition():
+    assert should_restock("pending", "fulfilled") is False
+
+
+# --- build_patch placeholder numbering (routes/shop.py update_order_status) --
+
+def test_build_patch_numbering_matches_route_append_of_two_args():
+    # update_order_status appends exactly [order_id, site_id] after build_patch's
+    # own args, then closes the WHERE clause with ${len(args)-1}/${len(args)}.
+    # That arithmetic is only correct if build_patch's own placeholders are
+    # sequential starting at $1 with no gaps — assert that directly.
+    body = CappeOrderStatusUpdate.model_validate({"carrier": "USPS", "tracking_number": "123"})
+    sets, args = build_patch(body, ("status", "carrier", "tracking_number"))
+    assert args == ["USPS", "123"]
+    assert sets == ["carrier = $1", "tracking_number = $2"]
+    args_with_route_tail = [*args, "order-id", "site-id"]
+    assert f"${len(args_with_route_tail) - 1}" == "$3"  # order_id placeholder
+    assert f"${len(args_with_route_tail)}" == "$4"       # site_id placeholder
+
+
+def test_build_patch_single_field_numbering():
+    body = CappeOrderStatusUpdate.model_validate({"status": "paid"})
+    sets, args = build_patch(body, ("status", "carrier", "tracking_number"))
+    assert sets == ["status = $1"] and args == ["paid"]
+
+
+# --- build_stripe_line_items / total invariant --------------------------------
+
+def test_line_items_sum_plus_shipping_equals_total():
+    # The invariant Stripe must charge: sum(line_items) + shipping_cents ==
+    # subtotal_cents + tax_cents + shipping_cents == total_cents.
+    line_rows = [
+        (None, "Shirt", 2500, 2, "physical", {}, None, [], []),
+        (None, "Consult", 6000, 1, "service", {}, None, [], []),
+    ]
+    subtotal = sum(unit * qty for (_p, _t, unit, qty, *_r) in line_rows)
+    tax_cents = 400
+    shipping_cents = 700
+    total_cents = subtotal + tax_cents + shipping_cents
+    line_items = build_stripe_line_items(line_rows, "usd", tax_cents, "Tax")
+    charged = sum(li["price_data"]["unit_amount"] * li["quantity"] for li in line_items)
+    assert charged + shipping_cents == total_cents
+
+
+def test_line_items_omit_tax_line_when_zero():
+    line_rows = [(None, "Widget", 1000, 1, "physical", {}, None, [], [])]
+    line_items = build_stripe_line_items(line_rows, "usd", 0, "Tax")
+    assert len(line_items) == 1
+
+
+# --- _ship_to_html robustness --------------------------------------------------
+
+def test_ship_to_html_non_dict_address_field_does_not_raise():
+    # Guards against a JSONB payload where "address" isn't itself a dict —
+    # must degrade gracefully, not AttributeError inside the receipt render.
+    html = _ship_to_html({"name": "Jane Doe", "address": "not-a-dict"})
+    assert "Jane Doe" in html
+
+
+def test_ship_to_html_non_dict_top_level_returns_empty():
+    assert _ship_to_html("garbage") == ""
+    assert _ship_to_html(None) == ""
 
 
 # --- CappeOrderStatusUpdate --------------------------------------------------
@@ -1061,17 +1174,18 @@ def test_receipt_total_fallback_includes_shipping():
 
 1. **Tests**: `cd server && ./venv/bin/python -m pytest tests/cappe/ -q` — new file plus existing cappe suite green.
 2. **Static**: post-edit hook runs `py_compile` per file; `cd client && npx tsc -p tsconfig.app.json --noEmit` (never bare `npx tsc --noEmit` — checks nothing).
-3. **Manual (user-run, Stripe test mode)**: apply migration via `./scripts/migrate-dev.sh`; `stripe listen --forward-to localhost:8001/api/cappe/payments/webhook`; buy a physical item on a dev storefront → Checkout shows address form + shipping row ("Free shipping" when threshold met) → webhook lands → order row has `shipping_address` → receipt PDF shows Ship-to + shipping line → set carrier/tracking in Orders page → tokened `/public/orders/{token}` payload shows `carrier`/`tracking_number` but **no address** → digital-only order still checks out with no address form.
+3. **Manual (user-run, Stripe test mode)**: apply migration via `./scripts/migrate-dev.sh`; `stripe listen --forward-to localhost:8001/api/cappe/payments/webhook`; buy a physical item on a dev storefront → Checkout shows address form + shipping row ("Free shipping" when threshold met) → webhook lands → order row has `shipping_address` → receipt PDF shows Ship-to + shipping line → set carrier/tracking in Orders page → tokened `/public/orders/{token}` payload shows `carrier`/`tracking_number` but **no address** → digital-only order still checks out with no address form, and its webhook does **not** call `retrieve_checkout_session` (check logs/breakpoint — `shipping_cost` gate). Also: a cart mixing a $60 non-physical line with a $10 physical line against a $50 free-shipping threshold still charges shipping (threshold is goods-only, not whole-cart); a $0 physical item never persists `shipping_cents > 0`.
 4. After approval of any spec change: re-copy this file to repo-root `CAPPE_SHIPPING_PLAN.md` and commit.
 
 ## Risks / edge cases
 
 - **Mixed carts** (physical + digital): `has_physical` any-match → shipping applies once per order.
 - **Pre-migration pending orders paid after deploy**: `shipping_cents` defaults 0; `COALESCE($5::jsonb, o.shipping_address)` leaves address NULL when Stripe collected none.
-- **`subtotal == 0` physical carts** (free item): `can_pay` false (:540-543) → no Stripe session → no address, no shipping. Accepted — matches existing free-cart behavior.
-- **Tracking-only PATCH must not touch stock**: restock gated on `body.status is not None` + FROM/TO transition sets (Step 5f); `{"status": null}` rejected at the model so `build_patch` can never SET status NULL.
+- **`taxable == 0` physical carts** (free item, or a cart whose only physical line is a giveaway): `compute_shipping_cents`'s `goods_subtotal_cents <= 0` guard returns 0 — no shipping is persisted even though `can_pay` is also false (:540-543) → no Stripe session → no address either. (Corrected from an earlier draft of this bullet, which claimed "no shipping" while the shipped code actually still charged it — see the fix pass's F1/F4.)
+- **Tracking-only PATCH must not touch stock**: restock gated on `body.status is not None` + FROM/TO transition sets (Step 5f, extracted into the pure `should_restock(current_status, new_status)` for unit testing); `{"status": null}` rejected at the model so `build_patch` can never SET status NULL.
 - **Threshold clearing**: `model_fields_set` gate (Step 8d); ShippingSettingsCard sends `null` for an emptied "Free over" input.
-- **`shipping_options` on direct-charge (connected-account) sessions**: Stripe supports it, but smoke-test in test mode before calling done — a `CappeStripeError` degrades to the manual pending flow at commerce.py:591 (order still created, shipping in total).
-- **Stripe retrieve fallback**: fires only when the event payload lacks shipping details; failure swallowed (`ship = None`) so paid-marking + receipt never block. Claim/release dedupe (:135-149) untouched.
+- **`shipping_options` on direct-charge (connected-account) sessions**: confirmed against Stripe docs — inline `shipping_rate_data`, a `fixed_amount.amount = 0` free-shipping row, and `application_fee_amount` via `payment_intent_data` on a `Stripe-Account`-scoped session are all documented and composable; payment mode only (this code hardcodes `mode="payment"`). A `CappeStripeError` still degrades to the manual pending flow at commerce.py:591 (order still created, shipping in total).
+- **Stripe retrieve fallback**: fires only when the event payload lacks shipping details AND `shipping_cost` shows the session had a shipping option attached (i.e. only for physical orders) — a digital/service webhook never triggers the extra round-trip. Failure swallowed (`ship = None`) so paid-marking + receipt never block. Claim/release dedupe (:135-149) untouched.
+- **Threshold base**: compares the physical-goods subtotal (`taxable`), not the whole-cart `subtotal` — a $60 booking + $10 shirt does NOT get free shipping at a $50 threshold, matching the tax base and the docstring's "goods subtotal" claim.
 - **`loads()` None-collapse**: `common.loads()` maps NULL→`{}`; `_order_row` uses `loads(...) or None` so Pydantic serializes `null`, not `{}`.
 - **Deploy order**: migration before code (user's normal migrate-then-deploy flow).
