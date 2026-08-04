@@ -70,7 +70,13 @@ export default function PublicBrand() {
     setLoadingMore(true)
     try {
       const next = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=${reviews.length}`)
-      setReviews((r) => [...r, ...next.reviews])
+      // The underlying `publish_at <= NOW()` window grows between fetches, so
+      // a review crossing the 48h boundary can shift the offset and reappear
+      // in the next page — dedupe by id rather than trusting offset alone.
+      setReviews((r) => {
+        const seen = new Set(r.map((x) => x.id))
+        return [...r, ...next.reviews.filter((x) => !seen.has(x.id))]
+      })
     } finally {
       setLoadingMore(false)
     }

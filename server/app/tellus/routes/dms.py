@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from ..dependencies import require_consumer, require_paid_brand, require_tellus_account
+from ..dependencies import require_consumer, require_dm_account, require_paid_brand
 from ..models.tellus import TellusAccount, TellusDmMessage, TellusDmSend, TellusDmThread
 from ..services.email import send_tellus_dm_email
 from ..services.points_service import _notify
@@ -81,6 +81,11 @@ async def open_thread(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="DMs are only available for public reviews.",
                 )
+            if report["review_state"] == "withdrawn":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This review was withdrawn — there's no public review to message about.",
+                )
             # ON CONFLICT makes reopening idempotent: a brand messaging again
             # about the same report reuses the existing thread instead of
             # erroring on the UNIQUE(report_id).
@@ -135,7 +140,7 @@ async def open_thread(
 
 
 @router.get("/dm/threads", response_model=list[TellusDmThread])
-async def list_threads(account: TellusAccount = Depends(require_tellus_account)):
+async def list_threads(account: TellusAccount = Depends(require_dm_account)):
     async with get_connection() as conn:
         if account.account_type == "brand":
             rows = await conn.fetch(
@@ -171,7 +176,7 @@ async def list_threads(account: TellusAccount = Depends(require_tellus_account))
 
 
 @router.get("/dm/threads/{thread_id}/messages", response_model=list[TellusDmMessage])
-async def get_messages(thread_id: UUID, account: TellusAccount = Depends(require_tellus_account)):
+async def get_messages(thread_id: UUID, account: TellusAccount = Depends(require_dm_account)):
     async with get_connection() as conn:
         _, my_role = await _get_thread_for_account(conn, thread_id, account)
         # Read-on-fetch: the OTHER party's unread messages are marked read the
@@ -200,7 +205,7 @@ async def get_messages(thread_id: UUID, account: TellusAccount = Depends(require
 @router.post("/dm/threads/{thread_id}/messages", response_model=TellusDmMessage)
 async def send_message(
     thread_id: UUID, body: TellusDmSend, background: BackgroundTasks,
-    account: TellusAccount = Depends(require_tellus_account),
+    account: TellusAccount = Depends(require_dm_account),
 ):
     await check_rate_limit(str(account.id), "tellus_dm_send_burst", 10, 60)
     await check_rate_limit(str(account.id), "tellus_dm_send", 30, 3600)

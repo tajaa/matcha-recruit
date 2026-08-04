@@ -25,9 +25,15 @@ function ReviewCard({ review, onChange }: { review: MyReview; onChange: () => vo
   const [err, setErr] = useState('')
 
   async function save() {
+    if (!description.trim()) {
+      setErr('Description cannot be empty.')
+      return
+    }
     setBusy(true); setErr('')
     try {
-      await tellusApi.patch(`/me/reviews/${review.id}`, { title: title || null, description, rating: rating || null })
+      // title sent as-is (not `|| null`) — null means "leave unchanged" to the
+      // server's COALESCE, so clearing the title to empty needs an empty string.
+      await tellusApi.patch(`/me/reviews/${review.id}`, { title, description, rating: rating || null })
       setEditing(false)
       onChange()
     } catch (e) {
@@ -129,16 +135,24 @@ function ReviewCard({ review, onChange }: { review: MyReview; onChange: () => vo
 export default function MyReviews() {
   const [reviews, setReviews] = useState<MyReview[]>([])
   const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState('')
 
   const load = useCallback(async () => {
-    const r = await tellusApi.get<MyReview[]>('/me/reviews')
-    setReviews(r)
-    setLoading(false)
+    setErr('')
+    try {
+      const r = await tellusApi.get<MyReview[]>('/me/reviews')
+      setReviews(r)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load reviews')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { void load() }, [load])
 
   if (loading) return <Spinner />
+  if (err) return <ErrorText>{err}</ErrorText>
 
   return (
     <div className="space-y-4">

@@ -204,11 +204,20 @@ async def heart_report(report_id: UUID, account: TellusAccount = Depends(require
             report_id, account.brand_id, account.id,
         )
         if row["hearted_at"] is None and row["reporter_account_id"] is not None:
-            await _notify(
-                conn, row["reporter_account_id"], "review_hearted", "Your feedback got a heart",
-                "A brand acknowledged your feedback.",
-                reference_type="report", reference_id=str(report_id),
+            # hearted_at resets on unheart, so it can't gate "first time ever" on
+            # its own — a heart/unheart/heart cycle would re-notify each time.
+            # Check the notification log itself instead.
+            already_notified = await conn.fetchval(
+                "SELECT 1 FROM tellus_notifications WHERE reference_type = 'report' "
+                "AND reference_id = $1 AND kind = 'review_hearted' LIMIT 1",
+                str(report_id),
             )
+            if not already_notified:
+                await _notify(
+                    conn, row["reporter_account_id"], "review_hearted", "Your feedback got a heart",
+                    "A brand acknowledged your feedback.",
+                    reference_type="report", reference_id=str(report_id),
+                )
         return await serialize_report(conn, updated)
 
 
@@ -250,11 +259,19 @@ async def set_public_reply(
             report_id, account.brand_id, body.body,
         )
         if first_reply and row["reporter_account_id"] is not None:
-            await _notify(
-                conn, row["reporter_account_id"], "review_reply", "A brand replied to your review",
-                "Check your review to read the reply.",
-                reference_type="report", reference_id=str(report_id),
+            # brand_public_reply_at resets on delete — same "notify once ever"
+            # gap as the heart path above. Check the notification log instead.
+            already_notified = await conn.fetchval(
+                "SELECT 1 FROM tellus_notifications WHERE reference_type = 'report' "
+                "AND reference_id = $1 AND kind = 'review_reply' LIMIT 1",
+                str(report_id),
             )
+            if not already_notified:
+                await _notify(
+                    conn, row["reporter_account_id"], "review_reply", "A brand replied to your review",
+                    "Check your review to read the reply.",
+                    reference_type="report", reference_id=str(report_id),
+                )
         return await serialize_report(conn, updated)
 
 

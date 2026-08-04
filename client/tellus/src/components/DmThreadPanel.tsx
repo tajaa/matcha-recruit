@@ -23,7 +23,7 @@ export function DmThreadPanel({
   const [err, setErr] = useState('')
 
   async function loadThread() {
-    setLoading(true)
+    setLoading(true); setErr('')
     try {
       const threads = await tellusApi.get<DmThread[]>('/dm/threads')
       const found = threads.find((t) => t.report_id === reportId) ?? null
@@ -32,6 +32,8 @@ export function DmThreadPanel({
         const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${found.id}/messages`)
         setMessages(msgs)
       }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to load conversation')
     } finally {
       setLoading(false)
     }
@@ -64,17 +66,27 @@ export function DmThreadPanel({
 
   async function toggleBlock() {
     if (!thread) return
-    setBusy(true)
+    setBusy(true); setErr('')
     try {
       if (thread.blocked) await tellusApi.delete(`/dm/threads/${thread.id}/block`)
       else await tellusApi.post(`/dm/threads/${thread.id}/block`)
       setThread({ ...thread, blocked: !thread.blocked })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Action failed')
     } finally {
       setBusy(false)
     }
   }
 
   if (loading) return <div className="py-4"><Spinner /></div>
+  if (err && !thread && messages.length === 0) {
+    return (
+      <div className="rounded-lg border border-tu-border bg-tu-panel2 p-3">
+        <p className="text-xs text-tu-bad">{err}</p>
+        <Button size="sm" variant="ghost" className="mt-2" onClick={() => void loadThread()}>Retry</Button>
+      </div>
+    )
+  }
 
   const blocked = thread?.blocked ?? false
   const canCompose = isBrand ? !blocked : !!thread && !blocked

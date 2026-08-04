@@ -126,3 +126,20 @@ async def require_paid_brand(
             detail="This brand account does not have an active subscription.",
         )
     return account
+
+
+async def require_dm_account(
+    account: TellusAccount = Depends(require_tellus_account),
+) -> TellusAccount:
+    """Any consumer account, or a brand account with an active subscription.
+
+    DMs are shared brand/consumer surfaces (dms.py branches on
+    account_type) — a lapsed brand shouldn't keep DM read/write just because
+    it skips the require_paid_brand gate the rest of the dashboard uses.
+    """
+    if account.account_type == "brand" and account.plan_status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="This brand account does not have an active subscription.",
+        )
+    return account

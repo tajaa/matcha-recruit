@@ -65,10 +65,24 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  function openNotifications() {
-    navigate(isBrand ? '/brand/feedback' : '/my-reviews')
-    tellusApi.post('/notifications/read').catch(() => {})
-    setUnread(0)
+  const FEEDBACK_SURFACE_KINDS = new Set(['dm_message', 'review_moderated', 'review_hearted', 'review_reply'])
+
+  async function openNotifications() {
+    // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send
+    // them to their own status page instead.
+    navigate(isBrand ? (isPendingBrand ? '/brand/billing' : '/brand/feedback') : '/my-reviews')
+
+    // Only clear notifications relevant to the surface we're navigating to —
+    // a blanket mark-all-read here would silently drop unrelated points/
+    // redemption notices the user never saw.
+    try {
+      const notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
+      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind))
+      await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
+      setUnread(notes.length - relevant.length)
+    } catch {
+      // best-effort — leave unread count as-is on failure
+    }
   }
 
   const bell = (

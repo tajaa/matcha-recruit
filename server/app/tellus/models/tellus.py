@@ -197,9 +197,10 @@ class TellusFeedbackSubmit(BaseModel):
     occurred_at: Optional[datetime] = None
     reporter_contact: Optional[str] = Field(default=None, max_length=320)
     rating: Optional[int] = Field(default=None, ge=1, le=5)
-    # Default ON — a logged-in consumer posts publicly unless they opt out.
-    # Anonymous submissions are forced private server-side regardless.
-    post_as_review: bool = True
+    # Default OFF — older clients that don't send this field would otherwise
+    # hit the rating-required 422 in public_intake.py when submitting a
+    # rating-less report. Anonymous submissions are forced private regardless.
+    post_as_review: bool = False
     # Presigned media keys (storage paths returned by /media/presign).
     media_keys: list["TellusSubmittedMedia"] = Field(default_factory=list)
     # Honeypot — bots fill hidden fields; humans leave them empty.
