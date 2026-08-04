@@ -5,6 +5,8 @@ import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import type { CappeTokenResponse } from '../types'
 
+const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
+
 // Landing for the emailed confirmation link (/cappe/verify?token=…). Exchanges
 // the token for a session and drops the user straight into their dashboard.
 export default function CappeVerify() {
@@ -28,7 +30,7 @@ export default function CappeVerify() {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
         setState('ok')
-        setTimeout(() => navigate('/cappe/sites', { replace: true }), 900)
+        setTimeout(() => navigate(postAuthHome(res.account?.account_type), { replace: true }), 900)
       })
       .catch((err) => {
         setState('error')

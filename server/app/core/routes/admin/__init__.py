@@ -2,6 +2,7 @@
 from fastapi import APIRouter
 
 from app.core.routes.admin.jurisdictions import router as _jurisdictions
+from app.core.routes.admin.cappe_creators import router as _cappe_creators
 from app.core.routes.admin.companies import router as _companies
 from app.core.routes.admin.deal_flow import router as _deal_flow
 from app.core.routes.admin.brokers import router as _brokers
@@ -24,7 +25,7 @@ from app.core.routes.admin._shared import (  # noqa: F401
 from app.core.models.admin import ProposedCategory  # noqa: F401
 
 router = APIRouter()
-for _r in (_jurisdictions, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products, _schedule_rules):
+for _r in (_jurisdictions, _cappe_creators, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products, _schedule_rules):
     router.include_router(_r)
 
 __all__ = [

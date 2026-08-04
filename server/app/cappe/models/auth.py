@@ -11,8 +11,10 @@ class CappeSignup(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     name: Optional[str] = Field(default=None, max_length=255)
     # business = an organization's storefront; personal = a solo professional
-    # ("business of one") who gets hired/booked. Same engine, different framing.
-    account_type: Literal["business", "personal"] = "business"
+    # ("business of one") who gets hired/booked; creator = influencer/content
+    # creator on the creator marketplace (media kit + collab offers). Same
+    # engine, different framing.
+    account_type: Literal["business", "personal", "creator"] = "business"
 
 
 class CappeLogin(BaseModel):

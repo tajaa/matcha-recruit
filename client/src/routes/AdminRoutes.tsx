@@ -22,6 +22,7 @@ import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
 import Updates from '../pages/admin/Updates'
 import Cappe from '../pages/admin/Cappe'
+import CappeCreators from '../pages/admin/CappeCreators'
 import GapAnalysisHome from '../pages/admin/GapAnalysisHome'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
 import GapDashboard from '../pages/admin/GapDashboard'
@@ -66,6 +67,7 @@ export default function AdminRoutes() {
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="matcha-work" element={<MatchaWork />} />
         <Route path="cappe" element={<Cappe />} />
+        <Route path="cappe-creators" element={<CappeCreators />} />
         <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />
         <Route path="client-errors" element={<ClientErrors />} />
         <Route path="server-errors" element={<ServerErrors />} />

@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
+  Handshake, Wallet, Compass,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
@@ -96,10 +97,24 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
               />
             ))}
           </>
+        ) : account?.account_type === 'creator' ? (
+          <>
+            <Item to="/cappe/creator" icon={UserCircle} label="My Profile" end />
+            <Item to="/cappe/creator/deals" icon={Handshake} label="Deals" />
+            <Item to="/cappe/creator/earnings" icon={Wallet} label="Earnings" />
+            <Item to="/cappe/creators" icon={Compass} label="Directory" />
+          </>
         ) : (
           <>
             <Item to="/cappe/sites" icon={LayoutGrid} label="My Sites" end />
             <Item to="/cappe/templates" icon={LayoutTemplate} label="Templates" />
+            {account?.account_type === 'business' && (
+              <>
+                <div className="mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Creators</div>
+                <Item to="/cappe/creators" icon={Compass} label="Find creators" />
+                <Item to="/cappe/collabs" icon={Handshake} label="Collabs" />
+              </>
+            )}
           </>
         )}
       </nav>
