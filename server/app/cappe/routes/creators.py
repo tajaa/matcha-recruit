@@ -8,6 +8,7 @@ from uuid import UUID
 import asyncpg
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
+from ...core.services.redis_cache import check_rate_limit
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -85,6 +86,16 @@ async def _load_me(conn, account_id: UUID) -> dict:
 
 
 async def _recompute_reach_verified(conn, profile_id: UUID) -> None:
+    """Only safe to call right after every social row for this profile was
+    just deleted and reinserted (replace_my_socials' pattern below) — it
+    checks audit_status on whatever rows currently exist, so on a path that
+    edits socials WITHOUT wiping prior audits first it would incorrectly
+    treat a still-flagged social as verified.
+
+    Deliberately does NOT touch reach_audited_at (that's the admin's actual
+    last-review timestamp, set only by the per-social audit endpoint) — see
+    admin_list_creators' reaudit_due for how a post-audit social edit still
+    surfaces in the re-audit queue despite the stale timestamp."""
     verified = await conn.fetchval(
         "SELECT EXISTS(SELECT 1 FROM cappe_creator_socials WHERE profile_id = $1 AND audit_status = 'verified')",
         profile_id,
@@ -282,6 +293,10 @@ async def upload_creator_media(
     `cappe_assets` record — that catalog is site-scoped and creators have no
     site."""
     _require_creator(account)
+    # No S3 storage quota on this path (unlike site assets, a creator has no
+    # site to cap by) — a per-account request rate limit is the only backstop
+    # against unbounded upload volume/cost.
+    await check_rate_limit(str(account.id), "cappe_creator_upload", 30, 3600)
     if file.content_type in _ALLOWED_IMAGE:
         data = await read_capped(file, _MAX_IMAGE_BYTES, "Image too large (max 5 MB)")
     elif file.content_type in _ALLOWED_VIDEO:

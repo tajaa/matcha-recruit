@@ -31,10 +31,13 @@ owes for approved work.
 
 ## File: `server/alembic/versions/zzzzcappe28_creator_marketplace.py`
 
-`revision = "zzzzcappe28"`. `down_revision`: the alembic head at author time — currently
-`"empavail01"` (verify with the newest file in `server/alembic/versions/` before writing;
-chain is single-headed). Commit the migration before applying anywhere. Apply via
-`./scripts/migrate-dev.sh`; prod only at ship time via `./scripts/migrate-prod.sh`.
+`revision = "zzzzcappe28"`. `down_revision`: **shipped as `"zzzzcappe27"`**, not the
+`"empavail01"` this section originally named — the repo has multiple alembic heads
+(18 at author time, not single-headed as this doc claimed), and `empavail01` already
+had a child revision, so chaining off it would have forked the graph. `zzzzcappe27`
+(the cappe-branch head) was the correct, non-forking choice. Commit the migration
+before applying anywhere. Apply via `./scripts/migrate-dev.sh`; prod only at ship
+time via `./scripts/migrate-prod.sh`.
 
 All DDL `IF NOT EXISTS` style, matching `zzzzcappe10_reviews.py`. Full `upgrade()`:
 
@@ -931,9 +934,13 @@ Called inside `async with conn.transaction():` by the route. Steps, in order:
 4. If `terms.compensation_cents > 0`: `build_payment_rows(...)` → INSERT each into
    `cappe_collab_payments`, mapping `deliverable_idx` → deliverable id;
    `on_accept` rows get `status='due', due_at=NOW()`, others `status='scheduled'`.
-5. If there are NO payment rows (gifting): offer goes straight
-   `accepted → active` (`UPDATE ... SET status='active'`) — active means "underway",
-   and with nothing to fund there is nothing to wait for.
+5. If there is no `on_accept`-triggered payment due — **gifting (no payment rows
+   at all) OR a `per_deliverable` schedule (payment rows exist, but every trigger
+   is `on_deliverable`)** — offer goes straight `accepted → active`
+   (`UPDATE ... SET status='active'`). Necessary, not just gifting: the webhook
+   only ever flips `accepted → active` on an `on_accept` payment clearing, and
+   deliverable submission requires `status='active'` — a `per_deliverable` offer
+   left in `accepted` with no `on_accept` row to pay would be stuck there forever.
 
 ### `fire_deliverable_payment(conn, offer_id, deliverable_id) -> Optional[UUID]`
 
@@ -962,11 +969,26 @@ it flipped (route emails both sides on completion).
 
 ### `cancel_offer(conn, offer_row, side, reason) -> None`
 
-Guard: status in `('accepted', 'active')` else 409. Then:
-- `UPDATE cappe_collab_offers SET status='cancelled', cancelled_at=NOW(), cancelled_by=$side,
-  cancel_reason=$reason, last_action_at=NOW(), updated_at=NOW() WHERE id=$1 AND status IN ('accepted','active')`.
-- `UPDATE cappe_collab_payments SET status='cancelled', updated_at=NOW()
-  WHERE offer_id=$1 AND status IN ('scheduled', 'due', 'processing')`.
+**Superseded by the protections addendum's cancel asymmetry (§B) — this section's
+original flat "cancel everything unpaid" behavior was never shipped.** As built:
+locks the offer row (`SELECT ... FOR UPDATE`) and branches on the status observed
+under that lock rather than the caller's pre-read `offer_row`, so a webhook
+flipping `accepted → active` between the caller's read and the cancel call can't
+put it through the wrong branch. Guard: locked status in `('accepted', 'active')`
+else 409.
+
+- `cancelled_by='brand'` on an `active` offer: any deliverable currently
+  `submitted` is treated as earned regardless of the auto-approve window — it's
+  approved and its payment fired to `due` *before* the cancel proceeds, so it
+  survives under the rule below (more creator-favorable than §B's original
+  "only the auto-approve sweep saves it" framing).
+- `UPDATE cappe_collab_offers SET status='cancelled', ...`.
+- Payment cancellation is asymmetric, not a flat status list — see
+  `CAPPE_CREATOR_MARKETPLACE_PROTECTIONS_PLAN.md` §B and
+  `services/collab.py:cancel_offer`'s docstring for the exact due/scheduled split
+  by side and prior offer status. (This doc's "Part 9B" cross-references elsewhere
+  are aspirational — the addendum was never mechanically folded in as its own §I
+  intended; it stands alone as the authority on protections A–H.)
 - Paid installments stay `paid` — milestone money is earned; refunds are a manual
   admin action in Stripe, out of scope.
 
@@ -1804,7 +1826,9 @@ Tabs (local state): **Review queue** · **All creators** · **Re-audit due** · 
    accept: allowed only for the side that did NOT propose the latest revision
                               │
                           accepted ── first installment paid (webhook) ──▶ active
-                              │            (gifting/zero-comp offers skip straight to active)
+                              │      (gifting AND per_deliverable schedules skip straight to
+                              │       active at accept — neither has an on_accept payment to
+                              │       wait on; see accept_offer step 5 above)
                               │
    active ── all deliverables approved AND all payments paid/cancelled ──▶ completed
 ```

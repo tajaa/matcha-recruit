@@ -37,6 +37,7 @@ from ..services import collab as svc
 from ..services.common import loads
 from ..services.email import (
     dashboard_url,
+    send_cappe_collab_completed_email,
     send_cappe_collab_message_email,
     send_cappe_collab_payment_due_email,
     send_cappe_collab_payment_nudge_email,
@@ -69,9 +70,9 @@ async def _recipient_send_ok(email: str) -> bool:
 async def _brand_stats(conn, brand_account_id: UUID) -> BrandStats:
     row = await conn.fetchrow(
         """SELECT
-             COUNT(*) FILTER (WHERE o.status = 'completed') AS completed_collabs,
-             COUNT(*) FILTER (WHERE o.status = 'cancelled' AND o.cancelled_by = 'brand') AS brand_cancelled,
-             COUNT(*) FILTER (WHERE o.status = 'active') AS in_progress,
+             COUNT(DISTINCT o.id) FILTER (WHERE o.status = 'completed') AS completed_collabs,
+             COUNT(DISTINCT o.id) FILTER (WHERE o.status = 'cancelled' AND o.cancelled_by = 'brand') AS brand_cancelled,
+             COUNT(DISTINCT o.id) FILTER (WHERE o.status = 'active') AS in_progress,
              AVG(EXTRACT(EPOCH FROM (p.paid_at - p.due_at)) / 3600.0)
                  FILTER (WHERE p.paid_at IS NOT NULL AND p.due_at IS NOT NULL) AS avg_hours_to_pay
            FROM cappe_collab_offers o
@@ -87,11 +88,39 @@ async def _brand_stats(conn, brand_account_id: UUID) -> BrandStats:
     )
 
 
+async def _notify_auto_approve(conn, offer_id: UUID, offer_row, result: dict) -> None:
+    """Auto-approve (protection C) must not fire payments in silence — email
+    the creator each approved deliverable and the brand each payment now due,
+    same as a manual approve. Awaited inline (not BackgroundTasks: this runs
+    from a GET path with no request-scoped BackgroundTasks to hand off to);
+    every sender already logs-and-swallows its own failures."""
+    if not result["deliverables"] and not result["fired_payments"]:
+        return
+    creator_email, creator_name = await _resolve_contact(conn, offer_row, "brand")
+    brand_email, brand_name = await _resolve_contact(conn, offer_row, "creator")
+    for d in result["deliverables"]:
+        await send_cappe_deliverable_decision_email(
+            creator_email, creator_name, offer_row["title"], d["label"], True, None,
+            dashboard_url(f"/creator/deals/{offer_id}"),
+        )
+    for p in result["fired_payments"]:
+        await send_cappe_collab_payment_due_email(
+            brand_email, brand_name, offer_row["title"], p["label"], p["amount_cents"],
+            dashboard_url(f"/collabs/{offer_id}"),
+        )
+    if result["completed"]:
+        await send_cappe_collab_completed_email(brand_email, brand_name, offer_row["title"],
+                                                 dashboard_url(f"/collabs/{offer_id}"))
+        await send_cappe_collab_completed_email(creator_email, creator_name, offer_row["title"],
+                                                 dashboard_url(f"/creator/deals/{offer_id}"))
+
+
 async def _offer_detail(conn, offer_id: UUID, account_id: UUID) -> OfferDetail:
     offer_row, side = await svc.get_offer_side(conn, offer_id, account_id)
 
     if offer_row["status"] == "active":
-        await svc.auto_approve_overdue(conn, offer_id)
+        result = await svc.auto_approve_overdue(conn, offer_id)
+        await _notify_auto_approve(conn, offer_id, offer_row, result)
         offer_row, side = await svc.get_offer_side(conn, offer_id, account_id)
 
     revision_rows = await conn.fetch(
@@ -130,6 +159,8 @@ async def _offer_detail(conn, offer_id: UUID, account_id: UUID) -> OfferDetail:
         )
         brand_stats = b_stats
 
+    auto_approve_days = await svc.resolve_auto_approve_days(conn)
+
     return OfferDetail(
         id=offer_row["id"], title=offer_row["title"], status=offer_row["status"],
         payment_schedule=offer_row["payment_schedule"], total_cents=offer_row["total_cents"],
@@ -146,7 +177,7 @@ async def _offer_detail(conn, offer_id: UUID, account_id: UUID) -> OfferDetail:
         deliverables=[DeliverableOut(**dict(d)) for d in deliverable_rows],
         payments=[PaymentOut(**dict(p)) for p in payment_rows],
         creator_payouts_ready=bool(offer_row["creator_stripe_account_id"] and offer_row["creator_charges_enabled"]),
-        deal_check=deal_check, brand_stats=brand_stats,
+        deal_check=deal_check, brand_stats=brand_stats, auto_approve_days=auto_approve_days,
     )
 
 
@@ -316,7 +347,17 @@ async def list_offers(
         active_ids = [r["id"] for r in row_dicts if r["status"] == "active"]
         if active_ids:
             for oid in active_ids:
-                await svc.auto_approve_overdue(conn, oid)
+                result = await svc.auto_approve_overdue(conn, oid)
+                if result["deliverables"] or result["fired_payments"]:
+                    notify_row = await conn.fetchrow(
+                        """SELECT o.*, ba.name AS brand_name
+                             FROM cappe_collab_offers o
+                             JOIN cappe_accounts ba ON ba.id = o.brand_account_id
+                            WHERE o.id = $1""",
+                        oid,
+                    )
+                    if notify_row is not None:
+                        await _notify_auto_approve(conn, oid, notify_row, result)
             # Re-pull just the status/total/last_action_at of the touched rows —
             # auto-approve can flip active -> completed and fire payments.
             refreshed = {
@@ -543,8 +584,8 @@ async def approve_deliverable(offer_id: UUID, deliverable_id: UUID, background: 
             all_fired = await svc.fire_all_approved_payments(conn, offer_id)
             completed = await svc.check_completion(conn, offer_id)
 
-        creator_email, creator_name = await _resolve_contact(conn, offer_row, "creator")
-        brand_email, brand_name = await _resolve_contact(conn, offer_row, "brand")
+        creator_email, creator_name = await _resolve_contact(conn, offer_row, "brand")
+        brand_email, brand_name = await _resolve_contact(conn, offer_row, "creator")
         label = f"{row['type']} #{row['idx'] + 1}"
         background.add_task(send_cappe_deliverable_decision_email, creator_email, creator_name, offer_row["title"],
                             label, True, None, dashboard_url(f"/creator/deals/{offer_id}"))
@@ -558,7 +599,6 @@ async def approve_deliverable(offer_id: UUID, deliverable_id: UUID, background: 
                 background.add_task(send_cappe_collab_payment_due_email, brand_email, brand_name, offer_row["title"],
                                     p["label"], p["amount_cents"], dashboard_url(f"/collabs/{offer_id}"))
         if completed:
-            from ..services.email import send_cappe_collab_completed_email
             background.add_task(send_cappe_collab_completed_email, brand_email, brand_name, offer_row["title"],
                                 dashboard_url(f"/collabs/{offer_id}"))
             background.add_task(send_cappe_collab_completed_email, creator_email, creator_name, offer_row["title"],
@@ -612,6 +652,12 @@ async def checkout_payment(offer_id: UUID, payment_id: UUID, account: CappeAccou
         )
         if payment is None or payment["status"] not in ("due", "processing"):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment is not due")
+        if not offer_row["creator_stripe_account_id"] or not offer_row["creator_charges_enabled"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "payouts_not_ready",
+                        "message": "Creator's payout setup isn't ready yet — try again once they finish"},
+            )
         fee_bps = await svc.resolve_collab_fee_bps(conn)
         fee = max(0, payment["amount_cents"] * fee_bps // 10_000)
 

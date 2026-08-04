@@ -186,18 +186,28 @@ export default function SendOfferSheet({ profile, onClose, onSent }: {
               <label className={ui.label}>Deliverables</label>
               <div className="space-y-2">
                 {deliverables.map((d, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 p-2">
-                    <select value={d.type} onChange={(e) => updateDeliverable(i, { type: e.target.value })} className={`${ui.input} w-auto`}>
-                      {DELIVERABLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <select value={d.platform} onChange={(e) => updateDeliverable(i, { platform: e.target.value })} className={`${ui.input} w-auto`}>
-                      {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    <input type="number" min={1} max={20} value={d.quantity} onChange={(e) => updateDeliverable(i, { quantity: Number(e.target.value) || 1 })} className={`${ui.input} w-16`} />
-                    <input type="date" value={d.due_date ?? ''} onChange={(e) => updateDeliverable(i, { due_date: e.target.value || null })} className={`${ui.input} w-auto`} />
-                    <button type="button" onClick={() => setDeliverables((prev) => prev.filter((_, idx) => idx !== i))} className="ml-auto text-zinc-500 hover:text-red-400">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                  <div key={i} className="rounded-lg border border-zinc-800 p-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select value={d.type} onChange={(e) => updateDeliverable(i, { type: e.target.value })} className={`${ui.input} w-auto`}>
+                        {DELIVERABLE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                      <select value={d.platform} onChange={(e) => updateDeliverable(i, { platform: e.target.value })} className={`${ui.input} w-auto`}>
+                        {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <input type="number" min={1} max={20} value={d.quantity} onChange={(e) => updateDeliverable(i, { quantity: Number(e.target.value) || 1 })} className={`${ui.input} w-16`} />
+                      <input type="date" value={d.due_date ?? ''} onChange={(e) => updateDeliverable(i, { due_date: e.target.value || null })} className={`${ui.input} w-auto`} />
+                      <button type="button" onClick={() => setDeliverables((prev) => prev.filter((_, idx) => idx !== i))} className="ml-auto text-zinc-500 hover:text-red-400">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={d.spec ?? ''}
+                      onChange={(e) => updateDeliverable(i, { spec: e.target.value || null })}
+                      placeholder="Spec / brief (optional)"
+                      maxLength={2000}
+                      className={`${ui.input} mt-2 w-full`}
+                    />
                   </div>
                 ))}
               </div>

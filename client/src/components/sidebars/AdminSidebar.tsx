@@ -20,6 +20,7 @@ const nav: NavGroup[] = [
       { to: '/admin/companies', icon: Building2, label: 'Companies' },
       { to: '/admin/matcha-work', icon: Sparkles, label: 'Matcha-Work' },
       { to: '/admin/cappe', icon: LayoutTemplate, label: 'Cappe' },
+      { to: '/admin/cappe-creators', icon: Users, label: 'Cappe Creators' },
       { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
       { to: '/admin/fractional-hr', icon: HeartHandshake, label: 'Fractional HR' },
     ],

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import {
   AlertTriangle, CheckCircle2, Loader2, MessageSquare, Send, ShieldCheck,
 } from 'lucide-react'
-import { cappeApi } from '../api'
+import { cappeApi, CappeApiError } from '../api'
 import { ui, badgeFor } from '../components/ui'
 import StripeConnectCard from '../components/StripeConnectCard'
 import TermSheet from './TermSheet'
@@ -84,7 +84,7 @@ export default function OfferDetailPage() {
       try {
         await cappeApi.post(`/collab/offers/${offerId}/accept`)
       } catch (e) {
-        if (e instanceof Error && /payouts_not_ready|payout setup/i.test(e.message)) {
+        if (e instanceof CappeApiError && e.code === 'payouts_not_ready') {
           setPayoutsBlocked(true)
           throw new Error('Stripe payout setup is required before this offer can be accepted.')
         }
@@ -103,7 +103,10 @@ export default function OfferDetailPage() {
   }
 
   async function cancel() {
-    if (!window.confirm('Cancel this collab? Paid installments are not refunded automatically.')) return
+    const warning = side === 'brand'
+      ? 'Cancel this collab? Any due or already-submitted work is still owed — those installments remain payable, and pending deliverables get approved and billed. Paid installments are not refunded automatically.'
+      : "Cancel this collab? You'll forfeit any installments that haven't come due yet. Paid installments are not refunded automatically."
+    if (!window.confirm(warning)) return
     const reason = window.prompt('Reason for cancelling:')
     if (!reason) return
     await act(() => cappeApi.post(`/collab/offers/${offerId}/cancel`, { reason }))
@@ -121,9 +124,9 @@ export default function OfferDetailPage() {
     setShowCounter(false)
   }
 
-  async function submitDeliverable(deliverableId: string, submissionUrl: string, note: string) {
+  async function submitDeliverable(deliverableId: string, submissionUrl: string, note: string, proofMediaUrl: string | null) {
     await act(() => cappeApi.post(`/collab/offers/${offerId}/deliverables/${deliverableId}/submit`, {
-      submission_url: submissionUrl, submission_note: note || null,
+      submission_url: submissionUrl, submission_note: note || null, proof_media_url: proofMediaUrl,
     }))
   }
 
@@ -143,7 +146,12 @@ export default function OfferDetailPage() {
       const { url } = await cappeApi.post<{ url: string }>(`/collab/offers/${offerId}/payments/${paymentId}/checkout`)
       window.location.href = url
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start checkout')
+      if (e instanceof CappeApiError && e.code === 'payouts_not_ready') {
+        setPayoutsBlocked(true)
+        setError("The creator hasn't finished their payout setup yet — check back once they have.")
+      } else {
+        setError(e instanceof Error ? e.message : 'Could not start checkout')
+      }
       setBusy(false)
     }
   }
@@ -184,21 +192,31 @@ export default function OfferDetailPage() {
         </div>
       )}
 
-      {side === 'creator' && offer.deal_check && offer.deal_check.length > 0 && (
-        <div className="mb-6">
-          <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-200">
-            <ShieldCheck className="h-4 w-4 text-emerald-400" /> Deal Check
+      {side === 'creator' && offer.deal_check && offer.deal_check.length > 0 && (() => {
+        const order: DealCheckSeverity[] = ['warning', 'caution', 'good']
+        const grouped = order.map((sev) => offer.deal_check!.filter((i) => i.severity === sev)).flat()
+        const reviewCount = offer.deal_check!.filter((i) => i.severity !== 'good').length
+        return (
+          <div className="mb-6">
+            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-200">
+              <ShieldCheck className="h-4 w-4 text-emerald-400" /> Deal Check
+              <span className="font-normal text-zinc-500">
+                {reviewCount > 0
+                  ? `— ${reviewCount} thing${reviewCount === 1 ? '' : 's'} to review before accepting`
+                  : '— looks good'}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {grouped.map((item) => (
+                <div key={item.key} className={`rounded-lg border px-3 py-2 text-sm ${DEAL_CHECK_COLOR[item.severity]}`}>
+                  <p className="font-medium">{item.title}</p>
+                  <p className="mt-0.5 opacity-90">{item.detail}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="space-y-1.5">
-            {offer.deal_check.map((item) => (
-              <div key={item.key} className={`rounded-lg border px-3 py-2 text-sm ${DEAL_CHECK_COLOR[item.severity]}`}>
-                <p className="font-medium">{item.title}</p>
-                <p className="mt-0.5 opacity-90">{item.detail}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {side === 'creator' && offer.brand_stats && (
         <div className={`${ui.card} mb-6 flex flex-wrap gap-x-6 gap-y-1 px-4 py-3 text-sm`}>
@@ -223,7 +241,12 @@ export default function OfferDetailPage() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Terms</h2>
           {latestRevision && <TermSheet terms={latestRevision.terms} previous={previousRevision?.terms} />}
 
-          {payoutsBlocked && <div className="mt-3"><StripeConnectCard /></div>}
+          {payoutsBlocked && side === 'creator' && <div className="mt-3"><StripeConnectCard /></div>}
+          {payoutsBlocked && side === 'brand' && (
+            <div className={`mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-sm text-amber-200`}>
+              The creator hasn't finished their Stripe payout setup yet — this offer can't be {isPreAccept ? 'accepted' : 'paid'} until they do.
+            </div>
+          )}
 
           <div className="mt-4 flex flex-wrap gap-2">
             {isPreAccept && !iAmProposer && (
@@ -267,6 +290,11 @@ export default function OfferDetailPage() {
                   <span className={badgeFor(d.status)}>{d.status.replace('_', ' ')}</span>
                 </div>
                 {d.spec && <p className="mt-1 text-xs text-zinc-500">{d.spec}</p>}
+                {d.status === 'submitted' && d.submitted_at && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Auto-approves {new Date(new Date(d.submitted_at).getTime() + offer.auto_approve_days * 86_400_000).toLocaleDateString()}
+                  </p>
+                )}
                 {d.review_note && d.status === 'revision_requested' && (
                   <p className="mt-1.5 rounded bg-orange-500/10 px-2 py-1 text-xs text-orange-300">{d.review_note}</p>
                 )}
@@ -275,7 +303,7 @@ export default function OfferDetailPage() {
                 )}
 
                 {side === 'creator' && ['pending', 'revision_requested'].includes(d.status) && (
-                  <DeliverableSubmitForm onSubmit={(url, note) => submitDeliverable(d.id, url, note)} busy={busy} />
+                  <DeliverableSubmitForm onSubmit={(url, note, proofMediaUrl) => submitDeliverable(d.id, url, note, proofMediaUrl)} busy={busy} />
                 )}
                 {side === 'brand' && d.status === 'submitted' && (
                   <div className="mt-2 flex gap-2">
@@ -299,25 +327,30 @@ export default function OfferDetailPage() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Payments</h2>
           <div className="space-y-2">
             {offer.payments.length === 0 && <p className="text-sm text-zinc-500">Gifting collab — no payments.</p>}
-            {offer.payments.map((p) => (
-              <div key={p.id} className="rounded-lg border border-zinc-800 p-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium text-zinc-200">{p.label}</p>
-                  <span className={badgeFor(p.status)}>{p.status}</span>
+            {offer.payments.map((p) => {
+              const daysOverdue = p.due_at ? (Date.now() - new Date(p.due_at).getTime()) / 86_400_000 : 0
+              const isOverdue = ['due', 'processing'].includes(p.status) && daysOverdue > 3
+              return (
+                <div key={p.id} className={`rounded-lg border p-3 text-sm ${isOverdue ? 'border-amber-500/40 bg-amber-500/[0.04]' : 'border-zinc-800'}`}>
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-zinc-200">{p.label}</p>
+                    <span className={badgeFor(p.status)}>{p.status}</span>
+                  </div>
+                  <p className="mt-0.5 text-zinc-400">{fmtCents(p.amount_cents)}</p>
+                  {p.status === 'paid' && p.fee_cents != null && side === 'creator' && (
+                    <p className="mt-0.5 text-xs text-zinc-500">Gummfit fee {fmtCents(p.fee_cents)}</p>
+                  )}
+                  {p.paid_at && <p className="mt-0.5 text-xs text-zinc-500">Paid {new Date(p.paid_at).toLocaleDateString()}</p>}
+                  {isOverdue && <p className="mt-0.5 text-xs font-medium text-amber-400">{Math.floor(daysOverdue)}d overdue</p>}
+                  {side === 'brand' && ['due', 'processing'].includes(p.status) && (
+                    <button onClick={() => payNow(p.id)} disabled={busy} className={`${ui.btnPrimary} mt-2 px-3 py-1.5 text-xs`}>Pay</button>
+                  )}
+                  {side === 'creator' && isOverdue && (
+                    <button onClick={() => nudge(p.id)} disabled={busy} className={`${ui.btnGhost} mt-2 px-3 py-1.5 text-xs`}>Remind brand</button>
+                  )}
                 </div>
-                <p className="mt-0.5 text-zinc-400">{fmtCents(p.amount_cents)}</p>
-                {p.status === 'paid' && p.fee_cents != null && side === 'creator' && (
-                  <p className="mt-0.5 text-xs text-zinc-500">Gummfit fee {fmtCents(p.fee_cents)}</p>
-                )}
-                {p.paid_at && <p className="mt-0.5 text-xs text-zinc-500">Paid {new Date(p.paid_at).toLocaleDateString()}</p>}
-                {side === 'brand' && ['due', 'processing'].includes(p.status) && (
-                  <button onClick={() => payNow(p.id)} disabled={busy} className={`${ui.btnPrimary} mt-2 px-3 py-1.5 text-xs`}>Pay</button>
-                )}
-                {side === 'creator' && ['due', 'processing'].includes(p.status) && (
-                  <button onClick={() => nudge(p.id)} disabled={busy} className={`${ui.btnGhost} mt-2 px-3 py-1.5 text-xs`}>Remind brand</button>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         </section>
       </div>
@@ -371,16 +404,49 @@ export default function OfferDetailPage() {
   )
 }
 
-function DeliverableSubmitForm({ onSubmit, busy }: { onSubmit: (url: string, note: string) => void; busy: boolean }) {
+function DeliverableSubmitForm({
+  onSubmit, busy,
+}: { onSubmit: (url: string, note: string, proofMediaUrl: string | null) => void; busy: boolean }) {
   const [url, setUrl] = useState('')
   const [note, setNote] = useState('')
+  const [proofMediaUrl, setProofMediaUrl] = useState<string | null>(null)
+  const [proofFileName, setProofFileName] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  async function handleFile(file: File) {
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await cappeApi.upload<{ url: string }>('/creators/me/upload', fd)
+      setProofMediaUrl(res.url)
+      setProofFileName(file.name)
+    } catch {
+      setProofMediaUrl(null)
+      setProofFileName(null)
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="mt-2 space-y-1.5">
       <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Link to the post/content" className={`${ui.input} text-xs`} />
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" className={`${ui.input} text-xs`} />
+      <input
+        ref={fileInput} type="file" accept="image/*,video/*" className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }}
+      />
       <button
-        onClick={() => { if (url.trim()) { onSubmit(url.trim(), note.trim()); setUrl(''); setNote('') } }}
-        disabled={busy || !url.trim()}
+        type="button" onClick={() => fileInput.current?.click()} disabled={uploading}
+        className={`${ui.btnGhost} px-3 py-1.5 text-xs`}
+      >
+        {uploading ? 'Uploading…' : proofFileName ? `Proof: ${proofFileName}` : 'Attach proof (optional)'}
+      </button>
+      <button
+        onClick={() => { if (url.trim()) { onSubmit(url.trim(), note.trim(), proofMediaUrl); setUrl(''); setNote(''); setProofMediaUrl(null); setProofFileName(null) } }}
+        disabled={busy || uploading || !url.trim()}
         className={`${ui.btnPrimary} px-3 py-1.5 text-xs`}
       >
         Submit

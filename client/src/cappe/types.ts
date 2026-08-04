@@ -1057,6 +1057,7 @@ export type OfferDetail = OfferListItem & {
   creator_payouts_ready: boolean
   deal_check: DealCheckItem[] | null
   brand_stats: BrandStats | null
+  auto_approve_days: number
 }
 
 export type OfferPage = {

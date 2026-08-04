@@ -22,7 +22,10 @@ class TermsDeliverable(BaseModel):
 
 class TermsUsageRights(BaseModel):
     scope: Literal["organic", "paid"] = "organic"
-    duration_months: Optional[int] = Field(default=None, ge=1, le=24)
+    # Organic usage may run long (a brand keeping organic posts up indefinitely
+    # is normal) — the 24-month ceiling is a paid-usage-only guardrail, enforced
+    # below rather than on the field, so it doesn't also cap organic grants.
+    duration_months: Optional[int] = Field(default=None, ge=1, le=120)
     whitelisting: bool = False
 
     @model_validator(mode="after")
@@ -30,8 +33,11 @@ class TermsUsageRights(BaseModel):
         # Creator-first protection: perpetual paid usage rights are structurally
         # impossible, and whitelisting (running ads from the creator's handle)
         # IS paid usage — it can't hide under an "organic" label.
-        if self.scope == "paid" and self.duration_months is None:
-            raise ValueError("Paid usage rights require duration_months (max 24)")
+        if self.scope == "paid":
+            if self.duration_months is None:
+                raise ValueError("Paid usage rights require duration_months (max 24)")
+            if self.duration_months > 24:
+                raise ValueError("Paid usage rights are capped at 24 months")
         if self.whitelisting and self.scope != "paid":
             raise ValueError("Whitelisting requires usage_rights.scope='paid'")
         return self
@@ -72,6 +78,17 @@ class CollabTerms(BaseModel):
         # not a checkbox a brand could uncheck.
         if not self.ftc_disclosure:
             raise ValueError("FTC disclosure cannot be waived")
+        # A per_deliverable schedule splits compensation_cents evenly across
+        # every deliverable (services/collab.py:build_payment_rows); a total
+        # below the deliverable count divides to $0 per row, which then fails
+        # the payments table's amount_cents > 0 CHECK at accept time — reject
+        # it here instead, at offer create/counter, where it's a normal 422.
+        if (self.payment_schedule == "per_deliverable" and self.compensation_cents > 0
+                and self.compensation_cents < self.deliverable_count):
+            raise ValueError(
+                f"Compensation ({self.compensation_cents}c) is too low to split across "
+                f"{self.deliverable_count} deliverables — each row would be $0"
+            )
         return self
 
     @property
@@ -251,6 +268,7 @@ class OfferDetail(OfferListItem):
     creator_payouts_ready: bool              # brand UI: explains why accept may 409
     deal_check: Optional[list[DealCheckItem]] = None   # creator side only
     brand_stats: Optional[BrandStats] = None            # creator side only
+    auto_approve_days: int                   # both sides: countdown on submitted deliverables
 
 
 class OfferPage(BaseModel):

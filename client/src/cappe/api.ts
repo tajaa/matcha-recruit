@@ -13,6 +13,24 @@ import type {
 
 const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 
+// Backend 409s carry a structured `{code, message}` detail for a few
+// conditions callers need to branch on (e.g. payouts_not_ready) rather than
+// just display — regexing .message is a copy-edit away from silently
+// breaking that branch, so preserve `code` through the error.
+export class CappeApiError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.code = code
+  }
+}
+
+function _errorDetailCode(detail: unknown): string | undefined {
+  return detail && typeof detail === 'object' && 'code' in detail && typeof (detail as { code: unknown }).code === 'string'
+    ? (detail as { code: string }).code
+    : undefined
+}
+
 const ACCESS_KEY = 'cappe_access_token'
 const REFRESH_KEY = 'cappe_refresh_token'
 
@@ -115,7 +133,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (!retry.ok) {
         if (retry.status === 401) { _logout(); throw new Error('Session expired') }
         const body = await retry.json().catch(() => null)
-        throw new Error(body?.detail || `${retry.status} ${retry.statusText}`)
+        const d = body?.detail
+        const msg = typeof d === 'string' ? d : (d?.message || JSON.stringify(d) || `${retry.status} ${retry.statusText}`)
+        throw new CappeApiError(msg, _errorDetailCode(d))
       }
       if (retry.status === 204) return null as T
       return retry.json()
@@ -127,16 +147,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const errBody = await res.json().catch(() => null)
     let msg: string
+    let d: unknown
     if (errBody?.detail) {
-      const d = errBody.detail
-      // detail may be a string, or an object like {message, missing} (publish gate).
-      msg = typeof d === 'string' ? d : (d?.message || JSON.stringify(d))
+      d = errBody.detail
+      // detail may be a string, or an object like {message, missing} (publish gate)
+      // or {code, message} (a condition callers branch on, e.g. payouts_not_ready).
+      msg = typeof d === 'string' ? d : ((d as { message?: string })?.message || JSON.stringify(d))
     } else if (res.status >= 500) {
       msg = 'Server error — try again in a moment.'
     } else {
       msg = `${res.status} ${res.statusText || 'Request failed'}`
     }
-    throw new Error(msg)
+    throw new CappeApiError(msg, _errorDetailCode(d))
   }
   if (res.status === 204) return null as T
   return res.json()

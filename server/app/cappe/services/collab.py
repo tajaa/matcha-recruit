@@ -257,33 +257,56 @@ async def check_completion(conn, offer_id: UUID) -> bool:
 
 # ── Auto-approve on brand silence (creator-first protection C) ──────────────────
 
-async def auto_approve_overdue(conn, offer_id: UUID) -> list[UUID]:
+async def auto_approve_overdue(conn, offer_id: UUID) -> dict:
     """For an active offer, auto-approve any deliverable submitted more than
     N days ago and still awaiting brand review. Evaluated lazily at read time
     (top of _offer_detail / offer-list fetch) — no new worker infra; the
     creator opening their deal is the trigger. Fires the same payment +
-    completion chain as a manual approve. Returns approved deliverable ids
-    (route emails brand payment-due, creator approved-notice per id)."""
+    completion chain as a manual approve.
+
+    Runs as one transaction so a failure between the deliverable UPDATE and
+    firing its payment can't strand it in 'scheduled' forever — auto-approve
+    only ever re-scans 'submitted' rows, so a half-applied approve is
+    otherwise unrecoverable.
+
+    Returns {"deliverables": [{id,label}], "fired_payments": [{id,label,amount_cents}],
+    "completed": bool} so the caller can email the brand (payment due) and the
+    creator (approved notice) — auto-approve must not fire payments silently."""
     offer = await conn.fetchrow("SELECT status FROM cappe_collab_offers WHERE id = $1", offer_id)
     if offer is None or offer["status"] != "active":
-        return []
+        return {"deliverables": [], "fired_payments": [], "completed": False}
 
-    days = await resolve_auto_approve_days(conn)
-    rows = await conn.fetch(
-        """UPDATE cappe_collab_deliverables
-              SET status='approved', approved_at=NOW(), updated_at=NOW(),
-                  review_note='Auto-approved after ' || $2::text || ' days without brand review'
-            WHERE offer_id=$1 AND status='submitted'
-              AND submitted_at < NOW() - make_interval(days => $2)
-        RETURNING id""",
-        offer_id, days,
-    )
-    approved_ids = [r["id"] for r in rows]
-    for did in approved_ids:
-        await fire_deliverable_payment(conn, offer_id, did)
-    await fire_all_approved_payments(conn, offer_id)
-    await check_completion(conn, offer_id)
-    return approved_ids
+    days = max(1, await resolve_auto_approve_days(conn))
+    async with conn.transaction():
+        rows = await conn.fetch(
+            """UPDATE cappe_collab_deliverables
+                  SET status='approved', approved_at=NOW(), updated_at=NOW(),
+                      review_note=COALESCE(review_note || E'\n', '')
+                          || 'Auto-approved after ' || $2::text || ' days without brand review'
+                WHERE offer_id=$1 AND status='submitted'
+                  AND submitted_at < NOW() - make_interval(days => $2)
+            RETURNING id, type, idx""",
+            offer_id, days,
+        )
+        approved = [{"id": r["id"], "label": f"{r['type']} #{r['idx'] + 1}"} for r in rows]
+
+        fired_ids: list[UUID] = []
+        for d in approved:
+            fired = await fire_deliverable_payment(conn, offer_id, d["id"])
+            if fired:
+                fired_ids.append(fired)
+        fired_ids.extend(await fire_all_approved_payments(conn, offer_id))
+
+        fired_payments = []
+        if fired_ids:
+            pay_rows = await conn.fetch(
+                "SELECT id, label, amount_cents FROM cappe_collab_payments WHERE id = ANY($1)", fired_ids
+            )
+            fired_payments = [{"id": p["id"], "label": p["label"], "amount_cents": p["amount_cents"]} for p in pay_rows]
+
+        completed = await check_completion(conn, offer_id)
+
+    return {"deliverables": approved, "fired_payments": fired_payments, "completed": completed}
 
 
 # ── Cancel asymmetry (creator-first protection B) ────────────────────────────
@@ -291,16 +314,47 @@ async def auto_approve_overdue(conn, offer_id: UUID) -> list[UUID]:
 async def cancel_offer(conn, offer_row, side: str, reason: str) -> None:
     """Brand owes for approved work; creator forfeits unearned installments.
 
+    Call inside `async with conn.transaction():` — locks the offer row
+    (SELECT ... FOR UPDATE) and branches on the status observed under that
+    lock, not the caller's pre-read `offer_row`, so a webhook flipping
+    accepted -> active between the caller's read and this call can't put a
+    cancel through the wrong (more destructive) branch.
+
     - cancelled_by='creator': every unpaid payment (scheduled/due/processing)
       cancels — the creator is walking away, forfeits unearned installments.
     - cancelled_by='brand', offer was 'active' (work started): 'due'/
       'processing' rows SURVIVE — due-ness fires on approval events, so
-      due == earned; only 'scheduled' rows cancel.
+      due == earned; only 'scheduled' rows cancel. Any deliverable already
+      'submitted' (delivered, not yet reviewed) is also treated as earned —
+      it's approved and its payment fired to 'due' before the scheduled rows
+      are cancelled, so the creator isn't left uncompensated for work sitting
+      in the brand's queue at cancel time regardless of the auto-approve
+      window.
     - cancelled_by='brand', offer was 'accepted' (never funded, no work
       possible): everything unpaid cancels, same as a creator cancel.
     """
-    if offer_row["status"] not in ("accepted", "active"):
+    locked = await conn.fetchrow(
+        "SELECT status FROM cappe_collab_offers WHERE id=$1 FOR UPDATE", offer_row["id"]
+    )
+    if locked is None or locked["status"] not in ("accepted", "active"):
         raise HTTPException(status_code=409, detail="Offer cannot be cancelled from its current status")
+    current_status = locked["status"]
+
+    if side == "brand" and current_status == "active":
+        submitted = await conn.fetch(
+            "SELECT id FROM cappe_collab_deliverables WHERE offer_id=$1 AND status='submitted'",
+            offer_row["id"],
+        )
+        for d in submitted:
+            approved = await conn.fetchval(
+                "UPDATE cappe_collab_deliverables SET status='approved', approved_at=NOW(), updated_at=NOW(), "
+                "review_note=COALESCE(review_note || E'\n', '') || 'Approved at brand cancellation' "
+                "WHERE id=$1 AND status='submitted' RETURNING id",
+                d["id"],
+            )
+            if approved is not None:
+                await fire_deliverable_payment(conn, offer_row["id"], d["id"])
+        await fire_all_approved_payments(conn, offer_row["id"])
 
     updated = await conn.fetchval(
         """UPDATE cappe_collab_offers
@@ -313,7 +367,7 @@ async def cancel_offer(conn, offer_row, side: str, reason: str) -> None:
     if updated is None:
         raise HTTPException(status_code=409, detail="Offer cannot be cancelled from its current status")
 
-    if side == "creator" or offer_row["status"] == "accepted":
+    if side == "creator" or current_status == "accepted":
         cancel_statuses = ["scheduled", "due", "processing"]
     else:
         # brand cancel of an active (work-started) offer: due/processing survive
