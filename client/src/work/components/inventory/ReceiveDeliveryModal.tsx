@@ -10,6 +10,7 @@ type DraftLine = ReceiptLine & {
   selectedItemId: string
   createNew: boolean
   editableQty: number
+  commitError?: string
 }
 
 function toDraftLine(line: ReceiptLine): DraftLine {
@@ -76,26 +77,44 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
     if (!draft) return
     setCommitting(true)
     try {
+      const submitted = lines
+        .map((l, idx) => ({ l, idx }))
+        .filter(({ l }) => l.editableQty > 0)
       const result = await commitReceipt({
         location_id: locationId,
         vendor: draft.vendor,
         invoice_number: draft.invoice_number,
         force,
-        lines: lines
-          .filter((l) => l.editableQty > 0)
-          .map((l) => ({
-            item_id: l.createNew ? undefined : l.selectedItemId || undefined,
-            new_item_name: l.createNew ? l.item_name : undefined,
-            quantity: l.editableQty,
-            order_id: l.open_order_id ?? undefined,
-          })),
+        lines: submitted.map(({ l }) => ({
+          item_id: l.createNew ? undefined : l.selectedItemId || undefined,
+          new_item_name: l.createNew ? l.item_name : undefined,
+          quantity: l.editableQty,
+          // Only claim the matched order if the user kept the original
+          // match — switching to "new item" or a different item must not
+          // flip a stranger's order to received.
+          order_id: !l.createNew && l.selectedItemId === l.item_id ? (l.open_order_id ?? undefined) : undefined,
+        })),
       })
       setDuplicateWarning(null)
       if (result.failed > 0) {
+        const errorByRow = new Map(result.errors.map((e) => [e.row, e.error]))
+        // Drop lines that already committed — resubmitting them on retry
+        // would double-count against the ledger. Keep failed + not-yet-
+        // submitted (qty 0) lines so the user can fix and retry just those.
+        setLines((prev) => prev
+          .map((line, i) => {
+            const submittedIdx = submitted.findIndex(({ idx }) => idx === i)
+            if (submittedIdx === -1) return { line, keep: true }
+            const err = errorByRow.get(submittedIdx + 1)
+            return err ? { line: { ...line, commitError: err }, keep: true } : { line, keep: false }
+          })
+          .filter((entry) => entry.keep)
+          .map((entry) => entry.line))
         toast(`Received ${result.created} of ${result.total_rows} — ${result.failed} failed`, 'error')
-      } else {
-        toast(`Received ${result.created} item${result.created === 1 ? '' : 's'}`, 'success')
+        if (result.created > 0) onCommitted()
+        return
       }
+      toast(`Received ${result.created} item${result.created === 1 ? '' : 's'}`, 'success')
       onCommitted()
       handleClose()
     } catch (err) {
@@ -115,7 +134,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
   return (
     <Modal open={open} onClose={handleClose} title="Receive delivery" width="lg">
       {!draft ? (
-        <FileUpload onFiles={handleFiles} accept=".csv,.pdf,.png,.jpg,.jpeg,.webp" disabled={parsing}>
+        <FileUpload onFiles={handleFiles} accept=".csv,.pdf,.png,.jpg,.jpeg,.webp" disabled={parsing} maxSizeMB={15}>
           <div className="text-sm text-zinc-400 py-8 text-center">
             {parsing ? 'Reading invoice…' : 'Drop an invoice or packing slip (CSV, PDF, or photo)'}
           </div>
@@ -141,6 +160,9 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
                   <div className="text-xs text-zinc-500">
                     {[line.unit, line.pack_size].filter(Boolean).join(' · ')}
                   </div>
+                )}
+                {line.commitError && (
+                  <div className="text-xs text-red-400">{line.commitError}</div>
                 )}
                 <div className="flex items-center gap-2">
                   <label className="flex items-center gap-1 text-xs text-zinc-400">

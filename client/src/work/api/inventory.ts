@@ -1,4 +1,4 @@
-import { api, API_BASE } from '../../api/client'
+import { api } from '../../api/client'
 
 // ── Types ──
 
@@ -185,7 +185,9 @@ export function commitReceipt(body: {
   return api.post<ReceiptCommitResult>('/inventory/receipts/commit', body)
 }
 
-export const receiptTemplateUrl = () => `${API_BASE}/inventory/receipts/template`
+export function downloadReceiptTemplate() {
+  return api.download('/inventory/receipts/template', 'inventory_receipt_template.csv')
+}
 
 export async function listSuggestions() {
   return api.get<Record<string, InventorySuggestion>>('/inventory/suggestions')

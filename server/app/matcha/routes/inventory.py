@@ -7,6 +7,7 @@ the /work Inventory page's REST surface plus manual item/order management.
 
 import csv
 import io
+import logging
 from typing import Optional
 from uuid import UUID
 
@@ -27,6 +28,7 @@ from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 _RECEIPT_MAX_BYTES = 15 * 1024 * 1024
 _RECEIPT_EXT_OK = (".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp")
@@ -338,6 +340,16 @@ async def commit_receipt_route(
     if body.vendor or body.invoice_number:
         note = " ".join(filter(None, [body.vendor, f"invoice {body.invoice_number}" if body.invoice_number else None]))
 
+    if body.location_id is not None:
+        async with get_connection() as conn:
+            ok = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
+                "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
+                body.location_id, company_id,
+            )
+        if not ok:
+            raise HTTPException(404, "Location not found.")
+
     errors: list[dict] = []
     movement_ids: list[str] = []
     created = 0
@@ -347,7 +359,7 @@ async def commit_receipt_route(
         if body.invoice_number and not body.force:
             dup = await conn.fetchval(
                 "SELECT 1 FROM inventory_movements WHERE company_id = $1 AND kind = 'in' "
-                "AND note LIKE '%' || $2 || '%' LIMIT 1",
+                "AND note LIKE '%' || replace(replace($2, '%', '\\%'), '_', '\\_') || '%' ESCAPE '\\' LIMIT 1",
                 company_id, f"invoice {body.invoice_number}",
             )
             if dup:
@@ -361,13 +373,19 @@ async def commit_receipt_route(
                     if line.order_id is not None:
                         row = await orders_service.mark_received(
                             conn, order_id=line.order_id, company_id=company_id,
-                            user_id=user.id, quantity=line.quantity,
+                            user_id=user.id, quantity=line.quantity, note=note,
                         )
                         if row is None:
                             raise ValueError("order not open")
                         movement_ids.append(str(row["receipt_movement_id"]))
                     else:
                         if line.item_id is not None:
+                            owned = await conn.fetchval(
+                                "SELECT 1 FROM inventory_items WHERE id = $1 AND company_id = $2",
+                                line.item_id, company_id,
+                            )
+                            if not owned:
+                                raise ValueError("item not found")
                             item_id = line.item_id
                         elif line.new_item_name:
                             item = await movements_service.find_or_create_item(
@@ -386,6 +404,11 @@ async def commit_receipt_route(
                         movement_ids.append(str(inserted[0]["id"]))
                     created += 1
             except Exception as exc:
-                errors.append({"row": n, "item": line.new_item_name or str(line.item_id or ""), "error": str(exc)})
+                logger.warning("receipt line %d commit failed", n, exc_info=True)
+                errors.append({
+                    "row": n,
+                    "item": line.new_item_name or str(line.item_id or ""),
+                    "error": "Could not record this line — check the item/order and try again.",
+                })
     return ReceiptCommitResult(total_rows=len(body.lines), created=created,
                                failed=len(errors), errors=errors, ids=movement_ids)

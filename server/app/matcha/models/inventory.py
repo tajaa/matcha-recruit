@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 MovementKind = Literal["out", "in", "stockout", "adjust"]
 OrderStatus = Literal["queued", "ordered", "received", "cancelled"]
@@ -87,7 +87,7 @@ class OrderListResponse(BaseModel):
 class ReceiptCommitLine(BaseModel):
     item_id: Optional[UUID] = None       # existing item ...
     new_item_name: Optional[str] = None  # ... or create-new (exactly one required)
-    quantity: float                      # the user-CONFIRMED count (invoice figure is only the prefill)
+    quantity: float = Field(gt=0)        # the user-CONFIRMED count (invoice figure is only the prefill)
     order_id: Optional[UUID] = None      # open order to mark_received against
 
 

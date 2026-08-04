@@ -178,6 +178,7 @@ async def resolve_lines(conn, *, company_id: UUID, location_id: Optional[UUID],
     from app.matcha.services.inventory.matching import best_match, normalize_name
 
     existing = await movements_service.list_item_names(conn, company_id, location_id)
+    claimed_order_ids: set[str] = set()
     out = []
     for line in lines:
         match = best_match(line["item_name"], existing)
@@ -195,6 +196,13 @@ async def resolve_lines(conn, *, company_id: UUID, location_id: Optional[UUID],
                 """,
                 match["id"], company_id,
             )
+            # Two invoice lines fuzzy-matching the same item must not both
+            # claim the same order — only the first gets it, the rest fall
+            # through to a bare `in` movement on commit.
+            if open_order_id is not None and str(open_order_id) in claimed_order_ids:
+                open_order_id = None
+            elif open_order_id is not None:
+                claimed_order_ids.add(str(open_order_id))
         out.append({
             **line,
             "item_id": str(match["id"]) if match else None,

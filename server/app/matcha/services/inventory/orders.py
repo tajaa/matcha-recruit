@@ -82,7 +82,9 @@ async def cancel_order(conn, *, order_id: UUID, company_id: UUID, user_id: UUID)
     return result
 
 
-async def mark_received(conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None) -> Optional[dict]:
+async def mark_received(
+    conn, *, order_id: UUID, company_id: UUID, user_id: UUID, quantity=None, note: Optional[str] = None,
+) -> Optional[dict]:
     order = await conn.fetchrow(
         "SELECT * FROM inventory_orders WHERE id = $1 AND company_id = $2 AND status IN ('queued', 'ordered')",
         order_id, company_id,
@@ -93,7 +95,7 @@ async def mark_received(conn, *, order_id: UUID, company_id: UUID, user_id: UUID
 
     inserted = await movements_service.record_movements(
         conn, company_id=company_id, channel_id=order["channel_id"], source_message_id=None,
-        recorded_by=user_id, kind="in", narrative="Order received", note=None,
+        recorded_by=user_id, kind="in", narrative="Order received", note=note,
         lines=[{"item_id": order["item_id"], "quantity": received_qty, "estimated": False}],
     )
     movement = inserted[0]
