@@ -115,6 +115,48 @@ class TestAsk:
         assert classify_intent(message) == ASK
 
 
+class TestOpsGroundingAsks:
+    """Schedule/inventory questions (not requests) — added alongside
+    `services/ems/channel_grounding.py` so these reach ASK instead of
+    falling through to LOG or an unhelpful bare-interrogative answer."""
+
+    @pytest.mark.parametrize("message", [
+        "@huume who's working tomorrow?",
+        "@huume who is scheduled for the morning shift",
+        "@huume who's on shift right now",
+        "@huume who's opening tomorrow",
+        "@huume what's my schedule this week",
+        "@huume when is my next shift",
+        "@huume how much flour is left in stock",
+        "@huume how many aprons do we have on hand",
+    ])
+    def test_ops_questions_ask(self, message):
+        assert classify_intent(message) == ASK
+
+    @pytest.mark.parametrize("message", [
+        # Requests to BUILD/ASSIGN a shift must still win SCHEDULE — checked
+        # before RECALL in classify_intent, unaffected by the new patterns.
+        "@huume can you schedule two people for Saturday",
+        "@huume I need an opener tomorrow at 8am",
+    ])
+    def test_schedule_build_requests_still_schedule(self, message):
+        from app.matcha.services.ems.intent import SCHEDULE
+        assert classify_intent(message) == SCHEDULE
+
+    def test_staffing_report_still_logs(self):
+        # A past-tense report, not a request or a question — bias-to-LOG.
+        assert classify_intent(
+            "@huume we needed more staff last night and someone got hurt"
+        ) == LOG
+
+    def test_stockout_report_is_still_inventory_not_ask(self):
+        # Pre-existing INVENTORY fork (checked before RECALL) — regression
+        # guard that the new "how much/many ... stock" ASK pattern didn't
+        # steal this.
+        from app.matcha.services.ems.intent import INVENTORY
+        assert classify_intent("@huume we ran out of cups again") == INVENTORY
+
+
 class TestHelp:
     @pytest.mark.parametrize("message", [
         "@huume help",

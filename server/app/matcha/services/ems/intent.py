@@ -93,6 +93,14 @@ _RECALL_PATTERNS = (
     # show/list/recap group's shared phrasing.
     r"^(?:(?:a|the|my|our|quick|short|full|daily|weekly|monthly)\s+)*(?:recap|summary|rundown|roundup)\b",
     r"^(?:i|we)(?:'d| would)? (?:need|want|would like)\b(?:\s+\w+){0,2}?\s+(?:a |the )?(?:recap|summary|rundown|roundup)\b",
+    # Ops grounding asks — schedule/inventory questions phrased as questions,
+    # not requests (a request to BUILD/ASSIGN a shift is caught by
+    # _SCHEDULE_PATTERNS first, checked before RECALL; a report of stock
+    # running out needs a we/i lead per _INVENTORY_PATTERNS, checked before
+    # RECALL too, so neither fork is stolen by these).
+    r"^who(?:'s| is| are)? (?:working|scheduled|on (?:the )?schedule|on shift|opening|closing)\b",
+    r"^(?:what|when)(?:'s| is| are)? (?:my|the|our) (?:next )?(?:shifts?|schedule)\b",
+    r"^how (?:much|many)\b(?=.*\b(?:in stock|stock|inventory|on hand|left|remaining)\b)",
 )
 
 # Weaker signal: only counts as a question when the message actually ends

@@ -288,6 +288,12 @@ async def _bg_ems_ask(
     decision needs: the company (via the same _ems_company_gate) and the
     asker's role.
 
+    Beyond ems_events, the answer is also grounded on schedule/inventory/
+    incidents/HR-ops data via `services/ems/channel_grounding.fetch_topic_blocks`
+    — the registry there (not this function) decides which topics exist,
+    which need admin, and which are location-scoped. See that module's
+    docstring for why the topic list is short.
+
     Rate-limited on its own `ems_ask` key rather than the `ems_event` one:
     logging is the documentation-critical path, and a chatty afternoon of
     questions must never exhaust the budget that lets a real event be
@@ -300,10 +306,12 @@ async def _bg_ems_ask(
     connection is held across the answer's Gemini call."""
     try:
         from app.matcha.services.ems import ask as ems_ask
+        from app.matcha.services.ems import channel_grounding
         from app.matcha.services.ems.intent import HELP, strip_mention
 
         sys_row = None
         events = None
+        extra_blocks: list[tuple[str, str]] = []
         is_admin = False
 
         async with get_connection() as conn:
@@ -312,9 +320,11 @@ async def _bg_ems_ask(
                 return
             role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(asker_user_id_str))
             is_admin = ems_ask.is_admin_role(role)
+            features = await _schedule_company_features(conn, company_id)
 
             if intent == HELP:
-                text = ems_ask.help_text(is_admin=is_admin)
+                extra_lines = channel_grounding.help_lines(features=features, is_admin=is_admin)
+                text = ems_ask.help_text(is_admin=is_admin, extra_lines=tuple(extra_lines))
                 sys_row = await _insert_system_message(conn, channel_id_str, text)
             else:
                 if not skip_rate_limit:
@@ -327,7 +337,12 @@ async def _bg_ems_ask(
                     conn, company_id=company_id, channel_id=UUID(channel_id_str),
                     include_behavioral=is_admin,
                 )
-                if not events:
+                loc_id, _loc_name = await _channel_location(conn, channel_id_str)
+                extra_blocks = await channel_grounding.fetch_topic_blocks(
+                    conn, company_id=company_id, features=features, is_admin=is_admin,
+                    location_id=loc_id,
+                )
+                if not events and not extra_blocks:
                     # "Nothing you can see" and "nothing happened" must not
                     # read as the same sentence — see ask.no_events_text.
                     hidden = not is_admin and await conn.fetchval(
@@ -350,7 +365,9 @@ async def _bg_ems_ask(
             return
 
         # No connection held across the Gemini call.
-        answer = await ems_ask.answer_question(strip_mention(content), events, is_admin=is_admin)
+        answer = await ems_ask.answer_question(
+            strip_mention(content), events, is_admin=is_admin, extra_blocks=tuple(extra_blocks),
+        )
 
         async with get_connection() as conn:
             sys_row = await _insert_system_message(conn, channel_id_str, answer)

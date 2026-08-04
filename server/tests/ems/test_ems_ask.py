@@ -116,6 +116,33 @@ class TestHelpText:
         for is_admin in (True, False):
             assert "*" not in ask.help_text(is_admin=is_admin)
 
+    def test_extra_lines_are_inserted(self):
+        text = ask.help_text(is_admin=False, extra_lines=("• Answer stock questions",))
+        assert "Answer stock questions" in text
+
+    def test_no_extra_lines_is_unchanged(self):
+        assert ask.help_text(is_admin=False, extra_lines=()) == ask.help_text(is_admin=False)
+
+
+class TestBuildPromptExtraBlocks:
+    def test_extra_blocks_render_as_sections(self):
+        prompt = ask._build_prompt(
+            "who's working tomorrow?", "(nothing logged in this channel)", is_admin=False,
+            extra_blocks=(("UPCOMING SCHEDULE (next 7 days)", "- Opener Mon Aug 3: Aisha Rivera"),),
+        )
+        assert "## UPCOMING SCHEDULE (next 7 days)" in prompt
+        assert "Aisha Rivera" in prompt
+
+    def test_no_extra_blocks_omits_extra_sections(self):
+        prompt = ask._build_prompt(
+            "what happened?", "(nothing logged in this channel)", is_admin=False,
+        )
+        assert "## UPCOMING SCHEDULE" not in prompt
+
+    def test_rule_text_covers_data_sections_not_just_events(self):
+        prompt = ask._build_prompt("x", "(nothing logged in this channel)", is_admin=True)
+        assert "Answer ONLY from the data sections above" in prompt
+
 
 class TestAnswerQuestion:
     @pytest.mark.asyncio

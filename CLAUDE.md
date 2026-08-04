@@ -59,7 +59,7 @@ Which frontend pairs with which backend package (don't re-derive this):
 
 Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property.property_cat.geocode` (single US Census geocoder — keep its signature stable). Verified 2026-07-27: `cappe → matcha` is 0 edges, `tellus → matcha` is that 1.
 
-**`werk/` is the fourth backend app and its rule is different — say so rather than assume.** `werk → matcha.services` is allowed and intentional (9 files / 58 imports, verified 2026-08-02; one deliberate module-level import at `werk/routes/channels.py:18` — don't "fix" it lazy). `matcha → werk` is exactly 2 lazy imports of `werk.routes.channels_ws.manager` — adding a third kind is the thing to refuse. Routes importing routes must stay 0 in both directions. Full edge inventory: `server/app/werk/CLAUDE.md`
+**`werk/` is the fourth backend app and its rule is different — say so rather than assume.** `werk → matcha.services` is allowed and intentional (9 files / 59 imports, verified 2026-08-03; one deliberate module-level import at `werk/routes/channels.py:18` — don't "fix" it lazy). `matcha → werk` is exactly 2 lazy imports of `werk.routes.channels_ws.manager` — adding a third kind is the thing to refuse. Routes importing routes must stay 0 in both directions. Full edge inventory: `server/app/werk/CLAUDE.md`
 
 ## Stack
 
