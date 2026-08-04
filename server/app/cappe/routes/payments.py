@@ -205,13 +205,23 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                 session_id = obj.get("id")
                 amount_total = obj.get("amount_total")
                 async with get_connection() as conn:
+                    # Match on payment id + amount + connected account, NOT the
+                    # session id — checkout_payment lets the brand re-open
+                    # checkout on a still-processing payment, which overwrites
+                    # stripe_checkout_session_id with the new session. If the
+                    # brand instead completes an earlier, now-orphaned session
+                    # in a stale tab, matching on session id would find zero
+                    # rows and the real charge would never get recorded. The
+                    # payment id (trusted: comes from this event's own
+                    # metadata) plus amount + connected-account ownership is
+                    # sufficient — session id is stored for audit only.
                     crow = await conn.fetchrow(
                         """UPDATE cappe_collab_payments cp
                               SET status = 'paid', paid_at = NOW(),
-                                  stripe_payment_intent = $2, updated_at = NOW()
+                                  stripe_payment_intent = $2, stripe_checkout_session_id = $4,
+                                  updated_at = NOW()
                              FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
                             WHERE cp.id = $1 AND cp.status IN ('due', 'processing')
-                              AND cp.stripe_checkout_session_id = $4
                               AND cp.amount_cents = $5
                               AND o.id = cp.offer_id AND p.id = o.creator_profile_id
                               AND ca.id = p.account_id AND ca.stripe_account_id = $3
@@ -232,8 +242,19 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                     if completed:
                         background.add_task(_notify_collab_completed, crow["offer_id"])
                 else:
-                    logger.warning("cappe collab webhook: payment %s not matched to account %s",
-                                   collab_payment_id, event_account_id)
+                    # Real money moved (Stripe already charged the brand and
+                    # credited the creator's connected account) but no row
+                    # matched — most likely the payment was cancelled (e.g.
+                    # the offer was cancelled while this checkout was still
+                    # in flight, see cancel_offer's docstring). There's no
+                    # automated refund path; this needs a human to reconcile
+                    # in Stripe, so it goes to ERROR (persisted to
+                    # server_error_reports) rather than WARNING.
+                    logger.error(
+                        "cappe collab webhook: payment %s (session %s, account %s) charged but not "
+                        "matched to a due/processing row — needs manual reconciliation in Stripe",
+                        collab_payment_id, session_id, event_account_id,
+                    )
 
     elif etype == "account.updated":
         acct_id = obj.get("id") or event.get("account")

@@ -133,11 +133,35 @@ async def latest_revision(conn, offer_id: UUID):
     )
 
 
+async def accepted_revision(conn, offer_row):
+    """The revision terms actually in force. Once an offer has an
+    accepted_revision_id, that row is the source of truth — NOT
+    revisions[-1] — because a race between accept and a concurrent counter
+    (closed by accept_offer's FOR UPDATE lock going forward, but old rows
+    can still predate that fix) can leave a later revision in the table
+    that was never agreed to. Falls back to the latest revision while still
+    pre-accept, when there is no accepted_revision_id yet."""
+    if offer_row["accepted_revision_id"]:
+        rev = await conn.fetchrow(
+            "SELECT * FROM cappe_collab_offer_revisions WHERE id = $1", offer_row["accepted_revision_id"]
+        )
+        if rev is not None:
+            return rev
+    return await latest_revision(conn, offer_row["id"])
+
+
 # ── Accept ───────────────────────────────────────────────────────────────────
 
 async def accept_offer(conn, offer_row, side: str) -> None:
-    """Call inside `async with conn.transaction():`."""
-    if offer_row["status"] not in PRE_ACCEPT_STATUSES:
+    """Call inside `async with conn.transaction():`. Locks the offer row
+    (SELECT ... FOR UPDATE) before reading the latest revision, same pattern
+    as cancel_offer — otherwise a counter-offer can insert a new revision
+    between this function's read and its guarded UPDATE, and the accept
+    proceeds against terms that were superseded before it landed."""
+    locked = await conn.fetchrow(
+        "SELECT status FROM cappe_collab_offers WHERE id=$1 FOR UPDATE", offer_row["id"]
+    )
+    if locked is None or locked["status"] not in PRE_ACCEPT_STATUSES:
         raise HTTPException(status_code=409, detail="Offer is not open for acceptance")
 
     rev = await latest_revision(conn, offer_row["id"])

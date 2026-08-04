@@ -72,8 +72,15 @@ export default function OfferDetailPage() {
 
   const side = offer.side
   const isPreAccept = ['sent', 'negotiating'].includes(offer.status)
-  const latestRevision = offer.revisions[offer.revisions.length - 1]
-  const previousRevision = offer.revisions[offer.revisions.length - 2]
+  // Once accepted, the terms in force are the accepted revision — not
+  // necessarily the last row in the table, which a race between accept and
+  // a concurrent counter could otherwise leave pointing at superseded terms.
+  const acceptedIdx = offer.accepted_revision_id
+    ? offer.revisions.findIndex((r) => r.id === offer.accepted_revision_id)
+    : -1
+  const latestRevisionIdx = acceptedIdx >= 0 ? acceptedIdx : offer.revisions.length - 1
+  const latestRevision = offer.revisions[latestRevisionIdx]
+  const previousRevision = offer.revisions[latestRevisionIdx - 1]
   const iAmProposer = latestRevision?.proposed_by === side
   const counterpartLabel = side === 'creator' ? (offer.brand_name || 'the brand') : `@${offer.creator_handle}`
   const onAcceptDue = offer.payments.find((p) => p.trigger === 'on_accept' && p.status === 'due')

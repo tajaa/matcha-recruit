@@ -196,19 +196,23 @@ async def replace_my_socials(
         prof = await conn.fetchrow("SELECT id FROM cappe_creator_profiles WHERE account_id = $1", account.id)
         if prof is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No creator profile yet")
-        async with conn.transaction():
-            await conn.execute("DELETE FROM cappe_creator_socials WHERE profile_id = $1", prof["id"])
-            for s in body:
-                await conn.execute(
-                    "INSERT INTO cappe_creator_socials "
-                    "(profile_id, platform, handle, url, follower_count, engagement_rate, sort_order) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                    prof["id"], s.platform, s.handle, s.url, s.follower_count, s.engagement_rate, s.sort_order,
-                )
-            # Any social edit resets audits — simplest correct rule. After a
-            # replace-all every row is fresh/unverified, so reach_verified
-            # always goes false here.
-            await _recompute_reach_verified(conn, prof["id"])
+        try:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM cappe_creator_socials WHERE profile_id = $1", prof["id"])
+                for s in body:
+                    await conn.execute(
+                        "INSERT INTO cappe_creator_socials "
+                        "(profile_id, platform, handle, url, follower_count, engagement_rate, sort_order) "
+                        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                        prof["id"], s.platform, s.handle, s.url, s.follower_count, s.engagement_rate, s.sort_order,
+                    )
+                # Any social edit resets audits — simplest correct rule. After a
+                # replace-all every row is fresh/unverified, so reach_verified
+                # always goes false here.
+                await _recompute_reach_verified(conn, prof["id"])
+        except asyncpg.UniqueViolationError:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="Duplicate social URL")
         rows = await conn.fetch(
             "SELECT id, platform, handle, url, follower_count, engagement_rate, audit_status, "
             "verified_follower_count, audited_at, sort_order FROM cappe_creator_socials "

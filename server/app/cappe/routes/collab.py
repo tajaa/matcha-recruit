@@ -115,6 +115,16 @@ async def _notify_auto_approve(conn, offer_id: UUID, offer_row, result: dict) ->
                                                  dashboard_url(f"/creator/deals/{offer_id}"))
 
 
+async def _notify_auto_approve_bg(offer_row: dict, result: dict) -> None:
+    """BackgroundTasks entrypoint for _notify_auto_approve — opens its own
+    connection since the request-scoped one is already released back to the
+    pool by the time background tasks run (list_offers can auto-approve
+    across several offers per request)."""
+    offer_id = offer_row["id"]
+    async with get_connection() as conn:
+        await _notify_auto_approve(conn, offer_id, offer_row, result)
+
+
 async def _offer_detail(conn, offer_id: UUID, account_id: UUID) -> OfferDetail:
     offer_row, side = await svc.get_offer_side(conn, offer_id, account_id)
 
@@ -147,14 +157,19 @@ async def _offer_detail(conn, offer_id: UUID, account_id: UUID) -> OfferDetail:
     deal_check = None
     brand_stats = None
     if side == "creator" and revisions:
-        latest = revisions[-1]
+        # Once accepted, the terms in force are the accepted revision, not
+        # necessarily revisions[-1] — see svc.accepted_revision.
+        relevant = next((r for r in revisions if r.id == offer_row["accepted_revision_id"]), None) \
+            if offer_row["accepted_revision_id"] else None
+        if relevant is None:
+            relevant = revisions[-1]
         rate_rows = await conn.fetch(
             "SELECT deliverable_type, platform, price_cents FROM cappe_creator_rate_cards WHERE profile_id = $1",
             offer_row["creator_profile_id"],
         )
         b_stats = await _brand_stats(conn, offer_row["brand_account_id"])
         deal_check = svc.analyze_terms_for_creator(
-            latest.terms, [dict(r) for r in rate_rows],
+            relevant.terms, [dict(r) for r in rate_rows],
             {"completed_collabs": b_stats.completed_collabs}, datetime.now(timezone.utc),
         )
         brand_stats = b_stats
@@ -301,6 +316,7 @@ async def create_offer(
 
 @router.get("/collab/offers", response_model=OfferPage)
 async def list_offers(
+    background: BackgroundTasks,
     side: Literal["brand", "creator"] = Query(...),
     status_csv: Optional[str] = Query(default=None, alias="status"),
     limit: int = Query(20, ge=1, le=100),
@@ -357,7 +373,11 @@ async def list_offers(
                         oid,
                     )
                     if notify_row is not None:
-                        await _notify_auto_approve(conn, oid, notify_row, result)
+                        # Emails go on BackgroundTasks, not awaited inline —
+                        # a creator with several active offers crossing the
+                        # auto-approve window would otherwise block this GET
+                        # (and the pooled connection) on N sequential sends.
+                        background.add_task(_notify_auto_approve_bg, dict(notify_row), result)
             # Re-pull just the status/total/last_action_at of the touched rows —
             # auto-approve can flip active -> completed and fire payments.
             refreshed = {
@@ -401,6 +421,15 @@ async def counter_offer(
                                 detail=f"Minimum offer is ${min_cents / 100:.0f}")
 
         async with conn.transaction():
+            # Lock + recheck under the transaction — the pre-read above can't
+            # see a concurrent accept_offer that grabs FOR UPDATE first; that
+            # accept commits, our lock acquires next, and the recheck stops
+            # us inserting a revision the accept already closed the door on.
+            locked = await conn.fetchrow(
+                "SELECT status FROM cappe_collab_offers WHERE id=$1 FOR UPDATE", offer_id
+            )
+            if locked is None or locked["status"] not in svc.PRE_ACCEPT_STATUSES:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer is no longer negotiable")
             rev_no = await conn.fetchval(
                 "SELECT COALESCE(MAX(revision_no), 0) + 1 FROM cappe_collab_offer_revisions WHERE offer_id = $1",
                 offer_id,
@@ -412,7 +441,7 @@ async def counter_offer(
             )
             await conn.execute(
                 "UPDATE cappe_collab_offers SET status='negotiating', last_action_at=NOW(), updated_at=NOW() "
-                "WHERE id=$1 AND status IN ('sent','negotiating')",
+                "WHERE id=$1",
                 offer_id,
             )
             if body.message:
@@ -472,11 +501,13 @@ async def decline_offer(offer_id: UUID, body: OfferDecline, background: Backgrou
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the creator can decline")
         if offer_row["status"] not in svc.PRE_ACCEPT_STATUSES:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer can no longer be declined")
-        await conn.execute(
+        updated = await conn.fetchval(
             "UPDATE cappe_collab_offers SET status='declined', declined_at=NOW(), declined_reason=$2, "
-            "last_action_at=NOW(), updated_at=NOW() WHERE id=$1",
-            offer_id, body.reason,
+            "last_action_at=NOW(), updated_at=NOW() WHERE id=$1 AND status = ANY($3) RETURNING id",
+            offer_id, body.reason, list(svc.PRE_ACCEPT_STATUSES),
         )
+        if updated is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer can no longer be declined")
         email, name = await _resolve_contact(conn, offer_row, "creator")
         background.add_task(send_cappe_offer_closed_email, email, name, offer_row["title"], "declined",
                             body.reason, dashboard_url(f"/collabs/{offer_id}"))
@@ -491,10 +522,13 @@ async def withdraw_offer(offer_id: UUID, background: BackgroundTasks, account: C
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the brand can withdraw")
         if offer_row["status"] not in svc.PRE_ACCEPT_STATUSES:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer can no longer be withdrawn")
-        await conn.execute(
-            "UPDATE cappe_collab_offers SET status='withdrawn', last_action_at=NOW(), updated_at=NOW() WHERE id=$1",
-            offer_id,
+        updated = await conn.fetchval(
+            "UPDATE cappe_collab_offers SET status='withdrawn', last_action_at=NOW(), updated_at=NOW() "
+            "WHERE id=$1 AND status = ANY($2) RETURNING id",
+            offer_id, list(svc.PRE_ACCEPT_STATUSES),
         )
+        if updated is None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Offer can no longer be withdrawn")
         email, name = await _resolve_contact(conn, offer_row, "brand")
         background.add_task(send_cappe_offer_closed_email, email, name, offer_row["title"], "withdrawn",
                             None, dashboard_url(f"/creator/deals/{offer_id}"))
@@ -620,7 +654,7 @@ async def request_deliverable_revision(offer_id: UUID, deliverable_id: UUID, bod
         if deliverable is None or deliverable["status"] != "submitted":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Deliverable is not submitted")
 
-        rev = await svc.latest_revision(conn, offer_id)
+        rev = await svc.accepted_revision(conn, offer_row)
         terms = svc.CollabTerms.model_validate(loads(rev["terms"])) if rev else None
         revision_rounds = terms.revision_rounds if terms else 1
         if deliverable["revision_count"] >= revision_rounds:

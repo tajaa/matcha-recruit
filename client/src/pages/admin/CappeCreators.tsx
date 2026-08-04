@@ -169,7 +169,13 @@ export default function CappeCreators() {
     try {
       await api.post(`/admin/cappe/creators/${row.id}/approve`)
       toast(`@${row.handle} approved`, 'success')
-      setCreators((prev) => prev.filter((c) => c.id !== row.id))
+      setCreators((prev) => prev.map((c) => (c.id === row.id
+        ? {
+            ...c, status: 'published', review_note: null,
+            published_at: c.published_at ?? new Date().toISOString(),
+            reaudit_due: c.socials.length > 0 && c.reach_audited_at === null,
+          }
+        : c)))
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Approve failed', 'error')
     } finally {
@@ -183,7 +189,8 @@ export default function CappeCreators() {
     try {
       await api.post(`/admin/cappe/creators/${rejectTarget.id}/reject`, { note: rejectNote.trim() })
       toast(`@${rejectTarget.handle} rejected`, 'success')
-      setCreators((prev) => prev.filter((c) => c.id !== rejectTarget.id))
+      const note = rejectNote.trim()
+      setCreators((prev) => prev.map((c) => (c.id === rejectTarget.id ? { ...c, status: 'rejected', review_note: note } : c)))
       setRejectTarget(null)
       setRejectNote('')
     } catch (e) {

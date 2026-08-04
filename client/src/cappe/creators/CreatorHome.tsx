@@ -11,7 +11,7 @@ import {
 
 type EditableSocial = { platform: string; handle: string; url: string; follower_count: number | null; engagement_rate: number | null; sort_order: number; _audit?: CreatorSocial['audit_status'] }
 type EditablePortfolio = { title: string; description: string | null; media_url: string | null; media_type: 'image' | 'video' | null; external_url: string | null; brand_name: string | null; metrics: Record<string, unknown>; sort_order: number }
-type EditableRate = { deliverable_type: string; platform: string; price_cents: number; negotiable: boolean; notes: string | null; sort_order: number }
+type EditableRate = { deliverable_type: string; platform: string; price_cents: number; negotiable: boolean; notes: string | null; sort_order: number; _priceText?: string }
 
 function ClaimForm({ onCreated }: { onCreated: () => void }) {
   const [handle, setHandle] = useState('')
@@ -129,8 +129,12 @@ export default function CreatorHome() {
   }
 
   async function togglePublic(v: boolean) {
-    await cappeApi.patch('/creators/me', { open_to_offers: v })
-    load()
+    try {
+      await cappeApi.patch('/creators/me', { open_to_offers: v })
+      load()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not update')
+    }
   }
 
   return (
@@ -190,6 +194,8 @@ function BasicsSection({ profile, onSaved }: { profile: CreatorProfileMe; onSave
         cover_url: coverUrl,
       })
       onSaved()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -267,6 +273,8 @@ function SocialsSection({ socials, onSaved }: { socials: CreatorSocial[]; onSave
     try {
       await cappeApi.put('/creators/me/socials', rows.map(({ _audit: _unused, ...r }) => r))
       onSaved()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -324,6 +332,8 @@ function PortfolioSection({ items, onSaved }: { items: CreatorPortfolioItem[]; o
     try {
       await cappeApi.put('/creators/me/portfolio', rows)
       onSaved()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -361,7 +371,11 @@ function PortfolioSection({ items, onSaved }: { items: CreatorPortfolioItem[]; o
 
 function RatesSection({ rates, onSaved }: { rates: CreatorRate[]; onSaved: () => void }) {
   const [rows, setRows] = useState<EditableRate[]>(
-    rates.map((r) => ({ deliverable_type: r.deliverable_type, platform: r.platform, price_cents: r.price_cents, negotiable: r.negotiable, notes: r.notes, sort_order: r.sort_order })),
+    rates.map((r) => ({
+      deliverable_type: r.deliverable_type, platform: r.platform, price_cents: r.price_cents,
+      negotiable: r.negotiable, notes: r.notes, sort_order: r.sort_order,
+      _priceText: (r.price_cents / 100).toString(),
+    })),
   )
   const [saving, setSaving] = useState(false)
 
@@ -372,8 +386,10 @@ function RatesSection({ rates, onSaved }: { rates: CreatorRate[]; onSaved: () =>
   async function save() {
     setSaving(true)
     try {
-      await cappeApi.put('/creators/me/rates', rows)
+      await cappeApi.put('/creators/me/rates', rows.map(({ _priceText: _unused, ...r }) => r))
       onSaved()
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not save')
     } finally {
       setSaving(false)
     }
@@ -391,7 +407,21 @@ function RatesSection({ rates, onSaved }: { rates: CreatorRate[]; onSaved: () =>
             <select value={r.platform} onChange={(e) => update(i, { platform: e.target.value })} className={`${ui.input} w-auto`}>
               {SOCIAL_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
-            <input type="number" min={0} step="0.01" value={(r.price_cents / 100).toString()} onChange={(e) => update(i, { price_cents: Math.round((Number(e.target.value) || 0) * 100) })} className={`${ui.input} w-24`} />
+            <input
+              type="number" min={0} step="0.01"
+              value={r._priceText ?? (r.price_cents / 100).toString()}
+              onChange={(e) => {
+                const text = e.target.value
+                const n = Number(text)
+                // Keep the raw text as-is (don't reformat on every keystroke)
+                // so a trailing "." while typing "12.50" isn't snapped back
+                // to "12" by the controlled value — only price_cents (the
+                // field actually saved) is derived, and only when parseable.
+                update(i, { _priceText: text, ...(text !== '' && !Number.isNaN(n) ? { price_cents: Math.round(n * 100) } : {}) })
+              }}
+              onBlur={() => update(i, { _priceText: (r.price_cents / 100).toString() })}
+              className={`${ui.input} w-24`}
+            />
             <span className="text-xs text-zinc-500">{fmtCents(r.price_cents)}</span>
             <label className="flex items-center gap-1 text-xs text-zinc-400">
               <input type="checkbox" checked={r.negotiable} onChange={(e) => update(i, { negotiable: e.target.checked })} /> negotiable
@@ -401,7 +431,7 @@ function RatesSection({ rates, onSaved }: { rates: CreatorRate[]; onSaved: () =>
         ))}
       </div>
       <div className="mt-3 flex gap-2">
-        <button onClick={() => setRows((prev) => [...prev, { deliverable_type: 'post', platform: 'instagram', price_cents: 0, negotiable: true, notes: null, sort_order: prev.length }])} className={ui.btnGhost}>
+        <button onClick={() => setRows((prev) => [...prev, { deliverable_type: 'post', platform: 'instagram', price_cents: 0, negotiable: true, notes: null, sort_order: prev.length, _priceText: '0' }])} className={ui.btnGhost}>
           <Plus className="h-4 w-4" /> Add rate
         </button>
         <button onClick={save} disabled={saving} className={ui.btnPrimary}>

@@ -89,6 +89,13 @@ class CollabTerms(BaseModel):
                 f"Compensation ({self.compensation_cents}c) is too low to split across "
                 f"{self.deliverable_count} deliverables — each row would be $0"
             )
+        # split_50_50 floor-divides the first installment (build_payment_rows);
+        # a 1-cent total gives a $0 first row, same CHECK failure as above.
+        if self.payment_schedule == "split_50_50" and 0 < self.compensation_cents < 2:
+            raise ValueError(
+                f"Compensation ({self.compensation_cents}c) is too low to split 50/50 — "
+                "the first installment would be $0"
+            )
         return self
 
     @property
