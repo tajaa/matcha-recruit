@@ -172,13 +172,19 @@ def _clamp_incident_days(days: Optional[int]) -> int:
 
 async def _lookup_context_impl(
     conn, *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
-    days: Optional[int] = None,
+    days: Optional[int] = None, location_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
     """Read-only grounding lookup for a handful of topics. Never raises —
     degrades to an empty/estimate result so a lookup failure doesn't kill
     the turn. Gate check runs BEFORE any SQL (three-state idiom from
     `hr_pilot_corpus`: flag off -> {"module": "off"}, distinct from
-    on-but-empty -> an empty list)."""
+    on-but-empty -> an empty list).
+
+    `location_id`, when given, scopes the `schedule`/`incidents`/`inventory`
+    topics to one `business_locations` row — used by
+    `services/ems/channel_grounding.py` so a store-bound channel only sees
+    its own store's data. `None` (the Huume-thread callers' default) leaves
+    every topic company-wide, unchanged from before this parameter existed."""
     required = _TOPIC_REQUIRED_FEATURE.get(topic)
     if required and not (features or {}).get(required):
         return {"topic": topic, "module": "off", "note": f"'{required}' isn't enabled for this company."}
@@ -288,17 +294,25 @@ async def _lookup_context_impl(
                 "overdue": [dict(r) for r in overdue],
             }
         if topic == "schedule":
+            # `assignees` names the shift the way the published portal
+            # already does — this topic is broadcast to whole channels
+            # (see channel_grounding.py), and a published shift's staffing
+            # is team-visible there, so naming it here isn't a new leak.
             rows = await conn.fetch(
                 """
                 SELECT s.id, s.role, s.starts_at, s.ends_at, s.required_staff,
-                       COUNT(a.id) AS assigned_count
+                       COUNT(a.id) FILTER (WHERE a.status != 'declined') AS assigned_count,
+                       ARRAY_REMOVE(ARRAY_AGG(DISTINCT e.first_name || ' ' || e.last_name)
+                                    FILTER (WHERE a.status != 'declined'), NULL) AS assignees
                 FROM schedule_shifts s
-                LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id AND a.status != 'declined'
+                LEFT JOIN schedule_shift_assignments a ON a.shift_id = s.id
+                LEFT JOIN employees e ON e.id = a.employee_id
                 WHERE s.company_id = $1 AND s.status = 'published'
                   AND s.starts_at > NOW() AND s.starts_at < NOW() + INTERVAL '7 days'
+                  AND ($2::uuid IS NULL OR s.location_id = $2)
                 GROUP BY s.id ORDER BY s.starts_at LIMIT 20
                 """,
-                company_id,
+                company_id, location_id,
             )
             return {"topic": "schedule", "upcoming_shifts": [dict(r) for r in rows]}
         if topic == "incidents":
@@ -321,9 +335,10 @@ async def _lookup_context_impl(
                        OR title ILIKE '%' || $3 || '%'
                        OR description ILIKE '%' || $3 || '%'
                        OR incident_type ILIKE '%' || $3 || '%')
+                  AND ($4::uuid IS NULL OR location_id = $4)
                 GROUP BY incident_type, severity
                 """,
-                company_id, str(window_days), query,
+                company_id, str(window_days), query, location_id,
             )
             detail_rows = await conn.fetch(
                 """
@@ -336,9 +351,10 @@ async def _lookup_context_impl(
                        OR title ILIKE '%' || $3 || '%'
                        OR description ILIKE '%' || $3 || '%'
                        OR incident_type ILIKE '%' || $3 || '%')
+                  AND ($4::uuid IS NULL OR location_id = $4)
                 ORDER BY occurred_at DESC LIMIT 21
                 """,
-                company_id, str(window_days), query,
+                company_id, str(window_days), query, location_id,
             )
             truncated = len(detail_rows) > 20
             result: dict[str, Any] = {
@@ -418,15 +434,21 @@ async def _lookup_context_impl(
                 "note": note,
             }
         if topic == "inventory":
+            # `location_id IS NULL` always stays in scope alongside a match —
+            # legacy company-wide items a store-bound channel still carries.
+            # An unscoped caller (location_id=None here) sees everything,
+            # unlike movements.list_item_names' stricter unscoped rule (that
+            # one exists to disambiguate write-matching, not for reads).
             rows = await conn.fetch(
                 """
                 SELECT it.id, it.name, it.current_quantity, it.unit, o.status AS order_status
                 FROM inventory_items it
                 LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
                 WHERE it.company_id = $1 AND it.archived_at IS NULL
+                  AND ($2::uuid IS NULL OR it.location_id IS NULL OR it.location_id = $2)
                 ORDER BY it.name LIMIT 21
                 """,
-                company_id,
+                company_id, location_id,
             )
             truncated = len(rows) > 20
             note = "Open a full item with show_record('inventory_item', ...)."

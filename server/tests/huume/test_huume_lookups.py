@@ -310,3 +310,84 @@ class TestClampIncidentDays:
 
     def test_over_max_clamps_to_365(self):
         assert _clamp_incident_days(9999) == 365
+
+
+class _FakeConn:
+    """Records every `fetch` call's SQL + params — enough to prove a
+    query's location filter param without a real database. `fetchval` is
+    unused by the topics under test here."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, tuple]] = []
+
+    async def fetch(self, sql, *params):
+        self.calls.append((sql, params))
+        return []
+
+
+class TestLocationScoping:
+    """`location_id` is new on `_lookup_context_impl` — added for
+    `services/ems/channel_grounding.py` so a store-bound channel only sees
+    its own store's schedule/incidents/inventory. Huume-thread callers never
+    pass it (default None), so every assertion here doubles as proof that
+    default stays a no-filter `IS NULL OR` branch, not a silent empty-set.
+
+        cd server && ./venv/bin/python -m pytest tests/huume/test_huume_lookups.py -q
+    """
+
+    def test_schedule_passes_location_id_as_last_param(self):
+        conn = _FakeConn()
+        loc = "loc-1"
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="schedule",
+            features={"employee_schedule": True}, location_id=loc,
+        ))
+        sql, params = conn.calls[0]
+        assert params[-1] == loc
+        assert "location_id" in sql
+
+    def test_schedule_defaults_location_id_to_none(self):
+        conn = _FakeConn()
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="schedule", features={"employee_schedule": True},
+        ))
+        _sql, params = conn.calls[0]
+        assert params[-1] is None
+
+    def test_incidents_passes_location_id_to_both_queries(self):
+        conn = _FakeConn()
+        loc = "loc-1"
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="incidents",
+            features={"incidents": True}, location_id=loc,
+        ))
+        assert len(conn.calls) == 2
+        for sql, params in conn.calls:
+            assert params[-1] == loc
+            assert "location_id" in sql
+
+    def test_incidents_defaults_location_id_to_none(self):
+        conn = _FakeConn()
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="incidents", features={"incidents": True},
+        ))
+        for _sql, params in conn.calls:
+            assert params[-1] is None
+
+    def test_inventory_passes_location_id_as_last_param(self):
+        conn = _FakeConn()
+        loc = "loc-1"
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="inventory", features={"inventory": True}, location_id=loc,
+        ))
+        sql, params = conn.calls[0]
+        assert params[-1] == loc
+        assert "location_id" in sql
+
+    def test_inventory_defaults_location_id_to_none(self):
+        conn = _FakeConn()
+        _run(_lookup_context_impl(
+            conn, company_id="c1", topic="inventory", features={"inventory": True},
+        ))
+        _sql, params = conn.calls[0]
+        assert params[-1] is None
