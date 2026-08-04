@@ -8,12 +8,14 @@ import Login from './pages/Login'
 import Signup from './pages/Signup'
 import Verify from './pages/Verify'
 import Intake from './pages/Intake'
+import PublicBrand from './pages/PublicBrand'
 
 import Rewards from './pages/consumer/Rewards'
 import Marketplace from './pages/consumer/Marketplace'
 import Redemptions from './pages/consumer/Redemptions'
 import Leaderboard from './pages/consumer/Leaderboard'
 import ConsumerSettings from './pages/consumer/Settings'
+import MyReviews from './pages/consumer/MyReviews'
 
 import BrandFeedback from './pages/brand/Feedback'
 import BrandStores from './pages/brand/Stores'
@@ -59,11 +61,13 @@ export default function App() {
       <Route path="/signup" element={<Signup />} />
       <Route path="/verify" element={<Verify />} />
       <Route path="/i/:token" element={<Intake />} />
+      <Route path="/b/:slug" element={<PublicBrand />} />
 
       {/* Consumer */}
       <Route path="/" element={<Home />} />
       <Route path="/marketplace" element={<Protected requireType="consumer"><Marketplace /></Protected>} />
       <Route path="/redemptions" element={<Protected requireType="consumer"><Redemptions /></Protected>} />
+      <Route path="/my-reviews" element={<Protected requireType="consumer"><MyReviews /></Protected>} />
       <Route path="/leaderboard" element={<Protected requireType="consumer"><Leaderboard /></Protected>} />
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
 

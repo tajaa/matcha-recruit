@@ -10,7 +10,7 @@ Rewards-for-feedback app. Own product, mirrors Cappe's shape — not a matcha te
 
 ## Layout
 
-- `routes/` — `auth.py`, `feedback.py`, `gamification.py`, `grants.py`, `links.py`, `marketplace.py`, `public_intake.py`, `rewards.py`, `_shared.py`
+- `routes/` — `auth.py`, `billing.py`, `community.py` (public brand review page, `/b/{slug}`), `dms.py` (brand↔reviewer DMs), `feedback.py`, `gamification.py`, `grants.py`, `links.py`, `marketplace.py`, `my_reviews.py` (consumer "My Reviews"), `public_intake.py`, `rewards.py`, `_shared.py`
 - `services/` — `auth.py`, `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `marketplace_service.py`, `points_service.py`
 - `models/tellus.py` — Pydantic shapes
 

@@ -108,10 +108,17 @@ async def create_report(
     reporter_account_id: Optional[UUID],
     reporter_contact: Optional[str],
     media: list,
+    rating: Optional[int] = None,
+    post_as_review: bool = False,
 ) -> dict:
     """Insert a report + media, score usefulness, and credit or queue points per
     the brand's reward_mode. Returns {report, points_awarded, earned,
-    reward_pending, brand_owner_account_id, brand_name, store_name}.
+    reward_pending, public_review, publish_at, brand_owner_account_id,
+    brand_name, store_name}.
+
+    `post_as_review` only takes effect for an identified (logged-in) consumer —
+    anonymous submissions are always private, regardless of the flag, since
+    there's no reviewer account to attribute or let edit/withdraw it later.
 
     Wrapped in a transaction so the report + its media + any point award commit
     together (or not at all).
@@ -121,6 +128,7 @@ async def create_report(
     usefulness = score_usefulness(
         description, has_media, bool(title), occurred_at is not None, identified
     )
+    public_review = bool(post_as_review and identified)
 
     async with conn.transaction():
         brand = await conn.fetchrow(
@@ -133,16 +141,20 @@ async def create_report(
         # auto → credited right below, so it lands approved.
         reward_status = None if not identified else ("pending" if manual else "approved")
 
+        # review_state/publish_at are set in the SAME statement as created_at's
+        # default so publish_at = created_at + 48h exactly (fixed clock).
         report = await conn.fetchrow(
             """INSERT INTO tellus_reports
                    (brand_id, store_id, link_id, report_number, category, sentiment,
                     title, description, occurred_at, reporter_account_id, reporter_contact,
-                    usefulness_score, status, reward_status)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'new', $13)
+                    usefulness_score, status, reward_status, rating, review_state, publish_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'new', $13, $14,
+                       CASE WHEN $15 THEN 'held' END,
+                       CASE WHEN $15 THEN NOW() + interval '48 hours' END)
                RETURNING *""",
             brand_id, store_id, link_id, _report_number(), category, sentiment,
             title, description, occurred_at, reporter_account_id, reporter_contact,
-            usefulness, reward_status,
+            usefulness, reward_status, rating, public_review,
         )
         report_id = report["id"]
 
@@ -179,6 +191,8 @@ async def create_report(
         "points_awarded": points_awarded,
         "earned": identified and points_awarded > 0,
         "reward_pending": reward_status == "pending",
+        "public_review": public_review,
+        "publish_at": report["publish_at"],
         "brand_owner_account_id": brand["owner_account_id"] if brand else None,
         "brand_name": brand["name"] if brand else "",
         "store_name": store_name,

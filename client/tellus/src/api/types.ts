@@ -4,6 +4,11 @@ export type AccountType = 'consumer' | 'brand'
 
 export type BrandPlanStatus = 'pending' | 'active' | 'past_due' | 'canceled'
 
+// 'published' is derived server-side (held + past its 48h hold) — it never
+// appears in the DB, only in API responses.
+export type ReviewState = 'held' | 'published' | 'withdrawn'
+export type DmSenderRole = 'brand' | 'consumer'
+
 export interface TellusAccount {
   id: string
   email: string
@@ -17,6 +22,8 @@ export interface TellusAccount {
   // Brand billing state — null for consumer accounts.
   plan_status: BrandPlanStatus | null
   location_count: number | null
+  // Public review-page slug (brand accounts only) — /tellus/b/{brand_slug}.
+  brand_slug: string | null
 }
 
 export interface TokenResponse {
@@ -99,6 +106,8 @@ export interface FeedbackSubmitResponse {
   points_awarded: number
   earned: boolean
   reward_pending: boolean
+  public_review: boolean
+  publish_at: string | null
 }
 
 export interface ReportMedia {
@@ -129,6 +138,14 @@ export interface Report {
   points_awarded: number
   created_at: string
   media: ReportMedia[]
+  rating: number | null
+  review_state: ReviewState | null
+  publish_at: string | null
+  hearted_at: string | null
+  brand_public_reply: string | null
+  brand_public_reply_at: string | null
+  is_identified: boolean
+  has_dm_thread: boolean
 }
 
 export interface FeedbackStats {
@@ -235,6 +252,77 @@ export interface BrandBillingStatus {
 export interface CheckoutResponse {
   checkout_url: string
   stripe_session_id: string
+}
+
+export interface MyReview {
+  id: string
+  brand_name: string
+  brand_slug: string
+  store_name: string | null
+  rating: number | null
+  title: string | null
+  description: string | null
+  review_state: ReviewState
+  publish_at: string
+  created_at: string
+  points_awarded: number
+  hearted: boolean
+  brand_public_reply: string | null
+  brand_public_reply_at: string | null
+  dm_thread_id: string | null
+  media: ReportMedia[]
+}
+
+export interface MyReviewUpdate {
+  title?: string | null
+  description?: string | null
+  rating?: number | null
+}
+
+export interface PublicReview {
+  id: string
+  rating: number
+  title: string | null
+  description: string | null
+  reviewer_name: string
+  store_name: string | null
+  created_at: string
+  publish_at: string
+  hearted: boolean
+  brand_reply: string | null
+  brand_reply_at: string | null
+  media: ReportMedia[]
+}
+
+export interface PublicBrandPage {
+  brand_name: string
+  slug: string
+  logo_url: string | null
+  review_count: number
+  avg_rating: number | null
+  reviews: PublicReview[]
+  total: number
+}
+
+export interface DmThread {
+  id: string
+  report_id: string
+  counterparty_name: string
+  report_title: string | null
+  report_number: string | null
+  blocked: boolean
+  unread_count: number
+  last_message_at: string
+  created_at: string
+}
+
+export interface DmMessage {
+  id: string
+  thread_id: string
+  sender_role: DmSenderRole
+  body: string
+  created_at: string
+  is_mine: boolean
 }
 
 export interface TellusNotification {

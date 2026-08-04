@@ -173,6 +173,15 @@ async def submit_feedback(
 
     reporter_account_id = await _optional_account_id(authorization)
 
+    # Public review requires a star rating and a logged-in account. Anonymous
+    # + post_as_review is not an error — it's silently forced private in
+    # create_report; the frontend nudges the submitter to sign in instead.
+    if body.post_as_review and reporter_account_id is not None and body.rating is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A star rating is required for a public review.",
+        )
+
     async with get_connection() as conn:
         async with conn.transaction():
             # Atomic reserve-a-use: validates active/expiry/max_uses AND increments
@@ -205,6 +214,8 @@ async def submit_feedback(
                 reporter_account_id=reporter_account_id,
                 reporter_contact=body.reporter_contact,
                 media=media,
+                rating=body.rating,
+                post_as_review=body.post_as_review,
             )
 
     # Alert the brand owner by email (best-effort, after the response).
@@ -228,4 +239,6 @@ async def submit_feedback(
         points_awarded=outcome["points_awarded"],
         earned=outcome["earned"],
         reward_pending=outcome["reward_pending"],
+        public_review=outcome["public_review"],
+        publish_at=outcome["publish_at"],
     )

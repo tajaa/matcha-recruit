@@ -12,6 +12,10 @@ ReportStatus = Literal["new", "reviewing", "resolved", "archived"]
 MediaType = Literal["photo", "video"]
 RedemptionType = Literal["code", "qr", "manual"]
 RedemptionStatus = Literal["pending", "issued", "redeemed", "expired", "cancelled"]
+# Effective review state — 'published' is derived at read time (held +
+# publish_at <= NOW()) and never stored; see tellus_app_05.
+ReviewState = Literal["held", "published", "withdrawn"]
+DmSenderRole = Literal["brand", "consumer"]
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
@@ -71,6 +75,8 @@ class TellusAccount(BaseModel):
     # Brand billing state — null for consumer accounts.
     plan_status: Optional[str] = None
     location_count: Optional[int] = None
+    # Public review-page slug (brand accounts only) — /tellus/b/{brand_slug}.
+    brand_slug: Optional[str] = None
 
 
 class TellusTokenResponse(BaseModel):
@@ -190,6 +196,10 @@ class TellusFeedbackSubmit(BaseModel):
     description: str = Field(min_length=1, max_length=8000)
     occurred_at: Optional[datetime] = None
     reporter_contact: Optional[str] = Field(default=None, max_length=320)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    # Default ON — a logged-in consumer posts publicly unless they opt out.
+    # Anonymous submissions are forced private server-side regardless.
+    post_as_review: bool = True
     # Presigned media keys (storage paths returned by /media/presign).
     media_keys: list["TellusSubmittedMedia"] = Field(default_factory=list)
     # Honeypot — bots fill hidden fields; humans leave them empty.
@@ -225,6 +235,10 @@ class TellusFeedbackSubmitResponse(BaseModel):
     earned: bool = False
     # True when the brand reviews manually — points credit on their approval.
     reward_pending: bool = False
+    # True when the submission became a public review (anonymous is never
+    # public regardless of the requested post_as_review flag).
+    public_review: bool = False
+    publish_at: Optional[datetime] = None
 
 
 # ── Reports (brand dashboard) ──────────────────────────────────────────────────
@@ -261,6 +275,17 @@ class TellusReport(BaseModel):
     points_awarded: int = 0
     created_at: datetime
     media: list[TellusReportMedia] = Field(default_factory=list)
+    rating: Optional[int] = None
+    # NULL = private feedback, never a review. 'published' is derived, not stored.
+    review_state: Optional[ReviewState] = None
+    publish_at: Optional[datetime] = None
+    hearted_at: Optional[datetime] = None
+    brand_public_reply: Optional[str] = None
+    brand_public_reply_at: Optional[datetime] = None
+    # Derived (reporter_account_id IS NOT NULL) — lets the brand UI show/hide
+    # "Message reviewer" without ever exposing the reporter's identity here.
+    is_identified: bool = False
+    has_dm_thread: bool = False
 
 
 class TellusReportStatusUpdate(BaseModel):
@@ -414,6 +439,94 @@ class TellusGrantRequest(BaseModel):
     report_id: UUID
     points: int = Field(ge=1, le=5000)
     description: Optional[str] = Field(default=None, max_length=500)
+
+
+# ── Reviews (consumer "My Reviews" + brand public reply) ──────────────────────
+
+class TellusBrandReplyUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class TellusMyReview(BaseModel):
+    id: UUID
+    brand_name: str
+    brand_slug: str
+    store_name: Optional[str] = None
+    rating: Optional[int] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    review_state: ReviewState
+    publish_at: datetime
+    created_at: datetime
+    points_awarded: int = 0
+    hearted: bool = False
+    brand_public_reply: Optional[str] = None
+    brand_public_reply_at: Optional[datetime] = None
+    dm_thread_id: Optional[UUID] = None
+    media: list[TellusReportMedia] = Field(default_factory=list)
+
+
+class TellusMyReviewUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = Field(default=None, min_length=1, max_length=8000)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+
+
+# ── Public brand community page ────────────────────────────────────────────────
+
+class TellusPublicReview(BaseModel):
+    id: UUID
+    rating: int
+    title: Optional[str] = None
+    description: Optional[str] = None
+    # The ONLY identity field ever exposed publicly.
+    reviewer_name: str
+    store_name: Optional[str] = None
+    created_at: datetime
+    publish_at: datetime
+    hearted: bool = False
+    brand_reply: Optional[str] = None
+    brand_reply_at: Optional[datetime] = None
+    media: list[TellusReportMedia] = Field(default_factory=list)
+
+
+class TellusPublicBrandPage(BaseModel):
+    brand_name: str
+    slug: str
+    logo_url: Optional[str] = None
+    review_count: int = 0
+    avg_rating: Optional[float] = None
+    reviews: list[TellusPublicReview] = Field(default_factory=list)
+    total: int = 0
+
+
+# ── DMs (brand <-> reviewer) ────────────────────────────────────────────────────
+
+class TellusDmSend(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class TellusDmMessage(BaseModel):
+    id: UUID
+    thread_id: UUID
+    sender_role: DmSenderRole
+    body: str
+    created_at: datetime
+    is_mine: bool = False
+
+
+class TellusDmThread(BaseModel):
+    id: UUID
+    report_id: UUID
+    # Brand view: reviewer's display_name (or 'Reviewer') — never email.
+    # Consumer view: the brand's name.
+    counterparty_name: str
+    report_title: Optional[str] = None
+    report_number: Optional[str] = None
+    blocked: bool = False
+    unread_count: int = 0
+    last_message_at: datetime
+    created_at: datetime
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────

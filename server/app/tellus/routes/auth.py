@@ -4,6 +4,7 @@ Fully separate from matcha's and cappe's /auth. Backed by `tellus_accounts`;
 issues Tell-Us-scoped tokens. A brand signup provisions a `tellus_brands` row;
 a consumer signup geocodes its city (best-effort) for the marketplace.
 """
+import secrets
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -14,6 +15,7 @@ from ...core.services.email import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import require_tellus_account
+from ._shared import slugify
 from ..models.tellus import (
     TellusAccount,
     TellusLocationUpdate,
@@ -46,7 +48,7 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
     row = await conn.fetchrow(
         """SELECT a.id, a.email, a.display_name, a.account_type, a.status,
                   a.city, a.state, a.leaderboard_opt_in, b.id AS brand_id,
-                  b.plan_status, b.location_count
+                  b.plan_status, b.location_count, b.slug AS brand_slug
            FROM tellus_accounts a
            LEFT JOIN tellus_brands b ON b.owner_account_id = a.id
            WHERE a.id = $1""",
@@ -57,6 +59,7 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
         account_type=row["account_type"], status=row["status"], city=row["city"],
         state=row["state"], leaderboard_opt_in=row["leaderboard_opt_in"], brand_id=row["brand_id"],
         plan_status=row["plan_status"], location_count=row["location_count"],
+        brand_slug=row["brand_slug"],
     )
 
 
@@ -115,10 +118,27 @@ async def signup(body: TellusSignup, request: Request, background: BackgroundTas
 
             if body.account_type == "brand":
                 brand_name = (body.brand_name or body.display_name or "My Brand").strip() or "My Brand"
-                await conn.execute(
-                    "INSERT INTO tellus_brands (owner_account_id, name, location_count) VALUES ($1, $2, $3)",
-                    account_id, brand_name, body.location_count,
-                )
+                slug = slugify(brand_name)
+                try:
+                    # Nested conn.transaction() = a SAVEPOINT — a slug
+                    # collision only rolls back this insert, not the whole
+                    # signup (a plain except here would otherwise leave the
+                    # outer transaction aborted).
+                    async with conn.transaction():
+                        await conn.execute(
+                            "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count) "
+                            "VALUES ($1, $2, $3, $4)",
+                            account_id, brand_name, slug, body.location_count,
+                        )
+                except asyncpg.UniqueViolationError as e:
+                    if e.constraint_name != "ux_tellus_brands_slug":
+                        raise
+                    slug = f"{slug}-{secrets.token_hex(3)}"
+                    await conn.execute(
+                        "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count) "
+                        "VALUES ($1, $2, $3, $4)",
+                        account_id, brand_name, slug, body.location_count,
+                    )
             else:
                 await conn.execute(
                     "INSERT INTO tellus_points_balances (account_id) VALUES ($1) ON CONFLICT DO NOTHING",

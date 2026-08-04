@@ -1,17 +1,28 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { Award, CreditCard, Gift, LogOut, MessageSquare, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Award, Bell, CreditCard, Gift, LogOut, MessageSquare, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
+import { tellusApi } from '../api/tellusClient'
+import type { TellusNotification } from '../api/types'
 
-const CONSUMER_NAV = [
+interface NavItem {
+  to: string
+  label: string
+  icon: typeof Award
+  end?: boolean
+}
+
+const CONSUMER_NAV: NavItem[] = [
   { to: '/', label: 'Rewards', icon: Award, end: true },
   { to: '/marketplace', label: 'Marketplace', icon: Gift },
-  { to: '/redemptions', label: 'My rewards', icon: Tag },
+  { to: '/redemptions', label: 'Redemptions', icon: Tag },
+  { to: '/my-reviews', label: 'My reviews', icon: Star },
   { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
-const BRAND_NAV = [
+const BRAND_NAV: NavItem[] = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
@@ -19,7 +30,7 @@ const BRAND_NAV = [
   { to: '/brand/settings', label: 'Settings', icon: Settings },
 ]
 
-const BRAND_PENDING_NAV = [
+const BRAND_PENDING_NAV: NavItem[] = [
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
 ]
 
@@ -37,6 +48,39 @@ export function Layout({ children }: { children: ReactNode }) {
   const isBrand = account?.account_type === 'brand'
   const isPendingBrand = isBrand && account?.plan_status !== 'active'
   const nav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
+  const [unread, setUnread] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    async function poll() {
+      try {
+        const notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
+        if (!cancelled) setUnread(notes.length)
+      } catch {
+        // best-effort — a failed poll just tries again next tick
+      }
+    }
+    void poll()
+    const id = setInterval(poll, 60_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
+  function openNotifications() {
+    navigate(isBrand ? '/brand/feedback' : '/my-reviews')
+    tellusApi.post('/notifications/read').catch(() => {})
+    setUnread(0)
+  }
+
+  const bell = (
+    <button onClick={openNotifications} className="relative text-tu-faint hover:text-tu-text" title="Notifications">
+      <Bell className="h-4 w-4" />
+      {unread > 0 && (
+        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-tu-accent text-[9px] font-bold text-black">
+          {unread > 9 ? '9+' : unread}
+        </span>
+      )}
+    </button>
+  )
 
   return (
     <div className="flex min-h-screen">
@@ -56,9 +100,12 @@ export function Layout({ children }: { children: ReactNode }) {
         </nav>
         <div className="flex items-center justify-between border-t border-tu-border px-4 py-3">
           <span className="truncate text-xs text-tu-faint">{account?.display_name || account?.email}</span>
-          <button onClick={logout} className="shrink-0 text-tu-faint hover:text-tu-text" title="Log out">
-            <LogOut className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            {bell}
+            <button onClick={logout} className="text-tu-faint hover:text-tu-text" title="Log out">
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -71,6 +118,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
           <div className="flex items-center gap-3">
             <span className="text-xs text-tu-faint">{account?.display_name || account?.email}</span>
+            {bell}
             <button onClick={logout} className="text-tu-faint hover:text-tu-text" title="Log out">
               <LogOut className="h-4 w-4" />
             </button>

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Camera, CheckCircle2, Loader2, X } from 'lucide-react'
+import { Camera, CheckCircle2, Loader2, Star, X } from 'lucide-react'
 import { tellusMaybeAuthPost, tellusPublicGet, tellusPublicPost, getTellusToken } from '../api/tellusClient'
 import { Button, Card, ErrorText, Input, Select, Spinner, Textarea } from '../components/ui'
 import type { FeedbackSubmitResponse, IntakeConfig, MediaPresignResponse, SubmittedMedia } from '../api/types'
+
+function hoursFromNow(iso: string): number {
+  return Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 3_600_000))
+}
 
 const SENTIMENTS = [
   { value: 'positive', label: '😊 Good', tone: 'text-tu-good border-tu-good/40 bg-tu-good/10' },
@@ -41,6 +45,8 @@ export default function Intake() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [contact, setContact] = useState('')
+  const [rating, setRating] = useState(0)
+  const [postPublic, setPostPublic] = useState(true)
   const [website, setWebsite] = useState('') // honeypot
   const [media, setMedia] = useState<PendingMedia[]>([])
   const [busy, setBusy] = useState(false)
@@ -88,7 +94,12 @@ export default function Intake() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    setErr(''); setBusy(true)
+    setErr('')
+    if (loggedIn && postPublic && rating === 0) {
+      setErr('Please pick a star rating for your public review.')
+      return
+    }
+    setBusy(true)
     try {
       const media_keys = media.filter((m) => m.done && m.storage_path).map((m) => ({
         storage_path: m.storage_path, media_type: m.media_type, mime_type: m.mime_type,
@@ -96,6 +107,7 @@ export default function Intake() {
       }))
       const res = await tellusMaybeAuthPost<FeedbackSubmitResponse>(`/i/${token}`, {
         category, sentiment, title: title || null, description, reporter_contact: contact || null,
+        rating: rating || null, post_as_review: postPublic,
         media_keys, website,
       })
       setResult(res)
@@ -135,6 +147,12 @@ export default function Intake() {
             <Link to="/login" className="mt-3 inline-block font-semibold text-tu-accent hover:underline">Create a Tell-Us account →</Link>
           </div>
         )}
+        {result.public_review && result.publish_at && (
+          <p className="mt-3 text-sm text-tu-dim">
+            Your review goes live in {hoursFromNow(result.publish_at)} hours — the brand can reach out to make
+            things right first. Edit or withdraw it any time from My Reviews.
+          </p>
+        )}
         {result.report_number && <p className="mt-4 text-xs text-tu-faint">Reference: {result.report_number}</p>}
       </div>
     )
@@ -159,6 +177,31 @@ export default function Intake() {
               </button>
             ))}
           </div>
+
+          <div>
+            <span className="mb-1 block text-xs font-medium text-tu-dim">Rating {postPublic && loggedIn ? '(required for a public review)' : '(optional)'}</span>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} star${n === 1 ? '' : 's'}`}>
+                  <Star className={`h-7 w-7 ${n <= rating ? 'fill-tu-accent text-tu-accent' : 'text-tu-border'}`} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 rounded-lg border border-tu-border bg-tu-panel2 px-3 py-2.5">
+            <input type="checkbox" checked={postPublic} onChange={(e) => setPostPublic(e.target.checked)} className="mt-0.5" />
+            <span className="text-sm text-tu-dim">
+              Post as a public review — goes live in 48 hours, giving the brand a chance to reach out first.
+            </span>
+          </label>
+          {postPublic && !loggedIn && (
+            <p className="text-xs text-tu-faint">
+              Public reviews need an account —{' '}
+              <Link to="/login" className="text-tu-accent hover:underline">sign in</Link>{' '}
+              or this will be sent privately to the brand instead.
+            </p>
+          )}
 
           <Select label="Category" value={category} onChange={(e) => setCategory(e.target.value)}
             options={(config?.categories ?? []).map((c) => ({ value: c, label: c[0].toUpperCase() + c.slice(1) }))} />

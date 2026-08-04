@@ -13,6 +13,7 @@ from ...database import get_connection
 from ..dependencies import require_paid_brand
 from ..models.tellus import (
     TellusAccount,
+    TellusBrandReplyUpdate,
     TellusFeedbackStats,
     TellusReport,
     TellusReportModerate,
@@ -21,7 +22,8 @@ from ..models.tellus import (
 )
 from ..services.email import send_tellus_points_email
 from ..services.feedback_service import award_for_report
-from ._shared import get_owned_report, serialize_report
+from ..services.points_service import _notify
+from ._shared import get_owned_report, serialize_report, serialize_reports
 
 router = APIRouter()
 
@@ -49,7 +51,7 @@ async def list_feedback(
                LIMIT $5 OFFSET $6""",
             account.brand_id, store_id, status_filter, sentiment, limit, offset,
         )
-        return [await serialize_report(conn, r) for r in rows]
+        return await serialize_reports(conn, rows)
 
 
 @router.get("/feedback/stats", response_model=TellusFeedbackStats)
@@ -160,12 +162,109 @@ async def moderate(
     report_id: UUID, body: TellusReportModerate, account: TellusAccount = Depends(require_paid_brand)
 ):
     """Brand flags/removes abusive UGC (review finding G). A removed report is
-    hidden from the default list; the media stays in S3 for takedown audit."""
+    hidden from the default list; the media stays in S3 for takedown audit.
+
+    NOTE: for a public review, 'removed' also pulls it off the public page —
+    the one place moderation can look like the brand suppressing a review it
+    just doesn't like. Mitigated for now by always notifying the reviewer on
+    removal (below) so a takedown is never silent; a real admin-review pass on
+    this path is a follow-up, not solved here.
+    """
     async with get_connection() as conn:
-        await get_owned_report(conn, report_id, account.brand_id)
-        row = await conn.fetchrow(
+        row = await get_owned_report(conn, report_id, account.brand_id)
+        updated = await conn.fetchrow(
             "UPDATE tellus_reports SET moderation_status = $3, updated_at = NOW() "
             "WHERE id = $1 AND brand_id = $2 RETURNING *",
             report_id, account.brand_id, body.moderation_status,
+        )
+        if (
+            body.moderation_status == "removed"
+            and row["moderation_status"] != "removed"
+            and row["review_state"] is not None
+            and row["reporter_account_id"] is not None
+        ):
+            await _notify(
+                conn, row["reporter_account_id"], "review_moderated", "Review removed",
+                "A brand removed your public review for a policy violation.",
+                reference_type="report", reference_id=str(report_id),
+            )
+        return await serialize_report(conn, updated)
+
+
+@router.post("/feedback/{report_id}/heart", response_model=TellusReport)
+async def heart_report(report_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
+    """One-tap brand acknowledgment — no points, just 'we see you'. Idempotent;
+    notifies the reporter only the first time (identified reporters only)."""
+    async with get_connection() as conn:
+        row = await get_owned_report(conn, report_id, account.brand_id)
+        updated = await conn.fetchrow(
+            "UPDATE tellus_reports SET hearted_at = COALESCE(hearted_at, NOW()), "
+            "hearted_by = COALESCE(hearted_by, $3), updated_at = NOW() "
+            "WHERE id = $1 AND brand_id = $2 RETURNING *",
+            report_id, account.brand_id, account.id,
+        )
+        if row["hearted_at"] is None and row["reporter_account_id"] is not None:
+            await _notify(
+                conn, row["reporter_account_id"], "review_hearted", "Your feedback got a heart",
+                "A brand acknowledged your feedback.",
+                reference_type="report", reference_id=str(report_id),
+            )
+        return await serialize_report(conn, updated)
+
+
+@router.delete("/feedback/{report_id}/heart", response_model=TellusReport)
+async def unheart_report(report_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
+    async with get_connection() as conn:
+        await get_owned_report(conn, report_id, account.brand_id)
+        row = await conn.fetchrow(
+            "UPDATE tellus_reports SET hearted_at = NULL, hearted_by = NULL, updated_at = NOW() "
+            "WHERE id = $1 AND brand_id = $2 RETURNING *",
+            report_id, account.brand_id,
+        )
+        return await serialize_report(conn, row)
+
+
+@router.put("/feedback/{report_id}/reply", response_model=TellusReport)
+async def set_public_reply(
+    report_id: UUID, body: TellusBrandReplyUpdate, account: TellusAccount = Depends(require_paid_brand)
+):
+    """Create-or-replace the brand's single public reply. Only valid on a
+    public review (review_state IS NOT NULL) — private feedback has no public
+    page to reply on."""
+    async with get_connection() as conn:
+        row = await get_owned_report(conn, report_id, account.brand_id)
+        if row["review_state"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Only public reviews can have a public reply.",
+            )
+        if row["review_state"] == "withdrawn":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This review was withdrawn and no longer has a public page to reply on.",
+            )
+        first_reply = row["brand_public_reply"] is None
+        updated = await conn.fetchrow(
+            "UPDATE tellus_reports SET brand_public_reply = $3, brand_public_reply_at = NOW(), "
+            "updated_at = NOW() WHERE id = $1 AND brand_id = $2 RETURNING *",
+            report_id, account.brand_id, body.body,
+        )
+        if first_reply and row["reporter_account_id"] is not None:
+            await _notify(
+                conn, row["reporter_account_id"], "review_reply", "A brand replied to your review",
+                "Check your review to read the reply.",
+                reference_type="report", reference_id=str(report_id),
+            )
+        return await serialize_report(conn, updated)
+
+
+@router.delete("/feedback/{report_id}/reply", response_model=TellusReport)
+async def remove_public_reply(report_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
+    async with get_connection() as conn:
+        await get_owned_report(conn, report_id, account.brand_id)
+        row = await conn.fetchrow(
+            "UPDATE tellus_reports SET brand_public_reply = NULL, brand_public_reply_at = NULL, "
+            "updated_at = NOW() WHERE id = $1 AND brand_id = $2 RETURNING *",
+            report_id, account.brand_id,
         )
         return await serialize_report(conn, row)
