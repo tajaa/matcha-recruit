@@ -172,7 +172,13 @@ elif [[ "$LEGACY" == "1" ]]; then
   echo "      Take your own backup if this migration is not reversible."
   echo
 elif command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1; then
-  SNAP_ID="matcha-prod-pre-${FIRST_PENDING}-$(date +%Y%m%d%H%M)"
+  # RDS identifiers allow only letters/digits/hyphens, no doubled or trailing
+  # hyphen. Alembic revision ids routinely contain underscores (tellus_app_05),
+  # which RDS rejects with InvalidParameterValue — normalize before using it.
+  SNAP_SLUG="$(printf '%s' "$FIRST_PENDING" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-*//' -e 's/-*$//')"
+  SNAP_ID="matcha-prod-pre-${SNAP_SLUG:-migration}-$(date +%Y%m%d%H%M)"
   read -r -p "Create RDS snapshot '${SNAP_ID}' before migrating? [Y/n] " reply
   if [[ "${reply:-Y}" =~ ^[Yy]?$ ]]; then
     # RDS snapshots are point-in-time at INITIATION (storage-level), so the
