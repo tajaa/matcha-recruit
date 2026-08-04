@@ -71,6 +71,59 @@ describe('renderSystemContent', () => {
     expect(links[0].props.to).toContain('11111111-1111-1111-1111-111111111111')
     expect(links[1].props.to).toContain('22222222-2222-2222-2222-222222222222')
   })
+
+  it('renders a bar token as a positioned, titled colored bar', () => {
+    // Mirrors services/scheduling/schedule_chat.py:schedule_strip's
+    // `[[bar:<startMin>:<endMin>:<colorIdx>]]` token — window is 6:00-22:00
+    // (360-1320 minutes), so 480-960 sits at (480-360)/960=12.5% width 50%.
+    const parts = renderSystemContent('[[bar:480:960:0]] 08:00–16:00 opener · Aisha Kim')
+    const bar = parts.find(
+      (p): p is React.ReactElement<{ title: string }> =>
+        isValidElement(p) && (p.props as { title?: string }).title === '08:00–16:00',
+    )
+    expect(bar).toBeDefined()
+    const fill = (bar!.props as unknown as { children: React.ReactElement<{ style: { left: string; width: string } }> })
+      .children
+    expect(fill.props.style.left).toBe('12.5%')
+    expect(fill.props.style.width).toBe('50.0%')
+  })
+
+  it('marks an overnight bar (endMin > 1440) in its title', () => {
+    const parts = renderSystemContent('[[bar:1200:1560:1]] 20:00–02:00→+1d closer · Dana Whitfield')
+    const bar = parts.find(
+      (p): p is React.ReactElement<{ title: string }> =>
+        isValidElement(p) && ((p.props as { title?: string }).title ?? '').includes('+1d'),
+    )
+    expect(bar).toBeDefined()
+    expect(bar!.props.title).toBe('20:00–02:00 (+1d)')
+  })
+
+  it('renders a barruler token with the expected hour ticks', () => {
+    const parts = renderSystemContent('[[barruler]]')
+    const ruler = parts.find(isValidElement) as React.ReactElement<{
+      children: React.ReactElement<{ children: string }>[]
+    }>
+    expect(ruler).toBeDefined()
+    const tickLabels = ruler.props.children.map((tick) => tick.props.children)
+    expect(tickLabels).toEqual(['6a', '9a', '12p', '3p', '6p', '9p'])
+  })
+
+  it('handles bold, a shift-link, and a bar token together in one pass', () => {
+    // Regression guard: matchAll interleaves capture groups from ALL four
+    // alternatives per match — this pins that bold/link/bar don't clobber
+    // each other's group indices.
+    const parts = renderSystemContent(
+      '**Opener** [[shift:11111111-1111-1111-1111-111111111111:2026-08-03]] [[bar:480:960:0]]',
+    )
+    const hasBold = parts.some((p) => isValidElement(p) && p.type === 'strong')
+    const hasLink = parts.some((p) => isValidElement(p) && p.type === Link)
+    const hasBar = parts.some(
+      (p) => isValidElement(p) && (p.props as { title?: string }).title === '08:00–16:00',
+    )
+    expect(hasBold).toBe(true)
+    expect(hasLink).toBe(true)
+    expect(hasBar).toBe(true)
+  })
 })
 
 describe('stripEmphasis', () => {
@@ -90,5 +143,14 @@ describe('stripEmphasis', () => {
         '✅ Done — 1 shift is live (**Closer** Sat Aug 1 · Aisha Kim [[shift:26c4ef29-ca1d-4c59-9719-30219f8e9056:2026-08-01]]).',
       ),
     ).toBe('✅ Done — 1 shift is live (Closer Sat Aug 1 · Aisha Kim).')
+  })
+
+  it('drops bar and barruler tokens entirely, keeping the surrounding text', () => {
+    // \s* on each removal pattern eats the token's own leading newline/
+    // whitespace too (same idiom as the shift-link stripper below) — no
+    // orphan blank line left behind.
+    expect(
+      stripEmphasis('Mon Aug 10\n[[barruler]]\n[[bar:480:960:0]] 08:00–16:00 opener · Aisha Kim'),
+    ).toBe('Mon Aug 10 08:00–16:00 opener · Aisha Kim')
   })
 })

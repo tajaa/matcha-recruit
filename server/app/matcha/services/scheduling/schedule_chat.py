@@ -718,6 +718,7 @@ async def execute_proposal(conn, *, proposal_row: dict, confirmed_by: UUID, feat
                 "id": str(shift_id), "date": starts_at.date().isoformat(),
                 "label": shift["label"], "when": _fmt_date(starts_at),
                 "assignee_names": assignee_names,
+                "starts_at": starts_at, "ends_at": ends_at,
             })
 
         await conn.execute(
@@ -820,6 +821,50 @@ def clarify_text(question: str, options: list[str]) -> str:
     return "\n".join(lines)
 
 
+# ── Rendered-bar schedule strip ───────────────────────────────────────────
+
+_STRIP_MAX_LINES = 7
+_BAR_COLOR_COUNT = 4       # client palette indices 0-3 rotate per staffed shift
+_BAR_UNSTAFFED_COLOR = 4   # index 4 = unstaffed (red)
+
+
+def schedule_strip(shifts_created: list[dict]) -> str:
+    """Numbers-only bar tokens for the confirm pill, rendered as real
+    colored bars by client/.../ChannelView/systemContent.tsx —
+    `[[barruler]]` draws the hour-ruler track, `[[bar:<startMin>:<endMin>:
+    <colorIdx>]]` draws one shift's bar (minutes since midnight;
+    endMin > 1440 marks an overnight shift). The token payload is digits
+    ONLY — labels/times/names stay plain text on the same line, so no user
+    text ever rides inside a parsed construct (same posture as the
+    `[[shift:uuid:date]]` token), and a surface that parses nothing
+    (desktop Espresso) still shows a readable line around a raw token.
+    Display clamping/rounding is the client's job — this emits real
+    minutes, unrounded."""
+    if not shifts_created:
+        return ""
+    shown = sorted(shifts_created, key=lambda s: s["starts_at"])[:_STRIP_MAX_LINES]
+    lines: list[str] = []
+    seen_dates: set = set()
+    for i, s in enumerate(shown):
+        starts_at, ends_at = s["starts_at"], s["ends_at"]
+        d = starts_at.date()
+        if d not in seen_dates:
+            seen_dates.add(d)
+            lines.append(_fmt_date(starts_at))
+            lines.append("[[barruler]]")
+        overnight = ends_at.date() > starts_at.date()
+        start_min = starts_at.hour * 60 + starts_at.minute
+        end_min = ends_at.hour * 60 + ends_at.minute + (1440 if overnight else 0)
+        names = s["assignee_names"]
+        color = _BAR_UNSTAFFED_COLOR if not names else i % _BAR_COLOR_COUNT
+        who = "open" if not names else names[0] + (f" +{len(names) - 1}" if len(names) > 1 else "")
+        span = f"{_fmt_time(starts_at)}–{_fmt_time(ends_at)}" + ("→+1d" if overnight else "")
+        lines.append(f"[[bar:{start_min}:{end_min}:{color}]] {span} {s['label']} · {who}")
+    if len(shifts_created) > _STRIP_MAX_LINES:
+        lines.append(f"… and {len(shifts_created) - _STRIP_MAX_LINES} more")
+    return "\n".join(lines)
+
+
 def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
     """A `[[shift:<id>:<date>]]` token trails each created shift — the ONE
     other markup construct client/.../ChannelView/systemContent.tsx parses
@@ -827,7 +872,10 @@ def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
     design). It renders as a link into /app/employee-schedule, deep-linked
     to that shift's week and highlighting the shift itself, so "1 shift is
     live" is something the reader can click through to rather than just
-    trust."""
+    trust. Below the summary line, `schedule_strip` appends bar tokens
+    the client renders as a real hour-ruler grid, so the pill itself
+    doubles as an at-a-glance confirmation — the link is for opening the
+    real scheduler, not for finding out what just happened."""
     parts = []
     for s in shifts_created:
         names = ", ".join(s["assignee_names"]) or "open"
@@ -842,4 +890,7 @@ def result_text(shifts_created: list[dict], dropped: list[dict]) -> str:
     ]
     for d in dropped:
         lines.append(f"Had to drop {d['name']} from the {d['label']}: {d['reason']}")
+    strip = schedule_strip(shifts_created)
+    if strip:
+        lines.append(strip)
     return "\n".join(lines)
