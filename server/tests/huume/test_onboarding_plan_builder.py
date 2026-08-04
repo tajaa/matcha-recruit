@@ -5,7 +5,9 @@
 
 from uuid import uuid4
 
-from app.matcha.services.huume.onboarding_skill import build_onboarding_plan, PLAN_STEP_ORDER
+from app.matcha.services.huume.onboarding_skill import (
+    build_onboarding_plan, PLAN_STEP_ORDER, _derive_work_state, _normalize_employment_type,
+)
 
 FULL_FEATURES = {
     "employees": True, "credential_templates": True, "training": True,
@@ -87,3 +89,40 @@ class TestBuildOnboardingPlan:
         plan = build_onboarding_plan(offer=_offer(candidate_name="Cher"), features=FULL_FEATURES, integrations={})
         assert plan["employee"]["first_name"] == "Cher"
         assert plan["employee"]["last_name"] is None
+
+
+class TestNormalizeEmploymentType:
+    def test_offer_default_maps_to_full_time(self):
+        assert _normalize_employment_type("Full-Time Exempt") == "full_time"
+
+    def test_common_variants(self):
+        assert _normalize_employment_type("Full-time") == "full_time"
+        assert _normalize_employment_type("at_will") == "full_time"
+        assert _normalize_employment_type("Salaried") == "full_time"
+        assert _normalize_employment_type("Part-Time Hourly") == "part_time"
+        assert _normalize_employment_type("Contractor") == "contractor"
+        assert _normalize_employment_type("1099") == "contractor"
+        assert _normalize_employment_type("Internship") == "intern"
+
+    def test_unmappable_returns_none(self):
+        assert _normalize_employment_type("Hybrid") is None
+        assert _normalize_employment_type("") is None
+        assert _normalize_employment_type(None) is None
+
+
+class TestDeriveWorkState:
+    def test_bare_code(self):
+        assert _derive_work_state("CA") == "CA"
+        assert _derive_work_state("ca") == "CA"
+
+    def test_city_comma_state(self):
+        assert _derive_work_state("Los Angeles, CA") == "CA"
+        assert _derive_work_state("Aliso Viejo, CA") == "CA"
+
+    def test_full_state_name(self):
+        assert _derive_work_state("California") == "CA"
+
+    def test_unmappable(self):
+        assert _derive_work_state("Remote in the US") is None
+        assert _derive_work_state("") is None
+        assert _derive_work_state(None) is None

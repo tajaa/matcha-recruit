@@ -16,6 +16,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+import asyncpg
+
 from app.matcha.services.employees.invitations import _send_invitation_with_conn
 from app.matcha.services.offer_letters.document import _send_candidate_range_email
 
@@ -35,6 +37,47 @@ PLAN_STEP_ORDER: tuple[tuple[str, str], ...] = (
     ("benefits_note", "Note benefits eligibility window"),
     ("jurisdiction_packet_note", "Note new-hire jurisdiction notices"),
 )
+
+# Free-text offer employment types (offer letters store prose like
+# "Full-Time Exempt") mapped onto the employees-table enum. Order matters:
+# "Part-Time Hourly" must not match the full-time tokens.
+_EMPLOYMENT_TYPE_TOKENS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("intern", ("intern",)),
+    ("contractor", ("contract", "1099", "consult", "temp")),
+    ("part_time", ("part",)),
+    ("full_time", ("full", "exempt", "salar", "at will", "at_will", "at-will")),
+)
+
+
+def _normalize_employment_type(raw: Optional[str]) -> Optional[str]:
+    """Map free-text offer employment type to the employees-table enum
+    (full_time/part_time/contractor/intern), or None when unmappable — the
+    column is nullable and a wrong guess ("Hybrid" -> full_time) is worse
+    than an empty field the admin fills in later."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return None
+    for enum_value, tokens in _EMPLOYMENT_TYPE_TOKENS:
+        if any(t in text for t in tokens):
+            return enum_value
+    return None
+
+
+def _derive_work_state(location: Optional[str]) -> Optional[str]:
+    """Best-effort US state from an offer's free-text location: a bare
+    2-letter code or full state name, else the last comma segment
+    ("Los Angeles, CA" -> CA). None when unmappable ("Remote in the US")."""
+    from app.matcha.routes.employees._shared import _normalize_work_state
+
+    text = (location or "").strip()
+    if not text:
+        return None
+    candidates = [text.rsplit(",", 1)[-1].strip(), text] if "," in text else [text]
+    for cand in candidates:
+        normalized, valid = _normalize_work_state(cand)
+        if valid and normalized:
+            return normalized
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +919,7 @@ async def execute_plan_step(
 async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employee_id, **_) -> dict[str, Any]:
     from app.matcha.routes.employees._shared import (
         _employee_compensation_fields_available, _employee_org_fields_available,
-        _sync_employee_location_for_compliance, _normalize_work_state,
+        _sync_employee_location_for_compliance,
     )
 
     emp = plan.get("employee") or {}
@@ -895,26 +938,26 @@ async def _step_create_employee(conn, *, company_id, actor_user_id, plan, employ
         except ValueError:
             pass
 
-    work_state = None
-    location = (emp.get("location") or "").strip()
-    if len(location) == 2:
-        normalized, valid = _normalize_work_state(location)
-        work_state = normalized if valid else None
+    work_state = _derive_work_state(emp.get("location"))
 
     comp_available = await _employee_compensation_fields_available(conn)
     org_available = await _employee_org_fields_available(conn)
 
     cols = ["org_id", "email", "first_name", "last_name", "work_state", "employment_type", "start_date"]
     vals = [company_id, email, emp.get("first_name") or "New", emp.get("last_name") or "Hire",
-            work_state, emp.get("employment_type") or "Full-Time Exempt", start_date]
+            work_state, _normalize_employment_type(emp.get("employment_type")), start_date]
     if org_available and emp.get("position_title"):
         cols.append("job_title")
         vals.append(emp["position_title"])
     placeholders = ", ".join(f"${i}" for i in range(1, len(vals) + 1))
-    row = await conn.fetchrow(
-        f"INSERT INTO employees ({', '.join(cols)}) VALUES ({placeholders}) RETURNING id",
-        *vals,
-    )
+    try:
+        row = await conn.fetchrow(
+            f"INSERT INTO employees ({', '.join(cols)}) VALUES ({placeholders}) RETURNING id",
+            *vals,
+        )
+    except asyncpg.PostgresError as exc:
+        logger.warning("huume create_employee: insert rejected for company %s: %s", company_id, exc)
+        return {"status": "failed", "message": f"Couldn't save the employee record: {exc}"}
     new_id = row["id"]
 
     try:
