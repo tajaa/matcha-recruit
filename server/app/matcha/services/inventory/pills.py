@@ -48,6 +48,25 @@ def stockout_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
     return base
 
 
+def reorder_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
+    """Same staged-order shape as `stockout_pill` (identical trailing
+    "Reply **confirm**..." sentence, so `_bg_inventory_reply`'s
+    confirm/cancel/quantity-edit parsing is unaffected) but for a request
+    someone explicitly asked for — never claims the item was marked out of
+    stock, since no `stockout` movement was recorded and the current count
+    may be fine."""
+    base = f"\U0001F4E6 Staging an order for {item_name}."
+    if suggestion and suggestion.get("avg_stockout_interval_days"):
+        days = round(suggestion["avg_stockout_interval_days"])
+        base += f" You've historically run out ~every {days} days;"
+    if order_qty is not None:
+        base += f" suggest ordering {order_qty}."
+    else:
+        base += " not enough history yet to suggest an amount — set one on the Inventory page."
+    base += " Reply **confirm** to queue it, a number to change the amount, or **cancel**."
+    return base
+
+
 def receipt_pill(item_name: str, qty, new_count) -> str:
     base = f"\U0001F4E6 Received {qty} × {item_name}."
     if new_count is not None:

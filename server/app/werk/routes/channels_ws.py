@@ -212,6 +212,28 @@ async def _inventory_company_gate(conn, channel_id_str: str):
     return row["company_id"] if _inventory_row_allowed(row) else None
 
 
+async def _asker_is_company_admin(conn, asker_user_id_str: str, role: Optional[str], company_id) -> bool:
+    """Whether an asker whose global role is admin-tier is actually an admin
+    OF THIS CHANNEL'S COMPANY. `role='admin'` is a platform admin (blanket
+    access, same as everywhere else in the app); `role='client'` is a
+    per-company business admin and must be re-checked against the channel's
+    own company_id — channel membership isn't company-bounded (an
+    invite-code join at `channels.py`'s accept-invite path, or a
+    cross-company `user_connections` add-members flow, can seat a company-A
+    client in a company-B channel), so trusting the bare role would hand
+    that asker company B's incidents/PTO/credentials/training data and the
+    `stage_inventory_order` write tool via `channel_grounding`'s admin-only
+    topics."""
+    if role == "admin":
+        return True
+    if role != "client":
+        return False
+    client_company_id = await conn.fetchval(
+        "SELECT company_id FROM clients WHERE user_id = $1", UUID(asker_user_id_str),
+    )
+    return client_company_id == company_id
+
+
 async def _channel_location(conn, channel_id_str: str):
     """(location_id, location_name) when the channel is store-scoped to an
     ACTIVE store, (None, None) otherwise. Gates stay untouched — their
@@ -331,11 +353,17 @@ async def _bg_ems_ask(
             if company_id is None:
                 return
             role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(asker_user_id_str))
-            is_admin = ems_ask.is_admin_role(role)
+            is_admin = await _asker_is_company_admin(conn, asker_user_id_str, role, company_id)
             features = await _schedule_company_features(conn, company_id)
+            loc_id, _loc_name = await _channel_location(conn, channel_id_str)
+            location_unavailable = loc_id is None and await _channel_bound_to_inactive_location(
+                conn, channel_id_str,
+            )
 
             if intent == HELP:
-                extra_lines = channel_grounding.help_lines(features=features, is_admin=is_admin)
+                extra_lines = channel_grounding.help_lines(
+                    features=features, is_admin=is_admin, location_unavailable=location_unavailable,
+                )
                 text = ems_ask.help_text(is_admin=is_admin, extra_lines=tuple(extra_lines))
                 sys_row = await _insert_system_message(conn, channel_id_str, text)
             else:
@@ -349,11 +377,9 @@ async def _bg_ems_ask(
                     conn, company_id=company_id, channel_id=UUID(channel_id_str),
                     include_behavioral=is_admin,
                 )
-                loc_id, _loc_name = await _channel_location(conn, channel_id_str)
-                location_unavailable = loc_id is None and await _channel_bound_to_inactive_location(
-                    conn, channel_id_str,
+                reachable = channel_grounding.reachable_topics(
+                    features=features, is_admin=is_admin, location_unavailable=location_unavailable,
                 )
-                reachable = channel_grounding.reachable_topics(features=features, is_admin=is_admin)
                 stage_inventory_available = bool(features.get("inventory")) and not location_unavailable
 
                 # "Nothing you can see" and "nothing happened" must not read

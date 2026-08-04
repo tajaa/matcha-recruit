@@ -183,6 +183,8 @@ async def _stage_inventory_order(
         item["id"],
     )
     suggestion = suggest_order([dict(r) for r in history_rows], datetime.now(timezone.utc))
+    if isinstance(quantity, str) and quantity.strip().lstrip("-").isdigit():
+        quantity = int(quantity)
     order_qty = quantity if isinstance(quantity, (int, float)) and not isinstance(quantity, bool) and quantity > 0 else (
         suggestion.get("suggested_quantity") if suggestion else None
     )
@@ -192,7 +194,7 @@ async def _stage_inventory_order(
     )
     if order_qty is not None and order_qty != order.get("quantity"):
         await conn.execute("UPDATE inventory_orders SET quantity = $1 WHERE id = $2", order_qty, order["id"])
-    pill_text = pills.stockout_pill(item["name"], suggestion, order_qty)
+    pill_text = pills.reorder_pill(item["name"], suggestion, order_qty)
     return {"text": f"Staged — told the channel: {pill_text}", "order_id": order["id"], "pill_text": pill_text}
 
 
@@ -214,7 +216,11 @@ async def answer_channel_question(
 
     started = time.monotonic()
     events_block = ask.render_events_block(events, is_admin=is_admin, filtered=filtered)
-    allowed_topics = [t.topic for t in channel_grounding.reachable_topics(features=features, is_admin=is_admin)]
+    allowed_topics = [
+        t.topic for t in channel_grounding.reachable_topics(
+            features=features, is_admin=is_admin, location_unavailable=location_unavailable,
+        )
+    ]
     stage_inventory_available = bool((features or {}).get("inventory")) and not location_unavailable
 
     declarations = []
@@ -270,6 +276,20 @@ async def answer_channel_question(
                             name=name, response={"result": result["text"]},
                         ))
                     elif name == _STAGE_INVENTORY_TOOL and stage_inventory_available:
+                        if staged_this_round:
+                            # Only one order can be committed per turn — the
+                            # caller only stamps confirm_message_id onto the
+                            # LAST staged row (channels_ws._bg_ems_ask), so a
+                            # second stage call in the same round would
+                            # silently orphan an earlier one (unconfirmable,
+                            # uncancellable, still sitting in the queue).
+                            response_parts.append(types.Part.from_function_response(
+                                name=name, response={"result": (
+                                    "Only one order can be staged per message — ask again "
+                                    "to stage the next item."
+                                )},
+                            ))
+                            continue
                         outcome = await _stage_inventory_order(
                             conn, company_id=company_id, channel_id=channel_id,
                             asker_user_id=asker_user_id, asker_role=asker_role,
@@ -292,6 +312,23 @@ async def answer_channel_question(
             if staged_this_round:
                 break
             contents.append(types.Content(role="user", parts=response_parts))
+
+        if final_text is None and pending_order_id is None and (time.monotonic() - started) < _WALL_CLOCK_SECONDS:
+            # The call bound (or wall clock) was hit while the model still
+            # had a function call queued, so the loop above never gave it a
+            # text turn — every prior lookup in `contents` already
+            # succeeded. One tool-free call to write those up beats
+            # discarding them behind _FALLBACK_TEXT (mirrors
+            # huume/agent.py's force-finish-with-partial-work on a bound hit).
+            finish_config = types.GenerateContentConfig(
+                temperature=0.4, max_output_tokens=600,
+                system_instruction=_build_system_prompt(is_admin=is_admin, events_block=events_block),
+            )
+            resp = await asyncio.wait_for(
+                client.aio.models.generate_content(model=GEMINI_FLASH, contents=contents, config=finish_config),
+                timeout=_CALL_TIMEOUT,
+            )
+            final_text = (getattr(resp, "text", None) or "").strip() or None
     except Exception:
         logger.warning("EMS: channel agent loop failed for channel %s", channel_id, exc_info=True)
         final_text = None

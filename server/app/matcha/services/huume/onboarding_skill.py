@@ -468,10 +468,11 @@ async def lookup_context_impl(
                 FROM inventory_items it
                 LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
                 WHERE it.company_id = $1 AND it.archived_at IS NULL
-                  AND ($2::uuid IS NULL OR it.location_id IS NULL OR it.location_id = $2)
+                  AND ($2::text IS NULL OR it.name ILIKE '%' || $2 || '%')
+                  AND ($3::uuid IS NULL OR it.location_id IS NULL OR it.location_id = $3)
                 ORDER BY it.name LIMIT 21
                 """,
-                company_id, location_id,
+                company_id, query, location_id,
             )
             truncated = len(rows) > 20
             note = "Open a full item with show_record('inventory_item', ...)."

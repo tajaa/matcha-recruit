@@ -197,7 +197,10 @@ class TestTopicEnforcementIsServerSide:
 class TestLoopBounds:
     def test_stops_after_the_call_bound_and_falls_back(self, monkeypatch):
         # A model that never stops calling tools must not hang the channel
-        # forever — the loop force-finishes and degrades to the same
+        # forever — the loop stops after _MAX_MODEL_CALLS, then gets exactly
+        # one extra tool-free call to try to write up whatever it already
+        # learned (force-finish). If even THAT call keeps calling tools
+        # (this model never stops), it still degrades to the same
         # deterministic line a total failure produces.
         async def fake_lookup_impl(conn, **kwargs):
             return {"topic": kwargs.get("topic")}
@@ -214,8 +217,34 @@ class TestLoopBounds:
         result = _run(channel_agent.answer_channel_question(**_base_kwargs(
             features={"inventory": True}, asker_role="client", is_admin=True,
         )))
-        assert len(client.calls) == channel_agent._MAX_MODEL_CALLS
+        assert len(client.calls) == channel_agent._MAX_MODEL_CALLS + 1
         assert result["message"] == channel_agent._FALLBACK_TEXT
+        assert result["pending_order_id"] is None
+
+    def test_force_finish_call_writes_up_partial_work_on_bound_hit(self, monkeypatch):
+        # The force-finish call is tools=None, so it can only return text —
+        # that text becomes the answer instead of _FALLBACK_TEXT, even
+        # though every lookup succeeded via tool calls the model never got
+        # a turn to summarize on its own.
+        async def fake_lookup_impl(conn, **kwargs):
+            return {"topic": kwargs.get("topic")}
+
+        monkeypatch.setattr(
+            "app.matcha.services.huume.onboarding_skill.lookup_context_impl", fake_lookup_impl,
+        )
+        always_calling = [
+            _Resp(parts=[_Part(function_call=_FnCall("lookup_context", {"topic": "inventory"}))])
+            for _ in range(channel_agent._MAX_MODEL_CALLS)
+        ]
+        finishing = _Resp(parts=[_Part(text="here's what's on hand")], text="here's what's on hand")
+        client = _install(monkeypatch, responses=[*always_calling, finishing])
+
+        result = _run(channel_agent.answer_channel_question(**_base_kwargs(
+            features={"inventory": True}, asker_role="client", is_admin=True,
+        )))
+        assert len(client.calls) == channel_agent._MAX_MODEL_CALLS + 1
+        assert client.calls[-1]["config"].tools is None
+        assert "here's what's on hand" in result["message"]
         assert result["pending_order_id"] is None
 
     def test_total_model_failure_degrades_to_the_fallback_line(self, monkeypatch):

@@ -98,6 +98,8 @@ def _render_inventory(result: dict[str, Any]) -> str:
         unit = it.get("unit") or ""
         status = f" (order {it['order_status']})" if it.get("order_status") else ""
         lines.append(f"- {it.get('name', 'item')}: {qty} {unit}{status}".rstrip())
+    if result.get("note"):
+        lines.append(result["note"])
     return "\n".join(lines)
 
 
@@ -113,17 +115,26 @@ def _render_incidents(result: dict[str, Any]) -> str:
             f"- [{when}] {inc.get('incident_number', '?')} {inc.get('title', 'Untitled')} "
             f"({inc.get('incident_type', 'unspecified')}, {inc.get('severity', 'unspecified')} severity, {inc.get('status', 'unspecified')})"
         )
+    if result.get("note"):
+        lines.append(result["note"])
     return "\n".join(lines)
 
 
 def _render_training(result: dict[str, Any]) -> str:
+    counts = result.get("counts_by_status") or {}
     overdue = result.get("overdue") or []
-    if not overdue:
+    if not overdue and not counts:
         return ""
     lines = []
-    for r in overdue:
-        due = r["due_date"].strftime("%b %d, %Y") if r.get("due_date") else "unknown date"
-        lines.append(f"- {r.get('first_name', '')} {r.get('last_name', '')}: {r.get('title', 'training')} overdue since {due}")
+    if counts:
+        summary = ", ".join(f"{status}: {n}" for status, n in counts.items())
+        lines.append(f"Status counts — {summary}")
+    if overdue:
+        for r in overdue:
+            due = r["due_date"].strftime("%b %d, %Y") if r.get("due_date") else "unknown date"
+            lines.append(f"- {r.get('first_name', '')} {r.get('last_name', '')}: {r.get('title', 'training')} overdue since {due}")
+    else:
+        lines.append("Nothing overdue right now.")
     return "\n".join(lines)
 
 
@@ -212,17 +223,26 @@ CHANNEL_TOPICS: tuple[ChannelTopic, ...] = (
 CHANNEL_TOPICS_BY_NAME: dict[str, ChannelTopic] = {t.topic: t for t in CHANNEL_TOPICS}
 
 
-def reachable_topics(*, features: Optional[dict[str, Any]], is_admin: bool) -> list[ChannelTopic]:
+def reachable_topics(
+    *, features: Optional[dict[str, Any]], is_admin: bool, location_unavailable: bool = False,
+) -> list[ChannelTopic]:
     """The subset of `CHANNEL_TOPICS` this asker could reach right now —
     same admin + feature gate `run_topic_lookup`/`help_lines` apply, shared
     here so callers deciding whether to run the agent loop at all (an empty
     list means there's nothing for it to ground beyond ems_events) and the
-    loop's own tool-declaration enum stay in agreement."""
+    loop's own tool-declaration enum stay in agreement. `location_unavailable`
+    drops every location-scoped topic — `run_topic_lookup` would refuse them
+    anyway (the channel's store is deactivated), so leaving them "reachable"
+    here would burn a model call just to relay that refusal, and could make
+    an all-location-scoped topic set look non-empty when it can't actually
+    answer anything."""
     from app.matcha.services.huume.onboarding_skill import topic_allowed
 
     return [
         t for t in CHANNEL_TOPICS
-        if (is_admin or not t.admin_only) and topic_allowed(t.topic, features)
+        if (is_admin or not t.admin_only)
+        and topic_allowed(t.topic, features)
+        and not (t.location_scoped and location_unavailable)
     ]
 
 
@@ -284,11 +304,13 @@ async def run_topic_lookup(
     return {"text": _sanitize_block(text), "degraded": False}
 
 
-def help_lines(*, features: Optional[dict[str, Any]], is_admin: bool) -> list[str]:
+def help_lines(
+    *, features: Optional[dict[str, Any]], is_admin: bool, location_unavailable: bool = False,
+) -> list[str]:
     """Capability-pill bullets for the topics this asker can actually reach
-    right now — same admin/feature gate `run_topic_lookup` applies (via the
-    shared `topic_allowed`), so "@huume help" never advertises something
-    the next question can't do."""
+    right now — same admin/feature/location gate `run_topic_lookup` applies
+    (via the shared `topic_allowed` + `location_unavailable`), so "@huume
+    help" never advertises something the next question can't do."""
     from app.matcha.services.huume.onboarding_skill import topic_allowed
 
     lines = []
@@ -296,6 +318,8 @@ def help_lines(*, features: Optional[dict[str, Any]], is_admin: bool) -> list[st
         if t.admin_only and not is_admin:
             continue
         if not topic_allowed(t.topic, features):
+            continue
+        if t.location_scoped and location_unavailable:
             continue
         lines.append(f"• {t.help_line}")
     return lines
