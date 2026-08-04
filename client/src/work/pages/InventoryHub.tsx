@@ -5,6 +5,7 @@ import { Button, Input, useToast } from '../../components/ui'
 import ItemTable from '../components/inventory/ItemTable'
 import ItemDetail from '../components/inventory/ItemDetail'
 import OrderQueue from '../components/inventory/OrderQueue'
+import ReceiveDeliveryModal from '../components/inventory/ReceiveDeliveryModal'
 import { createItem, listItems, listOrders, type InventoryItem, type InventoryOrder } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 
@@ -19,6 +20,7 @@ export default function InventoryHub() {
   const [newItemName, setNewItemName] = useState('')
   const [newItemLocation, setNewItemLocation] = useState('')
   const [adding, setAdding] = useState(false)
+  const [receiveOpen, setReceiveOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -80,20 +82,30 @@ export default function InventoryHub() {
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Inventory</h2>
-        {locations.length > 0 && (
-          <select
-            value={locFilter}
-            onChange={(e) => setLocFilter(e.target.value)}
-            className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
-          >
-            <option value="all">All locations</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
-            ))}
-            <option value="none">Unassigned</option>
-          </select>
-        )}
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setReceiveOpen(true)}>Receive delivery</Button>
+          {locations.length > 0 && (
+            <select
+              value={locFilter}
+              onChange={(e) => setLocFilter(e.target.value)}
+              className="text-sm rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1"
+            >
+              <option value="all">All locations</option>
+              {locations.map((l) => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+              <option value="none">Unassigned</option>
+            </select>
+          )}
+        </div>
       </div>
+      <ReceiveDeliveryModal
+        open={receiveOpen}
+        onClose={() => setReceiveOpen(false)}
+        items={visibleItems}
+        locationId={locFilter !== 'all' && locFilter !== 'none' ? locFilter : undefined}
+        onCommitted={load}
+      />
       <OrderQueue orders={visibleOrders} items={visibleItems} onChange={load} />
       <div className="flex items-end gap-2">
         <Input

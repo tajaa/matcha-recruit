@@ -1,4 +1,4 @@
-import { api } from '../../api/client'
+import { api, API_BASE } from '../../api/client'
 
 // ── Types ──
 
@@ -135,6 +135,57 @@ export async function receiveOrder(orderId: string, quantity?: number) {
 export async function cancelOrder(orderId: string) {
   return api.post<InventoryOrder>(`/inventory/orders/${orderId}/cancel`, {})
 }
+
+// ── Receipts (invoice / packing-slip ingest) ──
+
+export interface ReceiptLine {
+  item_name: string
+  quantity: number | null
+  unit: string | null
+  pack_size: string | null
+  vendor_sku: string | null
+  unit_price: number | null
+  item_id: string | null
+  matched_name: string | null
+  exact: boolean
+  open_order_id: string | null
+}
+
+export interface ReceiptDraft {
+  vendor: string | null
+  invoice_number: string | null
+  invoice_date: string | null
+  lines: ReceiptLine[]
+  notes: string | null
+  available: boolean
+}
+
+export interface ReceiptCommitResult {
+  total_rows: number
+  created: number
+  failed: number
+  errors: { row: number; item: string; error: string }[]
+  ids: string[]
+}
+
+export function parseReceipt(file: File, locationId?: string) {
+  const form = new FormData()
+  form.append('file', file)
+  const qs = locationId ? `?location_id=${locationId}` : ''
+  return api.upload<ReceiptDraft>(`/inventory/receipts/parse${qs}`, form)
+}
+
+export function commitReceipt(body: {
+  location_id?: string | null
+  vendor?: string | null
+  invoice_number?: string | null
+  force?: boolean
+  lines: { item_id?: string | null; new_item_name?: string | null; quantity: number; order_id?: string | null }[]
+}) {
+  return api.post<ReceiptCommitResult>('/inventory/receipts/commit', body)
+}
+
+export const receiptTemplateUrl = () => `${API_BASE}/inventory/receipts/template`
 
 export async function listSuggestions() {
   return api.get<Record<string, InventorySuggestion>>('/inventory/suggestions')

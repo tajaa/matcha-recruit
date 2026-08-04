@@ -188,6 +188,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Service package (matching, reorder math, rules, pills, extraction, DB services) → `server/app/matcha/services/inventory/`
 - REST router (items/movements/orders/suggestions) → `server/app/matcha/routes/inventory.py`
 - Per-location item resolution → `server/app/matcha/services/inventory/movements.py:list_item_names` / `find_or_create_item`
+- Receipt ingest (invoice/packing-slip → `in` movements) → `server/app/matcha/services/inventory/receipts.py`, routes at `routes/inventory.py` `/receipts/*`
 
 ### Employees
 

@@ -5,23 +5,31 @@ staging) happens in server/app/werk/routes/channels_ws.py; this router is
 the /work Inventory page's REST surface plus manual item/order management.
 """
 
+import csv
+import io
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.inventory import (
     InventoryItemCreate, InventoryItemOut, InventoryItemPatch, ItemListResponse,
     MovementListResponse, MovementOut, OrderAction, OrderCreate, OrderListResponse, OrderOut,
+    ReceiptCommit, ReceiptCommitResult,
 )
 from app.matcha.services.inventory import movements as movements_service
 from app.matcha.services.inventory import orders as orders_service
+from app.matcha.services.inventory import receipts as receipts_service
 from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
 
 router = APIRouter()
+
+_RECEIPT_MAX_BYTES = 15 * 1024 * 1024
+_RECEIPT_EXT_OK = (".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
 
 @router.get("/items", response_model=ItemListResponse)
@@ -269,3 +277,115 @@ async def list_suggestions(company_id: UUID = Depends(get_client_company_id),
             if suggestion:
                 out[str(item["id"])] = {"name": item["name"], **suggestion}
     return out
+
+
+@router.get("/receipts/template")
+async def receipt_template(_=Depends(require_admin_or_client)):
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=list(receipts_service._CSV_FIELDS))
+    w.writeheader()
+    w.writerow({"item_name": "Nitrile Gloves (M)", "quantity": "10", "unit": "BX",
+                "pack_size": "100/BX", "vendor_sku": "NG-100-M", "unit_price": "8.99"})
+    out.seek(0)
+    return StreamingResponse(
+        io.BytesIO(out.getvalue().encode()), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=inventory_receipt_template.csv"},
+    )
+
+
+@router.post("/receipts/parse")
+async def parse_receipt_route(
+    file: UploadFile = File(...),
+    location_id: Optional[UUID] = Query(None),
+    company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client),
+):
+    """Parse an invoice/packing slip into a reviewable draft. Writes NOTHING."""
+    name = (file.filename or "").lower()
+    if not name.endswith(_RECEIPT_EXT_OK):
+        if name.endswith((".xlsx", ".xls")):
+            raise HTTPException(400, "Export the spreadsheet as CSV first — .xlsx isn't supported.")
+        raise HTTPException(400, "Upload a CSV, PDF, or photo of the invoice.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > _RECEIPT_MAX_BYTES:
+        raise HTTPException(413, "File too large (max 15MB)")
+    receipt = await receipts_service.parse_receipt(data, file.content_type or "", file.filename or "")
+    async with get_connection() as conn:
+        receipt["lines"] = await receipts_service.resolve_lines(
+            conn, company_id=company_id, location_id=location_id, lines=receipt["lines"],
+        )
+    return receipt
+
+
+@router.post("/receipts/commit", response_model=ReceiptCommitResult)
+async def commit_receipt_route(
+    body: ReceiptCommit,
+    company_id: UUID = Depends(get_client_company_id),
+    user=Depends(require_admin_or_client),
+):
+    """Write the user-reviewed lines: matched-order lines via mark_received
+    (movement + order flip atomic together), the rest as bare `in`
+    movements. PER-LINE transactions — one wrapping transaction can't
+    survive a failed row in Postgres (first error aborts it), and the
+    BulkUploadResult contract is that bad rows fail alone."""
+    if not body.lines:
+        raise HTTPException(400, "No lines to commit")
+    if len(body.lines) > receipts_service.MAX_LINES:
+        raise HTTPException(413, f"Too many lines (max {receipts_service.MAX_LINES})")
+    note = None
+    if body.vendor or body.invoice_number:
+        note = " ".join(filter(None, [body.vendor, f"invoice {body.invoice_number}" if body.invoice_number else None]))
+
+    errors: list[dict] = []
+    movement_ids: list[str] = []
+    created = 0
+    async with get_connection() as conn:
+        # Forceable duplicate guard (schedule-conflict 409 idiom): the note
+        # stamped on every committed movement is what we match on.
+        if body.invoice_number and not body.force:
+            dup = await conn.fetchval(
+                "SELECT 1 FROM inventory_movements WHERE company_id = $1 AND kind = 'in' "
+                "AND note LIKE '%' || $2 || '%' LIMIT 1",
+                company_id, f"invoice {body.invoice_number}",
+            )
+            if dup:
+                raise HTTPException(409, detail={
+                    "code": "duplicate_invoice",
+                    "message": f"Invoice {body.invoice_number} looks already received — commit anyway?",
+                })
+        for n, line in enumerate(body.lines, start=1):
+            try:
+                async with conn.transaction():
+                    if line.order_id is not None:
+                        row = await orders_service.mark_received(
+                            conn, order_id=line.order_id, company_id=company_id,
+                            user_id=user.id, quantity=line.quantity,
+                        )
+                        if row is None:
+                            raise ValueError("order not open")
+                        movement_ids.append(str(row["receipt_movement_id"]))
+                    else:
+                        if line.item_id is not None:
+                            item_id = line.item_id
+                        elif line.new_item_name:
+                            item = await movements_service.find_or_create_item(
+                                conn, company_id, line.new_item_name,
+                                created_by=user.id, location_id=body.location_id,
+                            )
+                            item_id = item["id"]
+                        else:
+                            raise ValueError("line needs item_id or new_item_name")
+                        inserted = await movements_service.record_movements(
+                            conn, company_id=company_id, channel_id=None,
+                            source_message_id=None, recorded_by=user.id,
+                            kind="in", narrative="Receipt ingest", note=note,
+                            lines=[{"item_id": item_id, "quantity": line.quantity, "estimated": False}],
+                        )
+                        movement_ids.append(str(inserted[0]["id"]))
+                    created += 1
+            except Exception as exc:
+                errors.append({"row": n, "item": line.new_item_name or str(line.item_id or ""), "error": str(exc)})
+    return ReceiptCommitResult(total_rows=len(body.lines), created=created,
+                               failed=len(errors), errors=errors, ids=movement_ids)

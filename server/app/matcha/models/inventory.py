@@ -82,3 +82,26 @@ class MovementListResponse(BaseModel):
 
 class OrderListResponse(BaseModel):
     orders: list[OrderOut]
+
+
+class ReceiptCommitLine(BaseModel):
+    item_id: Optional[UUID] = None       # existing item ...
+    new_item_name: Optional[str] = None  # ... or create-new (exactly one required)
+    quantity: float                      # the user-CONFIRMED count (invoice figure is only the prefill)
+    order_id: Optional[UUID] = None      # open order to mark_received against
+
+
+class ReceiptCommit(BaseModel):
+    location_id: Optional[UUID] = None
+    vendor: Optional[str] = None
+    invoice_number: Optional[str] = None
+    force: bool = False                  # override the duplicate_invoice 409
+    lines: list[ReceiptCommitLine]
+
+
+class ReceiptCommitResult(BaseModel):
+    total_rows: int
+    created: int
+    failed: int
+    errors: list[dict]
+    ids: list[str]                       # movement ids written
