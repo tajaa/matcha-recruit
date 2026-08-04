@@ -100,7 +100,13 @@ _RECALL_PATTERNS = (
     # RECALL too, so neither fork is stolen by these).
     r"^who(?:'s| is| are)? (?:working|scheduled|on (?:the )?schedule|on shift|opening|closing)\b",
     r"^(?:what|when)(?:'s| is| are)? (?:my|the|our) (?:next )?(?:shifts?|schedule)\b",
-    r"^how (?:much|many)\b(?=.*\b(?:in stock|stock|inventory|on hand|left|remaining)\b)",
+    # "how much/many ... [in stock|inventory|on hand]" is unambiguous. Bare
+    # "left"/"remaining" is NOT — "how many customers left after the AC
+    # died" is a report, not a stock question — so that pair only counts
+    # when the message ENDS there (a report is never phrased that way).
+    # `[\s\S]` (not `.`) so a question split across lines still matches.
+    r"^how (?:much|many)\b(?=[\s\S]*\b(?:in stock|inventory|on hand)\b)",
+    r"^how (?:much|many)\b[\s\S]*\b(?:left|remaining)\s*\??$",
 )
 
 # Weaker signal: only counts as a question when the message actually ends

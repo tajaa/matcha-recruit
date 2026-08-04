@@ -176,8 +176,9 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Intake classify + urgency overlay → `server/app/matcha/services/ems/event_intake.py` (`classify_event`, `apply_urgency_overlay`, `fallback_classification`)
 - Urgent-event fan-out (in-app + email) → `server/app/matcha/services/ems/urgent_notify.py:send_urgent_event_notifications`
 - Company protocol file (fetch/upsert + prompt excerpt) → `server/app/matcha/services/ems/protocols.py`
-- WS dispatch (intake + clarify) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify`
+- WS dispatch (intake + clarify + ask) → `server/app/werk/routes/channels_ws.py:_bg_ems_intake` / `_bg_ems_clarify` / `_bg_ems_ask`
 - Channel store scope lookup (used by every @huume dispatch handler) → `server/app/werk/routes/channels_ws.py:_channel_location`
+- Channel `@huume` ASK grounding (bounded tool-calling loop beyond `ems_events`) → `server/app/matcha/services/ems/channel_agent.py:answer_channel_question`, policy registry at `server/app/matcha/services/ems/channel_grounding.py:run_topic_lookup`
 
 ### Inventory (channel stock tracking)
 

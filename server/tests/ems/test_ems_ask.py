@@ -1,4 +1,6 @@
-"""Channel-answer redaction + the deterministic (no-Gemini) replies.
+"""Channel-answer redaction + the deterministic (no-Gemini) replies — the
+pure pieces `ask.py` still owns after the model-facing answer loop moved to
+`channel_agent.py` (see tests/ems/test_channel_agent.py for that half).
 
 Every REST read of ems_events is admin-only; a channel answer is broadcast
 to the whole room, employees included. These tests pin the difference —
@@ -71,6 +73,21 @@ class TestRenderEventsBlock:
     def test_empty_is_explicit(self):
         assert ask.render_events_block([], is_admin=True) == "(nothing logged in this channel)"
 
+    def test_filtered_empty_does_not_claim_the_room_is_clean(self):
+        # `filtered=True` means this channel HAS events, they're just
+        # hidden from this asker (e.g. a non-admin's behavioral filter) —
+        # rendering the plain empty string here would let the model tell
+        # the room "nothing's been logged", a false statement about the
+        # record. See the docstring on render_events_block for the pairing
+        # with ask.no_events_text's own filtered/unfiltered split.
+        block = ask.render_events_block([], is_admin=False, filtered=True)
+        assert block != "(nothing logged in this channel)"
+        assert "may see more" in block
+
+    def test_filtered_is_irrelevant_when_events_exist(self):
+        block = ask.render_events_block([_event()], is_admin=False, filtered=True)
+        assert "Walk-in freezer running warm" in block
+
     def test_missing_title_does_not_crash(self):
         block = ask.render_events_block([_event(title=None)], is_admin=False)
         assert "Untitled" in block
@@ -122,67 +139,3 @@ class TestHelpText:
 
     def test_no_extra_lines_is_unchanged(self):
         assert ask.help_text(is_admin=False, extra_lines=()) == ask.help_text(is_admin=False)
-
-
-class TestBuildPromptExtraBlocks:
-    def test_extra_blocks_render_as_sections(self):
-        prompt = ask._build_prompt(
-            "who's working tomorrow?", "(nothing logged in this channel)", is_admin=False,
-            extra_blocks=(("UPCOMING SCHEDULE (next 7 days)", "- Opener Mon Aug 3: Aisha Rivera"),),
-        )
-        assert "## UPCOMING SCHEDULE (next 7 days)" in prompt
-        assert "Aisha Rivera" in prompt
-
-    def test_no_extra_blocks_omits_extra_sections(self):
-        prompt = ask._build_prompt(
-            "what happened?", "(nothing logged in this channel)", is_admin=False,
-        )
-        assert "## UPCOMING SCHEDULE" not in prompt
-
-    def test_rule_text_covers_data_sections_not_just_events(self):
-        prompt = ask._build_prompt("x", "(nothing logged in this channel)", is_admin=True)
-        assert "Answer ONLY from the data sections above" in prompt
-
-
-class TestAnswerQuestion:
-    @pytest.mark.asyncio
-    async def test_gemini_failure_degrades_to_a_pointer(self, monkeypatch):
-        from app.matcha.services._shared import gemini as shared_gemini
-
-        def _boom():
-            raise RuntimeError("Gemini unavailable")
-        # Patch the module that DEFINES genai_env_client (ask.py imports it
-        # lazily from _shared.gemini as of 2026-07-31 — was event_intake
-        # before the single-genai-client-accessor lift), per the repo's
-        # patching rule.
-        monkeypatch.setattr(shared_gemini, "genai_env_client", _boom)
-
-        text = await ask.answer_question("what happened?", [_event()], is_admin=False)
-        assert "couldn't pull that up" in text
-        assert text.startswith("\U0001F4CB")
-
-    @pytest.mark.asyncio
-    async def test_model_asterisks_and_clarify_marker_stripped(self, monkeypatch):
-        from app.matcha.services._shared import gemini as shared_gemini
-
-        class _Resp:
-            text = "Couple things: **freezer** ran warm \U0001F914 and a guest slipped."
-
-        class _Models:
-            async def generate_content(self, **kwargs):
-                return _Resp()
-
-        class _Aio:
-            models = _Models()
-
-        class _Client:
-            aio = _Aio()
-
-        monkeypatch.setattr(shared_gemini, "genai_env_client", lambda: _Client())
-
-        text = await ask.answer_question("what happened?", [_event()], is_admin=True)
-        assert "*" not in text
-        # 🤔 is the armed-clarify marker; a reply to an ANSWER pill has no
-        # event to claim, so the model must never be able to render one.
-        assert "\U0001F914" not in text
-        assert "freezer" in text

@@ -239,12 +239,20 @@ async def _channel_location(conn, channel_id_str: str):
 
 async def _channel_bound_to_inactive_location(conn, channel_id_str: str) -> bool:
     """True when the channel is bound to a store that has since gone
-    inactive. Inventory must block on this rather than treat it like an
-    unscoped channel (which `_channel_location` does) — falling through to
-    `location_id=None` there means `find_or_create_item` auto-creates a
-    company-wide twin of an existing store item, permanently forking the
-    stock ledger. EMS/schedule_chat don't need this: their fallthrough is a
-    clarify question, not a write."""
+    inactive. Inventory's WRITE path must block on this rather than treat
+    it like an unscoped channel (which `_channel_location` does) — falling
+    through to `location_id=None` there means `find_or_create_item`
+    auto-creates a company-wide twin of an existing store item, permanently
+    forking the stock ledger. schedule_chat's fallthrough is a clarify
+    question, not a write, so it doesn't need this.
+
+    `_bg_ems_ask`'s channel-grounding READ path needs it too, for the
+    opposite reason: `_channel_location` returning `(None, None)` here would
+    otherwise read as "unscoped", which for `channel_grounding.py`'s
+    location-scoped topics (schedule/incidents/inventory) means "answer
+    company-wide" — a real widening from one store's data to every store's,
+    not the narrowing it is on the write paths above. A dead store must
+    make those topics refuse, never expand."""
     row = await conn.fetchrow(
         "SELECT ch.location_id, bl.is_active FROM channels ch "
         "LEFT JOIN business_locations bl ON bl.id = ch.location_id "
@@ -288,11 +296,14 @@ async def _bg_ems_ask(
     decision needs: the company (via the same _ems_company_gate) and the
     asker's role.
 
-    Beyond ems_events, the answer is also grounded on schedule/inventory/
-    incidents/HR-ops data via `services/ems/channel_grounding.fetch_topic_blocks`
-    — the registry there (not this function) decides which topics exist,
-    which need admin, and which are location-scoped. See that module's
-    docstring for why the topic list is short.
+    Beyond ems_events, the answer is grounded on schedule/inventory/
+    incidents/HR-ops data via `services/ems/channel_agent.py`'s bounded
+    tool-calling loop, which decides FOR ITSELF (one topic per tool call,
+    only the topics the question asks about) rather than being handed every
+    topic this asker is merely allowed to see. `channel_grounding.py`
+    remains the policy registry (which topics exist, admin/feature/location
+    gates) — this function only resolves the two things that policy needs:
+    the channel's store binding and whether that store is still active.
 
     Rate-limited on its own `ems_ask` key rather than the `ems_event` one:
     logging is the documentation-critical path, and a chatty afternoon of
@@ -303,16 +314,17 @@ async def _bg_ems_ask(
     defeating the reason they're split.
 
     Two connection blocks, same reasoning as _bg_ems_intake — no pooled
-    connection is held across the answer's Gemini call."""
+    connection is held across the loop's Gemini calls (channel_agent.py
+    opens its own connection per tool call)."""
     try:
         from app.matcha.services.ems import ask as ems_ask
-        from app.matcha.services.ems import channel_grounding
+        from app.matcha.services.ems import channel_agent, channel_grounding
         from app.matcha.services.ems.intent import HELP, strip_mention
 
         sys_row = None
         events = None
-        extra_blocks: list[tuple[str, str]] = []
         is_admin = False
+        hidden = False
 
         async with get_connection() as conn:
             company_id = await _ems_company_gate(conn, channel_id_str)
@@ -338,14 +350,20 @@ async def _bg_ems_ask(
                     include_behavioral=is_admin,
                 )
                 loc_id, _loc_name = await _channel_location(conn, channel_id_str)
-                extra_blocks = await channel_grounding.fetch_topic_blocks(
-                    conn, company_id=company_id, features=features, is_admin=is_admin,
-                    location_id=loc_id,
+                location_unavailable = loc_id is None and await _channel_bound_to_inactive_location(
+                    conn, channel_id_str,
                 )
-                if not events and not extra_blocks:
-                    # "Nothing you can see" and "nothing happened" must not
-                    # read as the same sentence — see ask.no_events_text.
-                    hidden = not is_admin and await conn.fetchval(
+                reachable = channel_grounding.reachable_topics(features=features, is_admin=is_admin)
+                stage_inventory_available = bool(features.get("inventory")) and not location_unavailable
+
+                # "Nothing you can see" and "nothing happened" must not read
+                # as the same sentence — see ask.no_events_text. This probe
+                # runs whenever events are empty and the asker isn't an
+                # admin, independent of whether the loop below even runs,
+                # so a schedule/inventory-only answer still can't imply the
+                # room's ems_events are clean when a behavioral one exists.
+                if not events and not is_admin:
+                    hidden = bool(await conn.fetchval(
                         """
                         SELECT EXISTS (
                             SELECT 1 FROM ems_events
@@ -353,24 +371,33 @@ async def _bg_ems_ask(
                         )
                         """,
                         UUID(channel_id_str), company_id,
-                    )
-                    text = ems_ask.no_events_text(filtered=bool(hidden))
+                    ))
+
+                if not events and not reachable and not stage_inventory_available:
+                    text = ems_ask.no_events_text(filtered=hidden)
                     sys_row = await _insert_system_message(conn, channel_id_str, text)
 
         # Broadcast AFTER the connection releases in every branch above —
         # holding a pooled connection across the fan-out isn't needed and
-        # (the events==None Gemini-answer path below) must never happen.
+        # (the events==None loop path below) must never happen.
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
             return
 
-        # No connection held across the Gemini call.
-        answer = await ems_ask.answer_question(
-            strip_mention(content), events, is_admin=is_admin, extra_blocks=tuple(extra_blocks),
+        # No connection held across the loop's Gemini calls.
+        result = await channel_agent.answer_channel_question(
+            question=strip_mention(content), events=events, is_admin=is_admin, filtered=hidden,
+            company_id=company_id, channel_id=UUID(channel_id_str), asker_user_id=UUID(asker_user_id_str),
+            asker_role=role, features=features, location_id=loc_id, location_unavailable=location_unavailable,
         )
 
         async with get_connection() as conn:
-            sys_row = await _insert_system_message(conn, channel_id_str, answer)
+            sys_row = await _insert_system_message(conn, channel_id_str, result["message"])
+            if result.get("pending_order_id"):
+                await conn.execute(
+                    "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], result["pending_order_id"],
+                )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
         logger.exception("EMS ask failed in channel %s", channel_id_str)

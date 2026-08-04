@@ -129,6 +129,11 @@ class TestOpsGroundingAsks:
         "@huume when is my next shift",
         "@huume how much flour is left in stock",
         "@huume how many aprons do we have on hand",
+        "@huume how much flour is in stock",
+        "@huume how many cups do we have in inventory",
+        "@huume how much flour is left",
+        "@huume how many aprons are remaining?",
+        "@huume how much flour\nis left?",
     ])
     def test_ops_questions_ask(self, message):
         assert classify_intent(message) == ASK
@@ -155,6 +160,19 @@ class TestOpsGroundingAsks:
         # steal this.
         from app.matcha.services.ems.intent import INVENTORY
         assert classify_intent("@huume we ran out of cups again") == INVENTORY
+
+    @pytest.mark.parametrize("message", [
+        # "left"/"remaining" mid-sentence is ordinary report phrasing, not a
+        # stock question — bias-to-LOG means an unmatched report must never
+        # be swallowed as a recall ask (nobody re-types it). No trailing "?"
+        # so the generic bare-interrogative fallback can't rescue these —
+        # this is specifically the "how much/many ... left" pattern's own
+        # discipline being tested, not the fallback's.
+        "@huume how many customers left after the AC died",
+        "@huume how much product was left in the walk-in when it failed",
+    ])
+    def test_how_much_many_with_mid_sentence_left_still_logs(self, message):
+        assert classify_intent(message) == LOG
 
 
 class TestHelp:

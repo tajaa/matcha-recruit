@@ -9,7 +9,7 @@ import asyncio
 
 from app.matcha.services.huume.onboarding_skill import (
     _clamp_incident_days,
-    _lookup_context_impl,
+    lookup_context_impl,
 )
 from app.matcha.services.huume.record_view import (
     _MODEL_BUILDERS,
@@ -29,85 +29,85 @@ def _run(coro):
 
 class TestLookupGating:
     def test_training_status_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="training_status", features={"training": False},
         ))
         assert result["module"] == "off"
 
     def test_credentials_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="credentials", features={"credential_templates": False},
         ))
         assert result["module"] == "off"
 
     def test_employee_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="employee", features={"employees": False},
         ))
         assert result["module"] == "off"
 
     def test_schedule_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="schedule", features={"employee_schedule": False},
         ))
         assert result["module"] == "off"
 
     def test_incidents_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="incidents", features={"incidents": False},
         ))
         assert result["module"] == "off"
 
     def test_er_cases_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="er_cases", features={"er_copilot": False},
         ))
         assert result["module"] == "off"
 
     def test_no_features_dict_defaults_to_off(self):
-        result = _run(_lookup_context_impl(None, company_id="c1", topic="training_status", features=None))
+        result = _run(lookup_context_impl(None, company_id="c1", topic="training_status", features=None))
         assert result["module"] == "off"
 
     def test_pto_leave_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="pto_leave", features={"employees": False},
         ))
         assert result["module"] == "off"
 
     def test_policies_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="policies", features={"handbooks": False},
         ))
         assert result["module"] == "off"
 
     def test_discipline_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="discipline", features={"discipline": False},
         ))
         assert result["module"] == "off"
 
     def test_events_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="events", features={"ems": False},
         ))
         assert result["module"] == "off"
 
     def test_offers_off_returns_module_off_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="offers", features={"offer_letters": False},
         ))
         assert result["module"] == "off"
 
     def test_wage_floors_bad_state_is_error_without_conn(self):
         # Validated before any DB call — conn=None never touched proves it.
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="wage_floors", query="california", features={},
         ))
         assert "module" not in result
         assert "error" in result
 
     def test_wage_floors_missing_query_is_error_without_conn(self):
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="wage_floors", query=None, features={},
         ))
         assert "module" not in result
@@ -116,7 +116,7 @@ class TestLookupGating:
     def test_wage_floors_is_ungated_and_attempts_lookup(self):
         # No feature required — a valid 2-letter state proceeds past the
         # (absent) gate check and attempts the DB path, hitting conn=None.
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="wage_floors", query="CA", features={},
         ))
         assert "module" not in result
@@ -124,7 +124,7 @@ class TestLookupGating:
 
     def test_compliance_off_returns_module_off_without_conn(self):
         # Neither of the two flags that gate this topic is on.
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="compliance", features={"compliance": False, "compliance_lite": False},
         ))
         assert result["module"] == "off"
@@ -132,7 +132,7 @@ class TestLookupGating:
     def test_compliance_lite_alone_is_sufficient(self):
         # any-of gate: compliance_lite on its own should pass the gate check
         # and attempt the DB path (conn=None -> "lookup failed", not "off").
-        result = _run(_lookup_context_impl(
+        result = _run(lookup_context_impl(
             None, company_id="c1", topic="compliance", features={"compliance": False, "compliance_lite": True},
         ))
         assert "module" not in result
@@ -144,7 +144,7 @@ class TestLookupGating:
         # own except-Exception wraps that into an "error" result rather than
         # raising — distinct from the gated "module": "off" shape, proving
         # this topic was never gate-short-circuited.
-        result = _run(_lookup_context_impl(None, company_id="c1", topic="roster", features={}))
+        result = _run(lookup_context_impl(None, company_id="c1", topic="roster", features={}))
         assert "module" not in result
         assert result.get("error") == "lookup failed"
 
@@ -326,7 +326,7 @@ class _FakeConn:
 
 
 class TestLocationScoping:
-    """`location_id` is new on `_lookup_context_impl` — added for
+    """`location_id` is new on `lookup_context_impl` — added for
     `services/ems/channel_grounding.py` so a store-bound channel only sees
     its own store's schedule/incidents/inventory. Huume-thread callers never
     pass it (default None), so every assertion here doubles as proof that
@@ -338,7 +338,7 @@ class TestLocationScoping:
     def test_schedule_passes_location_id_as_last_param(self):
         conn = _FakeConn()
         loc = "loc-1"
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="schedule",
             features={"employee_schedule": True}, location_id=loc,
         ))
@@ -348,7 +348,7 @@ class TestLocationScoping:
 
     def test_schedule_defaults_location_id_to_none(self):
         conn = _FakeConn()
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="schedule", features={"employee_schedule": True},
         ))
         _sql, params = conn.calls[0]
@@ -357,7 +357,7 @@ class TestLocationScoping:
     def test_incidents_passes_location_id_to_both_queries(self):
         conn = _FakeConn()
         loc = "loc-1"
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="incidents",
             features={"incidents": True}, location_id=loc,
         ))
@@ -368,7 +368,7 @@ class TestLocationScoping:
 
     def test_incidents_defaults_location_id_to_none(self):
         conn = _FakeConn()
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="incidents", features={"incidents": True},
         ))
         for _sql, params in conn.calls:
@@ -377,7 +377,7 @@ class TestLocationScoping:
     def test_inventory_passes_location_id_as_last_param(self):
         conn = _FakeConn()
         loc = "loc-1"
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="inventory", features={"inventory": True}, location_id=loc,
         ))
         sql, params = conn.calls[0]
@@ -386,8 +386,32 @@ class TestLocationScoping:
 
     def test_inventory_defaults_location_id_to_none(self):
         conn = _FakeConn()
-        _run(_lookup_context_impl(
+        _run(lookup_context_impl(
             conn, company_id="c1", topic="inventory", features={"inventory": True},
         ))
         _sql, params = conn.calls[0]
         assert params[-1] is None
+
+    def test_schedule_keeps_unstamped_rows_in_a_scoped_query(self):
+        # A store-bound channel must still see shifts with no location_id
+        # (e.g. published before oploc01) — a bare `location_id = $n` would
+        # silently drop them, understating what's actually published.
+        conn = _FakeConn()
+        _run(lookup_context_impl(
+            conn, company_id="c1", topic="schedule",
+            features={"employee_schedule": True}, location_id="loc-1",
+        ))
+        sql, _params = conn.calls[0]
+        assert "location_id IS NULL OR" in sql
+
+    def test_incidents_keeps_unstamped_rows_in_a_scoped_query(self):
+        # IR-form incidents carry no location_id at all — a strict `=` here
+        # means a store channel reports "nothing on file" while real
+        # incidents exist. Same tolerance `inventory` already has.
+        conn = _FakeConn()
+        _run(lookup_context_impl(
+            conn, company_id="c1", topic="incidents",
+            features={"incidents": True}, location_id="loc-1",
+        ))
+        for sql, _params in conn.calls:
+            assert "location_id IS NULL OR" in sql

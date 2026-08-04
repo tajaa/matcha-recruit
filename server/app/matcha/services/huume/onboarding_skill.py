@@ -104,7 +104,7 @@ async def lookup_context(
     """Agent-facing tool wrapper — opens its own connection."""
     from app.database import get_connection
     async with get_connection() as conn:
-        return await _lookup_context_impl(conn, company_id=company_id, topic=topic, query=query, features=features, days=days)
+        return await lookup_context_impl(conn, company_id=company_id, topic=topic, query=query, features=features, days=days)
 
 
 # topic -> feature flag gating it. Absent from this dict = no extra gate
@@ -133,6 +133,19 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
 # full Compliance) — handled separately from the single-flag dict above.
 _COMPLIANCE_TOPIC_FLAGS = ("compliance", "compliance_lite")
+
+
+def topic_allowed(topic: str, features: Optional[dict[str, Any]]) -> bool:
+    """The single source both `lookup_context_impl`'s gate check and
+    `services/ems/channel_grounding.help_lines`/the channel agent's tool
+    dispatch read — before this existed, `help_lines` re-derived the gate
+    from `_TOPIC_REQUIRED_FEATURE` alone and silently diverged from the
+    two-flag `compliance` case (and from any topic added to the dict
+    without a matching update there)."""
+    if topic == "compliance":
+        return any((features or {}).get(f) for f in _COMPLIANCE_TOPIC_FLAGS)
+    required = _TOPIC_REQUIRED_FEATURE.get(topic)
+    return not required or bool((features or {}).get(required))
 
 # A leave that has already started is `active`, not `approved` — filtering on
 # `approved` alone reports "nobody is out" for exactly the people who are out
@@ -170,7 +183,7 @@ def _clamp_incident_days(days: Optional[int]) -> int:
     return min(days, _INCIDENT_LOOKBACK_MAX_DAYS)
 
 
-async def _lookup_context_impl(
+async def lookup_context_impl(
     conn, *, company_id: UUID, topic: str, query: Optional[str] = None, features: Optional[dict[str, Any]] = None,
     days: Optional[int] = None, location_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
@@ -182,14 +195,15 @@ async def _lookup_context_impl(
 
     `location_id`, when given, scopes the `schedule`/`incidents`/`inventory`
     topics to one `business_locations` row — used by
-    `services/ems/channel_grounding.py` so a store-bound channel only sees
-    its own store's data. `None` (the Huume-thread callers' default) leaves
-    every topic company-wide, unchanged from before this parameter existed."""
-    required = _TOPIC_REQUIRED_FEATURE.get(topic)
-    if required and not (features or {}).get(required):
+    `services/ems/channel_agent.py` (the channel `@huume` tool loop) so a
+    store-bound channel only sees its own store's data. `None` (the
+    Huume-thread callers' default) leaves every topic company-wide,
+    unchanged from before this parameter existed. Public (not `_`-prefixed):
+    `channel_agent.py` is a genuine second caller of this read layer, not an
+    internal helper reaching past this module's API."""
+    if not topic_allowed(topic, features):
+        required = _TOPIC_REQUIRED_FEATURE.get(topic, "compliance")
         return {"topic": topic, "module": "off", "note": f"'{required}' isn't enabled for this company."}
-    if topic == "compliance" and not any((features or {}).get(f) for f in _COMPLIANCE_TOPIC_FLAGS):
-        return {"topic": topic, "module": "off", "note": "Compliance isn't enabled for this company."}
     try:
         if topic == "roster":
             rows = await conn.fetch(
@@ -298,6 +312,9 @@ async def _lookup_context_impl(
             # already does — this topic is broadcast to whole channels
             # (see channel_grounding.py), and a published shift's staffing
             # is team-visible there, so naming it here isn't a new leak.
+            # `location_id IS NULL OR` keeps unstamped shifts in scope for a
+            # store-bound caller too — dropping them silently understates
+            # what's published, the same failure mode `incidents` below has.
             rows = await conn.fetch(
                 """
                 SELECT s.id, s.role, s.starts_at, s.ends_at, s.required_staff,
@@ -309,7 +326,7 @@ async def _lookup_context_impl(
                 LEFT JOIN employees e ON e.id = a.employee_id
                 WHERE s.company_id = $1 AND s.status = 'published'
                   AND s.starts_at > NOW() AND s.starts_at < NOW() + INTERVAL '7 days'
-                  AND ($2::uuid IS NULL OR s.location_id = $2)
+                  AND ($2::uuid IS NULL OR s.location_id IS NULL OR s.location_id = $2)
                 GROUP BY s.id ORDER BY s.starts_at LIMIT 20
                 """,
                 company_id, location_id,
@@ -324,6 +341,12 @@ async def _lookup_context_impl(
             # below (query filter), it's just never returned to the model.
             # show_record (the side-panel tool) fetches the fuller record
             # separately, gated on the admin's own auth, not the model.
+            # `location_id IS NULL OR` keeps unstamped incidents (e.g. filed
+            # through the normal IR form, which never sets a location) in a
+            # store-bound caller's results — a strict `=` here would drop
+            # real incidents and let a store channel report "nothing on
+            # file" while incidents exist, same rule `inventory` already
+            # follows below.
             window_days = _clamp_incident_days(days)
             counts = await conn.fetch(
                 """
@@ -335,7 +358,7 @@ async def _lookup_context_impl(
                        OR title ILIKE '%' || $3 || '%'
                        OR description ILIKE '%' || $3 || '%'
                        OR incident_type ILIKE '%' || $3 || '%')
-                  AND ($4::uuid IS NULL OR location_id = $4)
+                  AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
                 GROUP BY incident_type, severity
                 """,
                 company_id, str(window_days), query, location_id,
@@ -351,7 +374,7 @@ async def _lookup_context_impl(
                        OR title ILIKE '%' || $3 || '%'
                        OR description ILIKE '%' || $3 || '%'
                        OR incident_type ILIKE '%' || $3 || '%')
-                  AND ($4::uuid IS NULL OR location_id = $4)
+                  AND ($4::uuid IS NULL OR location_id IS NULL OR location_id = $4)
                 ORDER BY occurred_at DESC LIMIT 21
                 """,
                 company_id, str(window_days), query, location_id,
