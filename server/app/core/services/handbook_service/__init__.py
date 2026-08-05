@@ -2826,11 +2826,11 @@ class HandbookService:
         """
 
         try:
-            from app.core.services.pdf import render_pdf
+            from app.core.services.pdf import render_pdf_async
         except ImportError as exc:
             raise RuntimeError("PDF generation is not available because WeasyPrint is not installed") from exc
 
-        pdf_bytes = render_pdf(html_content)
+        pdf_bytes = await render_pdf_async(html_content)
         filename = _handbook_filename(handbook.title, handbook.active_version)
         return pdf_bytes, filename
 

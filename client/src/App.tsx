@@ -93,6 +93,9 @@ const ProductSignup = lazy(() => import("./pages/auth/ProductSignup"));
 const BusinessInviteRegister = lazy(
   () => import("./pages/auth/BusinessInviteRegister"),
 );
+const EmployeeInviteAccept = lazy(
+  () => import("./pages/auth/EmployeeInviteAccept"),
+);
 const IrOnboardingWizard = lazy(
   () => import("./components/ir/onboarding/IrOnboardingWizard"),
 );
@@ -108,6 +111,7 @@ const SignPolicy = lazy(() => import("./pages/shared/SignPolicy"));
 const SignEmployeeDocument = lazy(
   () => import("./pages/shared/SignEmployeeDocument"),
 );
+const NotFound = lazy(() => import("./pages/shared/NotFound"));
 
 // On the dedicated Cappe domain the Cappe route tree also mounts at "/" so
 // the bare apex shows the Gummfit landing instead of the Matcha landing.
@@ -236,6 +240,7 @@ export default function App() {
         />
         <Route path="/report/:token" element={<AnonymousReport />} />
         <Route path="/offer/:token" element={<OfferSign />} />
+        <Route path="/invite/:token" element={<EmployeeInviteAccept />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/intake/external/:token" element={<ExternalIntake />} />
         <Route path="/request-info/:token" element={<RequestInfoForm />} />
@@ -256,6 +261,7 @@ export default function App() {
         <Route path="/broker/*" element={<BrokerRoutes />} />
         <Route path="/portal/*" element={<PortalRoutes />} />
         <Route path="/app/*" element={<AppRoutes />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );

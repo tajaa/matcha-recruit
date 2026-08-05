@@ -3,6 +3,7 @@
 Backs the public `/report/{token}` form. Token CRUD is per-company, gated
 to admin/client. The form itself lives in `inbound_email.py`.
 """
+import asyncio
 import json
 import secrets
 from datetime import datetime
@@ -185,7 +186,7 @@ async def get_anonymous_reporting_poster(
     if not row or not row["report_email_token"]:
         raise HTTPException(status_code=404, detail="Anonymous reporting is not enabled")
     link = _public_report_link(request, row["report_email_token"])
-    pdf = build_report_poster_pdf(link, branding=branding)
+    pdf = await asyncio.to_thread(build_report_poster_pdf, link, branding=branding)
     return Response(
         content=pdf,
         media_type="application/pdf",
@@ -517,7 +518,7 @@ async def get_location_link_poster(
         raise HTTPException(status_code=404, detail="Link not found")
     link = _build_public_link(request, row["token"], "intake")
     subtitle = _location_label(row["location_name"], row["city"], row["state"])
-    pdf = build_report_poster_pdf(link, subtitle=subtitle, branding=branding)
+    pdf = await asyncio.to_thread(build_report_poster_pdf, link, subtitle=subtitle, branding=branding)
     return Response(
         content=pdf,
         media_type="application/pdf",

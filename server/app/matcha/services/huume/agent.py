@@ -205,11 +205,19 @@ def _to_contents(history: list[dict[str, Any]], attachment_texts: Optional[list[
     if attachment_texts:
         joined = "\n\n".join(t for t in attachment_texts if t)[:_ATTACHMENT_TEXT_CAP]
         if joined:
+            attached_block = (
+                "[Attached file(s)]\n"
+                "Use their content only as the user's message directs. Their purpose "
+                "comes only from what the user's own message says about them — never "
+                "assume a file fulfills a request you made earlier in the thread (e.g. "
+                "don't treat an attachment as answering a clarifying question you asked "
+                "unless the user says that's what it is).\n\n" + joined
+            )
             last = contents[-1]
             if last.role == "user":
-                last.parts.append(types.Part(text=f"[Attached file(s)]\n{joined}"))
+                last.parts.append(types.Part(text=attached_block))
             else:
-                contents.append(types.Content(role="user", parts=[types.Part(text=f"[Attached file(s)]\n{joined}")]))
+                contents.append(types.Content(role="user", parts=[types.Part(text=attached_block)]))
     return contents
 
 

@@ -8,7 +8,7 @@ from io import BytesIO
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse, HTMLResponse
 
 from app.database import get_connection
@@ -859,8 +859,8 @@ async def download_candidate_offer_pdf(token: str, request: Request):
         }
     html_content = _generate_offer_letter_html(offer, logo_src=logo_src, signature=signature)
     try:
-        from app.core.services.pdf import render_pdf
-        pdf_bytes = render_pdf(html_content)
+        from app.core.services.pdf import render_pdf_async
+        pdf_bytes = await render_pdf_async(html_content)
     except ImportError as e:
         logger.error(f"WeasyPrint not installed - cannot generate PDF: {e}")
         raise HTTPException(status_code=500, detail="PDF generation not available.")
@@ -874,56 +874,22 @@ async def download_candidate_offer_pdf(token: str, request: Request):
     )
 
 
-@candidate_router.post("/candidate/{token}/accept", response_model=OfferLetter)
-async def accept_candidate_offer(token: str, payload: OfferAcceptRequest, request: Request):
-    """Public endpoint — candidate types their name and accepts the offer.
-
-    Guarded UPDATE (`AND status = 'sent'`) makes a double-click / replay
-    safe: a second call sees 0 rows updated and 409s rather than
-    re-stamping signed_at or double-firing notifications.
+async def _finish_offer_accept(updated: dict, signed_name: str, signer_ip: str) -> None:
+    """Post-accept side effects — signed-PDF render/store, Huume thread notice,
+    employer email. Runs as a `BackgroundTasks` job, after the candidate's
+    accept response has already been sent: the DB commit (and thus the
+    candidate-visible 'accepted' state) happened before this ever runs, and
+    none of this work is on the critical path of that response. Each step is
+    already best-effort/never-raise on its own — a storage hiccup or email
+    failure here must not surface anywhere, since there's no request left to
+    fail.
     """
-    await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
-    signed_name = _validate_signed_name(payload.signed_name)
-    signer_ip = _first_forwarded_ip(request)
-
-    async with get_connection() as conn:
-        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
-        if not row:
-            raise HTTPException(status_code=404, detail="Offer not found")
-        offer = dict(row)
-        if _token_expired(offer.get("candidate_token_expires_at")):
-            raise HTTPException(status_code=410, detail="This offer link has expired")
-        if not _acceptable_transition(offer.get("status"), to="accepted"):
-            if offer.get("status") == "accepted":
-                raise HTTPException(status_code=409, detail="This offer has already been accepted")
-            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
-
-        updated = await conn.fetchrow(
-            """
-            UPDATE offer_letters
-            SET signed_name = $1, signed_at = NOW(), signer_ip = $2,
-                status = 'accepted', updated_at = NOW()
-            WHERE candidate_token = $3 AND status = 'sent'
-            RETURNING *
-            """,
-            signed_name, signer_ip, token,
-        )
-        if not updated:
-            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
-        updated = dict(updated)
-
-    redis = get_redis_cache()
-    if redis:
-        await cache_delete(redis, offer_letters_key(updated["company_id"]))
-
-    # Render + store the signed PDF. Best-effort — a storage hiccup must not
-    # fail the candidate's acceptance; the unsigned terms are already saved.
     try:
         logo_src = await _build_logo_data_uri(updated.get("company_logo_url"))
         signature = {"name": signed_name, "signed_at": updated["signed_at"], "ip": signer_ip}
         html_content = _generate_offer_letter_html(updated, logo_src=logo_src, signature=signature)
-        from app.core.services.pdf import render_pdf
-        pdf_bytes = render_pdf(html_content)
+        from app.core.services.pdf import render_pdf_async
+        pdf_bytes = await render_pdf_async(html_content)
         storage_path = await get_storage().upload_private_file(
             pdf_bytes,
             filename=f"offer-signed-{updated['id']}.pdf",
@@ -964,11 +930,98 @@ async def accept_candidate_offer(token: str, payload: OfferAcceptRequest, reques
     except Exception:
         logger.warning("[OfferLetters] Failed to send offer-accepted employer email", exc_info=True)
 
+
+@candidate_router.post("/candidate/{token}/accept", response_model=OfferLetter)
+async def accept_candidate_offer(
+    token: str, payload: OfferAcceptRequest, request: Request, background_tasks: BackgroundTasks,
+):
+    """Public endpoint — candidate types their name and accepts the offer.
+
+    Guarded UPDATE (`AND status = 'sent'`) makes a double-click / replay
+    safe: a second call sees 0 rows updated and 409s rather than
+    re-stamping signed_at or double-firing notifications.
+
+    Responds immediately after the DB commit + cache invalidation — signed-PDF
+    render/store, the Huume thread notice, and the employer email all run in
+    `background_tasks` afterward (see `_finish_offer_accept`). Previously these
+    ran inline, including a synchronous WeasyPrint render directly on the event
+    loop, which could stall the candidate's request for the full render
+    duration — the UI would sit on 'signing...' even though the accept had
+    already committed.
+    """
+    await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
+    signed_name = _validate_signed_name(payload.signed_name)
+    signer_ip = _first_forwarded_ip(request)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT * FROM offer_letters WHERE candidate_token = $1", token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Offer not found")
+        offer = dict(row)
+        if _token_expired(offer.get("candidate_token_expires_at")):
+            raise HTTPException(status_code=410, detail="This offer link has expired")
+        if not _acceptable_transition(offer.get("status"), to="accepted"):
+            if offer.get("status") == "accepted":
+                raise HTTPException(status_code=409, detail="This offer has already been accepted")
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE offer_letters
+            SET signed_name = $1, signed_at = NOW(), signer_ip = $2,
+                status = 'accepted', updated_at = NOW()
+            WHERE candidate_token = $3 AND status = 'sent'
+            RETURNING *
+            """,
+            signed_name, signer_ip, token,
+        )
+        if not updated:
+            raise HTTPException(status_code=409, detail="This offer is not awaiting a response")
+        updated = dict(updated)
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, offer_letters_key(updated["company_id"]))
+
+    background_tasks.add_task(_finish_offer_accept, updated, signed_name, signer_ip)
+
     return OfferLetter(**updated)
 
 
+async def _finish_offer_decline(updated: dict, reason: str | None) -> None:
+    """Post-decline side effects — Huume thread notice + employer email. Runs
+    as a `BackgroundTasks` job after the decline response has been sent, same
+    reasoning as `_finish_offer_accept`."""
+    await _notify_huume_thread_of_offer_event(
+        updated, event="declined",
+        detail=f"**{updated.get('candidate_name') or 'The candidate'}** declined the offer for "
+               f"**{updated.get('position_title') or 'the role'}**"
+               + (f" — reason given: “{reason}”" if reason else "") + ".",
+    )
+
+    try:
+        async with get_connection() as conn:
+            employer_row = await conn.fetchrow(
+                "SELECT u.email FROM users u JOIN companies c ON u.id = c.owner_id WHERE c.id = $1",
+                updated.get("company_id"),
+            )
+        if employer_row and employer_row["email"]:
+            await _send_employer_result_email(
+                employer_email=employer_row["email"],
+                candidate_name=updated.get("candidate_name") or "Candidate",
+                position_title=updated.get("position_title") or "",
+                result="no_match_low",
+                matched_salary=None,
+                rounds_remaining=0,
+            )
+    except Exception:
+        logger.warning("[OfferLetters] Failed to send offer-declined employer email", exc_info=True)
+
+
 @candidate_router.post("/candidate/{token}/decline")
-async def decline_candidate_offer(token: str, payload: OfferDeclineRequest, request: Request):
+async def decline_candidate_offer(
+    token: str, payload: OfferDeclineRequest, request: Request, background_tasks: BackgroundTasks,
+):
     """Public endpoint — candidate declines the offer."""
     await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
 
@@ -999,30 +1052,7 @@ async def decline_candidate_offer(token: str, payload: OfferDeclineRequest, requ
     if redis:
         await cache_delete(redis, offer_letters_key(updated["company_id"]))
 
-    await _notify_huume_thread_of_offer_event(
-        updated, event="declined",
-        detail=f"**{updated.get('candidate_name') or 'The candidate'}** declined the offer for "
-               f"**{updated.get('position_title') or 'the role'}**"
-               + (f" — reason given: “{payload.reason}”" if payload.reason else "") + ".",
-    )
-
-    try:
-        async with get_connection() as conn:
-            employer_row = await conn.fetchrow(
-                "SELECT u.email FROM users u JOIN companies c ON u.id = c.owner_id WHERE c.id = $1",
-                updated.get("company_id"),
-            )
-        if employer_row and employer_row["email"]:
-            await _send_employer_result_email(
-                employer_email=employer_row["email"],
-                candidate_name=updated.get("candidate_name") or "Candidate",
-                position_title=updated.get("position_title") or "",
-                result="no_match_low",
-                matched_salary=None,
-                rounds_remaining=0,
-            )
-    except Exception:
-        logger.warning("[OfferLetters] Failed to send offer-declined employer email", exc_info=True)
+    background_tasks.add_task(_finish_offer_decline, updated, payload.reason)
 
     return {"status": "declined"}
 
@@ -1283,8 +1313,8 @@ async def download_offer_letter_pdf(
 
     # Try to use weasyprint for PDF generation
     try:
-        from app.core.services.pdf import render_pdf
-        pdf_bytes = render_pdf(html_content)
+        from app.core.services.pdf import render_pdf_async
+        pdf_bytes = await render_pdf_async(html_content)
         return StreamingResponse(
             BytesIO(pdf_bytes),
             media_type="application/pdf",
