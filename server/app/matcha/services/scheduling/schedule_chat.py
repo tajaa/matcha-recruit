@@ -225,7 +225,7 @@ def _coerce_delta(value) -> Optional[int]:
     return minutes
 
 
-def _coerce_edit_request(raw) -> Optional[dict]:
+def coerce_edit_request(raw) -> Optional[dict]:
     if not isinstance(raw, dict):
         return None
     kind = str(raw.get("kind") or "").strip().lower()
@@ -325,7 +325,7 @@ def _parse_schedule_json(raw: str) -> dict:
     raw_edits = data.get("edit_requests")
     if isinstance(raw_edits, list):
         for r in raw_edits[:_MAX_EDIT_REQUESTS]:
-            coerced = _coerce_edit_request(r)
+            coerced = coerce_edit_request(r)
             if coerced:
                 edit_requests.append(coerced)
 

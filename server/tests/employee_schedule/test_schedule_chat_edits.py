@@ -3,7 +3,7 @@
 Pure: no DB, no Gemini. The resolver/executor need both and are covered by
 the live dev-remote run documented in HUUME_SCHEDULE_EDITS_PLAN.md.
 
-`_coerce_edit_request` is the trust boundary for Stage A's output — the
+`coerce_edit_request` is the trust boundary for Stage A's output — the
 model names an action and some hints, and everything downstream
 (`_resolve_shift_ref`, `execute_edit_proposal`) assumes the shape is
 already sane. An op that could never resolve is dropped HERE, so the
@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.matcha.services.scheduling.schedule_chat import (
-    _coerce_delta, _coerce_edit_request, _parse_schedule_json,
+    _coerce_delta, _parse_schedule_json, coerce_edit_request,
     edit_proposal_text, edit_result_text,
 )
 
@@ -38,59 +38,59 @@ def _op(**over):
 
 class TestCoerceEditRequest:
     def test_unknown_kind_is_dropped(self):
-        assert _coerce_edit_request({"kind": "explode", "target_employee_name": "Cara"}) is None
+        assert coerce_edit_request({"kind": "explode", "target_employee_name": "Cara"}) is None
 
     def test_non_dict_is_dropped(self):
-        assert _coerce_edit_request("reassign") is None
+        assert coerce_edit_request("reassign") is None
 
     def test_reassign_without_a_source_person_is_dropped(self):
         # "reassign to Casey" names no shift and no one losing it.
-        assert _coerce_edit_request({"kind": "reassign", "to_employee_name": "Casey"}) is None
+        assert coerce_edit_request({"kind": "reassign", "to_employee_name": "Casey"}) is None
 
     def test_reassign_without_a_destination_person_is_dropped(self):
-        assert _coerce_edit_request({"kind": "reassign", "target_employee_name": "Cara"}) is None
+        assert coerce_edit_request({"kind": "reassign", "target_employee_name": "Cara"}) is None
 
     def test_reassign_with_both_survives(self):
-        out = _coerce_edit_request(
+        out = coerce_edit_request(
             {"kind": "reassign", "target_employee_name": "Cara", "to_employee_name": "Casey"})
         assert out["kind"] == "reassign"
         assert (out["target_employee_name"], out["to_employee_name"]) == ("Cara", "Casey")
 
     def test_unassign_needs_the_person_coming_off(self):
-        assert _coerce_edit_request({"kind": "unassign", "target_role_hint": "opener"}) is None
-        assert _coerce_edit_request({"kind": "unassign", "target_employee_name": "Dana"}) is not None
+        assert coerce_edit_request({"kind": "unassign", "target_role_hint": "opener"}) is None
+        assert coerce_edit_request({"kind": "unassign", "target_employee_name": "Dana"}) is not None
 
     def test_retime_needs_some_new_time(self):
-        assert _coerce_edit_request({"kind": "retime", "target_role_hint": "opener"}) is None
-        assert _coerce_edit_request(
+        assert coerce_edit_request({"kind": "retime", "target_role_hint": "opener"}) is None
+        assert coerce_edit_request(
             {"kind": "retime", "target_role_hint": "opener", "new_start_time": "13:00"}) is not None
 
     def test_retime_accepts_a_relative_delta_alone(self):
         # "push the opener back an hour" gives no clock time at all.
-        out = _coerce_edit_request({"kind": "retime", "target_role_hint": "opener",
+        out = coerce_edit_request({"kind": "retime", "target_role_hint": "opener",
                                     "shift_by_minutes": 60})
         assert out is not None and out["shift_by_minutes"] == 60
 
     def test_cancel_needs_something_to_find_the_shift_by(self):
-        assert _coerce_edit_request({"kind": "cancel"}) is None
-        assert _coerce_edit_request({"kind": "cancel", "target_role_hint": "opener"}) is not None
+        assert coerce_edit_request({"kind": "cancel"}) is None
+        assert coerce_edit_request({"kind": "cancel", "target_role_hint": "opener"}) is not None
 
     def test_swap_needs_a_hint_for_BOTH_shifts(self):
-        assert _coerce_edit_request({"kind": "swap", "target_role_hint": "opener"}) is None
-        assert _coerce_edit_request(
+        assert coerce_edit_request({"kind": "swap", "target_role_hint": "opener"}) is None
+        assert coerce_edit_request(
             {"kind": "swap", "target_role_hint": "opener", "second_role_hint": "closer"}) is not None
 
     def test_a_bad_date_is_nulled_not_fatal(self):
-        out = _coerce_edit_request({"kind": "cancel", "target_role_hint": "opener",
+        out = coerce_edit_request({"kind": "cancel", "target_role_hint": "opener",
                                     "target_date": "next tuesday"})
         assert out is not None and out["target_date"] is None
 
     def test_a_real_date_survives(self):
-        out = _coerce_edit_request({"kind": "cancel", "target_date": "2026-08-12"})
+        out = coerce_edit_request({"kind": "cancel", "target_date": "2026-08-12"})
         assert out["target_date"] == "2026-08-12"
 
     def test_free_text_hints_are_length_clamped(self):
-        out = _coerce_edit_request({"kind": "cancel", "target_role_hint": "x" * 500})
+        out = coerce_edit_request({"kind": "cancel", "target_role_hint": "x" * 500})
         assert len(out["target_role_hint"]) == 80
 
 

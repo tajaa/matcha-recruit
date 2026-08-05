@@ -251,10 +251,12 @@ class TestHelpLines:
 
     def test_admin_with_everything_on_sees_every_line(self):
         lines = channel_grounding.help_lines(features=_all_features_on(), is_admin=True)
-        # +1: the coverage ("who can cover a shift") bullet, which isn't a
-        # CHANNEL_TOPICS row (it rides the schedule topic's gate instead).
-        assert len(lines) == len(channel_grounding.CHANNEL_TOPICS) + 1
+        # +2: the coverage ("who can cover a shift") + schedule-change bullets,
+        # neither of which is a CHANNEL_TOPICS row (both ride the schedule
+        # topic's own gate instead).
+        assert len(lines) == len(channel_grounding.CHANNEL_TOPICS) + 2
         assert any("who can cover" in line for line in lines)
+        assert any("Swap, move, or cancel" in line for line in lines)
 
     def test_coverage_line_excluded_for_employee(self):
         lines = channel_grounding.help_lines(features=_all_features_on(), is_admin=False)

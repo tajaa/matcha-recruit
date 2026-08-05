@@ -109,3 +109,31 @@ def order_cancelled_pill(item_name: str) -> str:
 
 def rearm_pill() -> str:
     return "\U0001F4E6 Didn't catch that — reply **confirm**, a number, or **cancel**."
+
+
+def receipt_draft_pill(*, vendor, invoice_number, preview: list[dict]) -> str:
+    """Review pill for an attached invoice/packing-slip, before the admin's
+    confirm reply commits it (`receipts.receive_channel_lines`, strict —
+    same provenance invariant as `channel_receipt_pill`: only lines that
+    match an open order will actually check in, nothing is auto-created).
+    `preview`: `receipts.resolve_lines`' output — used here for display
+    only, RE-resolved fresh at confirm time against current state."""
+    header = f"\U0001F4E6 Got the {vendor} invoice" if vendor else "\U0001F4E6 Got that delivery invoice"
+    if invoice_number:
+        header += f" (#{invoice_number})"
+    header += " — here's what I can check in:"
+    lines = [header]
+    for p in preview:
+        label = p.get("matched_name") or p.get("item_name")
+        qty = p.get("quantity")
+        qty_str = f"{qty:g}" if isinstance(qty, (int, float)) else (qty or "?")
+        if p.get("open_order_id"):
+            lines.append(f"✓ {qty_str} × {label} — has an open order")
+        else:
+            lines.append(f"✗ {qty_str} × {label} — no open order, will be skipped")
+    lines.append("Reply **confirm** to check in the matched lines, or **cancel**.")
+    return "\n".join(lines)
+
+
+def receipt_draft_cancelled_pill() -> str:
+    return "\U0001F4E6 Scrapped that invoice — nothing was checked in."

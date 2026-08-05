@@ -181,6 +181,9 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Channel `@huume` ASK grounding (bounded tool-calling loop beyond `ems_events`) → `server/app/matcha/services/ems/channel_agent.py:answer_channel_question`, policy registry at `server/app/matcha/services/ems/channel_grounding.py:run_topic_lookup`
 - Channel `@huume` "who can cover a shift" → `server/app/matcha/services/ems/channel_grounding.py:run_coverage_lookup` → `server/app/matcha/services/scheduling/coverage.py:find_coverage_candidates`
 - Channel `@huume` shift EDITS (swap/reassign/unassign/retime/cancel) → `services/scheduling/schedule_chat.py:build_edit_proposal` / `execute_edit_proposal`, writing through the four shared cores in `services/scheduling/shift_writes.py` (`apply_assignment_core`, `remove_assignment_core`, `retime_shift_core`, `cancel_shift_core`)
+- Channel ASK-loop NL schedule-change tool (anaphora/compound asks) → `services/ems/channel_agent.py:propose_schedule_change` tool → `services/ems/channel_grounding.py:run_schedule_change`
+- Thread Huume schedule tools (`find_shift_coverage` read, `propose_schedule_change` staged) → `services/huume/schedule_skill.py`
+- Channel receipt/invoice attachment ingest (@huume + a dropped CSV/PDF/photo) → `werk/routes/channels_ws.py:_bg_inventory_receipt` / `_bg_receipt_reply`, staging table `inventory_receipt_drafts` (migration `receiptdraft01`)
 
 ### Inventory (channel stock tracking)
 

@@ -709,6 +709,75 @@ TOOLS: tuple[HuumeTool, ...] = (
         intent_hints=("received a delivery", "got a delivery", "invoice attached", "packing slip"),
     ),
     _tool(
+        "find_shift_coverage", "read",
+        "Find who is free to cover shifts on one date — use for 'who can "
+        "cover / replace / fill in for X' questions. date must be YYYY-MM-DD. "
+        "Returns each published shift's current assignees plus ranked "
+        "candidates who are free and available that day. Read-only — never "
+        "assigns anyone; follow up with propose_schedule_change once you "
+        "have a candidate.",
+        properties={
+            "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
+            "role_hint": types.Schema(
+                type=types.Type.STRING,
+                description="Optional — filter to shifts whose role matches, e.g. 'opener'.",
+            ),
+        },
+        required=["date"],
+        discovery=True,
+        intent_hints=("who can cover", "who's free", "call out", "called in sick", "coverage"),
+    ),
+    _tool(
+        "propose_schedule_change", "staged",
+        "Stage a schedule change or a brand new shift for the admin to "
+        "confirm — swap, reassign, unassign, retime, cancel, or create. "
+        "Nothing happens until they confirm on a LATER turn by calling this "
+        "again with EXACTLY the same confirm_id. Use real names/dates from "
+        "lookup_context(topic='schedule') or find_shift_coverage — never "
+        "invent one.",
+        properties={
+            "kind": types.Schema(
+                type=types.Type.STRING,
+                enum=["create", "reassign", "assign", "unassign", "retime", "cancel", "swap"],
+            ),
+            "location_name": types.Schema(
+                type=types.Type.STRING,
+                description="Store name if the company has more than one location — get exact "
+                            "names from lookup_context(topic='locations'). Omit if there's only one.",
+            ),
+            "target_employee_name": types.Schema(type=types.Type.STRING),
+            "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
+            "target_role_hint": types.Schema(type=types.Type.STRING),
+            "to_employee_name": types.Schema(type=types.Type.STRING),
+            "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+            "second_date": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+            "second_role_hint": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+            "new_date": types.Schema(type=types.Type.STRING, description="For kind='retime'."),
+            "new_start_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
+            "new_end_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),
+            "shift_by_minutes": types.Schema(
+                type=types.Type.INTEGER,
+                description="For a RELATIVE retime with no clock time given.",
+            ),
+            "label": types.Schema(type=types.Type.STRING, description="For kind='create'."),
+            "date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, for kind='create'."),
+            "start_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
+            "end_time": types.Schema(type=types.Type.STRING, description="For kind='create', HH:MM 24h."),
+            "count": types.Schema(type=types.Type.INTEGER, description="For kind='create'."),
+            "employee_names": types.Schema(
+                type=types.Type.ARRAY, items=types.Schema(type=types.Type.STRING),
+                description="For kind='create'.",
+            ),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
+            ),
+        },
+        required=["kind"],
+        discovery=True,
+        intent_hints=("swap shift", "reassign shift", "move shift", "cancel shift", "cover for"),
+    ),
+    _tool(
         "finish", "finish",
         "End the turn. Call this once you've done what was asked, or to "
         "explain why you couldn't — describe ONLY what actually happened, "

@@ -396,6 +396,26 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Receipt not committed",
         "done_status": "committed",
     },
+    "propose_schedule_change": {
+        "action_type": "schedule_change",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        # The raw args are kept on the staged dict for the model's own
+        # reference (what it asked for), but the real state that execute()
+        # reads is proposal_id, merged in below by schedule_skill.propose —
+        # not reconstructed from these on the confirm turn.
+        "fields": (
+            "kind", "location_name", "target_employee_name", "target_date", "target_role_hint",
+            "to_employee_name", "second_employee_name", "second_date", "second_role_hint",
+            "new_date", "new_start_time", "new_end_time", "shift_by_minutes",
+            "label", "date", "start_time", "end_time", "count", "employee_names",
+        ),
+        "staged_label": "Staged: schedule change",
+        "refused_label": "Schedule change refused",
+        "done_label": "Schedule updated",
+        "failed_label": "Schedule change not applied",
+        "done_status": "applied",
+    },
 }
 
 
@@ -798,6 +818,20 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name == "find_shift_coverage":
+                from app.matcha.services.huume import schedule_skill
+                result = await schedule_skill.find_coverage(
+                    company_id=company_id, role=user_role, features=features,
+                    date_str=str(args.get("date") or ""), role_hint=args.get("role_hint"),
+                )
+                ok = "error" not in result
+                step = recorder.record(
+                    tool=name, kind="read",
+                    label="Found shift coverage" if ok else "Coverage lookup refused",
+                    status="ok" if ok else "rejected", detail=result.get("error"),
+                )
+                return _json_safe(result), step
+
             if name == "stage_inventory_order":
                 # No confirm needed — queuing IS the staging step, mirroring
                 # the channel `@huume` tool of the same name. Unlike the
@@ -837,6 +871,25 @@ async def run_huume_turn(
                         )
                         return {"status": "refused", "message": parsed["error"]}, step
                     staged.update({k: v for k, v in parsed.items() if k != "error"})
+                if name == "propose_schedule_change" and not confirming:
+                    # Same shape as the receipt special-case above: resolve
+                    # the request into a real proposal row NOW (dry-run
+                    # checks + advisory lines included), so the confirm turn
+                    # executes exactly what was resolved rather than
+                    # re-parsing the model's args a second time.
+                    from app.matcha.services.huume import schedule_skill
+                    from app.database import get_connection as _get_connection
+                    async with _get_connection() as _conn:
+                        proposed = await schedule_skill.propose(
+                            _conn, company_id=company_id, actor_user_id=user_id, args=args,
+                        )
+                    if proposed.get("error"):
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Schedule change not staged",
+                            status="rejected", detail=proposed["error"],
+                        )
+                        return {"status": "refused", "message": proposed["error"]}, step
+                    staged.update({k: v for k, v in proposed.items() if k != "error"})
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,

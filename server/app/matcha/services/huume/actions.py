@@ -111,6 +111,7 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "inventory_item_create": "inventory",
     "inventory_item_archive": "inventory",
     "inventory_receipt": "inventory",
+    "schedule_change": "employee_schedule",
 }
 
 # discipline_from_incident / discipline_decision — the incident-triggered
@@ -301,6 +302,17 @@ def evaluate_huume_action(
 
     if action_type == "inventory_receipt":
         return _validate_inventory_receipt(staged_action)
+
+    if action_type == "schedule_change":
+        # No further field validation needed here — schedule_skill.propose
+        # already resolved the request into a real schedule_chat_proposals
+        # row (conflict/availability/compliance dry-run included) on the
+        # stage turn; proposal_id not surviving to the confirm turn is the
+        # one thing that can go wrong, same "there's a target" shape as
+        # amend_handbook.
+        if not staged_action.get("proposal_id"):
+            return HuumeVerdict(kind="refuse", message="There's no schedule change to apply.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
     return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
 
@@ -1075,6 +1087,11 @@ async def execute_huume_action(
     if action.get("type") in _INVENTORY_ACTIONS:
         from app.matcha.services.huume import inventory_skill
         return await inventory_skill.execute(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    if action.get("type") == "schedule_change":
+        from app.matcha.services.huume import schedule_skill
+        return await schedule_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     return {"status": "error", "message": "Unsupported action."}

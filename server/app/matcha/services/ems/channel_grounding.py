@@ -402,6 +402,109 @@ async def run_coverage_lookup(
     return {"text": _sanitize_block(text), "degraded": False, "shift_links": shift_links}
 
 
+async def run_schedule_change(
+    conn, *, company_id: UUID, features: Optional[dict[str, Any]], is_admin: bool,
+    asker_user_id: UUID, asker_role: Optional[str], channel_id: UUID,
+    location_unavailable: bool = False, args: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute one model-requested `propose_schedule_change(...)` call — the
+    enforcement point `channel_agent.py`'s tool loop calls for that tool.
+    Same posture as `run_coverage_lookup`: the model's structured args are
+    advisory only, everything is re-checked here before any DB write. Stages
+    into the SAME `schedule_chat_proposals` table the deterministic SCHEDULE
+    intent fork uses (`schedule_chat.build_proposal`/`build_edit_proposal`)
+    — this is a second, natural-language ENTRY POINT into identical
+    machinery, not a parallel write path. Returns `{"text", "proposal_id"}`;
+    `proposal_id` is None on refusal/clarify-nothing-to-stage, non-None once
+    a pill has been persisted — the caller stamps `confirm_message_id` onto
+    the pill it posts, exactly like it does for a staged inventory order,
+    and the existing `_bg_schedule_reply` claim handles everything after."""
+    from datetime import date as _date
+
+    from fastapi import HTTPException
+
+    from app.core.services.redis_cache import check_rate_limit
+    from app.matcha.services.scheduling import schedule_chat
+    from app.matcha.services.scheduling.schedule_chat_rules import evaluate_schedule_proposal
+
+    if not is_admin:
+        return {"text": "That's only available to admins in this channel.", "proposal_id": None}
+    verdict = evaluate_schedule_proposal(role=asker_role, features=features or {}, stage="propose")
+    if not verdict.ok:
+        return {"text": verdict.reason, "proposal_id": None}
+    if location_unavailable:
+        return {
+            "text": "This channel's store is deactivated, so I can't change shifts here — "
+                    "an admin can reactivate the store or rebind this channel.",
+            "proposal_id": None,
+        }
+    try:
+        await check_rate_limit(str(company_id), "ems_schedule", 20, 3600)
+    except HTTPException:
+        return {"text": "That's hit its hourly limit — try again shortly.", "proposal_id": None}
+
+    kind = str(args.get("kind") or "").strip().lower()
+    today = _date.today()
+    try:
+        if kind == "create":
+            parsed = {
+                "ack": "Got it.", "action": "create",
+                "shift_requests": [_coerce_tool_shift_request(args)],
+                "edit_requests": [],
+            }
+            build = await schedule_chat.build_proposal(
+                conn, company_id=company_id, channel_id=channel_id, source_message_id=None,
+                created_by=asker_user_id, parsed=parsed, today=today,
+                original_content=f"[via ask] {args.get('label') or 'shift'} request",
+            )
+        else:
+            edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
+            if edit_req is None:
+                return {"text": "I don't have enough to make that change — who, and which shift?",
+                        "proposal_id": None}
+            parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": [edit_req]}
+            build = await schedule_chat.build_edit_proposal(
+                conn, company_id=company_id, channel_id=channel_id, source_message_id=None,
+                created_by=asker_user_id, parsed=parsed, today=today,
+                original_content=f"[via ask] {kind} request",
+            )
+    except Exception:
+        logger.exception("channel_grounding: schedule change failed for company %s", company_id)
+        return {"text": "That change failed just now — try the Schedule page instead.", "proposal_id": None}
+    return {"text": build.pill_text, "proposal_id": build.proposal_id}
+
+
+def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "label": args.get("label") or args.get("role") or "shift",
+        # target_date fallback: same gotcha found in the thread skill's copy
+        # of this coercer — the model reaches for the edit-kind field name
+        # reflexively even on kind='create'.
+        "template_hint": None, "date": args.get("date") or args.get("target_date"),
+        "weekdays": [], "start_time": args.get("start_time"), "end_time": args.get("end_time"),
+        "role": args.get("role"), "count": args.get("count") or 1,
+        "employee_name_hints": [n for n in (args.get("employee_names") or []) if n],
+    }
+
+
+def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "target_employee_name": args.get("target_employee_name"),
+        "target_date": args.get("target_date"),
+        "target_time_hint": args.get("target_time_hint"),
+        "target_role_hint": args.get("target_role_hint"),
+        "to_employee_name": args.get("to_employee_name"),
+        "second_employee_name": args.get("second_employee_name"),
+        "second_date": args.get("second_date"),
+        "second_role_hint": args.get("second_role_hint"),
+        "new_date": args.get("new_date"),
+        "new_start_time": args.get("new_start_time"),
+        "new_end_time": args.get("new_end_time"),
+        "shift_by_minutes": args.get("shift_by_minutes"),
+    }
+
+
 def help_lines(
     *, features: Optional[dict[str, Any]], is_admin: bool, location_unavailable: bool = False,
 ) -> list[str]:
@@ -422,4 +525,8 @@ def help_lines(
         lines.append(f"• {t.help_line}")
     if is_admin and topic_allowed("schedule", features) and not location_unavailable:
         lines.append('• Suggest who can cover a shift ("@huume who can cover tomorrow?") (admins only)')
+        lines.append(
+            '• Swap, move, or cancel shifts in plain words '
+            '("@huume can you swap those two?") (admins only)'
+        )
     return lines

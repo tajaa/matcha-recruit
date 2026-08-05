@@ -177,6 +177,14 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"after the admin confirms commits it — confirming past the duplicate warning above "
                 f"IS the override, there's no separate force step."
             )
+        elif action.get("type") == "schedule_change":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: schedule change "
+                f"({action.get('kind')}), confirm_id={action.get('confirm_id')}. Calling "
+                f"propose_schedule_change again with EXACTLY this confirm_id after the admin "
+                f"confirms applies it; omitting confirm_id (or a different one) stages a NEW "
+                f"proposal instead."
+            )
         elif action.get("type") == "amend_handbook":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: amend handbook "

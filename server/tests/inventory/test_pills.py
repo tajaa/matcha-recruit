@@ -1,7 +1,13 @@
 from app.matcha.services.inventory.pills import (
     channel_receipt_pill, extract_question, movement_pill, order_cancelled_pill, order_confirmed_pill,
-    quantity_question, rearm_pill, reorder_pill, stockout_pill,
+    quantity_question, rearm_pill, receipt_draft_cancelled_pill, receipt_draft_pill, reorder_pill,
+    stockout_pill,
 )
+
+_SAMPLE_PREVIEW = [
+    {"item_name": "Nitrile Gloves", "matched_name": "Nitrile Gloves (M)", "quantity": 10, "open_order_id": "o1"},
+    {"item_name": "Cotton Rolls", "matched_name": None, "quantity": 5, "open_order_id": None},
+]
 
 _ALL_BUILDERS = [
     movement_pill("Cookies", 1, 12, "gifted to Elizabeth", False),
@@ -13,6 +19,8 @@ _ALL_BUILDERS = [
     order_confirmed_pill("Salads", 42),
     order_cancelled_pill("Salads"),
     rearm_pill(),
+    receipt_draft_pill(vendor="Henry Schein", invoice_number="INV-1", preview=_SAMPLE_PREVIEW),
+    receipt_draft_cancelled_pill(),
 ]
 
 
@@ -54,6 +62,36 @@ class TestChannelReceiptPill:
             channel_receipt_pill([{"item_name": "Cookies", "quantity": 24, "new_count": 30}], ["Widgets"]),
         ):
             assert "❓" not in pill  # never the question-marker (no clarify round-trip for receipts)
+
+
+class TestReceiptDraftPill:
+    def test_vendor_and_invoice_number_render(self):
+        pill = receipt_draft_pill(vendor="Henry Schein", invoice_number="INV-42", preview=_SAMPLE_PREVIEW)
+        assert "Henry Schein" in pill
+        assert "#INV-42" in pill
+
+    def test_no_vendor_falls_back_gracefully(self):
+        pill = receipt_draft_pill(vendor=None, invoice_number=None, preview=_SAMPLE_PREVIEW)
+        assert "that delivery" in pill
+
+    def test_matched_and_unmatched_lines_are_distinguishable(self):
+        pill = receipt_draft_pill(vendor="Henry Schein", invoice_number=None, preview=_SAMPLE_PREVIEW)
+        assert "Nitrile Gloves (M)" in pill and "has an open order" in pill
+        assert "Cotton Rolls" in pill and "will be skipped" in pill
+
+    def test_ends_with_confirm_cancel_prompt(self):
+        pill = receipt_draft_pill(vendor="X", invoice_number=None, preview=_SAMPLE_PREVIEW)
+        assert "Reply **confirm**" in pill and "**cancel**" in pill
+
+    def test_never_claims_something_was_already_received(self):
+        # This is a REVIEW pill, before any write happens.
+        pill = receipt_draft_pill(vendor="X", invoice_number=None, preview=_SAMPLE_PREVIEW)
+        assert "checked in" not in pill.lower().replace("can check in", "")
+
+
+def test_receipt_draft_cancelled_pill_says_nothing_was_written():
+    pill = receipt_draft_cancelled_pill()
+    assert "nothing was checked in" in pill
 
 
 def test_reorder_pill_never_claims_stockout():

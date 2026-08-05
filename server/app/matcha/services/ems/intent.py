@@ -111,10 +111,16 @@ _RECALL_PATTERNS = (
 
 # Weaker signal: only counts as a question when the message actually ends
 # in a question mark, which "@huume what's broken: the ice machine" does
-# not.
+# not. The `^.{0,60}?,\s*` alternative (same bounded lead-in-clause idiom as
+# _SCHEDULE_PATTERNS' push/assign pattern) catches a short scene-setting
+# clause before the actual question — "Dana called out for Wednesday, can
+# you put someone else on it?" is a real compound ask, not a report, but
+# the interrogative doesn't start the message. Still start-anchored (via
+# `.match`), so a genuinely long report with a rhetorical question buried
+# in it doesn't retroactively become ASK.
 _INTERROGATIVE_LEAD = re.compile(
-    r"^(?:what|when|who|whom|whose|where|why|how|which|is|are|was|were|do|does|"
-    r"did|has|have|had|can|could|should|would|will|any)\b",
+    r"(?:^|^.{0,60}?,\s*)(?:what|when|who|whom|whose|where|why|how|which|is|are|was|were|"
+    r"do|does|did|has|have|had|can|could|should|would|will|any)\b",
     re.IGNORECASE,
 )
 

@@ -25,6 +25,20 @@ class TestBuildStateBlock:
         block = build_state_block(state)
         assert "offer-1" not in block
 
+    def test_staged_schedule_change_carries_confirm_id(self):
+        # Regression: with no dedicated branch, this fell through to the
+        # generic "STAGED ACTION: schedule_change." line with NO id shown —
+        # the model then guessed the type name AS the confirm_id on the next
+        # turn, silently failed the match, and (separately) hallucinated a
+        # success message even though nothing executed. Caught live on
+        # dev-remote before this branch existed.
+        state = {"huume_action": {
+            "type": "schedule_change", "kind": "create", "confirm_id": "ab12cd34", "status": "proposed",
+        }}
+        block = build_state_block(state)
+        assert "ab12cd34" in block
+        assert "propose_schedule_change" in block
+
     def test_huume_offer_pointer_rendered(self):
         state = {"huume_offer": {"offer_id": "offer-2", "status": "accepted"}}
         block = build_state_block(state)

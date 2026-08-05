@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Dict, Optional, Set
 from uuid import UUID, uuid4
@@ -347,6 +348,7 @@ async def _bg_ems_ask(
         events = None
         is_admin = False
         hidden = False
+        recent_block = ""
 
         async with get_connection() as conn:
             company_id = await _ems_company_gate(conn, channel_id_str)
@@ -402,6 +404,29 @@ async def _bg_ems_ask(
                 if not events and not reachable and not stage_inventory_available:
                     text = ems_ask.no_events_text(filtered=hidden)
                     sys_row = await _insert_system_message(conn, channel_id_str, text)
+                elif is_admin and "schedule" in [t.topic for t in reachable]:
+                    # Only fetched for the admin+schedule case that can
+                    # actually use it (propose_schedule_change resolving
+                    # anaphora) — an extra query on every plain ASK isn't
+                    # worth it for the common case that never needs it.
+                    recent_rows = await conn.fetch(
+                        f"""
+                        SELECT m.content, COALESCE({_USER_NAME_EXPR}, 'Huume') AS sender_name
+                        FROM channel_messages m
+                        LEFT JOIN users u ON u.id = m.sender_id
+                        LEFT JOIN clients c ON c.user_id = u.id
+                        LEFT JOIN employees e ON e.user_id = u.id
+                        LEFT JOIN admins a ON a.user_id = u.id
+                        WHERE m.channel_id = $1 AND m.deleted_at IS NULL
+                          AND m.message_type IS DISTINCT FROM 'system'
+                        ORDER BY m.created_at DESC LIMIT 12
+                        """,
+                        UUID(channel_id_str),
+                    )
+                    recent_block = "\n".join(
+                        f"{r['sender_name']}: {(r['content'] or '')[:200]}"
+                        for r in reversed(recent_rows)
+                    )
 
         # Broadcast AFTER the connection releases in every branch above —
         # holding a pooled connection across the fan-out isn't needed and
@@ -415,6 +440,7 @@ async def _bg_ems_ask(
             question=strip_mention(content), events=events, is_admin=is_admin, filtered=hidden,
             company_id=company_id, channel_id=UUID(channel_id_str), asker_user_id=UUID(asker_user_id_str),
             asker_role=role, features=features, location_id=loc_id, location_unavailable=location_unavailable,
+            recent_block=recent_block,
         )
 
         async with get_connection() as conn:
@@ -423,6 +449,14 @@ async def _bg_ems_ask(
                 await conn.execute(
                     "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
                     sys_row["id"], result["pending_order_id"],
+                )
+            elif result.get("pending_proposal_id"):
+                # Stamped exactly like a deterministic-fork proposal — the
+                # existing _bg_schedule_reply claim handles confirm/cancel/
+                # clarify from here, no new reply-handling code needed.
+                await conn.execute(
+                    "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], result["pending_proposal_id"],
                 )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
@@ -910,6 +944,224 @@ async def _bg_inventory_reply(
         return claim_happened
     except Exception:
         logger.exception("inventory chat reply failed for %s", reply_to_id_str)
+        return claim_happened
+
+
+# ── Channel receipt/invoice ingest (attachment-driven) ──────────────────
+#
+# "@huume here's the delivery invoice" + a dropped CSV/PDF/photo. A CSV or
+# PDF attachment is unambiguously a document, so it's tried regardless of
+# wording; a photo is ambiguous (could be an incident photo), so it's only
+# tried when the text itself reads as a delivery/invoice mention
+# (_RECEIPT_TEXT_RE). STRICT provenance, same invariant as the deterministic
+# INVENTORY "receipt" fork: only lines that resolve against an item's own
+# open order actually check in (`receipts.receive_channel_lines`) — nothing
+# is auto-created from an unreviewed chat attachment. The staged draft lives
+# in `inventory_receipt_drafts` (migration `receiptdraft01`) between the
+# review pill and the confirm reply, the same `confirm_message_id`
+# atomic-claim idiom as `schedule_chat_proposals`/`inventory_orders`.
+
+_RECEIPT_TEXT_RE = re.compile(
+    r"\b(invoice|receipt|packing slip|delivery|shipment|order (?:came|arrived|is here)|restock)\b",
+    re.IGNORECASE,
+)
+_RECEIPT_DOC_EXTS = (".csv", ".pdf")
+_RECEIPT_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
+_RECEIPT_MAX_BYTES = 15 * 1024 * 1024  # same cap as routes/inventory.py's REST /receipts/parse
+
+
+def _pick_receipt_attachment(attachments: Optional[list], content: str) -> Optional[dict]:
+    """Most-recent-first (mirrors huume/inventory_skill.py's attachment
+    order rule). Returns None when nothing here reads as a receipt — the
+    caller falls through to the normal intent fork untouched."""
+    if not attachments:
+        return None
+    text_hints_receipt = bool(_RECEIPT_TEXT_RE.search(content or ""))
+    for att in reversed(attachments):
+        filename = (att.get("filename") or "").lower()
+        size = att.get("size") or 0
+        if size > _RECEIPT_MAX_BYTES:
+            continue
+        if filename.endswith(_RECEIPT_DOC_EXTS):
+            return att
+        if filename.endswith(_RECEIPT_IMAGE_EXTS) and text_hints_receipt:
+            return att
+    return None
+
+
+async def _bg_inventory_receipt(
+    channel_id_str: str, message_id_str: str, sender_user_id_str: str, content: str,
+    attachments: Optional[list],
+) -> bool:
+    """Claim-style: True iff a receipt-shaped attachment was found and
+    handled (a pill was always posted in that case — refusal included), so
+    the mention fork is never ALSO tried for the same message. False means
+    "nothing here looked like a receipt", the normal fork proceeds
+    untouched. Two connection blocks: the Gemini parse call (PDF/image
+    branch of `receipts.parse_receipt`) must not run with a pooled
+    connection held, same rule as every other Gemini-calling dispatch here."""
+    att = _pick_receipt_attachment(attachments, content)
+    if att is None:
+        return False
+    try:
+        from app.core.services.storage import get_storage
+        from app.matcha.services.inventory import pills
+        from app.matcha.services.inventory import receipts as receipts_service
+        from app.matcha.services.inventory.rules import evaluate_inventory_action
+
+        sys_row = None
+        async with get_connection() as conn:
+            company_id = await _inventory_company_gate(conn, channel_id_str)
+            if company_id is None:
+                return False  # inventory off here — let the normal fork's own gate answer
+            try:
+                await check_rate_limit(str(company_id), "inventory_event", 30, 3600)
+            except HTTPException:
+                return True  # over budget — claimed, but silently skip like every other rate-limited path
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
+            features = await _schedule_company_features(conn, company_id)
+            # approve_order bar (client/admin), not the any-role movement bar —
+            # committing a receive is the same authority level as approving an
+            # order, matching the REST /receipts/commit route's gate.
+            verdict = evaluate_inventory_action(role=role, features=features, stage="approve_order")
+            if not verdict.ok:
+                sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+            else:
+                location_id, _ = await _channel_location(conn, channel_id_str)
+                if location_id is None and await _channel_bound_to_inactive_location(conn, channel_id_str):
+                    sys_row = await _insert_system_message(
+                        conn, channel_id_str,
+                        "\U0001F4E6 This channel's store is deactivated, so inventory tracking is paused here.",
+                    )
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return True
+
+        # No connection held — download + parse (parse's PDF/image branch is Gemini).
+        storage = get_storage()
+        if not storage.is_supported_storage_path(att.get("url")):
+            async with get_connection() as conn:
+                sys_row = await _insert_system_message(
+                    conn, channel_id_str, "\U0001F4E6 Couldn't read that attachment.")
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+            return True
+        file_bytes = await storage.download_file(att["url"])
+        receipt = await receipts_service.parse_receipt(
+            file_bytes, att.get("content_type") or "", att.get("filename") or "")
+
+        async with get_connection() as conn:
+            if not receipt["available"] or not receipt["lines"]:
+                sys_row = await _insert_system_message(
+                    conn, channel_id_str,
+                    "\U0001F4E6 Couldn't read any line items off that file — try Receive Delivery "
+                    "on the Inventory page instead.",
+                )
+            else:
+                location_id, _ = await _channel_location(conn, channel_id_str)
+                preview = await receipts_service.resolve_lines(
+                    conn, company_id=company_id, location_id=location_id, lines=receipt["lines"])
+                draft_id = await conn.fetchval(
+                    """
+                    INSERT INTO inventory_receipt_drafts
+                        (company_id, channel_id, location_id, source_message_id, created_by,
+                         vendor, invoice_number, lines)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+                    RETURNING id
+                    """,
+                    company_id, UUID(channel_id_str), location_id, UUID(message_id_str),
+                    UUID(sender_user_id_str), receipt.get("vendor"), receipt.get("invoice_number"),
+                    json.dumps(receipt["lines"]),
+                )
+                pill_text = pills.receipt_draft_pill(
+                    vendor=receipt.get("vendor"), invoice_number=receipt.get("invoice_number"),
+                    preview=preview,
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                await conn.execute(
+                    "UPDATE inventory_receipt_drafts SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], draft_id,
+                )
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        return True
+    except Exception:
+        logger.exception("inventory receipt ingest failed for message %s", message_id_str)
+        return True  # we found a receipt-shaped attachment; a crash must not fall through to double-dispatch
+
+
+async def _bg_receipt_reply(
+    channel_id_str: str, reply_to_id_str: str, sender_user_id_str: str, content: str,
+) -> bool:
+    """Fold a reply-to-a-receipt-draft-pill into confirm/cancel. Same
+    claim-then-act contract as `_bg_inventory_reply` — returns True iff the
+    atomic claim below matched. Lines are RE-resolved fresh at confirm time
+    (`receive_channel_lines` calls `resolve_lines` internally) rather than
+    trusting the stage-time preview — an order may have been queued or
+    claimed by something else in the meantime, same "current state, not
+    proposal time" posture as the schedule-edit executor."""
+    claim_happened = False
+    try:
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.inventory import pills
+        from app.matcha.services.inventory import receipts as receipts_service
+        from app.matcha.services.scheduling.schedule_chat_rules import parse_confirm_reply
+
+        reply_uuid = UUID(reply_to_id_str)
+        sender_uuid = UUID(sender_user_id_str)
+        sys_row = None
+
+        async with get_connection() as conn:
+            claimed = await conn.fetchrow(
+                """
+                UPDATE inventory_receipt_drafts SET confirm_message_id = NULL, updated_at = NOW()
+                WHERE confirm_message_id = $1 AND channel_id = $2 AND status = 'staged'
+                  AND created_at > NOW() - INTERVAL '7 days'
+                RETURNING id, company_id, location_id, vendor, invoice_number, lines
+                """,
+                reply_uuid, UUID(channel_id_str),
+            )
+            if claimed is None:
+                return False
+            claim_happened = True
+            action = parse_confirm_reply(strip_mention(content))
+
+            if action == "cancel":
+                await conn.execute(
+                    "UPDATE inventory_receipt_drafts SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+                    claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, pills.receipt_draft_cancelled_pill())
+            elif action == "confirm":
+                lines = claimed["lines"]
+                if isinstance(lines, str):
+                    lines = json.loads(lines)
+                note = " ".join(filter(None, [
+                    claimed["vendor"],
+                    f"invoice {claimed['invoice_number']}" if claimed["invoice_number"] else None,
+                ])) or None
+                result = await receipts_service.receive_channel_lines(
+                    conn, company_id=claimed["company_id"], location_id=claimed["location_id"],
+                    user_id=sender_uuid, source_message_id=reply_uuid, note=note, lines=lines,
+                )
+                await conn.execute(
+                    "UPDATE inventory_receipt_drafts SET status = 'committed', committed_by = $1, "
+                    "committed_at = NOW(), updated_at = NOW() WHERE id = $2",
+                    sender_uuid, claimed["id"],
+                )
+                sys_row = await _insert_system_message(
+                    conn, channel_id_str, pills.channel_receipt_pill(result["received"], result["unmatched"]))
+            else:
+                pill_text = pills.rearm_pill()
+                sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                await conn.execute(
+                    "UPDATE inventory_receipt_drafts SET confirm_message_id = $1 WHERE id = $2",
+                    sys_row["id"], claimed["id"],
+                )
+
+        if sys_row is not None:
+            await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        return claim_happened
+    except Exception:
+        logger.exception("receipt draft reply failed for %s", reply_to_id_str)
         return claim_happened
 
 
@@ -1477,6 +1729,7 @@ async def _bg_ems_dispatch(
     content: str,
     *,
     has_huume_mention: bool,
+    attachments: Optional[list] = None,
 ) -> None:
     """Single EMS entry point off the send hot path, replacing the two
     independent _spawn_bg(...) call sites that used to fire in the same
@@ -1517,9 +1770,19 @@ async def _bg_ems_dispatch(
         )
         if claimed:
             return
+        claimed = await _bg_receipt_reply(
+            channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
+        )
+        if claimed:
+            return
     if has_huume_mention:
         from app.matcha.services.ems.intent import INVENTORY, LINK, LOG, SCHEDULE, classify_intent
 
+        # A receipt-shaped attachment is tried before intent classification —
+        # "@huume here's the invoice" with a CSV/PDF attached should ingest it
+        # even if the wording alone wouldn't trip the INVENTORY regex.
+        if await _bg_inventory_receipt(channel_id_str, message_id_str, sender_user_id_str, content, attachments):
+            return
         intent = classify_intent(content)
         if intent == LOG:
             await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
@@ -2657,6 +2920,7 @@ async def channel_websocket(
                                     str(row["reply_to_id"]) if reply_to_system else None,
                                     str(user.id), row["content"],
                                     has_huume_mention="huume" in mention_handles,
+                                    attachments=list(broadcast_attachments) if broadcast_attachments else None,
                                 ))
 
                             await manager.broadcast_message(room_key, {
