@@ -4,12 +4,12 @@ import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package } f
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
-import { createProjectNew, createThread, startPersonalCheckout } from '../../api/matchaWork'
+import { createProjectNew, createThread, archiveThread, notifyThreadsChanged, startPersonalCheckout } from '../../api/matchaWork'
 import { useMe } from '../../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../panels/HiringClientPickerModal'
 import TemplatePickerModal from '../panels/TemplatePickerModal'
-import type { RecruitingClient } from '../../types'
+import type { RecruitingClient, MWThread } from '../../types'
 import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
 import { canCreateChannel, canCreatePaidChannel } from '../../utils/channelPermissions'
 import { canReviewEvents } from '../../utils/eventsPermissions'
@@ -57,6 +57,16 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
   // Inline rename state
   const rename = useSidebarRename({ setChannels, setProjects, setThreads })
+
+  async function handleArchiveThread(t: MWThread) {
+    if (!window.confirm(`Archive "${t.title}"? You can restore it from the Archived filter on the threads page.`)) return
+    try {
+      await archiveThread(t.id)
+      setThreads((prev) => prev.filter((x) => x.id !== t.id))
+      notifyThreadsChanged()
+      if (location.pathname === `${base}/${t.id}`) navigate(base)
+    } catch {}
+  }
 
   async function handleNewChat() {
     try {
@@ -297,6 +307,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             navigate={navigate}
             isActive={isActive}
             rename={rename}
+            onArchive={handleArchiveThread}
           />
 
           {/* Channels */}

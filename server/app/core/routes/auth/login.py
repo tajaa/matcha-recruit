@@ -51,9 +51,9 @@ from app.config import get_settings
 from app.core.routes.auth._shared import *  # noqa: F401,F403
 
 
-_LOGIN_MINUTE_LIMIT = 5
+_LOGIN_MINUTE_LIMIT = 10
 _LOGIN_MINUTE_WINDOW = 60  # seconds
-_LOGIN_HOUR_LIMIT = 20
+_LOGIN_HOUR_LIMIT = 40
 _LOGIN_HOUR_WINDOW = 3600  # seconds
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 

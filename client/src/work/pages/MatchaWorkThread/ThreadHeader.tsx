@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, Check, X, Sun, Moon, MoreHorizontal, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { ArrowLeft, Pencil, Check, X, Sun, Moon, MoreHorizontal, PanelRightOpen, PanelRightClose, Archive } from 'lucide-react'
 import ThreadCollaborators from '../../components/panels/ThreadCollaborators'
 import { formatTokens } from '../../components/panels/constants'
 import { formatDateTimePacific } from '../../../utils/dateFormat'
@@ -120,7 +120,7 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel, huumePanelAvail
 }
 
 function HeaderOverflow({ c, th }: { c: ThreadController; th: ThreadTheme }) {
-  const { lightMode, toggleLightMode, usage24h, usageTotal } = c
+  const { lightMode, toggleLightMode, usage24h, usageTotal, thread, handleArchiveThread } = c
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -160,6 +160,15 @@ function HeaderOverflow({ c, th }: { c: ThreadController; th: ThreadTheme }) {
             <span className="text-w-dim">{lightMode ? <Moon size={14} /> : <Sun size={14} />}</span>
             <span className="text-w-text">{lightMode ? 'Switch to dark mode' : 'Switch to light mode'}</span>
           </button>
+          {thread?.status !== 'archived' && (
+            <button
+              onClick={() => { setOpen(false); void handleArchiveThread() }}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-w-surface2/60 border-t border-w-line"
+            >
+              <span className="text-w-dim"><Archive size={14} /></span>
+              <span className="text-w-text">Archive thread</span>
+            </button>
+          )}
         </div>
       )}
     </div>

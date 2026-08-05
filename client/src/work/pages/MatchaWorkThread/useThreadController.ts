@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep, MWThreadAttachment } from '../../types'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, uploadThreadFiles, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged, notifyUsageChanged } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, uploadThreadFiles, updateTitle, archiveThread, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged, notifyUsageChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
@@ -28,6 +28,7 @@ export function useThreadController() {
   const isIndividual = me?.user?.role === 'individual'
   const { threadId } = useParams<{ threadId: string }>()
   const base = useWorkBase()
+  const navigate = useNavigate()
   const [thread, setThread] = useState<MWThreadDetail | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
   const { appendOptimistic, reconcileById } = useOptimisticMessages(setMessages)
@@ -540,6 +541,18 @@ export function useThreadController() {
     } catch {}
   }
 
+  async function handleArchiveThread() {
+    if (!threadId) return
+    if (!window.confirm('Archive this thread? It will be hidden from the chat list — you can restore it from the Archived filter.')) return
+    try {
+      await archiveThread(threadId)
+      notifyThreadsChanged()
+      navigate(base)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't archive thread", 'error')
+    }
+  }
+
   async function handleModeToggle(mode: MWModeKey) {
     if (!threadId || togglingMode) return
     const current = modeValue(mode)
@@ -602,7 +615,7 @@ export function useThreadController() {
     titleDraft, setTitleDraft,
     messagesEndRef, textareaRef,
     refreshUsage, refreshThreadState,
-    handleSend, handleFileUpload, handleKeyDown, handleTitleSave, handleModeToggle, handleEditSlide,
+    handleSend, handleFileUpload, handleKeyDown, handleTitleSave, handleArchiveThread, handleModeToggle, handleEditSlide,
     toggleLightMode,
   }
 }

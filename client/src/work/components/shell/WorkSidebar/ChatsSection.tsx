@@ -1,10 +1,15 @@
+import { useState } from 'react'
 import { Link, type NavigateFunction } from 'react-router-dom'
-import { MessageSquare, ChevronDown, Pencil, Plus, Users } from 'lucide-react'
+import { MessageSquare, ChevronDown, Pencil, Plus, Users, Archive } from 'lucide-react'
 import type { MWThread } from '../../../types'
 import { formatDateTimePacific } from '../../../../utils/dateFormat'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
 
+// Default collapsed to the 5 most recent — a "Show more" chevron expands in
+// place. A hard cap (not "show ALL ever") still applies once expanded so a
+// long-lived company doesn't render hundreds of rows into the sidebar.
+const COLLAPSED_VISIBLE = 5
 const MAX_VISIBLE = 20
 
 interface Props {
@@ -17,6 +22,7 @@ interface Props {
   navigate: NavigateFunction
   isActive: (path: string) => boolean
   rename: SidebarRename
+  onArchive: (thread: MWThread) => void
 }
 
 // Chats — one flat, recent-first list (the backend already orders
@@ -33,8 +39,10 @@ export default function ChatsSection({
   navigate,
   isActive,
   rename,
+  onArchive,
 }: Props) {
   const { renaming, startRename } = rename
+  const [expanded, setExpanded] = useState(false)
   return (
     <div className="mt-1">
       <button
@@ -63,7 +71,10 @@ export default function ChatsSection({
           return <p className="px-2.5 py-1 text-[11px] text-w-faint">No chats</p>
         }
 
-        const visible = filtered.slice(0, MAX_VISIBLE)
+        // Filtering implies the admin is searching for something specific —
+        // the 5-row collapse only applies to the unfiltered recent list.
+        const limit = filter ? MAX_VISIBLE : (expanded ? MAX_VISIBLE : COLLAPSED_VISIBLE)
+        const visible = filtered.slice(0, limit)
 
         return (
           <div className="space-y-0.5 mt-0.5">
@@ -99,10 +110,35 @@ export default function ChatsSection({
                     >
                       <Pencil size={11} />
                     </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onArchive(t) }}
+                      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all mt-0.5"
+                      title="Archive"
+                    >
+                      <Archive size={11} />
+                    </button>
                   </>
                 )}
               </div>
             ))}
+            {!filter && !expanded && filtered.length > COLLAPSED_VISIBLE && (
+              <button
+                onClick={() => setExpanded(true)}
+                className="w-full flex items-center gap-1 px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-text transition-colors"
+              >
+                <ChevronDown size={11} />
+                Show {Math.min(filtered.length, MAX_VISIBLE) - COLLAPSED_VISIBLE} more
+              </button>
+            )}
+            {!filter && expanded && filtered.length > COLLAPSED_VISIBLE && (
+              <button
+                onClick={() => setExpanded(false)}
+                className="w-full flex items-center gap-1 px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-text transition-colors"
+              >
+                <ChevronDown size={11} className="rotate-180" />
+                Show less
+              </button>
+            )}
             {filtered.length > MAX_VISIBLE && (
               <button
                 onClick={() => navigate(base)}
