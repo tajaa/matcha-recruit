@@ -973,16 +973,25 @@ _RECEIPT_MAX_BYTES = 15 * 1024 * 1024  # same cap as routes/inventory.py's REST 
 def _pick_receipt_attachment(attachments: Optional[list], content: str) -> Optional[dict]:
     """Most-recent-first (mirrors huume/inventory_skill.py's attachment
     order rule). Returns None when nothing here reads as a receipt — the
-    caller falls through to the normal intent fork untouched."""
+    caller falls through to the normal intent fork untouched.
+
+    A doc attachment (.csv/.pdf) requires the SAME wording opt-in as an
+    image one, unless the message is a bare mention with nothing else said
+    — "@huume attaching the incident report from this morning" + a PDF must
+    still reach `classify_intent`/LOG (and the OSHA dual-write), not get
+    silently swallowed here just because it happens to carry a PDF."""
     if not attachments:
         return None
+    from app.matcha.services.ems.intent import strip_mention
+
     text_hints_receipt = bool(_RECEIPT_TEXT_RE.search(content or ""))
+    bare_mention = not strip_mention(content).strip()
     for att in reversed(attachments):
         filename = (att.get("filename") or "").lower()
         size = att.get("size") or 0
         if size > _RECEIPT_MAX_BYTES:
             continue
-        if filename.endswith(_RECEIPT_DOC_EXTS):
+        if filename.endswith(_RECEIPT_DOC_EXTS) and (text_hints_receipt or bare_mention):
             return att
         if filename.endswith(_RECEIPT_IMAGE_EXTS) and text_hints_receipt:
             return att
@@ -1093,16 +1102,21 @@ async def _bg_receipt_reply(
 ) -> bool:
     """Fold a reply-to-a-receipt-draft-pill into confirm/cancel. Same
     claim-then-act contract as `_bg_inventory_reply` — returns True iff the
-    atomic claim below matched. Lines are RE-resolved fresh at confirm time
-    (`receive_channel_lines` calls `resolve_lines` internally) rather than
-    trusting the stage-time preview — an order may have been queued or
-    claimed by something else in the meantime, same "current state, not
-    proposal time" posture as the schedule-edit executor."""
+    atomic claim below matched, and (also mirroring `_bg_inventory_reply`)
+    re-runs the `approve_order` authz bar on the REPLIER once claimed —
+    staging is not confirming, so a non-admin/employee reply or a
+    since-disabled `inventory` flag re-arms the pill instead of committing.
+    Lines are RE-resolved fresh at confirm time (`receive_channel_lines`
+    calls `resolve_lines` internally) rather than trusting the stage-time
+    preview — an order may have been queued or claimed by something else in
+    the meantime, same "current state, not proposal time" posture as the
+    schedule-edit executor."""
     claim_happened = False
     try:
         from app.matcha.services.ems.intent import strip_mention
         from app.matcha.services.inventory import pills
         from app.matcha.services.inventory import receipts as receipts_service
+        from app.matcha.services.inventory.rules import evaluate_inventory_action
         from app.matcha.services.scheduling.schedule_chat_rules import parse_confirm_reply
 
         reply_uuid = UUID(reply_to_id_str)
@@ -1122,6 +1136,25 @@ async def _bg_receipt_reply(
             if claimed is None:
                 return False
             claim_happened = True
+
+            # Same approve_order bar `_bg_inventory_reply` re-checks on ITS
+            # replier — committing a receive is at least that authority
+            # level, and it must be re-verified on the REPLIER, not just
+            # whoever staged the draft (an admin can stage, then anyone in
+            # the channel could otherwise reply "confirm"), and it must be
+            # re-verified fresh in case `inventory` was turned off since.
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", sender_uuid)
+            features = await _schedule_company_features(conn, claimed["company_id"])
+            verdict = evaluate_inventory_action(role=role, features=features, stage="approve_order")
+            if not verdict.ok:
+                await conn.execute(
+                    "UPDATE inventory_receipt_drafts SET confirm_message_id = $1 WHERE id = $2",
+                    reply_uuid, claimed["id"],
+                )
+                sys_row = await _insert_system_message(conn, channel_id_str, verdict.reason)
+                await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+                return True
+
             action = parse_confirm_reply(strip_mention(content))
 
             if action == "cancel":
@@ -1780,7 +1813,10 @@ async def _bg_ems_dispatch(
 
         # A receipt-shaped attachment is tried before intent classification —
         # "@huume here's the invoice" with a CSV/PDF attached should ingest it
-        # even if the wording alone wouldn't trip the INVENTORY regex.
+        # even if the wording alone wouldn't trip the INVENTORY regex. But a
+        # doc attachment still needs receipt wording (or a bare mention) per
+        # `_pick_receipt_attachment` — "@huume attaching the incident report"
+        # + a PDF must fall through to LOG, not get claimed here.
         if await _bg_inventory_receipt(channel_id_str, message_id_str, sender_user_id_str, content, attachments):
             return
         intent = classify_intent(content)

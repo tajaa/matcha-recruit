@@ -241,6 +241,32 @@ def shift_snapshot(row) -> dict:
     }
 
 
+async def restore_assignment_raw(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+    employee_id: UUID,
+    assigned_by: Optional[UUID],
+) -> None:
+    """Re-INSERT an assignment removed earlier in the SAME transaction, with
+    no audit row and no training/scheduled-role side effects. Used only to
+    undo a phase-1 removal when a later phase refuses the op (schedule_chat.
+    py's two-phase edit executor) — a refused op must be a true no-op, not
+    an `assignment.delete` + `assignment.create` pair, which `fair_workweek.
+    RELEVANT_ACTIONS` would double-count as churn. `assigned_by` should be
+    the original assignment's own value, not the confirming actor, since
+    this isn't a new assignment decision."""
+    await conn.execute(
+        """
+        INSERT INTO schedule_shift_assignments (company_id, shift_id, employee_id, assigned_by)
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (shift_id, employee_id) DO NOTHING
+        """,
+        company_id, shift_id, employee_id, assigned_by,
+    )
+
+
 async def apply_assignment_core(
     conn,
     company_id: UUID,
@@ -316,6 +342,21 @@ async def apply_assignment_core(
             )
 
 
+def removal_audit_details(shift_row, employee_id: UUID, audit_details: Optional[dict] = None) -> dict:
+    """The `assignment.delete` details shape, factored out so a caller that
+    defers the audit write (schedule_chat.py's two-phase edit executor)
+    can't drift from what `remove_assignment_core` writes inline."""
+    return {
+        "employee_id": str(employee_id),
+        "shift_starts_at": shift_row["starts_at"].isoformat(),
+        "shift_ends_at": shift_row["ends_at"].isoformat(),
+        "shift_status": shift_row["status"],
+        "shift_kind": shift_row["kind"],
+        "location_id": str(shift_row["location_id"]) if shift_row["location_id"] else None,
+        **(audit_details or {}),
+    }
+
+
 async def remove_assignment_core(
     conn,
     company_id: UUID,
@@ -325,24 +366,28 @@ async def remove_assignment_core(
     actor_user_id: UUID,
     shift_row,
     audit_details: Optional[dict] = None,
-) -> None:
-    """DELETE one assignment + the `assignment.delete` audit row. `shift_row`
-    must carry starts_at/ends_at/status/kind/location_id. Caller runs the FW
-    advisory check (if any) and owns the transaction."""
-    await conn.execute(
+    write_audit: bool = True,
+) -> int:
+    """DELETE one assignment + (unless suppressed) the `assignment.delete`
+    audit row. `shift_row` must carry starts_at/ends_at/status/kind/
+    location_id. Caller runs the FW advisory check (if any) and owns the
+    transaction. Returns the number of rows deleted (0 or 1) — a zero-row
+    delete means "they weren't on that shift" and never gets an audit row,
+    even when `write_audit` is True, so a phantom unassign can't feed Fair
+    Workweek/pretext-shield history. `write_audit=False` lets a caller that
+    needs the removal to be restorable (schedule_chat.py's two-phase edit
+    executor) defer the audit write until it knows the op actually
+    succeeds — use `removal_audit_details` to write it later with the same
+    shape."""
+    status = await conn.execute(
         "DELETE FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
         shift_id, employee_id,
     )
-    await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
-                    "assignment.delete", {
-                        "employee_id": str(employee_id),
-                        "shift_starts_at": shift_row["starts_at"].isoformat(),
-                        "shift_ends_at": shift_row["ends_at"].isoformat(),
-                        "shift_status": shift_row["status"],
-                        "shift_kind": shift_row["kind"],
-                        "location_id": str(shift_row["location_id"]) if shift_row["location_id"] else None,
-                        **(audit_details or {}),
-                    })
+    deleted = int(status.split()[-1])
+    if deleted and write_audit:
+        await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
+                        "assignment.delete", removal_audit_details(shift_row, employee_id, audit_details))
+    return deleted
 
 
 async def retime_shift_core(

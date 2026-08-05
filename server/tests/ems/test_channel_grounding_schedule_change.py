@@ -82,3 +82,47 @@ class TestGates:
         result = _run(_call(features=_features(), args={"kind": "reassign"}))
         assert result["proposal_id"] is None
         assert "enough" in result["text"].lower() or "which" in result["text"].lower()
+
+
+class TestToolArgsToSentence:
+    """`original_content` is what `compose_clarify_followup` (schedule_chat.
+    py) feeds back to Stage A's Gemini re-parse verbatim if a clarify round
+    follows — it must carry the real names/dates the model already
+    extracted, not the old "[via ask] {kind} request" placeholder that
+    re-parsed against nothing and looped."""
+
+    def test_create_carries_label_date_and_time(self):
+        text = channel_grounding._tool_args_to_sentence("create", {
+            "label": "opener", "date": "2026-08-12",
+            "start_time": "08:00", "end_time": "16:00",
+        })
+        assert "opener" in text and "2026-08-12" in text and "08:00" in text and "16:00" in text
+
+    def test_reassign_carries_both_names_and_date(self):
+        text = channel_grounding._tool_args_to_sentence("reassign", {
+            "target_employee_name": "Cara", "to_employee_name": "Casey",
+            "target_date": "2026-08-12", "target_role_hint": "opener",
+        })
+        assert "Cara" in text and "Casey" in text and "2026-08-12" in text and "opener" in text
+
+    def test_swap_carries_both_shifts(self):
+        text = channel_grounding._tool_args_to_sentence("swap", {
+            "target_employee_name": "Cara", "target_date": "2026-08-12",
+            "second_employee_name": "Casey", "second_date": "2026-08-13",
+        })
+        assert "Cara" in text and "Casey" in text
+        assert "2026-08-12" in text and "2026-08-13" in text
+
+    def test_retime_carries_the_new_window(self):
+        text = channel_grounding._tool_args_to_sentence("retime", {
+            "target_employee_name": "Cara", "target_date": "2026-08-12",
+            "new_start_time": "13:00", "new_end_time": "21:00",
+        })
+        assert "Cara" in text and "13:00" in text and "21:00" in text
+
+    def test_no_longer_a_bare_placeholder(self):
+        text = channel_grounding._tool_args_to_sentence("unassign", {
+            "target_employee_name": "Dana", "target_date": "2026-08-12",
+        })
+        assert text != "[via ask] unassign request"
+        assert "Dana" in text

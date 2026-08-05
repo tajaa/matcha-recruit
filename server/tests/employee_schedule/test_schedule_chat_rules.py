@@ -16,6 +16,7 @@ from app.matcha.services.scheduling.schedule_chat_rules import (
     match_location,
     match_template,
     parse_confirm_reply,
+    parse_time_hint,
     rank_candidates,
     resolve_clarify_answer,
     resolve_dates,
@@ -341,3 +342,27 @@ class TestApplyChannelDefaultLocation:
     def test_uuid_vs_str_id_comparison(self):
         from uuid import UUID
         assert apply_channel_default_location([], "", UUID(LOC_B["id"]), [LOC_A, LOC_B]) == [LOC_B]
+
+
+class TestParseTimeHint:
+    """The "8am shift" disambiguator — narrows _resolve_shift_ref's
+    ambiguous-match listing by hour when the manager gave a time hint."""
+
+    @pytest.mark.parametrize("hint,expect", [
+        ("8am", (8, 0)),
+        ("8 am", (8, 0)),
+        ("12am", (0, 0)),
+        ("12pm", (12, 0)),
+        ("8:30pm", (20, 30)),
+        ("8:30 PM", (20, 30)),
+        ("08:00", (8, 0)),
+        ("20:00", (20, 0)),
+    ])
+    def test_parses_unambiguous_forms(self, hint, expect):
+        result = parse_time_hint(hint)
+        assert result is not None
+        assert (result.hour, result.minute) == expect
+
+    @pytest.mark.parametrize("hint", [None, "", "8", "morning", "the opener", "13am"])
+    def test_ambiguous_or_empty_returns_none(self, hint):
+        assert parse_time_hint(hint) is None

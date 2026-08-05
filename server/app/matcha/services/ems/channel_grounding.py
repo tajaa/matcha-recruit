@@ -455,7 +455,7 @@ async def run_schedule_change(
             build = await schedule_chat.build_proposal(
                 conn, company_id=company_id, channel_id=channel_id, source_message_id=None,
                 created_by=asker_user_id, parsed=parsed, today=today,
-                original_content=f"[via ask] {args.get('label') or 'shift'} request",
+                original_content=_tool_args_to_sentence("create", args),
             )
         else:
             edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
@@ -466,7 +466,7 @@ async def run_schedule_change(
             build = await schedule_chat.build_edit_proposal(
                 conn, company_id=company_id, channel_id=channel_id, source_message_id=None,
                 created_by=asker_user_id, parsed=parsed, today=today,
-                original_content=f"[via ask] {kind} request",
+                original_content=_tool_args_to_sentence(kind, args),
             )
     except Exception:
         logger.exception("channel_grounding: schedule change failed for company %s", company_id)
@@ -485,6 +485,53 @@ def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
         "role": args.get("role"), "count": args.get("count") or 1,
         "employee_name_hints": [n for n in (args.get("employee_names") or []) if n],
     }
+
+
+def _tool_args_to_sentence(kind: str, args: dict[str, Any]) -> str:
+    """Reconstruct a plain-English version of the model's structured tool
+    call — this becomes the staged proposal's `original_content`, which
+    `compose_clarify_followup` (schedule_chat.py) feeds BACK to Stage A's
+    Gemini re-parse verbatim if a clarify round follows. The placeholder
+    this replaced ("[via ask] {kind} request") carried none of the names/
+    dates the model already extracted, so a clarify answer re-parsed
+    against nothing and looped. Every field here came from the SAME tool
+    call args a build_proposal/build_edit_proposal call already trusts, so
+    restating them in prose adds no new trust surface."""
+    parts = [f"[via ask] {kind}"]
+    if kind == "create":
+        parts.append(str(args.get("label") or args.get("role") or "shift"))
+        if args.get("date") or args.get("target_date"):
+            parts.append(f"on {args.get('date') or args.get('target_date')}")
+        if args.get("start_time") or args.get("end_time"):
+            parts.append(f"{args.get('start_time') or '?'}-{args.get('end_time') or '?'}")
+        if args.get("employee_names"):
+            parts.append("for " + ", ".join(n for n in args["employee_names"] if n))
+        return " ".join(parts)
+
+    target = str(args.get("target_employee_name") or "someone").strip()
+    parts.append(f"{target}'s shift")
+    if args.get("target_date"):
+        parts.append(f"on {args['target_date']}")
+    if args.get("target_role_hint"):
+        parts.append(f"({args['target_role_hint']})")
+    if args.get("target_time_hint"):
+        parts.append(f"around {args['target_time_hint']}")
+    if kind in ("reassign", "assign") and args.get("to_employee_name"):
+        parts.append(f"to {args['to_employee_name']}")
+    if kind == "swap":
+        parts.append(f"with {args.get('second_employee_name') or 'the other shift'}")
+        if args.get("second_date"):
+            parts.append(f"on {args['second_date']}")
+        if args.get("second_role_hint"):
+            parts.append(f"({args['second_role_hint']})")
+    if kind == "retime":
+        if args.get("new_date"):
+            parts.append(f"to {args['new_date']}")
+        if args.get("new_start_time") or args.get("new_end_time"):
+            parts.append(f"{args.get('new_start_time') or '?'}-{args.get('new_end_time') or '?'}")
+        if args.get("shift_by_minutes"):
+            parts.append(f"({int(args['shift_by_minutes']):+d} minutes)")
+    return " ".join(parts)
 
 
 def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any]:

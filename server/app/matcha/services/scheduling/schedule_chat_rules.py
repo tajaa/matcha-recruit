@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from typing import Literal, Optional, Union
 from uuid import UUID
 
@@ -435,3 +435,43 @@ def parse_confirm_reply(text: str) -> Literal["confirm", "cancel", "other"]:
     if _CONFIRM_RE.match(t):
         return "confirm"
     return "other"
+
+
+# ── Shift-edit time-hint parsing ─────────────────────────────────────────
+
+_TIME_HINT_RE = re.compile(
+    r"^(?P<hour>[01]?\d|2[0-3])(?::(?P<minute>[0-5]\d))?\s*(?P<ampm>am|pm)?$",
+    re.IGNORECASE,
+)
+
+
+def parse_time_hint(hint: Optional[str]) -> Optional[time]:
+    """Best-effort clock time out of `target_time_hint`'s free-text value
+    ("8am", "8:30pm", "08:00", "20:00") — unlike `_coerce_time` in
+    schedule_chat.py this ISN'T restricted to strict 24h "HH:MM", since the
+    model is asked for a human hint, not a normalized field. Returns None
+    on anything ambiguous (bare "8" with no am/pm and no way to tell if
+    it's 24h, "morning", empty) rather than guessing — a caller uses this
+    only to narrow an already-ambiguous shift match, never to schedule
+    anything, so a missed parse just falls back to the existing listing."""
+    if not hint:
+        return None
+    m = _TIME_HINT_RE.match(hint.strip())
+    if not m:
+        return None
+    hour = int(m.group("hour"))
+    has_minute = m.group("minute") is not None
+    minute = int(m.group("minute") or 0)
+    ampm = (m.group("ampm") or "").lower()
+    if ampm:
+        if not (1 <= hour <= 12):
+            return None
+        if ampm == "am":
+            hour = 0 if hour == 12 else hour
+        else:
+            hour = hour if hour == 12 else hour + 12
+    elif has_minute or hour > 12:
+        pass  # unambiguous 24h — either an explicit "HH:MM" or a bare hour > 12
+    else:
+        return None  # bare "8" — no am/pm, no minute, no way to tell
+    return time(hour, minute)

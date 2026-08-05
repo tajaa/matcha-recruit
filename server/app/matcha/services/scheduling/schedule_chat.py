@@ -52,6 +52,7 @@ from .schedule_chat_rules import (
     build_adhoc_spec,
     match_location,
     match_template,
+    parse_time_hint,
     rank_candidates,
     resolve_dates,
     resolve_week,
@@ -64,7 +65,8 @@ from .schedule_rules import (
 from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _week_hours, check_shift_compliance
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
-    find_conflicts, log_audit, remove_assignment_core, retime_shift_core,
+    find_conflicts, log_audit, remove_assignment_core, removal_audit_details,
+    restore_assignment_raw, retime_shift_core,
 )
 
 logger = logging.getLogger(__name__)
@@ -845,6 +847,15 @@ async def _resolve_shift_ref(
     if not rows:
         return {"none": "couldn't find a matching shift"}
     if len(rows) > 1:
+        hint_time = parse_time_hint(ref.get("target_time_hint"))
+        if hint_time is not None:
+            # "the 8am shift" — narrow same-day/same-role candidates by
+            # start hour before falling back to the pickable listing.
+            narrowed = [r for r in rows if r["starts_at"].time().hour == hint_time.hour]
+            if len(narrowed) == 1:
+                return {"shift": dict(narrowed[0])}
+            if narrowed:
+                rows = narrowed
         return {"ambiguous": rows}
     return {"shift": dict(rows[0])}
 
@@ -1214,7 +1225,16 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
     proposal may be minutes or hours old) and dropped with the violation
     quoted rather than failing the whole batch. The phase split is what
     makes a same-shift-time swap correct without dedicated swap code: by
-    the time op 2's conflict check runs, op 1's removal already happened."""
+    the time op 2's conflict check runs, op 1's removal already happened.
+
+    Phase-1 removals for `unassign`/`reassign` are staged with
+    `write_audit=False` and the assignment row saved in `removed[idx]`.
+    Phase 2 then either commits the deferred `assignment.delete` audit row
+    (the op went on to succeed) or undoes the removal with
+    `restore_assignment_raw` (the op was refused) — so a refused reassign
+    never leaves the shift understaffed, and a refusal never emits the
+    delete/create audit pair `fair_workweek.RELEVANT_ACTIONS` would
+    otherwise double-count as churn."""
     proposal = proposal_row["proposal"]
     if isinstance(proposal, str):
         proposal = json.loads(proposal)
@@ -1222,13 +1242,27 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
     ops = proposal["ops"]
 
     results: list[dict] = []
-    audit_shift_ids: list[UUID] = []
+    # For kind='edit' proposals this holds shifts TOUCHED by the confirm,
+    # not created ones — the column is shared with the create-flow, where
+    # it does mean newly created shift ids.
+    affected_shift_ids: list[UUID] = []
     _details = lambda: {"source": "huume_chat_edit", "proposal_id": str(proposal_row["id"])}  # noqa: E731
 
+    async def _restore_if_removed(idx: int) -> None:
+        info = removed.get(idx)
+        if info and info["deleted"] and info["assignment_row"] is not None:
+            await restore_assignment_raw(
+                conn, company_id, shift_id=info["shift_row"]["id"],
+                employee_id=info["employee_id"],
+                assigned_by=info["assignment_row"]["assigned_by"],
+            )
+
     async with conn.transaction():
-        for op in ops:
+        removed: dict[int, dict] = {}
+        for idx, op in enumerate(ops):
             if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):
                 shift_id = UUID(op["shift_id"])
+                employee_id = UUID(op["from_employee_id"])
                 shift_row = await conn.fetchrow(
                     "SELECT id, starts_at, ends_at, status, kind, location_id "
                     "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
@@ -1236,24 +1270,32 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                 )
                 if shift_row is None or shift_row["status"] == "cancelled":
                     continue  # phase 2 reports the failure for this op
-                await remove_assignment_core(
-                    conn, company_id, shift_id=shift_id,
-                    employee_id=UUID(op["from_employee_id"]), actor_user_id=confirmed_by,
-                    shift_row=shift_row, audit_details=_details(),
+                assignment_row = await conn.fetchrow(
+                    "SELECT * FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
+                    shift_id, employee_id,
                 )
-                audit_shift_ids.append(shift_id)
+                deleted = await remove_assignment_core(
+                    conn, company_id, shift_id=shift_id,
+                    employee_id=employee_id, actor_user_id=confirmed_by,
+                    shift_row=shift_row, audit_details=_details(), write_audit=False,
+                )
+                removed[idx] = {
+                    "deleted": deleted, "shift_row": shift_row,
+                    "employee_id": employee_id, "assignment_row": assignment_row,
+                }
 
-        for op in ops:
+        for idx, op in enumerate(ops):
             shift_id = UUID(op["shift_id"])
             shift_row = await conn.fetchrow(
                 """
                 SELECT id, starts_at, ends_at, status, role, location_id, break_minutes,
-                       kind, training_requirement_id, published_at
+                       kind, training_requirement_id, published_at, required_staff
                 FROM schedule_shifts WHERE id = $1 AND company_id = $2
                 """,
                 shift_id, company_id,
             )
             if shift_row is None:
+                await _restore_if_removed(idx)
                 results.append({**op, "ok": False, "reason": "that shift no longer exists"})
                 continue
 
@@ -1266,11 +1308,23 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                     actor_user_id=confirmed_by, audit_details=_details(),
                 )
                 results.append({**op, "ok": True})
-                audit_shift_ids.append(shift_id)
+                affected_shift_ids.append(shift_id)
                 continue
 
             if op["kind"] == "unassign":
-                results.append({**op, "ok": True})  # write happened in phase 1
+                info = removed.get(idx)
+                if info is None:
+                    results.append({**op, "ok": False, "reason": "that shift was cancelled or no longer exists"})
+                    continue
+                if info["deleted"] == 0:
+                    results.append({**op, "ok": False, "reason": "they weren't on that shift"})
+                    continue
+                await log_audit(
+                    conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
+                    removal_audit_details(info["shift_row"], info["employee_id"], _details()),
+                )
+                results.append({**op, "ok": True})
+                affected_shift_ids.append(shift_id)
                 continue
 
             if op["kind"] == "swap":
@@ -1278,6 +1332,9 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                 # Self-contained (both removals + both additions here) rather
                 # than split across phases, because which people move is only
                 # known by reading BOTH shifts' current rosters live.
+                # Conflicts are checked BEFORE any write (neither side has
+                # been removed yet), so a refused swap costs zero writes —
+                # no remove-then-restore round trip padding the audit log.
                 other_row = await conn.fetchrow(
                     """
                     SELECT id, starts_at, ends_at, status, role, location_id, break_minutes,
@@ -1296,8 +1353,23 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                 if not a_ids and not b_ids:
                     results.append({**op, "ok": False, "reason": "neither shift has anyone on it"})
                     continue
-                # Remove both sides FIRST so each person's conflict re-check
-                # below can't see the shift they're leaving.
+                # Neither side has been removed yet, so each person's OWN
+                # shift(s) must be excluded from their own conflict check —
+                # otherwise the shift they're about to leave reads as a
+                # double-booking against the one they're moving to.
+                own_shift_ids = {str(shift_id), str(other_row["id"])}
+                blocked: Optional[str] = None
+                for eid, dest in [(e, other_row) for e in a_ids] + [(e, shift_row) for e in b_ids]:
+                    conflicts = await find_conflicts(
+                        conn, company_id, eid, dest["starts_at"], dest["ends_at"],
+                        exclude_shift_id=dest["id"])
+                    conflicts = [c for c in conflicts if c["shift_id"] not in own_shift_ids]
+                    if conflicts:
+                        blocked = "it would double-book someone"
+                        break
+                if blocked:
+                    results.append({**op, "ok": False, "reason": blocked})
+                    continue
                 for eid in a_ids:
                     await remove_assignment_core(
                         conn, company_id, shift_id=shift_id, employee_id=eid,
@@ -1306,27 +1378,6 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                     await remove_assignment_core(
                         conn, company_id, shift_id=other_row["id"], employee_id=eid,
                         actor_user_id=confirmed_by, shift_row=other_row, audit_details=_details())
-                blocked: Optional[str] = None
-                for eid, dest in [(e, other_row) for e in a_ids] + [(e, shift_row) for e in b_ids]:
-                    conflicts = await find_conflicts(
-                        conn, company_id, eid, dest["starts_at"], dest["ends_at"],
-                        exclude_shift_id=dest["id"])
-                    if conflicts:
-                        blocked = "it would double-book someone"
-                        break
-                if blocked:
-                    # Put everyone back — a partially-applied swap is worse
-                    # than a refused one.
-                    for eid in a_ids:
-                        await apply_assignment_core(
-                            conn, company_id, shift_row=shift_row, employee_id=eid,
-                            actor_user_id=confirmed_by, audit_details=_details())
-                    for eid in b_ids:
-                        await apply_assignment_core(
-                            conn, company_id, shift_row=other_row, employee_id=eid,
-                            actor_user_id=confirmed_by, audit_details=_details())
-                    results.append({**op, "ok": False, "reason": blocked})
-                    continue
                 for eid in a_ids:
                     await apply_assignment_core(
                         conn, company_id, shift_row=other_row, employee_id=eid,
@@ -1336,10 +1387,11 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                         conn, company_id, shift_row=shift_row, employee_id=eid,
                         actor_user_id=confirmed_by, audit_details=_details())
                 results.append({**op, "ok": True})
-                audit_shift_ids.extend([shift_id, other_row["id"]])
+                affected_shift_ids.extend([shift_id, other_row["id"]])
                 continue
 
             if shift_row["status"] == "cancelled":
+                await _restore_if_removed(idx)
                 results.append({**op, "ok": False, "reason": "that shift was cancelled"})
                 continue
 
@@ -1375,17 +1427,27 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                     actor_user_id=confirmed_by, audit_details=_details(),
                 )
                 results.append({**op, "ok": True})
-                audit_shift_ids.append(shift_id)
+                affected_shift_ids.append(shift_id)
                 continue
 
-            # reassign / assign — add the new person, re-checked live
+            # reassign / assign — add the new person, re-checked live. A
+            # refusal past this point must undo any phase-1 removal
+            # (reassign only — a plain `assign` never appears in `removed`)
+            # so the shift isn't left short a person over a failed swap.
             to_id = UUID(op["to_employee_id"])
             conflicts = await find_conflicts(
                 conn, company_id, to_id, shift_row["starts_at"], shift_row["ends_at"],
                 exclude_shift_id=shift_id,
             )
             if conflicts:
+                await _restore_if_removed(idx)
                 results.append({**op, "ok": False, "reason": "they picked up a conflicting shift in the meantime"})
+                continue
+            assignee_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)
+            if assignee_count >= (shift_row["required_staff"] or 1):
+                await _restore_if_removed(idx)
+                results.append({**op, "ok": False, "reason": "that shift is already fully staffed"})
                 continue
             avail_map = await fetch_availability(conn, company_id, [to_id])
             avail = availability_violations(avail_map.get(to_id, {}), shift_row["starts_at"], shift_row["ends_at"])
@@ -1399,15 +1461,22 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
             )
             block = next((v for v in violations if v.get("severity") == "block"), None)
             if block or avail:
+                await _restore_if_removed(idx)
                 reason = block["message"] if block else "this is outside their logged availability"
                 results.append({**op, "ok": False, "reason": reason})
                 continue
+            info = removed.get(idx)
+            if info and info["deleted"]:
+                await log_audit(
+                    conn, company_id, "assignment", shift_id, confirmed_by, "assignment.delete",
+                    removal_audit_details(info["shift_row"], info["employee_id"], _details()),
+                )
             await apply_assignment_core(
                 conn, company_id, shift_row=shift_row, employee_id=to_id,
                 actor_user_id=confirmed_by, audit_details=_details(),
             )
             results.append({**op, "ok": True})
-            audit_shift_ids.append(shift_id)
+            affected_shift_ids.append(shift_id)
 
         await conn.execute(
             """
@@ -1416,7 +1485,7 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
                 confirmed_at = NOW(), updated_at = NOW()
             WHERE id = $3
             """,
-            list(dict.fromkeys(audit_shift_ids)), confirmed_by, proposal_row["id"],
+            list(dict.fromkeys(affected_shift_ids)), confirmed_by, proposal_row["id"],
         )
         await log_audit(
             conn, company_id, "shift", None, confirmed_by, "schedule_chat.edit_confirm",

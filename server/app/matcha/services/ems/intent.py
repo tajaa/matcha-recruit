@@ -118,9 +118,18 @@ _RECALL_PATTERNS = (
 # the interrogative doesn't start the message. Still start-anchored (via
 # `.match`), so a genuinely long report with a rhetorical question buried
 # in it doesn't retroactively become ASK.
+#
+# The lead-in alternative is deliberately NARROWER than the `^`-anchored
+# one — only the bot-directed request forms ("can/could/would/will you"),
+# not the full interrogative list. A full-width lead-in swallowed genuine
+# incident narration: "Dana slipped on the wet floor by the walk-in, is she
+# okay?" would otherwise classify ASK off the "is" and never LOG the fall.
+# "…, can you put someone else on it?" still matches — it's a request, not
+# a report — while "…, is she okay?" now doesn't.
 _INTERROGATIVE_LEAD = re.compile(
-    r"(?:^|^.{0,60}?,\s*)(?:what|when|who|whom|whose|where|why|how|which|is|are|was|were|"
-    r"do|does|did|has|have|had|can|could|should|would|will|any)\b",
+    r"(?:^(?:what|when|who|whom|whose|where|why|how|which|is|are|was|were|"
+    r"do|does|did|has|have|had|can|could|should|would|will|any)\b"
+    r"|^.{0,60}?,\s*(?:can|could|would|will)\s+(?:you|u)\b)",
     re.IGNORECASE,
 )
 

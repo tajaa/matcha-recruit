@@ -175,6 +175,35 @@ class TestOpsGroundingAsks:
         assert classify_intent(message) == LOG
 
 
+class TestInterrogativeLeadNarrowedToRequestVerbs:
+    """`_INTERROGATIVE_LEAD`'s lead-in-clause alternative (a short throwaway
+    clause before the actual question) only counts as ASK when the lead-in
+    is itself a bot-directed request ("can/could/would/will you") — not any
+    interrogative word. A live-prod near-miss: a full-width lead-in would
+    have made an injury report ending in a question read as ASK instead of
+    LOG, because "is" is on the interrogative list too."""
+
+    @pytest.mark.parametrize("message", [
+        "@huume Dana slipped on the wet floor by the walk-in, is she okay?",
+        "@huume the fryer caught fire, has anyone called the fire department?",
+        "@huume someone got hurt on the ladder, did we call it in yet?",
+    ])
+    def test_incident_narration_with_trailing_question_still_logs(self, message):
+        assert classify_intent(message) == LOG
+
+    def test_request_lead_in_still_asks(self):
+        # The one case the widening was added for — a request, not a
+        # report — must keep working.
+        assert classify_intent(
+            "@huume Dana called out for Wednesday, can you put someone else on it?"
+        ) == ASK
+
+    def test_bare_leading_interrogative_is_unaffected(self):
+        # Regression guard: the `^`-anchored alternative (question starts
+        # the message) keeps the full interrogative word list.
+        assert classify_intent("@huume is there anything on file about the fryer?") == ASK
+
+
 class TestHelp:
     @pytest.mark.parametrize("message", [
         "@huume help",

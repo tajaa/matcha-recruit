@@ -1,10 +1,15 @@
 """Attachment-driven receipt ingest — the pure trigger logic.
 
-A CSV/PDF attachment is unambiguously a document, so it's tried regardless
-of wording. A photo is ambiguous (could be an incident photo of a burst
-pipe), so it's only tried when the message text itself reads as a
-delivery/invoice mention. `_pick_receipt_attachment` is the whole trigger
-decision, pure and DB-free.
+A CSV/PDF attachment is tried on a bare mention (nothing else said) or when
+the message text reads as a delivery/invoice mention — same wording bar a
+photo needs. Wording-less non-bare messages ("@huume attaching the incident
+report from this morning" + a PDF) must NOT be claimed here — that's an
+incident report, and stealing it here means it never reaches
+`classify_intent`/LOG and its OSHA dual-write. A photo is always ambiguous
+(could be an incident photo of a burst pipe), so it's only tried when the
+message text itself reads as a delivery/invoice mention, bare mention or
+not. `_pick_receipt_attachment` is the whole trigger decision, pure and
+DB-free.
 
     cd server && ./venv/bin/python -m pytest tests/ems/test_receipt_attachment_dispatch.py -q
 """
@@ -24,13 +29,29 @@ class TestPickReceiptAttachment:
         assert _pick_receipt_attachment(None, "@huume here's the invoice") is None
         assert _pick_receipt_attachment([], "@huume here's the invoice") is None
 
-    def test_csv_triggers_regardless_of_wording(self):
+    def test_csv_on_a_bare_mention_still_triggers(self):
         att = _att("gloves.csv")
         assert _pick_receipt_attachment([att], "@huume") == att
 
-    def test_pdf_triggers_regardless_of_wording(self):
+    def test_pdf_on_a_bare_mention_still_triggers(self):
         att = _att("packing-slip.pdf")
         assert _pick_receipt_attachment([att], "@huume") == att
+
+    def test_csv_with_receipt_wording_triggers(self):
+        att = _att("gloves.csv")
+        assert _pick_receipt_attachment([att], "@huume here's the invoice") == att
+
+    def test_pdf_with_unrelated_wording_is_not_picked(self):
+        # A PDF attached to an incident report must NOT be swallowed as a
+        # receipt — it needs to reach classify_intent/LOG and the OSHA
+        # dual-write, not a "couldn't read any line items" pill.
+        att = _att("report.pdf")
+        assert _pick_receipt_attachment(
+            [att], "@huume attaching the incident report from this morning") is None
+
+    def test_csv_with_unrelated_wording_is_not_picked(self):
+        att = _att("data.csv")
+        assert _pick_receipt_attachment([att], "@huume here's the spreadsheet you asked for") is None
 
     def test_photo_without_receipt_wording_is_not_picked(self):
         # A photo attached to "this pipe burst" must NOT hijack an incident

@@ -449,3 +449,27 @@ class TestStageInventoryOrderStoreDeactivated:
         )))
         assert called == []
         assert result["pending_order_id"] is None
+
+
+class TestRecentMessagesLiveInUserTurnNotSystemPrompt:
+    """Untrusted channel content sits in the model's USER turn, never the
+    system instruction — the system prompt holds the admin-only
+    propose_schedule_change tool, and any channel member can author these
+    messages, so they must not sit somewhere a model over-weights as
+    operator instructions."""
+
+    def test_recent_block_is_in_the_user_turn_not_the_system_prompt(self, monkeypatch):
+        client = _install(monkeypatch, responses=[_Resp(parts=[_Part(text="ok")], text="ok")])
+        _run(channel_agent.answer_channel_question(**_base_kwargs(
+            recent_block="Casey: can you cover Friday for me?",
+        )))
+        call = client.calls[0]
+        assert "Casey: can you cover Friday for me?" not in call["config"].system_instruction
+        user_text = call["contents"][0].parts[0].text
+        assert "Casey: can you cover Friday for me?" in user_text
+        assert "RECENT CHANNEL MESSAGES" in user_text
+
+    def test_no_recent_block_leaves_the_user_turn_as_just_the_question(self, monkeypatch):
+        client = _install(monkeypatch, responses=[_Resp(parts=[_Part(text="ok")], text="ok")])
+        _run(channel_agent.answer_channel_question(**_base_kwargs(question="what's going on")))
+        assert client.calls[0]["contents"][0].parts[0].text == "what's going on"
