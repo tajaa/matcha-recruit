@@ -147,12 +147,16 @@ export default function Intake() {
             <Link to="/login" className="mt-3 inline-block font-semibold text-tu-accent hover:underline">Create a Tell-Us account →</Link>
           </div>
         )}
-        {result.public_review && result.publish_at && (
+        {result.public_review && result.publish_at ? (
           <p className="mt-3 text-sm text-tu-dim">
             Your review goes live in {hoursFromNow(result.publish_at)} hours — the brand can reach out to make
             things right first. Edit or withdraw it any time from My Reviews.
           </p>
-        )}
+        ) : loggedIn ? (
+          <p className="mt-3 text-sm text-tu-dim">
+            This was sent privately. The brand may still message you directly about it — check Messages.
+          </p>
+        ) : null}
         {result.report_number && <p className="mt-4 text-xs text-tu-faint">Reference: {result.report_number}</p>}
       </div>
     )
@@ -200,6 +204,12 @@ export default function Intake() {
               Public reviews need an account —{' '}
               <Link to="/login" className="text-tu-accent hover:underline">sign in</Link>{' '}
               or this will be sent privately to the brand instead.
+            </p>
+          )}
+          {loggedIn && (
+            <p className="text-xs text-tu-faint">
+              Signed in, so the brand can message you directly about this feedback — public or
+              private — to make things right. You can block a conversation any time from Messages.
             </p>
           )}
 

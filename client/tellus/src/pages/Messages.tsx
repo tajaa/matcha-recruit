@@ -4,7 +4,7 @@ import { tellusApi } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Card, Chip, Empty, ErrorText, Spinner } from '../components/ui'
 import { DmThreadPanel } from '../components/DmThreadPanel'
-import type { DmThread } from '../api/types'
+import type { DmThread, TellusNotification } from '../api/types'
 
 function hoursLeft(publishAt: string): number {
   return Math.max(0, Math.ceil((Date.parse(publishAt) - Date.now()) / 3_600_000))
@@ -36,6 +36,23 @@ export default function Messages() {
       .finally(() => setLoading(false))
   }, [])
 
+  // Opening a thread here reads its messages (server marks them read), but that
+  // doesn't clear the `dm_message` bell notification or this row's stale chip —
+  // both were only ever cleared via the bell's own openNotifications() path.
+  async function openThread(id: string) {
+    const opening = openId !== id
+    setOpenId((cur) => (cur === id ? null : id))
+    if (!opening) return
+    setThreads((ts) => ts.map((t) => (t.id === id ? { ...t, unread_count: 0 } : t)))
+    try {
+      const notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
+      const relevant = notes.filter((n) => n.kind === 'dm_message' && n.reference_id === id)
+      await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
+    } catch {
+      // best-effort — bell badge catches up on its next 60s poll
+    }
+  }
+
   if (loading) return <Spinner />
   if (err) return <ErrorText>{err}</ErrorText>
 
@@ -57,7 +74,7 @@ export default function Messages() {
           {threads.map((t) => (
             <Card key={t.id}>
               <button className="flex w-full items-start justify-between gap-3 text-left"
-                onClick={() => setOpenId((id) => (id === t.id ? null : t.id))}>
+                onClick={() => openThread(t.id)}>
                 <div>
                   <div className="flex flex-wrap items-center gap-1.5">
                     <StateChip t={t} />

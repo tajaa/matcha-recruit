@@ -75,9 +75,11 @@ export function Layout({ children }: { children: ReactNode }) {
     // over the default feedback/reviews surface — that's where the actual
     // unread thing lives.
     let notes: TellusNotification[] = []
+    let fetchedNotes = true
     try {
       notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
     } catch {
+      fetchedNotes = false
       // best-effort — fall through to the default surface
     }
     const hasDm = notes.some((n) => n.kind === 'dm_message')
@@ -87,7 +89,9 @@ export function Layout({ children }: { children: ReactNode }) {
 
     // Only clear notifications relevant to the surface we're navigating to —
     // a blanket mark-all-read here would silently drop unrelated points/
-    // redemption notices the user never saw.
+    // redemption notices the user never saw. Skip entirely if the fetch above
+    // failed — `notes` is empty in that case, not actually zero unread.
+    if (!fetchedNotes) return
     try {
       const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind))
       await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
