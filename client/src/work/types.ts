@@ -527,6 +527,15 @@ export interface HuumeOffer {
   signed_name?: string | null
 }
 
+/** One row from `GET /threads/{id}/huume/offers` — every offer letter ever
+ * drafted from this thread (`offer_letters.source_thread_id`), not just the
+ * latest one `current_state.huume_offer` tracks. */
+export interface HuumeThreadOffer {
+  offer_id: string
+  candidate_name: string
+  status: string
+}
+
 export interface HuumePlanStep {
   key: string
   label: string

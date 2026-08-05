@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { FileSignature, PlayCircle, BookOpen, Scale, Send, X } from 'lucide-react'
-import type { HuumeOffer, HuumePlan, HuumeRecordRef } from '../../../types'
+import type { HuumeOffer, HuumePlan, HuumeRecordRef, HuumeThreadOffer } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
 import { actionIcon, bannerLabel } from '../../../utils/huumeActionMeta'
-import { closeHuumeRecord } from '../../../api/matchaWork/huume'
+import { closeHuumeRecord, listThreadOffers } from '../../../api/matchaWork/huume'
 import { useToast } from '../../../../components/ui'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
@@ -42,7 +42,7 @@ interface HuumePanelProps {
 
 function tabLabel(a: HuumeArtifact): { icon: React.ReactNode; label: string } {
   switch (a.kind) {
-    case 'offer': return { icon: <FileSignature size={12} />, label: 'Offer' }
+    case 'offer': return { icon: <FileSignature size={12} />, label: a.label ?? 'Offer' }
     case 'plan': return { icon: <PlayCircle size={12} />, label: `Plan${a.plan.employee.first_name ? ` — ${a.plan.employee.first_name}` : ''}` }
     case 'action': return { icon: actionIcon(a.action.type, 12), label: a.action.type.replace(/_/g, ' ') }
     case 'handbook': return { icon: <BookOpen size={12} />, label: `Handbook (${a.pendingDrafts.length})` }
@@ -65,9 +65,34 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
 export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss, onReviewInChat }: HuumePanelProps) {
   const { toast } = useToast()
   const huume = getHuumeState(state)
-  const artifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
+  const baseArtifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [closingRecordKey, setClosingRecordKey] = useState<string | null>(null)
+
+  // Every offer ever drafted from this thread, not just the latest —
+  // `current_state.huume_offer` is a single slot agent.py overwrites on each
+  // draft, so without this a second candidate's draft would make the first
+  // one's tab unreachable. Refetched on a new draft (huume.offer.offer_id
+  // changing) so a just-drafted offer picks up its candidate-name label.
+  const [threadOffers, setThreadOffers] = useState<HuumeThreadOffer[]>([])
+  useEffect(() => {
+    let cancelled = false
+    listThreadOffers(threadId).then((res) => { if (!cancelled) setThreadOffers(res.offers) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [threadId, huume.offer?.offer_id])
+
+  const artifacts = useMemo(() => {
+    const labeled = baseArtifacts.map((a) => {
+      if (a.kind !== 'offer') return a
+      const match = threadOffers.find((o) => o.offer_id === a.offerId)
+      return match ? { ...a, label: `Offer — ${match.candidate_name}` } : a
+    })
+    const existingOfferIds = new Set(baseArtifacts.filter((a) => a.kind === 'offer').map((a) => a.offerId))
+    const extra: HuumeArtifact[] = threadOffers
+      .filter((o) => !existingOfferIds.has(o.offer_id))
+      .map((o) => ({ kind: 'offer' as const, key: `offer:${o.offer_id}`, offerId: o.offer_id, label: `Offer — ${o.candidate_name}` }))
+    return [...labeled, ...extra]
+  }, [baseArtifacts, threadOffers])
 
   // The most-recently-opened record wins focus (the whole point of "show it
   // to me" is that the panel jumps to it) — `merge_open_records` appends on

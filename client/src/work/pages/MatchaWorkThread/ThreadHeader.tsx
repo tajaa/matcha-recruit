@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Pencil, Check, X, Sun, Moon, MoreHorizontal } from 'lucide-react'
+import { ArrowLeft, Pencil, Check, X, Sun, Moon, MoreHorizontal, PanelRightOpen, PanelRightClose } from 'lucide-react'
 import ThreadCollaborators from '../../components/panels/ThreadCollaborators'
 import { formatTokens } from '../../components/panels/constants'
 import { formatDateTimePacific } from '../../../utils/dateFormat'
@@ -14,9 +14,14 @@ interface ThreadHeaderProps {
   th: ThreadTheme
   lm: boolean
   hasRightPanel: boolean
+  /** Whether the thread has Huume content worth a panel at all — gates
+   * whether the reopen/close toggle renders in the first place. */
+  huumePanelAvailable: boolean
+  huumePanelOpen: boolean
+  onToggleHuumePanel: () => void
 }
 
-export default function ThreadHeader({ c, th, lm, hasRightPanel }: ThreadHeaderProps) {
+export default function ThreadHeader({ c, th, lm, hasRightPanel, huumePanelAvailable, huumePanelOpen, onToggleHuumePanel }: ThreadHeaderProps) {
   const {
     base, editingTitle, titleDraft, setTitleDraft, handleTitleSave, setEditingTitle,
     thread, threadId, onlineUsers, mobileView, setMobileView,
@@ -96,6 +101,16 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel }: ThreadHeaderP
             Panel
           </button>
         </div>
+      )}
+
+      {huumePanelAvailable && (
+        <button
+          onClick={onToggleHuumePanel}
+          title={huumePanelOpen ? 'Hide Huume panel' : 'Show Huume panel — offers, records, and staged actions from this chat'}
+          className={`p-1.5 rounded-full transition-colors shrink-0 ${huumePanelOpen ? 'text-w-accent' : th.backArrow}`}
+        >
+          {huumePanelOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+        </button>
       )}
 
       <ToolsMenu c={c} />

@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.models.auth import CurrentUser
+from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, require_feature
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.huume import actions as huume_actions, record_view, store as huume_store
@@ -206,3 +207,34 @@ async def close_huume_record(
     except ValueError:
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"records": records}
+
+
+@router.get("/threads/{thread_id}/huume/offers")
+async def list_thread_offers(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Every offer letter ever drafted from this thread (offer_letters.
+    source_thread_id, set once and never repointed). `current_state.
+    huume_offer` only tracks the LATEST draft — agent.py overwrites it on
+    each `draft_offer_letter` call — so a second candidate drafted in the
+    same thread would otherwise make the first one's panel tab unreachable
+    once a new draft lands."""
+    thread, caller_company_id = await _get_owned_thread(thread_id, current_user)
+    company_id = thread["company_id"]
+    if caller_company_id != company_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, candidate_name, status FROM offer_letters
+               WHERE source_thread_id = $1 AND company_id = $2
+               ORDER BY created_at""",
+            thread_id, company_id,
+        )
+    return {
+        "offers": [
+            {"offer_id": str(r["id"]), "candidate_name": r["candidate_name"], "status": r["status"]}
+            for r in rows
+        ]
+    }

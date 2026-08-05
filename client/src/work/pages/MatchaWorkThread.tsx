@@ -53,9 +53,10 @@ export default function MatchaWorkThread() {
     ...deriveHuumeArtifacts(huume).map((a) => a.key),
     huume.records?.[huume.records.length - 1]?.opened_at ?? '',
   ].join('|')
-  const showHuumePanel = shouldShowHuumePanel({
+  const canShowHuumePanel = shouldShowHuumePanel({
     huumeMode: !!thread?.huume_mode, state: thread?.current_state, pdfUrl, agentMode,
-  }) && dismissedToken !== huumeToken
+  })
+  const showHuumePanel = canShowHuumePanel && dismissedToken !== huumeToken
   const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || showHuumePanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
@@ -88,7 +89,12 @@ export default function MatchaWorkThread() {
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
       <div className={`${mobileView === 'panel' && hasRightPanel ? 'hidden md:flex' : 'flex'} flex-col ${hasRightPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg} ${lm ? 'mw-light' : ''}`}>
-        <ThreadHeader c={c} th={th} lm={lm} hasRightPanel={hasRightPanel} />
+        <ThreadHeader
+          c={c} th={th} lm={lm} hasRightPanel={hasRightPanel}
+          huumePanelAvailable={canShowHuumePanel}
+          huumePanelOpen={showHuumePanel}
+          onToggleHuumePanel={() => setDismissedToken(showHuumePanel ? huumeToken : null)}
+        />
 
         <JurisdictionBar
           complianceMode={complianceMode}

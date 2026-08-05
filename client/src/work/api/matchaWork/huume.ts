@@ -1,5 +1,5 @@
 import { api } from '../../../api/client'
-import type { HuumePlan, HuumeRecordRef, HuumeRecordView } from '../../types'
+import type { HuumePlan, HuumeRecordRef, HuumeRecordView, HuumeThreadOffer } from '../../types'
 
 export function approveHuumePlan(threadId: string, offerId: string, stepKeys?: string[]) {
   return api.post<{ plan: HuumePlan; offer_id: string }>(`/matcha-work/threads/${threadId}/huume/plan/approve`, {
@@ -24,4 +24,8 @@ export function closeHuumeRecord(threadId: string, recordType: string, recordId:
   return api.delete<{ records: HuumeRecordRef[] }>(
     `/matcha-work/threads/${threadId}/huume/record?record_type=${encodeURIComponent(recordType)}&record_id=${encodeURIComponent(recordId)}`,
   )
+}
+
+export function listThreadOffers(threadId: string) {
+  return api.get<{ offers: HuumeThreadOffer[] }>(`/matcha-work/threads/${threadId}/huume/offers`)
 }

@@ -60,7 +60,7 @@ export function shouldShowHuumePanel(opts: HuumePanelGateOpts): boolean {
 // ──────────────────────────────────────────────────────────────────────
 
 export type HuumeArtifact =
-  | { kind: 'offer'; key: string; offerId: string }
+  | { kind: 'offer'; key: string; offerId: string; label?: string }
   | { kind: 'plan'; key: string; offerId: string; plan: HuumePlan }
   | { kind: 'action'; key: string; action: Exclude<HuumeAction, HuumeActionSendOffer> }
   | { kind: 'handbook'; key: string; sessionId: string; pendingDrafts: HuumeHandbook['pending_drafts'] }
