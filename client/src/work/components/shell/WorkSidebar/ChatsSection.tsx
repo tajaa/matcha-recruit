@@ -1,6 +1,7 @@
 import { Link, type NavigateFunction } from 'react-router-dom'
 import { MessageSquare, ChevronDown, Pencil, Plus, Users } from 'lucide-react'
 import type { MWThread } from '../../../types'
+import { formatDateTimePacific } from '../../../../utils/dateFormat'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
 
@@ -69,28 +70,31 @@ export default function ChatsSection({
             {visible.map((t) => (
               <div
                 key={t.id}
-                className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                className={`group w-full flex items-start gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                   isActive(`${base}/${t.id}`)
                     ? 'bg-w-surface2 text-white font-medium'
                     : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
                 }`}
               >
-                <MessageSquare size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
+                <MessageSquare size={14} className="text-w-dim shrink-0 mt-0.5" strokeWidth={1.6} />
                 {renaming?.type === 'thread' && renaming.id === t.id ? (
                   <RenameInput rename={rename} />
                 ) : (
                   <>
-                    <Link to={`${base}/${t.id}`} className="flex-1 min-w-0 text-left truncate">
-                      {t.title}
+                    <Link to={`${base}/${t.id}`} className="flex-1 min-w-0 text-left">
+                      <div className="truncate">{t.title}</div>
+                      <div className="truncate text-[10px] text-w-faint font-normal" title="Created (Pacific time)">
+                        {formatDateTimePacific(t.created_at)}
+                      </div>
                     </Link>
                     {t.collaborator_count > 0 && (
-                      <span title="Shared" className="shrink-0 text-w-faint">
+                      <span title="Shared" className="shrink-0 text-w-faint mt-0.5">
                         <Users size={11} />
                       </span>
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
-                      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
+                      className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all mt-0.5"
                       title="Rename"
                     >
                       <Pencil size={11} />
