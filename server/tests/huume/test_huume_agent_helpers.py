@@ -9,6 +9,8 @@ capped image-part attachment, and the onboarding plan builder carrying
 `employment_type` through from the offer.
 """
 
+from decimal import Decimal
+
 from google.genai import types
 
 from app.matcha.services.huume.agent import (
@@ -18,11 +20,32 @@ from app.matcha.services.huume.agent import (
     _STEP_PAYLOAD_CAP_CHARS,
     _StepRecorder,
     _cap_payload,
+    _json_safe,
     _rate_limit_disposition,
     _to_contents,
     is_sole_finish,
 )
 from app.matcha.services.huume.onboarding_skill import build_onboarding_plan
+
+
+class TestJsonSafe:
+    """Pins the Decimal fix: asyncpg returns NUMERIC columns (e.g.
+    inventory_items.current_quantity) as Decimal, and json.dumps has no
+    built-in handling for it (unlike date/UUID, no `default=str` fallback
+    saves it at the Gemini function-response boundary) — a raw Decimal
+    reaching that call crashes the WHOLE turn, not just one tool result."""
+
+    def test_decimal_becomes_float(self):
+        assert _json_safe(Decimal("24")) == 24.0
+        assert isinstance(_json_safe(Decimal("24")), float)
+
+    def test_decimal_inside_nested_dict_and_list(self):
+        value = {"items": [{"current_quantity": Decimal("46.5")}, {"current_quantity": None}]}
+        safe = _json_safe(value)
+        assert safe["items"][0]["current_quantity"] == 46.5
+        assert safe["items"][1]["current_quantity"] is None
+        import json
+        json.dumps(safe)  # must not raise
 
 
 class TestCapPayload:

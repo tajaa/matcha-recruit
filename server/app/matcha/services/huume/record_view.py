@@ -328,10 +328,14 @@ async def _model_inventory_items_batch(conn, company_id: UUID, rids: list[UUID])
     rows = await conn.fetch(
         """
         SELECT it.id, it.name, it.current_quantity, it.unit, bl.name AS location_name,
-               o.status AS order_status
+               o.id AS order_id, o.status AS order_status
         FROM inventory_items it
         LEFT JOIN business_locations bl ON bl.id = it.location_id
-        LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
+        LEFT JOIN LATERAL (
+            SELECT id, status FROM inventory_orders
+            WHERE item_id = it.id AND status IN ('queued', 'ordered')
+            ORDER BY created_at DESC, id DESC LIMIT 1
+        ) o ON TRUE
         WHERE it.id = ANY($1::uuid[]) AND it.company_id = $2
         """,
         rids, company_id,
@@ -345,6 +349,7 @@ async def _model_inventory_items_batch(conn, company_id: UUID, rids: list[UUID])
             "current_quantity": float(data["current_quantity"]) if data.get("current_quantity") is not None else None,
             "unit": data.get("unit"),
             "location": data.get("location_name"),
+            "order_id": str(data["order_id"]) if data.get("order_id") else None,
             "record_status": data.get("order_status") or "no open order",
         }
     return out

@@ -49,6 +49,57 @@ async def find_or_create_item(
     return dict(row)
 
 
+async def create_item_checked(
+    conn, *, company_id: UUID, name: str, unit: Optional[str] = None,
+    current_quantity=None, low_stock_threshold=None, location_id: Optional[UUID] = None,
+    created_by: Optional[UUID] = None,
+) -> dict:
+    """Shared item-create writer — REST route and the Huume chat tool both
+    call this. Raises ValueError("location not found") / ValueError("duplicate
+    item") for the caller to map onto its own error shape (HTTP 404/409,
+    a staged-action refusal, whatever)."""
+    if location_id is not None:
+        ok = await conn.fetchval(
+            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
+            "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
+            location_id, company_id,
+        )
+        if not ok:
+            raise ValueError("location not found")
+    normalized = normalize_name(name)
+    existing = await conn.fetchval(
+        "SELECT id FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 "
+        "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL",
+        company_id, normalized, location_id,
+    )
+    if existing:
+        raise ValueError("duplicate item")
+    row = await conn.fetchrow(
+        """
+        INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
+                                     low_stock_threshold, created_by, location_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+        """,
+        company_id, name, normalized, unit, current_quantity,
+        low_stock_threshold, created_by, location_id,
+    )
+    return dict(row)
+
+
+async def archive_item(conn, *, company_id: UUID, item_id: UUID) -> Optional[dict]:
+    """Idempotent-refusing archive — None means not found or already archived,
+    the caller decides how to phrase that."""
+    row = await conn.fetchrow(
+        """
+        UPDATE inventory_items SET archived_at = NOW(), updated_at = NOW()
+        WHERE id = $1 AND company_id = $2 AND archived_at IS NULL
+        RETURNING *
+        """,
+        item_id, company_id,
+    )
+    return dict(row) if row is not None else None
+
+
 async def record_movements(
     conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
     recorded_by: Optional[UUID], kind: str, lines: list[dict], narrative: str, note: Optional[str],
@@ -138,7 +189,9 @@ async def amend_movement_quantity(conn, *, movement_id: UUID, quantity, user_id:
     return dict(row)
 
 
-async def adjust_item_count(conn, *, item_id: UUID, company_id: UUID, quantity, user_id: UUID) -> dict:
+async def adjust_item_count(
+    conn, *, item_id: UUID, company_id: UUID, quantity, user_id: UUID, note: Optional[str] = None,
+) -> dict:
     """The ONLY set-count path — never write inventory_items.current_quantity
     directly from a route handler."""
     old = await conn.fetchrow(
@@ -158,10 +211,10 @@ async def adjust_item_count(conn, *, item_id: UUID, company_id: UUID, quantity, 
     row = await conn.fetchrow(
         """
         INSERT INTO inventory_movements (
-            company_id, item_id, recorded_by, kind, quantity, quantity_delta, narrative
-        ) VALUES ($1, $2, $3, 'adjust', $4, $5, 'Manual count adjustment')
+            company_id, item_id, recorded_by, kind, quantity, quantity_delta, note, narrative
+        ) VALUES ($1, $2, $3, 'adjust', $4, $5, $6, 'Manual count adjustment')
         RETURNING *
         """,
-        company_id, item_id, user_id, new_qty, delta,
+        company_id, item_id, user_id, new_qty, delta, note,
     )
     return dict(row)

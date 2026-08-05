@@ -171,6 +171,7 @@ _TOPIC_REQUIRED_FEATURE: dict[str, str] = {
     "events": "ems",
     "offers": "offer_letters",
     "inventory": "inventory",
+    "locations": "inventory",
 }
 
 # compliance is gated on either of two flags (Matcha-X's read-only taste or
@@ -507,9 +508,14 @@ async def lookup_context_impl(
             # one exists to disambiguate write-matching, not for reads).
             rows = await conn.fetch(
                 """
-                SELECT it.id, it.name, it.current_quantity, it.unit, o.status AS order_status
+                SELECT it.id, it.name, it.current_quantity, it.unit,
+                       o.id AS order_id, o.status AS order_status
                 FROM inventory_items it
-                LEFT JOIN inventory_orders o ON o.item_id = it.id AND o.status = 'queued'
+                LEFT JOIN LATERAL (
+                    SELECT id, status FROM inventory_orders
+                    WHERE item_id = it.id AND status IN ('queued', 'ordered')
+                    ORDER BY created_at DESC, id DESC LIMIT 1
+                ) o ON TRUE
                 WHERE it.company_id = $1 AND it.archived_at IS NULL
                   AND ($2::text IS NULL OR it.name ILIKE '%' || $2 || '%')
                   AND ($3::uuid IS NULL OR it.location_id IS NULL OR it.location_id = $3)
@@ -525,6 +531,18 @@ async def lookup_context_impl(
                 "topic": "inventory",
                 "items": [dict(r) for r in rows[:20]],
                 "note": note,
+            }
+        if topic == "locations":
+            loc_rows = await conn.fetch(
+                "SELECT id, name, city, state FROM business_locations "
+                "WHERE company_id = $1 AND is_active IS NOT FALSE "
+                "AND is_company_wide = FALSE ORDER BY name, id",
+                company_id,
+            )
+            return {
+                "topic": "locations",
+                "locations": [dict(r) for r in loc_rows],
+                "note": "Pass a location id as location_id on inventory tools to scope to that store; omit for company-wide.",
             }
         if topic == "pto_leave":
             pto_rows = await conn.fetch(

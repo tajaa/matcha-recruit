@@ -72,33 +72,18 @@ async def list_items(include_archived: bool = False, company_id: UUID = Depends(
 @router.post("/items", response_model=InventoryItemOut, status_code=201)
 async def create_item(body: InventoryItemCreate, company_id: UUID = Depends(get_client_company_id),
                        user=Depends(require_admin_or_client)):
-    normalized = normalize_name(body.name)
     async with get_connection() as conn:
-        if body.location_id is not None:
-            ok = await conn.fetchval(
-                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
-                "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
-                body.location_id, company_id,
+        try:
+            row = await movements_service.create_item_checked(
+                conn, company_id=company_id, name=body.name, unit=body.unit,
+                current_quantity=body.current_quantity, low_stock_threshold=body.low_stock_threshold,
+                location_id=body.location_id, created_by=user.id,
             )
-            if not ok:
+        except ValueError as exc:
+            if str(exc) == "location not found":
                 raise HTTPException(404, "Location not found.")
-        existing = await conn.fetchval(
-            "SELECT id FROM inventory_items WHERE company_id = $1 AND normalized_name = $2 "
-            "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL",
-            company_id, normalized, body.location_id,
-        )
-        if existing:
             raise HTTPException(409, "An item with this name already exists.")
-        row = await conn.fetchrow(
-            """
-            INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
-                                         low_stock_threshold, created_by, location_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
-            """,
-            company_id, body.name, normalized, body.unit, body.current_quantity,
-            body.low_stock_threshold, user.id, body.location_id,
-        )
-    return InventoryItemOut(**dict(row))
+    return InventoryItemOut(**row)
 
 
 @router.get("/items/{item_id}", response_model=dict)
@@ -327,88 +312,26 @@ async def commit_receipt_route(
     company_id: UUID = Depends(get_client_company_id),
     user=Depends(require_admin_or_client),
 ):
-    """Write the user-reviewed lines: matched-order lines via mark_received
-    (movement + order flip atomic together), the rest as bare `in`
-    movements. PER-LINE transactions — one wrapping transaction can't
-    survive a failed row in Postgres (first error aborts it), and the
-    BulkUploadResult contract is that bad rows fail alone."""
+    """Delegates to receipts_service.commit_receipt_lines — see that
+    docstring for the transaction/error-shape contract."""
     if not body.lines:
         raise HTTPException(400, "No lines to commit")
     if len(body.lines) > receipts_service.MAX_LINES:
         raise HTTPException(413, f"Too many lines (max {receipts_service.MAX_LINES})")
-    note = None
-    if body.vendor or body.invoice_number:
-        note = " ".join(filter(None, [body.vendor, f"invoice {body.invoice_number}" if body.invoice_number else None]))
 
-    if body.location_id is not None:
-        async with get_connection() as conn:
-            ok = await conn.fetchval(
-                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
-                "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
-                body.location_id, company_id,
-            )
-        if not ok:
-            raise HTTPException(404, "Location not found.")
-
-    errors: list[dict] = []
-    movement_ids: list[str] = []
-    created = 0
+    lines = [
+        {"item_id": line.item_id, "new_item_name": line.new_item_name,
+         "quantity": line.quantity, "order_id": line.order_id}
+        for line in body.lines
+    ]
     async with get_connection() as conn:
-        # Forceable duplicate guard (schedule-conflict 409 idiom): the note
-        # stamped on every committed movement is what we match on.
-        if body.invoice_number and not body.force:
-            dup = await conn.fetchval(
-                "SELECT 1 FROM inventory_movements WHERE company_id = $1 AND kind = 'in' "
-                "AND note LIKE '%' || replace(replace($2, '%', '\\%'), '_', '\\_') || '%' ESCAPE '\\' LIMIT 1",
-                company_id, f"invoice {body.invoice_number}",
+        try:
+            result = await receipts_service.commit_receipt_lines(
+                conn, company_id=company_id, user_id=user.id, location_id=body.location_id,
+                vendor=body.vendor, invoice_number=body.invoice_number, force=body.force, lines=lines,
             )
-            if dup:
-                raise HTTPException(409, detail={
-                    "code": "duplicate_invoice",
-                    "message": f"Invoice {body.invoice_number} looks already received — commit anyway?",
-                })
-        for n, line in enumerate(body.lines, start=1):
-            try:
-                async with conn.transaction():
-                    if line.order_id is not None:
-                        row = await orders_service.mark_received(
-                            conn, order_id=line.order_id, company_id=company_id,
-                            user_id=user.id, quantity=line.quantity, note=note,
-                        )
-                        if row is None:
-                            raise ValueError("order not open")
-                        movement_ids.append(str(row["receipt_movement_id"]))
-                    else:
-                        if line.item_id is not None:
-                            owned = await conn.fetchval(
-                                "SELECT 1 FROM inventory_items WHERE id = $1 AND company_id = $2",
-                                line.item_id, company_id,
-                            )
-                            if not owned:
-                                raise ValueError("item not found")
-                            item_id = line.item_id
-                        elif line.new_item_name:
-                            item = await movements_service.find_or_create_item(
-                                conn, company_id, line.new_item_name,
-                                created_by=user.id, location_id=body.location_id,
-                            )
-                            item_id = item["id"]
-                        else:
-                            raise ValueError("line needs item_id or new_item_name")
-                        inserted = await movements_service.record_movements(
-                            conn, company_id=company_id, channel_id=None,
-                            source_message_id=None, recorded_by=user.id,
-                            kind="in", narrative="Receipt ingest", note=note,
-                            lines=[{"item_id": item_id, "quantity": line.quantity, "estimated": False}],
-                        )
-                        movement_ids.append(str(inserted[0]["id"]))
-                    created += 1
-            except Exception as exc:
-                logger.warning("receipt line %d commit failed", n, exc_info=True)
-                errors.append({
-                    "row": n,
-                    "item": line.new_item_name or str(line.item_id or ""),
-                    "error": "Could not record this line — check the item/order and try again.",
-                })
-    return ReceiptCommitResult(total_rows=len(body.lines), created=created,
-                               failed=len(errors), errors=errors, ids=movement_ids)
+        except ValueError:
+            raise HTTPException(404, "Location not found.")
+        except receipts_service.DuplicateInvoiceError as exc:
+            raise HTTPException(409, detail={"code": "duplicate_invoice", "message": str(exc)})
+    return ReceiptCommitResult(**result)

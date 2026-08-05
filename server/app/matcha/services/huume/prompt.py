@@ -133,6 +133,50 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"Calling promote_ems_event again with EXACTLY this event_id after the admin "
                 f"confirms files it; a different event_id stages a NEW proposal instead."
             )
+        elif action.get("type") == "inventory_movement":
+            qty = action.get("quantity")
+            what = action.get("new_item_name") or f"item_id={action.get('item_id')}"
+            detail = f"{action.get('kind')}" + (f" {qty:g}" if isinstance(qty, (int, float)) else "") + f" {what}"
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: stock movement — {detail}, "
+                f"confirm_id={action.get('confirm_id')}. Calling record_stock_movement again with "
+                f"EXACTLY this confirm_id after the admin confirms records it; a changed kind or "
+                f"quantity stages a NEW proposal instead."
+            )
+        elif action.get("type") == "inventory_order_decision":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: {action.get('decision')} "
+                f"order_id={action.get('order_id')}. Calling decide_inventory_order again with "
+                f"EXACTLY this order_id and the same decision after the admin confirms applies it; "
+                f"a different decision stages a NEW proposal instead."
+            )
+        elif action.get("type") == "inventory_item_create":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: add inventory item "
+                f"\"{action.get('name')}\", confirm_id={action.get('confirm_id')}. Calling "
+                f"create_inventory_item again with EXACTLY this confirm_id after the admin confirms "
+                f"adds it; omitting confirm_id (or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "inventory_item_archive":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: archive inventory item "
+                f"item_id={action.get('item_id')}. Calling archive_inventory_item again with "
+                f"EXACTLY this item_id after the admin confirms archives it."
+            )
+        elif action.get("type") == "inventory_receipt":
+            count = len(action.get("lines") or [])
+            detail = ", ".join(filter(None, [
+                action.get("vendor"),
+                f"invoice {action.get('invoice_number')}" if action.get("invoice_number") else None,
+            ]))
+            warn = f" ⚠ {action['dup_warning']}" if action.get("dup_warning") else ""
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: commit a receipt "
+                f"({count} line(s){', ' + detail if detail else ''}), confirm_id={action.get('confirm_id')}."
+                f"{warn} Calling stage_receipt_from_attachment again with EXACTLY this confirm_id "
+                f"after the admin confirms commits it — confirming past the duplicate warning above "
+                f"IS the override, there's no separate force step."
+            )
         elif action.get("type") == "amend_handbook":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: amend handbook "
@@ -233,7 +277,7 @@ You also carry the company's two document pilots into this chat, when they're en
 
 ## The confirm-first rule — READ FIRST, NEVER VIOLATE
 
-You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, and promote_ems_event. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE action can be staged at a time — staging a new one replaces whatever was pending, so don't stage a second while the admin is still deciding on the first.
+You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, promote_ems_event, record_stock_movement, decide_inventory_order, create_inventory_item, archive_inventory_item, and stage_receipt_from_attachment. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE action can be staged at a time — staging a new one replaces whatever was pending, so don't stage a second while the admin is still deciding on the first.
 
 execute_approved_steps only runs plan steps the admin has explicitly approved (in full, or by name). If they haven't approved anything yet, ask which steps to run rather than calling it. A plan you build THIS turn cannot be executed THIS turn, even if the admin's message told you to do both — build it, describe it, and wait for their next message.
 

@@ -106,6 +106,11 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     # ems_skill.execute_promote via ems.promote.evaluate_promote — this
     # registry is single-flag, same as every other entry here.
     "ems_promote": "ems",
+    "inventory_movement": "inventory",
+    "inventory_order_decision": "inventory",
+    "inventory_item_create": "inventory",
+    "inventory_item_archive": "inventory",
+    "inventory_receipt": "inventory",
 }
 
 # discipline_from_incident / discipline_decision — the incident-triggered
@@ -140,6 +145,34 @@ _PTO_DECISIONS = frozenset({"approve", "deny"})
 _HR_OPS_ACTIONS = frozenset({"ir_report", "er_case", "training_assign", "pto_decision"})
 _MAX_TRAINING_ASSIGNEES = 50
 _MAX_PTO_NOTE_CHARS = 500
+
+# Staged types routed to huume's own inventory_skill executors.
+_INVENTORY_ACTIONS = frozenset({
+    "inventory_movement", "inventory_order_decision",
+    "inventory_item_create", "inventory_item_archive", "inventory_receipt",
+})
+_INVENTORY_MOVEMENT_KINDS = frozenset({"in", "out", "stockout", "adjust"})
+_INVENTORY_ORDER_DECISIONS = frozenset({"approve", "receive", "cancel"})
+_MAX_INVENTORY_NOTE_CHARS = 200
+_MAX_INVENTORY_NAME_CHARS = 200
+# Mirrors services.inventory.receipts.MAX_LINES — duplicated rather than
+# imported so this module stays pure and import-light (same reasoning as the
+# IR/ER vocab constants above).
+_MAX_INVENTORY_RECEIPT_LINES = 200
+
+
+def _is_positive_number(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_nonnegative_number(value: Any) -> bool:
+    try:
+        return float(value) >= 0
+    except (TypeError, ValueError):
+        return False
 
 
 def evaluate_huume_action(
@@ -248,6 +281,21 @@ def evaluate_huume_action(
         if not staged_action.get("target_handbook_id"):
             return HuumeVerdict(kind="refuse", message="There's no handbook to amend.")
         return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type == "inventory_movement":
+        return _validate_inventory_movement(staged_action)
+
+    if action_type == "inventory_order_decision":
+        return _validate_inventory_order_decision(staged_action)
+
+    if action_type == "inventory_item_create":
+        return _validate_inventory_item_create(staged_action)
+
+    if action_type == "inventory_item_archive":
+        return _validate_inventory_item_archive(staged_action)
+
+    if action_type == "inventory_receipt":
+        return _validate_inventory_receipt(staged_action)
 
     return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
 
@@ -451,6 +499,167 @@ def _validate_pto_decision(staged: dict[str, Any]) -> HuumeVerdict:
         "request_id": str(request_id),
         "decision": decision,
         "note": note,
+    })
+
+
+def _validate_inventory_movement(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged stock movement. Exactly one of
+    item_id/new_item_name; quantity required for in/out/adjust, ignored for
+    stockout (it always zeroes the count regardless of what's passed)."""
+    kind = str(staged.get("kind") or "").strip().lower()
+    if kind not in _INVENTORY_MOVEMENT_KINDS:
+        return HuumeVerdict(
+            kind="refuse",
+            message="Tell me whether this is stock in, stock out, a stockout, or a count adjustment.",
+        )
+
+    item_id = staged.get("item_id")
+    new_item_name = str(staged.get("new_item_name") or "").strip()
+    if item_id and not _is_uuid(item_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="That item id isn't valid — look it up with lookup_context(topic='inventory') first.",
+        )
+    if not item_id and not new_item_name:
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need either an existing item id (lookup_context(topic='inventory')) or a name for a new item.",
+        )
+
+    quantity = staged.get("quantity")
+    if kind == "stockout":
+        quantity = None
+    elif kind == "adjust":
+        if not _is_nonnegative_number(quantity):
+            return HuumeVerdict(kind="refuse", message="What should the count be set to?")
+        quantity = float(quantity)
+    else:
+        if not _is_positive_number(quantity):
+            return HuumeVerdict(kind="refuse", message="How many, and of what unit?")
+        quantity = float(quantity)
+
+    location_id = staged.get("location_id")
+    if location_id and not _is_uuid(location_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="That location id isn't valid — look it up with lookup_context(topic='locations') first.",
+        )
+
+    note = str(staged.get("note") or "").strip() or None
+    if note and len(note) > _MAX_INVENTORY_NOTE_CHARS:
+        note = note[:_MAX_INVENTORY_NOTE_CHARS]
+
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "inventory_movement",
+        "kind": kind,
+        "item_id": str(item_id) if item_id else None,
+        "new_item_name": new_item_name or None,
+        "quantity": quantity,
+        "location_id": str(location_id) if location_id else None,
+        "note": note,
+    })
+
+
+def _validate_inventory_order_decision(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for a staged order approve/receive/cancel."""
+    order_id = staged.get("order_id")
+    if not _is_uuid(order_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the order's id — check lookup_context(topic='inventory') for an item's open order.",
+        )
+    decision = str(staged.get("decision") or "").strip().lower()
+    if decision not in _INVENTORY_ORDER_DECISIONS:
+        return HuumeVerdict(kind="refuse", message="Tell me whether to approve, receive, or cancel it.")
+    quantity = staged.get("quantity")
+    if quantity not in (None, "") :
+        if not _is_positive_number(quantity):
+            return HuumeVerdict(kind="refuse", message="That quantity doesn't look right — what was actually delivered?")
+        quantity = float(quantity)
+    else:
+        quantity = None
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "inventory_order_decision",
+        "order_id": str(order_id),
+        "decision": decision,
+        "quantity": quantity,
+    })
+
+
+def _validate_inventory_item_create(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for staging a brand-new inventory item."""
+    name = str(staged.get("name") or "").strip()
+    if not name:
+        return HuumeVerdict(kind="refuse", message="What should the item be called?")
+    name = name[:_MAX_INVENTORY_NAME_CHARS]
+
+    unit = str(staged.get("unit") or "").strip() or None
+    if unit and len(unit) > 40:
+        unit = unit[:40]
+
+    for field in ("initial_quantity", "low_stock_threshold"):
+        value = staged.get(field)
+        if value not in (None, "") and not _is_nonnegative_number(value):
+            return HuumeVerdict(kind="refuse", message=f"That {field.replace('_', ' ')} doesn't look right.")
+
+    location_id = staged.get("location_id")
+    if location_id and not _is_uuid(location_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="That location id isn't valid — look it up with lookup_context(topic='locations') first.",
+        )
+
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "inventory_item_create",
+        "name": name,
+        "unit": unit,
+        "initial_quantity": float(staged["initial_quantity"]) if staged.get("initial_quantity") not in (None, "") else None,
+        "low_stock_threshold": float(staged["low_stock_threshold"]) if staged.get("low_stock_threshold") not in (None, "") else None,
+        "location_id": str(location_id) if location_id else None,
+    })
+
+
+def _validate_inventory_item_archive(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for archiving an inventory item."""
+    item_id = staged.get("item_id")
+    if not _is_uuid(item_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="I need the item's id — look it up with lookup_context(topic='inventory') first.",
+        )
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "inventory_item_archive",
+        "item_id": str(item_id),
+    })
+
+
+def _validate_inventory_receipt(staged: dict[str, Any]) -> HuumeVerdict:
+    """Confirm-turn validation for committing a receipt parsed from a thread
+    attachment. `lines` was populated server-side at STAGE time
+    (agent.py's stage_receipt_from_attachment special-case, BEFORE this
+    validator ever runs) — never supplied or editable by the model, so this
+    only checks shape, not per-line semantics (commit_receipt_lines does
+    that, same as the REST route)."""
+    lines = staged.get("lines")
+    if not isinstance(lines, list) or not lines:
+        return HuumeVerdict(
+            kind="refuse",
+            message="There's nothing staged to commit — attach the invoice CSV again.",
+        )
+    if len(lines) > _MAX_INVENTORY_RECEIPT_LINES:
+        return HuumeVerdict(kind="refuse", message="That receipt has too many lines to commit at once.")
+    location_id = staged.get("location_id")
+    if location_id and not _is_uuid(location_id):
+        return HuumeVerdict(
+            kind="refuse",
+            message="That location id isn't valid — look it up with lookup_context(topic='locations') first.",
+        )
+    return HuumeVerdict(kind="proceed", message="", action={
+        "type": "inventory_receipt",
+        "lines": lines,
+        "vendor": staged.get("vendor"),
+        "invoice_number": staged.get("invoice_number"),
+        "location_id": str(location_id) if location_id else None,
     })
 
 
@@ -849,6 +1058,11 @@ async def execute_huume_action(
     if action.get("type") == "ems_promote":
         from app.matcha.services.huume import ems_skill
         return await ems_skill.execute_promote(
+            company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    if action.get("type") in _INVENTORY_ACTIONS:
+        from app.matcha.services.huume import inventory_skill
+        return await inventory_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
     return {"status": "error", "message": "Unsupported action."}

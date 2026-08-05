@@ -27,7 +27,7 @@ LOOKUP_TOPICS = (
     "roster", "templates", "integrations", "training", "credentials", "offers",
     "employee", "training_status", "schedule", "incidents", "er_cases",
     "pto_leave", "policies", "discipline", "compliance", "documents", "events",
-    "wage_floors", "inventory",
+    "wage_floors", "inventory", "locations",
 )
 
 # record_type values show_record accepts — the single source both the tool
@@ -95,7 +95,10 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Use show_record with an id from a list here (incident/er_case/"
         "employee/credential/inventory_item) to open that record in the "
         "admin's side panel. topic='inventory' lists stock items with "
-        "current count and any open order.",
+        "current count and any open order. topic='locations' lists the "
+        "company's stores (id, name, city, state) — call this first to get "
+        "a location_id for any inventory tool when the admin names a store; "
+        "omit location_id entirely for company-wide inventory.",
         properties={
             "topic": types.Schema(type=types.Type.STRING, enum=list(LOOKUP_TOPICS)),
             "query": types.Schema(type=types.Type.STRING, description="Optional free-text filter, e.g. a candidate/employee name or email. For topic='wage_floors', the 2-letter state code (e.g. 'CA')."),
@@ -587,6 +590,120 @@ TOOLS: tuple[HuumeTool, ...] = (
         },
         required=["analysis_type"],
         intent_hints=("root cause analysis", "corrective action recommendations"),
+    ),
+    # ---- Inventory ops skill (feature `inventory`) ---------------------------
+    _tool(
+        "record_stock_movement", "staged",
+        "Record stock going in, out, or a stockout/count adjustment for an "
+        "item. This STAGES the movement for the admin's confirmation — "
+        "nothing changes until they confirm on a LATER turn by calling this "
+        "again with EXACTLY the same confirm_id. Get item ids from "
+        "lookup_context(topic='inventory'); pass new_item_name instead of "
+        "item_id to auto-create one. kind='adjust' sets the count to an exact "
+        "known value (a physical count), not a delta. kind='stockout' zeroes "
+        "the count regardless of quantity. Use lookup_context(topic='locations') "
+        "for location_id when the admin names a specific store; omit it for "
+        "the shared company-wide item pool.",
+        properties={
+            "kind": types.Schema(type=types.Type.STRING, enum=["in", "out", "stockout", "adjust"]),
+            "item_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='inventory')."),
+            "new_item_name": types.Schema(type=types.Type.STRING, description="Create a new item with this name instead of using item_id."),
+            "quantity": types.Schema(type=types.Type.NUMBER, description="Required for in/out/adjust. Ignored for stockout."),
+            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "note": types.Schema(type=types.Type.STRING, description="Optional short note recorded on the movement."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
+            ),
+        },
+        required=["kind"],
+        discovery=True,
+        intent_hints=("we used", "we ran out", "out of stock", "ran out of", "used up", "we went through", "stock count", "count is"),
+    ),
+    _tool(
+        "stage_inventory_order", "write",
+        "Queue a restock order for an item — a real record the admin (or "
+        "anyone) can approve, and the same queue the Inventory page shows. "
+        "This does NOT need a later confirm — queuing is itself the staging "
+        "step; use decide_inventory_order to approve/receive/cancel it. "
+        "Omit quantity to use the deterministic reorder suggestion from the "
+        "item's consumption history, if any.",
+        properties={
+            "item_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='inventory')."),
+            "new_item_name": types.Schema(type=types.Type.STRING, description="Create a new item with this name instead of using item_id."),
+            "quantity": types.Schema(type=types.Type.NUMBER, description="Omit to use the reorder-history suggestion."),
+            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+        },
+        discovery=True,
+        intent_hints=("running low", "restock", "order more", "need to order", "place an order"),
+    ),
+    _tool(
+        "decide_inventory_order", "staged",
+        "Approve, receive, or cancel a queued/ordered restock order. This "
+        "STAGES the decision for the admin's confirmation; nothing changes "
+        "until they confirm on a LATER turn. Get order_id from "
+        "lookup_context(topic='inventory') (an item's open_order) or "
+        "show_record. decision='receive' records the delivery as stock — "
+        "pass quantity if it differs from what was ordered.",
+        properties={
+            "order_id": types.Schema(type=types.Type.STRING),
+            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "receive", "cancel"]),
+            "quantity": types.Schema(type=types.Type.NUMBER, description="For decision='receive' when the delivered amount differs from what was ordered."),
+        },
+        required=["order_id", "decision"],
+    ),
+    _tool(
+        "create_inventory_item", "staged",
+        "Add a new inventory item outright (not via a movement). This STAGES "
+        "the item for the admin's confirmation — nothing is created until "
+        "they confirm on a LATER turn by calling this again with EXACTLY the "
+        "same confirm_id. Prefer record_stock_movement with new_item_name "
+        "when the admin is really describing a delivery or usage, not just "
+        "adding a catalog entry.",
+        properties={
+            "name": types.Schema(type=types.Type.STRING),
+            "unit": types.Schema(type=types.Type.STRING, description="e.g. 'BX', 'CS', 'EA'."),
+            "initial_quantity": types.Schema(type=types.Type.NUMBER),
+            "low_stock_threshold": types.Schema(type=types.Type.NUMBER),
+            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
+            ),
+        },
+        required=["name"],
+    ),
+    _tool(
+        "archive_inventory_item", "staged",
+        "Archive (soft-delete) an inventory item — it stops appearing in "
+        "lookups and on the Inventory page. This STAGES the archive for the "
+        "admin's confirmation; nothing changes until they confirm on a LATER "
+        "turn. Get item_id from lookup_context(topic='inventory').",
+        properties={"item_id": types.Schema(type=types.Type.STRING)},
+        required=["item_id"],
+    ),
+    _tool(
+        "stage_receipt_from_attachment", "staged",
+        "Parse a vendor invoice/packing-slip CSV the admin attached to their "
+        "message, and STAGE the resulting stock-in lines for confirmation — "
+        "nothing is recorded until they confirm on a LATER turn by calling "
+        "this again with EXACTLY the same confirm_id. The server parses the "
+        "attachment itself and matches its lines against existing items — "
+        "do NOT retype or invent line items yourself. Only CSV attachments "
+        "are supported here (ask the admin to export PDF/photo invoices as "
+        "CSV, or use the Inventory page's Receive Delivery for those). If no "
+        "attachment or no parseable lines are found, say so plainly. If the "
+        "staged state shows a duplicate-invoice warning, confirming anyway "
+        "commits it — there's no separate override step.",
+        properties={
+            "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
+            "confirm_id": types.Schema(
+                type=types.Type.STRING,
+                description="Omit on the first (staging) call. On the confirm turn, pass back EXACTLY the confirm_id from 'Current staged state'.",
+            ),
+        },
+        discovery=True,
+        intent_hints=("received a delivery", "got a delivery", "invoice attached", "packing slip"),
     ),
     _tool(
         "finish", "finish",

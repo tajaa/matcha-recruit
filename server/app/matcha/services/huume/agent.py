@@ -36,6 +36,7 @@ import json
 import logging
 import time
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, AsyncIterator, Optional
 from uuid import UUID, uuid4
 
@@ -45,7 +46,10 @@ from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
-from . import actions, discipline_skill, er_skill, handbook_skill, ir_skill, legal_skill, onboarding_skill, record_view, routing, store
+from . import (
+    actions, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
+    legal_skill, onboarding_skill, record_view, routing, store,
+)
 from .prompt import build_state_block, build_system_prompt
 from .tools import TOOLS_BY_NAME, tool_declarations
 
@@ -234,6 +238,14 @@ def _json_safe(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, UUID):
         return str(value)
+    if isinstance(value, Decimal):
+        # asyncpg returns NUMERIC columns as Decimal — inventory's
+        # current_quantity/quantity fields are the first lookup_context
+        # result to carry one through this path. json.dumps doesn't know
+        # Decimal at all (unlike date/UUID, no `default=str` fallback saves
+        # it downstream at the Gemini function-response boundary), so this
+        # needs its own branch rather than falling through.
+        return float(value)
     return value
 
 
@@ -324,6 +336,65 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "done_label": "Promoted event to incident",
         "failed_label": "Event not promoted",
         "done_status": "promoted",
+    },
+    "record_stock_movement": {
+        "action_type": "inventory_movement",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("kind", "item_id", "new_item_name", "quantity", "location_id", "note"),
+        # A changed kind or quantity on what looks like the confirm turn must
+        # not silently record the ORIGINALLY staged numbers.
+        "decision_fields": ("kind", "quantity"),
+        "staged_label": "Staged: stock movement",
+        "refused_label": "Stock movement refused",
+        "done_label": "Recorded stock movement",
+        "failed_label": "Stock movement not recorded",
+        "done_status": "recorded",
+    },
+    "decide_inventory_order": {
+        "action_type": "inventory_order_decision",
+        "match_key": "order_id",
+        "mints_confirm_id": False,
+        "fields": ("order_id", "decision", "quantity"),
+        "decision_fields": ("decision",),
+        "staged_label": "Staged: order decision",
+        "refused_label": "Order decision refused",
+        "done_label": "Applied order decision",
+        "failed_label": "Order decision not applied",
+        "done_status": "decided",
+    },
+    "create_inventory_item": {
+        "action_type": "inventory_item_create",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("name", "unit", "initial_quantity", "low_stock_threshold", "location_id"),
+        "staged_label": "Staged: new inventory item",
+        "refused_label": "New item refused",
+        "done_label": "Added inventory item",
+        "failed_label": "Item not added",
+        "done_status": "created",
+    },
+    "archive_inventory_item": {
+        "action_type": "inventory_item_archive",
+        "match_key": "item_id",
+        "mints_confirm_id": False,
+        "fields": ("item_id",),
+        "staged_label": "Staged: archive inventory item",
+        "refused_label": "Archive refused",
+        "done_label": "Archived inventory item",
+        "failed_label": "Item not archived",
+        "done_status": "archived",
+    },
+    "stage_receipt_from_attachment": {
+        "action_type": "inventory_receipt",
+        "match_key": "confirm_id",
+        "mints_confirm_id": True,
+        "fields": ("location_id",),
+        "staged_label": "Staged: receipt commit",
+        "refused_label": "Receipt commit refused",
+        "done_label": "Committed receipt",
+        "failed_label": "Receipt not committed",
+        "done_status": "committed",
     },
 }
 
@@ -727,11 +798,45 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name == "stage_inventory_order":
+                # No confirm needed — queuing IS the staging step, mirroring
+                # the channel `@huume` tool of the same name. Unlike the
+                # channel version, thread collaborators are a broader/less-
+                # trusted population than channel members, so stage_order
+                # itself also enforces the client/admin-only gate the other
+                # staged inventory tools use, on top of `inventory`'s own
+                # feature check.
+                result = await inventory_skill.stage_order(
+                    company_id=company_id, actor_user_id=user_id, role=user_role, features=features,
+                    item_id=args.get("item_id"), new_item_name=args.get("new_item_name"),
+                    quantity=args.get("quantity"), location_id_str=args.get("location_id"),
+                )
+                ok = result.get("status") == "created"
+                step = recorder.record(
+                    tool=name, kind="write", label="Queued inventory order" if ok else "Order not queued",
+                    status="ok" if ok else "error", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
             if name in _HR_OPS_TOOL_SPECS:
                 # Incident report / ER case / training assignment / PTO
                 # decision — one flow, table-driven (see _HR_OPS_TOOL_SPECS).
                 spec = _HR_OPS_TOOL_SPECS[name]
                 staged, confirming = _build_hr_ops_staged(spec, args, pre_turn_action)
+                if name == "stage_receipt_from_attachment" and not confirming:
+                    # Lines ride the staged dict itself, resolved server-side
+                    # NOW so the confirm turn commits exactly what was parsed
+                    # — the model never sees or retypes line items.
+                    parsed = await inventory_skill.parse_attachment_for_staging(
+                        attachment_texts, company_id, args.get("location_id"),
+                    )
+                    if parsed.get("error"):
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Receipt not staged",
+                            status="rejected", detail=parsed["error"],
+                        )
+                        return {"status": "refused", "message": parsed["error"]}, step
+                    staged.update({k: v for k, v in parsed.items() if k != "error"})
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
@@ -742,6 +847,14 @@ async def run_huume_turn(
                     response = {"status": "staged", "message": verdict.message}
                     # Echo whichever id the confirm turn has to pass back.
                     response[spec["match_key"]] = staged.get(spec["match_key"])
+                    if name == "stage_receipt_from_attachment":
+                        # Surface what was actually parsed THIS turn — the
+                        # model has no other way to see the line count/vendor/
+                        # dup warning before the state block renders next turn.
+                        response["vendor"] = staged.get("vendor")
+                        response["invoice_number"] = staged.get("invoice_number")
+                        response["line_count"] = len(staged.get("lines") or [])
+                        response["dup_warning"] = staged.get("dup_warning")
                     return _json_safe(response), step
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=spec["refused_label"], status="rejected", detail=verdict.message)

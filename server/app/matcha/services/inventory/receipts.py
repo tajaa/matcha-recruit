@@ -26,6 +26,11 @@ _analyzer: Optional[IRAnalyzer] = None
 RECEIPT_PARSE_TIMEOUT = 90
 MAX_LINES = 200
 
+
+class DuplicateInvoiceError(Exception):
+    """Raised by commit_receipt_lines when invoice_number already appears on
+    a prior `in` movement's note and the caller didn't pass force=True."""
+
 _PROMPT = """You are reading a supplier invoice, packing slip, or order confirmation for a small business. Extract the delivered/billed line items.
 
 Return ONLY valid JSON with exactly this shape (null for anything not present — NEVER invent quantities or prices):
@@ -129,6 +134,13 @@ def _parse_csv(raw: bytes) -> dict:
             "lines": lines, "notes": None}
 
 
+def parse_csv_bytes(raw: bytes) -> dict:
+    """Public entry point for `_parse_csv` — callers outside this module
+    (the Huume receipt-attachment tool) go through this rather than reaching
+    into the private name directly."""
+    return _parse_csv(raw)
+
+
 async def parse_receipt(file_bytes: bytes, mime_type: str, filename: str) -> dict:
     """-> {**receipt_fields, "available": bool}. Never raises."""
     name = (filename or "").lower()
@@ -211,3 +223,97 @@ async def resolve_lines(conn, *, company_id: UUID, location_id: Optional[UUID],
             "open_order_id": str(open_order_id) if open_order_id else None,
         })
     return out
+
+
+async def commit_receipt_lines(
+    conn, *, company_id: UUID, user_id: UUID, location_id: Optional[UUID],
+    vendor: Optional[str], invoice_number: Optional[str], force: bool, lines: list[dict],
+) -> dict:
+    """Shared commit writer — REST route and the Huume chat tool both call
+    this. `lines`: [{item_id|new_item_name, quantity, order_id}]. Raises
+    ValueError("location not found") for an unowned location; raises
+    DuplicateInvoiceError when invoice_number already appears on a prior
+    movement's note and force is False. PER-LINE transactions — one wrapping
+    transaction can't survive a failed row in Postgres (first error aborts
+    it), and the caller's bad-rows-fail-alone contract needs that.
+    Returns {total_rows, created, failed, errors, ids}."""
+    from app.matcha.services.inventory import movements as movements_service
+    from app.matcha.services.inventory import orders as orders_service
+
+    if location_id is not None:
+        ok = await conn.fetchval(
+            "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2 "
+            "AND is_active IS NOT FALSE AND is_company_wide = FALSE",
+            location_id, company_id,
+        )
+        if not ok:
+            raise ValueError("location not found")
+
+    note = None
+    if vendor or invoice_number:
+        note = " ".join(filter(None, [vendor, f"invoice {invoice_number}" if invoice_number else None]))
+
+    if invoice_number and not force:
+        dup = await conn.fetchval(
+            "SELECT 1 FROM inventory_movements WHERE company_id = $1 AND kind = 'in' "
+            "AND note LIKE '%' || replace(replace($2, '%', '\\%'), '_', '\\_') || '%' ESCAPE '\\' LIMIT 1",
+            company_id, f"invoice {invoice_number}",
+        )
+        if dup:
+            raise DuplicateInvoiceError(
+                f"Invoice {invoice_number} looks already received — commit anyway?"
+            )
+
+    errors: list[dict] = []
+    movement_ids: list[str] = []
+    created = 0
+    for n, line in enumerate(lines, start=1):
+        try:
+            async with conn.transaction():
+                order_id = line.get("order_id")
+                item_id = line.get("item_id")
+                new_item_name = line.get("new_item_name")
+                quantity = line["quantity"]
+                if not isinstance(quantity, (int, float)) or isinstance(quantity, bool) or quantity <= 0:
+                    raise ValueError("quantity must be a positive number")
+                if order_id is not None:
+                    row = await orders_service.mark_received(
+                        conn, order_id=order_id, company_id=company_id,
+                        user_id=user_id, quantity=quantity, note=note,
+                    )
+                    if row is None:
+                        raise ValueError("order not open")
+                    movement_ids.append(str(row["receipt_movement_id"]))
+                else:
+                    if item_id is not None:
+                        owned = await conn.fetchval(
+                            "SELECT 1 FROM inventory_items WHERE id = $1 AND company_id = $2",
+                            item_id, company_id,
+                        )
+                        if not owned:
+                            raise ValueError("item not found")
+                    elif new_item_name:
+                        item = await movements_service.find_or_create_item(
+                            conn, company_id, new_item_name,
+                            created_by=user_id, location_id=location_id,
+                        )
+                        item_id = item["id"]
+                    else:
+                        raise ValueError("line needs item_id or new_item_name")
+                    inserted = await movements_service.record_movements(
+                        conn, company_id=company_id, channel_id=None,
+                        source_message_id=None, recorded_by=user_id,
+                        kind="in", narrative="Receipt ingest", note=note,
+                        lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}],
+                    )
+                    movement_ids.append(str(inserted[0]["id"]))
+                created += 1
+        except Exception:
+            logger.warning("receipt line %d commit failed", n, exc_info=True)
+            errors.append({
+                "row": n,
+                "item": line.get("new_item_name") or str(line.get("item_id") or ""),
+                "error": "Could not record this line — check the item/order and try again.",
+            })
+    return {"total_rows": len(lines), "created": created, "failed": len(errors),
+            "errors": errors, "ids": movement_ids}
