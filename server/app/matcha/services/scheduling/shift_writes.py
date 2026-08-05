@@ -15,6 +15,23 @@ chat confirm flow create shifts identically. The route keeps every gate
 (location assert, training feature check, conflicts, compliance,
 `raise_for_violations`, forced-override audit) — only the write block
 delegates here.
+
+`apply_assignment_core` / `remove_assignment_core` / `retime_shift_core` /
+`cancel_shift_core` (2026-08-04) are the edit-side counterparts, added so
+`schedule_chat.py`'s edit proposals (swap/reassign/retime/cancel via
+@huume) can write through the exact same path `routes/employee_schedule/
+assignments.py` and `shifts.py` use — same audit action names
+(`assignment.create`/`assignment.delete`/`shift.update`) and the same
+`shift_snapshot`-shaped `before`/`after` schedule_intelligence reads for
+Fair Workweek exposure. `shift_snapshot` itself moved here (from routes'
+`_shared.py`) so these cores can build it without a services→routes
+import; `_shared.py` re-exports it under its old name.
+
+These are callers-own-the-checks writers, same posture as
+`create_shift_core`: conflict/availability/compliance checks stay in the
+caller (route handler or `schedule_chat`'s proposal builder/executor) —
+the core only performs the write + audit once the caller has decided to
+proceed.
 """
 
 from __future__ import annotations
@@ -207,3 +224,192 @@ async def create_shift_core(
     }
     await log_audit(conn, company_id, "shift", shift_id, created_by, "shift.create", details)
     return shift_id
+
+
+def shift_snapshot(row) -> dict:
+    """Before/after change-detail shape for schedule_audit_log.
+
+    Feeds the Schedule Intelligence engine's Fair Workweek / instability
+    analysis, which needs to know what a shift looked like before a change —
+    the plain audit log recorded only which fields changed, not their values.
+    """
+    return {
+        "starts_at": _iso(row["starts_at"]),
+        "ends_at": _iso(row["ends_at"]),
+        "status": row["status"],
+        "location_id": str(row["location_id"]) if row["location_id"] else None,
+    }
+
+
+async def apply_assignment_core(
+    conn,
+    company_id: UUID,
+    *,
+    shift_row,
+    employee_id: UUID,
+    actor_user_id: UUID,
+    audit_details: Optional[dict] = None,
+) -> None:
+    """INSERT one assignment + the `assignment.create` audit row + the same
+    training/scheduled-role hooks `create_shift_core` runs. `shift_row` must
+    carry id/starts_at/ends_at/status/kind/role/training_requirement_id/
+    location_id (the `fetch_shift_for_write` shape). Caller has already run
+    conflict/headcount/availability/compliance checks and owns the
+    transaction — this only writes."""
+    from app.matcha.services.training.training_assignment import (
+        assign_training, evaluate_scheduled_role_rules,
+    )
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    shift_id = shift_row["id"]
+    await conn.execute(
+        """
+        INSERT INTO schedule_shift_assignments
+            (company_id, shift_id, employee_id, assigned_by)
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (shift_id, employee_id) DO NOTHING
+        """,
+        company_id, shift_id, employee_id, actor_user_id,
+    )
+    await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
+                    "assignment.create", {
+                        "employee_id": str(employee_id),
+                        "shift_starts_at": shift_row["starts_at"].isoformat(),
+                        "shift_ends_at": shift_row["ends_at"].isoformat(),
+                        "shift_status": shift_row["status"],
+                        "location_id": str(shift_row["location_id"]) if shift_row["location_id"] else None,
+                        **(audit_details or {}),
+                    })
+    if shift_row["kind"] == "training" and shift_row["training_requirement_id"] is not None:
+        requirement = await conn.fetchrow(
+            "SELECT id, title, training_type, frequency_months "
+            "FROM training_requirements WHERE id = $1 AND company_id = $2",
+            shift_row["training_requirement_id"], company_id,
+        )
+        if requirement:
+            await assign_training(
+                conn, company_id, dict(requirement), [employee_id],
+                source_type="schedule", source_ref=shift_id,
+                source_note=f"Scheduled training session {shift_row['starts_at'].date().isoformat()}",
+                due_date=shift_row["starts_at"].astimezone(timezone.utc).date(),
+                assigned_by=actor_user_id,
+            )
+        else:
+            logger.warning(
+                "training-kind shift %s has no resolvable training_requirement_id "
+                "(deleted?) — skipping training assignment", shift_id,
+            )
+    elif shift_row["kind"] == "work":
+        # A scheduled_role match must not fail the assignment write — the
+        # shift is already staffed at this point.
+        try:
+            await evaluate_scheduled_role_rules(
+                conn, company_id, employee_id,
+                shift_id=shift_id, shift_role=shift_row["role"],
+                shift_start=shift_row["starts_at"].astimezone(timezone.utc).date(),
+            )
+        except Exception:
+            logger.exception(
+                "scheduled_role training rules failed for shift %s", shift_id
+            )
+
+
+async def remove_assignment_core(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+    employee_id: UUID,
+    actor_user_id: UUID,
+    shift_row,
+    audit_details: Optional[dict] = None,
+) -> None:
+    """DELETE one assignment + the `assignment.delete` audit row. `shift_row`
+    must carry starts_at/ends_at/status/kind/location_id. Caller runs the FW
+    advisory check (if any) and owns the transaction."""
+    await conn.execute(
+        "DELETE FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
+        shift_id, employee_id,
+    )
+    await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
+                    "assignment.delete", {
+                        "employee_id": str(employee_id),
+                        "shift_starts_at": shift_row["starts_at"].isoformat(),
+                        "shift_ends_at": shift_row["ends_at"].isoformat(),
+                        "shift_status": shift_row["status"],
+                        "shift_kind": shift_row["kind"],
+                        "location_id": str(shift_row["location_id"]) if shift_row["location_id"] else None,
+                        **(audit_details or {}),
+                    })
+
+
+async def retime_shift_core(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+    existing_row,
+    new_starts_at: datetime,
+    new_ends_at: datetime,
+    actor_user_id: UUID,
+    audit_details: Optional[dict] = None,
+) -> None:
+    """UPDATE a shift's starts_at/ends_at + the `shift.update` audit row with
+    a `shift_snapshot`-shaped before/after (what schedule_intelligence's Fair
+    Workweek exposure reads). `existing_row` must carry starts_at/ends_at/
+    status/location_id/published_at. Caller has already run conflict/
+    availability/compliance re-checks (with `exclude_shift_id=shift_id`) and
+    owns the transaction."""
+    before = shift_snapshot(existing_row)
+    after = {
+        "starts_at": new_starts_at.isoformat(),
+        "ends_at": new_ends_at.isoformat(),
+        "status": existing_row["status"],
+        "location_id": str(existing_row["location_id"]) if existing_row["location_id"] else None,
+    }
+    was_published = existing_row["published_at"] is not None
+    await conn.execute(
+        "UPDATE schedule_shifts SET starts_at = $1, ends_at = $2, updated_at = NOW() "
+        "WHERE id = $3 AND company_id = $4",
+        new_starts_at, new_ends_at, shift_id, company_id,
+    )
+    await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
+                    "shift.update", {
+                        "fields": ["starts_at", "ends_at"],
+                        "before": before, "after": after,
+                        "was_published": was_published,
+                        **(audit_details or {}),
+                    })
+
+
+async def cancel_shift_core(
+    conn,
+    company_id: UUID,
+    *,
+    shift_id: UUID,
+    existing_row,
+    actor_user_id: UUID,
+    audit_details: Optional[dict] = None,
+) -> None:
+    """Set a shift `status='cancelled'` (terminal — publish already refuses
+    a cancelled shift, and reopening as a draft is the only supported path
+    back) + the `shift.update` audit row. `existing_row` must carry
+    starts_at/ends_at/status/location_id/published_at. Caller has already
+    run the FW cancel-advisory check and owns the transaction."""
+    before = shift_snapshot(existing_row)
+    after = {**before, "status": "cancelled"}
+    was_published = existing_row["published_at"] is not None
+    await conn.execute(
+        "UPDATE schedule_shifts SET status = 'cancelled', published_at = NULL, "
+        "updated_at = NOW() WHERE id = $1 AND company_id = $2",
+        shift_id, company_id,
+    )
+    await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
+                    "shift.update", {
+                        "fields": ["status"],
+                        "before": before, "after": after,
+                        "was_published": was_published,
+                        **(audit_details or {}),
+                    })

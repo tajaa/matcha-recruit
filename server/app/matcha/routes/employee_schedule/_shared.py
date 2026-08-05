@@ -20,7 +20,7 @@ from ...services.scheduling.schedule_rules import (  # re-exported for the route
     build_patch, conflict_detail, shift_full_detail, shift_window_on_date,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
-    _iso, fetch_availability, find_conflicts, log_audit,
+    _iso, fetch_availability, find_conflicts, log_audit, shift_snapshot,
 )
 
 _SHIFT_COLS = (
@@ -85,21 +85,6 @@ async def assert_location_in_company(
     )
     if not row:
         raise HTTPException(status_code=404, detail="Location not found")
-
-
-def shift_snapshot(row) -> dict:
-    """Before/after change-detail shape for schedule_audit_log.
-
-    Feeds the Schedule Intelligence engine's Fair Workweek / instability
-    analysis, which needs to know what a shift looked like before a change —
-    the plain audit log recorded only which fields changed, not their values.
-    """
-    return {
-        "starts_at": _iso(row["starts_at"]),
-        "ends_at": _iso(row["ends_at"]),
-        "status": row["status"],
-        "location_id": str(row["location_id"]) if row["location_id"] else None,
-    }
 
 
 async def fetch_shifts(

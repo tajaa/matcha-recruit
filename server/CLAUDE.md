@@ -180,6 +180,7 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - Channel store scope lookup (used by every @huume dispatch handler) → `server/app/werk/routes/channels_ws.py:_channel_location`
 - Channel `@huume` ASK grounding (bounded tool-calling loop beyond `ems_events`) → `server/app/matcha/services/ems/channel_agent.py:answer_channel_question`, policy registry at `server/app/matcha/services/ems/channel_grounding.py:run_topic_lookup`
 - Channel `@huume` "who can cover a shift" → `server/app/matcha/services/ems/channel_grounding.py:run_coverage_lookup` → `server/app/matcha/services/scheduling/coverage.py:find_coverage_candidates`
+- Channel `@huume` shift EDITS (swap/reassign/unassign/retime/cancel) → `services/scheduling/schedule_chat.py:build_edit_proposal` / `execute_edit_proposal`, writing through the four shared cores in `services/scheduling/shift_writes.py` (`apply_assignment_core`, `remove_assignment_core`, `retime_shift_core`, `cancel_shift_core`)
 
 ### Inventory (channel stock tracking)
 

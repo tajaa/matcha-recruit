@@ -562,16 +562,31 @@ async def _bg_schedule_request(
 
         # No connection held across the Gemini parse call.
         parsed = await schedule_chat.parse_schedule_request(strip_mention(content), _date.today())
-        if parsed is None or not parsed.get("shift_requests"):
+        if parsed is None:
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+            return
+        action = parsed.get("action", "create")
+        if action == "edit":
+            if not parsed.get("edit_requests"):
+                await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
+                return
+        elif not parsed.get("shift_requests"):
             await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
             return
 
         async with get_connection() as conn:
-            build = await schedule_chat.build_proposal(
-                conn, company_id=company_id, channel_id=UUID(channel_id_str),
-                source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
-                parsed=parsed, today=_date.today(), original_content=strip_mention(content),
-            )
+            if action == "edit":
+                build = await schedule_chat.build_edit_proposal(
+                    conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                    source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
+                    parsed=parsed, today=_date.today(), original_content=strip_mention(content),
+                )
+            else:
+                build = await schedule_chat.build_proposal(
+                    conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                    source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
+                    parsed=parsed, today=_date.today(), original_content=strip_mention(content),
+                )
             sys_row = await _insert_system_message(conn, channel_id_str, build.pill_text)
             await conn.execute(
                 "UPDATE schedule_chat_proposals SET confirm_message_id = $1, updated_at = NOW() WHERE id = $2",
@@ -997,8 +1012,13 @@ async def _bg_schedule_reply(
                     sys_row = await _insert_system_message(conn, channel_id_str, schedule_chat.CANCELLED_TEXT)
 
                 elif claimed["status"] == "proposed" and action == "confirm":
+                    executor = (
+                        schedule_chat.execute_edit_proposal
+                        if proposal.get("kind") == "edit"
+                        else schedule_chat.execute_proposal
+                    )
                     try:
-                        text = await schedule_chat.execute_proposal(
+                        text = await executor(
                             conn, proposal_row={**claimed, "proposal": proposal},
                             confirmed_by=sender_uuid, features=features,
                         )
@@ -1073,7 +1093,17 @@ async def _bg_schedule_reply(
                 history = list(proposal.get("clarify_history") or []) + [
                     {"q": proposal.get("clarify_question"), "a": content}
                 ]
-                build = await schedule_chat.build_proposal(
+                # Dispatch on the ORIGINAL proposal's kind (set once by
+                # build_edit_proposal's own _clarify), not the fresh
+                # re-parse's guess — an edit clarify round must stay an
+                # edit proposal even if the composed follow-up text reads
+                # ambiguously to the model.
+                builder = (
+                    schedule_chat.build_edit_proposal
+                    if proposal.get("kind") == "edit"
+                    else schedule_chat.build_proposal
+                )
+                build = await builder(
                     conn2, company_id=claimed["company_id"], channel_id=claimed.get("channel_id"),
                     source_message_id=claimed.get("source_message_id"), created_by=claimed["created_by"],
                     parsed=parsed, today=_date.today(), original_content=proposal.get("original_content", ""),

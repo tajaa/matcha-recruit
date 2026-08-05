@@ -162,6 +162,45 @@ _SCHEDULE_PATTERNS = (
     rf"(?:^|^.{{0,20}}?,\s*)(?:can|could|will|would) (?:you|u) "
     rf"(?:push|re-?ass?i(?:gn|ng)|ass?i(?:gn|ng))\b"
     rf"(?:(?!\bto (?:report|log|file)\b).)*?\b{_SHIFT_NOUN}\b",
+    # ── EDIT an existing shift (added 2026-08-04) ────────────────────
+    # Live-prod report: "can you swap those two? give Cara's shift Casey
+    # and Caseys to Cara's" classified LOG and minted a phantom
+    # ems_events row — the ASK weak-interrogative fallback only fires
+    # when the message ENDS with "?", and no SCHEDULE pattern carried a
+    # swap verb at all.
+    #
+    # These lean wider than the create patterns above on purpose: a
+    # SCHEDULE match is NOT a commitment, it's a routing decision.
+    # `_bg_schedule_request` falls back to `_bg_ems_intake` whenever the
+    # parse comes back non-actionable, so a false positive costs one
+    # flash-lite call and still gets documented — while a false NEGATIVE
+    # writes a permanent event row for what was actually a work request.
+    # Tense-exactness still guards the LOG side: \bmove\b never matches
+    # "moved", so "we moved the freezer and someone got hurt" stays LOG.
+    #
+    # A: bot-directed + a verb that means nothing else here. No shift
+    #    noun required — "can you swap those two?" names none.
+    r"^(?:can|could|will|would|pls|please)\s*(?:you|u)?\s*(?:please )?"
+    r"(?:swap|switch|trade|re-?ass?i(?:gn|ng))\b",
+    # B: bot-directed + a verb that DOES mean other things ("can you
+    #    take a look", "can you put that in the notes"), so it must
+    #    reach a shift noun. The lead-in allows one throwaway clause —
+    #    "Dana called out for Wednesday, can you put someone else on it?"
+    rf"(?:^|[.!?]\s+|^.{{0,60}}?,\s*)(?:can|could|will|would) (?:you|u) (?:please )?"
+    rf"(?:give|move|put|push|pull|take|bump|make|change|update|cancel|drop|remove|scrap)\b"
+    rf"(?:(?!\bto (?:report|log|file)\b).)*?\b{_SHIFT_NOUN}\b",
+    # C: bare imperative — "give Cara's shift to Casey", "push the
+    #    opener back an hour", "take Dana off the schedule".
+    rf"(?:^|[.!?]\s+)(?:give|move|put|push|pull|take|bump|switch|swap|trade|change|update)\b"
+    rf"(?:(?!\bto (?:report|log|file)\b).)*?\b{_SHIFT_NOUN}\b",
+    # D: cancel/drop the shift itself. Kept separate from C's verb list
+    #    with a tighter token budget so "we had to cancel a patient's
+    #    appointment because the drill broke" stays LOG.
+    rf"(?:^|[.!?]\s+)(?:cancel|drop|remove|scrap)\b(?:\s+\S+){{0,6}}\s+{_SHIFT_NOUN}\b",
+    # E: third-person report of a wanted change — "Carmen and Casey want
+    #    to trade shifts next week", "Dana wants to swap Friday".
+    rf"\b(?:wants?|would like|'?d like|wanna) to (?:swap|switch|trade|change|move)\b"
+    rf"(?:(?!\bto (?:report|log|file)\b).)*?\b{_SHIFT_NOUN}\b",
 )
 
 # The inventory ask — deduct/receive/stockout/order stock. Bias-to-LOG
@@ -173,10 +212,12 @@ _INVENTORY_PATTERNS = (
     r"^(?:we|i)(?:'ve| have| just|'ve just| have just)? "
     r"(?:gifted|gave away|comped|donated|handed out|used up|went through|"
     r"threw (?:out|away)|tossed|wasted)\b",
-    # STOCKOUT / LOW — "we ran out of salads again", "we're low on cups".
+    # STOCKOUT / LOW — "we ran out of salads again", "we're low on cups",
+    # "we're down to 3 boxes of gloves" (a count-remaining report reads as
+    # a stock level, not an incident).
     r"^(?:we|i)(?:'re|'ve| are| have| am)?\s*(?:completely |all |totally |almost )?"
     r"(?:ran out of|run out of|out of|used the last of|have no more|"
-    r"running low on|low on)\b",
+    r"running low on|low on|down to (?:my |our )?\S+)\b",
     # RECEIPT — "we received the produce order", "we restocked napkins".
     r"^(?:we|i)(?: just)? (?:received|restocked|got in|"
     r"got (?:a|the|our) (?:delivery|shipment|order)(?: of)?)\b",
