@@ -198,6 +198,46 @@ describe('deriveHuumeArtifacts', () => {
     expect(result).toEqual([{ kind: 'action', key: 'action:ems_promote:ev1', action }])
   })
 
+  it('yields an action artifact for inventory_movement', () => {
+    const action: HuumeAction = {
+      type: 'inventory_movement', status: 'proposed', confirm_id: 'c1', kind: 'in',
+      item_id: 'i1', quantity: 5,
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:inventory_movement:c1', action }])
+  })
+
+  it('yields an action artifact for inventory_order_decision', () => {
+    const action: HuumeAction = {
+      type: 'inventory_order_decision', status: 'proposed', order_id: 'o1', decision: 'approve',
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:inventory_order_decision:o1', action }])
+  })
+
+  it('yields an action artifact for inventory_item_create', () => {
+    const action: HuumeAction = {
+      type: 'inventory_item_create', status: 'proposed', confirm_id: 'c1', name: 'Gloves',
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:inventory_item_create:c1', action }])
+  })
+
+  it('yields an action artifact for inventory_item_archive', () => {
+    const action: HuumeAction = { type: 'inventory_item_archive', status: 'proposed', item_id: 'i1' }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:inventory_item_archive:i1', action }])
+  })
+
+  it('yields an action artifact for inventory_receipt', () => {
+    const action: HuumeAction = {
+      type: 'inventory_receipt', status: 'proposed', confirm_id: 'c1',
+      lines: [{ item_id: 'i1', quantity: 10 }],
+    }
+    const result = deriveHuumeArtifacts({ plans: {}, action })
+    expect(result).toEqual([{ kind: 'action', key: 'action:inventory_receipt:c1', action }])
+  })
+
   it('omits handbook when pending_drafts is empty', () => {
     const result = deriveHuumeArtifacts({ plans: {}, handbook: { session_id: 's1', pending_drafts: [] } })
     expect(result).toEqual([])

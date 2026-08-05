@@ -648,6 +648,68 @@ export interface HuumeActionEmsPromote {
   location?: string | null
 }
 
+/** Stock in/out/stockout/adjust — see actions.py's _validate_inventory_movement.
+ * Exactly one of item_id/new_item_name is set; quantity is null for stockout
+ * (always zeroes the count regardless of what was asked). */
+export interface HuumeActionInventoryMovement {
+  type: 'inventory_movement'
+  status: 'proposed' | 'recorded' | 'failed' | 'cancelled'
+  confirm_id: string
+  kind: 'in' | 'out' | 'stockout' | 'adjust'
+  item_id?: string | null
+  new_item_name?: string | null
+  quantity?: number | null
+  location_id?: string | null
+  note?: string | null
+}
+
+export interface HuumeActionInventoryOrderDecision {
+  type: 'inventory_order_decision'
+  status: 'proposed' | 'decided' | 'failed' | 'cancelled'
+  order_id: string
+  decision: 'approve' | 'receive' | 'cancel'
+  quantity?: number | null
+}
+
+export interface HuumeActionInventoryItemCreate {
+  type: 'inventory_item_create'
+  status: 'proposed' | 'created' | 'failed' | 'cancelled'
+  confirm_id: string
+  name: string
+  unit?: string | null
+  initial_quantity?: number | null
+  low_stock_threshold?: number | null
+  location_id?: string | null
+}
+
+export interface HuumeActionInventoryItemArchive {
+  type: 'inventory_item_archive'
+  status: 'proposed' | 'archived' | 'failed' | 'cancelled'
+  item_id: string
+}
+
+export interface HuumeActionInventoryReceiptLine {
+  item_id?: string | null
+  new_item_name?: string | null
+  order_id?: string | null
+  quantity?: number | null
+}
+
+/** `dup_warning` rides the staged dict from stage time through to done/failed
+ * (agent.py spreads the original `staged` dict, not the executor's action) —
+ * it's never sent back to the executor (see actions.py's
+ * _validate_inventory_receipt), just shown here. */
+export interface HuumeActionInventoryReceipt {
+  type: 'inventory_receipt'
+  status: 'proposed' | 'committed' | 'failed' | 'cancelled'
+  confirm_id: string
+  lines: HuumeActionInventoryReceiptLine[]
+  vendor?: string | null
+  invoice_number?: string | null
+  location_id?: string | null
+  dup_warning?: string | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -664,6 +726,11 @@ export type HuumeAction =
   | HuumeActionDisciplineFromIncident
   | HuumeActionDisciplineDecision
   | HuumeActionEmsPromote
+  | HuumeActionInventoryMovement
+  | HuumeActionInventoryOrderDecision
+  | HuumeActionInventoryItemCreate
+  | HuumeActionInventoryItemArchive
+  | HuumeActionInventoryReceipt
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */

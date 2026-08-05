@@ -1,4 +1,4 @@
-import { ArrowUpCircle, BookOpen, CalendarCheck, FileSignature, Gavel, GraduationCap, Scale, ShieldAlert, Siren } from 'lucide-react'
+import { Archive, ArrowUpCircle, BookOpen, CalendarCheck, FileSignature, Gavel, GraduationCap, Package, Receipt, Scale, ShieldAlert, Siren, Truck } from 'lucide-react'
 import type { HuumeAction } from '../types'
 
 /** Terminal status -> the past-tense chip. Keyed by type because each staged
@@ -16,6 +16,11 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   discipline_from_incident: { filed: 'Disciplinary action staged for HR approval' },
   discipline_decision: { decided: 'Approval decision recorded' },
   ems_promote: { promoted: 'Promoted to incident' },
+  inventory_movement: { recorded: 'Stock movement recorded' },
+  inventory_order_decision: { decided: 'Order decision applied' },
+  inventory_item_create: { created: 'Item added' },
+  inventory_item_archive: { archived: 'Item archived' },
+  inventory_receipt: { committed: 'Receipt committed' },
 }
 
 /** One-line summary for the chat banner strip / the panel's passive status line. */
@@ -41,6 +46,22 @@ export function bannerLabel(action: HuumeAction): string {
       return `${action.decision === 'deny' ? 'Deny' : 'Approve'} this disciplinary action?`
     case 'ems_promote':
       return 'Promote this event to an incident?'
+    case 'inventory_movement': {
+      const label = action.new_item_name ?? 'this item'
+      if (action.kind === 'stockout') return `Mark ${label} as out of stock?`
+      if (action.kind === 'adjust') return `Set ${label}'s count to ${action.quantity ?? '?'}?`
+      const verb = action.kind === 'in' ? 'received' : 'used'
+      const qty = action.quantity != null ? `${action.quantity} ` : ''
+      return `Record ${qty}${label} ${verb}?`
+    }
+    case 'inventory_order_decision':
+      return `${action.decision === 'approve' ? 'Approve' : action.decision === 'receive' ? 'Mark received' : 'Cancel'} this order?`
+    case 'inventory_item_create':
+      return `Add "${action.name}" to inventory?`
+    case 'inventory_item_archive':
+      return 'Archive this inventory item?'
+    case 'inventory_receipt':
+      return `Commit this receipt (${action.lines.length} line${action.lines.length === 1 ? '' : 's'})?`
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -57,5 +78,9 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'amend_handbook') return <BookOpen size={size} />
   if (type === 'discipline_decision') return <Gavel size={size} />
   if (type === 'ems_promote') return <ArrowUpCircle size={size} />
+  if (type === 'inventory_movement' || type === 'inventory_item_create') return <Package size={size} />
+  if (type === 'inventory_order_decision') return <Truck size={size} />
+  if (type === 'inventory_item_archive') return <Archive size={size} />
+  if (type === 'inventory_receipt') return <Receipt size={size} />
   return <ShieldAlert size={size} />
 }

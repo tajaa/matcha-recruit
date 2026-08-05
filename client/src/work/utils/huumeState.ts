@@ -102,6 +102,11 @@ export function deriveHuumeArtifacts(h: HuumeState): HuumeArtifact[] {
       : h.action.type === 'discipline_from_incident' ? h.action.confirm_id
       : h.action.type === 'discipline_decision' ? h.action.record_id
       : h.action.type === 'ems_promote' ? h.action.event_id
+      : h.action.type === 'inventory_movement' ? h.action.confirm_id
+      : h.action.type === 'inventory_order_decision' ? h.action.order_id
+      : h.action.type === 'inventory_item_create' ? h.action.confirm_id
+      : h.action.type === 'inventory_item_archive' ? h.action.item_id
+      : h.action.type === 'inventory_receipt' ? h.action.confirm_id
       : ((): never => { throw new Error('unreachable') })()
     artifacts.push({ kind: 'action', key: `action:${h.action.type}:${idKey}`, action: h.action })
   }

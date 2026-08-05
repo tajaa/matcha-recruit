@@ -42,6 +42,21 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return `Discipline ${action.decision === 'deny' ? 'Denial' : 'Approval'}`
     case 'ems_promote':
       return `Promote to Incident${action.incident_type ? ` — ${action.incident_type}` : ''}`
+    case 'inventory_movement': {
+      const verbs: Record<string, string> = {
+        in: 'Stock In', out: 'Stock Out', stockout: 'Stockout', adjust: 'Count Adjustment',
+      }
+      const label = action.new_item_name ?? action.item_id
+      return `${verbs[action.kind] ?? 'Stock Movement'}${label ? ` — ${label}` : ''}`
+    }
+    case 'inventory_order_decision':
+      return `Order ${action.decision === 'approve' ? 'Approval' : action.decision === 'receive' ? 'Receipt' : 'Cancellation'}`
+    case 'inventory_item_create':
+      return `New Inventory Item — ${action.name}`
+    case 'inventory_item_archive':
+      return 'Archive Inventory Item'
+    case 'inventory_receipt':
+      return `Receipt Commit${action.vendor ? ` — ${action.vendor}` : ''}`
   }
 }
 
@@ -191,6 +206,52 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
           </div>
           <Prose>{action.title}</Prose>
           <p className="text-[11px] opacity-60">Files the logged event as a real IR incident — the original event stays in Ops.</p>
+        </>
+      )}
+
+      {action.type === 'inventory_movement' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <Meta label="Item" value={action.new_item_name ?? action.item_id} />
+          <Meta label="Kind" value={action.kind} />
+          <Meta label="Quantity" value={action.quantity} />
+          <Meta label="Note" value={action.note} />
+        </div>
+      )}
+
+      {action.type === 'inventory_order_decision' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <Meta label="Order" value={action.order_id} />
+          <Meta label="Decision" value={action.decision} />
+          <Meta label="Quantity" value={action.quantity} />
+        </div>
+      )}
+
+      {action.type === 'inventory_item_create' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <Meta label="Name" value={action.name} />
+          <Meta label="Unit" value={action.unit} />
+          <Meta label="Initial qty" value={action.initial_quantity} />
+          <Meta label="Low-stock at" value={action.low_stock_threshold} />
+        </div>
+      )}
+
+      {action.type === 'inventory_item_archive' && (
+        <Meta label="Item" value={action.item_id} />
+      )}
+
+      {action.type === 'inventory_receipt' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Vendor" value={action.vendor} />
+            <Meta label="Invoice" value={action.invoice_number} />
+            <Meta label="Lines" value={action.lines.length} />
+          </div>
+          {action.dup_warning && (
+            <div className={`flex items-start gap-1.5 text-[11px] px-2 py-1.5 rounded border w-fit ${chipRed}`}>
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>{action.dup_warning}</span>
+            </div>
+          )}
         </>
       )}
     </div>
