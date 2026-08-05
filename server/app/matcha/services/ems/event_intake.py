@@ -149,7 +149,11 @@ def _build_classify_prompt(
         "reported, written like a teammate replying in a group chat — refer "
         "to the specific thing that happened in your own words, vary your "
         "phrasing, no corporate boilerplate, don't restate the category "
-        "name or say the word 'logged'/'event', <=140 chars), "
+        "name or say the word 'logged'/'event', never restate dates/"
+        "weekdays/times, and NEVER say you did, will do, or are doing "
+        "anything (adding/ordering/scheduling/fixing/updating a count) — "
+        "you are only filing a note for the record, not taking an action, "
+        "<=140 chars), "
         f"{protocol_field}"
         '"incident_recommendation": bool (true only if this plausibly '
         "warrants a formal HR/safety incident record — real injury, "

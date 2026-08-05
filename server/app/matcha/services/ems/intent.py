@@ -227,6 +227,12 @@ _INVENTORY_PATTERNS = (
     r"^(?:we|i)(?:'ve| have| just|'ve just| have just)? "
     r"(?:gifted|gave away|comped|donated|handed out|used up|went through|"
     r"threw (?:out|away)|tossed|wasted)\b",
+    # "we used 2 boxes of gloves" — bare "used" is otherwise excluded
+    # deliberately (bias-to-LOG: "someone used the slicer and got hurt"), so
+    # this only matches a quantity-led object, never a bare verb+noun.
+    r"^(?:we|i)(?:'ve| have| just|'ve just| have just)? used "
+    r"(?:\d|a (?:box|bag|case|bottle|pack|ream|roll|carton|jar|can|tube|pair)e?s? of|"
+    r"some |a few )",
     # STOCKOUT / LOW — "we ran out of salads again", "we're low on cups",
     # "we're down to 3 boxes of gloves" (a count-remaining report reads as
     # a stock level, not an incident).
@@ -236,6 +242,23 @@ _INVENTORY_PATTERNS = (
     # RECEIPT — "we received the produce order", "we restocked napkins".
     r"^(?:we|i)(?: just)? (?:received|restocked|got in|"
     r"got (?:a|the|our) (?:delivery|shipment|order)(?: of)?)\b",
+    # RECEIPT — a quantity-led acquisition claim ("we got 3 more reams of
+    # paper") or an explicit add-to-stock instruction. These are chat-only
+    # ADDITION claims with no invoice/receipt/CSV — routed through the same
+    # strict receipt branch (receive_channel_lines) as every other addition,
+    # so they get honestly steered rather than silently filed as a log note
+    # that lies about having added stock.
+    r"^(?:we|i)(?: just)? (?:got|bought|picked up) \d+ (?:more )?",
+    r"\badd (?:\S+ ){0,4}?(?:back )?(?:in)?to (?:the )?(?:inventory|stock)\b",
+    # RETURN — goods coming back INTO stock from a customer/patient/guest,
+    # never a document; plain chat is sufficient by design (unlike other
+    # additions). Subject list is deliberately narrow so "she returned to
+    # work Monday" stays LOG.
+    r"^(?:a |the |our )?(?:patient|customer|client|guest|someone|they)\b"
+    r"[^.!?]{0,60}? returned\b",
+    r"^(?:we|i)(?: just)? (?:got|took|received) a return\b",
+    r"\bput (?:it|them|that|those|this|these)(?:[^.!?]{0,30})? "
+    r"back in(?:to)? (?:stock|inventory)\b",
     # ORDER REQUEST — tense-exact like SCHEDULE's \bneed\b (never "needed").
     r"^(?:we|i)(?:'ll| will)? need to (?:order|re-?order|re-?stock|buy)\b",
 )

@@ -1,7 +1,7 @@
 from app.matcha.services.inventory.pills import (
     channel_receipt_pill, extract_question, movement_pill, order_cancelled_pill, order_confirmed_pill,
     quantity_question, rearm_pill, receipt_draft_cancelled_pill, receipt_draft_pill, reorder_pill,
-    stockout_pill,
+    return_pill, return_unmatched_pill, stockout_pill,
 )
 
 _SAMPLE_PREVIEW = [
@@ -21,6 +21,8 @@ _ALL_BUILDERS = [
     rearm_pill(),
     receipt_draft_pill(vendor="Henry Schein", invoice_number="INV-1", preview=_SAMPLE_PREVIEW),
     receipt_draft_cancelled_pill(),
+    return_pill("Nitrile Gloves (M)", 1, 33, False),
+    return_unmatched_pill("Gauze Pads"),
 ]
 
 
@@ -98,6 +100,61 @@ def test_reorder_pill_never_claims_stockout():
     pill = reorder_pill("Salads", {"avg_stockout_interval_days": 9}, 42)
     assert "out of stock" not in pill.lower()
     assert "Reply **confirm**" in pill
+
+
+class TestOrderSuggestionClause:
+    """Both order pills share this tail. Live dev-remote read
+    "Staging an order for Dental Floss. suggest ordering 20.0." — a
+    lowercase sentence start and a float quantity."""
+
+    def test_whole_number_quantity_renders_bare(self):
+        for pill in (reorder_pill("Floss", None, 20.0), stockout_pill("Floss", None, 20.0)):
+            assert "20." not in pill.replace("20. ", "")  # no "20.0"
+            assert "ordering 20" in pill
+
+    def test_fractional_quantity_preserved(self):
+        assert "ordering 2.5" in reorder_pill("Floss", None, 2.5)
+
+    def test_sentence_start_capitalized_without_history_clause(self):
+        assert "Suggest ordering" in reorder_pill("Floss", None, 20)
+        assert ". suggest" not in reorder_pill("Floss", None, 20)
+
+    def test_lowercase_after_the_history_semicolon(self):
+        pill = reorder_pill("Floss", {"avg_stockout_interval_days": 9}, 20)
+        assert "days; suggest ordering 20." in pill
+
+    def test_no_suggestion_capitalized_without_history_clause(self):
+        assert "Not enough history" in reorder_pill("Floss", None, None)
+
+    def test_no_suggestion_lowercase_after_history_clause(self):
+        pill = reorder_pill("Floss", {"avg_stockout_interval_days": 9}, None)
+        assert "days; not enough history" in pill
+
+
+class TestReturnPill:
+    def test_known_quantity_and_count(self):
+        pill = return_pill("Nitrile Gloves (M)", 1, 33, False)
+        assert "Put back 1 × Nitrile Gloves (M)" in pill
+        assert "33 on hand" in pill
+
+    def test_estimated_quantity_shows_tilde(self):
+        pill = return_pill("Nitrile Gloves (M)", 1, 33, True)
+        assert "~1" in pill
+
+    def test_unknown_count_phrasing(self):
+        pill = return_pill("Nitrile Gloves (M)", 1, None, False)
+        assert "count unknown" in pill.lower()
+
+    def test_never_claims_stockout(self):
+        pill = return_pill("Nitrile Gloves (M)", 1, 33, False)
+        assert "out of stock" not in pill.lower()
+
+
+class TestReturnUnmatchedPill:
+    def test_steers_to_inventory_page_never_auto_creates(self):
+        pill = return_unmatched_pill("Gauze Pads")
+        assert "Gauze Pads" in pill
+        assert "Inventory page" in pill
 
 
 def test_every_pill_starts_with_box_emoji():

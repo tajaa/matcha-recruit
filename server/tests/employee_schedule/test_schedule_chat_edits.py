@@ -93,6 +93,39 @@ class TestCoerceEditRequest:
         out = coerce_edit_request({"kind": "cancel", "target_role_hint": "x" * 500})
         assert len(out["target_role_hint"]) == 80
 
+    def test_day_hints_carry_through_lowercased_and_clamped(self):
+        out = coerce_edit_request({
+            "kind": "cancel", "target_day_hint": "Tomorrow",
+            "second_day_hint": "FRIDAY-WHATEVER-LONG", "new_day_hint": "wed",
+        })
+        assert out["target_day_hint"] == "tomorrow"
+        assert out["second_day_hint"] == "friday-whate"  # 12-char cap
+        assert out["new_day_hint"] == "wed"
+
+    def test_missing_day_hints_are_none(self):
+        out = coerce_edit_request({"kind": "cancel", "target_role_hint": "opener"})
+        assert out["target_day_hint"] is None
+        assert out["second_day_hint"] is None
+        assert out["new_day_hint"] is None
+
+    def test_cancel_survives_on_day_hint_alone(self):
+        # "cancel tomorrow's shift" — no employee/role/exact-date, only a
+        # relative day. Must not be dropped by the minimum-shape gate (a
+        # real prod bug: this used to require target_date/target_role_hint/
+        # target_employee_name and silently discarded a day-hint-only ask).
+        out = coerce_edit_request({"kind": "cancel", "target_day_hint": "tomorrow"})
+        assert out is not None
+
+    def test_swap_survives_on_day_hints_alone(self):
+        out = coerce_edit_request({
+            "kind": "swap", "target_day_hint": "monday", "second_day_hint": "tuesday",
+        })
+        assert out is not None
+
+    def test_retime_survives_on_new_day_hint_alone(self):
+        out = coerce_edit_request({"kind": "retime", "target_role_hint": "opener", "new_day_hint": "friday"})
+        assert out is not None
+
 
 class TestCoerceDelta:
     @pytest.mark.parametrize("value", [None, "60", True, 0, 721, -721])

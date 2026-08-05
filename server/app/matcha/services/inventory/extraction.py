@@ -27,7 +27,7 @@ Message: "{content}"
 Return ONLY JSON matching this shape:
 {{
   "actionable": true or false,
-  "kind": "movement" | "stockout" | "receipt" | "order_request",
+  "kind": "movement" | "stockout" | "receipt" | "order_request" | "return",
   "lines": [
     {{"item_name": "...", "quantity": number or null, "unit": "..." or null, "direction": "out" or "in"}}
   ],
@@ -36,10 +36,10 @@ Return ONLY JSON matching this shape:
 
 Rules:
 - "actionable": false when the message does not name any identifiable stock item, or is not really about inventory (a misclassification) — the caller falls back to plain event logging in that case.
-- "kind": "movement" for an ordinary deduction/use ("we gifted some cookies"), "stockout" for a "ran out of" / "out of" report, "receipt" for goods coming IN ("we received the produce delivery"), "order_request" for an explicit "we need to reorder X".
+- "kind": "movement" for an ordinary deduction/use ("we gifted some cookies"), "stockout" for a "ran out of" / "out of" report, "receipt" for goods coming IN with an invoice/delivery/order behind it ("we received the produce delivery", "we got 3 more reams, add them to stock"), "return" for goods coming back INTO stock from a customer/patient/guest return (no document expected — "a patient returned an unopened box of gloves, put it back in stock"), "order_request" for an explicit "we need to reorder X".
 - "quantity" is null when the message doesn't state a number ("some cookies") — never guess a number.
 - "recipient_note" captures a short human-readable aside like "gifted to Elizabeth (manager)" — null if there isn't one.
-- Every "direction" is "out" for movement/stockout, "in" for receipt. order_request lines have direction "out" (they represent what's being replenished).
+- Every "direction" is "out" for movement/stockout, "in" for receipt/return. order_request lines have direction "out" (they represent what's being replenished).
 """
 
 

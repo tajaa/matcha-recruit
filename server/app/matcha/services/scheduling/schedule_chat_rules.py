@@ -157,6 +157,32 @@ def resolve_dates(
     return NeedsClarify("Which days should I schedule?")
 
 
+def resolve_day_hint(hint: Optional[str], today: date) -> Optional[date]:
+    """"today"/"tomorrow"/a weekday name -> the concrete date it means,
+    relative to `today`. A named weekday resolves to its NEXT occurrence —
+    `today` counts as a match for its own weekday (so "Wednesday" said on a
+    Wednesday means today, matching how a manager would say it). Used for
+    edit ops' relative day fields (target/second/new), which — unlike
+    create's `weekdays`/`week_hint` — have no symbolic field at all in the
+    parse prompt; the model is told never to compute a relative date, so
+    something has to turn "tomorrow" into a real one deterministically.
+    Returns None for anything unrecognized (an explicit `target_date` on the
+    same request always wins over this, and a miss falls back to the
+    existing ambiguous-listing clarify — never silently guesses)."""
+    if not hint:
+        return None
+    h = hint.strip().lower()
+    if h == "today":
+        return today
+    if h == "tomorrow":
+        return today + timedelta(days=1)
+    if h not in _WEEKDAY_NAMES:
+        return None
+    wanted = _WEEKDAY_NAMES[h]
+    delta = (wanted - sunday_indexed_weekday(today)) % 7
+    return today + timedelta(days=delta)
+
+
 # ── Location / template matching ────────────────────────────────────────
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -255,6 +281,21 @@ def resolve_clarify_answer(answer: str, options: list[str]) -> str:
     if snapped is None:
         return text
     return _OPTION_CITY_SUFFIX.sub("", snapped).strip()
+
+
+def snapped_to_option(snapped: str, options: list[str]) -> bool:
+    """Did `resolve_clarify_answer` actually land on one of the offered
+    options? Callers can't just test `snapped in options` — the trailing
+    " (City)" is stripped off the return value, so a snapped location never
+    compares equal to the raw option string it came from. A caller that
+    gets this wrong silently treats a good answer as unresolved (the
+    location-clarify round then re-asks the same question forever)."""
+    if not snapped or not options:
+        return False
+    target = snapped.strip().lower()
+    return any(
+        _OPTION_CITY_SUFFIX.sub("", o).strip().lower() == target for o in options
+    )
 
 
 def _stem(word: str) -> str:
@@ -444,10 +485,14 @@ _TIME_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A range hint ("9am-5pm", "9 to 5pm") narrows on its FIRST endpoint — that's
+# always the shift's start time, which is what candidates differ on.
+_TIME_RANGE_SPLIT_RE = re.compile(r"\s*(?:-|–|—|\bto\b|\buntil\b)\s*", re.IGNORECASE)
+
 
 def parse_time_hint(hint: Optional[str]) -> Optional[time]:
     """Best-effort clock time out of `target_time_hint`'s free-text value
-    ("8am", "8:30pm", "08:00", "20:00") — unlike `_coerce_time` in
+    ("8am", "8:30pm", "08:00", "20:00", "9am-5pm") — unlike `_coerce_time` in
     schedule_chat.py this ISN'T restricted to strict 24h "HH:MM", since the
     model is asked for a human hint, not a normalized field. Returns None
     on anything ambiguous (bare "8" with no am/pm and no way to tell if
@@ -456,7 +501,9 @@ def parse_time_hint(hint: Optional[str]) -> Optional[time]:
     anything, so a missed parse just falls back to the existing listing."""
     if not hint:
         return None
-    m = _TIME_HINT_RE.match(hint.strip())
+    hint = hint.strip()
+    segments = _TIME_RANGE_SPLIT_RE.split(hint, maxsplit=1)
+    m = _TIME_HINT_RE.match(segments[0].strip())
     if not m:
         return None
     hour = int(m.group("hour"))

@@ -10,6 +10,28 @@ INVENTORY_POSITIVES = [
     "@huume we received the produce delivery",
     "@huume we need to reorder napkins",
     "hey @huume we ran out of salads",
+    # F5 — quantity-led "used" (bare "used" stays excluded, see negatives).
+    "@huume we used 2 boxes of nitrile gloves",
+    "@huume we used a case of paper towels",
+    "@huume we used some napkins",
+    "@huume i used a few gloves",
+    # F6 — chat-only addition claims, routed to the same strict receipt
+    # branch as every other addition (never auto-created, never a lie).
+    "@huume we got 3 more reams of printer paper in stock, please add them",
+    "@huume we bought 10 more masks",
+    "@huume please add these gloves back to the inventory",
+    # NOTE: a bot-directed "can you add ..." (no object clause reaching
+    # "stock"/"inventory" first) classifies SCHEDULE instead — that's the
+    # pre-existing bot-directed staffing pattern (_SCHEDULE_PATTERNS,
+    # "can you add/staff/book/schedule/put"), checked before INVENTORY,
+    # and deliberately not narrowed here.
+    # F7 — chat-only returns (no document required, unlike other additions).
+    "@huume a patient returned an unopened box of nitrile gloves, put it back in stock",
+    "@huume the customer returned two masks",
+    "@huume we got a return from a client",
+    "@huume someone returned their gloves",
+    "@huume please put them back in stock",
+    "@huume put that back into inventory",
 ]
 
 LOG_NEGATIVES = [
@@ -18,6 +40,12 @@ LOG_NEGATIVES = [
     "@huume we needed more staff last night and someone got hurt",
     "@huume customer threw a chair",
     "@huume the walk-in ran all night",
+    # F5 — bare "used" (no quantity-led object) must stay LOG.
+    "@huume someone used the fryer without gloves on",
+    # F7 — "returned" not led by a person-subject stays LOG (e.g. an
+    # employee's own attendance, not a stock event).
+    "@huume Dana returned from lunch late",
+    "@huume she returned to work Monday",
 ]
 
 ASK_NEGATIVES = [

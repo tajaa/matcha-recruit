@@ -20,7 +20,9 @@ from app.matcha.services.scheduling.schedule_chat_rules import (
     rank_candidates,
     resolve_clarify_answer,
     resolve_dates,
+    resolve_day_hint,
     resolve_week,
+    snapped_to_option,
 )
 
 LOCATIONS = [
@@ -168,6 +170,39 @@ class TestResolveClarifyAnswer:
 
     def test_no_options_passthrough(self):
         assert resolve_clarify_answer("8am to 4pm", []) == "8am to 4pm"
+
+
+class TestSnappedToOption:
+    """A caller can't test `snapped in options` — resolve_clarify_answer
+    strips the trailing " (City)" off what it returns, so a snapped
+    location never compares equal to the option it came from. Getting this
+    wrong made the location-clarify round re-ask its own question forever
+    (caught live on dev-remote, not by the earlier unit pass)."""
+
+    OPTS = [
+        "Sunset Smile Dental — Wilshire (Los Angeles)",
+        "La Jolla Studio (San Diego)",
+    ]
+
+    def test_snapped_value_matches_despite_stripped_city_suffix(self):
+        snapped = resolve_clarify_answer("wilshire", self.OPTS)
+        assert snapped == "Sunset Smile Dental — Wilshire"
+        assert snapped not in self.OPTS       # the naive check that failed
+        assert snapped_to_option(snapped, self.OPTS) is True
+
+    def test_unsnapped_freetext_is_false(self):
+        snapped = resolve_clarify_answer("somewhere else entirely", self.OPTS)
+        assert snapped_to_option(snapped, self.OPTS) is False
+
+    def test_case_insensitive(self):
+        assert snapped_to_option("la jolla studio", self.OPTS) is True
+
+    def test_empty_inputs_are_false(self):
+        assert snapped_to_option("", self.OPTS) is False
+        assert snapped_to_option("Wilshire", []) is False
+
+    def test_option_without_a_city_suffix_still_matches(self):
+        assert snapped_to_option("Main Store", ["Main Store"]) is True
 
 
 class TestMatchTemplate:
@@ -366,3 +401,54 @@ class TestParseTimeHint:
     @pytest.mark.parametrize("hint", [None, "", "8", "morning", "the opener", "13am"])
     def test_ambiguous_or_empty_returns_none(self, hint):
         assert parse_time_hint(hint) is None
+
+    @pytest.mark.parametrize("hint,expect", [
+        ("9am-5pm", (9, 0)),
+        ("9am–5pm", (9, 0)),  # en dash
+        ("9am to 5pm", (9, 0)),
+        ("9am to 5", (9, 0)),
+        ("9am until 5pm", (9, 0)),
+        ("08:00-17:00", (8, 0)),
+    ])
+    def test_range_narrows_on_first_endpoint(self, hint, expect):
+        # A real prod miss: "cancel Friday's 9am-5pm shift" listed every
+        # Friday shift instead of narrowing to the exact 9-5 one, because
+        # the range hint failed to parse at all.
+        result = parse_time_hint(hint)
+        assert result is not None
+        assert (result.hour, result.minute) == expect
+
+    def test_bare_time_regression_after_range_split(self):
+        # The range-split must not break the plain single-time case.
+        result = parse_time_hint("8am")
+        assert (result.hour, result.minute) == (8, 0)
+
+
+class TestResolveDayHint:
+    TODAY = date(2026, 8, 5)  # a Wednesday
+
+    def test_today(self):
+        assert resolve_day_hint("today", self.TODAY) == self.TODAY
+
+    def test_tomorrow(self):
+        assert resolve_day_hint("tomorrow", self.TODAY) == date(2026, 8, 6)
+
+    def test_case_insensitive(self):
+        assert resolve_day_hint("Tomorrow", self.TODAY) == date(2026, 8, 6)
+
+    def test_same_weekday_as_today_means_today(self):
+        # Today IS Wednesday — "Wednesday" said today means today, not next week.
+        assert resolve_day_hint("wednesday", self.TODAY) == self.TODAY
+
+    def test_future_weekday_this_week(self):
+        assert resolve_day_hint("friday", self.TODAY) == date(2026, 8, 7)
+
+    def test_past_weekday_rolls_to_next_week(self):
+        assert resolve_day_hint("monday", self.TODAY) == date(2026, 8, 10)
+
+    def test_abbreviation(self):
+        assert resolve_day_hint("fri", self.TODAY) == date(2026, 8, 7)
+
+    @pytest.mark.parametrize("hint", [None, "", "next week", "sometime", "8am"])
+    def test_unrecognized_returns_none(self, hint):
+        assert resolve_day_hint(hint, self.TODAY) is None

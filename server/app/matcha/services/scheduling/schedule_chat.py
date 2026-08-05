@@ -55,6 +55,7 @@ from .schedule_chat_rules import (
     parse_time_hint,
     rank_candidates,
     resolve_dates,
+    resolve_day_hint,
     resolve_week,
 )
 from .schedule_intelligence import fetch_lapse_items
@@ -74,6 +75,11 @@ logger = logging.getLogger(__name__)
 _CANDIDATE_CAP = 8
 _MAX_SHIFT_REQUESTS = 6
 CLARIFY_ROUND_CAP = 2
+
+# Shared with channels_ws.py's clarify-resume logic — the location question
+# is OUR OWN multiple-choice offer (build_proposal's own list of options),
+# so a reply to it can be resolved deterministically without a Gemini call.
+LOCATION_CLARIFY_QUESTION = "Which location did you mean?"
 
 CANCELLED_TEXT = "\U0001F44D Scrapped it — nothing was created."
 CLARIFY_BAIL_TEXT = (
@@ -126,7 +132,9 @@ def _build_parse_prompt(content: str, today: date) -> str:
         '{"actionable": bool (false if this is not really a concrete '
         "scheduling request), "
         '"ack": str (ONE short casual sentence acknowledging the request, '
-        "like a teammate replying in chat, <=140 chars), "
+        "like a teammate replying in chat, <=140 chars — never restate "
+        "dates, weekdays, or times, the structured preview below it is the "
+        "authority on those), "
         '"action": "create"|"edit", '
         '"location_hint": str|null (the store/location they named, in '
         "their own words), "
@@ -146,17 +154,29 @@ def _build_parse_prompt(content: str, today: date) -> str:
         '"retime"|"cancel"|"swap", '
         '"target_employee_name": str|null (whose CURRENT shift this is — '
         'required for reassign/unassign, the person being taken off), '
-        '"target_date": str|null (ISO YYYY-MM-DD if named, else null), '
-        '"target_time_hint": str|null (a time they mentioned to help find '
-        "the shift, e.g. \"the opener\" or \"8am\"), "
+        '"target_date": str|null (ISO YYYY-MM-DD ONLY if they named an '
+        'EXACT date, else null — for a RELATIVE day like "today"/'
+        '"tomorrow"/a bare weekday name, use target_day_hint instead, '
+        "never compute the date yourself), "
+        '"target_day_hint": "today"|"tomorrow"|weekday name (lowercase)|'
+        'null (a RELATIVE day reference for the shift, e.g. "tomorrow\'s '
+        'shift" or "the Friday shift" — null when target_date is set or '
+        'no day was named), '
+        '"target_time_hint": str|null (a time or time RANGE they mentioned '
+        'to help find the shift, e.g. "the opener", "8am", or "9am-5pm"), '
         '"target_role_hint": str|null (role/label to help find the shift, '
         'e.g. "opener", "closer"), '
         '"to_employee_name": str|null (who the shift should go TO — for '
         'reassign/assign), '
-        '"second_date": str|null, "second_role_hint": str|null, '
+        '"second_date": str|null (exact date only, same rule as '
+        'target_date), "second_day_hint": str|null (same as '
+        'target_day_hint, for shift #2), "second_role_hint": str|null, '
         '"second_employee_name": str|null (the OTHER shift in a '
-        'kind="swap" — same three hint fields, describing shift #2), '
-        '"new_date": str|null, "new_start_time": str|null, '
+        'kind="swap" — same hint fields, describing shift #2), '
+        '"new_date": str|null (exact date only — for retime moving the '
+        'shift to a different day), "new_day_hint": str|null (same as '
+        'target_day_hint, for the day retime is moving TO), '
+        '"new_start_time": str|null, '
         '"new_end_time": str|null (for retime — HH:MM 24h), '
         '"shift_by_minutes": int|null (for a RELATIVE retime where they '
         'gave no clock time — "push it back an hour" = 60, "start 30 '
@@ -238,6 +258,10 @@ def coerce_edit_request(raw) -> Optional[dict]:
         v = raw.get(key)
         return str(v).strip()[:limit] if v else None
 
+    def _day_hint(key: str) -> Optional[str]:
+        v = raw.get(key)
+        return str(v).strip().lower()[:12] if v else None
+
     target_date = raw.get("target_date")
     if isinstance(target_date, str):
         try:
@@ -269,13 +293,16 @@ def coerce_edit_request(raw) -> Optional[dict]:
         "kind": kind,
         "target_employee_name": _s("target_employee_name"),
         "target_date": target_date,
+        "target_day_hint": _day_hint("target_day_hint"),
         "target_time_hint": _s("target_time_hint", 40),
         "target_role_hint": _s("target_role_hint", 80),
         "to_employee_name": _s("to_employee_name"),
         "second_employee_name": _s("second_employee_name"),
         "second_date": second_date,
+        "second_day_hint": _day_hint("second_day_hint"),
         "second_role_hint": _s("second_role_hint", 80),
         "new_date": new_date,
+        "new_day_hint": _day_hint("new_day_hint"),
         "new_start_time": _coerce_time(raw.get("new_start_time")),
         "new_end_time": _coerce_time(raw.get("new_end_time")),
         "shift_by_minutes": _coerce_delta(raw.get("shift_by_minutes")),
@@ -288,16 +315,19 @@ def coerce_edit_request(raw) -> Optional[dict]:
         return None
     if kind == "retime" and not (
         result["new_start_time"] or result["new_end_time"]
-        or result["new_date"] or result["shift_by_minutes"]
+        or result["new_date"] or result["new_day_hint"] or result["shift_by_minutes"]
     ):
         return None
     if kind == "swap" and not (
-        (result["second_role_hint"] or result["second_date"] or result["second_employee_name"])
-        and (result["target_role_hint"] or result["target_date"] or result["target_employee_name"])
+        (result["second_role_hint"] or result["second_date"] or result["second_day_hint"]
+         or result["second_employee_name"])
+        and (result["target_role_hint"] or result["target_date"] or result["target_day_hint"]
+             or result["target_employee_name"])
     ):
         return None
     if kind in ("cancel", "assign") and not (
-        result["target_employee_name"] or result["target_date"] or result["target_role_hint"]
+        result["target_employee_name"] or result["target_date"] or result["target_day_hint"]
+        or result["target_role_hint"]
     ):
         return None
     return result
@@ -470,7 +500,7 @@ async def build_proposal(
             f"{(l.get('name') or l.get('address') or 'Unnamed')} ({l.get('city')})"
             for l in (matched or locations)
         ][:6]
-        return await _clarify("Which location did you mean?", options)
+        return await _clarify(LOCATION_CLARIFY_QUESTION, options)
     location = matched[0]
     location_id = UUID(str(location["id"]))
     location_state = location.get("state")
@@ -903,6 +933,23 @@ async def build_edit_proposal(
     ops: list[dict] = []
     for req in parsed["edit_requests"]:
         kind = req["kind"]
+
+        # Relative day hints ("tomorrow", a bare weekday) have no ISO date
+        # from the parse — the prompt forbids the model from computing one.
+        # Resolve them here, deterministically, before any shift lookup:
+        # _resolve_shift_ref only ever reads target_date, so an unresolved
+        # target_day_hint silently narrows nothing and every candidate on
+        # the 14-day window comes back as an ambiguous listing.
+        for date_key, hint_key in (
+            ("target_date", "target_day_hint"),
+            ("second_date", "second_day_hint"),
+            ("new_date", "new_day_hint"),
+        ):
+            if not req.get(date_key) and req.get(hint_key):
+                resolved_day = resolve_day_hint(req[hint_key], today)
+                if resolved_day is not None:
+                    req[date_key] = resolved_day.isoformat()
+
         from_employee_id: Optional[UUID] = None
         from_employee_name: Optional[str] = None
         to_employee_id: Optional[UUID] = None
@@ -931,8 +978,14 @@ async def build_edit_proposal(
                 conn, company_id, location_id, ref, today, from_employee_id=emp_id,
             )
             if "none" in found:
-                who = label_hint or "that shift"
-                return None, await _clarify(f"I couldn't find a shift for {who} — what date is it on?")
+                # No label to name it by reads as "a shift for that shift" —
+                # drop the possessive clause entirely in that case.
+                question = (
+                    f"I couldn't find a shift for {label_hint} — what date is it on?"
+                    if label_hint else
+                    "I couldn't find that shift — what date is it on?"
+                )
+                return None, await _clarify(question)
             if "ambiguous" in found:
                 # Who's on it is the discriminator that makes two same-role,
                 # same-window shifts (two stores, or a genuinely doubled-up

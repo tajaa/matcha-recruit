@@ -21,6 +21,26 @@ def movement_pill(item_name: str, qty, remaining, note: str | None, estimated: b
     return base
 
 
+def return_pill(item_name: str, qty, new_count, estimated: bool) -> str:
+    """Chat-only return — no invoice/receipt/CSV needed by design, unlike
+    every other addition (services/inventory/CLAUDE.md provenance
+    invariant). Same estimated-quantity shape as movement_pill."""
+    qty_str = f"~{qty}" if estimated else str(qty)
+    base = f"\U0001F4E6 Put back {qty_str} × {item_name}"
+    if new_count is None:
+        base += ". Count unknown — set it on the Inventory page."
+    else:
+        base += f". {new_count} on hand."
+    return base
+
+
+def return_unmatched_pill(item_name: str) -> str:
+    return (
+        f"\U0001F4E6 I don't see {item_name} in the catalog — "
+        "add it on the Inventory page first, then I can put the return back."
+    )
+
+
 def quantity_question(pill: str) -> str:
     return f"{pill}{_QUESTION_MARKER}How many?{_QUESTION_SUFFIX}"
 
@@ -35,15 +55,37 @@ def extract_question(pill_content: str) -> str:
     return question
 
 
-def stockout_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
-    base = f"\U0001F4E6 {item_name} marked out of stock."
+def _fmt_qty(qty) -> str:
+    """Whole numbers render bare — suggest_order works in floats, so an
+    un-formatted suggestion reads as "order 20.0" in the channel."""
+    try:
+        f = float(qty)
+    except (TypeError, ValueError):
+        return str(qty)
+    return str(int(f)) if f == int(f) else str(f)
+
+
+def _order_suggestion_clause(suggestion: dict | None, order_qty) -> str:
+    """Shared tail of stockout_pill/reorder_pill. The lead-in is a
+    semicolon when the history clause precedes it and a fresh sentence
+    otherwise — without this the pill read ". suggest ordering 20."."""
+    days_clause = ""
     if suggestion and suggestion.get("avg_stockout_interval_days"):
         days = round(suggestion["avg_stockout_interval_days"])
-        base += f" You've run out ~every {days} days;"
-    if order_qty is not None:
-        base += f" suggest ordering {order_qty}."
-    else:
-        base += " not enough history yet to suggest an amount — set one on the Inventory page."
+        days_clause = f" You've run out ~every {days} days;"
+    if order_qty is None:
+        return days_clause + (
+            " not enough history yet to suggest an amount — set one on the Inventory page."
+            if days_clause else
+            " Not enough history yet to suggest an amount — set one on the Inventory page."
+        )
+    verb = "suggest" if days_clause else "Suggest"
+    return f"{days_clause} {verb} ordering {_fmt_qty(order_qty)}."
+
+
+def stockout_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
+    base = f"\U0001F4E6 {item_name} marked out of stock."
+    base += _order_suggestion_clause(suggestion, order_qty)
     base += " Reply **confirm** to queue it, a number to change the amount, or **cancel**."
     return base
 
@@ -56,13 +98,7 @@ def reorder_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
     stock, since no `stockout` movement was recorded and the current count
     may be fine."""
     base = f"\U0001F4E6 Staging an order for {item_name}."
-    if suggestion and suggestion.get("avg_stockout_interval_days"):
-        days = round(suggestion["avg_stockout_interval_days"])
-        base += f" You've historically run out ~every {days} days;"
-    if order_qty is not None:
-        base += f" suggest ordering {order_qty}."
-    else:
-        base += " not enough history yet to suggest an amount — set one on the Inventory page."
+    base += _order_suggestion_clause(suggestion, order_qty)
     base += " Reply **confirm** to queue it, a number to change the amount, or **cancel**."
     return base
 

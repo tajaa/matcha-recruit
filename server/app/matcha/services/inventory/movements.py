@@ -49,6 +49,21 @@ async def find_or_create_item(
     return dict(row)
 
 
+async def find_item(
+    conn, company_id: UUID, raw_name: str, location_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """Match-only lookup — unlike find_or_create_item, NEVER inserts a new
+    row. Used by the return branch: returning stock the company never
+    tracked shouldn't silently mint a catalog entry from an unreviewed chat
+    claim, the way an out/stockout report is allowed to."""
+    existing = await list_item_names(conn, company_id, location_id)
+    match = best_match(raw_name, existing)
+    if match is None:
+        return None
+    row = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1", match["id"])
+    return dict(row)
+
+
 async def create_item_checked(
     conn, *, company_id: UUID, name: str, unit: Optional[str] = None,
     current_quantity=None, low_stock_threshold=None, location_id: Optional[UUID] = None,

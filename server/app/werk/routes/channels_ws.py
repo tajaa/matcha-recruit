@@ -764,6 +764,56 @@ async def _bg_inventory_request(
                 pill_text = pills.channel_receipt_pill(result["received"], result["unmatched"])
                 sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
 
+            elif kind == "return":
+                # Chat-only ADDITION exception (services/inventory/CLAUDE.md
+                # provenance invariant): a return needs no invoice/receipt/
+                # CSV, unlike every other addition — but it still never
+                # AUTO-CREATES an item the way movement/stockout do, since
+                # returning stock the company never tracked would otherwise
+                # mint a catalog row from an unreviewed chat claim.
+                resolved_lines = []
+                unmatched_names = []
+                for line in lines:
+                    raw_name = line.get("item_name", "")
+                    item = await movements_service.find_item(conn, company_id, raw_name, location_id)
+                    if item is None:
+                        unmatched_names.append(raw_name)
+                        continue
+                    qty = line.get("quantity")
+                    estimated = qty is None
+                    resolved_lines.append({
+                        "item_id": item["id"], "quantity": 1 if estimated else qty, "estimated": estimated,
+                    })
+                if not resolved_lines:
+                    pill_text = pills.return_unmatched_pill(unmatched_names[0] if unmatched_names else stripped)
+                    sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                else:
+                    inserted = await movements_service.record_movements(
+                        conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                        source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
+                        kind="in", lines=resolved_lines, narrative=stripped,
+                        note=extracted.get("recipient_note"),
+                    )
+                    if not inserted:
+                        return
+                    first = inserted[0]
+                    item_row = await conn.fetchrow(
+                        "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
+                    )
+                    pill_text = pills.return_pill(
+                        item_row["name"], first["quantity"], item_row["current_quantity"],
+                        first["quantity_estimated"],
+                    )
+                    single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
+                    if single_unknown:
+                        pill_text = pills.quantity_question(pill_text)
+                    sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                    if single_unknown:
+                        await conn.execute(
+                            "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                            sys_row["id"], inserted[0]["id"],
+                        )
+
             else:  # stockout / order_request
                 item_name = lines[0].get("item_name") if lines else stripped
                 item = await movements_service.find_or_create_item(
@@ -791,7 +841,10 @@ async def _bg_inventory_request(
                     source_message_id=UUID(message_id_str), created_by=UUID(sender_user_id_str),
                     suggestion=suggestion,
                 )
-                pill_text = pills.stockout_pill(item["name"], suggestion, order_qty)
+                pill_text = (
+                    pills.stockout_pill(item["name"], suggestion, order_qty) if kind == "stockout"
+                    else pills.reorder_pill(item["name"], suggestion, order_qty)
+                )
                 sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
                 await conn.execute(
                     "UPDATE inventory_orders SET confirm_message_id = $1 WHERE id = $2",
@@ -800,6 +853,14 @@ async def _bg_inventory_request(
 
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+
+        # A RETURN is a customer/patient interaction, not just a stock
+        # correction — the movement ledger records the units, but what
+        # happened (who returned what, and why) belongs in the event record
+        # too. Same dual-write shape as the OSHA-keyword case above, and
+        # guarded against firing twice for one message when both apply.
+        if kind == "return" and not osha_dual_write:
+            await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
     except Exception:
         logger.exception("inventory chat request failed for message %s", message_id_str)
 
@@ -899,7 +960,7 @@ async def _bg_inventory_reply(
                         UPDATE inventory_movements SET clarify_message_id = NULL
                         WHERE clarify_message_id = $1 AND channel_id = $2
                           AND created_at > NOW() - INTERVAL '7 days'
-                        RETURNING id, company_id, item_id, clarify_rounds
+                        RETURNING id, company_id, item_id, clarify_rounds, kind
                         """,
                         reply_uuid, UUID(channel_id_str),
                     )
@@ -918,10 +979,12 @@ async def _bg_inventory_reply(
                                 "SELECT current_quantity FROM inventory_items WHERE id = $1",
                                 claimed_movement["item_id"],
                             )
-                            sys_row = await _insert_system_message(
-                                conn, channel_id_str,
-                                pills.movement_pill(item["name"], qty, new_item["current_quantity"], None, False),
+                            pill_text = (
+                                pills.return_pill(item["name"], qty, new_item["current_quantity"], False)
+                                if claimed_movement["kind"] == "in"
+                                else pills.movement_pill(item["name"], qty, new_item["current_quantity"], None, False)
                             )
+                            sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
                         elif claimed_movement["clarify_rounds"] < 2:
                             await conn.execute(
                                 "UPDATE inventory_movements SET clarify_rounds = clarify_rounds + 1 WHERE id = $1",
@@ -1237,6 +1300,7 @@ async def _bg_schedule_reply(
         from app.matcha.services.scheduling import schedule_chat
         from app.matcha.services.scheduling.schedule_chat_rules import (
             evaluate_schedule_proposal, parse_confirm_reply, resolve_clarify_answer,
+            snapped_to_option,
         )
 
         reply_uuid = UUID(reply_to_id_str)
@@ -1245,6 +1309,9 @@ async def _bg_schedule_reply(
         composed: Optional[str] = None
         proposal: Optional[dict] = None
         claimed: Optional[dict] = None
+        stored_parse: Optional[dict] = None
+        snapped: Optional[str] = None
+        clarify_options: list = []
         sys_row = None
 
         async with get_connection() as conn:
@@ -1256,7 +1323,7 @@ async def _bg_schedule_reply(
                   AND status IN ('proposed', 'clarifying')
                   AND created_at > NOW() - INTERVAL '7 days'
                 RETURNING id, company_id, channel_id, source_message_id, status,
-                          proposal, clarify_rounds, created_by
+                          proposal, parse, clarify_rounds, created_by
                 """,
                 reply_uuid,
             )
@@ -1267,6 +1334,9 @@ async def _bg_schedule_reply(
             proposal = claimed["proposal"]
             if isinstance(proposal, str):
                 proposal = json.loads(proposal)
+            stored_parse = claimed.get("parse")
+            if isinstance(stored_parse, str):
+                stored_parse = json.loads(stored_parse)
 
             # Re-assert role + features on the REPLIER — any admin/client may
             # confirm a proposal, not only the manager who started it, and a
@@ -1341,8 +1411,8 @@ async def _bg_schedule_reply(
                     # outstanding question and needs a fresh Gemini parse,
                     # which must not run with this connection held.
                     need_reparse = True
-                    snapped = resolve_clarify_answer(
-                        strip_mention(content), proposal.get("clarify_options") or [])
+                    clarify_options = proposal.get("clarify_options") or []
+                    snapped = resolve_clarify_answer(strip_mention(content), clarify_options)
                     composed = schedule_chat.compose_clarify_followup(proposal, snapped)
 
         if sys_row is not None:
@@ -1352,20 +1422,36 @@ async def _bg_schedule_reply(
         if not need_reparse or composed is None:
             return True
 
-        # No connection held across the Gemini re-parse call.
-        parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
+        # The location question is OUR OWN multiple-choice offer
+        # (build_proposal's own options list) — when the reply snapped
+        # cleanly onto one of them, resume deterministically from the
+        # ORIGINAL successfully-parsed request instead of spending a fresh
+        # Gemini call on the composed follow-up. A real prod miss: that
+        # re-parse can come back non-actionable even though the answer is
+        # unambiguous, and the old code had no fallback for that — it just
+        # cancelled the whole proposal with a generic "do this on the
+        # schedule page" bail.
+        location_answer = (
+            proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION
+            and snapped_to_option(snapped, clarify_options)
+        )
 
-        # This reply is the answer to the location clarify question and was
-        # already resolved (snapped) against the offered options — force it
-        # through rather than trust the Gemini re-parse to notice it in
-        # `composed`'s prose. Otherwise a miss here reads as "no hint", and
-        # apply_channel_default_location's "explicit hint always wins"
-        # silently loses to the channel's default store.
-        if (
-            parsed is not None and proposal.get("clarify_question") == "Which location did you mean?"
-            and snapped and not (parsed.get("location_hint") or "").strip()
-        ):
+        if location_answer and stored_parse is not None:
+            parsed = dict(stored_parse)
             parsed["location_hint"] = snapped
+        else:
+            # No connection held across the Gemini re-parse call.
+            parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
+            if parsed is None and stored_parse is not None:
+                # The re-parse came back non-actionable even though we
+                # already have a successfully-parsed original request —
+                # resume from that rather than cancelling outright.
+                parsed = dict(stored_parse)
+            if (
+                parsed is not None and location_answer
+                and not (parsed.get("location_hint") or "").strip()
+            ):
+                parsed["location_hint"] = snapped
 
         async with get_connection() as conn2:
             if parsed is None:
