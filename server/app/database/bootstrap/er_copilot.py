@@ -181,7 +181,7 @@ async def create_er_copilot(conn):
                 -- by trainint01 / discipapp01 on any migrated database.
                 remedial_requirement_id UUID,
                 -- from discipapp01 (incident-triggered discipline + HR approval)
-                approval_status VARCHAR(20) NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required', 'pending', 'approved', 'denied')),
+                approval_status VARCHAR(20) NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required', 'pending', 'approved', 'denied', 'changes_requested')),
                 approval_requested_at TIMESTAMPTZ,
                 approved_by UUID REFERENCES users(id),
                 approval_decided_at TIMESTAMPTZ,

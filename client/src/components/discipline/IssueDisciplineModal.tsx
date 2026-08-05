@@ -94,6 +94,7 @@ export default function IssueDisciplineModal({
     renderedBody: string
     missingFields: string[]
   } | null>(null)
+  const [usedTemplateId, setUsedTemplateId] = useState<string | null>(null)
   const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null)
   const [verdictLoading, setVerdictLoading] = useState(false)
   const [ackReason, setAckReason] = useState('')
@@ -197,6 +198,7 @@ export default function IssueDisciplineModal({
       setDescription(draft.description)
       setExpectedImprovement(draft.expected_improvement)
       setDraftConcerns(draft.concerns)
+      setUsedTemplateId(null)
       setDraftTemplate(
         draft.template_id && draft.rendered_body
           ? {
@@ -255,6 +257,7 @@ export default function IssueDisciplineModal({
         override_reason: overrideEnabled ? overrideReason : undefined,
         advisory_ack_reason: ackReason.trim() || undefined,
         remedial_requirement_id: remedialRequirementId || undefined,
+        template_id: usedTemplateId || undefined,
       })
       onIssued?.(record)
       onClose()
@@ -381,6 +384,7 @@ export default function IssueDisciplineModal({
                   variant="secondary"
                   onClick={() => {
                     setDescription(draftTemplate.renderedBody)
+                    setUsedTemplateId(draftTemplate.id)
                     setDraftTemplate(null)
                   }}
                 >

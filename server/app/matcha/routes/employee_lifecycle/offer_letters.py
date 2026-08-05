@@ -948,6 +948,11 @@ async def accept_candidate_offer(
     loop, which could stall the candidate's request for the full render
     duration — the UI would sit on 'signing...' even though the accept had
     already committed.
+
+    Consequence: this response's `signed_pdf_storage_path` is always None —
+    the render hasn't happened yet at return time. No current frontend reads
+    it off this endpoint's response (poll `GET` on the record for the real
+    path once `_finish_offer_accept` completes).
     """
     await check_rate_limit(_first_forwarded_ip(request), "offer_accept", 10, 3600)
     signed_name = _validate_signed_name(payload.signed_name)

@@ -761,15 +761,20 @@ async def deny_record(
                 discipline_id, company_id, actor_user_id, reason,
             )
         else:
+            # No approved_by/approval_decided_at here — the record hasn't been
+            # decided, it's been sent back. Stamping those made a revised-then-
+            # later-approved record permanently read as "approved by X" and
+            # show a denial reason it never had (RecordViewer renders that row
+            # whenever approved_by is set).
             row = await conn.fetchrow(
                 f"""
                 UPDATE progressive_discipline
-                SET approval_status = 'changes_requested', denial_reason = $4,
-                    approved_by = $3, approval_decided_at = NOW(), updated_at = NOW()
+                SET approval_status = 'changes_requested', denial_reason = $3,
+                    updated_at = NOW()
                 WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
                 RETURNING {RECORD_COLUMNS}
                 """,
-                discipline_id, company_id, actor_user_id, reason,
+                discipline_id, company_id, reason,
             )
         if not row:
             return None

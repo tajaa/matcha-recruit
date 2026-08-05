@@ -69,6 +69,10 @@ class IssueRequest(BaseModel):
     # Output-only — the compliance gate above never consults this; assigning
     # training is a consequence of issuing, not an input to legality.
     remedial_requirement_id: Optional[UUID] = None
+    # Provenance only — records which company_discipline_templates row (if
+    # any) HR started from. The letter text itself is whatever's in
+    # `description`; this is never re-rendered from the template server-side.
+    template_id: Optional[UUID] = None
 
 
 class DraftRequest(BaseModel):
@@ -106,13 +110,17 @@ class DenyRequest(BaseModel):
 class DraftUpdateRequest(BaseModel):
     """PATCH body for editing a record while approval_status='changes_requested'.
     Every field optional — a caller sends only what it's changing; at least
-    one must be present (route 400s on an all-None body)."""
+    one must be present (route 400s on an all-None body).
+
+    Deliberately narrower than the underlying `progressive_discipline` row:
+    `discipline_type`/`severity` are NOT editable here. Changing either
+    would move the record's ladder position without re-running the
+    escalation-ladder check or the compliance gate that `POST /records`
+    runs before insert — a revise round-trip could silently jump
+    written_warning to suspension. Re-classifying that far belongs in a new
+    record, not an edit to one HR already reasoned about at issue time."""
     description: Optional[str] = None
     expected_improvement: Optional[str] = None
-    discipline_type: Optional[str] = Field(
-        None, pattern="^(verbal_warning|written_warning|pip|final_warning|suspension)$"
-    )
-    severity: Optional[str] = Field(None, pattern="^(minor|moderate|severe|immediate_written)$")
 
 
 class TemplateUpsertRequest(BaseModel):
@@ -306,29 +314,35 @@ async def draft_letter(
         if draft.get("available"):
             infraction_for_template = body.infraction_type or draft.get("suggested_infraction_type")
             if infraction_for_template:
-                templates = await discipline_templates.list_templates(conn, company_id)
-                tpl = discipline_templates.resolve_template(
-                    templates, infraction_type=infraction_for_template, discipline_type=None,
-                )
-                if tpl:
-                    values = await discipline_templates.build_placeholder_values(
-                        conn, company_id=company_id, employee=employee,
-                        record_fields={
-                            "infraction_type": infraction_for_template,
-                            "discipline_type": None,
-                            "occurrence_dates": [],
-                            "description": draft.get("description"),
-                            "expected_improvement": draft.get("expected_improvement"),
-                            "issued_date": date.today().isoformat(),
-                        },
-                        incident=None,
-                        policy_citations=[],
+                # Additive to the AI draft — never let a template-resolution
+                # failure (bad manager lookup, etc.) fail the whole /ai/draft
+                # call when the draft itself already succeeded.
+                try:
+                    templates = await discipline_templates.list_templates(conn, company_id)
+                    tpl = discipline_templates.resolve_template(
+                        templates, infraction_type=infraction_for_template, discipline_type=None,
                     )
-                    rendered, missing = discipline_templates.render_template(tpl["body"], values)
-                    draft["template_id"] = str(tpl["id"])
-                    draft["template_name"] = tpl["name"]
-                    draft["rendered_body"] = rendered
-                    draft["missing_fields"] = missing
+                    if tpl:
+                        values = await discipline_templates.build_placeholder_values(
+                            conn, company_id=company_id, employee=employee,
+                            record_fields={
+                                "infraction_type": infraction_for_template,
+                                "discipline_type": None,
+                                "occurrence_dates": [],
+                                "description": draft.get("description"),
+                                "expected_improvement": draft.get("expected_improvement"),
+                                "issued_date": date.today().isoformat(),
+                            },
+                            incident=None,
+                            policy_citations=[],
+                        )
+                        rendered, missing = discipline_templates.render_template(tpl["body"], values)
+                        draft["template_id"] = str(tpl["id"])
+                        draft["template_name"] = tpl["name"]
+                        draft["rendered_body"] = rendered
+                        draft["missing_fields"] = missing
+                except Exception:
+                    logger.exception("[discipline] template resolution failed for /ai/draft")
     if not draft.get("available"):
         raise HTTPException(
             status_code=503,
@@ -356,6 +370,14 @@ async def issue_record(
             )
             if not requirement:
                 raise HTTPException(status_code=404, detail="Training requirement not found")
+
+        if body.template_id is not None:
+            template = await conn.fetchval(
+                "SELECT id FROM company_discipline_templates WHERE id = $1 AND company_id = $2",
+                body.template_id, company_id,
+            )
+            if not template:
+                raise HTTPException(status_code=404, detail="Template not found")
 
         # The gate runs here, server-side, on every issue — never trusting what
         # the client previewed. A block is a statutory prohibition, so there is
@@ -416,6 +438,7 @@ async def issue_record(
             compliance_check=verdict,
             advisory_ack_reason=body.advisory_ack_reason,
             remedial_requirement_id=body.remedial_requirement_id,
+            template_id=body.template_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

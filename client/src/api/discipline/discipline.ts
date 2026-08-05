@@ -203,6 +203,8 @@ export type DisciplineIssueInput = DisciplineRecommendInput & {
   advisory_ack_reason?: string
   /** Optional remedial training assigned in the same transaction as issuance. */
   remedial_requirement_id?: string
+  /** Provenance only — which company template (if any) HR started from. */
+  template_id?: string
 }
 
 export type DisciplineDraftInput = {

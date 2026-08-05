@@ -141,6 +141,7 @@ async def _resolve_recipients(
     *,
     notify_grandparent: bool,
     audience: str = "all",
+    skip_user_id: Optional[UUID] = None,
 ) -> list[dict[str, Any]]:
     """Build the recipient set for a discipline notification.
 
@@ -162,8 +163,9 @@ async def _resolve_recipients(
       - "drafter_only": the record's own issuer (the person who staged/
         drafted it) — used when HR sends a record back for revision, since
         that's who actually needs to act. Falls back to the hr_only set when
-        the issuer is missing or no longer active, so a revise request never
-        notifies nobody.
+        the issuer is missing, no longer active, or IS the acting HR user
+        (`skip_user_id` — the common case where the HR approver is also who
+        staged the record), so a revise request never notifies nobody.
     """
     if audience not in _AUDIENCES:
         raise ValueError(f"Invalid audience: {audience}")
@@ -186,8 +188,11 @@ async def _resolve_recipients(
         return recipients
 
     if audience == "drafter_only":
-        is_active = issuer_id and await conn.fetchval(
-            "SELECT TRUE FROM users WHERE id = $1 AND is_active", issuer_id,
+        is_active = (
+            issuer_id and issuer_id != skip_user_id
+            and await conn.fetchval(
+                "SELECT TRUE FROM users WHERE id = $1 AND is_active", issuer_id,
+            )
         )
         if is_active:
             _add(issuer_id, "drafter")
@@ -286,6 +291,7 @@ async def dispatch(
 
         recipients = await _resolve_recipients(
             conn, record, notify_grandparent=notify_grandparent, audience=audience,
+            skip_user_id=skip_user_id,
         )
 
     body = _build_body(record, action, employee_name)
