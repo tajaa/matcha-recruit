@@ -752,6 +752,12 @@ TOOLS: tuple[HuumeTool, ...] = (
             ),
             "target_employee_name": types.Schema(type=types.Type.STRING),
             "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD"),
+            "target_time_hint": types.Schema(
+                type=types.Type.STRING,
+                description="Start time of the shift you mean, when several shifts share target_date — "
+                            "e.g. '12:30pm', '8am', '08:00'. Get it from find_shift_coverage results "
+                            "or the admin's own words.",
+            ),
             "target_role_hint": types.Schema(type=types.Type.STRING),
             "to_employee_name": types.Schema(type=types.Type.STRING),
             "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
@@ -780,7 +786,7 @@ TOOLS: tuple[HuumeTool, ...] = (
         },
         required=["kind"],
         discovery=True,
-        intent_hints=("swap shift", "reassign shift", "move shift", "cancel shift", "cover for"),
+        intent_hints=("swap shift", "reassign shift", "assign", "move shift", "cancel shift", "cover for"),
     ),
     _tool(
         "finish", "finish",

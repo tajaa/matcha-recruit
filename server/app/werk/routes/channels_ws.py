@@ -1514,6 +1514,82 @@ async def _bg_schedule_reply(
         return claim_happened
 
 
+async def _bg_schedule_untargeted_reply(
+    channel_id_str: str, sender_user_id_str: str, content: str,
+) -> bool:
+    """Narrow fallback for a clarify answer typed as a plain new message
+    rather than a threaded reply-to-the-pill. A real transcript showed a
+    bare "Willshire" (no @huume mention, no reply_to) go through with zero
+    response — _ems_dispatch_decision spawns nothing without one of those
+    two signals, so nothing ever looked at it.
+
+    Only engages when the channel has exactly one live schedule clarify AND
+    this message's own text actually resolves against it (snaps onto one of
+    the offered options, parses as a clock time, or — for the location
+    clarify specifically — fuzzy-matches exactly one business_locations row)
+    — never just "the next message after a clarify", which would sweep
+    ordinary chatter in. Short-content only (clarify answers are short; this
+    keeps the extra SELECT off the hot path for real conversation). Purely a
+    targeting shim: once a match is found, the real resolution/re-parse/
+    build logic is _bg_schedule_reply's, reached via the SAME
+    confirm_message_id claim a threaded reply would use — so it can't race
+    a genuine threaded answer to the same pill."""
+    from app.matcha.services.ems.intent import strip_mention
+    from app.matcha.services.scheduling import schedule_chat
+    from app.matcha.services.scheduling.schedule_chat_rules import (
+        match_location, parse_time_hint, resolve_clarify_answer, snapped_to_option,
+    )
+
+    text = strip_mention(content).strip()
+    if not text or len(text) > 60:
+        return False
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT company_id, confirm_message_id, proposal
+            FROM schedule_chat_proposals
+            WHERE channel_id = $1 AND status = 'clarifying'
+              AND confirm_message_id IS NOT NULL
+              AND created_at > NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            UUID(channel_id_str),
+        )
+        if row is None or row["confirm_message_id"] is None:
+            return False
+
+        proposal = row["proposal"]
+        if isinstance(proposal, str):
+            proposal = json.loads(proposal)
+        options = proposal.get("clarify_options") or []
+        snapped = resolve_clarify_answer(text, options)
+        looks_like_answer = snapped_to_option(snapped, options) or parse_time_hint(text) is not None
+
+        # The location clarify is OUR OWN multiple-choice offer — a typo'd
+        # store name ("Willshire" for "Wilshire") never snaps via
+        # resolve_clarify_answer's plain containment check against the full
+        # option strings, but match_location's own fuzzy tier (added
+        # alongside this fallback) is the SAME resolver _bg_schedule_reply's
+        # re-parse path would eventually land on. Checking it directly here
+        # — rather than requiring a snap first — is what makes the typo
+        # case actually reachable from a plain, non-threaded reply.
+        if not looks_like_answer and proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION:
+            location_rows = await conn.fetch(
+                "SELECT id, name, address, city, state, zipcode FROM business_locations "
+                "WHERE company_id = $1 AND is_active IS NOT FALSE",
+                row["company_id"],
+            )
+            looks_like_answer = len(match_location(text, [dict(r) for r in location_rows])) == 1
+
+    if not looks_like_answer:
+        return False
+
+    return await _bg_schedule_reply(
+        channel_id_str, str(row["confirm_message_id"]), sender_user_id_str, content,
+    )
+
+
 async def _bg_ems_intake(
     channel_id_str: str, message_id_str: str, reporter_user_id_str: str, content: str,
 ) -> None:
@@ -3064,6 +3140,15 @@ async def channel_websocket(
                                     str(user.id), row["content"],
                                     has_huume_mention="huume" in mention_handles,
                                     attachments=list(broadcast_attachments) if broadcast_attachments else None,
+                                ))
+                            elif is_new_message and not row["reply_to_id"] and len(row["content"]) <= 60:
+                                # Neither threaded-reply nor @huume-mention —
+                                # _ems_dispatch_decision spawns nothing for
+                                # this message. Still worth one cheap check:
+                                # is this a clarify answer typed as a plain
+                                # message? See _bg_schedule_untargeted_reply.
+                                _spawn_bg(_bg_schedule_untargeted_reply(
+                                    str(ch_uuid), str(user.id), row["content"],
                                 ))
 
                             await manager.broadcast_message(room_key, {

@@ -111,6 +111,11 @@ class TestResolveTier:
         assert routing.resolve_tier("which incidents need disciplinary action?", current_state=state) == "deep"
         assert routing.resolve_tier("show me pending approvals", current_state=state) == "deep"
 
+    def test_assign_intent_hint_routes_deep(self):
+        # "Assign Elena to one of them" previously fell to `standard` (no
+        # matching intent_hint), understating what the message needed.
+        assert routing.resolve_tier("assign Elena to the 12:30 shift", current_state={}) == "deep"
+
     def test_analytical_question_routes_deep(self):
         assert routing.resolve_tier("why does this keep happening?", current_state={}) == "deep"
         assert routing.resolve_tier("what should I do about this employee?", current_state={}) == "deep"

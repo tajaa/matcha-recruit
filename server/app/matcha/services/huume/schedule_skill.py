@@ -129,9 +129,15 @@ async def propose(
     if build.kind == "clarify":
         # No threaded clarify round-trip (v1 scope cut) — ask the admin to
         # restate with the missing detail instead of staging a proposal
-        # that can never be confirmed.
-        question = build.pill_text.split("\n", 1)[0].removeprefix("\U0001F4C5 ").strip()
-        return {"error": f"{question} Try again with that detail."}
+        # that can never be confirmed. Keep the full pill_text (question +
+        # numbered candidates), not just its first line — the model needs
+        # the options to relay them, not just the fact that some exist.
+        text = build.pill_text.removeprefix("\U0001F4C5 ").strip()
+        return {"error": (
+            f"{text}\nAsk the admin which one they mean, then call "
+            f"propose_schedule_change again adding target_time_hint (e.g. "
+            f"'12:30pm') or target_employee_name to pin down the shift."
+        )}
     return {"proposal_id": str(build.proposal_id), "pill_text": build.pill_text}
 
 

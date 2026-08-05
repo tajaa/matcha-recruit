@@ -150,3 +150,15 @@ class TestBuildSystemPrompt:
     def test_lists_promote_ems_event_as_staged(self):
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "promote_ems_event" in prompt
+
+    def test_lists_propose_schedule_change_as_staged(self):
+        # Previously omitted from the staged-tool list sentence entirely —
+        # the model had no prompt guidance that this tool needs a confirm
+        # turn like every other staged action.
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "propose_schedule_change" in prompt
+
+    def test_schedule_section_mentions_target_time_hint_and_verbatim_tokens(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "target_time_hint" in prompt
+        assert "verbatim" in prompt

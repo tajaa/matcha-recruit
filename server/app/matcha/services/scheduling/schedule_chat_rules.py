@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
+from difflib import SequenceMatcher
 from typing import Literal, Optional, Union
 from uuid import UUID
 
@@ -192,6 +193,9 @@ def _tokens(text: Optional[str]) -> set[str]:
     return set(_TOKEN_RE.findall((text or "").lower()))
 
 
+_FUZZY_LOCATION_THRESHOLD = 0.8
+
+
 def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
     """`locations` = active `business_locations` rows (id, name, address,
     city, state, zipcode). "La Jolla" must match a row NAMED "La Jolla …"
@@ -223,10 +227,31 @@ def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
         if score > 0:
             scored.append((score, loc))
 
-    if not scored:
-        return []
-    top = max(s for s, _ in scored)
-    return [loc for s, loc in scored if s == top]
+    if scored:
+        top = max(s for s, _ in scored)
+        return [loc for s, loc in scored if s == top]
+
+    # Nothing matched exactly/substring — try a typo-tolerant fallback
+    # ("Willshire" for "Wilshire") before giving up. Only fires here (never
+    # ahead of an exact/substring hit) and only returns a match when exactly
+    # ONE location clears the bar — an ambiguous fuzzy hit still clarifies,
+    # same as today. Scored per-token (not whole-name-string) since a real
+    # location name is often multi-word ("Sunset Smile Dental — Wilshire")
+    # and the typo is usually in just one word of it.
+    fuzzy: list[tuple[float, dict]] = []
+    for loc in locations:
+        name = (loc.get("name") or "").strip().lower()
+        if not name:
+            continue
+        name_tokens = _tokens(name)
+        best = SequenceMatcher(None, hint_norm, name).ratio()
+        for tok in name_tokens:
+            best = max(best, SequenceMatcher(None, hint_norm, tok).ratio())
+        if best >= _FUZZY_LOCATION_THRESHOLD:
+            fuzzy.append((best, loc))
+    if len(fuzzy) == 1:
+        return [fuzzy[0][1]]
+    return []
 
 
 def apply_channel_default_location(
@@ -489,6 +514,23 @@ _TIME_HINT_RE = re.compile(
 # always the shift's start time, which is what candidates differ on.
 _TIME_RANGE_SPLIT_RE = re.compile(r"\s*(?:-|–|—|\bto\b|\buntil\b)\s*", re.IGNORECASE)
 
+# A colonless 3-4 digit clock ("1230", "830") — a real transcript typed
+# "Fri Aug 7 1230-18:00" and got no narrowing at all, since _TIME_HINT_RE
+# requires the colon. Only 3-4 digit runs are rewritten (never 1-2 digit —
+# "8" stays the deliberately-ambiguous case _TIME_HINT_RE/the has_minute
+# branch below already documents) so this can't turn a genuine bare hour
+# into a guessed minute.
+_BARE_DIGIT_CLOCK_RE = re.compile(r"^(?P<digits>\d{3,4})\s*(?P<ampm>am|pm)?$", re.IGNORECASE)
+
+
+def _normalize_bare_digit_clock(segment: str) -> str:
+    m = _BARE_DIGIT_CLOCK_RE.match(segment)
+    if not m:
+        return segment
+    digits = m.group("digits")
+    hour, minute = digits[:-2], digits[-2:]
+    return f"{hour}:{minute}{m.group('ampm') or ''}"
+
 
 def parse_time_hint(hint: Optional[str]) -> Optional[time]:
     """Best-effort clock time out of `target_time_hint`'s free-text value
@@ -503,7 +545,7 @@ def parse_time_hint(hint: Optional[str]) -> Optional[time]:
         return None
     hint = hint.strip()
     segments = _TIME_RANGE_SPLIT_RE.split(hint, maxsplit=1)
-    m = _TIME_HINT_RE.match(segments[0].strip())
+    m = _TIME_HINT_RE.match(_normalize_bare_digit_clock(segments[0].strip()))
     if not m:
         return None
     hour = int(m.group("hour"))

@@ -145,6 +145,26 @@ class TestMatchLocation:
         out = match_location("", LOCATIONS[:1])
         assert [l["id"] for l in out] == ["1"]
 
+    def test_typo_falls_back_to_fuzzy_match(self):
+        # A real transcript: "Willshire" (typo) failed to match "Sunset
+        # Smile Dental — Wilshire" at all — exact/substring tiers require
+        # the token itself, not an edit-distance-close one — so the
+        # location clarify silently swallowed the reply.
+        locs = [{"id": "1", "name": "Sunset Smile Dental — Wilshire",
+                 "address": "", "city": "Los Angeles", "state": "CA", "zipcode": ""}]
+        out = match_location("Willshire", locs)
+        assert [l["id"] for l in out] == ["1"]
+
+    def test_fuzzy_match_still_clarifies_when_ambiguous(self):
+        locs = [
+            {"id": "1", "name": "Wilshire", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+            {"id": "2", "name": "Wiltshire", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+        ]
+        assert match_location("Wilshre", locs) == []
+
+    def test_unrelated_typo_stays_unmatched(self):
+        assert match_location("nowhereville", LOCATIONS) == []
+
 
 class TestResolveClarifyAnswer:
     OPTS1 = ["Sunset Smile Dental — Wilshire (Los Angeles)"]
@@ -422,6 +442,27 @@ class TestParseTimeHint:
         # The range-split must not break the plain single-time case.
         result = parse_time_hint("8am")
         assert (result.hour, result.minute) == (8, 0)
+
+    @pytest.mark.parametrize("hint,expect", [
+        ("1230", (12, 30)),
+        ("830", (8, 30)),
+        ("1230-18:00", (12, 30)),  # a real transcript: "Fri Aug 7 1230-18:00"
+        ("830am", (8, 30)),
+        ("2130", (21, 30)),
+    ])
+    def test_colonless_digit_clock_parses(self, hint, expect):
+        # Previously only "12:30" (with colon) parsed — a bare "1230" fell
+        # through _TIME_HINT_RE entirely, so a clarify reply with no colon
+        # never narrowed anything and re-asked the identical question.
+        result = parse_time_hint(hint)
+        assert result is not None
+        assert (result.hour, result.minute) == expect
+
+    def test_bare_two_digit_hour_still_ambiguous(self):
+        # Must NOT be swept up by the 3-4 digit bare-clock normalization —
+        # "8" stays deliberately unparseable (no way to tell 8am from 8pm
+        # from 08:00 24h).
+        assert parse_time_hint("8") is None
 
 
 class TestResolveDayHint:

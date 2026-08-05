@@ -496,10 +496,11 @@ async def build_proposal(
             matched, parsed.get("location_hint"), channel_location_id, locations,
         )
     if len(matched) != 1:
-        options = [
-            f"{(l.get('name') or l.get('address') or 'Unnamed')} ({l.get('city')})"
-            for l in (matched or locations)
-        ][:6]
+        def _location_option(l: dict) -> str:
+            label = l.get('name') or l.get('address') or 'Unnamed'
+            city = (l.get('city') or '').strip()
+            return f"{label} ({city})" if city else label
+        options = [_location_option(l) for l in (matched or locations)][:6]
         return await _clarify(LOCATION_CLARIFY_QUESTION, options)
     location = matched[0]
     location_id = UUID(str(location["id"]))
@@ -1555,7 +1556,28 @@ async def execute_edit_proposal(conn, *, proposal_row: dict, confirmed_by: UUID,
             {"proposal_id": str(proposal_row["id"]), "results": results},
         )
 
-    return edit_result_text(results)
+    text = edit_result_text(results)
+    unique_ids = list(dict.fromkeys(affected_shift_ids))
+    if unique_ids:
+        strip_rows = await conn.fetch(
+            """
+            SELECT s.id, s.starts_at, s.ends_at, COALESCE(s.role, 'shift') AS label,
+                   ARRAY(
+                       SELECT TRIM(e.first_name || ' ' || e.last_name)
+                       FROM schedule_shift_assignments a
+                       JOIN employees e ON e.id = a.employee_id
+                       WHERE a.shift_id = s.id
+                       ORDER BY e.first_name, e.last_name
+                   ) AS assignee_names
+            FROM schedule_shifts s
+            WHERE s.id = ANY($1::uuid[]) AND s.company_id = $2 AND s.status != 'cancelled'
+            """,
+            unique_ids, company_id,
+        )
+        strip = schedule_strip([dict(r) for r in strip_rows])
+        if strip:
+            text += "\n" + strip
+    return text
 
 
 # ── Pill text ─────────────────────────────────────────────────────────────

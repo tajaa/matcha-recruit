@@ -12,11 +12,14 @@ a DB call).
 """
 
 import asyncio
+import unittest
+from unittest import mock
 
 from app.matcha.services.huume.actions import evaluate_huume_action
 from app.matcha.services.huume.agent import _HR_OPS_TOOL_SPECS, _build_hr_ops_staged
 from app.matcha.services.huume.tools import TOOLS_BY_NAME
 from app.matcha.services.huume import schedule_skill
+from app.matcha.services.scheduling import schedule_chat
 
 BASE_ON = {"huume": True, "matcha_work": True, "employee_schedule": True}
 PROPOSAL_ID = "3f6b1c22-2000-4000-8000-000000000001"
@@ -44,6 +47,19 @@ class TestRegistry:
 
     def test_coverage_tool_is_read(self):
         assert TOOLS_BY_NAME["find_shift_coverage"].kind == "read"
+
+    def test_schema_declares_target_time_hint(self):
+        # Without this, the model has no field to disambiguate "assign
+        # Elena to one of them" when several shifts share a date — a real
+        # transcript hit exactly that and staging refused outright.
+        tool = TOOLS_BY_NAME["propose_schedule_change"]
+        assert "target_time_hint" in tool.declaration.parameters.properties
+
+    def test_intent_hints_include_assign(self):
+        assert "assign" in TOOLS_BY_NAME["propose_schedule_change"].intent_hints
+
+    def test_spec_fields_forward_target_time_hint(self):
+        assert "target_time_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
 
     def test_spec_mints_a_confirm_id(self):
         spec = _HR_OPS_TOOL_SPECS["propose_schedule_change"]
@@ -133,3 +149,35 @@ class TestExecuteNoProposal:
             company_id="c1", actor_user_id="u1", action=_change(proposal_id=None),
         ))
         assert result["status"] == "error"
+
+
+class TestProposeClarify(unittest.TestCase):
+    """A build_edit_proposal 'clarify' result (ambiguous shift, e.g. several
+    shifts share the target date) has no thread-side round-trip — propose()
+    surfaces it as a refusal instead of staging an unconfirmable proposal.
+    Previously that refusal kept only the question's first line, dropping
+    the numbered candidate list the model needs to relay back to the admin
+    — the real failure behind "Assign Elena to one of them" going nowhere."""
+
+    def test_clarify_keeps_full_option_list_and_hints_target_time_hint(self):
+        pill = schedule_chat.clarify_text(
+            "Which shift did you mean?",
+            ["Shift — Fri Aug 7 08:00–16:00 · Aisha Kim", "Shift — Fri Aug 7 12:30–18:00 · unstaffed"],
+        )
+        build = schedule_chat.ProposalBuild(
+            kind="clarify", proposal_id="3f6b1c22-2000-4000-8000-000000000099", pill_text=pill,
+        )
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "assign", "to_employee_name": "Elena", "target_date": "2026-08-07"},
+            ))
+
+        assert "error" in result
+        assert "Aisha Kim" in result["error"]  # first option survived
+        assert "unstaffed" in result["error"]  # second option survived
+        assert "target_time_hint" in result["error"]

@@ -7,6 +7,7 @@ import HuumeStepTimeline from './HuumeStepTimeline'
 import HuumeAvatar from './HuumeAvatar'
 import CitationSources, { numberCitations } from '../../../components/ui/CitationSources'
 import { safeUrl } from './markdownToHtml'
+import { hasScheduleTokens, splitScheduleSegments, renderSystemContent } from '../../pages/ChannelView/systemContent'
 
 // Backend-authored Huume lifecycle notices (offer accept/decline routes,
 // REST plan-execute). A metadata.huume_event value not in this map renders
@@ -68,9 +69,27 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
     () => numberCitations(m.content, m.metadata?.citations),
     [m.content, m.metadata?.citations],
   )
-  const markdownContent = useMemo(() => (
-    <Markdown>{cited.text}</Markdown>
-  ), [cited.text])
+  // Huume schedule tools (propose_schedule_change et al.) echo server-composed
+  // [[shift:...]]/[[bar:...]]/[[barruler]] token lines verbatim into the
+  // thread's finish message — channels already render these (systemContent.tsx);
+  // this bubble was piping everything through <Markdown>, showing raw tokens.
+  // Guard-first so every non-schedule message renders exactly as before.
+  const markdownContent = useMemo(() => {
+    if (!hasScheduleTokens(cited.text)) return <Markdown>{cited.text}</Markdown>
+    return (
+      <>
+        {splitScheduleSegments(cited.text).map((seg, i) =>
+          seg.kind === 'tokens' ? (
+            <div key={i} className="not-prose whitespace-pre-wrap my-1.5 text-xs">
+              {renderSystemContent(seg.text)}
+            </div>
+          ) : (
+            <Markdown key={i}>{seg.text}</Markdown>
+          ),
+        )}
+      </>
+    )
+  }, [cited.text])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
   const policyGaps = useMemo(() => extractPolicyGaps(m.metadata), [m.metadata])
   const [detailsOpen, setDetailsOpen] = useState(false)

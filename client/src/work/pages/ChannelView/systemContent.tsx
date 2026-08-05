@@ -120,6 +120,35 @@ function renderBar(key: number, startMin: number, endMin: number, colorIdx: numb
   )
 }
 
+// Consecutive-line regex twin of TOKEN_RE's shift/bar/barruler alternatives,
+// used to split a Huume THREAD bubble's markdown prose from the server-
+// composed token lines mixed into it (schedule_chat.py's result/edit-result
+// text + strip) — see MessageBubble.tsx, the other consumer of this module.
+const SCHEDULE_TOKEN_LINE_RE =
+  /\[\[(?:shift:[0-9a-fA-F-]{36}:\d{4}-\d{2}-\d{2}|bar:\d{1,4}:\d{1,4}:\d|barruler)\]\]/
+
+export function hasScheduleTokens(text: string): boolean {
+  return SCHEDULE_TOKEN_LINE_RE.test(text)
+}
+
+export type ScheduleSegment = { kind: 'markdown' | 'tokens'; text: string }
+
+/** Split mixed model prose + server-composed token lines into segments —
+ *  consecutive token-bearing lines group into one 'tokens' segment, the
+ *  rest stays 'markdown'. Line-granularity matches how the backend composes
+ *  these strings: one construct (a bar, the ruler, a shift-link summary
+ *  line) per line. */
+export function splitScheduleSegments(text: string): ScheduleSegment[] {
+  const segments: ScheduleSegment[] = []
+  for (const line of text.split('\n')) {
+    const kind: ScheduleSegment['kind'] = SCHEDULE_TOKEN_LINE_RE.test(line) ? 'tokens' : 'markdown'
+    const last = segments[segments.length - 1]
+    if (last && last.kind === kind) last.text += '\n' + line
+    else segments.push({ kind, text: line })
+  }
+  return segments
+}
+
 export function renderSystemContent(text: string): ReactNode[] {
   // Manual scan rather than String.split: split() interleaves EVERY capture
   // group (including every alternative's own groups) into its result

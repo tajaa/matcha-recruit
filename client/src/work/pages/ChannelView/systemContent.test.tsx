@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { isValidElement } from 'react'
 import { Link } from 'react-router-dom'
-import { renderSystemContent, stripEmphasis } from './systemContent'
+import { renderSystemContent, stripEmphasis, hasScheduleTokens, splitScheduleSegments } from './systemContent'
 
 /** Mirrors the strings composed server-side by
  *  services/ems/event_intake.py:_confirmation_text and the two
@@ -152,5 +152,60 @@ describe('stripEmphasis', () => {
     expect(
       stripEmphasis('Mon Aug 10\n[[barruler]]\n[[bar:480:960:0]] 08:00–16:00 opener · Aisha Kim'),
     ).toBe('Mon Aug 10 08:00–16:00 opener · Aisha Kim')
+  })
+})
+
+// hasScheduleTokens / splitScheduleSegments — used by MessageBubble.tsx to
+// split a Huume THREAD bubble's markdown prose from the server-composed
+// schedule token lines mixed into it (schedule_chat.py's result/edit-result
+// text + strip), which the bubble previously ran through <Markdown> whole,
+// showing raw `[[bar:...]]`/`[[barruler]]`/`[[shift:...]]` text.
+describe('hasScheduleTokens', () => {
+  it('is false for plain markdown, including bold-only text', () => {
+    expect(hasScheduleTokens('**Opener** added Elena.')).toBe(false)
+    expect(hasScheduleTokens('Nothing staged yet.')).toBe(false)
+  })
+
+  it('is true when any schedule token is present', () => {
+    expect(hasScheduleTokens('✅ Done [[shift:26c4ef29-ca1d-4c59-9719-30219f8e9056:2026-08-01]]')).toBe(true)
+    expect(hasScheduleTokens('Sat Aug 8\n[[barruler]]')).toBe(true)
+    expect(hasScheduleTokens('[[bar:480:960:0]] 08:00–16:00 opener · Aisha Kim')).toBe(true)
+  })
+})
+
+describe('splitScheduleSegments', () => {
+  it('returns a single markdown segment for pure prose', () => {
+    const segs = splitScheduleSegments('Staged: assign Elena to the 12:30 shift.')
+    expect(segs).toEqual([{ kind: 'markdown', text: 'Staged: assign Elena to the 12:30 shift.' }])
+  })
+
+  it('groups consecutive token lines into one tokens segment, plain lines stay markdown', () => {
+    // A plain (no-token) line breaks a token run at LINE granularity — "Sat
+    // Aug 8" here has no token of its own, so it merges with the preceding
+    // markdown line rather than the following token lines.
+    const text = [
+      'Staged: assign Elena to the 12:30 shift.',
+      'Sat Aug 8',
+      '[[barruler]]',
+      '[[bar:480:960:0]] 08:00–16:00 opener · Elena +1',
+    ].join('\n')
+    const segs = splitScheduleSegments(text)
+    expect(segs.map((s) => s.kind)).toEqual(['markdown', 'tokens'])
+    expect(segs[0].text).toBe('Staged: assign Elena to the 12:30 shift.\nSat Aug 8')
+    expect(segs[1].text).toBe('[[barruler]]\n[[bar:480:960:0]] 08:00–16:00 opener · Elena +1')
+  })
+
+  it('a summary line carrying a shift token is its own tokens segment', () => {
+    const text =
+      '✅ Done — 1 change is live (**Opener** added Elena [[shift:26c4ef29-ca1d-4c59-9719-30219f8e9056:2026-08-08]]).'
+    const segs = splitScheduleSegments(text)
+    expect(segs.map((s) => s.kind)).toEqual(['tokens'])
+  })
+
+  it('re-splits back to markdown after a token block ends', () => {
+    const text = '[[barruler]]\n[[bar:480:960:0]] shift\nLet me know if you need anything else.'
+    const segs = splitScheduleSegments(text)
+    expect(segs.map((s) => s.kind)).toEqual(['tokens', 'markdown'])
+    expect(segs[1].text).toBe('Let me know if you need anything else.')
   })
 })
