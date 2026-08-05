@@ -595,6 +595,7 @@ async def _bg_inventory_request(
         from app.matcha.services.inventory import movements as movements_service
         from app.matcha.services.inventory import orders as orders_service
         from app.matcha.services.inventory import pills
+        from app.matcha.services.inventory import receipts as receipts_service
         from app.matcha.services.inventory.extraction import extract_inventory
         from app.matcha.services.inventory.reorder import suggest_order
         from app.matcha.services.inventory.rules import evaluate_inventory_action
@@ -660,8 +661,7 @@ async def _bg_inventory_request(
         lines = extracted.get("lines") or []
 
         async with get_connection() as conn:
-            if kind in ("movement", "receipt"):
-                movement_kind = "in" if kind == "receipt" else "out"
+            if kind == "movement":
                 resolved_lines = []
                 for line in lines:
                     item = await movements_service.find_or_create_item(
@@ -676,7 +676,7 @@ async def _bg_inventory_request(
                 inserted = await movements_service.record_movements(
                     conn, company_id=company_id, channel_id=UUID(channel_id_str),
                     source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
-                    kind=movement_kind, lines=resolved_lines, narrative=stripped,
+                    kind="out", lines=resolved_lines, narrative=stripped,
                     note=extracted.get("recipient_note"),
                 )
                 if not inserted:
@@ -698,6 +698,22 @@ async def _bg_inventory_request(
                         "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
                         sys_row["id"], inserted[0]["id"],
                     )
+
+            elif kind == "receipt":
+                # Provenance invariant (services/inventory/CLAUDE.md): a
+                # delivery reported in chat is NEVER auto-created or booked as
+                # a bare `in` movement — it only checks in against an item's
+                # own open order. No clarify-arm here (that machinery is
+                # out-only now); an unmatched line just steers toward a real
+                # audit trail (Receive Delivery / an invoice).
+                result = await receipts_service.receive_channel_lines(
+                    conn, company_id=company_id, location_id=location_id,
+                    user_id=UUID(sender_user_id_str), source_message_id=UUID(message_id_str),
+                    note=extracted.get("recipient_note"),
+                    lines=[{"item_name": l.get("item_name", ""), "quantity": l.get("quantity")} for l in lines],
+                )
+                pill_text = pills.channel_receipt_pill(result["received"], result["unmatched"])
+                sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
 
             else:  # stockout / order_request
                 item_name = lines[0].get("item_name") if lines else stripped

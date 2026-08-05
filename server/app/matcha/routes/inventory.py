@@ -226,9 +226,10 @@ async def receive_order_route(order_id: UUID, body: OrderAction,
                                company_id: UUID = Depends(get_client_company_id),
                                user=Depends(require_admin_or_client)):
     async with get_connection() as conn:
-        row = await orders_service.mark_received(
-            conn, order_id=order_id, company_id=company_id, user_id=user.id, quantity=body.quantity,
-        )
+        async with conn.transaction():
+            row = await orders_service.mark_received(
+                conn, order_id=order_id, company_id=company_id, user_id=user.id, quantity=body.quantity,
+            )
     if row is None:
         raise HTTPException(404, "No open order found.")
     return OrderOut(**row)

@@ -67,10 +67,35 @@ def reorder_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
     return base
 
 
-def receipt_pill(item_name: str, qty, new_count) -> str:
-    base = f"\U0001F4E6 Received {qty} × {item_name}."
-    if new_count is not None:
-        base += f" {new_count} in stock now."
+def channel_receipt_pill(received: list[dict], unmatched: list[str]) -> str:
+    """Channel `@huume` receipt-shaped intake — never a bare 'received' claim
+    (see receipts.receive_channel_lines' provenance invariant): each line
+    either checks in against its own open order, or gets steered toward a
+    real audit trail. `received`: [{item_name, quantity, new_count}]."""
+    steer = (
+        "Use Receive Delivery on the Inventory page (it wants the invoice), "
+        "or queue an order first and I'll check it in when it lands."
+    )
+
+    if not received:
+        return (
+            "\U0001F4E6 Sounds like a delivery — I can't book received stock from chat alone. "
+            f"{steer}"
+        )
+
+    def _line(r: dict) -> str:
+        return f"{r['quantity']:g} × {r['item_name']}" if isinstance(r["quantity"], (int, float)) else f"{r['quantity']} × {r['item_name']}"
+
+    if len(received) == 1 and not unmatched:
+        r = received[0]
+        base = f"\U0001F4E6 Received {_line(r)} — checked in against the open order."
+        if r.get("new_count") is not None:
+            base += f" {r['new_count']} in stock now."
+        return base
+
+    base = f"\U0001F4E6 Checked in against open orders: {', '.join(_line(r) for r in received)}."
+    if unmatched:
+        base += f" Couldn't check in {', '.join(unmatched)} — no open order; {steer}"
     return base
 
 

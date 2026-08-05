@@ -225,6 +225,59 @@ async def resolve_lines(conn, *, company_id: UUID, location_id: Optional[UUID],
     return out
 
 
+async def receive_channel_lines(
+    conn, *, company_id: UUID, location_id: Optional[UUID], user_id: UUID,
+    source_message_id: UUID, note: Optional[str], lines: list[dict],
+) -> dict:
+    """Channel `@huume` receipt-shaped intake ("we got the delivery") ->
+    receive against each line's open order. Provenance invariant (see
+    services/inventory/CLAUDE.md): a `kind='in'` movement always comes from
+    an open order (`orders.mark_received`) or a human-reviewed invoice
+    (`commit_receipt_lines`) — this NEVER calls find_or_create_item and NEVER
+    writes a bare `in` movement. A line with no item match, no open order, an
+    order another line already claimed, or an unstated quantity against an
+    order with no quantity of its own (nothing to default to, and there's no
+    review step in chat to catch a wrong number) is reported unmatched for
+    the caller to steer toward Receive Delivery / stage_receipt_from_attachment.
+    Returns {"received": [{item_name, quantity, new_count}], "unmatched": [names]}."""
+    from app.matcha.services.inventory import orders as orders_service
+
+    resolved = await resolve_lines(conn, company_id=company_id, location_id=location_id, lines=lines)
+    received: list[dict] = []
+    unmatched: list[str] = []
+    for line in resolved:
+        label = line.get("matched_name") or line.get("item_name")
+        order_id = line.get("open_order_id")
+        if not order_id:
+            unmatched.append(label)
+            continue
+        quantity = line.get("quantity")
+        if quantity is None:
+            order_quantity = await conn.fetchval(
+                "SELECT quantity FROM inventory_orders WHERE id = $1", order_id,
+            )
+            if not order_quantity:
+                unmatched.append(label)
+                continue
+        async with conn.transaction():
+            row = await orders_service.mark_received(
+                conn, order_id=UUID(order_id), company_id=company_id, user_id=user_id,
+                quantity=quantity, note=note, source_message_id=source_message_id,
+            )
+        if row is None:
+            unmatched.append(label)
+            continue
+        item_row = await conn.fetchrow(
+            "SELECT current_quantity FROM inventory_items WHERE id = $1", row["item_id"],
+        )
+        received.append({
+            "item_name": label,
+            "quantity": row["received_quantity"],
+            "new_count": item_row["current_quantity"] if item_row else None,
+        })
+    return {"received": received, "unmatched": unmatched}
+
+
 async def commit_receipt_lines(
     conn, *, company_id: UUID, user_id: UUID, location_id: Optional[UUID],
     vendor: Optional[str], invoice_number: Optional[str], force: bool, lines: list[dict],

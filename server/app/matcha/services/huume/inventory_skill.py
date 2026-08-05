@@ -180,10 +180,18 @@ async def stage_order(
 
 async def _execute_movement(company_id, actor_user_id, action) -> dict[str, Any]:
     from app.database import get_connection
+    from app.matcha.services.huume.actions import _INVENTORY_RECEIVED_STEER_MESSAGE
     from app.matcha.services.inventory import movements as movements_service
 
     kind = action["kind"]
     quantity = action.get("quantity")
+
+    # Defense in depth — _validate_inventory_movement already refuses kind='in'
+    # on the confirm turn and the tool's schema enum excludes it as the
+    # primary gate, but this executor is reachable from anywhere a caller
+    # assembles an `action` dict directly, so the invariant is walled here too.
+    if kind == "in":
+        return {"status": "error", "message": _INVENTORY_RECEIVED_STEER_MESSAGE}
 
     async with get_connection() as conn:
         try:
@@ -228,8 +236,6 @@ async def _execute_movement(company_id, actor_user_id, action) -> dict[str, Any]
             row = inserted[0] if inserted else None
             if kind == "stockout":
                 message = f"Marked {item_name} as out of stock."
-            elif kind == "in":
-                message = f"Recorded {quantity} {item_name} received."
             else:
                 message = f"Recorded {quantity} {item_name} used."
 

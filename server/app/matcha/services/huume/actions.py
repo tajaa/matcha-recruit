@@ -151,7 +151,12 @@ _INVENTORY_ACTIONS = frozenset({
     "inventory_movement", "inventory_order_decision",
     "inventory_item_create", "inventory_item_archive", "inventory_receipt",
 })
-_INVENTORY_MOVEMENT_KINDS = frozenset({"in", "out", "stockout", "adjust"})
+_INVENTORY_MOVEMENT_KINDS = frozenset({"out", "stockout", "adjust"})
+_INVENTORY_RECEIVED_STEER_MESSAGE = (
+    "Received stock needs provenance — receive it against its open order with "
+    "decide_inventory_order(decision='receive'), or attach the invoice CSV and "
+    "use stage_receipt_from_attachment."
+)
 _INVENTORY_ORDER_DECISIONS = frozenset({"approve", "receive", "cancel"})
 _MAX_INVENTORY_NOTE_CHARS = 200
 _MAX_INVENTORY_NAME_CHARS = 200
@@ -504,13 +509,20 @@ def _validate_pto_decision(staged: dict[str, Any]) -> HuumeVerdict:
 
 def _validate_inventory_movement(staged: dict[str, Any]) -> HuumeVerdict:
     """Confirm-turn validation for a staged stock movement. Exactly one of
-    item_id/new_item_name; quantity required for in/out/adjust, ignored for
-    stockout (it always zeroes the count regardless of what's passed)."""
+    item_id/new_item_name; quantity required for out/adjust, ignored for
+    stockout (it always zeroes the count regardless of what's passed).
+    kind='in' is refused here as a confirm-turn backstop — the tool's schema
+    enum (tools.py) already excludes it as the primary gate, since a bare
+    chat-asserted receive has no audit trail (see inventory/CLAUDE.md's
+    provenance invariant: an `in` movement must come from mark_received or
+    commit_receipt_lines, never a raw movement write)."""
     kind = str(staged.get("kind") or "").strip().lower()
+    if kind == "in":
+        return HuumeVerdict(kind="refuse", message=_INVENTORY_RECEIVED_STEER_MESSAGE)
     if kind not in _INVENTORY_MOVEMENT_KINDS:
         return HuumeVerdict(
             kind="refuse",
-            message="Tell me whether this is stock in, stock out, a stockout, or a count adjustment.",
+            message="Tell me whether this is stock out, a stockout, or a count adjustment.",
         )
 
     item_id = staged.get("item_id")

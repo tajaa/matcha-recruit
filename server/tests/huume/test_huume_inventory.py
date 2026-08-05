@@ -27,8 +27,11 @@ def _features(**extra):
 
 
 def _movement(**overrides):
+    # kind defaults to "out" — "in" is refused (provenance invariant: a
+    # received movement must come from an order receive or a receipt commit,
+    # never a bare staged movement; see TestMovementValidation.test_kind_in_refuses_with_steering).
     base = {"type": "inventory_movement", "status": "proposed", "confirm_id": "aa11bb22",
-            "kind": "in", "item_id": ITEM_ID, "quantity": 12}
+            "kind": "out", "item_id": ITEM_ID, "quantity": 12}
     base.update(overrides)
     return base
 
@@ -121,9 +124,18 @@ class TestMovementValidation:
         assert verdict.ok
         assert verdict.action["new_item_name"] == "Cherry Farms Cookies"
 
-    def test_zero_quantity_refuses_for_in(self):
-        verdict = _evaluate(_movement(kind="in", quantity=0), _features())
+    def test_zero_quantity_refuses_for_out(self):
+        verdict = _evaluate(_movement(kind="out", quantity=0), _features())
         assert verdict.kind == "refuse"
+
+    def test_kind_in_refuses_with_steering(self):
+        """Provenance invariant: a received-stock movement can't be staged
+        from chat at all — refuse with a message naming the two real exits,
+        not the generic 'tell me the kind' refusal."""
+        verdict = _evaluate(_movement(kind="in"), _features())
+        assert verdict.kind == "refuse"
+        assert "decide_inventory_order" in verdict.message
+        assert "stage_receipt_from_attachment" in verdict.message
 
     def test_negative_quantity_refuses_for_out(self):
         verdict = _evaluate(_movement(kind="out", quantity=-5), _features())
@@ -254,7 +266,7 @@ class TestBuildHrOpsStaged:
 
     def test_movement_no_pre_turn_action_stages_new(self):
         spec = _HR_OPS_TOOL_SPECS["record_stock_movement"]
-        staged, confirming = _build_hr_ops_staged(spec, {"kind": "in", "item_id": ITEM_ID, "quantity": 12}, None)
+        staged, confirming = _build_hr_ops_staged(spec, {"kind": "out", "item_id": ITEM_ID, "quantity": 12}, None)
         assert confirming is False
         assert staged["status"] == "proposed"
         assert len(staged["confirm_id"]) == 8
@@ -263,32 +275,32 @@ class TestBuildHrOpsStaged:
         spec = _HR_OPS_TOOL_SPECS["record_stock_movement"]
         existing = _movement()
         staged, confirming = _build_hr_ops_staged(
-            spec, {"kind": "in", "item_id": ITEM_ID, "quantity": 12, "confirm_id": existing["confirm_id"]}, existing,
+            spec, {"kind": "out", "item_id": ITEM_ID, "quantity": 12, "confirm_id": existing["confirm_id"]}, existing,
         )
         assert confirming is True
         assert staged is existing
 
     def test_movement_changed_quantity_restages_instead_of_executing_stale(self):
-        """The bug: admin stages 'in 12', then says 'actually 20' — the model
+        """The bug: admin stages 'out 12', then says 'actually 20' — the model
         calls with the SAME confirm_id but quantity=20. Matching on
         confirm_id alone would return `existing` (quantity=12) with
         confirming=True, silently recording the wrong number."""
         spec = _HR_OPS_TOOL_SPECS["record_stock_movement"]
         existing = _movement(quantity=12)
         staged, confirming = _build_hr_ops_staged(
-            spec, {"kind": "in", "item_id": ITEM_ID, "quantity": 20, "confirm_id": existing["confirm_id"]}, existing,
+            spec, {"kind": "out", "item_id": ITEM_ID, "quantity": 20, "confirm_id": existing["confirm_id"]}, existing,
         )
         assert confirming is False
         assert staged["quantity"] == 20
 
     def test_movement_changed_kind_restages_instead_of_executing_stale(self):
         spec = _HR_OPS_TOOL_SPECS["record_stock_movement"]
-        existing = _movement(kind="in")
+        existing = _movement(kind="out")
         staged, confirming = _build_hr_ops_staged(
-            spec, {"kind": "out", "item_id": ITEM_ID, "quantity": 12, "confirm_id": existing["confirm_id"]}, existing,
+            spec, {"kind": "adjust", "item_id": ITEM_ID, "quantity": 12, "confirm_id": existing["confirm_id"]}, existing,
         )
         assert confirming is False
-        assert staged["kind"] == "out"
+        assert staged["kind"] == "adjust"
 
     def test_order_decision_matches_on_order_id(self):
         spec = _HR_OPS_TOOL_SPECS["decide_inventory_order"]
@@ -354,6 +366,13 @@ class TestRegistry:
         for name, required in expected.items():
             declared = set(TOOLS_BY_NAME[name].declaration.parameters.required or [])
             assert declared == required, name
+
+    def test_movement_kind_enum_excludes_in(self):
+        """Schema-level backstop for the provenance invariant — the primary
+        gate is the enum itself (Gemini enforces it), the validator refusal
+        in TestMovementValidation is the confirm-turn belt."""
+        declared = TOOLS_BY_NAME["record_stock_movement"].declaration.parameters.properties["kind"].enum
+        assert set(declared) == {"out", "stockout", "adjust"}
 
     def test_locations_topic_registered_and_gated(self):
         from app.matcha.services.huume.onboarding_skill import _TOPIC_REQUIRED_FEATURE

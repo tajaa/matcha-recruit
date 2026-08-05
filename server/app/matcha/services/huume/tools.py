@@ -594,7 +594,7 @@ TOOLS: tuple[HuumeTool, ...] = (
     # ---- Inventory ops skill (feature `inventory`) ---------------------------
     _tool(
         "record_stock_movement", "staged",
-        "Record stock going in, out, or a stockout/count adjustment for an "
+        "Record stock going out, a stockout, or a count adjustment for an "
         "item. This STAGES the movement for the admin's confirmation — "
         "nothing changes until they confirm on a LATER turn by calling this "
         "again with EXACTLY the same confirm_id. Get item ids from "
@@ -603,12 +603,15 @@ TOOLS: tuple[HuumeTool, ...] = (
         "known value (a physical count), not a delta. kind='stockout' zeroes "
         "the count regardless of quantity. Use lookup_context(topic='locations') "
         "for location_id when the admin names a specific store; omit it for "
-        "the shared company-wide item pool.",
+        "the shared company-wide item pool. Received stock/deliveries are "
+        "NEVER recorded here — receive an open order with "
+        "decide_inventory_order(decision='receive'), or attach the "
+        "delivery's invoice CSV and use stage_receipt_from_attachment.",
         properties={
-            "kind": types.Schema(type=types.Type.STRING, enum=["in", "out", "stockout", "adjust"]),
+            "kind": types.Schema(type=types.Type.STRING, enum=["out", "stockout", "adjust"]),
             "item_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='inventory')."),
             "new_item_name": types.Schema(type=types.Type.STRING, description="Create a new item with this name instead of using item_id."),
-            "quantity": types.Schema(type=types.Type.NUMBER, description="Required for in/out/adjust. Ignored for stockout."),
+            "quantity": types.Schema(type=types.Type.NUMBER, description="Required for out/adjust. Ignored for stockout."),
             "location_id": types.Schema(type=types.Type.STRING, description="UUID from lookup_context(topic='locations'). Omit for company-wide."),
             "note": types.Schema(type=types.Type.STRING, description="Optional short note recorded on the movement."),
             "confirm_id": types.Schema(
