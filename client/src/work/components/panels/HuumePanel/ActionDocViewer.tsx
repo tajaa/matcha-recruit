@@ -57,6 +57,8 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return 'Archive Inventory Item'
     case 'inventory_receipt':
       return `Receipt Commit${action.vendor ? ` — ${action.vendor}` : ''}`
+    case 'schedule_change':
+      return `Schedule Change${action.target_employee_name ? ` — ${action.target_employee_name}` : ''}`
   }
 }
 
@@ -252,6 +254,16 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
               <span>{action.dup_warning}</span>
             </div>
           )}
+        </>
+      )}
+
+      {action.type === 'schedule_change' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Employee" value={action.target_employee_name} />
+            <Meta label="Date" value={action.target_date ?? action.new_date ?? action.date} />
+          </div>
+          <Prose>{action.pill_text}</Prose>
         </>
       )}
     </div>

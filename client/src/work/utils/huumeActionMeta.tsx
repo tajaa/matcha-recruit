@@ -1,4 +1,4 @@
-import { Archive, ArrowUpCircle, BookOpen, CalendarCheck, FileSignature, Gavel, GraduationCap, Package, Receipt, Scale, ShieldAlert, Siren, Truck } from 'lucide-react'
+import { Archive, ArrowUpCircle, BookOpen, CalendarClock, CalendarCheck, FileSignature, Gavel, GraduationCap, Package, Receipt, Scale, ShieldAlert, Siren, Truck } from 'lucide-react'
 import type { HuumeAction } from '../types'
 
 /** Terminal status -> the past-tense chip. Keyed by type because each staged
@@ -21,6 +21,7 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   inventory_item_create: { created: 'Item added' },
   inventory_item_archive: { archived: 'Item archived' },
   inventory_receipt: { committed: 'Receipt committed' },
+  schedule_change: { applied: 'Schedule updated' },
 }
 
 /** One-line summary for the chat banner strip / the panel's passive status line. */
@@ -62,6 +63,8 @@ export function bannerLabel(action: HuumeAction): string {
       return 'Archive this inventory item?'
     case 'inventory_receipt':
       return `Commit this receipt (${action.lines.length} line${action.lines.length === 1 ? '' : 's'})?`
+    case 'schedule_change':
+      return action.pill_text?.split('\n', 1)[0] ?? 'Apply this schedule change?'
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -82,5 +85,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'inventory_order_decision') return <Truck size={size} />
   if (type === 'inventory_item_archive') return <Archive size={size} />
   if (type === 'inventory_receipt') return <Receipt size={size} />
+  if (type === 'schedule_change') return <CalendarClock size={size} />
   return <ShieldAlert size={size} />
 }

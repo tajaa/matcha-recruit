@@ -720,6 +720,37 @@ export interface HuumeActionInventoryReceipt {
   dup_warning?: string | null
 }
 
+/** Thread Huume's `propose_schedule_change` — see services/huume/schedule_skill.py.
+ * `proposal_id`/`pill_text` are merged in by `schedule_skill.propose` on the stage
+ * turn (the source of truth `execute` reads); the rest are the raw model args,
+ * kept for the model's own reference across the confirm turn. */
+export interface HuumeActionScheduleChange {
+  type: 'schedule_change'
+  status: 'proposed' | 'applied' | 'failed' | 'cancelled'
+  confirm_id: string
+  proposal_id?: string
+  pill_text?: string
+  kind?: string
+  location_name?: string | null
+  target_employee_name?: string | null
+  target_date?: string | null
+  target_role_hint?: string | null
+  to_employee_name?: string | null
+  second_employee_name?: string | null
+  second_date?: string | null
+  second_role_hint?: string | null
+  new_date?: string | null
+  new_start_time?: string | null
+  new_end_time?: string | null
+  shift_by_minutes?: number | null
+  label?: string | null
+  date?: string | null
+  start_time?: string | null
+  end_time?: string | null
+  count?: number | null
+  employee_names?: string[] | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -741,6 +772,7 @@ export type HuumeAction =
   | HuumeActionInventoryItemCreate
   | HuumeActionInventoryItemArchive
   | HuumeActionInventoryReceipt
+  | HuumeActionScheduleChange
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */
