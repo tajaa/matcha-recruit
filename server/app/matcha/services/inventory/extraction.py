@@ -75,6 +75,23 @@ def _parse_model_json(text: str) -> dict:
     return json.loads(text)
 
 
+_VALID_KINDS = {"movement", "stockout", "receipt", "order_request", "return"}
+
+
+def _coerce_result(parsed: dict) -> dict:
+    """Merge the model's JSON onto the fallback shape and validate `kind`.
+    An unrecognized kind (a hallucination, or a future schema drift) must
+    not fall into the caller's else-branch — that branch auto-creates the
+    item and stages a real order, on the assumption that only stockout/
+    order_request ever reach it. Marking non-actionable routes the message
+    to plain event logging instead, the documented misclassification
+    fallback."""
+    result = {**_FALLBACK_RESULT, **parsed}
+    if result.get("kind") not in _VALID_KINDS:
+        result["actionable"] = False
+    return result
+
+
 async def extract_inventory(content: str, item_names: list[str]) -> dict:
     """Never raises. Returns the fallback shape (actionable=False) on any
     Gemini failure or malformed response — caller falls back to
@@ -89,7 +106,7 @@ async def extract_inventory(content: str, item_names: list[str]) -> dict:
             ),
         )
         parsed = _parse_model_json(resp.text)
-        return {**_FALLBACK_RESULT, **parsed}
+        return _coerce_result(parsed)
     except Exception:
         logger.warning("inventory: extraction failed, falling back", exc_info=True)
         return fallback_extraction(content)

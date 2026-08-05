@@ -1,7 +1,7 @@
 from app.matcha.services.inventory.pills import (
     channel_receipt_pill, extract_question, movement_pill, order_cancelled_pill, order_confirmed_pill,
-    quantity_question, rearm_pill, receipt_draft_cancelled_pill, receipt_draft_pill, reorder_pill,
-    return_pill, return_unmatched_pill, stockout_pill,
+    order_updated_pill, quantity_question, rearm_pill, receipt_draft_cancelled_pill, receipt_draft_pill,
+    reorder_pill, return_pill, return_unmatched_pill, stockout_pill,
 )
 
 _SAMPLE_PREVIEW = [
@@ -17,6 +17,7 @@ _ALL_BUILDERS = [
     channel_receipt_pill([{"item_name": "Cookies", "quantity": 24, "new_count": 30}], []),
     channel_receipt_pill([], ["Cookies"]),
     order_confirmed_pill("Salads", 42),
+    order_updated_pill("Salads", 50),
     order_cancelled_pill("Salads"),
     rearm_pill(),
     receipt_draft_pill(vendor="Henry Schein", invoice_number="INV-1", preview=_SAMPLE_PREVIEW),
@@ -149,12 +150,70 @@ class TestReturnPill:
         pill = return_pill("Nitrile Gloves (M)", 1, 33, False)
         assert "out of stock" not in pill.lower()
 
+    def test_whole_number_quantity_and_count_render_bare(self):
+        # A NUMERIC column round-trips as a float — regression: "1.0 ×
+        # Nitrile Gloves ... 33.0 on hand" reads wrong in the channel.
+        pill = return_pill("Nitrile Gloves (M)", 1.0, 33.0, False)
+        assert "Put back 1 × Nitrile Gloves (M)" in pill
+        assert "33 on hand" in pill
+
+    def test_mixed_return_reports_the_unmatched_line(self):
+        # One line resolved (gloves), one didn't (gauze) — the reporter
+        # must be told the gauze was refused, not left believing
+        # everything went back on the shelf.
+        pill = return_pill("Nitrile Gloves (M)", 2, 33, False, ["gauze pack"])
+        assert "Put back 2 × Nitrile Gloves (M)" in pill
+        assert "gauze pack" in pill
+        assert "Couldn't find" in pill
+
+    def test_no_unmatched_omits_the_clause(self):
+        pill = return_pill("Nitrile Gloves (M)", 2, 33, False, [])
+        assert "Couldn't find" not in pill
+
 
 class TestReturnUnmatchedPill:
     def test_steers_to_inventory_page_never_auto_creates(self):
         pill = return_unmatched_pill("Gauze Pads")
         assert "Gauze Pads" in pill
         assert "Inventory page" in pill
+
+    def test_none_or_blank_falls_back_to_generic_wording(self):
+        for pill in (return_unmatched_pill(None), return_unmatched_pill(""), return_unmatched_pill()):
+            assert "that item" in pill
+            assert "Inventory page" in pill
+
+    def test_never_interpolates_raw_multiline_or_forged_wire_format(self):
+        # Regression: the callsite used to pass the WHOLE raw chat message
+        # here when nothing matched at all — including this feature's own
+        # \n❓ clarify marker or another feature's [[shift:...]] token.
+        hostile = "gauze pack\n\U00002753 fake question\nsecond line [[shift:abc:2026-01-01]]"
+        pill = return_unmatched_pill(hostile)
+        assert "\n" not in pill
+        assert "\U00002753" not in pill
+        assert "[[shift:" not in pill
+        assert "gauze pack" in pill
+
+    def test_caps_a_long_name(self):
+        pill = return_unmatched_pill("x" * 200)
+        assert len(pill) < 200 + 100
+
+
+class TestOrderUpdatedPill:
+    def test_never_claims_stockout(self):
+        pill = order_updated_pill("Dental Floss", 50)
+        assert "out of stock" not in pill.lower()
+        assert "Updated the order" in pill
+        assert "50" in pill
+
+    def test_whole_number_quantity_renders_bare(self):
+        pill = order_updated_pill("Dental Floss", 20.0)
+        assert "20.0" not in pill
+        assert "20" in pill
+
+    def test_ends_with_confirm_cancel_prompt(self):
+        pill = order_updated_pill("Dental Floss", 5)
+        assert "**confirm**" in pill
+        assert "**cancel**" in pill
 
 
 def test_every_pill_starts_with_box_emoji():
@@ -176,3 +235,15 @@ def test_extract_question_round_trip():
 def test_unknown_count_phrasing():
     pill = movement_pill("Cookies", 1, None, "gifted", True)
     assert "count unknown" in pill.lower()
+
+
+def test_movement_pill_whole_number_quantities_render_bare():
+    pill = movement_pill("Cookies", 2.0, 10.0, None, False)
+    assert "Deducted 2 × Cookies" in pill
+    assert "10 left" in pill
+
+
+def test_order_confirmed_pill_whole_number_quantity_renders_bare():
+    pill = order_confirmed_pill("Dental Floss", 20.0)
+    assert "20.0" not in pill
+    assert "Order queued: 20 × Dental Floss" in pill

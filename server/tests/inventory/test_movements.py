@@ -64,3 +64,74 @@ class TestFindItem:
         _run(movements.find_item(conn, "company-1", "gloves", "loc-1"))
 
         assert seen["location_id"] == "loc-1"
+
+    def test_existing_list_skips_the_catalog_requery(self, monkeypatch):
+        # channels_ws.py already holds item_rows from the initial
+        # list_item_names call in _bg_inventory_request — a per-line
+        # find_item in the return branch must not re-run it.
+        calls = {"n": 0}
+
+        async def fake_list_item_names(conn, company_id, location_id):
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(movements, "list_item_names", fake_list_item_names)
+        conn = FakeConn(row={"id": "item-1", "name": "Nitrile Gloves (M)"})
+        existing = [{"id": "item-1", "name": "Nitrile Gloves (M)", "normalized_name": "nitrile glove m"}]
+
+        result = _run(movements.find_item(conn, "company-1", "nitrile gloves", existing=existing))
+
+        assert result == {"id": "item-1", "name": "Nitrile Gloves (M)"}
+        assert calls["n"] == 0
+
+
+class FakeConnWithInsert(FakeConn):
+    """find_or_create_item's insert-on-miss path also runs an execute() and
+    a second fetchrow(), beyond the plain-lookup FakeConn above."""
+
+    def __init__(self, rows_by_query=None):
+        super().__init__()
+        self._rows_by_query = rows_by_query or {}
+        self.execute_calls = []
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+
+    async def fetchrow(self, query, *args):
+        self.fetchrow_calls.append((query, args))
+        if "INSERT" in query.upper() or "SELECT * FROM inventory_items WHERE id" in query:
+            return self._rows_by_query.get("match")
+        return self._rows_by_query.get("post_insert")
+
+
+class TestFindOrCreateItem:
+    def test_match_delegates_to_find_item_never_inserts(self, monkeypatch):
+        async def fake_list_item_names(conn, company_id, location_id):
+            return [{"id": "item-1", "name": "Nitrile Gloves (M)", "normalized_name": "nitrile glove m"}]
+
+        monkeypatch.setattr(movements, "list_item_names", fake_list_item_names)
+        conn = FakeConnWithInsert(rows_by_query={"match": {"id": "item-1", "name": "Nitrile Gloves (M)"}})
+
+        result = _run(movements.find_or_create_item(
+            conn, "company-1", "nitrile gloves", created_by="user-1",
+        ))
+
+        assert result == {"id": "item-1", "name": "Nitrile Gloves (M)"}
+        assert conn.execute_calls == []  # no INSERT on a match
+
+    def test_no_match_inserts_new_item(self, monkeypatch):
+        async def fake_list_item_names(conn, company_id, location_id):
+            return []
+
+        monkeypatch.setattr(movements, "list_item_names", fake_list_item_names)
+        conn = FakeConnWithInsert(rows_by_query={
+            "post_insert": {"id": "item-new", "name": "Brand New Widget", "auto_created": True},
+        })
+
+        result = _run(movements.find_or_create_item(
+            conn, "company-1", "brand new widget", created_by="user-1",
+        ))
+
+        assert result["id"] == "item-new"
+        assert len(conn.execute_calls) == 1
+        assert "INSERT" in conn.execute_calls[0][0].upper()

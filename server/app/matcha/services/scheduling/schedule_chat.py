@@ -1034,6 +1034,16 @@ async def build_edit_proposal(
         new_starts_at: Optional[datetime] = None
         new_ends_at: Optional[datetime] = None
         if kind == "retime":
+            if not (
+                req.get("new_start_time") or req.get("new_end_time")
+                or req.get("shift_by_minutes") or req.get("new_date")
+            ):
+                # Survived coerce_edit_request's minimum-shape gate only on a
+                # new_day_hint that resolve_day_hint couldn't turn into a
+                # date (e.g. "next friday") — building from here would fall
+                # through to "keep the shift's current date+times", a
+                # confirmable no-op that still writes shift.update churn.
+                return await _clarify("What day should that shift move to?")
             if req.get("shift_by_minutes") and not (
                 req.get("new_start_time") or req.get("new_end_time")
             ):

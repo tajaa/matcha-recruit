@@ -10,33 +10,58 @@ _QUESTION_SUFFIX = " Reply to this message to answer."
 
 
 def movement_pill(item_name: str, qty, remaining, note: str | None, estimated: bool) -> str:
-    qty_str = f"~{qty}" if estimated else str(qty)
+    qty_str = f"~{_fmt_qty(qty)}" if estimated else _fmt_qty(qty)
     base = f"\U0001F4E6 Deducted {qty_str} × {item_name}"
     if note:
         base += f" — {note}"
     if remaining is None:
         base += ". Count unknown — set it on the Inventory page."
     else:
-        base += f". {remaining} left."
+        base += f". {_fmt_qty(remaining)} left."
     return base
 
 
-def return_pill(item_name: str, qty, new_count, estimated: bool) -> str:
+def return_pill(item_name: str, qty, new_count, estimated: bool, unmatched: list[str] | None = None) -> str:
     """Chat-only return — no invoice/receipt/CSV needed by design, unlike
     every other addition (services/inventory/CLAUDE.md provenance
-    invariant). Same estimated-quantity shape as movement_pill."""
-    qty_str = f"~{qty}" if estimated else str(qty)
+    invariant). Same estimated-quantity shape as movement_pill.
+    `unmatched`: item names from the SAME return message that didn't match
+    the catalog — a mixed return (one line resolves, one doesn't) must say
+    so, or the reporter believes the unresolved line went back on the shelf
+    too."""
+    qty_str = f"~{_fmt_qty(qty)}" if estimated else _fmt_qty(qty)
     base = f"\U0001F4E6 Put back {qty_str} × {item_name}"
     if new_count is None:
         base += ". Count unknown — set it on the Inventory page."
     else:
-        base += f". {new_count} on hand."
+        base += f". {_fmt_qty(new_count)} on hand."
+    names = [_safe_name(n) for n in (unmatched or []) if _safe_name(n)]
+    if names:
+        base += f" Couldn't find {', '.join(names)} in the catalog — add it on the Inventory page first."
     return base
 
 
-def return_unmatched_pill(item_name: str) -> str:
+def _safe_name(name) -> str:
+    """Item names in a pill can come straight from raw chat text (the
+    return-unmatched fallback used to pass the WHOLE message). First line
+    only + hard cap so a crafted message can't forge this feature's own
+    \n❓ clarify wire format, or another feature's [[shift:...]] token,
+    into a system message."""
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    return text.splitlines()[0].strip()[:80]
+
+
+def return_unmatched_pill(item_name=None) -> str:
+    name = _safe_name(item_name)
+    if not name:
+        return (
+            "\U0001F4E6 I don't see that item in the catalog — "
+            "add it on the Inventory page first, then I can put the return back."
+        )
     return (
-        f"\U0001F4E6 I don't see {item_name} in the catalog — "
+        f"\U0001F4E6 I don't see {name} in the catalog — "
         "add it on the Inventory page first, then I can put the return back."
     )
 
@@ -103,6 +128,17 @@ def reorder_pill(item_name: str, suggestion: dict | None, order_qty) -> str:
     return base
 
 
+def order_updated_pill(item_name: str, new_qty) -> str:
+    """Quantity-change reply on an already-staged order. inventory_orders
+    has no column recording whether the order originated from a `stockout`
+    or an explicit `order_request` — a shared, neutral pill for both,
+    replacing the old call that always rendered stockout_pill (claiming
+    "marked out of stock" even for a plain reorder request)."""
+    base = f"\U0001F4E6 Updated the order for {item_name}: {_fmt_qty(new_qty)}."
+    base += " Reply **confirm** to queue it, or **cancel**."
+    return base
+
+
 def channel_receipt_pill(received: list[dict], unmatched: list[str]) -> str:
     """Channel `@huume` receipt-shaped intake — never a bare 'received' claim
     (see receipts.receive_channel_lines' provenance invariant): each line
@@ -136,7 +172,7 @@ def channel_receipt_pill(received: list[dict], unmatched: list[str]) -> str:
 
 
 def order_confirmed_pill(item_name: str, qty) -> str:
-    return f"\U0001F4E6 Order queued: {qty} × {item_name}. Approved and marked ordered."
+    return f"\U0001F4E6 Order queued: {_fmt_qty(qty)} × {item_name}. Approved and marked ordered."
 
 
 def order_cancelled_pill(item_name: str) -> str:

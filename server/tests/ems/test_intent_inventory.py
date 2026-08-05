@@ -46,6 +46,20 @@ LOG_NEGATIVES = [
     # employee's own attendance, not a stock event).
     "@huume Dana returned from lunch late",
     "@huume she returned to work Monday",
+    # code-review fix (2026-08-05): the "returned"-subject pattern's
+    # subject list (patient/customer/client/guest/someone/they) DOES cover
+    # "someone"/"they" — a bare returned\b used to match their own
+    # movement, not a stock event. A negative lookahead after "returned"
+    # now excludes to/from/back so these stay LOG.
+    "@huume someone returned to the line drunk and shoved a coworker",
+    "@huume they returned from break 40 minutes late",
+    "@huume a customer returned back to the counter and yelled at staff",
+    # code-review fix (2026-08-05): the ADD-to-stock and PUT-back-in-stock
+    # patterns used to be unanchored (\b, matched anywhere via .search()),
+    # so injury/conduct narration containing either phrase mid-sentence
+    # misrouted to INVENTORY. Now message-initial only.
+    "@huume Dana slipped carrying a case, I told her to put it back in stock and she's got a sprained wrist",
+    "@huume the shelf collapsed while John tried to add boxes back to the inventory rack and it hit his foot",
 ]
 
 ASK_NEGATIVES = [

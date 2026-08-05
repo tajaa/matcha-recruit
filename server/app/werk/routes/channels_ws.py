@@ -775,7 +775,9 @@ async def _bg_inventory_request(
                 unmatched_names = []
                 for line in lines:
                     raw_name = line.get("item_name", "")
-                    item = await movements_service.find_item(conn, company_id, raw_name, location_id)
+                    item = await movements_service.find_item(
+                        conn, company_id, raw_name, location_id, existing=item_rows,
+                    )
                     if item is None:
                         unmatched_names.append(raw_name)
                         continue
@@ -785,14 +787,19 @@ async def _bg_inventory_request(
                         "item_id": item["id"], "quantity": 1 if estimated else qty, "estimated": estimated,
                     })
                 if not resolved_lines:
-                    pill_text = pills.return_unmatched_pill(unmatched_names[0] if unmatched_names else stripped)
+                    pill_text = pills.return_unmatched_pill(unmatched_names[0] if unmatched_names else None)
                     sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
                 else:
                     inserted = await movements_service.record_movements(
                         conn, company_id=company_id, channel_id=UUID(channel_id_str),
                         source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
                         kind="in", lines=resolved_lines, narrative=stripped,
-                        note=extracted.get("recipient_note"),
+                        # A chat return is the one addition kind that skips
+                        # invoice/receipt/order provenance (CLAUDE.md
+                        # invariant) — the fallback note is what still lets
+                        # an auditor tell it apart from a delivery-backed
+                        # `in` row when the reporter added no aside.
+                        note=extracted.get("recipient_note") or "Customer return (chat)",
                     )
                     if not inserted:
                         return
@@ -802,7 +809,7 @@ async def _bg_inventory_request(
                     )
                     pill_text = pills.return_pill(
                         item_row["name"], first["quantity"], item_row["current_quantity"],
-                        first["quantity_estimated"],
+                        first["quantity_estimated"], unmatched_names,
                     )
                     single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
                     if single_unknown:
@@ -943,9 +950,12 @@ async def _bg_inventory_reply(
                                     "UPDATE inventory_orders SET quantity = $1 WHERE id = $2",
                                     new_qty, claimed_order["id"],
                                 )
-                                pill_text = pills.stockout_pill(
-                                    item["name"], orders_service.decode_suggestion(claimed_order["suggestion"]), new_qty,
-                                )
+                                # Neutral pill — origin (stockout vs a plain
+                                # order_request) isn't stored on
+                                # inventory_orders, so stockout_pill here
+                                # used to claim "marked out of stock" even
+                                # for a reorder that was never a stockout.
+                                pill_text = pills.order_updated_pill(item["name"], new_qty)
                             else:
                                 pill_text = pills.rearm_pill()
                             sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
@@ -1423,18 +1433,17 @@ async def _bg_schedule_reply(
             return True
 
         # The location question is OUR OWN multiple-choice offer
-        # (build_proposal's own options list) — when the reply snapped
-        # cleanly onto one of them, resume deterministically from the
-        # ORIGINAL successfully-parsed request instead of spending a fresh
-        # Gemini call on the composed follow-up. A real prod miss: that
-        # re-parse can come back non-actionable even though the answer is
-        # unambiguous, and the old code had no fallback for that — it just
-        # cancelled the whole proposal with a generic "do this on the
-        # schedule page" bail.
-        location_answer = (
-            proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION
-            and snapped_to_option(snapped, clarify_options)
-        )
+        # (build_proposal's own options list). `location_question` is true
+        # whenever THIS clarify round is that offer — independent of
+        # whether the reply actually snapped onto one of the options —
+        # because a reply that DIDN'T snap ("the one over on Wilshire
+        # Blvd") still needs to be force-fed into location_hint below:
+        # apply_channel_default_location's "an explicit hint always wins"
+        # rule silently loses to the channel's default store otherwise.
+        # `location_answer` (snapped cleanly) additionally unlocks the
+        # deterministic resume path, skipping a Gemini call entirely.
+        location_question = proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION
+        location_answer = location_question and snapped_to_option(snapped, clarify_options)
 
         if location_answer and stored_parse is not None:
             parsed = dict(stored_parse)
@@ -1442,15 +1451,27 @@ async def _bg_schedule_reply(
         else:
             # No connection held across the Gemini re-parse call.
             parsed = await schedule_chat.parse_schedule_request(composed, _date.today())
-            if parsed is None and stored_parse is not None:
+            if parsed is None and location_question and stored_parse is not None:
                 # The re-parse came back non-actionable even though we
-                # already have a successfully-parsed original request —
-                # resume from that rather than cancelling outright.
+                # already have a successfully-parsed original request AND
+                # this clarify round has a slot (location_hint) to inject
+                # the answer into below — resume from it rather than
+                # cancelling outright. Restricted to the location question:
+                # any OTHER clarify's answer has no slot to inject into, so
+                # resuming from stored_parse (which by construction lacks
+                # the answer) would just re-ask the identical question
+                # until the round cap — two wasted Gemini calls to reach
+                # the same bail the un-resumed path gives immediately.
                 parsed = dict(stored_parse)
             if (
-                parsed is not None and location_answer
+                parsed is not None and location_question
                 and not (parsed.get("location_hint") or "").strip()
             ):
+                # Force the reply through even when it didn't snap onto an
+                # offered option — resolve_clarify_answer returns the RAW
+                # reply in that case, which is still a real answer to this
+                # question (a fuzzy store name, say) and must win over the
+                # channel's default location, not silently lose to it.
                 parsed["location_hint"] = snapped
 
         async with get_connection() as conn2:

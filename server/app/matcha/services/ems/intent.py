@@ -249,15 +249,28 @@ _INVENTORY_PATTERNS = (
     # so they get honestly steered rather than silently filed as a log note
     # that lies about having added stock.
     r"^(?:we|i)(?: just)? (?:got|bought|picked up) \d+ (?:more )?",
-    r"\badd (?:\S+ ){0,4}?(?:back )?(?:in)?to (?:the )?(?:inventory|stock)\b",
+    # Message-initial only (unlike most patterns here, which are content
+    # ^-anchored but tolerate a leading polite lead-in) — an UNANCHORED
+    # \b version of this used to match mid-sentence anywhere the words
+    # appeared, so injury narration ("...I told her to put it back in
+    # stock...") misrouted to INVENTORY. See classify_intent: it runs
+    # .search(), not .match(), so only the pattern's own anchor prevents
+    # a mid-message hit.
+    r"^(?:please |can you |could you )?add (?:\S+ ){0,4}?(?:back )?(?:in)?to (?:the )?(?:inventory|stock)\b",
     # RETURN — goods coming back INTO stock from a customer/patient/guest,
     # never a document; plain chat is sufficient by design (unlike other
     # additions). Subject list is deliberately narrow so "she returned to
-    # work Monday" stays LOG.
+    # work Monday" stays LOG. Negative lookahead after "returned" excludes
+    # "returned to/from/back" (returned TO the line, FROM break, BACK to
+    # the counter) — those are a person's own movement, not stock; a real
+    # stock return reads "returned an unopened box", "returned two masks".
     r"^(?:a |the |our )?(?:patient|customer|client|guest|someone|they)\b"
-    r"[^.!?]{0,60}? returned\b",
+    r"[^.!?]{0,60}? returned\b(?!\s+(?:to|from|back)\b)",
     r"^(?:we|i)(?: just)? (?:got|took|received) a return\b",
-    r"\bput (?:it|them|that|those|this|these)(?:[^.!?]{0,30})? "
+    # Message-initial only — same unanchored-mid-sentence hazard as ADD
+    # above ("I told her to put it back in stock and she's got a sprained
+    # wrist" must stay LOG).
+    r"^(?:please )?put (?:it|them|that|those|this|these)(?:[^.!?]{0,30})? "
     r"back in(?:to)? (?:stock|inventory)\b",
     # ORDER REQUEST — tense-exact like SCHEDULE's \bneed\b (never "needed").
     r"^(?:we|i)(?:'ll| will)? need to (?:order|re-?order|re-?stock|buy)\b",

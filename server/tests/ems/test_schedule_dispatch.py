@@ -219,3 +219,136 @@ class TestScheduleReplyRefusalRearms:
         assert len(rearm_calls) == 1
         _, rearm_args = rearm_calls[0]
         assert rearm_args == (reply_uuid, claim_id)
+
+
+class TestScheduleReplyLocationClarifyResume:
+    """code-review fixes (2026-08-05) to the location-clarify resume block
+    in _bg_schedule_reply: (1) a reply that does NOT snap onto one of the
+    offered location options must still force-feed the raw reply into
+    location_hint — narrowing the force-through to snapped-only answers
+    silently lost to the channel's default store; (2) a re-parse coming
+    back None on a NON-location clarify must bail immediately rather than
+    resuming from stored_parse (which lacks the answer) and re-asking the
+    identical question."""
+
+    @staticmethod
+    def _claim_conn(claimed_row, role="admin"):
+        class _FakeConn:
+            async def fetchrow(self, query, *args):
+                assert "UPDATE schedule_chat_proposals" in query
+                return claimed_row
+
+            async def fetchval(self, query, *args):
+                return role
+
+            async def execute(self, query, *args):
+                return None
+
+        class _FakeConnCtx:
+            async def __aenter__(self):
+                return _FakeConn()
+
+            async def __aexit__(self, *exc):
+                return False
+
+        return _FakeConnCtx()
+
+    @pytest.mark.asyncio
+    async def test_non_snapping_location_answer_still_forces_through(self, monkeypatch):
+        from app.matcha.services.scheduling import schedule_chat
+
+        reply_uuid = "22222222-2222-2222-2222-222222222222"
+        claim_id = "33333333-3333-3333-3333-333333333333"
+        sender_id = "11111111-1111-1111-1111-111111111111"
+        options = [
+            "Sunset Smile Dental — Wilshire (Los Angeles)",
+            "Sunset Smile Dental — Downtown (Los Angeles)",
+        ]
+        claimed_row = {
+            "id": claim_id, "company_id": "company-1", "channel_id": "channel-1",
+            "source_message_id": "msg-1", "status": "clarifying",
+            "proposal": {
+                "kind": "create", "clarify_question": schedule_chat.LOCATION_CLARIFY_QUESTION,
+                "clarify_options": options, "clarify_history": [], "original_content": "schedule an opener friday",
+            },
+            "parse": None, "clarify_rounds": 1, "created_by": sender_id,
+        }
+
+        conn_ctx = self._claim_conn(claimed_row)
+        conn_ctxs = iter([conn_ctx, conn_ctx])
+        monkeypatch.setattr(channels_ws, "get_connection", lambda: next(conn_ctxs))
+        monkeypatch.setattr(
+            channels_ws, "_schedule_company_features",
+            AsyncMock(return_value={"ems": True, "employee_schedule": True}),
+        )
+        monkeypatch.setattr(channels_ws, "_insert_system_message", AsyncMock(return_value={"id": "sys-1"}))
+        monkeypatch.setattr(channels_ws, "_system_message_payload", lambda *a, **k: {})
+        monkeypatch.setattr(channels_ws, "broadcast_system_message", AsyncMock())
+
+        # A reply that names a real place but doesn't snap onto either
+        # offered option string — resolve_clarify_answer (real, unmocked)
+        # returns it unchanged.
+        reply_text = "the one over on Wilshire Blvd"
+
+        # parse_schedule_request's re-parse must not come back with its own
+        # location_hint, so the force-through is what supplies it.
+        monkeypatch.setattr(
+            schedule_chat, "parse_schedule_request",
+            AsyncMock(return_value={"location_hint": None, "action": "create"}),
+        )
+
+        captured = {}
+
+        async def fake_build_proposal(conn, **kwargs):
+            captured["parsed"] = kwargs["parsed"]
+            return schedule_chat.ProposalBuild(kind="proposal", proposal_id=claim_id, pill_text="ok")
+
+        monkeypatch.setattr(schedule_chat, "build_proposal", fake_build_proposal)
+
+        result = await channels_ws._bg_schedule_reply("channel-1", reply_uuid, sender_id, reply_text)
+
+        assert result is True
+        assert captured["parsed"]["location_hint"] == reply_text
+
+    @pytest.mark.asyncio
+    async def test_non_location_clarify_reparse_none_bails_without_reasking(self, monkeypatch):
+        from app.matcha.services.scheduling import schedule_chat
+
+        reply_uuid = "44444444-4444-4444-4444-444444444444"
+        claim_id = "55555555-5555-5555-5555-555555555555"
+        sender_id = "11111111-1111-1111-1111-111111111111"
+        claimed_row = {
+            "id": claim_id, "company_id": "company-1", "channel_id": "channel-1",
+            "source_message_id": "msg-1", "status": "clarifying",
+            "proposal": {
+                "kind": "create", "clarify_question": "Which days should I schedule?",
+                "clarify_options": [], "clarify_history": [], "original_content": "schedule an opener",
+            },
+            # A successfully-parsed original request WOULD be available,
+            # but it has no `weekdays`/`date` — the very reason this
+            # clarify fired — so resuming from it would just re-ask the
+            # same question. Must bail instead.
+            "parse": {"action": "create", "weekdays": [], "date": None},
+            "clarify_rounds": 1, "created_by": sender_id,
+        }
+
+        conn_ctx = self._claim_conn(claimed_row)
+        conn_ctxs = iter([conn_ctx, conn_ctx])
+        monkeypatch.setattr(channels_ws, "get_connection", lambda: next(conn_ctxs))
+        monkeypatch.setattr(
+            channels_ws, "_schedule_company_features",
+            AsyncMock(return_value={"ems": True, "employee_schedule": True}),
+        )
+        monkeypatch.setattr(channels_ws, "_insert_system_message", AsyncMock(return_value={"id": "sys-1"}))
+        monkeypatch.setattr(channels_ws, "_system_message_payload", lambda *a, **k: {})
+        monkeypatch.setattr(channels_ws, "broadcast_system_message", AsyncMock())
+        monkeypatch.setattr(schedule_chat, "parse_schedule_request", AsyncMock(return_value=None))
+
+        builder_mock = AsyncMock()
+        monkeypatch.setattr(schedule_chat, "build_proposal", builder_mock)
+        monkeypatch.setattr(schedule_chat, "build_edit_proposal", builder_mock)
+
+        result = await channels_ws._bg_schedule_reply("channel-1", reply_uuid, sender_id, "Friday")
+
+        assert result is True
+        builder_mock.assert_not_called()  # no re-ask — cancelled with CLARIFY_BAIL_TEXT instead

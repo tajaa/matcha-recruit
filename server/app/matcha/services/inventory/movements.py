@@ -21,16 +21,33 @@ async def list_item_names(conn, company_id: UUID, location_id: Optional[UUID] = 
     return [dict(r) for r in rows]
 
 
+async def find_item(
+    conn, company_id: UUID, raw_name: str, location_id: Optional[UUID] = None,
+    *, existing: Optional[list[dict]] = None,
+) -> Optional[dict]:
+    """Match-only lookup — unlike find_or_create_item, NEVER inserts a new
+    row. Used by the return branch: returning stock the company never
+    tracked shouldn't silently mint a catalog entry from an unreviewed chat
+    claim, the way an out/stockout report is allowed to. Pass `existing`
+    (list_item_names' own return shape) when the caller already fetched
+    the catalog — skips a redundant full-table SELECT per line."""
+    if existing is None:
+        existing = await list_item_names(conn, company_id, location_id)
+    match = best_match(raw_name, existing)
+    if match is None:
+        return None
+    row = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1", match["id"])
+    return dict(row)
+
+
 async def find_or_create_item(
     conn, company_id: UUID, raw_name: str, *,
     created_by: Optional[UUID], location_id: Optional[UUID] = None,
 ) -> dict:
-    existing = await list_item_names(conn, company_id, location_id)
-    match = best_match(raw_name, existing)
-    if match is not None:
+    found = await find_item(conn, company_id, raw_name, location_id)
+    if found is not None:
         # May resolve to a shared NULL-location legacy item — intended.
-        row = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1", match["id"])
-        return dict(row)
+        return found
 
     normalized = normalize_name(raw_name)
     await conn.execute(
@@ -46,21 +63,6 @@ async def find_or_create_item(
         "AND location_id IS NOT DISTINCT FROM $3 AND archived_at IS NULL",
         company_id, normalized, location_id,
     )
-    return dict(row)
-
-
-async def find_item(
-    conn, company_id: UUID, raw_name: str, location_id: Optional[UUID] = None,
-) -> Optional[dict]:
-    """Match-only lookup — unlike find_or_create_item, NEVER inserts a new
-    row. Used by the return branch: returning stock the company never
-    tracked shouldn't silently mint a catalog entry from an unreviewed chat
-    claim, the way an out/stockout report is allowed to."""
-    existing = await list_item_names(conn, company_id, location_id)
-    match = best_match(raw_name, existing)
-    if match is None:
-        return None
-    row = await conn.fetchrow("SELECT * FROM inventory_items WHERE id = $1", match["id"])
     return dict(row)
 
 
