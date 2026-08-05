@@ -1,5 +1,6 @@
 import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass, ShieldAlert, KanbanSquare, Search } from 'lucide-react'
 import { THREAD_MODE_TOGGLES } from '../components/panels/constants'
+import { formatDateTimePacific } from '../../utils/dateFormat'
 import OnboardingWizard from '../components/shell/OnboardingWizard'
 import { useMatchaWorkList } from './useMatchaWorkList'
 
@@ -232,7 +233,7 @@ export default function MatchaWorkList() {
                 </div>
                 <div className="mt-0.5 flex items-center gap-2.5 text-[11px] text-w-faint">
                   <span>v{t.version}</span>
-                  <span>{new Date(t.updated_at).toLocaleDateString()}</span>
+                  <span title="Created (Pacific time)">{formatDateTimePacific(t.created_at)}</span>
                   <span className="capitalize">{t.status}</span>
                 </div>
               </div>

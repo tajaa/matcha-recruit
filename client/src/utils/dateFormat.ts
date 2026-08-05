@@ -34,3 +34,27 @@ export function formatDateOnly(value: string | null | undefined): string {
   if (!y || !m || !d) return '—'
   return new Date(y, m - 1, d).toLocaleDateString()
 }
+
+/**
+ * Format a timestamp with time-of-day, forced to Pacific regardless of the
+ * viewer's own device timezone — this surface (matcha-work threads) is an
+ * internal ops tool where "when was this made" needs one consistent
+ * reference clock, not whatever timezone a given browser happens to be in.
+ * "Aug 5, 2:07 PM PT" / with year when not the current one.
+ */
+// timeZoneName: 'short' emits the correct PST/PDT for the given instant —
+// hardcoding "PT" would be wrong on one side of the DST boundary.
+const _pacificSameYear = new Intl.DateTimeFormat('en-US', {
+  month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles', timeZoneName: 'short',
+})
+const _pacificWithYear = new Intl.DateTimeFormat('en-US', {
+  month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles', timeZoneName: 'short',
+})
+
+export function formatDateTimePacific(value: string | null | undefined): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return '—'
+  const now = new Date()
+  return (d.getFullYear() === now.getFullYear() ? _pacificSameYear : _pacificWithYear).format(d)
+}

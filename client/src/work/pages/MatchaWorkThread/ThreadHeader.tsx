@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, Pencil, Check, X, Sun, Moon, MoreHorizontal } from 'lucide-react'
 import ThreadCollaborators from '../../components/panels/ThreadCollaborators'
 import { formatTokens } from '../../components/panels/constants'
+import { formatDateTimePacific } from '../../../utils/dateFormat'
 import { TASK_LABELS } from './constants'
 import ToolsMenu from './ToolsMenu'
 import type { ThreadTheme } from './theme'
@@ -58,6 +59,11 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel }: ThreadHeaderP
           {thread?.task_type && (
             <span className="shrink-0 text-[11px] text-w-faint truncate">
               {TASK_LABELS[thread.task_type] ?? thread.task_type}
+            </span>
+          )}
+          {thread?.created_at && (
+            <span className="shrink-0 text-[11px] text-w-faint truncate" title="Thread created (Pacific time)">
+              {formatDateTimePacific(thread.created_at)}
             </span>
           )}
           {threadId && (
