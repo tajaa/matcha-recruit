@@ -1,7 +1,10 @@
 """Tell-Us brand <-> reviewer DMs.
 
-One thread per report (a brand addresses a bad experience directly with the
-person who reported it). The brand opens the thread; the consumer replies or
+One thread per report, on ANY identified feedback — private, held, published,
+or withdrawn. The whole point is early intervention: brand reaches the
+reporter before the 48h hold expires (or on feedback that was never public),
+makes it right, and the bad review never surfaces. The brand opens the
+thread; the consumer replies or
 blocks. Brand-side views only ever see the consumer's display_name — never
 their email — mirroring the redaction already enforced on TellusReport.
 
@@ -19,7 +22,7 @@ from ..dependencies import require_consumer, require_dm_account, require_paid_br
 from ..models.tellus import TellusAccount, TellusDmMessage, TellusDmSend, TellusDmThread
 from ..services.email import send_tellus_dm_email
 from ..services.points_service import _notify
-from ._shared import get_owned_report
+from ._shared import effective_review_state, get_owned_report
 
 router = APIRouter()
 
@@ -35,6 +38,8 @@ def _thread_to_model(row) -> TellusDmThread:
         unread_count=row["unread_count"],
         last_message_at=row["last_message_at"],
         created_at=row["created_at"],
+        review_state=effective_review_state(row),
+        publish_at=row["publish_at"],
     )
 
 
@@ -76,16 +81,6 @@ async def open_thread(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="This reporter is anonymous — there's no one to message.",
                 )
-            if report["review_state"] is None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="DMs are only available for public reviews.",
-                )
-            if report["review_state"] == "withdrawn":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="This review was withdrawn — there's no public review to message about.",
-                )
             # ON CONFLICT makes reopening idempotent: a brand messaging again
             # about the same report reuses the existing thread instead of
             # erroring on the UNIQUE(report_id).
@@ -123,8 +118,8 @@ async def open_thread(
 
         row = await conn.fetchrow(
             """SELECT t.id, t.report_id, t.blocked_at, t.last_message_at, t.created_at,
-                      COALESCE(a.display_name, 'Reviewer') AS counterparty_name,
-                      r.title AS report_title, r.report_number,
+                      COALESCE(a.display_name, 'Reporter') AS counterparty_name,
+                      r.title AS report_title, r.report_number, r.review_state, r.publish_at,
                       0 AS unread_count
                FROM tellus_dm_threads t
                JOIN tellus_reports r ON r.id = t.report_id
@@ -134,7 +129,7 @@ async def open_thread(
         )
 
     if consumer:
-        background.add_task(send_tellus_dm_email, consumer["email"], consumer["display_name"], brand["name"] if brand else "A brand")
+        background.add_task(send_tellus_dm_email, consumer["email"], consumer["display_name"], brand["name"] if brand else "A brand", "/messages")
 
     return _thread_to_model(row)
 
@@ -145,8 +140,8 @@ async def list_threads(account: TellusAccount = Depends(require_dm_account)):
         if account.account_type == "brand":
             rows = await conn.fetch(
                 """SELECT t.id, t.report_id, t.blocked_at, t.last_message_at, t.created_at,
-                          COALESCE(a.display_name, 'Reviewer') AS counterparty_name,
-                          r.title AS report_title, r.report_number,
+                          COALESCE(a.display_name, 'Reporter') AS counterparty_name,
+                          r.title AS report_title, r.report_number, r.review_state, r.publish_at,
                           (SELECT COUNT(*) FROM tellus_dm_messages m
                              WHERE m.thread_id = t.id AND m.read_at IS NULL AND m.sender_role <> 'brand') AS unread_count
                    FROM tellus_dm_threads t
@@ -161,7 +156,7 @@ async def list_threads(account: TellusAccount = Depends(require_dm_account)):
             rows = await conn.fetch(
                 """SELECT t.id, t.report_id, t.blocked_at, t.last_message_at, t.created_at,
                           b.name AS counterparty_name,
-                          r.title AS report_title, r.report_number,
+                          r.title AS report_title, r.report_number, r.review_state, r.publish_at,
                           (SELECT COUNT(*) FROM tellus_dm_messages m
                              WHERE m.thread_id = t.id AND m.read_at IS NULL AND m.sender_role <> 'consumer') AS unread_count
                    FROM tellus_dm_threads t
@@ -236,12 +231,13 @@ async def send_message(
             else:
                 counterparty_id = thread["consumer_account_id"]
             await _notify(
-                conn, counterparty_id, "dm_message", "New message about a review",
+                conn, counterparty_id, "dm_message", "New message about your feedback",
                 "You have a new message.", reference_type="dm_thread", reference_id=str(thread_id),
             )
 
             recipient_email = None
             recipient_name = None
+            recipient_cta_path = "/messages" if my_role == "brand" else "/brand/messages"
             from_label = "A brand"
             if my_role == "brand":
                 consumer = await conn.fetchrow(
@@ -267,7 +263,7 @@ async def send_message(
                 from_label = (reviewer["display_name"] if reviewer else None) or "A reviewer"
 
     if recipient_email:
-        background.add_task(send_tellus_dm_email, recipient_email, recipient_name, from_label)
+        background.add_task(send_tellus_dm_email, recipient_email, recipient_name, from_label, recipient_cta_path)
 
     return TellusDmMessage(
         id=row["id"], thread_id=row["thread_id"], sender_role=row["sender_role"],

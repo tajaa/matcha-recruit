@@ -177,9 +177,9 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
         {report.review_state != null && report.review_state !== 'withdrawn' && !report.brand_public_reply && !replying && (
           <Button size="sm" variant="ghost" onClick={() => setReplying(true)}><MessageSquare className="h-3.5 w-3.5" /> Reply publicly</Button>
         )}
-        {report.is_identified && (report.has_dm_thread || (report.review_state != null && report.review_state !== 'withdrawn')) && (
+        {report.is_identified && (
           <Button size="sm" variant="ghost" onClick={() => setShowDm((s) => !s)}>
-            <MessageCircle className="h-3.5 w-3.5" /> {report.has_dm_thread ? 'View conversation' : 'Message reviewer'}
+            <MessageCircle className="h-3.5 w-3.5" /> {report.has_dm_thread ? 'View conversation' : 'Message reporter'}
           </Button>
         )}
         {granting ? (

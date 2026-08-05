@@ -133,15 +133,16 @@ async def send_tellus_feedback_alert_email(
     await _send(to_email, to_name, f"New feedback — {brand_name}", html, text, label="feedback alert")
 
 
-async def send_tellus_dm_email(to_email: str, to_name: str | None, from_label: str) -> None:
-    """Ping a reviewer that a brand sent them a message. Content NOT echoed
-    (untrusted UGC + the brand shouldn't need the email to carry the
-    conversation) — the consumer opens My Reviews to read and reply.
-    Best-effort."""
+async def send_tellus_dm_email(to_email: str, to_name: str | None, from_label: str, cta_path: str = "/messages") -> None:
+    """Ping a reporter/brand that the other side sent a message. Content NOT
+    echoed (untrusted UGC + the recipient shouldn't need the email to carry
+    the conversation) — they open the Messages page to read and reply.
+    Best-effort. cta_path differs by recipient app surface (consumer
+    '/messages' vs brand '/brand/messages')."""
     body = (
         f'<p style="margin:0;font-size:15px;line-height:1.6;color:#d4d4d8;">'
         f'<b style="color:#fafafa;">{escape(from_label)}</b> sent you a message about your feedback.</p>'
     )
-    html = _shell("New message", body, cta_label="View message", cta_url=app_url("/my-reviews"))
-    text = f"{from_label} sent you a message about your feedback.\n\n{app_url('/my-reviews')}"
+    html = _shell("New message", body, cta_label="View message", cta_url=app_url(cta_path))
+    text = f"{from_label} sent you a message about your feedback.\n\n{app_url(cta_path)}"
     await _send(to_email, to_name, f"New message from {from_label} — Tell-Us", html, text, label="dm")

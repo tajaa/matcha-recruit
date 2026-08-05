@@ -524,6 +524,10 @@ class TellusDmThread(BaseModel):
     counterparty_name: str
     report_title: Optional[str] = None
     report_number: Optional[str] = None
+    # Underlying report's derived review state — None = private feedback.
+    # Brand side renders "publishes in Nh" urgency off these two.
+    review_state: Optional[ReviewState] = None
+    publish_at: Optional[datetime] = None
     blocked: bool = False
     unread_count: int = 0
     last_message_at: datetime

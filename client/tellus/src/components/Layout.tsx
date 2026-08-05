@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, CreditCard, Gift, LogOut, MessageSquare, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
+import { Award, Bell, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -18,12 +18,14 @@ const CONSUMER_NAV: NavItem[] = [
   { to: '/marketplace', label: 'Marketplace', icon: Gift },
   { to: '/redemptions', label: 'Redemptions', icon: Tag },
   { to: '/my-reviews', label: 'My reviews', icon: Star },
+  { to: '/messages', label: 'Messages', icon: MessageCircle },
   { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 const BRAND_NAV: NavItem[] = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
+  { to: '/brand/messages', label: 'Messages', icon: MessageCircle },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
@@ -69,14 +71,24 @@ export function Layout({ children }: { children: ReactNode }) {
 
   async function openNotifications() {
     // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send
-    // them to their own status page instead.
-    navigate(isBrand ? (isPendingBrand ? '/brand/billing' : '/brand/feedback') : '/my-reviews')
+    // them to their own status page instead. A pending DM takes priority
+    // over the default feedback/reviews surface — that's where the actual
+    // unread thing lives.
+    let notes: TellusNotification[] = []
+    try {
+      notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
+    } catch {
+      // best-effort — fall through to the default surface
+    }
+    const hasDm = notes.some((n) => n.kind === 'dm_message')
+    if (isPendingBrand) navigate('/brand/billing')
+    else if (hasDm) navigate(isBrand ? '/brand/messages' : '/messages')
+    else navigate(isBrand ? '/brand/feedback' : '/my-reviews')
 
     // Only clear notifications relevant to the surface we're navigating to —
     // a blanket mark-all-read here would silently drop unrelated points/
     // redemption notices the user never saw.
     try {
-      const notes = await tellusApi.get<TellusNotification[]>('/notifications?unread_only=true&limit=30')
       const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind))
       await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
       setUnread(notes.length - relevant.length)

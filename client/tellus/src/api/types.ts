@@ -310,6 +310,8 @@ export interface DmThread {
   counterparty_name: string
   report_title: string | null
   report_number: string | null
+  review_state: ReviewState | null
+  publish_at: string | null
   blocked: boolean
   unread_count: number
   last_message_at: string

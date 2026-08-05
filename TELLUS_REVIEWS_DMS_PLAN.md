@@ -1,4 +1,14 @@
-# Tell-Us: Public Reviews (48h hold) + Brand↔Reviewer DMs
+# Tell-Us: Public Reviews (48h hold) + Brand↔Reporter DMs
+
+> **Amended 2026-08-04:** DM scope widened from public-review-only to ANY identified
+> feedback (private, held, published, or withdrawn — `reporter_account_id IS NOT NULL`
+> is the only gate). Rationale: DMs exist so a brand can reach a reporter *before* a bad
+> experience surfaces publicly — fix it, offer a reward, and the review never needs to
+> go live. Scoping to reviews only meant the brand could message strictly after the
+> thing DMs were meant to prevent. `TellusDmThread` now carries `review_state`/
+> `publish_at` so both sides see the hold urgency; a role-agnostic Messages page
+> (`/messages`, `/brand/messages`) was added since private feedback never appears on
+> `/my-reviews`.
 
 Status: **built on `tellus/dms`, migration NOT yet applied to any DB.** Code is in, `tsc -b` clean, backend imports clean, 19/19 pure-function tests pass. Manual E2E (Step 6 below) still needs a human to run after applying `tellus_app_05`.
 

@@ -10,12 +10,13 @@ import type { DmMessage, DmThread } from '../api/types'
 // row / review card, not as its own page — no modal/drawer primitive exists
 // in this app, so this follows the established inline-expansion pattern.
 export function DmThreadPanel({
-  reportId, isBrand,
+  reportId, initialThread, isBrand,
 }: {
-  reportId: string
+  reportId?: string
+  initialThread?: DmThread
   isBrand: boolean
 }) {
-  const [thread, setThread] = useState<DmThread | null>(null)
+  const [thread, setThread] = useState<DmThread | null>(initialThread ?? null)
   const [messages, setMessages] = useState<DmMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [body, setBody] = useState('')
@@ -25,8 +26,11 @@ export function DmThreadPanel({
   async function loadThread() {
     setLoading(true); setErr('')
     try {
-      const threads = await tellusApi.get<DmThread[]>('/dm/threads')
-      const found = threads.find((t) => t.report_id === reportId) ?? null
+      let found = initialThread ?? null
+      if (!found) {
+        const threads = await tellusApi.get<DmThread[]>('/dm/threads')
+        found = threads.find((t) => t.report_id === reportId) ?? null
+      }
       setThread(found)
       if (found) {
         const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${found.id}/messages`)
@@ -39,20 +43,20 @@ export function DmThreadPanel({
     }
   }
 
-  useEffect(() => { void loadThread() }, [reportId])
+  useEffect(() => { void loadThread() }, [reportId, initialThread?.id])
 
   async function send() {
     if (!body.trim()) return
     setBusy(true); setErr('')
     try {
-      if (!thread) {
+      if (!thread && reportId) {
         // Brand's first message opens the thread.
         const opened = await tellusApi.post<DmThread>(`/feedback/${reportId}/dm`, { body })
         setThread(opened)
         setBody('')
         const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${opened.id}/messages`)
         setMessages(msgs)
-      } else {
+      } else if (thread) {
         const msg = await tellusApi.post<DmMessage>(`/dm/threads/${thread.id}/messages`, { body })
         setMessages((m) => [...m, msg])
         setBody('')
