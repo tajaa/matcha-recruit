@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card, Textarea, useToast } from '../../../components/ui'
-import { ArrowLeft, Loader2, FileText, ShieldCheck, ShieldX } from 'lucide-react'
+import { ArrowLeft, Loader2, FileText, ShieldCheck, ShieldX, Undo2 } from 'lucide-react'
 import { useDisciplineApprovers, useDisciplineRecord } from '../../../hooks/discipline/useDiscipline'
 import SignatureWorkflow from '../../../components/discipline/SignatureWorkflow'
 import { api, ApiError } from '../../../api/client'
 import type {
   DisciplineLevel,
   DisciplineStatus,
+  DenyDisposition,
 } from '../../../api/discipline/discipline'
 
 const LEVEL_LABEL: Record<DisciplineLevel, string> = {
@@ -60,6 +61,8 @@ export default function DisciplineDetail() {
     downloadLetter,
     approve,
     deny,
+    updateDraft,
+    resubmit,
   } = useDisciplineRecord(recordId)
   const { toast } = useToast()
 
@@ -73,7 +76,21 @@ export default function DisciplineDetail() {
     : null
   const [showDenyForm, setShowDenyForm] = useState(false)
   const [denyReason, setDenyReason] = useState('')
+  const [denyDisposition, setDenyDisposition] = useState<DenyDisposition>('reject')
   const [decisionBusy, setDecisionBusy] = useState(false)
+
+  // Revision editing (approval_status === 'changes_requested').
+  const [revisedDescription, setRevisedDescription] = useState('')
+  const [revisedImprovement, setRevisedImprovement] = useState('')
+  const [revisionDirty, setRevisionDirty] = useState(false)
+  const [revisionBusy, setRevisionBusy] = useState(false)
+
+  useEffect(() => {
+    if (record?.approval_status !== 'changes_requested') return
+    setRevisedDescription(record.description || '')
+    setRevisedImprovement(record.expected_improvement || '')
+    setRevisionDirty(false)
+  }, [record?.id, record?.approval_status])
 
   useEffect(() => {
     if (!record?.employee_id) return
@@ -117,14 +134,50 @@ export default function DisciplineDetail() {
     if (denyReason.trim().length < MIN_DENIAL_REASON_CHARS) return
     setDecisionBusy(true)
     try {
-      await deny(denyReason.trim())
-      toast('Denied.', 'success')
+      await deny(denyReason.trim(), denyDisposition)
+      toast(denyDisposition === 'revise' ? 'Sent back for revision.' : 'Denied.', 'success')
       setShowDenyForm(false)
       setDenyReason('')
+      setDenyDisposition('reject')
     } catch (e) {
       toast(e instanceof ApiError ? e.message : 'Failed to deny', 'error')
     } finally {
       setDecisionBusy(false)
+    }
+  }
+
+  async function handleSaveRevision() {
+    setRevisionBusy(true)
+    try {
+      await updateDraft({
+        description: revisedDescription,
+        expected_improvement: revisedImprovement,
+      })
+      toast('Saved.', 'success')
+      setRevisionDirty(false)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to save', 'error')
+    } finally {
+      setRevisionBusy(false)
+    }
+  }
+
+  async function handleResubmit() {
+    setRevisionBusy(true)
+    try {
+      if (revisionDirty) {
+        await updateDraft({
+          description: revisedDescription,
+          expected_improvement: revisedImprovement,
+        })
+      }
+      await resubmit()
+      toast('Resubmitted for approval.', 'success')
+      setRevisionDirty(false)
+    } catch (e) {
+      toast(e instanceof ApiError ? e.message : 'Failed to resubmit', 'error')
+    } finally {
+      setRevisionBusy(false)
     }
   }
 
@@ -159,7 +212,8 @@ export default function DisciplineDetail() {
               <p className="text-xs text-zinc-400 mt-1">
                 This record was drafted from an incident and has not been issued. Approving
                 schedules the meeting step; denying is terminal — a later decision needs a new
-                record.
+                record. Sending it back for revision keeps this record and lets the drafter fix
+                it and resubmit.
               </p>
             </div>
             <div className="flex gap-2 shrink-0">
@@ -174,14 +228,38 @@ export default function DisciplineDetail() {
                 disabled={decisionBusy}
               >
                 <ShieldX className="w-4 h-4" />
-                <span className="ml-1.5">Deny</span>
+                <span className="ml-1.5">Deny / send back</span>
               </Button>
             </div>
           </div>
           {showDenyForm && (
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDenyDisposition('revise')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                    denyDisposition === 'revise'
+                      ? 'bg-amber-900/40 border-amber-700 text-amber-300'
+                      : 'border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Send back for revision
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDenyDisposition('reject')}
+                  className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                    denyDisposition === 'reject'
+                      ? 'bg-red-900/40 border-red-700 text-red-300'
+                      : 'border-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  Reject (terminal)
+                </button>
+              </div>
               <Textarea
-                label="Reason for denial (required, min 20 characters)"
+                label={`Reason${denyDisposition === 'revise' ? ' — what needs to change' : ' for denial'} (required, min 20 characters)`}
                 value={denyReason}
                 onChange={(e) => setDenyReason(e.target.value)}
                 rows={3}
@@ -189,11 +267,15 @@ export default function DisciplineDetail() {
               <div className="flex items-center gap-2">
                 <Button
                   size="sm"
-                  className="bg-red-700 hover:bg-red-600 text-white"
+                  className={
+                    denyDisposition === 'revise'
+                      ? 'bg-amber-700 hover:bg-amber-600 text-white'
+                      : 'bg-red-700 hover:bg-red-600 text-white'
+                  }
                   disabled={decisionBusy || denyReason.trim().length < MIN_DENIAL_REASON_CHARS}
                   onClick={handleDeny}
                 >
-                  Confirm denial
+                  {denyDisposition === 'revise' ? 'Confirm — send back' : 'Confirm denial'}
                 </Button>
                 <span className="text-xs text-zinc-500">
                   {denyReason.trim().length}/{MIN_DENIAL_REASON_CHARS}
@@ -210,6 +292,43 @@ export default function DisciplineDetail() {
           <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">
             {record.denial_reason || 'No reason recorded.'}
           </p>
+        </Card>
+      )}
+
+      {record.approval_status === 'changes_requested' && (
+        <Card className="p-4 border-amber-800 bg-amber-950/20 space-y-3">
+          <div>
+            <div className="text-sm font-medium text-amber-300">Sent back for revision</div>
+            <p className="text-sm text-zinc-300 mt-1 whitespace-pre-wrap">
+              {record.denial_reason || 'No reason recorded.'}
+            </p>
+          </div>
+          <Textarea
+            label="Description"
+            value={revisedDescription}
+            onChange={(e) => { setRevisedDescription(e.target.value); setRevisionDirty(true) }}
+            rows={4}
+          />
+          <Textarea
+            label="Expected improvement"
+            value={revisedImprovement}
+            onChange={(e) => { setRevisedImprovement(e.target.value); setRevisionDirty(true) }}
+            rows={3}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleSaveRevision}
+              disabled={revisionBusy || !revisionDirty}
+            >
+              Save
+            </Button>
+            <Button size="sm" onClick={handleResubmit} disabled={revisionBusy}>
+              <Undo2 className="w-4 h-4" />
+              <span className="ml-1.5">Resubmit for approval</span>
+            </Button>
+          </div>
         </Card>
       )}
 

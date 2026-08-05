@@ -28,9 +28,10 @@ _TITLES = {
     "discipline_approval_requested": "Discipline Approval Requested",
     "discipline_approved": "Discipline Approved",
     "discipline_denied": "Discipline Denied",
+    "discipline_changes_requested": "Discipline Sent Back for Revision",
 }
 
-_AUDIENCES = ("all", "hr_only", "manager_only")
+_AUDIENCES = ("all", "hr_only", "manager_only", "drafter_only")
 
 
 async def _resolve_manager_chain(
@@ -158,6 +159,11 @@ async def _resolve_recipients(
         (manager_id is sparse — only bulk upload populates it today, and an
         unresolvable email is silently dropped), falls back to the hr_only
         set so an approved letter doesn't notify nobody.
+      - "drafter_only": the record's own issuer (the person who staged/
+        drafted it) — used when HR sends a record back for revision, since
+        that's who actually needs to act. Falls back to the hr_only set when
+        the issuer is missing or no longer active, so a revise request never
+        notifies nobody.
     """
     if audience not in _AUDIENCES:
         raise ValueError(f"Invalid audience: {audience}")
@@ -175,6 +181,17 @@ async def _resolve_recipients(
             seen.add(uid)
 
     if audience == "hr_only":
+        for uid in await _designated_approver_user_ids(conn, company_id):
+            _add(uid, "hr")
+        return recipients
+
+    if audience == "drafter_only":
+        is_active = issuer_id and await conn.fetchval(
+            "SELECT TRUE FROM users WHERE id = $1 AND is_active", issuer_id,
+        )
+        if is_active:
+            _add(issuer_id, "drafter")
+            return recipients
         for uid in await _designated_approver_user_ids(conn, company_id):
             _add(uid, "hr")
         return recipients
@@ -227,6 +244,9 @@ def _build_body(record: dict[str, Any], action: str, employee_name: Optional[str
     if action == "discipline_denied":
         reason = record.get("denial_reason") or ""
         return f"The proposed {level} for {name} was denied.{(' Reason: ' + reason) if reason else ''}"
+    if action == "discipline_changes_requested":
+        reason = record.get("denial_reason") or ""
+        return f"The proposed {level} for {name} was sent back for revision.{(' Reason: ' + reason) if reason else ''}"
     return ""
 
 

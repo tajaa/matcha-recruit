@@ -783,9 +783,11 @@ def _validate_discipline_from_incident(staged: dict[str, Any]) -> HuumeVerdict:
 
 
 def _validate_discipline_decision(staged: dict[str, Any]) -> HuumeVerdict:
-    """Confirm-turn validation for approving/denying a pending discipline
-    record. Denial requires a reason of at least _MIN_DENIAL_REASON_CHARS —
-    mirrors DenyRequest in routes/employee_lifecycle/discipline.py."""
+    """Confirm-turn validation for approving/denying/revising a pending
+    discipline record. 'deny' and 'revise' both require a reason of at
+    least _MIN_DENIAL_REASON_CHARS — mirrors DenyRequest in
+    routes/employee_lifecycle/discipline.py (disposition='reject'/'revise'
+    both carry the same `reason` field, same floor)."""
     record_id = staged.get("record_id")
     if not _is_uuid(record_id):
         return HuumeVerdict(
@@ -793,14 +795,15 @@ def _validate_discipline_decision(staged: dict[str, Any]) -> HuumeVerdict:
             message="I need the discipline record's id — look it up with list_pending_approvals first.",
         )
     decision = str(staged.get("decision") or "").strip().lower()
-    if decision not in ("approve", "deny"):
-        return HuumeVerdict(kind="refuse", message="Tell me whether to approve or deny it.")
+    if decision not in ("approve", "deny", "revise"):
+        return HuumeVerdict(kind="refuse", message="Tell me whether to approve, deny, or send it back for revision.")
 
     reason = str(staged.get("reason") or "").strip()
-    if decision == "deny" and len(reason) < _MIN_DENIAL_REASON_CHARS:
+    if decision in ("deny", "revise") and len(reason) < _MIN_DENIAL_REASON_CHARS:
+        verb = "denial" if decision == "deny" else "revision request"
         return HuumeVerdict(
             kind="refuse",
-            message=f"A denial needs a written reason of at least {_MIN_DENIAL_REASON_CHARS} characters — ask the admin why.",
+            message=f"A {verb} needs a written reason of at least {_MIN_DENIAL_REASON_CHARS} characters — ask the admin why.",
         )
 
     return HuumeVerdict(kind="proceed", message="", action={

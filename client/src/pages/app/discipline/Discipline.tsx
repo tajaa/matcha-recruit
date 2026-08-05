@@ -47,6 +47,15 @@ const APPROVAL_VARIANT: Record<DisciplineApprovalStatus, 'success' | 'warning' |
   pending: 'warning',
   approved: 'success',
   denied: 'danger',
+  changes_requested: 'warning',
+}
+
+const APPROVAL_LABEL: Record<DisciplineApprovalStatus, string> = {
+  not_required: '',
+  pending: 'Pending',
+  approved: 'Approved',
+  denied: 'Denied',
+  changes_requested: 'Needs revision',
 }
 
 type EmployeeRow = { id: string; first_name: string | null; last_name: string | null }
@@ -151,6 +160,7 @@ export default function Discipline() {
           options={[
             { value: '', label: 'All' },
             { value: 'pending', label: 'Pending approval' },
+            { value: 'changes_requested', label: 'Needs revision' },
             { value: 'approved', label: 'Approved' },
             { value: 'denied', label: 'Denied' },
           ]}
@@ -223,7 +233,7 @@ export default function Discipline() {
                   <td className="px-4 py-3">
                     {r.approval_status !== 'not_required' && (
                       <Badge variant={APPROVAL_VARIANT[r.approval_status]}>
-                        {r.approval_status.charAt(0).toUpperCase() + r.approval_status.slice(1)}
+                        {APPROVAL_LABEL[r.approval_status]}
                       </Badge>
                     )}
                   </td>

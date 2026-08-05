@@ -16,7 +16,13 @@ export type DisciplineStatus =
   | 'expired'
   | 'escalated'
   | 'denied'
-export type DisciplineApprovalStatus = 'not_required' | 'pending' | 'approved' | 'denied'
+export type DisciplineApprovalStatus =
+  | 'not_required'
+  | 'pending'
+  | 'approved'
+  | 'denied'
+  | 'changes_requested'
+export type DenyDisposition = 'reject' | 'revise'
 export type DisciplineSignatureStatus =
   | 'pending'
   | 'requested'
@@ -121,6 +127,16 @@ export type DisciplineDraft = {
   dropped_citations: string[]
   concerns: string[]
   available: boolean
+  /** Present only when a company template resolved for this infraction —
+   *  see discipline_templates.resolve_template. `rendered_body` is the
+   *  template's body rendered over this draft's own field values;
+   *  `missing_fields` lists known placeholders that had nothing to fill
+   *  them (e.g. no manager on file) so the caller can flag a gap rather
+   *  than silently ship a blank clause. */
+  template_id?: string
+  template_name?: string
+  rendered_body?: string
+  missing_fields?: string[]
 }
 
 export type DisciplineRecommendation = {
@@ -279,12 +295,33 @@ export const disciplineApi = {
 
   pendingApprovals: () => api.get<DisciplineRecord[]>('/discipline/records/pending-approval'),
 
+  /** Records HR sent back for revision (approval_status='changes_requested') —
+   *  the sibling queue to pendingApprovals. */
+  changesRequested: () => api.get<DisciplineRecord[]>('/discipline/records/changes-requested'),
+
   approve: (recordId: string) =>
     api.post<DisciplineRecord>(`/discipline/records/${recordId}/approve`),
 
-  /** Throws ApiError 409 if the record isn't awaiting approval. */
-  deny: (recordId: string, reason: string) =>
-    api.post<DisciplineRecord>(`/discipline/records/${recordId}/deny`, { reason }),
+  /** Throws ApiError 409 if the record isn't awaiting approval.
+   *  `disposition='reject'` (default) is terminal — no un-deny. `'revise'`
+   *  sends it back to the drafter, editable via `updateDraft` + resubmittable
+   *  via `resubmit`. */
+  deny: (recordId: string, reason: string, disposition: DenyDisposition = 'reject') =>
+    api.post<DisciplineRecord>(`/discipline/records/${recordId}/deny`, { reason, disposition }),
+
+  /** Edit a record's content — only while approval_status='changes_requested'.
+   *  Throws ApiError 409 otherwise. Send only the fields being changed. */
+  updateDraft: (
+    recordId: string,
+    fields: Partial<
+      Pick<DisciplineRecord, 'description' | 'expected_improvement' | 'discipline_type' | 'severity'>
+    >,
+  ) => api.patch<DisciplineRecord>(`/discipline/records/${recordId}`, fields),
+
+  /** Send a 'changes_requested' record back to HR for another decision.
+   *  Throws ApiError 409 if it isn't awaiting revision. */
+  resubmit: (recordId: string) =>
+    api.post<DisciplineRecord>(`/discipline/records/${recordId}/resubmit`),
 
   listForEmployee: (employeeId: string) =>
     api.get<DisciplineRecord[]>(`/discipline/records/employee/${employeeId}`),

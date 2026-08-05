@@ -440,7 +440,7 @@ async def _execute_discipline_from_incident(
 
     async with get_connection() as conn:
         employee = await conn.fetchrow(
-            "SELECT id, first_name, last_name FROM employees WHERE id = $1 AND org_id = $2",
+            "SELECT id, first_name, last_name, job_title, manager_id FROM employees WHERE id = $1 AND org_id = $2",
             employee_id, company_id,
         )
         if not employee:
@@ -449,7 +449,7 @@ async def _execute_discipline_from_incident(
         incident_row = None
         if incident_id:
             incident_row = await conn.fetchrow(
-                "SELECT occurred_at FROM ir_incidents WHERE id = $1 AND company_id = $2",
+                "SELECT id, incident_number, occurred_at FROM ir_incidents WHERE id = $1 AND company_id = $2",
                 incident_id, company_id,
             )
             if not incident_row:
@@ -470,6 +470,55 @@ async def _execute_discipline_from_incident(
                 "compliance": verdict,
             }
 
+        # If a template resolved at stage time, re-render it here from a
+        # fresh placeholder pass — the staged `rendered_preview` string
+        # crossed a model turn and is display state, not what gets filed.
+        # `situation_narrative` always keeps the raw HR/model account
+        # regardless of a template (it already did before this change, since
+        # both fields were previously set to the same text); `description`
+        # becomes the templated letter when one applies, otherwise stays the
+        # freeform text exactly as before.
+        description = action["description"]
+        template_id = UUID(action["template_id"]) if action.get("template_id") else None
+        if template_id:
+            from app.matcha.services.discipline import discipline_templates
+            tpl = await conn.fetchrow(
+                "SELECT id, body FROM company_discipline_templates "
+                "WHERE id = $1 AND company_id = $2 AND is_active",
+                template_id, company_id,
+            )
+            if tpl:
+                citations: list[str] = []
+                if incident_id:
+                    existing = await conn.fetchval(
+                        "SELECT analysis_data FROM ir_incident_analysis "
+                        "WHERE incident_id = $1 AND analysis_type = 'policy_mapping'",
+                        incident_id,
+                    )
+                    if existing:
+                        data = json.loads(existing) if isinstance(existing, str) else dict(existing)
+                        citations = [m.get("policy_title") for m in (data.get("matches") or []) if m.get("policy_title")]
+                values = await discipline_templates.build_placeholder_values(
+                    conn, company_id=company_id, employee=dict(employee),
+                    record_fields={
+                        "infraction_type": infraction_type,
+                        "discipline_type": action.get("discipline_type") or "verbal_warning",
+                        "occurrence_dates": occurrence_dates,
+                        "description": action["description"],
+                        "expected_improvement": action.get("expected_improvement"),
+                        "issued_date": date.today().isoformat(),
+                    },
+                    incident=dict(incident_row) if incident_row else None,
+                    policy_citations=citations,
+                )
+                rendered, missing = discipline_templates.render_template(tpl["body"], values)
+                if missing:
+                    logger.warning(
+                        "[huume/discipline_skill] template %s missing fields at execute time: %s",
+                        template_id, missing,
+                    )
+                description = rendered
+
         row = await issue_discipline_with_supersede(
             actor_user_id=actor_user_id,
             company_id=company_id,
@@ -478,14 +527,14 @@ async def _execute_discipline_from_incident(
             severity=action.get("severity") or "moderate",
             discipline_type=action.get("discipline_type") or "verbal_warning",
             issued_date=date.today(),
-            description=action["description"],
+            description=description,
             expected_improvement=action.get("expected_improvement"),
             occurrence_dates=occurrence_dates,
             situation_narrative=action["description"],
             compliance_check=verdict,
             approval_status="pending",
             source_incident_id=incident_id,
-            template_id=UUID(action["template_id"]) if action.get("template_id") else None,
+            template_id=template_id,
         )
 
     name = " ".join(p for p in (employee["first_name"], employee["last_name"]) if p).strip() or "the employee"
@@ -527,10 +576,16 @@ async def _execute_discipline_decision(
                 conn, discipline_id=record_id, company_id=company_id, actor_user_id=actor_user_id,
             )
             notif_action, audience = "discipline_approved", "manager_only"
+        elif decision == "revise":
+            updated = await discipline_engine.deny_record(
+                conn, discipline_id=record_id, company_id=company_id,
+                actor_user_id=actor_user_id, reason=action["reason"], disposition="revise",
+            )
+            notif_action, audience = "discipline_changes_requested", "drafter_only"
         else:
             updated = await discipline_engine.deny_record(
                 conn, discipline_id=record_id, company_id=company_id,
-                actor_user_id=actor_user_id, reason=action["reason"],
+                actor_user_id=actor_user_id, reason=action["reason"], disposition="reject",
             )
             notif_action, audience = "discipline_denied", "hr_only"
 
@@ -541,7 +596,7 @@ async def _execute_discipline_decision(
         from app.matcha.services.discipline import discipline_notifications
         await discipline_notifications.dispatch(record=record, action=notif_action, audience=audience)
 
-    verb = "Approved" if decision == "approve" else "Denied"
+    verb = {"approve": "Approved", "revise": "Sent back for revision", "deny": "Denied"}[decision]
     return {
         "status": "created",
         "message": f"{verb} the discipline record.",

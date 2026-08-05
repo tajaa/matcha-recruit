@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Body
@@ -97,6 +97,22 @@ class DenyRequest(BaseModel):
     # (discipline_engine.py — override_level requires >=20 chars) — NOT
     # RefuseRequest's min_length=1, which is a different, unrelated field.
     reason: str = Field(..., min_length=20)
+    # 'reject' (default) preserves the pre-existing terminal behavior for
+    # every caller that hasn't been updated to send this field. 'revise'
+    # sends the record back editable instead of killing it.
+    disposition: Literal["reject", "revise"] = "reject"
+
+
+class DraftUpdateRequest(BaseModel):
+    """PATCH body for editing a record while approval_status='changes_requested'.
+    Every field optional — a caller sends only what it's changing; at least
+    one must be present (route 400s on an all-None body)."""
+    description: Optional[str] = None
+    expected_improvement: Optional[str] = None
+    discipline_type: Optional[str] = Field(
+        None, pattern="^(verbal_warning|written_warning|pip|final_warning|suspension)$"
+    )
+    severity: Optional[str] = Field(None, pattern="^(minor|moderate|severe|immediate_written)$")
 
 
 class TemplateUpsertRequest(BaseModel):
@@ -263,12 +279,22 @@ async def draft_letter(
     Grounded in the company's own records; hallucinated citations are dropped by
     the shared gate. The draft is a starting point for HR to edit — nothing is
     written to the record until they issue.
+
+    When a company template resolves for the (inferred) infraction type, the
+    response ALSO carries the rendered template body (`template_id`,
+    `template_name`, `rendered_body`, `missing_fields`) alongside the AI
+    `description`/`expected_improvement` — additive only, existing callers
+    reading just those two keys are unaffected. The infraction type used to
+    resolve a template is body.infraction_type if HR supplied one, else the
+    AI's own `suggested_infraction_type` — there's no discipline_type at
+    draft time (that's chosen at issue), so resolution stops at the
+    infraction-only / company-default tiers of `resolve_template`.
     """
     if not company_id:
         raise HTTPException(status_code=403, detail="No company associated with this account")
 
     async with get_connection() as conn:
-        await _load_employee(conn, body.employee_id, company_id)
+        employee = await _load_employee(conn, body.employee_id, company_id)
         draft = await discipline_ai.draft_discipline_letter(
             conn,
             company_id=company_id,
@@ -277,6 +303,32 @@ async def draft_letter(
             infraction_type=body.infraction_type,
             severity=body.severity,
         )
+        if draft.get("available"):
+            infraction_for_template = body.infraction_type or draft.get("suggested_infraction_type")
+            if infraction_for_template:
+                templates = await discipline_templates.list_templates(conn, company_id)
+                tpl = discipline_templates.resolve_template(
+                    templates, infraction_type=infraction_for_template, discipline_type=None,
+                )
+                if tpl:
+                    values = await discipline_templates.build_placeholder_values(
+                        conn, company_id=company_id, employee=employee,
+                        record_fields={
+                            "infraction_type": infraction_for_template,
+                            "discipline_type": None,
+                            "occurrence_dates": [],
+                            "description": draft.get("description"),
+                            "expected_improvement": draft.get("expected_improvement"),
+                            "issued_date": date.today().isoformat(),
+                        },
+                        incident=None,
+                        policy_citations=[],
+                    )
+                    rendered, missing = discipline_templates.render_template(tpl["body"], values)
+                    draft["template_id"] = str(tpl["id"])
+                    draft["template_name"] = tpl["name"]
+                    draft["rendered_body"] = rendered
+                    draft["missing_fields"] = missing
     if not draft.get("available"):
         raise HTTPException(
             status_code=503,
@@ -442,6 +494,19 @@ async def list_pending_approval_records(
     return [_serialize_record(r) for r in records]
 
 
+# Same static-path-before-{discipline_id} ordering requirement as pending-approval above.
+@router.get("/records/changes-requested")
+async def list_changes_requested_records(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        records = await discipline_engine.list_changes_requested(conn, company_id)
+    return [_serialize_record(r) for r in records]
+
+
 @router.post("/records/{discipline_id}/approve")
 async def approve_record(
     discipline_id: UUID,
@@ -478,23 +543,83 @@ async def deny_record(
     current_user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
+    """`disposition='reject'` (default): terminal denial, unchanged behavior.
+    `disposition='revise'`: sends the record back editable — the drafter is
+    notified instead of HR, since HR is the one who just acted."""
     if not company_id:
         raise HTTPException(status_code=403, detail="No company associated with this account")
     async with get_connection() as conn:
         updated = await discipline_engine.deny_record(
             conn, discipline_id=discipline_id, company_id=company_id,
-            actor_user_id=current_user.id, reason=body.reason,
+            actor_user_id=current_user.id, reason=body.reason, disposition=body.disposition,
         )
     if not updated:
         raise HTTPException(status_code=409, detail="Record is not awaiting approval")
 
+    if body.disposition == "revise":
+        notif_action, audience = "discipline_changes_requested", "drafter_only"
+    else:
+        notif_action, audience = "discipline_denied", "hr_only"
     try:
         await discipline_notifications.dispatch(
-            record=updated, action="discipline_denied",
+            record=updated, action=notif_action,
+            audience=audience, skip_user_id=current_user.id,
+        )
+    except Exception:
+        logger.exception("[discipline] notification dispatch failed for %s", notif_action)
+
+    return _serialize_record(updated)
+
+
+@router.patch("/records/{discipline_id}")
+async def update_draft_record(
+    discipline_id: UUID,
+    body: DraftUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Edit a record's content — only while it's `changes_requested` (HR sent
+    it back). Not a general-purpose record editor; every other state's
+    content is either not-yet-decided (draft, direct-issue path uses POST
+    /records) or already decided and part of the legal trail."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    async with get_connection() as conn:
+        updated = await discipline_engine.update_draft_content(
+            conn, discipline_id=discipline_id, company_id=company_id,
+            actor_user_id=current_user.id, fields=fields,
+        )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Record is not awaiting revision")
+    return _serialize_record(updated)
+
+
+@router.post("/records/{discipline_id}/resubmit")
+async def resubmit_record(
+    discipline_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Send a `changes_requested` record back to HR for another decision."""
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
+    async with get_connection() as conn:
+        updated = await discipline_engine.resubmit_for_approval(
+            conn, discipline_id=discipline_id, company_id=company_id, actor_user_id=current_user.id,
+        )
+    if not updated:
+        raise HTTPException(status_code=409, detail="Record is not awaiting revision")
+
+    try:
+        await discipline_notifications.dispatch(
+            record=updated, action="discipline_approval_requested",
             audience="hr_only", skip_user_id=current_user.id,
         )
     except Exception:
-        logger.exception("[discipline] notification dispatch failed for discipline_denied")
+        logger.exception("[discipline] notification dispatch failed for discipline_approval_requested")
 
     return _serialize_record(updated)
 

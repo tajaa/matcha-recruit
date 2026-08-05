@@ -118,8 +118,12 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"omitting confirm_id (or a different one) stages a NEW proposal instead."
             )
         elif action.get("type") == "discipline_decision":
+            decision = action.get("decision")
+            decision_label = {
+                "approve": "approve", "deny": "deny (terminal)", "revise": "send back for revision",
+            }.get(decision, decision)
             lines.append(
-                f"- STAGED ACTION awaiting the admin's confirmation: {action.get('decision')} "
+                f"- STAGED ACTION awaiting the admin's confirmation: {decision_label} "
                 f"discipline record_id={action.get('record_id')}. Calling "
                 f"decide_disciplinary_action again with EXACTLY this record_id and the same "
                 f"decision after the admin confirms applies it; a different record_id stages a "

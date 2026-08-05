@@ -569,12 +569,13 @@ async def transition_status(
     """Idempotent-friendly status flip. Returns updated row or None if no-op.
 
     Single choke point for the approval-bypass guard: no status transition may
-    advance a record whose approval is still 'pending' or was 'denied' — every
-    one of the 6 callsites in routes/employee_lifecycle/discipline.py (create,
-    meeting-held, signature/refuse, upload-physical, both webhook branches)
-    goes through this function, so the guard closes the bypass everywhere at
-    once rather than needing to be repeated at each call site. A legacy
-    ('not_required') or already-'approved' record passes unchanged.
+    advance a record whose approval is still 'pending', was 'denied', or is
+    'changes_requested' — every one of the 6 callsites in
+    routes/employee_lifecycle/discipline.py (create, meeting-held,
+    signature/refuse, upload-physical, both webhook branches) goes through
+    this function, so the guard closes the bypass everywhere at once rather
+    than needing to be repeated at each call site. A legacy ('not_required')
+    or already-'approved' record passes unchanged.
     """
     extra_sql = ""
     extra_values: list[Any] = []
@@ -592,7 +593,7 @@ async def transition_status(
         UPDATE progressive_discipline
         SET status = $2, updated_at = NOW(){extra_sql}
         WHERE id = $1 AND status = ANY($3::text[])
-          AND COALESCE(approval_status, 'not_required') NOT IN ('pending', 'denied')
+          AND COALESCE(approval_status, 'not_required') NOT IN ('pending', 'denied', 'changes_requested')
         RETURNING {RECORD_COLUMNS}
         """,
         discipline_id, to, expected_from, *extra_values,
@@ -727,32 +728,124 @@ async def approve_record(
 
 async def deny_record(
     conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID, reason: str,
+    disposition: str = "reject",
 ) -> Optional[dict[str, Any]]:
-    """Deny a pending discipline record. Terminal — no un-deny path; changing
-    course means issuing a NEW record, so the audit trail shows both the
-    denial and (if it happens) the later separate decision to discipline.
+    """Deny a pending discipline record. `disposition` picks how:
 
-    A direct guarded UPDATE, not transition_status — once denied,
-    transition_status's guard correctly refuses every other transition on
-    this record forever, which is also what a plain `deny_record` re-call
-    would hit (returns None, no double-audit).
+      - 'reject' (default): Terminal — no un-deny path; changing course means
+        issuing a NEW record, so the audit trail shows both the denial and
+        (if it happens) the later separate decision to discipline. A direct
+        guarded UPDATE, not transition_status — once denied,
+        transition_status's guard correctly refuses every other transition
+        on this record forever, which is also what a plain `deny_record`
+        re-call would hit (returns None, no double-audit).
+      - 'revise': approval_status -> 'changes_requested', status stays
+        'draft'. NOT terminal — `update_draft_content` can edit the record
+        while in this state, and `resubmit_for_approval` sends it back to
+        'pending'. `reason` is stored in the same `denial_reason` column
+        (it's "why HR sent it back" either way) and is what the drafter sees
+        on the editable record.
+    """
+    if disposition not in ("reject", "revise"):
+        raise ValueError(f"Invalid disposition: {disposition}")
+    async with conn.transaction():
+        if disposition == "reject":
+            row = await conn.fetchrow(
+                f"""
+                UPDATE progressive_discipline
+                SET approval_status = 'denied', status = 'denied', denial_reason = $4,
+                    approved_by = $3, approval_decided_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
+                RETURNING {RECORD_COLUMNS}
+                """,
+                discipline_id, company_id, actor_user_id, reason,
+            )
+        else:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE progressive_discipline
+                SET approval_status = 'changes_requested', denial_reason = $4,
+                    approved_by = $3, approval_decided_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
+                RETURNING {RECORD_COLUMNS}
+                """,
+                discipline_id, company_id, actor_user_id, reason,
+            )
+        if not row:
+            return None
+        audit_action = "approval_denied" if disposition == "reject" else "approval_changes_requested"
+        await write_audit(
+            conn, discipline_id, actor_user_id, audit_action, details={"reason": reason},
+        )
+        return _row_to_dict(row)
+
+
+async def update_draft_content(
+    conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID, fields: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    """Edit a record's content while it's in 'changes_requested' — the only
+    state a discipline record's substance may be edited in. `fields` is
+    pre-filtered by the caller to the allowed set (description,
+    expected_improvement, discipline_type, severity); this function trusts
+    its keys. Guarded UPDATE: None means the record isn't awaiting revision
+    (or doesn't belong to this company), and the caller 409s.
+    """
+    if not fields:
+        return None
+    parts = []
+    values: list[Any] = []
+    idx = 4
+    for col, val in fields.items():
+        parts.append(f"{col} = ${idx}")
+        values.append(val)
+        idx += 1
+    set_sql = ", ".join(parts)
+
+    async with conn.transaction():
+        row = await conn.fetchrow(
+            f"""
+            UPDATE progressive_discipline
+            SET {set_sql}, updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND approval_status = 'changes_requested'
+            RETURNING {RECORD_COLUMNS}
+            """,
+            discipline_id, company_id, *values,
+        )
+        if not row:
+            return None
+        await write_audit(
+            conn, discipline_id, actor_user_id, "draft_revised",
+            details={"fields": sorted(fields.keys())},
+        )
+        return _row_to_dict(row)
+
+
+async def resubmit_for_approval(
+    conn, *, discipline_id: UUID, company_id: UUID, actor_user_id: UUID,
+) -> Optional[dict[str, Any]]:
+    """Send a 'changes_requested' record back to 'pending' after HR's
+    requested edits. Clears the prior decision stamp (approved_by /
+    approval_decided_at) so the record reads as freshly awaiting a decision,
+    not as already decided-then-reopened; `denial_reason` is left in place
+    until the next decision overwrites it — while the record was being
+    edited it doubled as "what HR asked for", and there's no reason to blank
+    it a moment before approval either. Guarded UPDATE: None means the
+    record isn't in 'changes_requested' (or doesn't belong to this company).
     """
     async with conn.transaction():
         row = await conn.fetchrow(
             f"""
             UPDATE progressive_discipline
-            SET approval_status = 'denied', status = 'denied', denial_reason = $4,
-                approved_by = $3, approval_decided_at = NOW(), updated_at = NOW()
-            WHERE id = $1 AND company_id = $2 AND approval_status = 'pending'
+            SET approval_status = 'pending', approval_requested_at = NOW(),
+                approved_by = NULL, approval_decided_at = NULL, updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 AND approval_status = 'changes_requested'
             RETURNING {RECORD_COLUMNS}
             """,
-            discipline_id, company_id, actor_user_id, reason,
+            discipline_id, company_id,
         )
         if not row:
             return None
-        await write_audit(
-            conn, discipline_id, actor_user_id, "approval_denied", details={"reason": reason},
-        )
+        await write_audit(conn, discipline_id, actor_user_id, "approval_resubmitted")
         return _row_to_dict(row)
 
 
@@ -763,6 +856,19 @@ async def list_pending_approval(conn, company_id: UUID) -> list[dict[str, Any]]:
         FROM progressive_discipline
         WHERE company_id = $1 AND approval_status = 'pending'
         ORDER BY approval_requested_at ASC, created_at ASC
+        """,
+        company_id,
+    )
+    return [_row_to_dict(r) for r in rows]
+
+
+async def list_changes_requested(conn, company_id: UUID) -> list[dict[str, Any]]:
+    rows = await conn.fetch(
+        f"""
+        SELECT {RECORD_COLUMNS}
+        FROM progressive_discipline
+        WHERE company_id = $1 AND approval_status = 'changes_requested'
+        ORDER BY approval_decided_at ASC, created_at ASC
         """,
         company_id,
     )

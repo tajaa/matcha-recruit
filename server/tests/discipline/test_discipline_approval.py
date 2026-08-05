@@ -173,7 +173,7 @@ class TestTransitionStatusApprovalGuard:
             conn, NEW_ID, expected_from=["draft", "pending_meeting"], to="pending_signature",
         )
 
-        assert "COALESCE(approval_status, 'not_required') NOT IN ('pending', 'denied')" in captured["query"]
+        assert "COALESCE(approval_status, 'not_required') NOT IN ('pending', 'denied', 'changes_requested')" in captured["query"]
         assert result is None
 
 
@@ -347,6 +347,105 @@ class TestApproveDenyRecord:
         assert not [c for c in conn.execute.await_args_list if "advisory_ack_reason" in c.args[0]]
 
 
+class TestDenyDispositionRevise:
+    @pytest.mark.asyncio
+    async def test_invalid_disposition_raises(self):
+        conn = MagicMock()
+        with pytest.raises(ValueError):
+            await discipline_engine.deny_record(
+                conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+                reason="a" * 25, disposition="bogus",
+            )
+
+    @pytest.mark.asyncio
+    async def test_revise_sets_changes_requested_not_denied(self, monkeypatch):
+        conn = MagicMock()
+        captured = {}
+
+        async def fetchrow(query, *args):
+            captured["query"] = query
+            row = {c.strip(): None for c in discipline_engine.RECORD_COLUMNS.split(",")}
+            row.update({
+                "id": NEW_ID, "company_id": COMPANY_ID, "employee_id": EMPLOYEE_ID,
+                "approval_status": "changes_requested", "status": "draft", "denial_reason": args[-1],
+                "occurrence_dates": [], "compliance_check": None,
+            })
+            return row
+
+        conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.execute = AsyncMock(return_value=None)
+        conn.transaction = MagicMock(return_value=_noop_transaction())
+
+        result = await discipline_engine.deny_record(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            reason="the discipline level needs to match policy" * 1, disposition="revise",
+        )
+
+        assert result["approval_status"] == "changes_requested"
+        assert result["status"] == "draft"  # NOT 'denied' — status column untouched on revise
+        assert "approval_status = 'changes_requested'" in captured["query"]
+        assert "status = 'denied'" not in captured["query"]
+
+
+class TestUpdateDraftAndResubmit:
+    @pytest.mark.asyncio
+    async def test_update_draft_content_guards_on_changes_requested(self, monkeypatch):
+        conn = MagicMock()
+        captured = {}
+
+        async def fetchrow(query, *args):
+            captured["query"] = query
+            captured["args"] = args
+            return None  # not in changes_requested / wrong tenant
+
+        conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.transaction = MagicMock(return_value=_noop_transaction())
+
+        result = await discipline_engine.update_draft_content(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+            fields={"description": "revised text"},
+        )
+        assert result is None
+        assert "approval_status = 'changes_requested'" in captured["query"]
+        assert "description = $4" in captured["query"]
+
+    @pytest.mark.asyncio
+    async def test_update_draft_content_empty_fields_short_circuits(self):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock()
+        result = await discipline_engine.update_draft_content(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID, fields={},
+        )
+        assert result is None
+        conn.fetchrow.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resubmit_clears_prior_decision_stamp(self, monkeypatch):
+        conn = MagicMock()
+        captured = {}
+
+        async def fetchrow(query, *args):
+            captured["query"] = query
+            row = {c.strip(): None for c in discipline_engine.RECORD_COLUMNS.split(",")}
+            row.update({
+                "id": NEW_ID, "company_id": COMPANY_ID, "employee_id": EMPLOYEE_ID,
+                "approval_status": "pending", "status": "draft", "approved_by": None,
+                "occurrence_dates": [], "compliance_check": None,
+            })
+            return row
+
+        conn.fetchrow = AsyncMock(side_effect=fetchrow)
+        conn.execute = AsyncMock(return_value=None)
+        conn.transaction = MagicMock(return_value=_noop_transaction())
+
+        result = await discipline_engine.resubmit_for_approval(
+            conn, discipline_id=NEW_ID, company_id=COMPANY_ID, actor_user_id=ACTOR_ID,
+        )
+        assert result["approval_status"] == "pending"
+        assert "approved_by = NULL" in captured["query"]
+        assert "approval_status = 'changes_requested'" in captured["query"]
+
+
 class TestListRecordsApprovalFilter:
     @pytest.mark.asyncio
     async def test_approval_filter_adds_where_clause(self, monkeypatch):
@@ -379,3 +478,13 @@ class TestRoutePendingApprovalDeclaredFirst:
         pending_idx = paths.index("/records/pending-approval")
         id_idx = paths.index("/records/{discipline_id}")
         assert pending_idx < id_idx
+
+    def test_changes_requested_declared_before_id_route(self):
+        """Same trap as pending-approval above — GET /records/changes-requested
+        MUST be declared before GET /records/{discipline_id}."""
+        from app.matcha.routes.employee_lifecycle.discipline import router
+
+        paths = [r.path for r in router.routes if getattr(r, "path", None) and r.path.startswith("/records")]
+        changes_idx = paths.index("/records/changes-requested")
+        id_idx = paths.index("/records/{discipline_id}")
+        assert changes_idx < id_idx

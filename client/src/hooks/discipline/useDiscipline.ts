@@ -12,6 +12,7 @@ import {
   type DisciplineTemplate,
   type DisciplineTemplateUpsertInput,
   type DisciplineApprover,
+  type DenyDisposition,
 } from '../../api/discipline/discipline'
 
 export function useDisciplineList(
@@ -127,9 +128,28 @@ export function useDisciplineRecord(recordId: string | undefined) {
     return updated
   }, [recordId, refetch])
 
-  const deny = useCallback(async (reason: string) => {
+  const deny = useCallback(async (reason: string, disposition: DenyDisposition = 'reject') => {
     if (!recordId) return
-    const updated = await disciplineApi.deny(recordId, reason)
+    const updated = await disciplineApi.deny(recordId, reason, disposition)
+    setRecord(updated)
+    await refetch()
+    return updated
+  }, [recordId, refetch])
+
+  /** Throws ApiError 409 if the record isn't awaiting revision
+   *  (approval_status !== 'changes_requested'). */
+  const updateDraft = useCallback(async (fields: Parameters<typeof disciplineApi.updateDraft>[1]) => {
+    if (!recordId) return
+    const updated = await disciplineApi.updateDraft(recordId, fields)
+    setRecord(updated)
+    await refetch()
+    return updated
+  }, [recordId, refetch])
+
+  /** Throws ApiError 409 if the record isn't awaiting revision. */
+  const resubmit = useCallback(async () => {
+    if (!recordId) return
+    const updated = await disciplineApi.resubmit(recordId)
     setRecord(updated)
     await refetch()
     return updated
@@ -148,6 +168,8 @@ export function useDisciplineRecord(recordId: string | undefined) {
     downloadLetter,
     approve,
     deny,
+    updateDraft,
+    resubmit,
   }
 }
 

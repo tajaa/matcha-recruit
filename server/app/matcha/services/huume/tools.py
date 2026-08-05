@@ -381,16 +381,21 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "decide_disciplinary_action", "staged",
-        "Approve or deny a discipline record that is pending HR approval. "
-        "This STAGES the decision for the admin's confirmation; nothing "
-        "changes until they confirm on a LATER turn. Denial REQUIRES a "
-        "written reason (at least 20 characters) — it becomes part of the "
-        "legal record. Call list_pending_approvals first if you don't "
-        "already have the record_id.",
+        "Approve, deny, or send back for revision a discipline record that is "
+        "pending HR approval. This STAGES the decision for the admin's "
+        "confirmation; nothing changes until they confirm on a LATER turn. "
+        "'deny' is TERMINAL — the record is dead, a new one would need to be "
+        "drafted from scratch. 'revise' sends it back to whoever drafted it "
+        "so they can fix it and resubmit — use this when the substance is "
+        "right but something needs to change, not when the whole thing "
+        "should be dropped. Both 'deny' and 'revise' REQUIRE a written "
+        "reason (at least 20 characters) — it becomes part of the legal "
+        "record. Call list_pending_approvals first if you don't already "
+        "have the record_id.",
         properties={
             "record_id": types.Schema(type=types.Type.STRING),
-            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny"]),
-            "reason": types.Schema(type=types.Type.STRING, description="Required when decision='deny' — at least 20 characters."),
+            "decision": types.Schema(type=types.Type.STRING, enum=["approve", "deny", "revise"]),
+            "reason": types.Schema(type=types.Type.STRING, description="Required when decision='deny' or 'revise' — at least 20 characters."),
         },
         required=["record_id", "decision"],
     ),

@@ -88,6 +88,12 @@ export default function IssueDisciplineModal({
 
   const [drafting, setDrafting] = useState(false)
   const [draftConcerns, setDraftConcerns] = useState<string[]>([])
+  const [draftTemplate, setDraftTemplate] = useState<{
+    id: string
+    name: string
+    renderedBody: string
+    missingFields: string[]
+  } | null>(null)
   const [verdict, setVerdict] = useState<ComplianceVerdict | null>(null)
   const [verdictLoading, setVerdictLoading] = useState(false)
   const [ackReason, setAckReason] = useState('')
@@ -191,6 +197,16 @@ export default function IssueDisciplineModal({
       setDescription(draft.description)
       setExpectedImprovement(draft.expected_improvement)
       setDraftConcerns(draft.concerns)
+      setDraftTemplate(
+        draft.template_id && draft.rendered_body
+          ? {
+              id: draft.template_id,
+              name: draft.template_name || 'Company template',
+              renderedBody: draft.rendered_body,
+              missingFields: draft.missing_fields || [],
+            }
+          : null,
+      )
       // Only adopt the AI's classification if HR hasn't chosen one — never
       // overwrite a human's explicit call.
       if (!infractionType && draft.suggested_infraction_type) {
@@ -353,6 +369,31 @@ export default function IssueDisciplineModal({
             <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-amber-300/90">
               {draftConcerns.map((c, i) => <li key={i}>{c}</li>)}
             </ul>
+          )}
+          {draftTemplate && (
+            <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/60 p-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-zinc-400">
+                  Company template available: <span className="text-zinc-200">{draftTemplate.name}</span>
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setDescription(draftTemplate.renderedBody)
+                    setDraftTemplate(null)
+                  }}
+                >
+                  Use company template
+                </Button>
+              </div>
+              {draftTemplate.missingFields.length > 0 && (
+                <p className="mt-1.5 text-xs text-amber-300/90">
+                  Missing: {draftTemplate.missingFields.join(', ')} — the template renders those
+                  clauses blank until filled in.
+                </p>
+              )}
+            </div>
           )}
         </div>
 
