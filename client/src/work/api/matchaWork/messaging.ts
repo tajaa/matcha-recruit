@@ -1,8 +1,19 @@
 import { api } from '../../../api/client'
 import { postSSE, SSEHttpError } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
-import type { MWStreamEvent } from '../../types'
+import type { MWStreamEvent, MWThreadAttachment } from '../../types'
 import { uploadFilesStream, type UploadStreamCallbacks } from './_base'
+
+// ── Generic thread-file attach (no analysis — plain attachment until sent) ──
+
+export async function uploadThreadFiles(threadId: string, files: File[]) {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  return api.upload<{ attachments: MWThreadAttachment[] }>(
+    `/matcha-work/threads/${threadId}/files`,
+    form,
+  )
+}
 
 // ── Resume upload ──
 
@@ -30,7 +41,7 @@ export function sendMessageStream(
   threadId: string,
   content: string,
   callbacks: UploadStreamCallbacks,
-  options?: { slide_index?: number; model?: string },
+  options?: { slide_index?: number; model?: string; attachments?: MWThreadAttachment[] },
 ): AbortController {
   const endpoint = `/matcha-work/threads/${threadId}/messages/stream`
   const ctrl = new AbortController()

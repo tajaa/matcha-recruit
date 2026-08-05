@@ -86,7 +86,7 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UU
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
-        task_type=_infer_skill_from_state(thread["current_state"]),
+        task_type=_infer_skill_from_state(thread["current_state"], huume_mode=thread.get("huume_mode", False)),
         is_pinned=thread.get("is_pinned", False),
         # Registry-driven so a new mode can't be silently dropped here (the
         # pre-registry version of this serializer lost payer_mode).

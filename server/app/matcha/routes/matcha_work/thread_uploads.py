@@ -178,6 +178,16 @@ async def upload_thread_resume(
     if thread["status"] in ("finalized", "archived"):
         raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
 
+    # A Huume thread never auto-classifies an upload as a resume batch — the
+    # state this route writes (candidates/batch_status) latches skill inference
+    # into resume_batch with no exit path. Current clients route Huume-thread
+    # files to POST /threads/{id}/files; this rejects stale ones.
+    if thread.get("huume_mode"):
+        raise HTTPException(
+            status_code=400,
+            detail="This thread is in Huume mode — attach the file to a chat message instead.",
+        )
+
     if current_user.role != "admin":
         await token_budget_service.check_token_budget(company_id)
 

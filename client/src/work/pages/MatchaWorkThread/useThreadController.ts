@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep } from '../../types'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged, notifyUsageChanged } from '../../api/matchaWork'
+import type { MWMessage, MWModeKey, MWThreadDetail, MWSendResponse, MWStreamEvent, HuumeStep, MWThreadAttachment } from '../../types'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, uploadThreadFiles, updateTitle, getPdfProxyUrl, setThreadMode, fetchUsageSummary, fetchUsageSummary24h, notifyThreadsChanged, notifyUsageChanged } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../../api/compliance'
 import type { BusinessLocation } from '../../../types/compliance'
 import { useMe } from '../../../hooks/useMe'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
-import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS } from './constants'
+import { RESUME_EXTENSIONS, RESUME_MAX_SIZE, INVENTORY_EXTENSIONS, THREAD_FILE_EXTENSIONS } from './constants'
 import { useThreadCollaboration } from './useThreadCollaboration'
 import { useOptimisticMessages, makeTempId } from '../../hooks/useOptimisticMessages'
 import { useToast } from '../../../components/ui'
@@ -62,6 +62,11 @@ export function useThreadController() {
   // Resume drag-and-drop
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Pending generic attachments (Huume threads) — uploaded to S3 immediately,
+  // referenced by the next send. Cleared on send; files stay in S3 either way.
+  const [pendingAttachments, setPendingAttachments] = useState<MWThreadAttachment[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
 
   // Refetch current_state/version only — merge, don't replace: keeps local
   // title edits and never touches `messages` (a WS push already appended the
@@ -151,6 +156,7 @@ export function useThreadController() {
     // (user-initiated), so nothing else resets `streaming` — without this the
     // new thread mounts with a disabled composer and a permanent "Thinking…".
     setStreaming(false)
+    setPendingAttachments([])
     getThread(threadId)
       .then((data) => {
         setThread(data)
@@ -179,7 +185,7 @@ export function useThreadController() {
 
   function handleSend(overrideContent?: string, slideIndex?: number) {
     const content = (overrideContent ?? input).trim()
-    if (!threadId || !content || streaming || togglingMode) return
+    if (!threadId || (!content && pendingAttachments.length === 0) || streaming || togglingMode) return
 
     setInput('')
     setMentionQuery(null)
@@ -192,7 +198,7 @@ export function useThreadController() {
       thread_id: threadId,
       role: 'user',
       content,
-      metadata: null,
+      metadata: pendingAttachments.length ? { attachments: pendingAttachments } : null,
       version_created: null,
       created_at: new Date().toISOString(),
     }
@@ -201,6 +207,8 @@ export function useThreadController() {
     const streamOpts: Record<string, unknown> = {}
     if (slideIndex != null) streamOpts.slide_index = slideIndex
     if (selectedModel) streamOpts.model = selectedModel
+    if (pendingAttachments.length) streamOpts.attachments = pendingAttachments
+    setPendingAttachments([])
 
     setPendingHuumeSteps([])
     abortRef.current = sendMessageStream(threadId, content, {
@@ -322,6 +330,35 @@ export function useThreadController() {
     })
   }
 
+  async function handleAttachmentUpload(files: File[]) {
+    if (!threadId || streaming) return
+    for (const file of files) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+      if (!THREAD_FILE_EXTENSIONS.includes(ext)) {
+        setError(`Unsupported file type: ${file.name}. Please upload PDF, DOCX, TXT, MD, or JSON files.`)
+        return
+      }
+      if (file.size > RESUME_MAX_SIZE) {
+        setError(`File exceeds 10 MB limit: ${file.name}`)
+        return
+      }
+    }
+    setUploadingFiles(true)
+    setError('')
+    try {
+      const res = await uploadThreadFiles(threadId, files)
+      setPendingAttachments((prev) => [...prev, ...res.attachments.map((a) => ({ ...a, kind: 'file' as const }))])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setUploadingFiles(false)
+    }
+  }
+
+  function removePendingAttachment(url: string) {
+    setPendingAttachments((prev) => prev.filter((a) => a.url !== url))
+  }
+
   function handleInventoryUpload(files: File[]) {
     if (!threadId || streaming) return
 
@@ -381,6 +418,11 @@ export function useThreadController() {
 
     if (isInventoryThread || hasSpreadsheets) {
       handleInventoryUpload(fileList)
+    } else if (modeValue('huume')) {
+      // A file in a Huume thread is a plain attachment — its purpose comes from
+      // the user's message, never from auto-classification (the resume route
+      // latched non-resume PDFs into resume_batch state with no exit path).
+      void handleAttachmentUpload(fileList)
     } else {
       handleResumeUpload(fileList)
     }
@@ -551,6 +593,7 @@ export function useThreadController() {
     usageTotal, usage24h,
     isDragOver, setIsDragOver,
     fileInputRef,
+    pendingAttachments, removePendingAttachment, uploadingFiles, handleAttachmentUpload,
     onlineUsers, typingUsers, threadSocketRef, lastTypingSentRef,
     togglingMode, modeValue, complianceMode,
     locations, locationsUnavailable,

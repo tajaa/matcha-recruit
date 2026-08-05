@@ -117,6 +117,16 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
               : 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
+        {m.role === 'user' && (m.metadata?.attachments?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {m.metadata!.attachments!.filter((a) => a.kind !== 'image').map((a) => (
+              <span key={a.url} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-xs ${lm ? 'bg-zinc-100 border-zinc-300 text-zinc-600' : 'bg-w-surface2 border-w-line text-w-dim'}`}>
+                <FileText size={11} className="shrink-0" />
+                <span className="max-w-[180px] truncate">{a.filename}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {m.role === 'user' && (m.content.startsWith('[Resume uploaded:') || m.content.startsWith('[Resume batch:') || m.content.startsWith('[Inventory batch:')) ? (
           (() => {
             if (m.content.startsWith('[Inventory batch:')) {

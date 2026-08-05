@@ -680,7 +680,7 @@ async def _run_hard_stop_gates(tc: TurnContext):
             assistant_message=_row_to_message(assistant_msg),
             current_state=thread["current_state"],
             version=thread["version"],
-            task_type=_infer_skill_from_state(thread["current_state"]),
+            task_type=_infer_skill_from_state(thread["current_state"], huume_mode=thread.get("huume_mode", False)),
             pdf_url=None,
             token_usage=None,
         )
@@ -838,7 +838,7 @@ async def _run_hard_stop_gates(tc: TurnContext):
                     assistant_message=_row_to_message(assistant_msg),
                     current_state=stage_state,
                     version=stage_version,
-                    task_type=_infer_skill_from_state(stage_state),
+                    task_type=_infer_skill_from_state(stage_state, huume_mode=tc.thread.get("huume_mode", False)),
                     pdf_url=None,
                     token_usage=None,
                 )
@@ -1032,7 +1032,7 @@ async def _run_huume_dispatch(tc: TurnContext):
         assistant_message=_row_to_message(assistant_msg),
         current_state=tc.current_state,
         version=tc.current_version,
-        task_type=_infer_skill_from_state(tc.current_state),
+        task_type=_infer_skill_from_state(tc.current_state, huume_mode=True),
         pdf_url=None,
         token_usage=tc.final_usage,
     )

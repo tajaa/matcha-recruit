@@ -215,7 +215,7 @@ async def create_thread(
         status=thread["status"],
         current_state=thread["current_state"],
         version=thread["version"],
-        task_type=_infer_skill_from_state(thread["current_state"]),
+        task_type=_infer_skill_from_state(thread["current_state"], huume_mode=thread.get("huume_mode", False)),
         is_pinned=thread.get("is_pinned", False),
         # Registry-driven so a new mode can't be silently dropped here.
         **{m.column: thread.get(m.column, False) for m in THREAD_MODES},

@@ -5,6 +5,10 @@ export const RESUME_MAX_SIZE = 10 * 1024 * 1024
 export const INVENTORY_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 // INVENTORY_EXTENSIONS is used in handleFileUpload for routing detection
 
+// Generic thread-file attach (Huume threads) — mirrors server THREAD_FILE_EXTENSIONS
+// minus .csv, which handleFileUpload routes to inventory before this path is reached.
+export const THREAD_FILE_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.md', '.json']
+
 // Skills available in the chat — requiresCompany gates visibility for individual users
 export const HR_SKILLS = [
   { id: 'chat', icon: MessageSquare, label: 'HR Chat', desc: 'Ask any HR question', prompt: '', requiresCompany: false },

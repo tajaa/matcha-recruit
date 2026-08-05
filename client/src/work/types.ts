@@ -470,7 +470,17 @@ export interface HrPilotCitation {
   jurisdiction?: string
 }
 
+export interface MWThreadAttachment {
+  url: string
+  filename: string
+  content_type?: string | null
+  size?: number | null
+  kind?: 'file' | 'image'
+}
+
 export interface MWMessageMetadata {
+  /** Non-image files attached to this (user) message via POST /threads/{id}/files. */
+  attachments?: MWThreadAttachment[]
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
   referenced_categories?: string[]

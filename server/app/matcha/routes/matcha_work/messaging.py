@@ -213,7 +213,7 @@ async def send_message_stream(
                 assistant_message=_row_to_message(tc.assistant_msg),
                 current_state=tc.current_state,
                 version=tc.current_version,
-                task_type=_infer_skill_from_state(tc.current_state),
+                task_type=_infer_skill_from_state(tc.current_state, huume_mode=tc.thread.get("huume_mode", False)),
                 pdf_url=tc.pdf_url,
                 token_usage=tc.final_usage,
             )

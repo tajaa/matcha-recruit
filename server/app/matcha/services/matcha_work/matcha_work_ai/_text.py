@@ -120,8 +120,24 @@ def _extract_reply_field(raw_text: str) -> Optional[str]:
         return value
 
 
-def _infer_skill_from_state(current_state: dict) -> str:
-    """Infer the active skill from current_state contents."""
+# State keys written only by the thread resume-batch route
+# (routes/matcha_work/thread_uploads.py:upload_thread_resume). Filtered as a
+# set: `candidates` alone maps to resume_batch, but the leftover
+# `batch_status` would then match the onboarding branch below.
+_RESUME_BATCH_KEYS = frozenset({"candidates", "batch_status", "total_count", "analyzed_count"})
+
+
+def _infer_skill_from_state(current_state: dict, *, huume_mode: bool = False) -> str:
+    """Infer the active skill from current_state contents.
+
+    huume_mode: a Huume thread poisoned with resume-batch state (uploaded PDFs
+    auto-classified before the huume_mode guard existed) must not surface as
+    resume_batch/onboarding — the panel and prompt injection re-latch the model.
+    Non-destructive: the keys stay in state, so toggling Huume off restores the
+    recruiting view.
+    """
+    if huume_mode and current_state:
+        current_state = {k: v for k, v in current_state.items() if k not in _RESUME_BATCH_KEYS}
     if not current_state:
         return "chat"
     if "hr_action" in current_state:

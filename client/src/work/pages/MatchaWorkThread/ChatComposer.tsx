@@ -16,6 +16,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
     error, setError, fileInputRef, handleFileUpload, lightMode, input,
     threadId, threadSocketRef, lastTypingSentRef, handleKeyDown, handleInputChange, textareaRef, streaming, handleSend,
     mentionQuery, mentionMatches, applyHuumeMention, thread, modeValue, handleModeToggle, togglingMode,
+    pendingAttachments, removePendingAttachment, uploadingFiles,
   } = c
 
   const huumeOn = modeValue('huume')
@@ -62,6 +63,24 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                 </div>
               </div>
             )}
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingAttachments.map((a) => (
+                  <span key={a.url} className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full border text-xs bg-w-surface2 border-w-line text-w-text">
+                    <Paperclip size={11} className="shrink-0 text-w-dim" />
+                    <span className="max-w-[180px] truncate">{a.filename}</span>
+                    <button
+                      type="button"
+                      onClick={() => removePendingAttachment(a.url)}
+                      title="Remove attachment"
+                      className="p-0.5 rounded-full text-w-dim hover:text-w-text hover:bg-w-surface"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2">
               <input
                 ref={fileInputRef}
@@ -77,11 +96,11 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={inputDisabled}
+                disabled={inputDisabled || uploadingFiles}
                 title="Upload files (resumes, invoices, spreadsheets)"
                 className="p-3 rounded-lg transition-colors disabled:opacity-40 text-w-dim hover:text-w-text hover:bg-w-surface2"
               >
-                <Paperclip size={16} />
+                {uploadingFiles ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
               </button>
               <div className="flex-1 relative">
                 {mentionQuery !== null && mentionMatches.length > 0 && (
@@ -127,7 +146,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
               </div>
               <button
                 onClick={() => handleSend()}
-                disabled={inputDisabled || !input.trim() || togglingHuume}
+                disabled={inputDisabled || (!input.trim() && pendingAttachments.length === 0) || togglingHuume}
                 className="p-3 bg-w-accent hover:bg-w-accent-hi text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-w-accent"
               >
                 {streaming ? (
