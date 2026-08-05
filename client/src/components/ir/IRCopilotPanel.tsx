@@ -18,7 +18,6 @@ export default function IRCopilotPanel(props: Props) {
     currentCards,
     openQuestions,
     progress,
-    evidence,
     loading,
     streaming,
     showStartGate,
@@ -62,7 +61,6 @@ export default function IRCopilotPanel(props: Props) {
         closingIncident={closingIncident}
         emergencyAlertActive={emergencyAlertActive}
         progress={progress}
-        evidence={evidence}
         onRequestInfo={() => setRequestInfoOpen(true)}
         onCloseIncident={() => { void handleCloseIncident() }}
       />

@@ -4,7 +4,7 @@ import { api, authStreamHeaders, API_BASE } from '../../../api/client'
 import { consumeSSE } from '../../../api/sse'
 import { reportApiError } from '../../../api/errorReporter'
 import { useIRInfoRequests } from '../../../hooks/ir/useIRInfoRequests'
-import { type CopilotMessage, type CopilotProgress, type CopilotEvidence, type Transcript, type Props } from './types'
+import { type CopilotMessage, type CopilotProgress, type Transcript, type Props } from './types'
 
 export function useCopilotPanel({
   incidentId, incidentStatus, reportedByName, reportedByEmail, onIncidentChanged, onOpenDocuments,
@@ -13,7 +13,6 @@ export function useCopilotPanel({
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
   const [progress, setProgress] = useState<CopilotProgress | null>(null)
-  const [evidence, setEvidence] = useState<CopilotEvidence | null>(null)
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
@@ -49,7 +48,6 @@ export function useCopilotPanel({
       setCurrentCards(t.current_cards)
       setOpenQuestions(t.open_questions)
       setProgress(t.progress ?? null)
-      setEvidence(t.evidence ?? null)
       setLoadFailed(false)
     } catch (e) {
       if (id !== reqId.current) return
@@ -76,7 +74,6 @@ export function useCopilotPanel({
     setCurrentCards([])
     setOpenQuestions([])
     setProgress(null)
-    setEvidence(null)
     setError(null)
     setLoadFailed(false)
     setBusyCardMessageId(null)
@@ -409,7 +406,6 @@ export function useCopilotPanel({
     currentCards,
     openQuestions,
     progress,
-    evidence,
     loading,
     streaming,
     showStartGate,
