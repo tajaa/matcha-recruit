@@ -794,7 +794,8 @@ async def update_draft_content(
         return None
     parts = []
     values: list[Any] = []
-    idx = 4
+    # $1/$2 are the WHERE clause's discipline_id/company_id — SET params start at $3.
+    idx = 3
     for col, val in fields.items():
         parts.append(f"{col} = ${idx}")
         values.append(val)

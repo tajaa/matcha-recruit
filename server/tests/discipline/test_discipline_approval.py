@@ -407,7 +407,7 @@ class TestUpdateDraftAndResubmit:
         )
         assert result is None
         assert "approval_status = 'changes_requested'" in captured["query"]
-        assert "description = $4" in captured["query"]
+        assert "description = $3" in captured["query"]
 
     @pytest.mark.asyncio
     async def test_update_draft_content_empty_fields_short_circuits(self):
