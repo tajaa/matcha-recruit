@@ -8,14 +8,19 @@
   (JSONB; read only for display — nothing filters/joins on it).
 - cappe_orders.carrier / tracking_number: fulfillment tracking, owner-edited.
 
-Revision ID: zzzzcappe28
-Revises: zzzzcappe27
+Revision ID: zzzzcappe29
+Revises: zzzzcappe28
 Create Date: 2026-08-03
+
+Was authored as `zzzzcappe28`, colliding with zzzzcappe28_creator_marketplace
+(which landed first and won the id). Alembic warned "present more than once"
+and silently dropped this one, so its DDL never ran on any database while
+alembic_version read as up to date. Renumbered to 29 on 2026-08-05.
 """
 from alembic import op
 
-revision = "zzzzcappe28"
-down_revision = "zzzzcappe27"
+revision = "zzzzcappe29"
+down_revision = "zzzzcappe28"
 branch_labels = None
 depends_on = None
 
