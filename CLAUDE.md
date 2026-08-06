@@ -337,6 +337,8 @@ Gitlink footgun (a mode-160000 clone-in-tree breaks `actions/checkout`'s credent
 
 Two deploy-slowness regressions fixed 2026-07-19 — don't reintroduce: (1) never `docker image prune -a` before the pull (pruning belongs after the swap; the pre-pull prune survives only as a `<4GB`-free-disk safety valve); (2) the pre-deploy RDS backup is fire-and-forget and must stay non-fatal to the deploy (the old `~/backup-postgres.sh` cron had been silently broken since the RDS cutover, targeting a container that no longer exists). Full mechanics + history: `docs/ops/DEPLOY.md`
 
+**Changelog auto-generation**: a normal (non-hotfix, non-CI, `--matcha`) laptop deploy also runs `server/scripts/generate_changelog.py` right before the tenant sync (`update-ec2.sh:379`) — it shells out to `gh pr list`, asks Gemini for one entry per merged PR per product, and writes new rows into dev's `admin_updates` / `tellus_admin_updates` (never prod directly; the sync step that follows pushes them). Needs `server/.env`'s `GEMINI_API_KEY`/Gemini settings and a `gh` session; failure only `log_warn`s, never blocks the deploy. See `AUTO_CHANGELOG_PLAN.md` for the full design.
+
 ## Logs + error tracking
 
 **`./scripts/logs.sh backend|worker|frontend|nginx|nginx-err|errors`** tails prod (resolves the blue-green `8002`/`8003` suffix for you — don't hardcode it). But the **durable** error record is Postgres, not the container logs: `server_error_reports` (Admin → Server Errors) with fingerprint dedup + occurrence counts, and `client_error_reports` for browser-side errors. Every request carries a correlation ID — `X-Request-ID` header, `[rid=…]` on each backend log line, `context.request_id` on the error row, and a `Reference:` line on the user's crash screen.

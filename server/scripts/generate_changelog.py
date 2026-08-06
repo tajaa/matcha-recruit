@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import load_settings  # noqa: E402
 from app.database import init_pool, close_pool, get_connection  # noqa: E402
-from app.core.services.model_catalog import GEMINI_FLASH_LITE  # noqa: E402
+from app.core.services.model_catalog import GEMINI_FLASH  # noqa: E402
 from app.matcha.services._shared.gemini import genai_env_client  # noqa: E402
 from google.genai import types  # noqa: E402
 
@@ -123,19 +123,44 @@ def entry_id(pr_number: int, title: str) -> str:
     return f"pr-{pr_number}-{slugify(title)}"
 
 
+SKIP_EXAMPLE = {"skip": True, "reason": "Pure internal refactor — no route, page, flag, or table changed."}
+
+FIX_EXAMPLE = {
+    "title": "Fix EMS pill markdown and promoted-incident date drift",
+    "category": "Ops",
+    "summary": "Two bug fixes: @huume event pills were rendering raw markdown "
+                "asterisks instead of bold text, and promoting a channel event "
+                "into an IR incident could carry over the wrong date.",
+    "whatsNew": [
+        "Fixed: event pills in channel chat now render bold category labels correctly.",
+        "Fixed: promoting an event to an incident now uses the event's own date, not today's.",
+    ],
+    "howToUse": [],
+    "setup": None,
+    "notes": None,
+    "tag": None,
+}
+
+_BODY_MAX_CHARS = 4000
+_FILES_MAX = 120
+
+
 def build_prompt(pr: PrInfo, product: str) -> str:
     categories = MATCHA_CATEGORIES if product == "matcha" else TELLUS_CATEGORIES
     scope_note = (
         f"If this PR's changed files span more than one product, describe ONLY "
         f"the {product} changes below — ignore any other product's files entirely."
     )
-    files_list = "\n".join(f"- {p}" for p in pr.files[:60])
+    body = pr.body or "(no description)"
+    if len(body) > _BODY_MAX_CHARS:
+        body = body[:_BODY_MAX_CHARS] + "\n... (truncated)"
+    files_list = "\n".join(f"- {p}" for p in pr.files[:_FILES_MAX])
     return f"""You write internal changelog entries for a product team.
 
 PR #{pr.number}: {pr.title}
 
 PR description:
-{pr.body or "(no description)"}
+{body}
 
 Changed files:
 {files_list}
@@ -145,6 +170,9 @@ Changed files:
 Write ONE changelog entry as a JSON object with this exact shape:
 {json.dumps(SAMPLE_ENTRY, indent=2)}
 
+A pure bug fix (no new surface, nothing to set up) looks like this instead:
+{json.dumps(FIX_EXAMPLE, indent=2)}
+
 Rules:
 - category: pick the single closest match from this vocabulary: {", ".join(categories)}. If nothing fits, use "{categories[-1]}".
 - tag: "action-needed" ONLY if a migration must be applied or an env var must be set for this to work; "new" for a genuinely new user-facing feature; null for a fix/refactor with no setup step.
@@ -152,7 +180,14 @@ Rules:
 - howToUse: omit or use [] if there's no new surface to navigate to (e.g. a pure bug fix).
 - setup: omit or null unless a migration or env var must be applied — if so, name it.
 - notes: omit or null unless there's important context (omit if nothing to add).
-- If this PR has NO user-visible change for {product} (pure refactor, docs, CI, internal tooling), respond with EXACTLY: {{"skip": true}}
+- A PR that adds or changes an endpoint, a screen, a flag, a DB table, or user-visible behavior is
+  NEVER a skip — even if the PR title says "refactor" or "fix", write an entry for the
+  {product}-visible part of it. A fix to an existing feature is a normal entry with a "Fixed: "
+  bullet, not a skip.
+- Skip ONLY when {product} has truly nothing a user or admin would notice: docs, CI config, tests,
+  dependency bumps, internal-only tooling, or a refactor with zero behavior change. If you skip,
+  respond with EXACTLY: {json.dumps(SKIP_EXAMPLE)} — the "reason" must name what you checked (e.g.
+  "no {product} route/page/table touched").
 
 Return ONLY the JSON object, no markdown fences, no commentary."""
 
@@ -180,6 +215,8 @@ def parse_entry(raw: str, pr: PrInfo, product: str) -> dict | None:
         raise ChangelogEntryError(f"PR #{pr.number} ({product}): model JSON is not an object")
 
     if data.get("skip") is True:
+        reason = data.get("reason")
+        print(f"PR #{pr.number} -> {product}: skipped ({reason or 'no reason given'})", file=sys.stderr)
         return None
 
     title = data.get("title")
@@ -211,7 +248,10 @@ def parse_entry(raw: str, pr: PrInfo, product: str) -> dict | None:
     category = category.strip() if isinstance(category, str) and category.strip() else "Platform"
 
     return {
-        "id": entry_id(pr.number, title),
+        # Keyed off the PR's own title, not the model's — the model's title
+        # can change across reruns (temperature, prompt tweaks), which would
+        # break ON CONFLICT dedup and insert a second row for the same PR.
+        "id": entry_id(pr.number, pr.title),
         "date": pr.merged_at,
         "category": category,
         "title": title.strip(),
@@ -230,7 +270,13 @@ def parse_entry(raw: str, pr: PrInfo, product: str) -> dict | None:
 
 def fetch_merged_prs(since_pr: int, limit: int = 100) -> list:
     """Shell out to `gh pr list`. Returns PrInfo sorted ascending by number,
-    keeping only PRs merged after `since_pr`."""
+    keeping only PRs merged after `since_pr`.
+
+    `gh` returns the newest `limit` merged PRs, most-recent first. If more
+    than `limit` PRs have merged since `since_pr`, the oldest ones fall
+    outside the window and are silently invisible to this call — warn loudly
+    rather than let the caller advance state past a gap it never saw.
+    """
     result = subprocess.run(
         [
             "gh", "pr", "list", "--state", "merged", "--base", "main",
@@ -240,15 +286,30 @@ def fetch_merged_prs(since_pr: int, limit: int = 100) -> list:
         capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     )
     raw = json.loads(result.stdout)
+    if len(raw) >= limit:
+        oldest_seen = min(item["number"] for item in raw)
+        if oldest_seen > since_pr + 1:
+            print(
+                f"WARNING: gh pr list returned exactly --limit={limit} PRs and the oldest "
+                f"is #{oldest_seen}, but since_pr is #{since_pr} — PRs #{since_pr + 1}-"
+                f"#{oldest_seen - 1} may have merged and are outside this window. Re-run with "
+                f"a higher --limit or a narrower --since-pr to cover them.",
+                file=sys.stderr,
+            )
+
     prs = []
     for item in raw:
         if item["number"] <= since_pr:
+            continue
+        merged_at = (item.get("mergedAt") or "")[:10]
+        if not merged_at:
+            print(f"Skipping PR #{item['number']}: no mergedAt from gh (not actually merged?)", file=sys.stderr)
             continue
         prs.append(PrInfo(
             number=item["number"],
             title=item["title"],
             body=item.get("body") or "",
-            merged_at=(item["mergedAt"] or "")[:10],
+            merged_at=merged_at,
             files=[f["path"] for f in item.get("files") or []],
         ))
     prs.sort(key=lambda p: p.number)
@@ -262,7 +323,7 @@ async def generate_entry(client, pr: PrInfo, product: str) -> dict | None:
     prompt = build_prompt(pr, product)
     config = types.GenerateContentConfig(temperature=0.3, response_mime_type="application/json")
     response = await client.aio.models.generate_content(
-        model=GEMINI_FLASH_LITE, contents=[prompt], config=config,
+        model=GEMINI_FLASH, contents=[prompt], config=config,
     )
     raw = (getattr(response, "text", None) or "").strip()
     return parse_entry(raw, pr, product)
@@ -353,9 +414,18 @@ async def run(args) -> int:
             entries_by_product = {"matcha": [], "tellus": []}
 
             for pr in prs:
-                products = classify_pr(pr.files) & products_wanted
-                if not products:
+                all_products = classify_pr(pr.files)
+                products = all_products & products_wanted
+                if not all_products:
+                    # Nothing product-shaped in this PR (docs/CI/etc) — safe
+                    # to advance past regardless of --product narrowing.
                     last_ok_pr = pr.number
+                    continue
+                if not products:
+                    # Classified, but --product narrowed it away entirely
+                    # (e.g. a tellus-only PR under --product matcha). Not
+                    # "nothing to do" — the other product's entry for this PR
+                    # still needs a future run, so don't advance state here.
                     continue
                 try:
                     for product in sorted(products):
@@ -363,12 +433,20 @@ async def run(args) -> int:
                         if entry is not None:
                             entries_by_product[product].append(entry)
                             print(f"PR #{pr.number} -> {product}: {entry['title']}")
-                        else:
-                            print(f"PR #{pr.number} -> {product}: skipped (no user-visible change)")
                 except ChangelogEntryError as exc:
                     print(f"STOPPING at PR #{pr.number}: {exc}", file=sys.stderr)
                     break
-                last_ok_pr = pr.number
+                except Exception as exc:  # noqa: BLE001 — Gemini/network hiccups must not
+                    # discard every entry generated earlier in this run. Stop here,
+                    # commit what succeeded, and let the next run retry from this PR.
+                    print(f"STOPPING at PR #{pr.number}: unexpected error: {exc}", file=sys.stderr)
+                    break
+                if products == all_products:
+                    # Only advance past this PR once every product it touches
+                    # has actually been generated — a narrowed --product run
+                    # leaves the watermark where the untouched product's work
+                    # still needs picking up.
+                    last_ok_pr = pr.number
 
             if args.dry_run:
                 print(json.dumps(entries_by_product, indent=2))
@@ -380,6 +458,9 @@ async def run(args) -> int:
                     total += await upsert_entries(conn, product, entries)
                 await renumber(conn, TABLE_FOR_PRODUCT[product])
 
+            # last_ok_pr only ever advances past a PR once every product it
+            # touches has been generated (see the loop above), so it's always
+            # safe to persist here regardless of --product narrowing.
             await set_state(conn, last_ok_pr)
             print(f"Inserted {total} new changelog rows. State advanced to PR #{last_ok_pr}.")
             return 0

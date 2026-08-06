@@ -3,7 +3,10 @@
 Twin of `admin_updates` (migration adminupd01) for the new Tell-Us internal
 admin surface at /tellus/admin/updates, plus a single-row state table the
 changelog generator (server/scripts/generate_changelog.py) uses to remember
-the last merged PR number it processed, per product table it writes to.
+the last merged PR number it fully processed. The watermark is GLOBAL across
+both product tables — a PR only advances it once every product it touches
+has an entry generated, so a `--product`-narrowed run never advances state
+past a PR whose other-product half is still pending.
 
 Revision ID: tellus_app_07
 Revises: tellus_app_06

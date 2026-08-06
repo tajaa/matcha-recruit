@@ -72,6 +72,10 @@ class TestParseEntry:
     def test_skip_response(self):
         assert gc.parse_entry('{"skip": true}', _pr(), "matcha") is None
 
+    def test_skip_with_reason(self):
+        raw = '{"skip": true, "reason": "docs and tests only"}'
+        assert gc.parse_entry(raw, _pr(), "matcha") is None
+
     def test_valid_entry_forces_id_and_date(self):
         pr = _pr(number=42, title="Ignored model title", merged_at="2026-07-15")
         raw = (
@@ -80,10 +84,21 @@ class TestParseEntry:
             '"howToUse": ["Go here"], "tag": "new"}'
         )
         entry = gc.parse_entry(raw, pr, "matcha")
-        assert entry["id"] == gc.entry_id(42, "Model chosen title")
         assert entry["date"] == "2026-07-15"
         assert entry["tag"] == "new"
         assert entry["whatsNew"] == ["Added X"]
+        # Display title is whatever the model chose...
+        assert entry["title"] == "Model chosen title"
+
+    def test_id_derived_from_pr_title_not_model_title(self):
+        # entry_id must come from the PR's own (stable) title, not the
+        # model's — otherwise a rerun with a different model title breaks
+        # ON CONFLICT dedup and inserts a duplicate row for the same PR.
+        pr = _pr(number=42, title="Ignored model title")
+        raw = '{"title": "A totally different title", "summary": "S", "whatsNew": ["x"]}'
+        entry = gc.parse_entry(raw, pr, "matcha")
+        assert entry["id"] == gc.entry_id(42, "Ignored model title")
+        assert entry["id"] != gc.entry_id(42, "A totally different title")
 
     def test_unknown_tag_coerced_to_none(self):
         raw = '{"title": "T", "summary": "S", "whatsNew": ["x"], "tag": "banana"}'
@@ -129,7 +144,8 @@ class TestBuildPrompt:
         pr = _pr(files=["server/app/matcha/x.py", "server/app/tellus/y.py"])
         prompt = gc.build_prompt(pr, "tellus")
         assert "tellus" in prompt
-        assert '{"skip": true}' in prompt
+        assert '"skip": true' in prompt
+        assert '"reason"' in prompt
 
     def test_matcha_category_vocab_present(self):
         prompt = gc.build_prompt(_pr(), "matcha")
@@ -138,3 +154,23 @@ class TestBuildPrompt:
     def test_tellus_category_vocab_present(self):
         prompt = gc.build_prompt(_pr(), "tellus")
         assert "Consumer" in prompt
+
+    def test_skip_rule_is_narrow_not_refactor_blanket(self):
+        # A refactor/fix PR must NOT be told it's automatically a skip — the
+        # regression this guards: the original prompt's wide "pure refactor"
+        # escape hatch caused Gemini to skip real fixes and feature PRs.
+        prompt = gc.build_prompt(_pr(), "matcha")
+        assert "NEVER a skip" in prompt
+        assert "Fixed: " in prompt
+
+    def test_long_body_is_truncated(self):
+        pr = _pr(body="x" * 10_000)
+        prompt = gc.build_prompt(pr, "matcha")
+        assert "(truncated)" in prompt
+        assert len(prompt) < 10_000 + 2_000  # well under body length + prompt scaffolding
+
+    def test_files_beyond_cap_are_dropped(self):
+        pr = _pr(files=[f"server/app/matcha/f{i}.py" for i in range(200)])
+        prompt = gc.build_prompt(pr, "matcha")
+        assert "f119.py" in prompt
+        assert "f150.py" not in prompt

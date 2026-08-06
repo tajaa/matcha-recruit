@@ -216,6 +216,10 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - **Two Stripe accounts** (keys are per-account): dev/local = **Matcha Technologies LLC** (`acct_1S2GdG…`), prod historically = **Ahnimal** (`acct_1QcZE2…`, the legacy/discontinued sister product). As of 2026-07-04 prod `.env.backend` was switched to **Matcha Technologies LLC test-mode** keys (backup of the old Ahnimal keys at `~/matcha/.env.backend.bak.ahnimal-*`). Test webhook endpoint in the Matcha-Tech account → `https://hey-matcha.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.deleted`, `invoice.paid`, `checkout.session.expired`).
 - **Prod is in Stripe TEST mode** (pre-customer) — real cards are rejected. **Before go-live:** put Matcha-Tech **live** keys in `.env.backend` + register a **live** webhook endpoint (different `whsec_`) in the Matcha-Tech live dashboard, then recreate the backend. Test/live keys + webhook endpoints are per-mode and must be swapped as a matched pair (secret key + webhook secret + endpoint) or activation webhooks fail signature.
 
+### Tell-Us internal admin
+
+- `TELLUS_ADMIN_EMAILS` — comma-separated allowlist gating `/tellus/admin/updates` (`app/tellus/dependencies.py:_is_tellus_admin`). Empty ⇒ nobody passes (fail-closed), same shape as `master_admin_email`. Set in `server/.env` for dev. For prod, add it to **`~/matcha/.env.backend`** on the app EC2 alongside the Stripe keys above — same persistence rule applies (no deploy script overwrites that file).
+
 ### Compliance + jurisdictions
 
 - Compliance check service → `server/app/core/services/compliance_service/`
