@@ -13,6 +13,7 @@ import Inbox from '../pages/Inbox'
 import EventsHub from '../pages/EventsHub'
 import ProtocolPage from '../pages/ProtocolPage'
 import InventoryHub from '../pages/InventoryHub'
+import AssetsHub from '../pages/AssetsHub'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 
@@ -63,6 +64,16 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           >
             <Route path="inventory" element={<InventoryHub />} />
             <Route path="inventory/:itemId" element={<InventoryHub />} />
+          </Route>
+          <Route
+            element={
+              <FeatureGate feature="huume" label="Huume — Assets">
+                <Outlet />
+              </FeatureGate>
+            }
+          >
+            <Route path="assets" element={<AssetsHub />} />
+            <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
           <Route path=":threadId" element={<MatchaWorkThread />} />
           <Route path="projects/:projectId" element={<ProjectView />} />

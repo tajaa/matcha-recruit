@@ -267,3 +267,61 @@ async def list_thread_assets(
         asset_type=asset_type,
     )
     return {"assets": result}
+
+
+@router.get("/huume/assets")
+async def list_company_assets(
+    asset_type: Optional[str] = Query(None),
+    query: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Every asset Huume has ever created for this company, across every
+    thread — the standalone Assets page's feed (sidebar, not a per-thread
+    panel), so an admin doesn't have to remember which chat an offer letter
+    or discipline record came from. Each row carries `thread_id`/
+    `thread_title` for a 'generated from chat X on Y' line. Not thread-
+    scoped, so no `_get_owned_thread` ownership check is needed — company_id
+    comes straight from the caller's own account, same as `list_thread_assets`
+    but without the extra thread-ownership hop."""
+    from app.matcha.dependencies import get_client_company_id
+    from app.matcha.services.huume import assets as huume_assets
+
+    company_id = await get_client_company_id(current_user)
+    result = await huume_assets.list_assets(
+        company_id=company_id, thread_id=None, asset_type=asset_type, query=query, limit=200,
+    )
+    return {"assets": result}
+
+
+@router.get("/huume/record")
+async def get_company_record(
+    record_type: str = Query(...),
+    record_id: str = Query(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Company-scoped twin of `get_huume_record` (:150) for the Assets page —
+    which has no thread in scope (an asset's `thread_id` is nullable, `ON
+    DELETE SET NULL` if the thread is gone) and shouldn't need one just to
+    open a record it already knows the type/id of.
+    `record_view.get_record_view` is already fully company-scoped with no
+    thread dependency (see its docstring), so the thread-scoped route's only
+    real job beyond that call — the cross-tenant collaborator guard on
+    `_get_owned_thread`'s wider access check — doesn't apply here: company_id
+    comes straight from the caller's own account, not a thread's, so there's
+    no wider-than-tenant admission to guard against."""
+    from app.matcha.dependencies import get_client_company_id
+
+    company_id = await get_client_company_id(current_user)
+
+    required = record_view.RECORD_REQUIRED_FEATURE.get(record_type)
+    if required is None:
+        raise HTTPException(status_code=404, detail="Unknown record type")
+
+    features, _ = await huume_store.get_thread_features_and_integrations(company_id)
+    if not features.get(required):
+        raise HTTPException(status_code=403, detail=f"'{required}' isn't enabled for this company.")
+
+    view = await record_view.get_record_view(company_id=company_id, record_type=record_type, record_id=record_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return view

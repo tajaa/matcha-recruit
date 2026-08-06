@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Briefcase, BadgeCheck, FileText, Loader2, User } from 'lucide-react'
-import { getHuumeRecord } from '../../../api/matchaWork/huume'
+import { getHuumeRecord, getHuumeRecordForCompany } from '../../../api/matchaWork/huume'
 import type { HuumeRecordChipTone, HuumeRecordView } from '../../../types'
 
 interface RecordViewerProps {
-  threadId: string
+  /** Omit when there's no thread in scope (e.g. the company-wide Assets
+   * page) — falls back to the company-scoped fetch, same server-side view. */
+  threadId?: string
   recordType: string
   recordId: string
   lightMode?: boolean
@@ -73,7 +75,9 @@ export default function RecordViewer({ threadId, recordType, recordId, lightMode
     setLoading(true)
     setError(null)
     try {
-      setView(await getHuumeRecord(threadId, recordType, recordId))
+      setView(threadId
+        ? await getHuumeRecord(threadId, recordType, recordId)
+        : await getHuumeRecordForCompany(recordType, recordId))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load the record')
     } finally {

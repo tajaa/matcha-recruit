@@ -550,6 +550,8 @@ export interface HuumeAsset {
   source: 'huume_action' | 'draft'
   created_at: string
   status: string | null
+  thread_id: string | null
+  thread_title: string
 }
 
 export interface HuumePlanStep {

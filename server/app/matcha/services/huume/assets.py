@@ -226,27 +226,29 @@ async def list_assets(
     *, company_id: UUID, thread_id: Optional[UUID] = None,
     asset_type: Optional[str] = None, query: Optional[str] = None, limit: int = 25,
 ) -> list[dict]:
-    conditions = ["company_id = $1"]
+    conditions = ["ha.company_id = $1"]
     params: list[Any] = [company_id]
     if thread_id is not None:
         params.append(thread_id)
-        conditions.append(f"thread_id = ${len(params)}")
+        conditions.append(f"ha.thread_id = ${len(params)}")
     if asset_type:
         params.append(asset_type)
-        conditions.append(f"asset_type = ${len(params)}")
+        conditions.append(f"ha.asset_type = ${len(params)}")
     if query:
         params.append(f"%{query}%")
-        conditions.append(f"label ILIKE ${len(params)}")
-    params.append(min(max(limit, 1), 100))
+        conditions.append(f"ha.label ILIKE ${len(params)}")
+    params.append(min(max(limit, 1), 200))
 
     async with get_connection() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT id AS asset_id, asset_type, ref_table, ref_id, label, source,
-                   created_at, company_id
-            FROM huume_assets
+            SELECT ha.id AS asset_id, ha.asset_type, ha.ref_table, ha.ref_id, ha.label,
+                   ha.source, ha.created_at, ha.company_id,
+                   ha.thread_id, COALESCE(t.title, 'Untitled Chat') AS thread_title
+            FROM huume_assets ha
+            LEFT JOIN mw_threads t ON t.id = ha.thread_id
             WHERE {' AND '.join(conditions)}
-            ORDER BY created_at DESC
+            ORDER BY ha.created_at DESC
             LIMIT ${len(params)}
             """,
             *params,
@@ -257,5 +259,6 @@ async def list_assets(
     for a in assets:
         a.pop("company_id", None)
         a["asset_id"] = str(a["asset_id"])
+        a["thread_id"] = str(a["thread_id"]) if a.get("thread_id") else None
         a["created_at"] = a["created_at"].isoformat() if a["created_at"] else None
     return assets

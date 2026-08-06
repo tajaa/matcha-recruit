@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive } from 'lucide-react'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import { resetAuthCaches } from '../../../api/authReset'
 import type { ChannelSummary } from '../../api/channels'
@@ -35,6 +35,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const canCreate = canCreateChannel(me?.user?.role)
   const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
   const showInventory = canReviewEvents(me?.user?.role) && hasFeature('inventory')
+  const showAssets = canReviewEvents(me?.user?.role) && hasFeature('huume')
 
   const {
     channels, setChannels,
@@ -231,7 +232,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             Home
           </button>
 
-          {(showEvents || showInventory) && (
+          {(showEvents || showInventory || showAssets) && (
             <div className="mt-2 px-2.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-w-dim">Ops</div>
           )}
 
@@ -282,6 +283,21 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             >
               <Package size={14} strokeWidth={1.6} />
               Inventory
+            </button>
+          )}
+
+          {/* Assets (company-wide feed of everything Huume has created) */}
+          {showAssets && (
+            <button
+              onClick={() => navigate(`${base}/assets`)}
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/assets`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <Archive size={14} strokeWidth={1.6} />
+              Assets
             </button>
           )}
 

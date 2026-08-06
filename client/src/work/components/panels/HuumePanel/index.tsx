@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FileSignature, PlayCircle, BookOpen, Scale, Send, X, Archive, ChevronDown } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { FileSignature, PlayCircle, BookOpen, Scale, Send, X, Archive, ChevronDown, ArrowUpRight } from 'lucide-react'
 import type { HuumeAsset, HuumeOffer, HuumePlan, HuumeRecordRef, HuumeThreadOffer } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
 import { actionIcon, bannerLabel } from '../../../utils/huumeActionMeta'
 import { closeHuumeRecord, listHuumeAssets, listThreadOffers } from '../../../api/matchaWork/huume'
+import { useWorkBase } from '../../../routes/WorkSurfaceContext'
 import { useToast } from '../../../../components/ui'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
@@ -64,6 +66,8 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * (HuumeActionCard) now, so there's exactly one place a click can fire it. */
 export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss, onReviewInChat }: HuumePanelProps) {
   const { toast } = useToast()
+  const navigate = useNavigate()
+  const workBase = useWorkBase()
   const huume = getHuumeState(state)
   const baseArtifacts = useMemo(() => deriveHuumeArtifacts(huume), [huume])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -84,15 +88,17 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
   // Cross-type registry — every durable thing Huume has made in this thread
   // (offer letters, discipline records, incidents, schedule changes,
   // inventory rows, ...), not just the artifact kinds the tab bar tracks.
-  // Refetched whenever a new action lands (huume.action changing), same
-  // trigger shape as the offers refetch above.
+  // Refetch triggers cover BOTH write paths: a staged action executing
+  // (huume.action) AND a plain draft_offer_letter write, which only ever
+  // touches huume_offer — keying on the action alone left a just-drafted
+  // offer invisible until something unrelated happened to change it.
   const [assets, setAssets] = useState<HuumeAsset[]>([])
   const [assetsOpen, setAssetsOpen] = useState(false)
   useEffect(() => {
     let cancelled = false
     listHuumeAssets(threadId).then((res) => { if (!cancelled) setAssets(res.assets) }).catch(() => {})
     return () => { cancelled = true }
-  }, [threadId, huume.action?.status])
+  }, [threadId, huume.action?.status, huume.action?.type, huume.offer?.offer_id, huume.offer?.status])
 
   const artifacts = useMemo(() => {
     const labeled = baseArtifacts.map((a) => {
@@ -218,25 +224,30 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
             </div>
           )
         })}
-        {assets.length > 0 && (
-          <div className={`relative ${onDismiss ? '' : 'ml-auto'}`}>
-            <button
-              type="button"
-              onClick={() => setAssetsOpen((v) => !v)}
-              title="Everything Huume has made in this thread"
-              className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium ${
-                lightMode ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
+        <div className="relative ml-auto">
+          <button
+            type="button"
+            onClick={() => setAssetsOpen((v) => !v)}
+            title="Everything Huume has made in this thread"
+            className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium ${
+              lightMode ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
+            }`}
+          >
+            <Archive size={12} /> Assets ({assets.length}) <ChevronDown size={10} />
+          </button>
+          {assetsOpen && (
+            <div
+              className={`absolute right-0 top-full z-10 mt-1 max-h-64 w-64 overflow-y-auto rounded border shadow-lg ${
+                lightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
               }`}
             >
-              <Archive size={12} /> Assets ({assets.length}) <ChevronDown size={10} />
-            </button>
-            {assetsOpen && (
-              <div
-                className={`absolute right-0 top-full z-10 mt-1 max-h-64 w-64 overflow-y-auto rounded border shadow-lg ${
-                  lightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
-                }`}
-              >
-                {assets.map((a) => (
+              {assets.length === 0 && (
+                <p className={`px-2.5 py-2 text-[11px] ${lightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                  Nothing yet — offer letters, incidents, discipline records and other
+                  things Huume creates in this thread collect here.
+                </p>
+              )}
+              {assets.map((a) => (
                   <button
                     key={a.asset_id}
                     type="button"
@@ -257,18 +268,24 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
                     )}
                   </button>
                 ))}
-              </div>
-            )}
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => { setAssetsOpen(false); navigate(`${workBase}/assets`) }}
+                className={`flex w-full items-center gap-1 px-2.5 py-1.5 text-left text-[11px] font-medium ${
+                  lightMode ? 'text-orange-600 hover:bg-zinc-50' : 'text-orange-400 hover:bg-zinc-800/60'
+                }`}
+              >
+                View all assets <ArrowUpRight size={10} />
+              </button>
+            </div>
+          )}
+        </div>
         {onDismiss && (
           <button
             type="button"
             onClick={onDismiss}
             title="Close panel"
             className={`shrink-0 p-1 rounded transition-colors ${
-              assets.length === 0 ? 'ml-auto' : ''
-            } ${
               lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
             }`}
           >
