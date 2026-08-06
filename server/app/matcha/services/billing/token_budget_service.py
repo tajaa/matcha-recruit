@@ -17,7 +17,7 @@ from . import entitlements_service
 
 logger = logging.getLogger(__name__)
 
-FREE_TOKEN_GRANT = 1_000_000
+FREE_TOKEN_GRANT = 3_000_000
 SUBSCRIPTION_TOKENS = 5_000_000
 SUBSCRIPTION_AMOUNT_CENTS = 4000  # $40/month
 SUBSCRIPTION_PACK_ID = "matcha_work_pro"
