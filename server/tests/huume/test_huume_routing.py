@@ -129,6 +129,12 @@ class TestResolveTier:
         schedule_hints = TOOLS_BY_NAME["propose_schedule_change"].intent_hints
         assert not any(hint in msg.lower() for hint in schedule_hints)
 
+    def test_send_offer_by_name_hint_routes_deep(self):
+        assert routing.resolve_tier("can you send the offer letter to maria please", current_state={}) == "deep"
+
+    def test_list_assets_hint_routes_deep(self):
+        assert routing.resolve_tier("what have we made in this thread so far", current_state={}) == "deep"
+
     def test_analytical_question_routes_deep(self):
         assert routing.resolve_tier("why does this keep happening?", current_state={}) == "deep"
         assert routing.resolve_tier("what should I do about this employee?", current_state={}) == "deep"

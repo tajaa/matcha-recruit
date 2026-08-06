@@ -35,7 +35,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
       )}
 
       {/* Input */}
-      <div className={`px-4 py-3 border-t ${th.border} pb-[env(safe-area-inset-bottom)]`}>
+      <div className={`px-3 py-2 border-t ${th.border} pb-[env(safe-area-inset-bottom)]`}>
         {isFinalized ? (
           <div className="text-center text-sm text-w-faint py-2">
             This thread has been finalized.
@@ -47,8 +47,8 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
         ) : (
           <>
             {huumeOn && thread && (
-              <div className="flex items-center gap-1.5 mb-2">
-                <div className="flex items-center gap-1.5 pl-1.5 pr-1 py-1 rounded-full border bg-w-accent/10 border-w-accent/30">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="flex items-center gap-1.5 pl-1.5 pr-1 py-0.5 rounded-full border bg-w-accent/10 border-w-accent/30">
                   <HuumeAvatar size="sm" lightMode={lightMode} />
                   <span className="text-xs font-medium text-w-accent">Huume</span>
                   <button
@@ -98,7 +98,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                 onClick={() => fileInputRef.current?.click()}
                 disabled={inputDisabled || uploadingFiles}
                 title="Upload files (resumes, invoices, spreadsheets)"
-                className="p-3 rounded-lg transition-colors disabled:opacity-40 text-w-dim hover:text-w-text hover:bg-w-surface2"
+                className="p-2 rounded-lg transition-colors disabled:opacity-40 text-w-dim hover:text-w-text hover:bg-w-surface2"
               >
                 {uploadingFiles ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
               </button>
@@ -139,7 +139,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
                   placeholder={huumeOn ? 'Ask Huume...' : 'Type a message...'}
                   rows={1}
                   disabled={inputDisabled}
-                  className={`w-full text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px] ${th.textarea} ${
+                  className={`w-full text-[13px] rounded-lg px-3 py-2 border focus:outline-none resize-none disabled:opacity-50 min-h-[36px] ${th.textarea} ${
                     huumeOn ? 'ring-2 ring-w-accent/50' : ''
                   }`}
                 />
@@ -147,7 +147,7 @@ export default function ChatComposer({ c, th, isFinalized, isArchived, inputDisa
               <button
                 onClick={() => handleSend()}
                 disabled={inputDisabled || (!input.trim() && pendingAttachments.length === 0) || togglingHuume}
-                className="p-3 bg-w-accent hover:bg-w-accent-hi text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-w-accent"
+                className="p-2 bg-w-accent hover:bg-w-accent-hi text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-w-accent"
               >
                 {streaming ? (
                   <Loader2 size={16} className="animate-spin" />

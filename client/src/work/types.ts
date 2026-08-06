@@ -536,6 +536,22 @@ export interface HuumeThreadOffer {
   status: string
 }
 
+/** One row from `GET /threads/{id}/huume/assets` — every durable artifact
+ * Huume has created (offer letters, discipline records, incidents, schedule
+ * changes, inventory rows, ...), registered at the moment each staged
+ * action's executor succeeds. `status` is hydrated live server-side, not
+ * stored — the underlying record moves through its own lifecycle. */
+export interface HuumeAsset {
+  asset_id: string
+  asset_type: string
+  ref_table: string
+  ref_id: string
+  label: string
+  source: 'huume_action' | 'draft'
+  created_at: string
+  status: string | null
+}
+
 export interface HuumePlanStep {
   key: string
   label: string
@@ -563,6 +579,8 @@ export interface HuumeActionSendOffer {
   type: 'send_offer'
   offer_id: string
   status: 'proposed' | 'sent' | 'failed' | 'cancelled'
+  candidate_name?: string
+  recipient_email?: string
 }
 
 export interface HuumeActionDiscipline {

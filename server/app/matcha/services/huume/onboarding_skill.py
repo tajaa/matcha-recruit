@@ -836,9 +836,94 @@ async def check_offer_status(*, company_id: UUID, offer_id: str) -> dict[str, An
     return dict(row)
 
 
-async def execute_send_offer(*, company_id: UUID, actor_user_id: Optional[UUID], offer_id: str) -> dict[str, Any]:
+async def resolve_offer_for_send(
+    *, company_id: UUID, candidate_name: Optional[str] = None, offer_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Resolve which offer 'send X's latest offer letter' means, so the
+    send_offer arm in agent.py can stage a real offer_id without the model
+    ever needing one — it only has the name the admin typed.
+
+    Returns:
+      {"status": "ok", "offer": {...offer_letters row...}}
+      {"status": "ambiguous", "matches": [{offer_id, candidate_name,
+          position_title, status, created_at}, ...]}     -- >1 distinct candidate
+      {"status": "not_found", "message": ...}
+      {"status": "not_draft", "message": "...'s latest offer is already ..."}
+    """
+    from app.database import get_connection
+
+    async with get_connection() as conn:
+        if offer_id:
+            row = await conn.fetchrow(
+                "SELECT * FROM offer_letters WHERE id = $1 AND company_id = $2", offer_id, company_id,
+            )
+            if not row:
+                return {"status": "not_found", "message": "I couldn't find that offer."}
+            if row["status"] != "draft":
+                return {
+                    "status": "not_draft",
+                    "message": f"That offer is already {row['status']} — can't re-send it from here.",
+                }
+            return {"status": "ok", "offer": dict(row)}
+
+        name = (candidate_name or "").strip()
+        if not name:
+            return {"status": "not_found", "message": "Name the candidate or give me an offer_id."}
+
+        rows = await conn.fetch(
+            """
+            SELECT * FROM offer_letters
+            WHERE company_id = $1 AND candidate_name ILIKE $2
+            ORDER BY created_at DESC
+            """,
+            company_id, f"%{name}%",
+        )
+        if not rows:
+            return {"status": "not_found", "message": f"I don't see any offer letters for '{name}' in this company."}
+
+        latest_by_candidate: dict[str, dict] = {}
+        for r in rows:
+            key = (r["candidate_name"] or "").strip().lower()
+            if key not in latest_by_candidate:
+                latest_by_candidate[key] = dict(r)
+
+        if len(latest_by_candidate) > 1:
+            return {
+                "status": "ambiguous",
+                "matches": [
+                    {
+                        "offer_id": str(o["id"]), "candidate_name": o["candidate_name"],
+                        "position_title": o["position_title"], "status": o["status"],
+                        "created_at": o["created_at"].isoformat() if o["created_at"] else None,
+                    }
+                    for o in latest_by_candidate.values()
+                ],
+            }
+
+        offer = next(iter(latest_by_candidate.values()))
+        if offer["status"] != "draft":
+            return {
+                "status": "not_draft",
+                "message": (
+                    f"{offer['candidate_name']}'s latest offer is already {offer['status']} — "
+                    "can't re-send it from here."
+                ),
+            }
+        return {"status": "ok", "offer": offer}
+
+
+async def execute_send_offer(
+    *, company_id: UUID, actor_user_id: Optional[UUID], offer_id: str,
+    recipient_email: Optional[str] = None,
+) -> dict[str, Any]:
     """Send the candidate their sign link. Mirrors send_range_offer's token
-    minting (offer_letters.py) but for the fixed-terms sign flow."""
+    minting (offer_letters.py) but for the fixed-terms sign flow.
+
+    `recipient_email`, when given, OVERRIDES the offer's stored
+    candidate_email — the row is updated, not just the send target, since
+    the sign-link token, acceptance notifications, and the candidate portal
+    all key off `candidate_email`; a send-only override would leave the
+    record lying about where the live sign link actually went."""
     from app.database import get_connection
 
     async with get_connection() as conn:
@@ -851,7 +936,7 @@ async def execute_send_offer(*, company_id: UUID, actor_user_id: Optional[UUID],
         offer = dict(row)
         if offer["status"] != "draft":
             return {"status": "error", "message": f"Offer is already {offer['status']} — can't re-send from here."}
-        if not offer.get("candidate_email"):
+        if not (recipient_email or offer.get("candidate_email")):
             return {"status": "error", "message": "This offer has no candidate email set — add one before sending."}
 
         token = secrets.token_urlsafe(32)
@@ -859,11 +944,12 @@ async def execute_send_offer(*, company_id: UUID, actor_user_id: Optional[UUID],
         updated = await conn.fetchrow(
             """
             UPDATE offer_letters
-            SET candidate_token = $1, candidate_token_expires_at = $2, status = 'sent', updated_at = NOW()
+            SET candidate_token = $1, candidate_token_expires_at = $2, status = 'sent',
+                candidate_email = COALESCE($4, candidate_email), updated_at = NOW()
             WHERE id = $3
             RETURNING *
             """,
-            token, expires_at, offer_id,
+            token, expires_at, offer_id, recipient_email,
         )
 
     try:

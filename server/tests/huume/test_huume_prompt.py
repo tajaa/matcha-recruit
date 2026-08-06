@@ -39,6 +39,27 @@ class TestBuildStateBlock:
         assert "ab12cd34" in block
         assert "propose_schedule_change" in block
 
+    def test_staged_send_offer_names_recipient_email(self):
+        # "Send Maria's latest offer letter" — the admin must be told which
+        # address the sign link goes to before they confirm, and the block
+        # must carry the re-stage-on-override instruction (recipient_email).
+        state = {"huume_action": {
+            "type": "send_offer", "offer_id": "offer-1", "candidate_name": "Maria Lopez",
+            "recipient_email": "maria@example.com", "status": "proposed",
+        }}
+        block = build_state_block(state)
+        assert "maria@example.com" in block
+        assert "Maria Lopez" in block
+        assert "recipient_email" in block
+
+    def test_staged_send_offer_without_recipient_email_falls_back(self):
+        state = {"huume_action": {
+            "type": "send_offer", "offer_id": "offer-1", "status": "proposed",
+        }}
+        block = build_state_block(state)
+        assert "offer-1" in block
+        assert "address on file" in block
+
     def test_huume_offer_pointer_rendered(self):
         state = {"huume_offer": {"offer_id": "offer-2", "status": "accepted"}}
         block = build_state_block(state)
@@ -150,6 +171,11 @@ class TestBuildSystemPrompt:
     def test_lists_promote_ems_event_as_staged(self):
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "promote_ems_event" in prompt
+
+    def test_lists_list_assets_and_send_offer_guidance(self):
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "list_assets" in prompt
+        assert "recipient_email" in prompt
 
     def test_lists_propose_schedule_change_as_staged(self):
         # Previously omitted from the staged-tool list sentence entirely —

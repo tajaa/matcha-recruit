@@ -232,6 +232,9 @@ def evaluate_huume_action(
         offer_id = staged_action.get("offer_id")
         if not offer_id:
             return HuumeVerdict(kind="refuse", message="There's no offer to send.")
+        recipient = staged_action.get("recipient_email")
+        if recipient and ("@" not in recipient or "." not in recipient.rsplit("@", 1)[-1]):
+            return HuumeVerdict(kind="refuse", message=f"'{recipient}' doesn't look like an email address.")
         return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
     if action_type == "discipline_draft":
@@ -1043,61 +1046,74 @@ async def execute_huume_action(
     `thread_id`/`session_id`/`exclude_ids` are needed only by `amend_handbook`
     — turn-scoped context (which handbook-pilot session, which drafts THIS
     turn just proposed) that has no natural home on the persisted staged
-    action dict, unlike every other action type here."""
+    action dict, unlike every other action type here.
+
+    Every branch falls through to the tail below, which registers the result
+    in the asset registry (`assets.record_asset` — no-ops on anything that
+    isn't a real `status="created"` row, never raises) before returning."""
+    from app.matcha.services.huume import assets as huume_assets
     from app.matcha.services.huume import onboarding_skill
 
     if action.get("type") == "amend_handbook":
         from app.matcha.services.huume import handbook_skill
-        return await handbook_skill.promote(
+        result = await handbook_skill.promote(
             company_id=company_id, actor_user_id=actor_user_id, thread_id=thread_id,
             session_id=session_id, draft_ids=action.get("draft_ids"),
             exclude_ids=exclude_ids or set(),
             handbook_title=action.get("handbook_title"),
             target_handbook_id=action["target_handbook_id"],
         )
-    if action.get("type") == "send_offer":
-        return await onboarding_skill.execute_send_offer(
+    elif action.get("type") == "send_offer":
+        result = await onboarding_skill.execute_send_offer(
             company_id=company_id, actor_user_id=actor_user_id, offer_id=action["offer_id"],
+            recipient_email=action.get("recipient_email"),
         )
-    if action.get("type") == "discipline_draft":
+    elif action.get("type") == "discipline_draft":
         # Delegates to the SAME executor HR Pilot uses — employee resolution,
         # the deterministic discipline_compliance gate (a statutory block
         # refuses, no override), and the status='draft' write. Its
         # "clarify"/"blocked"/"escalate" statuses all read as a plain refusal
         # to this caller; the message still explains why.
         from app.matcha.services.pilots.hr_pilot_actions import execute_hr_action
-        return await execute_hr_action(company_id=company_id, actor_user_id=actor_user_id, action=action)
-    if action.get("type") in _HR_OPS_ACTIONS:
+        result = await execute_hr_action(company_id=company_id, actor_user_id=actor_user_id, action=action)
+    elif action.get("type") in _HR_OPS_ACTIONS:
         # Huume-own executors rather than hr_pilot_actions'. HR Pilot's
         # ir_report/er_case are hard-stop HAND-OFFS: they hardcode
         # occurred_at=now, category="harassment" and source="hr_pilot", which
         # is the wrong provenance and the wrong field set for an admin filing
         # a report deliberately. Same underlying *_core writers, though.
         from app.matcha.services.huume import hr_ops_skill
-        return await hr_ops_skill.execute(
+        result = await hr_ops_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
-    if action.get("type") in _DISCIPLINE_SKILL_ACTIONS:
+    elif action.get("type") in _DISCIPLINE_SKILL_ACTIONS:
         from app.matcha.services.huume import discipline_skill
-        return await discipline_skill.execute(
+        result = await discipline_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
-    if action.get("type") == "ems_promote":
+    elif action.get("type") == "ems_promote":
         from app.matcha.services.huume import ems_skill
-        return await ems_skill.execute_promote(
+        result = await ems_skill.execute_promote(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
-    if action.get("type") in _INVENTORY_ACTIONS:
+    elif action.get("type") in _INVENTORY_ACTIONS:
         from app.matcha.services.huume import inventory_skill
-        return await inventory_skill.execute(
+        result = await inventory_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
-    if action.get("type") == "schedule_change":
+    elif action.get("type") == "schedule_change":
         from app.matcha.services.huume import schedule_skill
-        return await schedule_skill.execute(
+        result = await schedule_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
         )
-    return {"status": "error", "message": "Unsupported action."}
+    else:
+        result = {"status": "error", "message": "Unsupported action."}
+
+    await huume_assets.record_asset(
+        company_id=company_id, thread_id=thread_id, actor_user_id=actor_user_id,
+        action=action, result=result,
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

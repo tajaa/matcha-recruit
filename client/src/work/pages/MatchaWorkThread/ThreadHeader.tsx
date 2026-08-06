@@ -28,7 +28,7 @@ export default function ThreadHeader({ c, th, lm, hasRightPanel, huumePanelAvail
   } = c
 
   return (
-    <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
+    <div className={`flex items-center gap-3 px-4 py-2 border-b ${th.border}`}>
       <Link to={base} className={`${th.backArrow} transition-colors shrink-0`}>
         <ArrowLeft size={18} />
       </Link>

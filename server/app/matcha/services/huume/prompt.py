@@ -58,10 +58,15 @@ def build_state_block(current_state: dict[str, Any]) -> str:
     if isinstance(action, dict) and action.get("status") == "proposed":
         if action.get("type") == "send_offer":
             lines.append(
-                f"- STAGED ACTION awaiting the admin's confirmation: send_offer "
-                f"for offer_id={action.get('offer_id')}. Calling that tool again with EXACTLY "
-                f"this offer_id after the admin confirms executes it; a different offer_id "
-                f"stages a NEW proposal instead."
+                f"- STAGED ACTION awaiting the admin's confirmation: send_offer for "
+                f"offer_id={action.get('offer_id')} (candidate {action.get('candidate_name') or 'unknown'}), "
+                f"which will email the sign link to "
+                f"{action.get('recipient_email') or 'the address on file'} — STATE THIS RECIPIENT "
+                f"to the admin before they confirm. Calling send_offer again with EXACTLY this "
+                f"offer_id after the admin confirms executes it (recipient_email may be omitted — "
+                f"the staged recipient is used). If the admin gives a DIFFERENT address, call "
+                f"send_offer with this offer_id AND the new recipient_email — that stages a NEW "
+                f"proposal needing its own confirmation."
             )
         elif action.get("type") == "discipline_draft":
             lines.append(
@@ -390,7 +395,7 @@ see "Current staged state" for which one that is.
 
 - Use lookup_context to ground yourself before drafting or acting — check for an existing offer/employee before creating a duplicate, and check integrations before promising Google Workspace or Slack provisioning. It also answers general questions (an employee's status, training/credential lapses, this week's schedule, recent incident counts) — report the facts it returns plainly; never invent a number it didn't give you, and never treat a lookup result as policy or legal advice. But when the admin asked to SEE specific records, not just hear about them, open them with show_record instead of retyping their fields into your reply — see "Showing records" above.
 - draft_offer_letter creates a DRAFT only — it is never sent by itself. Its only inputs are candidate_name, candidate_email, position_title, salary, start_date, employment_type, location — if the admin gave you incomplete information, ask only for the specific missing field(s) by that exact name; ask rather than inventing a value. Huume does not need, request, or process a resume or any candidate background document for this or any onboarding step — there is no tool that accepts or reads one, so never ask the admin to send you a resume, and never treat an attached file as one just because you're mid-onboarding (see "Attached files" below). If the admin asks for a statutory figure instead of a number ("minimum salary", "minimum wage", "the exempt threshold" for a state), you MUST call lookup_context(topic='wage_floors', query='<2-letter state>') and use the value it returns — these figures move every January and a number from memory is not a source. If that lookup comes back with nothing for the state, say so and ask the admin for the figure; never fall back to a remembered number.
-- Only call send_offer once the draft has a real candidate_email and the admin has given you what you need. It stages — do not treat it as sent.
+- Only call send_offer once the draft has a real candidate_email and the admin has given you what you need. It stages — do not treat it as sent. You can identify the offer by candidate_name ("send Maria's offer") instead of an offer_id — always tell the admin which email the sign link will go to before they confirm, and if they name a different address, pass recipient_email to re-stage with that override. Use list_assets if you need to find an offer you don't have the id for.
 - build_onboarding_plan requires the offer to be status='accepted' — check_offer_status first if you're not sure.
 - After building a plan, describe the steps and ask the admin which to approve. Do not call execute_approved_steps in the same turn you build the plan.
 - Call finish with a plain-language summary of exactly what happened this turn — what you drafted, what you staged (awaiting confirmation), what you actually executed, and what you're waiting on next. Never describe a staged action as completed.

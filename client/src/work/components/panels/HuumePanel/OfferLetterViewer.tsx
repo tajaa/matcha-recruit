@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Loader2, RotateCw } from 'lucide-react'
+import { Loader2, RotateCw, Send } from 'lucide-react'
 import { getOfferLetter, getOfferLetterPreviewHtml } from '../../../api/offerLetters'
-import type { HuumeOffer, OfferLetterDetail } from '../../../types'
+import type { HuumeActionSendOffer, HuumeOffer, OfferLetterDetail } from '../../../types'
 
 interface OfferLetterViewerProps {
   offerId: string
@@ -9,6 +9,10 @@ interface OfferLetterViewerProps {
    * `huume_offer.status`/`.event` in current_state, and the letter itself
    * (signature block) changes once that happens. */
   offer?: HuumeOffer
+  /** A `send_offer` staged action for THIS offer, still awaiting confirm —
+   * shows the exact recipient the sign link will go to (which may be a
+   * recipient_email override, not the offer's stored candidate_email). */
+  pendingSend?: HuumeActionSendOffer
   lightMode?: boolean
 }
 
@@ -30,7 +34,7 @@ function Field({ label, value }: { label: string; value?: string | null }) {
  * the candidate signing page produce (GET /offer-letters/{id}/preview) — in
  * a sandboxed iframe, plus a terms strip above it. This is the fix for the
  * panel that used to show only a raw offer UUID and a Confirm button. */
-export default function OfferLetterViewer({ offerId, offer, lightMode }: OfferLetterViewerProps) {
+export default function OfferLetterViewer({ offerId, offer, pendingSend, lightMode }: OfferLetterViewerProps) {
   const [detail, setDetail] = useState<OfferLetterDetail | null>(null)
   const [html, setHtml] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -84,6 +88,14 @@ export default function OfferLetterViewer({ offerId, offer, lightMode }: OfferLe
 
   return (
     <div className="flex w-full flex-1 min-h-0 flex-col">
+      {pendingSend?.status === 'proposed' && pendingSend.recipient_email && (
+        <div className={`flex items-center gap-1.5 border-b px-3 py-1.5 text-[11px] ${
+          lightMode ? 'border-zinc-200 bg-orange-50 text-orange-700' : 'border-zinc-800 bg-orange-950/30 text-orange-300'
+        }`}>
+          <Send size={11} className="shrink-0" />
+          Will send to <span className="font-medium">{pendingSend.recipient_email}</span> — awaiting your confirmation
+        </div>
+      )}
       <div className={`grid grid-cols-2 gap-x-4 gap-y-2 border-b px-3 py-2.5 ${lightMode ? 'border-zinc-200' : 'border-zinc-800'}`}>
         <Field label="Candidate" value={detail.candidate_name} />
         <Field label="Status" value={STATUS_LABEL[detail.status] ?? detail.status} />

@@ -68,11 +68,11 @@ export default function HuumeStepTimeline({ steps, live }: { steps: HuumeStep[];
   if (!open) {
     const latest = steps[steps.length - 1]
     return (
-      <div className="mt-2 pt-2 border-t border-w-line">
+      <div className="mt-0.5 pt-0.5">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="w-full flex items-center gap-1.5 text-[11px] text-w-dim hover:text-w-text transition-colors"
+          className="w-full flex items-center gap-1.5 text-[10px] text-w-dim hover:text-w-text transition-colors"
         >
           <Bot size={12} className={`shrink-0 ${live ? 'animate-pulse' : ''}`} />
           <span className="flex-1 text-left truncate">

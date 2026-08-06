@@ -53,6 +53,32 @@ class TestEvaluateHuumeAction:
         assert v.ok
         assert v.action["offer_id"] == "offer-1"
 
+    def test_valid_recipient_email_proceeds(self):
+        v = evaluate_huume_action(
+            staged_action=_staged(recipient_email="maria@example.com"), features=FEATURES_ON, role="client",
+            thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "proceed"
+        assert v.action["recipient_email"] == "maria@example.com"
+
+    def test_bad_recipient_email_refused(self):
+        v = evaluate_huume_action(
+            staged_action=_staged(recipient_email="not-an-email"), features=FEATURES_ON, role="client",
+            thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "refuse"
+        assert "not-an-email" in v.message
+
+    def test_absent_recipient_email_still_proceeds(self):
+        # Back-compat: a staged action with no recipient_email at all (the
+        # shape every send_offer proposal had before this feature) proceeds
+        # unchanged — the field is optional, not required.
+        v = evaluate_huume_action(
+            staged_action=_staged(), features=FEATURES_ON, role="client",
+            thread_huume_mode=True, this_turn_staged_new=False,
+        )
+        assert v.kind == "proceed"
+
     def test_already_sent_status_refuses(self):
         v = evaluate_huume_action(
             staged_action=_staged(status="sent"), features=FEATURES_ON, role="client",

@@ -23,7 +23,7 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
 
   return (
     <div
-      className="flex-1 overflow-y-auto px-4 py-4 space-y-4 relative"
+      className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5 relative"
       onDragOver={(e) => { e.preventDefault(); if (!streaming) setIsDragOver(true) }}
       onDragLeave={(e) => {
         // Only hide overlay when leaving the container (not entering a child)
@@ -72,10 +72,10 @@ export default function ChatMessages({ c, th, isProject }: ChatMessagesProps) {
       {streaming && (
         <div className={`flex justify-start ${thread?.huume_mode ? 'items-start gap-2' : ''}`}>
           {thread?.huume_mode && <HuumeAvatar size="sm" lightMode={lightMode} />}
-          <div className={`${th.streamBg} rounded-lg px-4 py-2.5 max-w-[85%]`}>
+          <div className={`${th.streamBg} rounded-md px-2.5 py-1.5 max-w-[85%]`}>
             <div className="flex items-center gap-2">
               <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
-              <span className={`text-sm ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
+              <span className={`text-[13px] ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
             </div>
             {pendingHuumeSteps.length > 0 && (
               <HuumeStepTimeline steps={pendingHuumeSteps} lightMode={lightMode} live />

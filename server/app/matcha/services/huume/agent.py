@@ -47,7 +47,7 @@ from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 
 from . import (
-    actions, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
+    actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
     legal_skill, onboarding_skill, record_view, routing, store,
 )
 from .prompt import build_state_block, build_system_prompt
@@ -577,6 +577,32 @@ async def run_huume_turn(
                 step = recorder.record(tool=name, kind="read", label=f"Looked up {args.get('topic')}", status="ok")
                 return _json_safe(result), step
 
+            if name == "list_assets":
+                # Labels only (type + number level) — per-type detail still
+                # flows through show_record, which re-checks that type's own
+                # feature flag. This tool has no single extra domain flag of
+                # its own (it spans every skill), so the gate here is just
+                # role + huume + matcha_work — no PILOT_TOOL_REQUIRED_FEATURE
+                # entry, unlike every single-domain pilot tool.
+                if (user_role or "").strip().lower() not in ("client", "admin"):
+                    step = recorder.record(tool=name, kind="read", label="Assets unavailable", status="rejected")
+                    return {"status": "refused", "message": "Only a business admin can list assets."}, step
+                if not (features.get("huume") and features.get("matcha_work")):
+                    step = recorder.record(tool=name, kind="read", label="Assets unavailable", status="rejected")
+                    return {"status": "refused", "message": "Huume isn't enabled for this company."}, step
+                scope = str(args.get("scope") or "thread")
+                try:
+                    limit = int(args.get("limit") or 25)
+                except (TypeError, ValueError):
+                    limit = 25
+                result_assets = await assets.list_assets(
+                    company_id=company_id,
+                    thread_id=None if scope == "company" else thread_id,
+                    asset_type=args.get("asset_type"), limit=limit,
+                )
+                step = recorder.record(tool=name, kind="read", label=f"Listed {len(result_assets)} assets", status="ok")
+                return _json_safe({"status": "ok", "assets": result_assets}), step
+
             if name == "show_record":
                 record_type = str(args.get("record_type") or "")
                 raw_ids = args.get("record_ids")
@@ -637,6 +663,12 @@ async def run_huume_turn(
                 ok = result.get("status") == "ok"
                 if ok:
                     state_updates["huume_offer"] = {"offer_id": result["offer_id"], "status": "draft"}
+                    await assets.record_offer_draft_asset(
+                        company_id=company_id, thread_id=thread_id, actor_user_id=user_id,
+                        offer_id=result["offer_id"],
+                        candidate_name=str(fields.get("candidate_name") or ""),
+                        position_title=str(fields.get("position_title") or ""),
+                    )
                 step = recorder.record(
                     tool=name, kind="write",
                     label="Drafted offer letter" if ok else "Could not draft offer letter",
@@ -655,24 +687,69 @@ async def run_huume_turn(
 
             if name == "send_offer":
                 offer_id = str(args.get("offer_id") or "")
+                candidate_name = str(args.get("candidate_name") or "").strip()
+                recipient_override = str(args.get("recipient_email") or "").strip() or None
                 existing = pre_turn_action
+
+                # Confirm match is omission-tolerant on purpose: a confirm
+                # turn that doesn't repeat recipient_email confirms the
+                # STAGED recipient; a DIFFERENT recipient_email re-stages
+                # (new proposal, fresh confirm) rather than silently
+                # switching who gets the email. Strict-echo matching is the
+                # schedule_change silent-mismatch bug this avoids.
                 confirming = (
                     isinstance(existing, dict) and existing.get("type") == "send_offer"
-                    and existing.get("offer_id") == offer_id and existing.get("status") == "proposed"
+                    and existing.get("status") == "proposed"
+                    and (
+                        (offer_id and existing.get("offer_id") == offer_id)
+                        or (not offer_id and candidate_name)
+                    )
+                    and (recipient_override is None or recipient_override == existing.get("recipient_email"))
                 )
-                staged = existing if confirming else {"type": "send_offer", "offer_id": offer_id, "status": "proposed"}
+
+                if confirming:
+                    staged = existing
+                elif not offer_id and not candidate_name:
+                    step = recorder.record(tool=name, kind="staged", label="Send offer needs a target", status="rejected")
+                    return {"status": "error", "message": "Name the candidate or pass an offer_id."}, step
+                else:
+                    resolved = await onboarding_skill.resolve_offer_for_send(
+                        company_id=company_id, candidate_name=candidate_name or None, offer_id=offer_id or None,
+                    )
+                    if resolved["status"] != "ok":
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Send offer needs disambiguation",
+                            status="rejected", detail=resolved.get("message"),
+                        )
+                        return _json_safe(resolved), step
+                    offer = resolved["offer"]
+                    recipient_email = recipient_override or offer.get("candidate_email")
+                    if not recipient_email:
+                        step = recorder.record(tool=name, kind="staged", label="Send offer has no recipient", status="rejected")
+                        return {"status": "error", "message": "This offer has no candidate email — give me the address to send it to."}, step
+                    staged = {
+                        "type": "send_offer", "offer_id": str(offer["id"]), "status": "proposed",
+                        "candidate_name": offer.get("candidate_name"), "recipient_email": recipient_email,
+                    }
+
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
                 )
                 if verdict.kind == "stage":
                     state_updates["huume_action"] = staged
-                    step = recorder.record(tool=name, kind="staged", label="Staged: send offer to candidate", status="ok", detail=verdict.message)
-                    return {"status": "staged", "message": verdict.message}, step
+                    msg = f"Sends the sign link to {staged['recipient_email']}. {verdict.message}"
+                    step = recorder.record(
+                        tool=name, kind="staged", label=f"Staged: send offer to {staged['recipient_email']}",
+                        status="ok", detail=msg,
+                    )
+                    return {"status": "staged", "message": msg, "recipient_email": staged["recipient_email"]}, step
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label="Send offer refused", status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
-                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                result = await actions.execute_huume_action(
+                    company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                )
                 state_updates["huume_action"] = {**staged, "status": "sent" if result.get("status") == "created" else "failed"}
                 step = recorder.record(
                     tool=name, kind="write", label="Sent offer to candidate" if result.get("status") == "created" else "Failed to send offer",
@@ -758,7 +835,9 @@ async def run_huume_turn(
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label="Disciplinary action refused", status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
-                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                result = await actions.execute_huume_action(
+                    company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                )
                 filed = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": "filed" if filed else "failed"}
                 for _bg in (result.pop("bg_tasks", None) or []):
@@ -806,7 +885,9 @@ async def run_huume_turn(
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label="Discipline draft refused", status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
-                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                result = await actions.execute_huume_action(
+                    company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                )
                 filed = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": "filed" if filed else "failed"}
                 # hr_pilot_actions' executors hand back post-commit enrichment
@@ -921,7 +1002,9 @@ async def run_huume_turn(
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=spec["refused_label"], status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
-                result = await actions.execute_huume_action(company_id=company_id, actor_user_id=user_id, action=verdict.action)
+                result = await actions.execute_huume_action(
+                    company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                )
                 done = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": spec["done_status"] if done else "failed"}
                 # Promote hands the incident to the IR bridge: "now run the

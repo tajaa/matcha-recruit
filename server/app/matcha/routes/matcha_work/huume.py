@@ -238,3 +238,32 @@ async def list_thread_offers(
             for r in rows
         ]
     }
+
+
+@router.get("/threads/{thread_id}/huume/assets")
+async def list_thread_assets(
+    thread_id: UUID,
+    scope: str = Query("thread", pattern="^(thread|company)$"),
+    asset_type: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Every asset Huume has created — offer letters, discipline records,
+    incidents, schedule changes, inventory rows, etc. — registered by
+    `services/huume/assets.record_asset` at the moment each staged action's
+    executor succeeds. `scope=thread` (default) is this thread only;
+    `scope=company` is every asset across the company. Status is hydrated
+    live per-type (`assets.hydrate_statuses`), not stored on the row — the
+    underlying record (an offer, a discipline case, ...) moves through its
+    own status lifecycle independently of this registry."""
+    thread, caller_company_id = await _get_owned_thread(thread_id, current_user)
+    company_id = thread["company_id"]
+    if caller_company_id != company_id:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    from app.matcha.services.huume import assets as huume_assets
+    result = await huume_assets.list_assets(
+        company_id=company_id,
+        thread_id=None if scope == "company" else thread_id,
+        asset_type=asset_type,
+    )
+    return {"assets": result}

@@ -146,13 +146,23 @@ TOOLS: tuple[HuumeTool, ...] = (
     ),
     _tool(
         "send_offer", "staged",
-        "Send an existing DRAFT offer letter to the candidate's email as a "
-        "sign link. This is a real, user-facing action — it STAGES the send "
-        "for the admin's confirmation and does not actually send until they "
-        "reply confirming on a later turn. Requires the offer to already "
-        "have a candidate_email set (use draft_offer_letter to add one).",
-        properties={"offer_id": types.Schema(type=types.Type.STRING)},
-        required=["offer_id"],
+        "Send an existing DRAFT offer letter to the candidate as a sign "
+        "link. This is a real, user-facing action — it STAGES the send for "
+        "the admin's confirmation and does not actually send until they "
+        "reply confirming on a later turn. The staged proposal names the "
+        "EXACT recipient email — always tell the admin that email before "
+        "they confirm. Identify the offer by offer_id, OR by candidate_name "
+        "('Maria' -> her latest draft offer) when the admin refers to it by "
+        "name instead of an id. If the admin wants it sent somewhere else, "
+        "pass recipient_email — that re-stages with the override and needs "
+        "a fresh confirm.",
+        properties={
+            "offer_id": types.Schema(type=types.Type.STRING),
+            "candidate_name": types.Schema(type=types.Type.STRING),
+            "recipient_email": types.Schema(type=types.Type.STRING),
+        },
+        intent_hints=("send the offer", "send her offer", "send his offer",
+                      "email the offer letter", "send the offer letter"),
     ),
     _tool(
         "check_offer_status", "read",
@@ -799,6 +809,21 @@ TOOLS: tuple[HuumeTool, ...] = (
         # a training-assignment ask at this tool instead of assign_training.
         intent_hints=("swap shift", "reassign shift", "assign a shift", "put someone on",
                       "move shift", "cancel shift", "cover for"),
+    ),
+    _tool(
+        "list_assets", "read",
+        "List the assets (offer letters, incident reports, discipline "
+        "records, schedule changes, inventory rows, ...) created from this "
+        "thread — or the whole company with scope='company'. Use this to "
+        "answer 'what have we made' and to find an existing artifact before "
+        "creating a duplicate.",
+        properties={
+            "scope": types.Schema(type=types.Type.STRING, enum=["thread", "company"]),
+            "asset_type": types.Schema(type=types.Type.STRING),
+            "limit": types.Schema(type=types.Type.INTEGER),
+        },
+        intent_hints=("what have we made", "what did we create", "assets we created",
+                      "list the assets", "offer letters we created"),
     ),
     _tool(
         "finish", "finish",

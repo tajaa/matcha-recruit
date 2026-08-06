@@ -128,12 +128,12 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
     <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} ${isHuume ? 'items-start gap-2' : ''}`}>
       {isHuume && <HuumeAvatar size="sm" lightMode={lm} />}
       <div
-        className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
+        className={`max-w-[95%] sm:max-w-[85%] rounded-md px-2.5 py-1.5 text-[13px] leading-snug ${
           m.role === 'user'
             ? 'bg-w-surface2 text-w-text whitespace-pre-wrap'
             : lm
-              ? 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-zinc max-w-none overflow-x-auto'
-              : 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
+              ? 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-zinc max-w-none overflow-x-auto prose-p:my-0.5 prose-p:leading-snug prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-li:leading-snug prose-headings:my-1 prose-pre:my-1'
+              : 'bg-w-surface text-w-text border border-w-line prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto prose-p:my-0.5 prose-p:leading-snug prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-li:leading-snug prose-headings:my-1 prose-pre:my-1'
         }`}
       >
         {m.role === 'user' && (m.metadata?.attachments?.length ?? 0) > 0 && (
@@ -178,11 +178,6 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
           })()
         ) : m.role === 'assistant' ? (
           <>
-            {isHuume && (
-              <div className={`not-prose text-[10px] font-medium uppercase tracking-wide mb-1 ${lm ? 'text-orange-600' : 'text-orange-400'}`}>
-                Huume
-              </div>
-            )}
             {m.metadata?.huume_event && HUUME_EVENT_STRIP[m.metadata.huume_event] && (() => {
               const ev = HUUME_EVENT_STRIP[m.metadata.huume_event]!
               const Icon = ev.icon
@@ -208,7 +203,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
               <button
                 type="button"
                 onClick={() => setDetailsOpen((v) => !v)}
-                className={`mt-2 pt-2 border-t ${divider} w-full flex items-center gap-1 text-[11px] ${metaText} hover:opacity-80 transition-opacity`}
+                className={`mt-0.5 w-full flex items-center gap-1 text-[10px] ${metaText} hover:opacity-80 transition-opacity`}
               >
                 {detailsOpen ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
                 <span className="truncate text-left">{detailParts.join(' · ')}</span>

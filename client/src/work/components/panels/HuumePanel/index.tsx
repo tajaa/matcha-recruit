@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { FileSignature, PlayCircle, BookOpen, Scale, Send, X } from 'lucide-react'
-import type { HuumeOffer, HuumePlan, HuumeRecordRef, HuumeThreadOffer } from '../../../types'
+import { FileSignature, PlayCircle, BookOpen, Scale, Send, X, Archive, ChevronDown } from 'lucide-react'
+import type { HuumeAsset, HuumeOffer, HuumePlan, HuumeRecordRef, HuumeThreadOffer } from '../../../types'
 import { getHuumeState, deriveHuumeArtifacts, defaultArtifactKey, type HuumeArtifact } from '../../../utils/huumeState'
 import { actionIcon, bannerLabel } from '../../../utils/huumeActionMeta'
-import { closeHuumeRecord, listThreadOffers } from '../../../api/matchaWork/huume'
+import { closeHuumeRecord, listHuumeAssets, listThreadOffers } from '../../../api/matchaWork/huume'
 import { useToast } from '../../../../components/ui'
 import OfferLetterViewer from './OfferLetterViewer'
 import ActionDocViewer from './ActionDocViewer'
@@ -80,6 +80,19 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
     listThreadOffers(threadId).then((res) => { if (!cancelled) setThreadOffers(res.offers) }).catch(() => {})
     return () => { cancelled = true }
   }, [threadId, huume.offer?.offer_id])
+
+  // Cross-type registry — every durable thing Huume has made in this thread
+  // (offer letters, discipline records, incidents, schedule changes,
+  // inventory rows, ...), not just the artifact kinds the tab bar tracks.
+  // Refetched whenever a new action lands (huume.action changing), same
+  // trigger shape as the offers refetch above.
+  const [assets, setAssets] = useState<HuumeAsset[]>([])
+  const [assetsOpen, setAssetsOpen] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    listHuumeAssets(threadId).then((res) => { if (!cancelled) setAssets(res.assets) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [threadId, huume.action?.status])
 
   const artifacts = useMemo(() => {
     const labeled = baseArtifacts.map((a) => {
@@ -205,12 +218,57 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
             </div>
           )
         })}
+        {assets.length > 0 && (
+          <div className={`relative ${onDismiss ? '' : 'ml-auto'}`}>
+            <button
+              type="button"
+              onClick={() => setAssetsOpen((v) => !v)}
+              title="Everything Huume has made in this thread"
+              className={`flex items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium ${
+                lightMode ? 'text-zinc-600 hover:bg-zinc-100' : 'text-zinc-400 hover:bg-zinc-800'
+              }`}
+            >
+              <Archive size={12} /> Assets ({assets.length}) <ChevronDown size={10} />
+            </button>
+            {assetsOpen && (
+              <div
+                className={`absolute right-0 top-full z-10 mt-1 max-h-64 w-64 overflow-y-auto rounded border shadow-lg ${
+                  lightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'
+                }`}
+              >
+                {assets.map((a) => (
+                  <button
+                    key={a.asset_id}
+                    type="button"
+                    onClick={() => {
+                      setAssetsOpen(false)
+                      if (a.asset_type === 'offer_letter') {
+                        const match = artifacts.find((art) => art.kind === 'offer' && art.offerId === a.ref_id)
+                        if (match) setSelectedKey(match.key)
+                      }
+                    }}
+                    className={`flex w-full flex-col items-start gap-0.5 border-b px-2.5 py-1.5 text-left last:border-b-0 ${
+                      lightMode ? 'border-zinc-100 hover:bg-zinc-50' : 'border-zinc-800/60 hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    <span className={`text-[11px] truncate w-full ${lightMode ? 'text-zinc-700' : 'text-zinc-300'}`}>{a.label}</span>
+                    {a.status && (
+                      <span className={`text-[10px] ${lightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>{a.status}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {onDismiss && (
           <button
             type="button"
             onClick={onDismiss}
             title="Close panel"
-            className={`ml-auto shrink-0 p-1 rounded transition-colors ${
+            className={`shrink-0 p-1 rounded transition-colors ${
+              assets.length === 0 ? 'ml-auto' : ''
+            } ${
               lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
             }`}
           >
@@ -234,6 +292,11 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
             key={active.key}
             offerId={active.offerId}
             offer={huume.offer?.offer_id === active.offerId ? huume.offer : undefined}
+            pendingSend={
+              huume.action?.type === 'send_offer' && huume.action.offer_id === active.offerId
+                ? huume.action
+                : undefined
+            }
             lightMode={lightMode}
           />
         )}
