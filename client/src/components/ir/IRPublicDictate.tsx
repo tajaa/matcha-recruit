@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Mic, Square, Loader2 } from 'lucide-react'
-import { useVoiceDictation } from '../../hooks/ir/useVoiceDictation'
+import { useVoiceDictation } from '../../hooks/useVoiceDictation'
 import type { VoicePrefill } from '../../types/ir'
 
 function fmtElapsed(s: number): string {

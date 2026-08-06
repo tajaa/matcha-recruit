@@ -193,6 +193,8 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 - REST router (items/movements/orders/suggestions) → `server/app/matcha/routes/inventory.py`
 - Per-location item resolution → `server/app/matcha/services/inventory/movements.py:list_item_names` / `find_or_create_item`
 - Receipt ingest (invoice/packing-slip → `in` movements) → `server/app/matcha/services/inventory/receipts.py`, routes at `routes/inventory.py` `/receipts/*`
+- Stock audit (bulk count → `adjust` movements) → `server/app/matcha/services/inventory/audits.py`, routes at `routes/inventory.py` `/audit/commit`
+- Voice stock-count dictation (`inventory_voice`) → `server/app/matcha/services/inventory/voice_audit.py`, route `/audit/voice-parse`
 
 ### Employees
 

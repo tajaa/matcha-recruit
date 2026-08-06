@@ -192,3 +192,45 @@ export function downloadReceiptTemplate() {
 export async function listSuggestions() {
   return api.get<Record<string, InventorySuggestion>>('/inventory/suggestions')
 }
+
+// ── Stock audit ──
+
+export interface AuditCommitLine {
+  item_id?: string
+  new_item_name?: string
+  counted_quantity: number
+}
+
+export interface AuditCommitResult {
+  total: number
+  applied: number
+  failed: number
+  errors: { row: number; item: string; error: string }[]
+}
+
+export function commitAudit(body: { location_id?: string | null; note?: string; lines: AuditCommitLine[] }) {
+  return api.post<AuditCommitResult>('/inventory/audit/commit', body)
+}
+
+export interface VoiceCountLine {
+  item_name: string
+  quantity: number
+  unit: string | null
+  item_id: string | null
+  matched_name: string | null
+  exact: boolean
+}
+
+export interface VoiceCountDraft {
+  available: boolean
+  transcript: string | null
+  model: string | null
+  lines: VoiceCountLine[]
+}
+
+export function parseAuditVoice(wav: Blob, locationId?: string) {
+  const form = new FormData()
+  form.append('file', wav, 'counts.wav')
+  const qs = locationId ? `?location_id=${locationId}` : ''
+  return api.upload<VoiceCountDraft>(`/inventory/audit/voice-parse${qs}`, form)
+}

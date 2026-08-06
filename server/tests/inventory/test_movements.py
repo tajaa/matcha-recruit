@@ -135,3 +135,25 @@ class TestFindOrCreateItem:
         assert result["id"] == "item-new"
         assert len(conn.execute_calls) == 1
         assert "INSERT" in conn.execute_calls[0][0].upper()
+
+    def test_existing_list_skips_the_catalog_requery(self, monkeypatch):
+        # audits.commit_audit_lines threads its own `existing` catalog
+        # across every new_item_name line in a batch — a per-line
+        # find_or_create_item must not re-run list_item_names.
+        calls = {"n": 0}
+
+        async def fake_list_item_names(conn, company_id, location_id):
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(movements, "list_item_names", fake_list_item_names)
+        conn = FakeConnWithInsert(rows_by_query={"match": {"id": "item-1", "name": "Nitrile Gloves (M)"}})
+        existing = [{"id": "item-1", "name": "Nitrile Gloves (M)", "normalized_name": "nitrile glove m"}]
+
+        result = _run(movements.find_or_create_item(
+            conn, "company-1", "nitrile gloves", created_by="user-1", existing=existing,
+        ))
+
+        assert result == {"id": "item-1", "name": "Nitrile Gloves (M)"}
+        assert conn.execute_calls == []  # matched against `existing`, no INSERT
+        assert calls["n"] == 0  # and no catalog requery

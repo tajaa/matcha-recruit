@@ -1,10 +1,11 @@
-// Capture-only mic dictation for the IR create form. Reuses the existing
-// pcm-capture-processor AudioWorklet (16 kHz mono Int16 PCM) and assembles a WAV
-// blob client-side (Gemini accepts WAV, not MediaRecorder's webm/opus). No
-// WebSocket / playback — this is a one-shot record→blob, unlike useVoiceSession.
+// Capture-only mic dictation — one-shot record→blob (no WebSocket/playback,
+// unlike work/hooks/useVoiceSession). Reuses the existing pcm-capture-processor
+// AudioWorklet (16 kHz mono Int16 PCM) and assembles a WAV blob client-side
+// (Gemini accepts WAV, not MediaRecorder's webm/opus). Shared: used by IR's
+// dictate-a-report flow and the inventory Audit sheet's dictate-a-count flow.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { pcmFramesToWavBlob } from '../../utils/pcmToWav'
+import { pcmFramesToWavBlob } from '../utils/pcmToWav'
 
 export type DictationStatus = 'idle' | 'recording' | 'denied' | 'error'
 

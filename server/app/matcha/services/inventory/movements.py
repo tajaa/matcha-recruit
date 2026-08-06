@@ -43,8 +43,9 @@ async def find_item(
 async def find_or_create_item(
     conn, company_id: UUID, raw_name: str, *,
     created_by: Optional[UUID], location_id: Optional[UUID] = None,
+    existing: Optional[list[dict]] = None,
 ) -> dict:
-    found = await find_item(conn, company_id, raw_name, location_id)
+    found = await find_item(conn, company_id, raw_name, location_id, existing=existing)
     if found is not None:
         # May resolve to a shared NULL-location legacy item — intended.
         return found

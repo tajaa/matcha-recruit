@@ -343,6 +343,12 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /inventory router + the /work Inventory page. See
     # services/inventory/CLAUDE.md for the full spec. NOT bundled.
     "inventory": False,
+    # Voice stock-count dictation on the Inventory Audit sheet — one Gemini
+    # multimodal parse of a spoken count list ("12 boxes of gloves...") into
+    # a review sheet the manager confirms before saving. Parse-only, NEVER
+    # writes (same invariant as ir_voice_intake). Default off; admin-toggle;
+    # NOT bundled.
+    "inventory_voice": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -747,6 +753,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "werk_lite": ("matcha_work",),
     "ems": ("matcha_work",),
     "inventory": ("matcha_work",),
+    "inventory_voice": ("inventory",),
 }
 
 

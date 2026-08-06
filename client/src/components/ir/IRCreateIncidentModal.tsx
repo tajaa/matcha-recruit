@@ -6,7 +6,7 @@ import { Button, Modal, Select } from '../ui'
 import { IRPersonMultiSelect } from './IRPersonMultiSelect'
 import { EmployeeMultiSelect } from '../employees/EmployeeMultiSelect'
 import { useMe } from '../../hooks/useMe'
-import { useVoiceDictation } from '../../hooks/ir/useVoiceDictation'
+import { useVoiceDictation } from '../../hooks/useVoiceDictation'
 import type { IRIncident, VoicePrefill } from '../../types/ir'
 
 type LocationRow = {

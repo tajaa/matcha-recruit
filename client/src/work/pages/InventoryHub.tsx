@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { ClipboardCheck, Loader2 } from 'lucide-react'
 import { Button, Input, useToast } from '../../components/ui'
 import ItemTable from '../components/inventory/ItemTable'
 import ItemDetail from '../components/inventory/ItemDetail'
@@ -8,9 +8,12 @@ import OrderQueue from '../components/inventory/OrderQueue'
 import ReceiveDeliveryModal from '../components/inventory/ReceiveDeliveryModal'
 import { createItem, listItems, listOrders, type InventoryItem, type InventoryOrder } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
+import { useWorkBase } from '../routes/WorkSurfaceContext'
 
 export default function InventoryHub() {
   const { itemId } = useParams<{ itemId: string }>()
+  const navigate = useNavigate()
+  const base = useWorkBase()
   const { toast } = useToast()
   const [items, setItems] = useState<InventoryItem[]>([])
   const [orders, setOrders] = useState<InventoryOrder[]>([])
@@ -83,6 +86,9 @@ export default function InventoryHub() {
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Inventory</h2>
         <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => navigate(`${base}/inventory/audit`)}>
+            <ClipboardCheck className="mr-1.5 inline h-3.5 w-3.5" /> Audit
+          </Button>
           <Button onClick={() => setReceiveOpen(true)}>Receive delivery</Button>
           {locations.length > 0 && (
             <select

@@ -32,3 +32,22 @@ async def read_upload_capped(file: UploadFile, max_bytes: int) -> bytes:
     if total == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
     return b"".join(chunks)
+
+
+_ALLOWED_AUDIO_MIME = {"audio/wav", "audio/x-wav", "audio/wave"}
+_MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+
+async def read_wav_or_400(file: UploadFile) -> bytes:
+    """Bound + validate a WAV voice-dictation upload. Content-type is
+    client-controlled, so it's checked as an allow-list hint and then the
+    bytes themselves are checked for the real RIFF/WAVE magic header.
+    Lifted from routes/ir_incidents/_shared.py's _read_audio_or_400 so any
+    route package can reuse it without importing another router package."""
+    content_type = (file.content_type or "").lower()
+    if content_type not in _ALLOWED_AUDIO_MIME:
+        raise HTTPException(status_code=400, detail="Audio must be WAV (audio/wav).")
+    audio = await read_upload_capped(file, _MAX_AUDIO_BYTES)
+    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise HTTPException(status_code=400, detail="Not a valid WAV file.")
+    return audio

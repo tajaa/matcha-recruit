@@ -14,16 +14,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
+from app.core.services.redis_cache import check_rate_limit
 from app.database import get_connection
-from app.matcha.dependencies import get_client_company_id, require_admin_or_client
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
 from app.matcha.models.inventory import (
-    InventoryItemCreate, InventoryItemOut, InventoryItemPatch, ItemListResponse,
-    MovementListResponse, MovementOut, OrderAction, OrderCreate, OrderListResponse, OrderOut,
-    ReceiptCommit, ReceiptCommitResult,
+    AuditCommit, AuditCommitResult, InventoryItemCreate, InventoryItemOut, InventoryItemPatch,
+    ItemListResponse, MovementListResponse, MovementOut, OrderAction, OrderCreate,
+    OrderListResponse, OrderOut, ReceiptCommit, ReceiptCommitResult, VoiceCountDraft,
 )
+from app.matcha.services._shared.uploads import read_wav_or_400
+from app.matcha.services.inventory import audits as audits_service
 from app.matcha.services.inventory import movements as movements_service
 from app.matcha.services.inventory import orders as orders_service
 from app.matcha.services.inventory import receipts as receipts_service
+from app.matcha.services.inventory import voice_audit
 from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
 
@@ -265,6 +269,74 @@ async def list_suggestions(company_id: UUID = Depends(get_client_company_id),
             if suggestion:
                 out[str(item["id"])] = {"name": item["name"], **suggestion}
     return out
+
+
+@router.post("/audit/commit", response_model=AuditCommitResult)
+async def commit_audit(body: AuditCommit, company_id: UUID = Depends(get_client_company_id),
+                        user=Depends(require_admin_or_client)):
+    """Bulk stock-count save from the Audit sheet — one or many item counts
+    in a single request, each written as a kind='adjust' movement (see
+    services/inventory/audits.py). Untouched items simply aren't in
+    `lines` — the sheet only sends rows the manager actually edited."""
+    if not body.lines:
+        raise HTTPException(400, "No counts to save.")
+    if len(body.lines) > audits_service.MAX_LINES:
+        raise HTTPException(413, f"Too many lines (max {audits_service.MAX_LINES}).")
+    async with get_connection() as conn:
+        try:
+            result = await audits_service.commit_audit_lines(
+                conn, company_id=company_id, user_id=user.id,
+                location_id=body.location_id, note=body.note,
+                lines=[line.model_dump() for line in body.lines],
+            )
+        except ValueError as exc:
+            if str(exc) != "location not found":
+                raise
+            raise HTTPException(404, "Location not found.")
+    return AuditCommitResult(**result)
+
+
+@router.post("/audit/voice-parse", response_model=VoiceCountDraft)
+async def parse_audit_voice(
+    file: UploadFile = File(...),
+    location_id: Optional[UUID] = Query(None),
+    current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("inventory_voice")),
+):
+    """Dictate stock counts instead of typing them — one Gemini multimodal
+    parse of a WAV recording into a count-per-item draft. Writes nothing;
+    the Audit sheet merges the result and the manager saves via
+    POST /audit/commit as normal. 2-segment path so it isn't shadowed by
+    /items/{item_id}-style single-segment routes."""
+    # Each parse is an expensive Gemini multimodal call — same rate-limit
+    # shape as ir_voice_intake's /voice/parse (burst + hourly per-user,
+    # hourly per-company), own action keys so the two features don't share
+    # a budget.
+    user_key = f"user:{current_user.id}"
+    await check_rate_limit(user_key, "inv_voice_parse_burst", 5, 60)
+    await check_rate_limit(user_key, "inv_voice_parse", 40, 3600)
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+    await check_rate_limit(str(company_id), "inv_voice_parse_co", 120, 3600)
+
+    audio = await read_wav_or_400(file)
+
+    async with get_connection() as conn:
+        catalog = await movements_service.list_item_names(conn, company_id, location_id)
+        parsed = await voice_audit.parse_voice_counts(
+            audio, (file.content_type or "audio/wav").lower(),
+            item_names=[row["name"] for row in catalog],
+        )
+        resolved = await voice_audit.resolve_count_lines(
+            conn, company_id=company_id, location_id=location_id, lines=parsed["lines"],
+            existing=catalog,
+        )
+    return VoiceCountDraft(
+        available=parsed["available"], transcript=parsed["transcript"],
+        model=parsed["model"], lines=resolved,
+    )
 
 
 @router.get("/receipts/template")

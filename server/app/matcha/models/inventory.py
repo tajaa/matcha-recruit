@@ -105,3 +105,38 @@ class ReceiptCommitResult(BaseModel):
     failed: int
     errors: list[dict]
     ids: list[str]                       # movement ids written
+
+
+class AuditLine(BaseModel):
+    item_id: Optional[UUID] = None       # existing item ...
+    new_item_name: Optional[str] = None  # ... or accept-as-new (exactly one required)
+    counted_quantity: float = Field(ge=0)  # the manager's physical count; 0 is legal (none on hand)
+
+
+class AuditCommit(BaseModel):
+    location_id: Optional[UUID] = None
+    note: Optional[str] = None           # defaults server-side to "Stock audit"
+    lines: list[AuditLine]
+
+
+class AuditCommitResult(BaseModel):
+    total: int
+    applied: int
+    failed: int
+    errors: list[dict]                   # [{row, item, error}]
+
+
+class VoiceCountLine(BaseModel):
+    item_name: str
+    quantity: float
+    unit: Optional[str] = None
+    item_id: Optional[str] = None
+    matched_name: Optional[str] = None
+    exact: bool = False
+
+
+class VoiceCountDraft(BaseModel):
+    available: bool
+    transcript: Optional[str] = None
+    model: Optional[str] = None
+    lines: list[VoiceCountLine]
