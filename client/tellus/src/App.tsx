@@ -26,6 +26,13 @@ import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 
 import TellusAdminUpdates from './pages/admin/Updates'
+import AdminAccounts from './pages/admin/Accounts'
+import AdminAccountDetail from './pages/admin/AccountDetail'
+import AdminBrands from './pages/admin/Brands'
+import AdminBrandDetail from './pages/admin/BrandDetail'
+import AdminModeration from './pages/admin/Moderation'
+import AdminEconomy from './pages/admin/Economy'
+import ResetPassword from './pages/ResetPassword'
 
 // Where an authenticated brand lands: /brand/billing if unpaid (or plan_status
 // unset — a defensive fallback, e.g. mid-migration data), else the dashboard.
@@ -74,6 +81,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/verify" element={<Verify />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/i/:token" element={<Intake />} />
       <Route path="/b/:slug" element={<PublicBrand />} />
       <Route path="/places" element={<Places />} />
@@ -96,6 +104,12 @@ export default function App() {
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
 
       {/* Internal admin */}
+      <Route path="/admin/accounts" element={<AdminOnly><AdminAccounts /></AdminOnly>} />
+      <Route path="/admin/accounts/:id" element={<AdminOnly><AdminAccountDetail /></AdminOnly>} />
+      <Route path="/admin/brands" element={<AdminOnly><AdminBrands /></AdminOnly>} />
+      <Route path="/admin/brands/:id" element={<AdminOnly><AdminBrandDetail /></AdminOnly>} />
+      <Route path="/admin/moderation" element={<AdminOnly><AdminModeration /></AdminOnly>} />
+      <Route path="/admin/economy" element={<AdminOnly><AdminEconomy /></AdminOnly>} />
       <Route path="/admin/updates" element={<AdminOnly><TellusAdminUpdates /></AdminOnly>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />

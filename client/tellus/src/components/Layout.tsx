@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
+import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -36,6 +36,14 @@ const BRAND_PENDING_NAV: NavItem[] = [
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
 ]
 
+const ADMIN_NAV: NavItem[] = [
+  { to: '/admin/accounts', label: 'Accounts', icon: Users },
+  { to: '/admin/brands', label: 'Brands', icon: Building2 },
+  { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert },
+  { to: '/admin/economy', label: 'Economy', icon: Coins },
+  { to: '/admin/updates', label: 'Updates', icon: Sparkles },
+]
+
 function navLinkClass({ isActive }: { isActive: boolean }) {
   return `flex items-center gap-2 whitespace-nowrap rounded-md border-l-2 px-3 py-2 text-sm font-medium transition ${
     isActive
@@ -50,9 +58,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const isBrand = account?.account_type === 'brand'
   const isPendingBrand = isBrand && account?.plan_status !== 'active'
   const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
-  const nav = account?.is_admin
-    ? [...baseNav, { to: '/admin/updates', label: 'Updates', icon: Sparkles }]
-    : baseNav
+  const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
   const [unread, setUnread] = useState(0)
 
   useEffect(() => {
@@ -124,12 +130,26 @@ export function Layout({ children }: { children: ReactNode }) {
           <span className="font-display text-sm font-bold tracking-tight">Tell-Us</span>
         </button>
         <nav className="flex flex-1 flex-col gap-0.5 px-3 py-2">
-          {nav.map(({ to, label, icon: Icon, end }) => (
+          {baseNav.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={navLinkClass}>
               <Icon className="h-4 w-4" />
               {label}
             </NavLink>
           ))}
+          {account?.is_admin && (
+            <>
+              <div className="my-2 border-t border-tu-border" />
+              <div className="px-3 pb-1 font-mono text-[10px] uppercase tracking-[0.15em] text-tu-faint">
+                Internal
+              </div>
+              {ADMIN_NAV.map(({ to, label, icon: Icon, end }) => (
+                <NavLink key={to} to={to} end={end} className={navLinkClass}>
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
         <div className="flex items-center justify-between border-t border-tu-border px-4 py-3">
           <span className="truncate text-xs text-tu-faint">{account?.display_name || account?.email}</span>

@@ -112,6 +112,7 @@ export async function tellusPublicPost<T>(path: string, body: unknown): Promise<
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await _errMsg(res))
+  if (res.status === 204) return null as T
   return res.json()
 }
 
