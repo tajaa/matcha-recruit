@@ -23,7 +23,7 @@ from ...models.admin import (
     TellusAdminPointsAdjust,
     TellusAdminSuspendRequest,
 )
-from ._shared import account_filter_sql
+from ._shared import account_filter_sql, decode_audit_rows
 
 router = APIRouter(dependencies=[Depends(require_tellus_admin)])
 
@@ -121,7 +121,7 @@ async def get_account_detail(account_id: UUID):
         recent_reports=[dict(r) for r in report_rows],
         redemptions=[dict(r) for r in redemption_rows],
         dm_threads=[dict(r) for r in dm_rows],
-        audit=[TellusAdminAuditEntry(**dict(r)) for r in audit_rows],
+        audit=[TellusAdminAuditEntry(**d) for d in decode_audit_rows(audit_rows)],
     )
 
 

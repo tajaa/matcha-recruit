@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....database import get_connection
 from .._shared import escape_like
+from ._shared import decode_audit_rows
 from ...dependencies import require_tellus_admin
 from ...models.tellus import TellusAccount
 from ...services.admin_audit import record_admin_action
@@ -118,7 +119,7 @@ async def get_brand_detail(brand_id: UUID):
         links=[dict(r) for r in links],
         prompts=[dict(r) for r in prompts],
         report_stats=dict(stats) if stats else {},
-        audit=[TellusAdminAuditEntry(**dict(r)) for r in audit_rows],
+        audit=[TellusAdminAuditEntry(**d) for d in decode_audit_rows(audit_rows)],
     )
 
 

@@ -1,9 +1,27 @@
 """Pure SQL filter builders for the Tell-Us internal admin list endpoints.
 No DB access — unit-tested in server/tests/tellus/test_admin_management.py.
 """
+import json
 from typing import Optional
 
 from .._shared import escape_like
+
+
+def decode_audit_rows(rows) -> list[dict]:
+    """asyncpg returns JSONB as a raw string unless a codec is registered on
+    the pool — decode `detail` defensively before constructing
+    TellusAdminAuditEntry (mirrors the same defensive decode in audit.py and
+    points_service.check_and_award_badges)."""
+    out = []
+    for r in rows:
+        d = dict(r)
+        if isinstance(d.get("detail"), str):
+            try:
+                d["detail"] = json.loads(d["detail"])
+            except ValueError:
+                d["detail"] = None
+        out.append(d)
+    return out
 
 
 def account_filter_sql(

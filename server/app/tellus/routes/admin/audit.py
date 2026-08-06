@@ -1,5 +1,4 @@
 """Tell-Us internal admin — audit trail reader."""
-import json
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -8,6 +7,7 @@ from ....database import get_connection
 from ...dependencies import require_tellus_admin
 from ...services.admin_audit import ADMIN_ACTIONS
 from ...models.admin import TellusAdminAuditEntry
+from ._shared import decode_audit_rows
 
 router = APIRouter(dependencies=[Depends(require_tellus_admin)])
 
@@ -46,15 +46,7 @@ async def list_audit(
         )
         total = await conn.fetchval(f"SELECT COUNT(*) FROM tellus_admin_audit{where}", *params)
 
-    items = []
-    for r in rows:
-        d = dict(r)
-        if isinstance(d["detail"], str):
-            try:
-                d["detail"] = json.loads(d["detail"])
-            except ValueError:
-                d["detail"] = None
-        items.append(TellusAdminAuditEntry(**d))
+    items = [TellusAdminAuditEntry(**d) for d in decode_audit_rows(rows)]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
