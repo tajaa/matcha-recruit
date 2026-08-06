@@ -60,8 +60,8 @@ async def list_accounts(
     account_type: Optional[str] = None,
     status: Optional[str] = None,
     verified: Optional[bool] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     where, params = account_filter_sql(q=q, account_type=account_type, status=status, verified=verified)
     async with get_connection() as conn:

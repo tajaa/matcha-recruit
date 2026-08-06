@@ -165,19 +165,23 @@ function Badges() {
 
 function Listings() {
   const [listings, setListings] = useState<AdminListing[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const limit = 50
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   async function load() {
     try {
-      const res = await tellusApi.get<{ items: AdminListing[] }>('/admin/listings')
+      const res = await tellusApi.get<{ items: AdminListing[]; total: number }>(`/admin/listings?limit=${limit}&offset=${offset}`)
       setListings(res.items)
+      setTotal(res.total)
     } catch (e) {
       setError(toErrorMessage(e, 'Failed to load listings'))
     }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load() }, [offset])
 
   async function toggle(l: AdminListing) {
     if (l.is_active && !window.confirm(`Deactivate "${l.title}"?`)) return
@@ -213,6 +217,25 @@ function Listings() {
           </div>
         ))}
         {listings.length === 0 && <p className="text-sm text-tu-faint">No listings yet.</p>}
+      </div>
+      <div className="mt-3 flex items-center justify-between border-t border-tu-border/50 pt-2">
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - limit))}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Prev
+        </button>
+        <span className="text-xs text-tu-faint">{total ? `${offset + 1}–${Math.min(offset + limit, total)} of ${total}` : ''}</span>
+        <button
+          type="button"
+          disabled={offset + limit >= total}
+          onClick={() => setOffset(offset + limit)}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Next
+        </button>
       </div>
     </Card>
   )

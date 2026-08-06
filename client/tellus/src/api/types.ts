@@ -512,6 +512,17 @@ export interface AdminReportItem extends Report {
   brand_name: string | null
 }
 
+// GET /admin/dm-threads/{id}/messages — admin's read-only view, distinct from
+// DmMessage (no `is_mine`; there's no "me" from the admin's perspective).
+export interface AdminDmMessage {
+  id: string
+  thread_id: string
+  sender_role: DmSenderRole
+  body: string
+  created_at: string
+  read_at: string | null
+}
+
 export interface AdminDmThreadSummary {
   id: string
   report_id: string

@@ -45,7 +45,8 @@ export default function AdminAccountDetail() {
   }
 
   async function suspend() {
-    const reason = window.prompt('Reason (optional):') ?? ''
+    const reason = window.prompt('Reason (optional):')
+    if (reason === null) return
     if (!window.confirm('Suspend this account? They will be signed out and unable to log in.')) return
     await withBusy(async () => {
       await tellusApi.post(`/admin/accounts/${id}/suspend`, { reason: reason || null })
@@ -104,9 +105,13 @@ export default function AdminAccountDetail() {
     if (n < 0 && !window.confirm(`Claw back ${-n} points from this account?`)) return
     setBusy(true)
     try {
-      await tellusApi.post<AdminPointsAdjustResult>(`/admin/accounts/${id}/points-adjust`, {
+      const result = await tellusApi.post<AdminPointsAdjustResult>(`/admin/accounts/${id}/points-adjust`, {
         delta: n, description, idempotency_key: idemKeyRef.current, clamp,
       })
+      if (!result.adjusted) {
+        setAdjustError('This adjustment was already applied — no change was made.')
+        return
+      }
       openAdjustForm()
       await refresh()
     } catch (e) {

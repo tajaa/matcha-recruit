@@ -17,8 +17,8 @@ async def list_audit(
     target_type: Optional[str] = None,
     target_id: Optional[str] = None,
     action: Optional[str] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     clauses: list[str] = []
     params: list = []

@@ -96,6 +96,19 @@ export default function AdminBrandDetail() {
     }
   }
 
+  async function unassignOwner() {
+    if (!window.confirm('Unassign this owner? If they were converted from a consumer account, they will be converted back.')) return
+    setBusy(true)
+    try {
+      await tellusApi.post(`/admin/brands/${id}/unassign-owner`)
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to unassign owner')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (error && !data) return <p className="p-4 text-sm text-tu-bad">{error}</p>
   if (!data) return <Spinner />
 
@@ -114,9 +127,14 @@ export default function AdminBrandDetail() {
           <Chip>{brand.source}</Chip>
         </div>
         <div className="mt-1 font-mono text-sm text-tu-dim">{brand.slug}</div>
-        <div className="mt-2 text-sm">
+        <div className="mt-2 flex items-center gap-2 text-sm">
           {brand.owner_account_id
-            ? <button onClick={() => navigate(`/admin/accounts/${brand.owner_account_id}`)} className="text-tu-accent hover:underline">Owner: {brand.owner_email}</button>
+            ? (
+              <>
+                <button onClick={() => navigate(`/admin/accounts/${brand.owner_account_id}`)} className="text-tu-accent hover:underline">Owner: {brand.owner_email}</button>
+                <Button variant="soft" size="sm" loading={busy} onClick={() => void unassignOwner()}>Unassign</Button>
+              </>
+            )
             : <span className="italic text-tu-faint">unclaimed</span>}
         </div>
         {data.activated_at && <div className="mt-1 text-xs text-tu-faint">Activated {fmtDate(data.activated_at)}</div>}

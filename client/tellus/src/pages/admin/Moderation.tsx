@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2, Sparkles, Star } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Chip, ErrorText, Input, Select } from '../../components/ui'
-import type { AdminDmThreadSummary, AdminReportItem, DmMessage } from '../../api/types'
+import type { AdminDmMessage, AdminDmThreadSummary, AdminReportItem } from '../../api/types'
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString()
 
@@ -17,6 +17,8 @@ function ReviewsTab() {
   const [debouncedBrandQ, setDebouncedBrandQ] = useState('')
   const [items, setItems] = useState<AdminReportItem[]>([])
   const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const limit = 50
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
@@ -28,6 +30,8 @@ function ReviewsTab() {
     return () => clearTimeout(t)
   }, [brandQ])
 
+  useEffect(() => { setOffset(0) }, [moderationStatus, reviewState, debouncedBrandQ])
+
   async function load() {
     setLoading(true)
     setError('')
@@ -35,6 +39,8 @@ function ReviewsTab() {
     if (moderationStatus) params.set('moderation_status', moderationStatus)
     if (reviewState) params.set('review_state', reviewState)
     if (debouncedBrandQ) params.set('q', debouncedBrandQ)
+    params.set('limit', String(limit))
+    params.set('offset', String(offset))
     try {
       const res = await tellusApi.get<{ items: AdminReportItem[]; total: number }>(`/admin/reports?${params.toString()}`)
       setItems(res.items)
@@ -46,7 +52,7 @@ function ReviewsTab() {
     }
   }
 
-  useEffect(() => { void load() }, [moderationStatus, reviewState, debouncedBrandQ])
+  useEffect(() => { void load() }, [moderationStatus, reviewState, debouncedBrandQ, offset])
 
   async function applyModeration(id: string) {
     const next = pendingStatus[id]
@@ -148,24 +154,48 @@ function ReviewsTab() {
         })}
         {!loading && items.length === 0 && <p className="px-4 py-8 text-center text-sm text-tu-faint">No reviews match these filters.</p>}
       </div>
+
+      <div className="flex items-center justify-between border-t border-tu-border px-4 py-2">
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - limit))}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Prev
+        </button>
+        <span className="text-xs text-tu-faint">{total ? `${offset + 1}–${Math.min(offset + limit, total)} of ${total}` : ''}</span>
+        <button
+          type="button"
+          disabled={offset + limit >= total}
+          onClick={() => setOffset(offset + limit)}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
     </div>
   )
 }
 
 function DmsTab() {
   const [items, setItems] = useState<AdminDmThreadSummary[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const limit = 50
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<Record<string, DmMessage[]>>({})
+  const [messages, setMessages] = useState<Record<string, AdminDmMessage[]>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const res = await tellusApi.get<{ items: AdminDmThreadSummary[] }>('/admin/dm-threads')
+      const res = await tellusApi.get<{ items: AdminDmThreadSummary[]; total: number }>(`/admin/dm-threads?limit=${limit}&offset=${offset}`)
       setItems(res.items)
+      setTotal(res.total)
     } catch (e) {
       setError(toErrorMessage(e, 'Failed to load conversations'))
     } finally {
@@ -173,14 +203,14 @@ function DmsTab() {
     }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => { void load() }, [offset])
 
   async function toggleOpen(t: AdminDmThreadSummary) {
     if (openId === t.id) { setOpenId(null); return }
     setOpenId(t.id)
     if (!messages[t.id]) {
       try {
-        const rows = await tellusApi.get<DmMessage[]>(`/admin/dm-threads/${t.id}/messages`)
+        const rows = await tellusApi.get<AdminDmMessage[]>(`/admin/dm-threads/${t.id}/messages`)
         setMessages((m) => ({ ...m, [t.id]: rows }))
       } catch (e) {
         setError(toErrorMessage(e, 'Failed to load messages'))
@@ -249,6 +279,26 @@ function DmsTab() {
         </div>
       ))}
       {!loading && items.length === 0 && <p className="px-4 py-8 text-center text-sm text-tu-faint">No conversations yet.</p>}
+
+      <div className="flex items-center justify-between border-t border-tu-border px-4 py-2">
+        <button
+          type="button"
+          disabled={offset === 0}
+          onClick={() => setOffset(Math.max(0, offset - limit))}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Prev
+        </button>
+        <span className="text-xs text-tu-faint">{total ? `${offset + 1}–${Math.min(offset + limit, total)} of ${total}` : ''}</span>
+        <button
+          type="button"
+          disabled={offset + limit >= total}
+          onClick={() => setOffset(offset + limit)}
+          className="rounded-md border border-tu-border px-2.5 py-1 text-xs font-medium text-tu-dim disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
     </div>
   )
 }

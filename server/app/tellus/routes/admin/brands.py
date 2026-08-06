@@ -41,8 +41,8 @@ async def list_brands(
     q: Optional[str] = None,
     plan_status: Optional[str] = None,
     source: Optional[str] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     clauses: list[str] = []
     params: list = []
@@ -138,6 +138,18 @@ async def update_plan(
 
             stripe_warning = None
             if body.action == "comp":
+                if row["stripe_subscription_id"]:
+                    # invoice.payment_failed (stripe_webhook.py) flips plan_status
+                    # 'active' -> 'past_due' for any row matching this
+                    # stripe_subscription_id — a comp on top of a live subscription
+                    # would get silently reverted by the next failed-payment
+                    # webhook. Cancel the subscription in Stripe first.
+                    raise HTTPException(
+                        409,
+                        f"Brand has an active Stripe subscription ({row['stripe_subscription_id']}) — "
+                        "cancel it in the Stripe dashboard before comping, or the next billing "
+                        "webhook will silently revert this.",
+                    )
                 await conn.execute(
                     "UPDATE tellus_brands SET plan_status = 'active', "
                     "activated_at = COALESCE(activated_at, NOW()), updated_at = NOW() WHERE id = $1",
@@ -212,6 +224,55 @@ async def assign_owner(
             await record_admin_action(
                 conn, admin, "brand.assign_owner", "brand", brand_id,
                 {"account_id": str(body.account_id), "account_email": target["email"], "flipped_type": flipped_type},
+            )
+
+        row = await conn.fetchrow(f"{_BRAND_SELECT} WHERE b.id = $1", brand_id)
+    return _row_to_summary(row)
+
+
+@router.post("/admin/brands/{brand_id}/unassign-owner")
+async def unassign_owner(
+    brand_id: UUID, admin: TellusAccount = Depends(require_tellus_admin),
+):
+    """Reverses assign_owner: clears ownership and, if the owner account has no
+    other brand, flips it back to 'consumer' — a 'brand' account type with no
+    brand attached is a stranded account (require_consumer 403s it, but it has
+    no brand-side access either)."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            brand = await conn.fetchrow(
+                "SELECT owner_account_id FROM tellus_brands WHERE id = $1", brand_id,
+            )
+            if brand is None:
+                raise HTTPException(404, "Brand not found")
+            owner_id = brand["owner_account_id"]
+            if owner_id is None:
+                raise HTTPException(409, "Brand has no owner to unassign.")
+
+            await conn.execute(
+                "UPDATE tellus_brands SET owner_account_id = NULL, claimed_at = NULL, "
+                "updated_at = NOW() WHERE id = $1",
+                brand_id,
+            )
+
+            reverted_type = False
+            account = await conn.fetchrow(
+                "SELECT account_type FROM tellus_accounts WHERE id = $1", owner_id,
+            )
+            if account and account["account_type"] == "brand":
+                still_owns = await conn.fetchval(
+                    "SELECT 1 FROM tellus_brands WHERE owner_account_id = $1", owner_id,
+                )
+                if not still_owns:
+                    await conn.execute(
+                        "UPDATE tellus_accounts SET account_type = 'consumer', updated_at = NOW() WHERE id = $1",
+                        owner_id,
+                    )
+                    reverted_type = True
+
+            await record_admin_action(
+                conn, admin, "brand.unassign_owner", "brand", brand_id,
+                {"account_id": str(owner_id), "reverted_type": reverted_type},
             )
 
         row = await conn.fetchrow(f"{_BRAND_SELECT} WHERE b.id = $1", brand_id)

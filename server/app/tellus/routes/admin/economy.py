@@ -40,6 +40,9 @@ async def update_earning_rule(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(422, "No fields to update.")
+    for not_null_field in ("points", "is_active"):
+        if not_null_field in updates and updates[not_null_field] is None:
+            raise HTTPException(422, f"{not_null_field} cannot be null.")
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -138,8 +141,8 @@ async def update_badge(
 async def list_listings(
     brand_id: Optional[UUID] = None,
     active: Optional[bool] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     clauses: list[str] = []
     params: list = []

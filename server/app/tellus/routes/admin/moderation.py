@@ -2,7 +2,7 @@
 oversight. The gap feedback.py's own docstring flags: brand-side moderation
 can look like a brand suppressing a review it doesn't like; this gives an
 admin the cross-tenant view brand.py's require_paid_brand scoping can't."""
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,11 +22,11 @@ router = APIRouter(dependencies=[Depends(require_tellus_admin)])
 @router.get("/admin/reports")
 async def list_reports(
     moderation_status: Optional[str] = None,
-    review_state: Optional[str] = None,
+    review_state: Optional[Literal["published", "held", "withdrawn"]] = None,
     brand_id: Optional[UUID] = None,
     q: Optional[str] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     where, params = report_filter_sql(
         moderation_status=moderation_status, review_state=review_state,
@@ -100,8 +100,8 @@ async def moderate_report(
 async def list_dm_threads(
     brand_id: Optional[UUID] = None,
     blocked: Optional[bool] = None,
-    limit: int = Query(50, le=100),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     clauses: list[str] = []
     params: list = []
