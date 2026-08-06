@@ -366,3 +366,77 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
 
 class RedeemError(Exception):
     """Raised when a redemption can't proceed (funds / inventory / window)."""
+
+
+class AdjustError(Exception):
+    """Manual adjustment can't proceed (overdraw / nothing to claw back)."""
+
+
+def compute_adjustment(balance: int, lifetime: int, delta: int, *, clamp: bool = False) -> dict:
+    """Pure math for an admin ledger adjustment. Credits mirror award_points
+    (balance += delta, lifetime += delta). Debits reverse erroneous credits, so
+    they reduce lifetime too (floored at 0) and level is recomputed — it CAN
+    drop. Deliberately unlike 'redeem', which spends balance but leaves
+    lifetime standing."""
+    if delta == 0:
+        raise ValueError("adjustment delta must be non-zero")
+    applied = delta
+    if delta < 0 and balance + delta < 0:
+        if not clamp:
+            raise AdjustError(f"Clawback of {-delta} exceeds balance of {balance}.")
+        applied = -balance
+        if applied == 0:
+            raise AdjustError("Nothing to claw back — balance is already 0.")
+    new_balance = balance + applied
+    new_lifetime = max(0, lifetime + applied) if applied < 0 else lifetime + applied
+    return {
+        "applied_delta": applied,
+        "new_balance": new_balance,
+        "new_lifetime": new_lifetime,
+        "new_level": level_for_points(new_lifetime),
+    }
+
+
+async def adjust_points(
+    conn, account_id: UUID, delta: int, *,
+    description: str, reference_id: Optional[str] = None,
+    clamp: bool = False, notify: bool = True,
+) -> dict:
+    """Manual admin credit or clawback. reason='adjustment' (in the ledger
+    CHECK since tellus_app_01, unused until now). Streaks NOT touched (an
+    adjustment is not user activity); badges only checked on credit, never
+    revoked on level-down (no removal path exists)."""
+    async with conn.transaction():
+        await _ensure_balance(conn, account_id)
+        bal = await conn.fetchrow(
+            "SELECT points_balance, lifetime_points, level FROM tellus_points_balances "
+            "WHERE account_id = $1 FOR UPDATE", account_id,
+        )
+        plan = compute_adjustment(bal["points_balance"], bal["lifetime_points"], delta, clamp=clamp)
+        try:
+            await conn.execute(
+                """INSERT INTO tellus_points_ledger
+                       (account_id, delta, balance_after, reason, event_key,
+                        reference_type, reference_id, description)
+                   VALUES ($1, $2, $3, 'adjustment', NULL, 'admin_adjustment', $4, $5)""",
+                account_id, plan["applied_delta"], plan["new_balance"], reference_id, description,
+            )
+        except asyncpg.UniqueViolationError:
+            return {"adjusted": False, "applied_delta": 0,
+                    "balance": bal["points_balance"], "lifetime": bal["lifetime_points"],
+                    "level": bal["level"]}
+        await conn.execute(
+            """UPDATE tellus_points_balances
+               SET points_balance = $2, lifetime_points = $3, level = $4, updated_at = NOW()
+               WHERE account_id = $1""",
+            account_id, plan["new_balance"], plan["new_lifetime"], plan["new_level"],
+        )
+        if plan["applied_delta"] > 0:
+            await check_and_award_badges(conn, account_id)
+        if notify:
+            await _notify(conn, account_id, "points_adjustment",
+                          f"{plan['applied_delta']:+d} points", description,
+                          "admin_adjustment", reference_id)
+        return {"adjusted": True, "applied_delta": plan["applied_delta"],
+                "balance": plan["new_balance"], "lifetime": plan["new_lifetime"],
+                "level": plan["new_level"]}
