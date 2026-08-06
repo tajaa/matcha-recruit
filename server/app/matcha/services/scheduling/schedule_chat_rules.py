@@ -193,7 +193,13 @@ def _tokens(text: Optional[str]) -> set[str]:
     return set(_TOKEN_RE.findall((text or "").lower()))
 
 
-_FUZZY_LOCATION_THRESHOLD = 0.8
+# 0.9, not 0.8: measured — 'Westwood'/'Eastwood' and 'Store 12'/'Store 13'
+# both sit at 0.875 (different stores, one edit apart), while real typos of
+# one name ('Willshire'->'wilshire' 0.941, 'wilshre' 0.933) clear 0.9.
+_FUZZY_LOCATION_THRESHOLD = 0.9
+_FUZZY_MIN_TOKEN_LEN = 5
+
+_DIGIT_RE = re.compile(r"\d")
 
 
 def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
@@ -235,18 +241,29 @@ def match_location(hint: Optional[str], locations: list[dict]) -> list[dict]:
     # ("Willshire" for "Wilshire") before giving up. Only fires here (never
     # ahead of an exact/substring hit) and only returns a match when exactly
     # ONE location clears the bar — an ambiguous fuzzy hit still clarifies,
-    # same as today. Scored per-token (not whole-name-string) since a real
+    # same as today. Scored per-token (not whole-name-string, and only
+    # tokens >= 5 chars — short tokens inflate the ratio) since a real
     # location name is often multi-word ("Sunset Smile Dental — Wilshire")
     # and the typo is usually in just one word of it.
+    #
+    # Digit guard: a hint or name/token containing a digit skips the fuzzy
+    # compare entirely. Numbered stores ("Store 12"/"Store 13") are
+    # identifiers one edit apart, not typo-tolerant prose — a correct digit
+    # hint already resolved through the exact/substring tiers above, so
+    # this only ever prevents a WRONG numbered store from being guessed.
+    if _DIGIT_RE.search(hint_norm):
+        return []
     fuzzy: list[tuple[float, dict]] = []
     for loc in locations:
         name = (loc.get("name") or "").strip().lower()
         if not name:
             continue
-        name_tokens = _tokens(name)
-        best = SequenceMatcher(None, hint_norm, name).ratio()
-        for tok in name_tokens:
-            best = max(best, SequenceMatcher(None, hint_norm, tok).ratio())
+        best = 0.0
+        if not _DIGIT_RE.search(name):
+            best = SequenceMatcher(None, hint_norm, name).ratio()
+        for tok in _tokens(name):
+            if len(tok) >= _FUZZY_MIN_TOKEN_LEN and not _DIGIT_RE.search(tok):
+                best = max(best, SequenceMatcher(None, hint_norm, tok).ratio())
         if best >= _FUZZY_LOCATION_THRESHOLD:
             fuzzy.append((best, loc))
     if len(fuzzy) == 1:
@@ -545,7 +562,17 @@ def parse_time_hint(hint: Optional[str]) -> Optional[time]:
         return None
     hint = hint.strip()
     segments = _TIME_RANGE_SPLIT_RE.split(hint, maxsplit=1)
-    m = _TIME_HINT_RE.match(_normalize_bare_digit_clock(segments[0].strip()))
+    first = segments[0].strip()
+    m = _TIME_HINT_RE.match(_normalize_bare_digit_clock(first))
+    if not m:
+        # "Fri Aug 7 1230-18:00" — day/date words ride in the same segment
+        # as the clock, so the whole-segment match above never fires. Retry
+        # on the segment's LAST whitespace token alone ("1230") before
+        # giving up — anything non-clock there still fails _TIME_HINT_RE
+        # ("the opener" -> "opener" -> None).
+        last = first.rsplit(None, 1)[-1] if first else first
+        if last and last != first:
+            m = _TIME_HINT_RE.match(_normalize_bare_digit_clock(last))
     if not m:
         return None
     hour = int(m.group("hour"))

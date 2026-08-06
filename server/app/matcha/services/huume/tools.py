@@ -793,7 +793,12 @@ TOOLS: tuple[HuumeTool, ...] = (
         },
         required=["kind"],
         discovery=True,
-        intent_hints=("swap shift", "reassign shift", "assign", "move shift", "cancel shift", "cover for"),
+        # Every hint here is deliberately multi-word — a bare "assign"
+        # substring-matches "assign the food-safety training to Maria" and
+        # routing.HINT_INDEX / prompt.build_discovery_block would then steer
+        # a training-assignment ask at this tool instead of assign_training.
+        intent_hints=("swap shift", "reassign shift", "assign a shift", "put someone on",
+                      "move shift", "cancel shift", "cover for"),
     ),
     _tool(
         "finish", "finish",

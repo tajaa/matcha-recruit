@@ -333,6 +333,13 @@ export function useThreadController() {
 
   async function handleAttachmentUpload(files: File[]) {
     if (!threadId || streaming) return
+    // Server caps SendMessageRequest.attachments at 5 (max_length=5) —
+    // reject here, before upload, rather than letting the send 422 after
+    // the composer already cleared its input and chips.
+    if (pendingAttachments.length + files.length > 5) {
+      setError('Up to 5 files per message.')
+      return
+    }
     for (const file of files) {
       const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
       if (!THREAD_FILE_EXTENSIONS.includes(ext)) {

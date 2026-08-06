@@ -92,6 +92,31 @@ def _spawn_bg(coro) -> None:
     task.add_done_callback(_bg_tasks.discard)
 
 
+# Channels that posted a schedule clarify pill recently (this process).
+# Gates _bg_schedule_untargeted_reply's spawn so ordinary chat never costs a
+# task + pooled connection + a schedule_chat_proposals scan — that table has
+# no channel_id index, and without this gate the fallback's own query ran on
+# every short (<=60 char) non-reply message in every company, schedule flag
+# or not. A process restart empties the dict: the fallback goes dormant
+# until the next clarify pill, which is acceptable for a best-effort
+# convenience — threaded replies (the primary path) are unaffected.
+_SCHEDULE_CLARIFY_TTL_SECONDS = 15 * 60
+_recent_schedule_clarifies: Dict[str, float] = {}
+
+
+def _note_schedule_clarify(channel_id_str: str) -> None:
+    now = time.monotonic()
+    stale = [k for k, deadline in _recent_schedule_clarifies.items() if deadline < now]
+    for k in stale:
+        _recent_schedule_clarifies.pop(k, None)
+    _recent_schedule_clarifies[channel_id_str] = now + _SCHEDULE_CLARIFY_TTL_SECONDS
+
+
+def _channel_recently_clarified(channel_id_str: str) -> bool:
+    deadline = _recent_schedule_clarifies.get(channel_id_str)
+    return deadline is not None and deadline >= time.monotonic()
+
+
 async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
     """Mirror a message's attachments into the linked collab project's Files,
     on its own connection and off the send hot path. The reverse JSONB lookup
@@ -458,6 +483,7 @@ async def _bg_ems_ask(
                     "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
                     sys_row["id"], result["pending_proposal_id"],
                 )
+                _note_schedule_clarify(channel_id_str)  # this build may be a clarify
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
         logger.exception("EMS ask failed in channel %s", channel_id_str)
@@ -626,6 +652,8 @@ async def _bg_schedule_request(
                 "UPDATE schedule_chat_proposals SET confirm_message_id = $1, updated_at = NOW() WHERE id = $2",
                 sys_row["id"], build.proposal_id,
             )
+            if build.kind == "clarify":
+                _note_schedule_clarify(channel_id_str)
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
     except Exception:
         logger.exception("schedule chat request failed for message %s", message_id_str)
@@ -1506,12 +1534,22 @@ async def _bg_schedule_reply(
                     "UPDATE schedule_chat_proposals SET confirm_message_id = $1 WHERE id = $2",
                     sys_row["id"], build.proposal_id,
                 )
+                if build.kind == "clarify":
+                    _note_schedule_clarify(channel_id_str)
 
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
         return True
     except Exception:
         logger.exception("schedule chat reply failed for %s", reply_to_id_str)
         return claim_happened
+
+
+# Start time as printed by schedule_chat's clarify option lines
+# ("Shift — Fri Aug 7 08:00–16:00 · Aisha Kim") — plain hyphen tolerated.
+_OPTION_START_RE = re.compile(r"\b(\d{2}:\d{2})\s*[–-]")
+# Mirrors schedule_chat_rules._OPTION_CITY_SUFFIX — kept as a local copy
+# rather than importing an underscore-prefixed name across modules.
+_LOCATION_OPTION_CITY_SUFFIX_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
 
 async def _bg_schedule_untargeted_reply(
@@ -1523,71 +1561,111 @@ async def _bg_schedule_untargeted_reply(
     response — _ems_dispatch_decision spawns nothing without one of those
     two signals, so nothing ever looked at it.
 
-    Only engages when the channel has exactly one live schedule clarify AND
-    this message's own text actually resolves against it (snaps onto one of
-    the offered options, parses as a clock time, or — for the location
-    clarify specifically — fuzzy-matches exactly one business_locations row)
-    — never just "the next message after a clarify", which would sweep
-    ordinary chatter in. Short-content only (clarify answers are short; this
-    keeps the extra SELECT off the hot path for real conversation). Purely a
-    targeting shim: once a match is found, the real resolution/re-parse/
-    build logic is _bg_schedule_reply's, reached via the SAME
-    confirm_message_id claim a threaded reply would use — so it can't race
-    a genuine threaded answer to the same pill."""
-    from app.matcha.services.ems.intent import strip_mention
-    from app.matcha.services.scheduling import schedule_chat
-    from app.matcha.services.scheduling.schedule_chat_rules import (
-        match_location, parse_time_hint, resolve_clarify_answer, snapped_to_option,
-    )
+    Claims ONLY on one of three exact-ish matches — full option echo,
+    unique location resolution for the location question specifically, or a
+    clock time matching exactly one option's own printed start time.
+    Deliberately NOT resolve_clarify_answer's plain containment: against
+    options ending "· Aisha Kim" / "· unstaffed", substrings like "Kim",
+    "unstaffed", or "ed" all satisfied containment and hijacked ordinary
+    chatter — those must stay plain messages here (a THREADED reply still
+    uses the looser resolve_clarify_answer path in _bg_schedule_reply,
+    where a reply-to is an explicit signal this fallback doesn't have).
 
-    text = strip_mention(content).strip()
-    if not text or len(text) > 60:
-        return False
+    Sender must be client/admin, checked BEFORE any match: an employee's
+    ordinary chatter must never surface evaluate_schedule_proposal's "Only a
+    business admin can…" refusal into the channel unprompted.
 
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT company_id, confirm_message_id, proposal
-            FROM schedule_chat_proposals
-            WHERE channel_id = $1 AND status = 'clarifying'
-              AND confirm_message_id IS NOT NULL
-              AND created_at > NOW() - INTERVAL '7 days'
-            ORDER BY created_at DESC LIMIT 1
-            """,
-            UUID(channel_id_str),
-        )
-        if row is None or row["confirm_message_id"] is None:
+    Short-content only (clarify answers are short) and gated by the caller
+    on _channel_recently_clarified (see that helper) so this whole function,
+    including its query, never runs against a channel with no live clarify
+    — schedule_chat_proposals has no channel_id index. Purely a targeting
+    shim once a match is found: the real resolution/re-parse/build logic is
+    _bg_schedule_reply's, reached via the SAME confirm_message_id claim a
+    threaded reply would use, so it can't race a genuine threaded answer to
+    the same pill. Top-level try/except, unlike its sibling _bg_* functions
+    only in that most of them are entered from a context that already
+    wraps one — this one is spawned directly via _spawn_bg, so a bare
+    exception here would otherwise surface only as an unretrieved-task
+    warning with no channel/content context."""
+    try:
+        from app.matcha.services.ems.intent import strip_mention
+        from app.matcha.services.scheduling import schedule_chat
+        from app.matcha.services.scheduling.schedule_chat_rules import match_location, parse_time_hint
+
+        text = strip_mention(content).strip()
+        if not text or len(text) > 60:
             return False
 
-        proposal = row["proposal"]
-        if isinstance(proposal, str):
-            proposal = json.loads(proposal)
-        options = proposal.get("clarify_options") or []
-        snapped = resolve_clarify_answer(text, options)
-        looks_like_answer = snapped_to_option(snapped, options) or parse_time_hint(text) is not None
-
-        # The location clarify is OUR OWN multiple-choice offer — a typo'd
-        # store name ("Willshire" for "Wilshire") never snaps via
-        # resolve_clarify_answer's plain containment check against the full
-        # option strings, but match_location's own fuzzy tier (added
-        # alongside this fallback) is the SAME resolver _bg_schedule_reply's
-        # re-parse path would eventually land on. Checking it directly here
-        # — rather than requiring a snap first — is what makes the typo
-        # case actually reachable from a plain, non-threaded reply.
-        if not looks_like_answer and proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION:
-            location_rows = await conn.fetch(
-                "SELECT id, name, address, city, state, zipcode FROM business_locations "
-                "WHERE company_id = $1 AND is_active IS NOT FALSE",
-                row["company_id"],
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT company_id, confirm_message_id, proposal
+                FROM schedule_chat_proposals
+                WHERE channel_id = $1 AND status = 'clarifying'
+                  AND confirm_message_id IS NOT NULL
+                  AND created_at > NOW() - INTERVAL '15 minutes'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                UUID(channel_id_str),
             )
-            looks_like_answer = len(match_location(text, [dict(r) for r in location_rows])) == 1
+            if row is None or row["confirm_message_id"] is None:
+                return False
 
-    if not looks_like_answer:
+            # Role gate BEFORE any match — an employee's plain chatter must
+            # never claim the pill just to be told they can't confirm it.
+            role = await conn.fetchval("SELECT role FROM users WHERE id = $1", UUID(sender_user_id_str))
+            if role not in ("client", "admin"):
+                return False
+
+            proposal = row["proposal"]
+            if isinstance(proposal, str):
+                proposal = json.loads(proposal)
+            options: list = proposal.get("clarify_options") or []
+            low = text.lower()
+
+            # (a) full option echo, with or without the "(City)" suffix
+            looks_like_answer = any(
+                low == opt.lower() or low == _LOCATION_OPTION_CITY_SUFFIX_RE.sub("", opt).strip().lower()
+                for opt in options
+            )
+
+            # (b) location question -> unique store resolution. match_location's
+            # fuzzy tier (0.9 threshold, digit-guarded) is the SAME resolver
+            # _bg_schedule_reply's re-parse path would eventually land on —
+            # checking it directly here is what makes a typo'd store name
+            # ("Willshire" for "Wilshire") reachable from a plain reply.
+            if not looks_like_answer and proposal.get("clarify_question") == schedule_chat.LOCATION_CLARIFY_QUESTION:
+                location_rows = await conn.fetch(
+                    "SELECT id, name, address, city, state, zipcode FROM business_locations "
+                    "WHERE company_id = $1 AND is_active IS NOT FALSE",
+                    row["company_id"],
+                )
+                looks_like_answer = len(match_location(text, [dict(r) for r in location_rows])) == 1
+
+            # (c) a clock time matching exactly ONE option's own printed
+            # start time. A bare "2026" parses as 20:26 (colonless-clock
+            # normalization) but claims nothing unless a listed shift
+            # genuinely starts then — this is what keeps that parse from
+            # becoming a false claim on ordinary numeric chatter.
+            if not looks_like_answer and options:
+                t = parse_time_hint(text)
+                if t is not None:
+                    hhmm = f"{t.hour:02d}:{t.minute:02d}"
+                    hits = [
+                        m for opt in options
+                        if (m := _OPTION_START_RE.search(opt)) and m.group(1) == hhmm
+                    ]
+                    looks_like_answer = len(hits) == 1
+
+        if not looks_like_answer:
+            return False
+
+        return await _bg_schedule_reply(
+            channel_id_str, str(row["confirm_message_id"]), sender_user_id_str, content,
+        )
+    except Exception:
+        logger.exception("schedule untargeted-reply fallback failed for channel %s", channel_id_str)
         return False
-
-    return await _bg_schedule_reply(
-        channel_id_str, str(row["confirm_message_id"]), sender_user_id_str, content,
-    )
 
 
 async def _bg_ems_intake(
@@ -3141,12 +3219,21 @@ async def channel_websocket(
                                     has_huume_mention="huume" in mention_handles,
                                     attachments=list(broadcast_attachments) if broadcast_attachments else None,
                                 ))
-                            elif is_new_message and not row["reply_to_id"] and len(row["content"]) <= 60:
+                            elif (
+                                is_new_message and not row["reply_to_id"]
+                                and len(row["content"]) <= 60
+                                and _channel_recently_clarified(room_key)
+                            ):
                                 # Neither threaded-reply nor @huume-mention —
                                 # _ems_dispatch_decision spawns nothing for
                                 # this message. Still worth one cheap check:
                                 # is this a clarify answer typed as a plain
                                 # message? See _bg_schedule_untargeted_reply.
+                                # _channel_recently_clarified is an in-memory
+                                # dict lookup (no DB) — it's what keeps this
+                                # branch off the hot path for the overwhelming
+                                # common case of a channel with no live
+                                # schedule clarify at all.
                                 _spawn_bg(_bg_schedule_untargeted_reply(
                                     str(ch_uuid), str(user.id), row["content"],
                                 ))

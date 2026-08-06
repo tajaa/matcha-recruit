@@ -156,14 +156,49 @@ class TestMatchLocation:
         assert [l["id"] for l in out] == ["1"]
 
     def test_fuzzy_match_still_clarifies_when_ambiguous(self):
+        # Symmetric near-miss, both >= the 0.9 threshold from the same hint
+        # (ratios computed: 'tillcrestview' vs 'hillcrestview'/'millcrestview'
+        # = 0.923 each) — a real ambiguous typo must still clarify, not
+        # silently pick the alphabetically-first candidate.
         locs = [
-            {"id": "1", "name": "Wilshire", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
-            {"id": "2", "name": "Wiltshire", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+            {"id": "1", "name": "Hillcrestview", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+            {"id": "2", "name": "Millcrestview", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
         ]
-        assert match_location("Wilshre", locs) == []
+        assert match_location("Tillcrestview", locs) == []
 
     def test_unrelated_typo_stays_unmatched(self):
         assert match_location("nowhereville", LOCATIONS) == []
+
+    def test_fuzzy_does_not_cross_to_a_different_store_name(self):
+        # Real review finding: hint 'Westwood' against a company whose only
+        # store is 'Eastwood' scored 0.875 at the old 0.8 threshold and
+        # silently resolved to the wrong store. At 0.9 that ratio now
+        # clarifies instead of guessing.
+        locs = [{"id": "1", "name": "Eastwood", "address": "", "city": "LA", "state": "CA", "zipcode": ""}]
+        assert match_location("Westwood", locs) == []
+
+    def test_exact_name_still_wins_when_the_real_store_exists(self):
+        locs = [
+            {"id": "1", "name": "Westwood", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+            {"id": "2", "name": "Eastwood", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+        ]
+        out = match_location("Westwood", locs)  # exact tier, never reaches fuzzy
+        assert [l["id"] for l in out] == ["1"]
+
+    def test_numbered_stores_never_fuzzy_match(self):
+        # 'Store 12'/'Store 13' ratio 0.875 — real review finding: a typo'd
+        # store number used to resolve to the wrong numbered store.
+        locs = [
+            {"id": "1", "name": "Store 12", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+            {"id": "2", "name": "Store 13", "address": "", "city": "LA", "state": "CA", "zipcode": ""},
+        ]
+        assert match_location("Store 12", locs)[0]["id"] == "1"  # exact tier
+        assert match_location("Stor 12", locs) == []  # digit guard blocks fuzzy entirely
+
+    def test_digit_hint_never_fuzzy_matches_a_plain_name(self):
+        # 'store 3' vs 'store' token ratio 0.833 — real review finding.
+        locs = [{"id": "1", "name": "Main Store", "address": "", "city": "LA", "state": "CA", "zipcode": ""}]
+        assert match_location("store 3", locs) == []
 
 
 class TestResolveClarifyAnswer:
@@ -446,7 +481,7 @@ class TestParseTimeHint:
     @pytest.mark.parametrize("hint,expect", [
         ("1230", (12, 30)),
         ("830", (8, 30)),
-        ("1230-18:00", (12, 30)),  # a real transcript: "Fri Aug 7 1230-18:00"
+        ("1230-18:00", (12, 30)),  # pre-stripped — no leading day/date words
         ("830am", (8, 30)),
         ("2130", (21, 30)),
     ])
@@ -463,6 +498,27 @@ class TestParseTimeHint:
         # "8" stays deliberately unparseable (no way to tell 8am from 8pm
         # from 08:00 24h).
         assert parse_time_hint("8") is None
+
+    @pytest.mark.parametrize("hint,expect", [
+        ("Fri Aug 7 1230-18:00", (12, 30)),  # the ACTUAL transcript string —
+        # the pre-stripped "1230-18:00" case above did NOT cover this: the
+        # whole-segment match on "Fri Aug 7 1230" failed _TIME_HINT_RE
+        # outright (it's `^...$`-anchored) and returned None, silently, with
+        # no fallback — a real prod miss until the last-token retry below.
+        ("Aug 7 8am", (8, 0)),
+        ("Friday 08:00-16:00", (8, 0)),
+        ("the closer shift at 1230", (12, 30)),
+    ])
+    def test_leading_words_dont_defeat_the_clock(self, hint, expect):
+        result = parse_time_hint(hint)
+        assert result is not None
+        assert (result.hour, result.minute) == expect
+
+    @pytest.mark.parametrize("hint", ["the opener", "Fri Aug 7", "next friday", "the closer"])
+    def test_wordy_non_clock_hints_still_none(self, hint):
+        # The last-token retry must not turn an ordinary wordy hint into a
+        # false clock match — every case here has a non-numeric last token.
+        assert parse_time_hint(hint) is None
 
 
 class TestResolveDayHint:

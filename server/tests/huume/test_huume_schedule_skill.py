@@ -55,8 +55,14 @@ class TestRegistry:
         tool = TOOLS_BY_NAME["propose_schedule_change"]
         assert "target_time_hint" in tool.declaration.parameters.properties
 
-    def test_intent_hints_include_assign(self):
-        assert "assign" in TOOLS_BY_NAME["propose_schedule_change"].intent_hints
+    def test_intent_hints_are_multiword_only(self):
+        # A bare "assign" substring-matched training/PTO assignment asks
+        # that have nothing to do with scheduling — every hint here must be
+        # multi-word so it can't collide with an unrelated skill's phrasing.
+        hints = TOOLS_BY_NAME["propose_schedule_change"].intent_hints
+        assert "assign" not in hints
+        assert any("assign" in h for h in hints)
+        assert all(" " in h for h in hints)
 
     def test_spec_fields_forward_target_time_hint(self):
         assert "target_time_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
@@ -193,3 +199,7 @@ class TestProposeClarify(unittest.TestCase):
         assert "unstaffed" in result["error"]  # second option survived
         assert "target_time_hint" in result["error"]
         assert "target_staffing_hint" in result["error"]
+        # Channel-only UX ("reply to the pill") has no meaning in a thread,
+        # and directly contradicts the very next sentence telling the model
+        # to call the tool again.
+        assert "Just reply to this message" not in result["error"]

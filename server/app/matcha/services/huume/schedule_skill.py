@@ -133,7 +133,12 @@ async def propose(
         # that can never be confirmed. Keep the full pill_text (question +
         # numbered candidates), not just its first line — the model needs
         # the options to relay them, not just the fact that some exist.
+        # clarify_text() ends with "Just reply to this message." — that's
+        # channel UX (reply to the pill). A thread has no pill to reply to,
+        # and the very next sentence tells the model to call the tool again
+        # instead — leaving both in was a direct contradiction.
         text = build.pill_text.removeprefix("\U0001F4C5 ").strip()
+        text = text.removesuffix("Just reply to this message.").strip()
         return {"error": (
             f"{text}\nAsk the admin which one they mean, then call "
             f"propose_schedule_change again adding target_time_hint (e.g. "
