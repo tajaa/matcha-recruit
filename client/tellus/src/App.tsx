@@ -25,6 +25,8 @@ import BrandListings from './pages/brand/Listings'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 
+import TellusAdminUpdates from './pages/admin/Updates'
+
 // Where an authenticated brand lands: /brand/billing if unpaid (or plan_status
 // unset — a defensive fallback, e.g. mid-migration data), else the dashboard.
 function brandHome(planStatus: string | null | undefined) {
@@ -44,6 +46,15 @@ function Protected({
   if (requireType === 'brand' && !allowUnpaid && account.plan_status !== 'active') {
     return <Navigate to="/brand/billing" replace />
   }
+  return <Layout>{children}</Layout>
+}
+
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { account, loading } = useAccount()
+  const location = useLocation()
+  if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
+  if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname + location.search)} replace />
+  if (!account.is_admin) return <Navigate to="/" replace />
   return <Layout>{children}</Layout>
 }
 
@@ -83,6 +94,9 @@ export default function App() {
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
+
+      {/* Internal admin */}
+      <Route path="/admin/updates" element={<AdminOnly><TellusAdminUpdates /></AdminOnly>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

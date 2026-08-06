@@ -24,6 +24,24 @@ export interface TellusAccount {
   location_count: number | null
   // Public review-page slug (brand accounts only) — /tellus/b/{brand_slug}.
   brand_slug: string | null
+  // True when this account's email is in TELLUS_ADMIN_EMAILS — internal
+  // changelog access at /tellus/admin/updates.
+  is_admin: boolean
+}
+
+// Internal admin changelog row — mirrors server/app/tellus/routes/admin.py's
+// response shape (same fields as matcha's AdminUpdate).
+export interface TellusAdminUpdate {
+  id: string
+  date: string // ISO yyyy-mm-dd
+  category: string
+  title: string
+  summary: string
+  whatsNew: string[]
+  howToUse: string[]
+  setup: string[] | null
+  notes: string[] | null
+  tag: 'new' | 'action-needed' | null
 }
 
 export interface TokenResponse {

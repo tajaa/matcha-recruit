@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
+import { Award, Bell, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -49,7 +49,10 @@ export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const isBrand = account?.account_type === 'brand'
   const isPendingBrand = isBrand && account?.plan_status !== 'active'
-  const nav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
+  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
+  const nav = account?.is_admin
+    ? [...baseNav, { to: '/admin/updates', label: 'Updates', icon: Sparkles }]
+    : baseNav
   const [unread, setUnread] = useState(0)
 
   useEffect(() => {
