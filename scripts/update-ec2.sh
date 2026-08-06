@@ -376,6 +376,11 @@ if [ "$HOTFIX" = false ] && [ "$UPDATE_MATCHA" = true ]; then
             } >> "$GITHUB_STEP_SUMMARY"
         fi
     else
+        log_info "Generating changelog entries from merged PRs..."
+        CG_PY="server/venv/bin/python"; [ -x "$CG_PY" ] || CG_PY="python3"
+        "$CG_PY" server/scripts/generate_changelog.py \
+            || log_warn "Changelog generation failed (deploy unaffected). Run server/scripts/generate_changelog.py manually."
+
         log_info "Syncing test tenants (dev <-> prod)..."
         "$(dirname "$0")/sync-test-tenants.sh" --auto \
             || log_warn "Test-tenant sync failed (deploy unaffected). Run ./scripts/sync-test-tenants.sh manually."

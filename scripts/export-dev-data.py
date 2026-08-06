@@ -145,6 +145,15 @@ WITH ordered AS (
 )
 UPDATE admin_updates a SET position = o.rn FROM ordered o WHERE a.id = o.id;
 """.strip(),
+    "tellus_admin_updates": """
+-- Re-derive changelog ordering across the merged row set — same reasoning as
+-- admin_updates above.
+WITH ordered AS (
+    SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC)) - 1 AS rn
+    FROM tellus_admin_updates
+)
+UPDATE tellus_admin_updates a SET position = o.rn FROM ordered o WHERE a.id = o.id;
+""".strip(),
 }
 
 RESERVED_EMAIL = re.compile(
