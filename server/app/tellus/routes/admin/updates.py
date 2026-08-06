@@ -1,20 +1,20 @@
-"""Tell-Us internal admin — changelog only for now.
+"""Tell-Us internal admin — changelog.
 
-Gated by require_tellus_admin (TELLUS_ADMIN_EMAILS allowlist), NOT the
-consumer/brand account_type split every other tellus route uses. Not a
-company/feature-flag surface — Tell-Us has no tenant model.
+Gated at the router level by require_tellus_admin (TELLUS_ADMIN_EMAILS
+allowlist), NOT the consumer/brand account_type split every other tellus
+route uses. Not a company/feature-flag surface — Tell-Us has no tenant model.
 """
 import json
 
 from fastapi import APIRouter, Depends
 
-from ...database import get_connection
-from ..dependencies import require_tellus_admin
+from ....database import get_connection
+from ...dependencies import require_tellus_admin
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_tellus_admin)])
 
 
-@router.get("/admin/updates", dependencies=[Depends(require_tellus_admin)])
+@router.get("/admin/updates")
 async def list_tellus_admin_updates():
     """Product changelog shown at /tellus/admin/updates, newest first."""
     async with get_connection() as conn:

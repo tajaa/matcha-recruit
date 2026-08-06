@@ -4,6 +4,14 @@ model validation). No DB, no HTTP — see TELLUS_ADMIN_MGMT_PLAN.md Part 6/2c/3f
 """
 import pytest
 
+from app.tellus.models.admin import (
+    ACCOUNT_STATUSES,
+    TellusAdminEarningRuleUpdate,
+    TellusAdminPlanAction,
+    TellusAdminPointsAdjust,
+    TellusPasswordResetConfirm,
+)
+from app.tellus.routes.admin._shared import account_filter_sql, report_filter_sql
 from app.tellus.services.admin_audit import serialize_detail
 from app.tellus.services.points_service import (
     AdjustError,
@@ -78,3 +86,92 @@ class TestSerializeDetail:
         raw = serialize_detail({"id": u, "when": d, "n": 3})
         decoded = json.loads(raw)
         assert decoded == {"id": str(u), "when": str(d), "n": 3}
+
+
+class TestReportFilterSql:
+    def test_published_fragment(self):
+        where, params = report_filter_sql(review_state="published")
+        assert "publish_at <= NOW()" in where
+        assert params == []
+
+    def test_held_fragment(self):
+        where, _ = report_filter_sql(review_state="held")
+        assert "IS NULL OR r.publish_at > NOW()" in where
+
+    def test_withdrawn_fragment(self):
+        where, _ = report_filter_sql(review_state="withdrawn")
+        assert "r.review_state = 'withdrawn'" in where
+
+    def test_placeholders_sequential_from_start_idx(self):
+        where, params = report_filter_sql(moderation_status="visible", brand_id="b1", start_idx=3)
+        assert "$3" in where and "$4" in where
+        assert params == ["visible", "b1"]
+
+    def test_q_escapes_like_wildcards_in_param(self):
+        _, params = report_filter_sql(q="50%_off")
+        assert params[0] == "%50\\%\\_off%"
+
+    def test_no_filters_returns_empty(self):
+        assert report_filter_sql() == ("", [])
+
+
+class TestAccountFilterSql:
+    def test_no_filters_returns_empty(self):
+        assert account_filter_sql() == ("", [])
+
+    def test_verified_true_and_false_differ(self):
+        where_true, _ = account_filter_sql(verified=True)
+        where_false, _ = account_filter_sql(verified=False)
+        assert "IS NOT NULL" in where_true
+        assert "IS NULL" in where_false
+
+
+class TestAdminModels:
+    def test_points_adjust_rejects_zero_delta(self):
+        with pytest.raises(Exception):
+            TellusAdminPointsAdjust(delta=0, description="test adj")
+
+    def test_points_adjust_rejects_out_of_range(self):
+        with pytest.raises(Exception):
+            TellusAdminPointsAdjust(delta=100_001, description="test adj")
+
+    def test_points_adjust_rejects_short_description(self):
+        with pytest.raises(Exception):
+            TellusAdminPointsAdjust(delta=10, description="ab")
+
+    def test_points_adjust_accepts_valid_clawback(self):
+        m = TellusAdminPointsAdjust(delta=-50, description="fraud clawback", clamp=True)
+        assert m.delta == -50 and m.clamp is True
+
+    def test_plan_action_rejects_unknown_literal(self):
+        with pytest.raises(Exception):
+            TellusAdminPlanAction(action="pending")
+
+    def test_password_reset_confirm_rejects_short_password(self):
+        with pytest.raises(Exception):
+            TellusPasswordResetConfirm(token="a" * 20, new_password="short12")
+
+    def test_password_reset_confirm_rejects_short_token(self):
+        with pytest.raises(Exception):
+            TellusPasswordResetConfirm(token="short", new_password="longenoughpw")
+
+    def test_earning_rule_update_distinguishes_absent_vs_null(self):
+        absent = TellusAdminEarningRuleUpdate(points=10)
+        explicit_null = TellusAdminEarningRuleUpdate(points=10, daily_cap=None)
+        assert "daily_cap" not in absent.model_dump(exclude_unset=True)
+        assert "daily_cap" in explicit_null.model_dump(exclude_unset=True)
+        assert explicit_null.model_dump(exclude_unset=True)["daily_cap"] is None
+
+    def test_account_statuses_tripwire(self):
+        assert ACCOUNT_STATUSES == ("active", "suspended")
+
+
+class TestAdminGateSweep:
+    def test_every_admin_route_is_gated(self):
+        from app.tellus.dependencies import require_tellus_admin
+        from app.tellus.routes.admin import router
+
+        assert len(router.routes) > 0
+        for route in router.routes:
+            deps = [d.call for d in route.dependant.dependencies]
+            assert require_tellus_admin in deps, f"{route.path} is not admin-gated"

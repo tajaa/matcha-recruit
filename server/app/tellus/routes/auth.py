@@ -5,6 +5,7 @@ issues Tell-Us-scoped tokens. A brand signup provisions a `tellus_brands` row;
 a consumer signup geocodes its city (best-effort) for the marketplace.
 """
 import secrets
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -16,6 +17,7 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import _is_tellus_admin, require_tellus_account
 from ._shared import slugify
+from ..models.admin import TellusPasswordResetConfirm
 from ..models.tellus import (
     TellusAccount,
     TellusLocationUpdate,
@@ -320,3 +322,33 @@ async def update_profile(
             account.id, body.display_name, body.leaderboard_opt_in,
         )
         return await _load_account(conn, account.id)
+
+
+@router.post("/auth/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password(body: TellusPasswordResetConfirm):
+    """Consume an admin-issued reset token (see routes/admin/accounts.py's
+    password-reset endpoint, the only minter): set the new password, burn the
+    token, and revoke all existing sessions."""
+    password_hash = hash_password(body.new_password)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, account_id, expires_at, used_at FROM tellus_password_reset_tokens "
+                "WHERE token = $1 FOR UPDATE",
+                body.token,
+            )
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid reset link.")
+            if row["used_at"] is not None or row["expires_at"] < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=status.HTTP_410_GONE,
+                    detail="This reset link has expired or was already used.",
+                )
+            await conn.execute(
+                "UPDATE tellus_accounts SET password_hash = $2, tokens_valid_after = NOW(), "
+                "updated_at = NOW() WHERE id = $1",
+                row["account_id"], password_hash,
+            )
+            await conn.execute(
+                "UPDATE tellus_password_reset_tokens SET used_at = NOW() WHERE id = $1", row["id"],
+            )
