@@ -77,6 +77,8 @@ class TellusAccount(BaseModel):
     location_count: Optional[int] = None
     # Public review-page slug (brand accounts only) — /tellus/b/{brand_slug}.
     brand_slug: Optional[str] = None
+    # True when the account email is in TELLUS_ADMIN_EMAILS — internal changelog access.
+    is_admin: bool = False
 
 
 class TellusTokenResponse(BaseModel):

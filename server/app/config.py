@@ -196,6 +196,12 @@ class Settings:
     # passes require_admin (and gets the RLS admin flag). Override per-env.
     master_admin_email: str = "tajatheprince@gmail.com"
 
+    # Tell-Us internal admin — comma-separated allowlist gating the Tell-Us
+    # changelog surface (/tellus/admin/updates). tellus_accounts has no role
+    # column, so this is the whole gate — same fail-closed-when-empty shape
+    # as master_admin_email. Override via TELLUS_ADMIN_EMAILS.
+    tellus_admin_emails: str = ""
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -359,6 +365,7 @@ def load_settings() -> Settings:
         saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),
         saml_sp_acs_url=os.getenv("SAML_SP_ACS_URL", "https://hey-matcha.com/api/sso/acs"),
         master_admin_email=os.getenv("MASTER_ADMIN_EMAIL", "tajatheprince@gmail.com"),
+        tellus_admin_emails=os.getenv("TELLUS_ADMIN_EMAILS", ""),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(

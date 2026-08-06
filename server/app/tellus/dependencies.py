@@ -4,21 +4,33 @@ Mirrors `cappe.dependencies` but resolves a Tell-Us-scoped bearer token against
 `tellus_accounts`. It does NOT touch matcha's RLS contextvars — every Tell-Us
 query scopes by `account_id` / `brand_id` in its WHERE clause instead.
 
-Three deps:
+Deps:
   - require_tellus_account — any authenticated Tell-Us account
   - require_consumer       — account_type='consumer'
   - require_brand          — account_type='brand' (brand_id guaranteed populated)
+  - require_tellus_admin   — email in TELLUS_ADMIN_EMAILS (internal changelog only)
 """
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.config import get_settings
+
 from ..database import get_connection
 from .models.tellus import TellusAccount
 from .services.auth import decode_tellus_token, is_tellus_token_revoked
 
 security = HTTPBearer()
+
+
+def _is_tellus_admin(email: str) -> bool:
+    """Case-insensitive allowlist from TELLUS_ADMIN_EMAILS. Empty setting
+    means nobody passes — tellus_accounts has no role column, so this env
+    allowlist is the whole gate (same fail-closed shape as matcha's
+    _is_master_admin)."""
+    allowed = {e.strip().lower() for e in get_settings().tellus_admin_emails.split(",") if e.strip()}
+    return email.lower() in allowed
 
 
 async def require_tellus_account(
@@ -79,6 +91,7 @@ async def require_tellus_account(
         plan_status=row["plan_status"],
         location_count=row["location_count"],
         brand_slug=row["brand_slug"],
+        is_admin=_is_tellus_admin(row["email"]),
     )
 
 
@@ -124,6 +137,18 @@ async def require_paid_brand(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="This brand account does not have an active subscription.",
+        )
+    return account
+
+
+async def require_tellus_admin(
+    account: TellusAccount = Depends(require_tellus_account),
+) -> TellusAccount:
+    """Internal Tell-Us admin surface — the changelog at /tellus/admin/updates."""
+    if not account.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access restricted",
         )
     return account
 
