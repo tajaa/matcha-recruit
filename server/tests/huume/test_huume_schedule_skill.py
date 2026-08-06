@@ -61,6 +61,17 @@ class TestRegistry:
     def test_spec_fields_forward_target_time_hint(self):
         assert "target_time_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
 
+    def test_schema_declares_target_staffing_hint(self):
+        # Two shifts can share the exact date AND time AND role (one
+        # staffed, one open) — target_time_hint alone can't separate them.
+        tool = TOOLS_BY_NAME["propose_schedule_change"]
+        props = tool.declaration.parameters.properties
+        assert "target_staffing_hint" in props
+        assert set(props["target_staffing_hint"].enum) == {"staffed", "unstaffed"}
+
+    def test_spec_fields_forward_target_staffing_hint(self):
+        assert "target_staffing_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
+
     def test_spec_mints_a_confirm_id(self):
         spec = _HR_OPS_TOOL_SPECS["propose_schedule_change"]
         staged, confirming = _build_hr_ops_staged(spec, {"kind": "cancel"}, None)
@@ -181,3 +192,4 @@ class TestProposeClarify(unittest.TestCase):
         assert "Aisha Kim" in result["error"]  # first option survived
         assert "unstaffed" in result["error"]  # second option survived
         assert "target_time_hint" in result["error"]
+        assert "target_staffing_hint" in result["error"]

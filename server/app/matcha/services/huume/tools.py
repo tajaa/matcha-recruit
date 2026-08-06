@@ -759,6 +759,13 @@ TOOLS: tuple[HuumeTool, ...] = (
                             "or the admin's own words.",
             ),
             "target_role_hint": types.Schema(type=types.Type.STRING),
+            "target_staffing_hint": types.Schema(
+                type=types.Type.STRING,
+                enum=["staffed", "unstaffed"],
+                description="Only when two candidate shifts share the same date, time, AND role — "
+                            "'unstaffed' for 'the open one'/'the unstaffed one', 'staffed' for 'the "
+                            "one that already has someone on it'. Omit otherwise.",
+            ),
             "to_employee_name": types.Schema(type=types.Type.STRING),
             "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
             "second_date": types.Schema(type=types.Type.STRING, description="For kind='swap'."),

@@ -162,3 +162,10 @@ class TestBuildSystemPrompt:
         prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
         assert "target_time_hint" in prompt
         assert "verbatim" in prompt
+
+    def test_schedule_section_mentions_target_staffing_hint(self):
+        # Two shifts sharing date+time+role (one staffed, one open) — the
+        # model must reach for this rather than telling the admin to go
+        # retime a shift on the Schedule page just to disambiguate.
+        prompt = build_system_prompt(company_name="Acme", today="2026-07-26")
+        assert "target_staffing_hint" in prompt

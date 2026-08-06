@@ -240,6 +240,17 @@ _SCHEDULE_CHANGE_DECLARATION = types.FunctionDeclaration(
                 description="Whose CURRENT shift this is — required for reassign/unassign.",
             ),
             "target_date": types.Schema(type=types.Type.STRING, description="YYYY-MM-DD, if named."),
+            "target_time_hint": types.Schema(
+                type=types.Type.STRING,
+                description="Start time of the shift meant, when several shifts share target_date — "
+                            "e.g. '12:30pm', '8am', '08:00'.",
+            ),
+            "target_staffing_hint": types.Schema(
+                type=types.Type.STRING,
+                enum=["staffed", "unstaffed"],
+                description="Only when two candidates share the same date, time, AND role — "
+                            "'unstaffed' for 'the open one', 'staffed' for 'the one with someone on it'.",
+            ),
             "target_role_hint": types.Schema(
                 type=types.Type.STRING, description="Role/label to help find the shift, e.g. 'opener'."),
             "to_employee_name": types.Schema(

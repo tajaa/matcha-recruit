@@ -540,6 +540,7 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
         "target_employee_name": args.get("target_employee_name"),
         "target_date": args.get("target_date"),
         "target_time_hint": args.get("target_time_hint"),
+        "target_staffing_hint": args.get("target_staffing_hint"),
         "target_role_hint": args.get("target_role_hint"),
         "to_employee_name": args.get("to_employee_name"),
         "second_employee_name": args.get("second_employee_name"),

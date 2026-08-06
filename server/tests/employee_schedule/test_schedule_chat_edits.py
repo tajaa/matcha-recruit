@@ -126,6 +126,18 @@ class TestCoerceEditRequest:
         out = coerce_edit_request({"kind": "retime", "target_role_hint": "opener", "new_day_hint": "friday"})
         assert out is not None
 
+    @pytest.mark.parametrize("raw,expect", [
+        ("unstaffed", "unstaffed"), ("open", "unstaffed"), ("empty", "unstaffed"),
+        ("unassigned", "unstaffed"), ("Unstaffed", "unstaffed"),
+        ("staffed", "staffed"), ("assigned", "staffed"), ("filled", "staffed"),
+        ("busy", None), ("", None), (None, None),
+    ])
+    def test_target_staffing_hint_normalizes(self, raw, expect):
+        out = coerce_edit_request({
+            "kind": "cancel", "target_role_hint": "closer", "target_staffing_hint": raw,
+        })
+        assert out["target_staffing_hint"] == expect
+
 
 class TestCoerceDelta:
     @pytest.mark.parametrize("value", [None, "60", True, 0, 721, -721])

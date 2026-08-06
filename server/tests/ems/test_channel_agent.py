@@ -473,3 +473,29 @@ class TestRecentMessagesLiveInUserTurnNotSystemPrompt:
         client = _install(monkeypatch, responses=[_Resp(parts=[_Part(text="ok")], text="ok")])
         _run(channel_agent.answer_channel_question(**_base_kwargs(question="what's going on")))
         assert client.calls[0]["contents"][0].parts[0].text == "what's going on"
+
+
+class TestScheduleChangeToolSchema:
+    """propose_schedule_change's declared params, mirrored against the
+    thread-Huume tool of the same name (services/huume/tools.py) — both
+    surfaces call schedule_chat.coerce_edit_request through their own
+    _tool_args_to_edit_request mapper, so a field one schema omits is a
+    field the model on that surface can never supply, even though the
+    mapper already reads it (target_time_hint was exactly this gap here
+    until fixed alongside target_staffing_hint)."""
+
+    def test_declares_target_time_hint(self):
+        props = channel_agent._SCHEDULE_CHANGE_DECLARATION.parameters.properties
+        assert "target_time_hint" in props
+
+    def test_declares_target_staffing_hint_with_the_right_enum(self):
+        props = channel_agent._SCHEDULE_CHANGE_DECLARATION.parameters.properties
+        assert "target_staffing_hint" in props
+        assert set(props["target_staffing_hint"].enum) == {"staffed", "unstaffed"}
+
+    def test_mapper_forwards_both_hints(self):
+        args = {"kind": "assign", "target_date": "2026-08-12", "target_time_hint": "2pm",
+                "target_staffing_hint": "unstaffed", "to_employee_name": "Elena Iyer"}
+        mapped = channel_grounding._tool_args_to_edit_request("assign", args)
+        assert mapped["target_time_hint"] == "2pm"
+        assert mapped["target_staffing_hint"] == "unstaffed"

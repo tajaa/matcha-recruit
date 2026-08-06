@@ -76,6 +76,13 @@ _CANDIDATE_CAP = 8
 _MAX_SHIFT_REQUESTS = 6
 CLARIFY_ROUND_CAP = 2
 
+# _resolve_shift_ref's forward lookup window — bounds a role/employee-hint-only
+# search (no exact target_date) so it can't scan the company's entire future
+# history. A real prod miss: a shift correctly created 15 days out couldn't be
+# found by its own exact date because this window used to cap at 14 days
+# regardless of whether an exact date was even given.
+EDIT_LOOKUP_WINDOW_DAYS = 60
+
 # Shared with channels_ws.py's clarify-resume logic — the location question
 # is OUR OWN multiple-choice offer (build_proposal's own list of options),
 # so a reply to it can be resolved deterministically without a Gemini call.
@@ -166,6 +173,11 @@ def _build_parse_prompt(content: str, today: date) -> str:
         'to help find the shift, e.g. "the opener", "8am", or "9am-5pm"), '
         '"target_role_hint": str|null (role/label to help find the shift, '
         'e.g. "opener", "closer"), '
+        '"target_staffing_hint": "staffed"|"unstaffed"|null (ONLY when they '
+        'distinguish two shifts by whether someone is already on it — e.g. '
+        '"the unstaffed one" / "the open one" = "unstaffed", "the one that '
+        "has someone on it\" / \"the filled one\" = \"staffed\"; null "
+        "otherwise), "
         '"to_employee_name": str|null (who the shift should go TO — for '
         'reassign/assign), '
         '"second_date": str|null (exact date only, same rule as '
@@ -262,6 +274,14 @@ def coerce_edit_request(raw) -> Optional[dict]:
         v = raw.get(key)
         return str(v).strip().lower()[:12] if v else None
 
+    def _staffing_hint(key: str) -> Optional[str]:
+        v = str(raw.get(key) or "").strip().lower()
+        if v in ("unstaffed", "open", "empty", "unassigned"):
+            return "unstaffed"
+        if v in ("staffed", "assigned", "filled"):
+            return "staffed"
+        return None
+
     target_date = raw.get("target_date")
     if isinstance(target_date, str):
         try:
@@ -296,6 +316,7 @@ def coerce_edit_request(raw) -> Optional[dict]:
         "target_day_hint": _day_hint("target_day_hint"),
         "target_time_hint": _s("target_time_hint", 40),
         "target_role_hint": _s("target_role_hint", 80),
+        "target_staffing_hint": _staffing_hint("target_staffing_hint"),
         "to_employee_name": _s("to_employee_name"),
         "second_employee_name": _s("second_employee_name"),
         "second_date": second_date,
@@ -824,15 +845,25 @@ async def _resolve_shift_ref(
     *, from_employee_id: Optional[UUID] = None,
 ) -> dict:
     """Find the one published shift a chat edit request refers to, scoped to
-    company (+ location, if the channel is store-bound) and a 14-day forward
-    window (edits target upcoming shifts, not history).
+    company (+ location, if the channel is store-bound) and a forward window
+    (edits target upcoming shifts, not history). An EXACT target_date already
+    pins the shift to one day via its own WHERE clause below, so the window
+    only needs to bound the role/employee-hint-only search — it's dropped
+    entirely once an exact date narrows the query, rather than capping it at
+    EDIT_LOOKUP_WINDOW_DAYS regardless (a real prod miss: an exact date 15+
+    days out was invisible to its own exact-date filter).
     -> {"shift": row} | {"ambiguous": [rows]} | {"none": reason}"""
     window_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
-    window_end = datetime.combine(today + timedelta(days=14), time.min, tzinfo=timezone.utc)
+    has_exact_date = bool(ref.get("target_date"))
+    window_end = None if has_exact_date else (
+        window_start + timedelta(days=EDIT_LOOKUP_WINDOW_DAYS)
+    )
     async def _query(*, use_role: bool) -> list:
-        params: list = [company_id, window_start, window_end]
-        where = ["s.company_id = $1", "s.status = 'published'",
-                 "s.starts_at >= $2", "s.starts_at < $3"]
+        params: list = [company_id, window_start]
+        where = ["s.company_id = $1", "s.status = 'published'", "s.starts_at >= $2"]
+        if window_end is not None:
+            params.append(window_end)
+            where.append(f"s.starts_at < ${len(params)}")
         if location_id is not None:
             params.append(location_id)
             where.append(f"s.location_id = ${len(params)}")
@@ -883,6 +914,17 @@ async def _resolve_shift_ref(
             # "the 8am shift" — narrow same-day/same-role candidates by
             # start hour before falling back to the pickable listing.
             narrowed = [r for r in rows if r["starts_at"].time().hour == hint_time.hour]
+            if len(narrowed) == 1:
+                return {"shift": dict(narrowed[0])}
+            if narrowed:
+                rows = narrowed
+        if len(rows) > 1 and ref.get("target_staffing_hint"):
+            # Two shifts can share the exact date, time, AND role (one
+            # staffed, one open) — time_hint alone can't separate them, but
+            # the ambiguous listing already tells the admin who (if anyone)
+            # is on each one, so "the unstaffed one" is a real answer.
+            want_unstaffed = ref["target_staffing_hint"] == "unstaffed"
+            narrowed = [r for r in rows if bool(r["assignee_names"]) != want_unstaffed]
             if len(narrowed) == 1:
                 return {"shift": dict(narrowed[0])}
             if narrowed:
@@ -979,13 +1021,29 @@ async def build_edit_proposal(
                 conn, company_id, location_id, ref, today, from_employee_id=emp_id,
             )
             if "none" in found:
+                # An exact date was already given (target_day_hint is
+                # resolved into target_date above before this runs) — "what
+                # date is it on?" would be a non-sequitur when they just
+                # told us the date; the miss means nothing matched that
+                # date/role/employee combo, not that the date is unknown.
                 # No label to name it by reads as "a shift for that shift" —
                 # drop the possessive clause entirely in that case.
-                question = (
-                    f"I couldn't find a shift for {label_hint} — what date is it on?"
-                    if label_hint else
-                    "I couldn't find that shift — what date is it on?"
-                )
+                if ref.get("target_date"):
+                    when = _fmt_date(datetime.combine(date.fromisoformat(ref["target_date"]), time.min))
+                    question = (
+                        f"I couldn't find a shift for {label_hint} on {when} — "
+                        "can you double check the date or who's on it?"
+                        if label_hint else
+                        f"I couldn't find a shift on {when} — can you double check the date?"
+                    )
+                else:
+                    question = (
+                        f"I couldn't find a shift for {label_hint} in the next "
+                        f"{EDIT_LOOKUP_WINDOW_DAYS} days — what date is it on?"
+                        if label_hint else
+                        f"I couldn't find that shift in the next {EDIT_LOOKUP_WINDOW_DAYS} "
+                        "days — what date is it on?"
+                    )
                 return None, await _clarify(question)
             if "ambiguous" in found:
                 # Who's on it is the discriminator that makes two same-role,

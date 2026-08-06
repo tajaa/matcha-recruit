@@ -52,6 +52,7 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
         "target_employee_name": args.get("target_employee_name"),
         "target_date": args.get("target_date"),
         "target_time_hint": args.get("target_time_hint"),
+        "target_staffing_hint": args.get("target_staffing_hint"),
         "target_role_hint": args.get("target_role_hint"),
         "to_employee_name": args.get("to_employee_name"),
         "second_employee_name": args.get("second_employee_name"),
@@ -136,7 +137,9 @@ async def propose(
         return {"error": (
             f"{text}\nAsk the admin which one they mean, then call "
             f"propose_schedule_change again adding target_time_hint (e.g. "
-            f"'12:30pm') or target_employee_name to pin down the shift."
+            f"'12:30pm'), target_employee_name, or — if the candidates differ "
+            f"only by who's on them — target_staffing_hint ('staffed' or "
+            f"'unstaffed') to pin down the shift."
         )}
     return {"proposal_id": str(build.proposal_id), "pill_text": build.pill_text}
 
