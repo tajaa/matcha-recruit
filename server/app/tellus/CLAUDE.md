@@ -11,8 +11,22 @@ Rewards-for-feedback app. Own product, mirrors Cappe's shape — not a matcha te
 ## Layout
 
 - `routes/` — `auth.py`, `billing.py`, `community.py` (public brand review page, `/b/{slug}`), `dms.py` (brand↔reporter DMs, any identified feedback — not review-scoped), `feedback.py`, `gamification.py`, `grants.py`, `links.py`, `marketplace.py`, `my_reviews.py` (consumer "My Reviews"), `public_intake.py`, `rewards.py`, `_shared.py`
-- `services/` — `auth.py`, `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `marketplace_service.py`, `points_service.py`
-- `models/tellus.py` — Pydantic shapes
+- `routes/admin/` — internal admin package (see "Internal admin management" below), gated by `require_tellus_admin` at the router level in every sub-router
+- `services/` — `auth.py`, `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `marketplace_service.py`, `points_service.py`, `admin_audit.py`
+- `models/tellus.py` — Pydantic shapes; `models/admin.py` — internal admin request/response shapes
+
+## Internal admin management
+
+`routes/admin/` (package, split 2026-08-06 from a single `admin.py` that started as just the changelog) — 27 endpoints across 6 sub-routers, every one gated by `require_tellus_admin` (`TELLUS_ADMIN_EMAILS` allowlist, fail-closed when empty — `dependencies.py:_is_tellus_admin`). Pinned by a gate-sweep test (`tests/tellus/test_admin_management.py::TestAdminGateSweep`) that walks `routes/admin/router.routes` and asserts the dependency on every one, so a future sub-router can't ship ungated.
+
+- **`accounts.py`** — list/search/detail, suspend/unsuspend (`tellus_accounts.status`, CHECK'd to `active|suspended` since `tellus_app_08`, previously never written after INSERT), force sign-out (`tokens_valid_after = NOW()`, same write self-logout uses), verify-email, password-reset link mint (Tell-Us had no reset flow before — `tellus_password_reset_tokens` + public `POST /auth/reset-password` consume in `routes/auth.py`, 1h expiry, single-use, revokes all sessions), manual points adjust.
+- **`brands.py`** — list/search/detail, plan comp/cancel (`tellus_brands.plan_status` — previously writable ONLY by the Stripe webhook; these endpoints never call Stripe, cancel-with-a-live-subscription returns a `stripe_warning` instead of touching Stripe), assign-owner (first-ever writer of `tellus_brands.claimed_at`, which existed since `tellus_app_06` but was dead schema — flips a consumer account to `account_type='brand'` if needed).
+- **`moderation.py`** — cross-brand review moderation queue (the gap `feedback.py`'s own docstring flags: brand-side moderation of its own reviews can look like suppressing a review it doesn't like) + DM thread oversight (view messages read-only, block/unblock — admin unblock can override a consumer's own block, no `blocked_by` column to distinguish who set it).
+- **`economy.py`** — config editors for `tellus_earning_rules` (had no UI before this), `tellus_badge_definitions`, `tellus_reward_listings` (force activate/deactivate).
+- **`audit.py`** + **`services/admin_audit.py`** — `tellus_admin_audit` table, `record_admin_action()` called inside the SAME transaction as every mutation above (so an audit row never exists for a rolled-back write). asyncpg returns the `detail` JSONB column as a raw string without a registered codec — always decode via `routes/admin/_shared.py:decode_audit_rows()` before constructing `TellusAdminAuditEntry`, never inline (a 500 from skipping this is how the accounts/brands detail endpoints broke during manual verification — fixed, but easy to reintroduce on a new endpoint).
+- **`services/points_service.py:adjust_points`/`compute_adjustment`** — manual credit/clawback, `reason='adjustment'` (declared in the ledger CHECK since `tellus_app_01`, unused until this). Unlike `redeem`, a clawback reduces `lifetime_points` too (floored at 0), so `level` can drop; badges are never revoked. Overdraw raises `AdjustError` (409) unless the caller passes `clamp=True`.
+
+Full design + endpoint-by-endpoint SQL: `TELLUS_ADMIN_MGMT_PLAN.md` at the repo root.
 
 ## Frontend pairing
 

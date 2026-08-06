@@ -218,7 +218,8 @@ Moved from root `CLAUDE.md`'s Symbol Map section.
 
 ### Tell-Us internal admin
 
-- `TELLUS_ADMIN_EMAILS` — comma-separated allowlist gating `/tellus/admin/updates` (`app/tellus/dependencies.py:_is_tellus_admin`). Empty ⇒ nobody passes (fail-closed), same shape as `master_admin_email`. Set in `server/.env` for dev. For prod, add it to **`~/matcha/.env.backend`** on the app EC2 alongside the Stripe keys above — same persistence rule applies (no deploy script overwrites that file).
+- `TELLUS_ADMIN_EMAILS` — comma-separated allowlist gating every `/tellus/admin/*` route (`app/tellus/dependencies.py:_is_tellus_admin`, `require_tellus_admin`). Empty ⇒ nobody passes (fail-closed), same shape as `master_admin_email`. Set in `server/.env` for dev. For prod, add it to **`~/matcha/.env.backend`** on the app EC2 alongside the Stripe keys above — same persistence rule applies (no deploy script overwrites that file).
+- Beyond the changelog (`/admin/updates`), the admin package (`app/tellus/routes/admin/`) covers account lifecycle (suspend/force-logout/verify-email/password-reset/manual points adjust), brand plan overrides + owner assignment, cross-brand review/DM moderation, and points-economy config editors (earning rules/badges/listings) — every mutation logged to `tellus_admin_audit` in the same transaction. Full spec → `server/app/tellus/CLAUDE.md`.
 
 ### Compliance + jurisdictions
 
