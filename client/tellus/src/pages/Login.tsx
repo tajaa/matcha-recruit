@@ -1,14 +1,18 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { tellusPublicPost } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
 import type { TokenResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
+import { popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
 
 export default function Login() {
   const { setSession } = useAccount()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const returnTo = sanitizeReturnTo(params.get('returnTo'))
+  useEffect(() => { stashReturnTo(returnTo) }, [returnTo])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
@@ -21,7 +25,8 @@ export default function Login() {
     try {
       const res = await tellusPublicPost<TokenResponse>('/auth/login', { email, password })
       setSession(res)
-      navigate('/')
+      const stashed = popReturnTo()
+      navigate(returnTo ?? stashed ?? '/')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Login failed'
       setErr(msg)
@@ -51,7 +56,7 @@ export default function Login() {
         </form>
       </Card>
       <p className="mt-4 text-center text-sm text-tu-dim">
-        New here? <Link to="/signup" className="font-semibold text-tu-accent hover:underline">Create an account</Link>
+        New here? <Link to={returnTo ? '/signup?returnTo=' + encodeURIComponent(returnTo) : '/signup'} className="font-semibold text-tu-accent hover:underline">Create an account</Link>
       </p>
     </AuthShell>
   )

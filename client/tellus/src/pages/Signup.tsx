@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
 import type { AccountType, BrandPricing, SignupResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
+import { popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
 
 export default function Signup() {
   const { setSession } = useAccount()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const returnTo = sanitizeReturnTo(params.get('returnTo'))
+  useEffect(() => { stashReturnTo(returnTo) }, [returnTo])
   const [type, setType] = useState<AccountType>('consumer')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -48,7 +52,8 @@ export default function Signup() {
         setSent(true)
       } else if (res.access_token && res.refresh_token && res.account) {
         setSession({ access_token: res.access_token, refresh_token: res.refresh_token, expires_in: res.expires_in ?? 0, account: res.account })
-        navigate(type === 'brand' ? '/brand/billing' : '/')
+        const stashed = popReturnTo()
+        navigate(type === 'brand' ? '/brand/billing' : (returnTo ?? stashed ?? '/'))
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Signup failed')
