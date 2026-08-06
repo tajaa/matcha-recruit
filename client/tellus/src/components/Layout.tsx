@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
+import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, ScrollText, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -42,6 +42,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert },
   { to: '/admin/economy', label: 'Economy', icon: Coins },
   { to: '/admin/updates', label: 'Updates', icon: Sparkles },
+  { to: '/admin/audit', label: 'Audit', icon: ScrollText },
 ]
 
 function navLinkClass({ isActive }: { isActive: boolean }) {

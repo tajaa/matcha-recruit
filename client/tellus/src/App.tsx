@@ -32,6 +32,7 @@ import AdminBrands from './pages/admin/Brands'
 import AdminBrandDetail from './pages/admin/BrandDetail'
 import AdminModeration from './pages/admin/Moderation'
 import AdminEconomy from './pages/admin/Economy'
+import AdminAudit from './pages/admin/Audit'
 import ResetPassword from './pages/ResetPassword'
 
 // Where an authenticated brand lands: /brand/billing if unpaid (or plan_status
@@ -111,6 +112,7 @@ export default function App() {
       <Route path="/admin/moderation" element={<AdminOnly><AdminModeration /></AdminOnly>} />
       <Route path="/admin/economy" element={<AdminOnly><AdminEconomy /></AdminOnly>} />
       <Route path="/admin/updates" element={<AdminOnly><TellusAdminUpdates /></AdminOnly>} />
+      <Route path="/admin/audit" element={<AdminOnly><AdminAudit /></AdminOnly>} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

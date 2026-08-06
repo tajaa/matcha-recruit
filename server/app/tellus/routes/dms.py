@@ -21,7 +21,7 @@ from ...database import get_connection
 from ..dependencies import require_consumer, require_dm_account, require_paid_brand
 from ..models.tellus import TellusAccount, TellusDmMessage, TellusDmSend, TellusDmThread
 from ..services.email import send_tellus_dm_email
-from ..services.points_service import _notify
+from ..services.points_service import notify_account
 from ._shared import effective_review_state, get_owned_report
 
 router = APIRouter()
@@ -105,7 +105,7 @@ async def open_thread(
             await conn.execute(
                 "UPDATE tellus_dm_threads SET last_message_at = NOW() WHERE id = $1", thread["id"],
             )
-            await _notify(
+            await notify_account(
                 conn, report["reporter_account_id"], "dm_message", "New message about your feedback",
                 "A brand sent you a message.", reference_type="dm_thread", reference_id=str(thread["id"]),
             )
@@ -231,7 +231,7 @@ async def send_message(
             else:
                 counterparty_id = thread["consumer_account_id"]
             if counterparty_id:
-                await _notify(
+                await notify_account(
                     conn, counterparty_id, "dm_message", "New message about your feedback",
                     "You have a new message.", reference_type="dm_thread", reference_id=str(thread_id),
                 )

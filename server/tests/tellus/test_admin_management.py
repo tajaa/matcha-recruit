@@ -2,6 +2,8 @@
 (points adjustment math, audit serialization, admin filter builders, admin
 model validation). No DB, no HTTP — see TELLUS_ADMIN_MGMT_PLAN.md Part 6/2c/3f.
 """
+from uuid import uuid4
+
 import pytest
 
 from app.tellus.models.admin import (
@@ -15,9 +17,59 @@ from app.tellus.routes.admin._shared import account_filter_sql, report_filter_sq
 from app.tellus.services.admin_audit import serialize_detail
 from app.tellus.services.points_service import (
     AdjustError,
+    adjust_points,
     compute_adjustment,
     level_for_points,
 )
+
+
+class _NullTxn:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
+class _FakeConn:
+    """Minimal asyncpg stand-in for adjust_points: dispatches on SQL
+    substring, records every call so a test can assert what did (and didn't)
+    run. `dup` simulates a ledger row already existing for the idempotency
+    key — the pre-check path adjust_points must take instead of relying on a
+    caught UniqueViolationError under a nested SAVEPOINT."""
+
+    def __init__(self, *, dup: bool, balance: int, lifetime: int, level: int, insert_id="ledger-1"):
+        self.calls: list[tuple] = []
+        self._dup = dup
+        self._balance = balance
+        self._lifetime = lifetime
+        self._level = level
+        self._insert_id = insert_id
+
+    def transaction(self):
+        return _NullTxn()
+
+    async def execute(self, query, *args):
+        self.calls.append(("execute", query, args))
+        return "OK"
+
+    async def fetch(self, query, *args):
+        self.calls.append(("fetch", query, args))
+        return []
+
+    async def fetchval(self, query, *args):
+        self.calls.append(("fetchval", query, args))
+        if "SELECT 1 FROM tellus_points_ledger" in query:
+            return 1 if self._dup else None
+        if "INSERT INTO tellus_points_ledger" in query:
+            return None if self._dup else self._insert_id
+        raise AssertionError(f"unexpected fetchval: {query}")
+
+    async def fetchrow(self, query, *args):
+        self.calls.append(("fetchrow", query, args))
+        if "tellus_points_balances" in query:
+            return {"points_balance": self._balance, "lifetime_points": self._lifetime, "level": self._level}
+        raise AssertionError(f"unexpected fetchrow: {query}")
 
 
 class TestComputeAdjustment:
@@ -70,6 +122,41 @@ class TestComputeAdjustment:
                     plan = compute_adjustment(balance, lifetime, delta)
                     assert plan["new_balance"] == balance + plan["applied_delta"] >= 0
                     assert plan["new_level"] == level_for_points(plan["new_lifetime"])
+
+
+class TestAdjustPointsIdempotency:
+    """adjust_points' insert is routinely called inside an already-open
+    transaction (routes/admin/accounts.py opens one before calling it), which
+    makes it a SAVEPOINT — a caught UniqueViolationError there leaves the
+    savepoint aborted and the request 500s. The fix is a pre-check + ON
+    CONFLICT DO NOTHING, verified here without touching a real DB."""
+
+    @pytest.mark.asyncio
+    async def test_first_call_inserts_and_credits(self):
+        conn = _FakeConn(dup=False, balance=0, lifetime=99, level=1)
+        result = await adjust_points(conn, uuid4(), 1, description="test adj", reference_id="adm:key1")
+        assert result == {"adjusted": True, "applied_delta": 1, "balance": 1, "lifetime": 100, "level": 2}
+        insert_calls = [c for c in conn.calls if c[0] == "fetchval" and "INSERT INTO tellus_points_ledger" in c[1]]
+        assert len(insert_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_replay_short_circuits_before_insert(self):
+        conn = _FakeConn(dup=True, balance=1, lifetime=100, level=2)
+        result = await adjust_points(conn, uuid4(), 1, description="test adj", reference_id="adm:key1")
+        assert result == {"adjusted": False, "applied_delta": 0, "balance": 1, "lifetime": 100, "level": 2}
+        insert_calls = [c for c in conn.calls if c[0] == "fetchval" and "INSERT INTO tellus_points_ledger" in c[1]]
+        assert len(insert_calls) == 0
+        # The pre-check dup lookup ran, but the FOR UPDATE balance lock never did.
+        lock_calls = [c for c in conn.calls if c[0] == "fetchrow" and "FOR UPDATE" in c[1]]
+        assert len(lock_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_reference_id_never_hits_the_precheck(self):
+        conn = _FakeConn(dup=False, balance=0, lifetime=0, level=1)
+        result = await adjust_points(conn, uuid4(), 5, description="test adj")
+        assert result["adjusted"] is True
+        dup_calls = [c for c in conn.calls if c[0] == "fetchval" and "SELECT 1 FROM tellus_points_ledger" in c[1]]
+        assert len(dup_calls) == 0
 
 
 class TestSerializeDetail:

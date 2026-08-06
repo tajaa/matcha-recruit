@@ -22,7 +22,7 @@ from ..models.tellus import (
 )
 from ..services.email import send_tellus_points_email
 from ..services.feedback_service import award_for_report
-from ..services.points_service import _notify
+from ..services.points_service import notify_account
 from ._shared import get_owned_report, serialize_report, serialize_reports
 
 router = APIRouter()
@@ -183,7 +183,7 @@ async def moderate(
             and row["review_state"] is not None
             and row["reporter_account_id"] is not None
         ):
-            await _notify(
+            await notify_account(
                 conn, row["reporter_account_id"], "review_moderated", "Review removed",
                 "A brand removed your public review for a policy violation.",
                 reference_type="report", reference_id=str(report_id),
@@ -213,7 +213,7 @@ async def heart_report(report_id: UUID, account: TellusAccount = Depends(require
                 str(report_id),
             )
             if not already_notified:
-                await _notify(
+                await notify_account(
                     conn, row["reporter_account_id"], "review_hearted", "Your feedback got a heart",
                     "A brand acknowledged your feedback.",
                     reference_type="report", reference_id=str(report_id),
@@ -267,7 +267,7 @@ async def set_public_reply(
                 str(report_id),
             )
             if not already_notified:
-                await _notify(
+                await notify_account(
                     conn, row["reporter_account_id"], "review_reply", "A brand replied to your review",
                     "Check your review to read the reply.",
                     reference_type="report", reference_id=str(report_id),

@@ -1,47 +1,64 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Sparkles, Star } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
-import { Button, Chip, Input, Select } from '../../components/ui'
+import { Button, Chip, ErrorText, Input, Select } from '../../components/ui'
 import type { AdminDmThreadSummary, AdminReportItem, DmMessage } from '../../api/types'
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString()
+
+function toErrorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
 
 function ReviewsTab() {
   const [moderationStatus, setModerationStatus] = useState('')
   const [reviewState, setReviewState] = useState('')
   const [brandQ, setBrandQ] = useState('')
+  const [debouncedBrandQ, setDebouncedBrandQ] = useState('')
   const [items, setItems] = useState<AdminReportItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [pendingStatus, setPendingStatus] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedBrandQ(brandQ), 300)
+    return () => clearTimeout(t)
+  }, [brandQ])
+
   async function load() {
     setLoading(true)
+    setError('')
     const params = new URLSearchParams()
     if (moderationStatus) params.set('moderation_status', moderationStatus)
     if (reviewState) params.set('review_state', reviewState)
-    if (brandQ) params.set('q', brandQ)
+    if (debouncedBrandQ) params.set('q', debouncedBrandQ)
     try {
       const res = await tellusApi.get<{ items: AdminReportItem[]; total: number }>(`/admin/reports?${params.toString()}`)
       setItems(res.items)
       setTotal(res.total)
+    } catch (e) {
+      setError(toErrorMessage(e, 'Failed to load reviews'))
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { void load() }, [moderationStatus, reviewState, brandQ])
+  useEffect(() => { void load() }, [moderationStatus, reviewState, debouncedBrandQ])
 
   async function applyModeration(id: string) {
     const next = pendingStatus[id]
     if (!next) return
     if (next === 'removed' && !window.confirm('Remove this review? The reporter will be notified.')) return
     setBusyId(id)
+    setError('')
     try {
       await tellusApi.patch(`/admin/reports/${id}/moderation`, { moderation_status: next })
       await load()
+    } catch (e) {
+      setError(toErrorMessage(e, 'Failed to update moderation status'))
     } finally {
       setBusyId(null)
     }
@@ -77,6 +94,7 @@ function ReviewsTab() {
       </div>
 
       <div>
+        {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
         {loading && items.length === 0 && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
         {items.map((r) => {
           const open = openId === r.id
@@ -137,15 +155,19 @@ function ReviewsTab() {
 function DmsTab() {
   const [items, setItems] = useState<AdminDmThreadSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Record<string, DmMessage[]>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
+    setError('')
     try {
       const res = await tellusApi.get<{ items: AdminDmThreadSummary[] }>('/admin/dm-threads')
       setItems(res.items)
+    } catch (e) {
+      setError(toErrorMessage(e, 'Failed to load conversations'))
     } finally {
       setLoading(false)
     }
@@ -157,49 +179,62 @@ function DmsTab() {
     if (openId === t.id) { setOpenId(null); return }
     setOpenId(t.id)
     if (!messages[t.id]) {
-      const rows = await tellusApi.get<DmMessage[]>(`/admin/dm-threads/${t.id}/messages`)
-      setMessages((m) => ({ ...m, [t.id]: rows }))
+      try {
+        const rows = await tellusApi.get<DmMessage[]>(`/admin/dm-threads/${t.id}/messages`)
+        setMessages((m) => ({ ...m, [t.id]: rows }))
+      } catch (e) {
+        setError(toErrorMessage(e, 'Failed to load messages'))
+      }
     }
   }
 
   async function block(t: AdminDmThreadSummary) {
     if (!window.confirm('Block this conversation? Neither side will be able to send messages.')) return
     setBusyId(t.id)
-    try { await tellusApi.post(`/admin/dm-threads/${t.id}/block`); await load() } finally { setBusyId(null) }
+    setError('')
+    try { await tellusApi.post(`/admin/dm-threads/${t.id}/block`); await load() }
+    catch (e) { setError(toErrorMessage(e, 'Failed to block conversation')) }
+    finally { setBusyId(null) }
   }
 
   async function unblock(t: AdminDmThreadSummary) {
     if (!window.confirm('Unblock this conversation? This may override a block the consumer set themselves.')) return
     setBusyId(t.id)
-    try { await tellusApi.post(`/admin/dm-threads/${t.id}/unblock`); await load() } finally { setBusyId(null) }
+    setError('')
+    try { await tellusApi.post(`/admin/dm-threads/${t.id}/unblock`); await load() }
+    catch (e) { setError(toErrorMessage(e, 'Failed to unblock conversation')) }
+    finally { setBusyId(null) }
   }
 
   return (
     <div>
+      {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
       {loading && items.length === 0 && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
       {items.map((t) => (
         <div key={t.id} className="border-b border-tu-border/70">
-          <button
-            type="button"
-            onClick={() => void toggleOpen(t)}
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-tu-panel2/60"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-sm font-medium text-tu-text">{t.brand_name} ↔ {t.consumer_email}</span>
-                {t.blocked && <Chip tone="negative">blocked</Chip>}
+          <div className="flex w-full items-center justify-between gap-3 px-4 py-3 hover:bg-tu-panel2/60">
+            <button
+              type="button"
+              onClick={() => void toggleOpen(t)}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-tu-text">{t.brand_name} ↔ {t.consumer_email}</span>
+                  {t.blocked && <Chip tone="negative">blocked</Chip>}
+                </div>
+                <div className="mt-0.5 text-xs text-tu-faint">
+                  {t.message_count} messages{t.last_message_at ? ` · last ${fmtDateTime(t.last_message_at)}` : ''}
+                </div>
               </div>
-              <div className="mt-0.5 text-xs text-tu-faint">
-                {t.message_count} messages{t.last_message_at ? ` · last ${fmtDateTime(t.last_message_at)}` : ''}
-              </div>
-            </div>
+            </button>
             <Button
               size="sm" variant="soft" loading={busyId === t.id}
-              onClick={(e) => { e.stopPropagation(); void (t.blocked ? unblock(t) : block(t)) }}
+              onClick={() => void (t.blocked ? unblock(t) : block(t))}
             >
               {t.blocked ? 'Unblock' : 'Block'}
             </Button>
-          </button>
+          </div>
           {openId === t.id && (
             <div className="space-y-2 px-4 pb-4 pl-8">
               {(messages[t.id] ?? []).map((m) => (

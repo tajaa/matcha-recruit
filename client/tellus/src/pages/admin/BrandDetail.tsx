@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Card, Chip, ErrorText, Input, Spinner } from '../../components/ui'
+import { AuditList } from './AuditList'
 import type { AdminAccountList, AdminAccountSummary, AdminBrandDetail, AdminPlanActionResult } from '../../api/types'
 
 const LABEL = 'font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-tu-faint'
@@ -10,7 +11,6 @@ const PLAN_TONE: Record<string, string> = {
   active: 'positive', past_due: 'negative', canceled: 'negative', pending: 'neutral',
 }
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-const fmtDateTime = (iso: string) => new Date(iso).toLocaleString()
 
 export default function AdminBrandDetail() {
   const { id } = useParams<{ id: string }>()
@@ -200,16 +200,7 @@ export default function AdminBrandDetail() {
 
       <Card>
         <div className={`mb-2 ${LABEL}`}>Audit history</div>
-        {data.audit.length === 0 && <p className="text-sm text-tu-faint">No admin actions on this brand yet.</p>}
-        {data.audit.map((a) => (
-          <details key={a.id} className="border-b border-tu-border/50 py-1.5 text-sm last:border-b-0">
-            <summary className="cursor-pointer">
-              <span className="text-tu-text">{a.action}</span>{' '}
-              <span className="text-tu-faint">by {a.actor_email} · {fmtDateTime(a.created_at)}</span>
-            </summary>
-            {a.detail && <pre className="mt-1 overflow-x-auto text-xs text-tu-dim">{JSON.stringify(a.detail, null, 2)}</pre>}
-          </details>
-        ))}
+        <AuditList entries={data.audit} emptyText="No admin actions on this brand yet." />
       </Card>
     </div>
   )

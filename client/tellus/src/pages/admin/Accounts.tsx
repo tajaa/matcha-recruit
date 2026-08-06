@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Sparkles } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
-import { Chip, Input, Select } from '../../components/ui'
+import { Chip, ErrorText, Input, Select } from '../../components/ui'
 import type { AdminAccountList, AdminAccountSummary } from '../../api/types'
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -17,6 +17,7 @@ export default function AdminAccounts() {
   const [offset, setOffset] = useState(0)
   const [data, setData] = useState<AdminAccountList | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const limit = 50
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export default function AdminAccounts() {
 
   useEffect(() => {
     setLoading(true)
+    setError('')
     const params = new URLSearchParams()
     if (debouncedQ) params.set('q', debouncedQ)
     if (accountType) params.set('account_type', accountType)
@@ -37,6 +39,7 @@ export default function AdminAccounts() {
     params.set('offset', String(offset))
     tellusApi.get<AdminAccountList>(`/admin/accounts?${params.toString()}`)
       .then(setData)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load accounts'))
       .finally(() => setLoading(false))
   }, [debouncedQ, accountType, status, verified, offset])
 
@@ -81,6 +84,7 @@ export default function AdminAccounts() {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
         {loading && !data && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
         {items.map((a: AdminAccountSummary) => (
           <button

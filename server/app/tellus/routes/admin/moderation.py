@@ -12,7 +12,7 @@ from ...dependencies import require_tellus_admin
 from ...models.tellus import TellusAccount, TellusReport
 from .._shared import serialize_report, serialize_reports
 from ...services.admin_audit import record_admin_action
-from ...services.points_service import _notify
+from ...services.points_service import notify_account
 from ...models.admin import TellusAdminDmThreadSummary, TellusAdminModerationUpdate
 from ._shared import report_filter_sql
 
@@ -74,13 +74,13 @@ async def moderate_report(
 
             notifiable = row["review_state"] is not None and row["reporter_account_id"] is not None
             if notifiable and body.moderation_status == "removed" and row["moderation_status"] != "removed":
-                await _notify(
+                await notify_account(
                     conn, row["reporter_account_id"], "review_moderated", "Review removed",
                     "A Tell-Us admin removed your public review for a policy violation.",
                     reference_type="report", reference_id=str(report_id),
                 )
             elif notifiable and body.moderation_status == "visible" and row["moderation_status"] == "removed":
-                await _notify(
+                await notify_account(
                     conn, row["reporter_account_id"], "review_moderated", "Review restored",
                     "Your public review was restored by a Tell-Us admin.",
                     reference_type="report", reference_id=str(report_id),

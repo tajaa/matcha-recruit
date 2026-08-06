@@ -429,6 +429,13 @@ export interface AdminAuditEntry {
   created_at: string
 }
 
+export interface AdminAuditList {
+  items: AdminAuditEntry[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export interface AdminAccountDetail {
   account: AdminAccountSummary
   lifetime_points: number

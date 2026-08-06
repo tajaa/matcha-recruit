@@ -14,8 +14,6 @@ import secrets
 from typing import Optional
 from uuid import UUID
 
-import asyncpg
-
 logger = logging.getLogger(__name__)
 
 # reason values must match the tellus_points_ledger CHECK constraint.
@@ -110,7 +108,7 @@ async def check_and_award_badges(conn, account_id: UUID) -> list[str]:
     return newly
 
 
-async def _notify(conn, account_id: UUID, kind: str, title: str, body: str | None,
+async def notify_account(conn, account_id: UUID, kind: str, title: str, body: str | None,
                   reference_type: str | None = None, reference_id: str | None = None) -> None:
     await conn.execute(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
@@ -238,16 +236,18 @@ async def award_points(
             new_streak = 1
         new_longest = max(bal["longest_streak"], new_streak)
 
-        try:
-            await conn.execute(
-                """INSERT INTO tellus_points_ledger
-                       (account_id, delta, balance_after, reason, event_key,
-                        reference_type, reference_id, description)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-                account_id, points, new_balance, reason, event_key,
-                reference_type, reference_id, description,
-            )
-        except asyncpg.UniqueViolationError:
+        inserted = await conn.fetchval(
+            """INSERT INTO tellus_points_ledger
+                   (account_id, delta, balance_after, reason, event_key,
+                    reference_type, reference_id, description)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+               ON CONFLICT (account_id, reason, reference_id) WHERE reference_id IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
+            account_id, points, new_balance, reason, event_key,
+            reference_type, reference_id, description,
+        )
+        if inserted is None:
             return result  # race lost the idempotency check — no double credit
 
         await conn.execute(
@@ -262,15 +262,15 @@ async def award_points(
         new_badges = await check_and_award_badges(conn, account_id)
 
         if notify:
-            await _notify(
+            await notify_account(
                 conn, account_id, "points_earned", f"+{points} points",
                 description or "You earned points.", reference_type, reference_id,
             )
             if new_level > old_level:
-                await _notify(conn, account_id, "level_up", f"Level {new_level}!",
+                await notify_account(conn, account_id, "level_up", f"Level {new_level}!",
                               f"You reached level {new_level}.")
             for bk in new_badges:
-                await _notify(conn, account_id, "badge", "New badge unlocked", bk,
+                await notify_account(conn, account_id, "badge", "New badge unlocked", bk,
                               "badge", bk)
 
         result.update(
@@ -357,7 +357,7 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
         )
 
         await check_and_award_badges(conn, account_id)
-        await _notify(
+        await notify_account(
             conn, account_id, "redemption", "Reward redeemed",
             f"You redeemed {listing['title']}.", "redemption", str(redemption["id"]),
         )
@@ -405,23 +405,47 @@ async def adjust_points(
     """Manual admin credit or clawback. reason='adjustment' (in the ledger
     CHECK since tellus_app_01, unused until now). Streaks NOT touched (an
     adjustment is not user activity); badges only checked on credit, never
-    revoked on level-down (no removal path exists)."""
+    revoked on level-down (no removal path exists).
+
+    Idempotency is checked up front (mirrors award_points) rather than caught
+    as a UniqueViolationError: this is routinely called inside an already-open
+    transaction (routes/admin/accounts.py), where a caught error leaves the
+    enclosing SAVEPOINT aborted and the request 500s instead of returning
+    adjusted=False."""
     async with conn.transaction():
         await _ensure_balance(conn, account_id)
+
+        if reference_id is not None:
+            dup = await conn.fetchval(
+                "SELECT 1 FROM tellus_points_ledger "
+                "WHERE account_id = $1 AND reason = 'adjustment' AND reference_id = $2",
+                account_id, reference_id,
+            )
+            if dup:
+                bal = await conn.fetchrow(
+                    "SELECT points_balance, lifetime_points, level FROM tellus_points_balances "
+                    "WHERE account_id = $1", account_id,
+                )
+                return {"adjusted": False, "applied_delta": 0,
+                        "balance": bal["points_balance"], "lifetime": bal["lifetime_points"],
+                        "level": bal["level"]}
+
         bal = await conn.fetchrow(
             "SELECT points_balance, lifetime_points, level FROM tellus_points_balances "
             "WHERE account_id = $1 FOR UPDATE", account_id,
         )
         plan = compute_adjustment(bal["points_balance"], bal["lifetime_points"], delta, clamp=clamp)
-        try:
-            await conn.execute(
-                """INSERT INTO tellus_points_ledger
-                       (account_id, delta, balance_after, reason, event_key,
-                        reference_type, reference_id, description)
-                   VALUES ($1, $2, $3, 'adjustment', NULL, 'admin_adjustment', $4, $5)""",
-                account_id, plan["applied_delta"], plan["new_balance"], reference_id, description,
-            )
-        except asyncpg.UniqueViolationError:
+        inserted = await conn.fetchval(
+            """INSERT INTO tellus_points_ledger
+                   (account_id, delta, balance_after, reason, event_key,
+                    reference_type, reference_id, description)
+               VALUES ($1, $2, $3, 'adjustment', NULL, 'admin_adjustment', $4, $5)
+               ON CONFLICT (account_id, reason, reference_id) WHERE reference_id IS NOT NULL
+               DO NOTHING
+               RETURNING id""",
+            account_id, plan["applied_delta"], plan["new_balance"], reference_id, description,
+        )
+        if inserted is None:
             return {"adjusted": False, "applied_delta": 0,
                     "balance": bal["points_balance"], "lifetime": bal["lifetime_points"],
                     "level": bal["level"]}
@@ -434,7 +458,7 @@ async def adjust_points(
         if plan["applied_delta"] > 0:
             await check_and_award_badges(conn, account_id)
         if notify:
-            await _notify(conn, account_id, "points_adjustment",
+            await notify_account(conn, account_id, "points_adjustment",
                           f"{plan['applied_delta']:+d} points", description,
                           "admin_adjustment", reference_id)
         return {"adjusted": True, "applied_delta": plan["applied_delta"],

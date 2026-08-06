@@ -325,10 +325,11 @@ async def update_profile(
 
 
 @router.post("/auth/reset-password", status_code=status.HTTP_204_NO_CONTENT)
-async def reset_password(body: TellusPasswordResetConfirm):
+async def reset_password(body: TellusPasswordResetConfirm, request: Request):
     """Consume an admin-issued reset token (see routes/admin/accounts.py's
     password-reset endpoint, the only minter): set the new password, burn the
     token, and revoke all existing sessions."""
+    await check_rate_limit(client_ip(request), "tellus_reset_pw", 10, 3600)
     password_hash = hash_password(body.new_password)
     async with get_connection() as conn:
         async with conn.transaction():

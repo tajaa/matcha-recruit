@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Card, Chip, ErrorText, Input, Spinner } from '../../components/ui'
+import { AuditList } from './AuditList'
 import type { AdminAccountDetail, AdminPasswordResetResponse, AdminPointsAdjustResult } from '../../api/types'
 
 const LABEL = 'font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-tu-faint'
@@ -220,6 +221,7 @@ export default function AdminAccountDetail() {
               <div className="flex items-center gap-2">
                 <span className="text-tu-text">{r.title || '(no title)'}</span>
                 <Chip>{r.moderation_status}</Chip>
+                {r.review_state && <Chip tone={r.review_state === 'published' ? 'positive' : undefined}>{r.review_state}</Chip>}
               </div>
               <div className="text-xs text-tu-faint">{r.brand_name} · {fmtDate(r.created_at)}</div>
             </div>
@@ -250,16 +252,7 @@ export default function AdminAccountDetail() {
 
       <Card>
         <div className={`mb-2 ${LABEL}`}>Audit history</div>
-        {data.audit.length === 0 && <p className="text-sm text-tu-faint">No admin actions on this account yet.</p>}
-        {data.audit.map((a) => (
-          <details key={a.id} className="border-b border-tu-border/50 py-1.5 text-sm last:border-b-0">
-            <summary className="cursor-pointer">
-              <span className="text-tu-text">{a.action}</span>{' '}
-              <span className="text-tu-faint">by {a.actor_email} · {fmtDateTime(a.created_at)}</span>
-            </summary>
-            {a.detail && <pre className="mt-1 overflow-x-auto text-xs text-tu-dim">{JSON.stringify(a.detail, null, 2)}</pre>}
-          </details>
-        ))}
+        <AuditList entries={data.audit} emptyText="No admin actions on this account yet." />
       </Card>
 
       {busy && <div className="fixed bottom-4 right-4"><Loader2 className="h-5 w-5 animate-spin text-tu-accent" /></div>}

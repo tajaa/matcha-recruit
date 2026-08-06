@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ....database import get_connection
 from ...dependencies import require_tellus_admin
 from ...models.tellus import TellusAccount
+from .._shared import effective_review_state
 from ...services.admin_audit import record_admin_action
 from ...services.email import app_url
 from ...services.points_service import AdjustError, adjust_points
@@ -41,6 +42,16 @@ _ACCOUNT_SELECT = """
 
 def _row_to_summary(row) -> TellusAdminAccountSummary:
     return TellusAdminAccountSummary(**dict(row))
+
+
+def _report_row_to_dict(row) -> dict:
+    """review_state is EFFECTIVE (mirrors /admin/reports' serialize_reports),
+    not the raw column — a held-but-past-publish_at review must read the same
+    way here as it does on the moderation queue."""
+    d = dict(row)
+    d["review_state"] = effective_review_state(row)
+    d.pop("publish_at", None)
+    return d
 
 
 @router.get("/admin/accounts", response_model=TellusAdminAccountList)
@@ -118,7 +129,7 @@ async def get_account_detail(account_id: UUID):
         level=bal["level"] if bal else 1,
         current_streak=bal["current_streak"] if bal else 0,
         ledger=[TellusAdminLedgerEntry(**dict(r)) for r in ledger_rows],
-        recent_reports=[dict(r) for r in report_rows],
+        recent_reports=[_report_row_to_dict(r) for r in report_rows],
         redemptions=[dict(r) for r in redemption_rows],
         dm_threads=[dict(r) for r in dm_rows],
         audit=[TellusAdminAuditEntry(**d) for d in decode_audit_rows(audit_rows)],
@@ -237,11 +248,13 @@ async def points_adjust(
                 raise HTTPException(409, str(exc))
             except ValueError as exc:
                 raise HTTPException(422, str(exc))
-            await record_admin_action(
-                conn, admin, "account.points_adjust", "account", account_id,
-                {
-                    "delta": body.delta, "applied_delta": result["applied_delta"],
-                    "description": body.description, "balance_after": result["balance"],
-                },
-            )
+            if result["adjusted"]:
+                # A replayed idempotency_key is a no-op, not a new admin action.
+                await record_admin_action(
+                    conn, admin, "account.points_adjust", "account", account_id,
+                    {
+                        "delta": body.delta, "applied_delta": result["applied_delta"],
+                        "description": body.description, "balance_after": result["balance"],
+                    },
+                )
     return result
