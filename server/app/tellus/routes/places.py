@@ -9,13 +9,12 @@ import secrets
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..models.tellus import TellusPlaceCreate, TellusPlaceCreateResponse, TellusPlaceSearchResult
-from ..services.geo import geocode_location
-from ._shared import slugify
+from ._shared import escape_like, slugify
 
 router = APIRouter()
 
@@ -27,6 +26,10 @@ async def search_places(
     city: Optional[str] = Query(default=None, max_length=120),
 ):
     await check_rate_limit(client_ip(request), "tellus_place_search", 60, 3600)
+    q = q.strip()
+    if not q:
+        return []
+    city_filter = (city or "").strip() or None
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT b.slug, b.name, b.logo_url, b.owner_account_id,
@@ -37,7 +40,10 @@ async def search_places(
                       CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token
                FROM tellus_brands b
                LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
-                                   WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
+                                   WHERE brand_id = b.id
+                                   ORDER BY ($2::text IS NOT NULL AND city ILIKE '%' || $2 || '%') DESC,
+                                            created_at
+                                   LIMIT 1) s ON TRUE
                LEFT JOIN LATERAL (SELECT token FROM tellus_links
                                    WHERE brand_id = b.id AND is_active
                                    ORDER BY created_at LIMIT 1) lk ON TRUE
@@ -47,7 +53,7 @@ async def search_places(
                         WHERE st.brand_id = b.id AND st.city ILIKE '%' || $2 || '%'))
                ORDER BY review_count DESC, b.name
                LIMIT 20""",
-            q.strip(), (city or "").strip() or None,
+            escape_like(q), escape_like(city_filter) if city_filter else None,
         )
     return [
         TellusPlaceSearchResult(
@@ -71,41 +77,53 @@ async def create_place(body: TellusPlaceCreate, request: Request):
 
     name = body.name.strip()
     city = body.city.strip()
-
-    async with get_connection() as conn:
-        # Dedup: same name + same city (or a store-less brand with the name).
-        existing = await conn.fetchrow(
-            """SELECT b.id, b.slug, b.name, b.owner_account_id
-               FROM tellus_brands b
-               WHERE lower(b.name) = lower($1)
-                 AND (EXISTS (SELECT 1 FROM tellus_stores s
-                               WHERE s.brand_id = b.id AND lower(s.city) = lower($2))
-                      OR NOT EXISTS (SELECT 1 FROM tellus_stores s WHERE s.brand_id = b.id))
-               ORDER BY b.created_at LIMIT 1""",
-            name, city,
-        )
-        if existing is not None:
-            claimed = existing["owner_account_id"] is not None
-            token = None
-            if not claimed:
-                token = await conn.fetchval(
-                    "SELECT token FROM tellus_links WHERE brand_id = $1 AND is_active "
-                    "ORDER BY created_at LIMIT 1", existing["id"],
-                )
-            return TellusPlaceCreateResponse(
-                slug=existing["slug"], name=existing["name"],
-                claimed=claimed, intake_token=token, existing=True,
-            )
-
-    # Geocode before opening the write transaction — it's a network call (up to
-    # 15s) and must not hold a pool connection + open transaction idle while it runs.
-    geo = await geocode_location(city, body.state, None, None)
+    if not name or not city:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Name and city are required.")
 
     async with get_connection() as conn:
         async with conn.transaction():
-            slug = slugify(name)
+            # Serialize concurrent creates of the same (name, city): the dedup
+            # SELECT and the INSERTs below must be atomic, or duplicate places
+            # are the normal outcome under concurrency. The lock releases at
+            # commit; a loser then sees the winner's committed row in the SELECT.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(lower($1) || '|' || lower($2), 0))",
+                name, city,
+            )
+
+            # Dedup: same name + same city (or a store-less brand with the name).
+            existing = await conn.fetchrow(
+                """SELECT b.id, b.slug, b.name, b.owner_account_id
+                   FROM tellus_brands b
+                   WHERE lower(b.name) = lower($1)
+                     AND (EXISTS (SELECT 1 FROM tellus_stores s
+                                   WHERE s.brand_id = b.id AND lower(s.city) = lower($2))
+                          OR NOT EXISTS (SELECT 1 FROM tellus_stores s WHERE s.brand_id = b.id))
+                   ORDER BY b.created_at LIMIT 1""",
+                name, city,
+            )
+            if existing is not None:
+                claimed = existing["owner_account_id"] is not None
+                token = None
+                if not claimed:
+                    token = await conn.fetchval(
+                        "SELECT token FROM tellus_links WHERE brand_id = $1 AND is_active "
+                        "ORDER BY created_at LIMIT 1", existing["id"],
+                    )
+                return TellusPlaceCreateResponse(
+                    slug=existing["slug"], name=existing["name"],
+                    claimed=claimed, intake_token=token, existing=True,
+                )
+
+            # Consumer-added places NEVER take the canonical slug — that's
+            # reserved for the real brand's own signup (routes/auth.py), so a
+            # squatter can't permanently own /b/<canonical> for a brand they
+            # don't run.
+            slug = f"{slugify(name)}-{secrets.token_hex(3)}"
             try:
-                # SAVEPOINT so a slug collision only rolls back this insert (auth.py pattern).
+                # SAVEPOINT so the astronomically-rare hex collision only rolls
+                # back this insert (auth.py pattern).
                 async with conn.transaction():
                     brand_id = await conn.fetchval(
                         "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count, source) "
@@ -115,18 +133,21 @@ async def create_place(body: TellusPlaceCreate, request: Request):
             except asyncpg.UniqueViolationError as e:
                 if e.constraint_name != "ux_tellus_brands_slug":
                     raise
-                slug = f"{slug}-{secrets.token_hex(3)}"
+                slug = f"{slugify(name)}-{secrets.token_hex(3)}"
                 brand_id = await conn.fetchval(
                     "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count, source) "
                     "VALUES (NULL, $1, $2, 1, 'consumer_added') RETURNING id",
                     name, slug,
                 )
 
+            # lat/lng deliberately NULL: city+state can never match the Census
+            # street-address geocoder (it resolves street addresses only), so
+            # the old call here was a guaranteed-NULL 15s network hit in the
+            # request path. A future city-centroid source can backfill.
             store_id = await conn.fetchval(
                 "INSERT INTO tellus_stores (brand_id, name, city, state, lat, lng) "
-                "VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+                "VALUES ($1, $2, $3, $4, NULL, NULL) RETURNING id",
                 brand_id, name, city, body.state,
-                geo["lat"] if geo else None, geo["lng"] if geo else None,
             )
             token = secrets.token_urlsafe(12)
             link_id = await conn.fetchval(

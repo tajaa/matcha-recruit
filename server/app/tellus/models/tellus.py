@@ -1,9 +1,9 @@
 """Pydantic request/response shapes for Tell-Us."""
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, StringConstraints, model_validator
 
 AccountType = Literal["consumer", "brand"]
 ReportCategory = Literal["service", "cleanliness", "facilities", "safety", "compliment", "other"]
@@ -133,7 +133,7 @@ class TellusBrandPrompt(BaseModel):
 
 
 class TellusPromptItem(BaseModel):
-    prompt: str = Field(min_length=1, max_length=500)
+    prompt: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 
 
 class TellusBrandPromptsUpdate(BaseModel):
@@ -245,6 +245,9 @@ class TellusIntakeConfig(BaseModel):
     store_name: Optional[str] = None
     categories: list[str] = Field(default_factory=lambda: list(ReportCategory.__args__))
     prompts: list[TellusIntakePrompt] = Field(default_factory=list)
+    # False for a consumer-added (unclaimed) place — lets the intake form allow
+    # anonymous public reviews there (create_report / public_intake mirror this).
+    claimed: bool = True
 
 
 class TellusFeedbackSubmit(BaseModel):
@@ -260,8 +263,8 @@ class TellusFeedbackSubmit(BaseModel):
     # rating-less report. Anonymous submissions are forced private regardless.
     post_as_review: bool = False
     # Presigned media keys (storage paths returned by /media/presign).
-    media_keys: list["TellusSubmittedMedia"] = Field(default_factory=list)
-    answers: list[TellusSubmittedAnswer] = Field(default_factory=list)
+    media_keys: list["TellusSubmittedMedia"] = Field(default_factory=list, max_length=10)
+    answers: list[TellusSubmittedAnswer] = Field(default_factory=list, max_length=20)
     # Honeypot — bots fill hidden fields; humans leave them empty.
     website: Optional[str] = None
 

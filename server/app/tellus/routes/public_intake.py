@@ -66,7 +66,7 @@ async def _resolve_link(conn, token: str) -> dict:
     row = await conn.fetchrow(
         """SELECT l.id, l.brand_id, l.store_id, l.is_active, l.expires_at,
                   l.max_uses, l.use_count, b.name AS brand_name, b.logo_url,
-                  s.name AS store_name
+                  b.owner_account_id, s.name AS store_name
            FROM tellus_links l
            JOIN tellus_brands b ON b.id = l.brand_id
            LEFT JOIN tellus_stores s ON s.id = l.store_id
@@ -100,6 +100,7 @@ async def intake_config(token: str, request: Request):
         store_name=link["store_name"],
         categories=_CATEGORIES,
         prompts=[TellusIntakePrompt(id=p["id"], prompt=p["prompt"]) for p in prows],
+        claimed=link["owner_account_id"] is not None,
     )
 
 
@@ -179,26 +180,19 @@ async def submit_feedback(
 
     reporter_account_id = await _optional_account_id(authorization)
 
-    # Public review requires a star rating and a logged-in account. Anonymous
-    # + post_as_review is not an error — it's silently forced private in
-    # create_report; the frontend nudges the submitter to sign in instead.
-    if body.post_as_review and reporter_account_id is not None and body.rating is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="A star rating is required for a public review.",
-        )
-
     async with get_connection() as conn:
         async with conn.transaction():
             # Atomic reserve-a-use: validates active/expiry/max_uses AND increments
             # in one statement so concurrent submits can't overshoot the cap.
             link = await conn.fetchrow(
-                """UPDATE tellus_links
+                """UPDATE tellus_links l
                    SET use_count = use_count + 1
-                   WHERE token = $1 AND is_active
-                     AND (expires_at IS NULL OR expires_at > NOW())
-                     AND (max_uses IS NULL OR use_count < max_uses)
-                   RETURNING id, brand_id, store_id""",
+                   FROM tellus_brands b
+                   WHERE l.token = $1 AND l.is_active
+                     AND (l.expires_at IS NULL OR l.expires_at > NOW())
+                     AND (l.max_uses IS NULL OR l.use_count < l.max_uses)
+                     AND b.id = l.brand_id
+                   RETURNING l.id, l.brand_id, l.store_id, b.owner_account_id""",
                 token,
             )
             if link is None:
@@ -207,21 +201,38 @@ async def submit_feedback(
                     detail="This feedback link is not available.",
                 )
 
+            # Public review requires a star rating. Applies to logged-in
+            # consumers and to anonymous submits on UNCLAIMED brands (those
+            # also publish — see create_report). Anonymous on a claimed brand
+            # is silently forced private, so no rating is required there.
+            # Raising here rolls back the use_count increment above.
+            if body.post_as_review and body.rating is None:
+                if reporter_account_id is not None or link["owner_account_id"] is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="A star rating is required for a public review.",
+                    )
+
+            # Answers ordered by the brand's configured prompt order (not
+            # client submission order) — every read path does ORDER BY
+            # position. First non-empty answer per prompt wins; bogus prompt
+            # ids drop silently.
             answers_in: list[tuple] = []
             if body.answers:
                 prows = await conn.fetch(
-                    "SELECT id, prompt FROM tellus_brand_prompts WHERE brand_id = $1", link["brand_id"]
+                    "SELECT id, prompt FROM tellus_brand_prompts "
+                    "WHERE brand_id = $1 ORDER BY position LIMIT 5",
+                    link["brand_id"],
                 )
-                text_by_id = {p["id"]: p["prompt"] for p in prows}
-                seen: set = set()
+                first_answer: dict = {}
                 for a in body.answers:
-                    text = text_by_id.get(a.prompt_id)
-                    if text is None or a.prompt_id in seen or not a.answer.strip():
-                        continue  # bogus/duplicate prompt ids are dropped, not errors
-                    seen.add(a.prompt_id)
-                    answers_in.append((a.prompt_id, text, a.answer.strip(), len(answers_in)))
-                    if len(answers_in) >= 5:
-                        break
+                    text = a.answer.strip()
+                    if text and a.prompt_id not in first_answer:
+                        first_answer[a.prompt_id] = text
+                for p in prows:
+                    ans = first_answer.get(p["id"])
+                    if ans is not None:
+                        answers_in.append((p["id"], p["prompt"], ans, len(answers_in)))
 
             outcome = await create_report(
                 conn,

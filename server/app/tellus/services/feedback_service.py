@@ -117,9 +117,12 @@ async def create_report(
     reward_pending, public_review, publish_at, brand_owner_account_id,
     brand_name, store_name}.
 
-    `post_as_review` only takes effect for an identified (logged-in) consumer —
-    anonymous submissions are always private, regardless of the flag, since
-    there's no reviewer account to attribute or let edit/withdraw it later.
+    `post_as_review` only takes effect for an identified (logged-in) consumer,
+    OR for anonymous submissions against an unclaimed (owner_account_id NULL)
+    brand — otherwise the feedback would be visible to nobody, ever (no owner
+    dashboard, no public page). Anonymous feedback on a CLAIMED brand is
+    always private, since there's no reviewer account to attribute or let
+    edit/withdraw it later.
 
     Wrapped in a transaction so the report + its media + any point award commit
     together (or not at all).
@@ -130,7 +133,6 @@ async def create_report(
     usefulness = score_usefulness(
         scoring_text, has_media, bool(title), occurred_at is not None, identified
     )
-    public_review = bool(post_as_review and identified)
 
     async with conn.transaction():
         brand = await conn.fetchrow(
@@ -138,6 +140,12 @@ async def create_report(
             brand_id,
         )
         manual = bool(brand and brand["reward_mode"] == "manual")
+        # Unclaimed brand (no owner) → anonymous feedback may still publish as
+        # a held review; otherwise it's visible to NOBODY (no owner dashboard,
+        # no public page) — a write-only black hole. Claimed brands keep the
+        # old rule: anonymous is always private.
+        unclaimed = bool(brand and brand["owner_account_id"] is None)
+        public_review = bool(post_as_review and (identified or unclaimed))
 
         # NULL for anonymous (nothing to credit); manual → queue for the brand;
         # auto → credited right below, so it lands approved.

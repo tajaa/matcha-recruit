@@ -23,6 +23,15 @@ def slugify(name: str) -> str:
     return base or "brand"
 
 
+_LIKE_SPECIALS_RE = re.compile(r"([\\%_])")
+
+
+def escape_like(s: str) -> str:
+    """Escape LIKE/ILIKE wildcards so user input matches literally.
+    Postgres default ESCAPE is backslash — no ESCAPE clause needed."""
+    return _LIKE_SPECIALS_RE.sub(r"\\\1", s)
+
+
 def effective_review_state(row) -> Optional[str]:
     """'held' + publish_at in the past -> 'published' (derived, never stored —
     see tellus_app_05 docstring for why). Anything else (withdrawn, or no
