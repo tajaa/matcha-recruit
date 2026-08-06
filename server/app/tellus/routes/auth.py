@@ -14,7 +14,7 @@ from ...config import get_settings
 from ...core.services.email import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
-from ..dependencies import require_tellus_account
+from ..dependencies import _is_tellus_admin, require_tellus_account
 from ._shared import slugify
 from ..models.tellus import (
     TellusAccount,
@@ -59,7 +59,7 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
         account_type=row["account_type"], status=row["status"], city=row["city"],
         state=row["state"], leaderboard_opt_in=row["leaderboard_opt_in"], brand_id=row["brand_id"],
         plan_status=row["plan_status"], location_count=row["location_count"],
-        brand_slug=row["brand_slug"],
+        brand_slug=row["brand_slug"], is_admin=_is_tellus_admin(row["email"]),
     )
 
 

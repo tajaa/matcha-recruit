@@ -378,8 +378,14 @@ if [ "$HOTFIX" = false ] && [ "$UPDATE_MATCHA" = true ]; then
     else
         log_info "Generating changelog entries from merged PRs..."
         CG_PY="server/venv/bin/python"; [ -x "$CG_PY" ] || CG_PY="python3"
-        "$CG_PY" server/scripts/generate_changelog.py \
-            || log_warn "Changelog generation failed (deploy unaffected). Run server/scripts/generate_changelog.py manually."
+        CG_TIMEOUT="timeout"; command -v gtimeout >/dev/null 2>&1 && CG_TIMEOUT="gtimeout"
+        if command -v "$CG_TIMEOUT" >/dev/null 2>&1; then
+            "$CG_TIMEOUT" 600 "$CG_PY" server/scripts/generate_changelog.py \
+                || log_warn "Changelog generation failed or timed out after 10m (deploy unaffected). Run server/scripts/generate_changelog.py manually."
+        else
+            "$CG_PY" server/scripts/generate_changelog.py \
+                || log_warn "Changelog generation failed (deploy unaffected). Run server/scripts/generate_changelog.py manually."
+        fi
 
         log_info "Syncing test tenants (dev <-> prod)..."
         "$(dirname "$0")/sync-test-tenants.sh" --auto \

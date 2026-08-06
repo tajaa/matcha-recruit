@@ -234,6 +234,12 @@ def parse_entry(raw: str, pr: PrInfo, product: str) -> dict | None:
     how_to_use = how_to_use if isinstance(how_to_use, list) and all(isinstance(h, str) for h in how_to_use) else []
 
     def _str_list_or_none(value):
+        if isinstance(value, str) and value.strip():
+            # Model sometimes returns a bare string instead of a one-item
+            # list for setup/notes — treat it as a single bullet rather than
+            # dropping it (previously silent: an "action-needed" tag would
+            # render with an empty setup section).
+            return [value.strip()]
         if isinstance(value, list) and all(isinstance(v, str) for v in value) and value:
             return value
         return None
@@ -283,18 +289,22 @@ def fetch_merged_prs(since_pr: int, limit: int = 100) -> list:
             "--limit", str(limit),
             "--json", "number,title,body,mergedAt,files",
         ],
-        capture_output=True, text=True, check=True, cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        capture_output=True, text=True, check=True, timeout=60,
+        cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     )
     raw = json.loads(result.stdout)
     if len(raw) >= limit:
         oldest_seen = min(item["number"] for item in raw)
         if oldest_seen > since_pr + 1:
-            print(
-                f"WARNING: gh pr list returned exactly --limit={limit} PRs and the oldest "
+            # Don't just warn and keep going — the caller advances the state
+            # watermark past whatever it processes, and if we silently drop
+            # PRs #since_pr+1..oldest_seen-1 here, that gap is unrecoverable:
+            # they'll sit forever below a watermark that's already past them.
+            raise RuntimeError(
+                f"gh pr list returned exactly --limit={limit} PRs and the oldest "
                 f"is #{oldest_seen}, but since_pr is #{since_pr} — PRs #{since_pr + 1}-"
                 f"#{oldest_seen - 1} may have merged and are outside this window. Re-run with "
-                f"a higher --limit or a narrower --since-pr to cover them.",
-                file=sys.stderr,
+                f"a higher --limit or a narrower --since-pr to cover them."
             )
 
     prs = []
@@ -305,12 +315,25 @@ def fetch_merged_prs(since_pr: int, limit: int = 100) -> list:
         if not merged_at:
             print(f"Skipping PR #{item['number']}: no mergedAt from gh (not actually merged?)", file=sys.stderr)
             continue
+        files = [f["path"] for f in item.get("files") or []]
+        if len(files) >= 100:
+            # `gh pr list --json files` caps at 100 files/PR regardless of
+            # --limit or _FILES_MAX — a bigger PR's file list here is already
+            # truncated by gh itself, before we ever see it. If the truncated
+            # tail held the tellus/matcha-distinguishing paths, classify_pr
+            # will misjudge which product(s) this PR touches.
+            print(
+                f"WARNING: PR #{item['number']} has >=100 changed files — gh's per-PR file "
+                f"cap may have truncated the list, so product classification could be wrong. "
+                f"Check it manually if the changelog entry looks off.",
+                file=sys.stderr,
+            )
         prs.append(PrInfo(
             number=item["number"],
             title=item["title"],
             body=item.get("body") or "",
             merged_at=merged_at,
-            files=[f["path"] for f in item.get("files") or []],
+            files=files,
         ))
     prs.sort(key=lambda p: p.number)
     return prs
@@ -322,8 +345,9 @@ async def generate_entry(client, pr: PrInfo, product: str) -> dict | None:
     abort or continue)."""
     prompt = build_prompt(pr, product)
     config = types.GenerateContentConfig(temperature=0.3, response_mime_type="application/json")
-    response = await client.aio.models.generate_content(
-        model=GEMINI_FLASH, contents=[prompt], config=config,
+    response = await asyncio.wait_for(
+        client.aio.models.generate_content(model=GEMINI_FLASH, contents=[prompt], config=config),
+        timeout=60,
     )
     raw = (getattr(response, "text", None) or "").strip()
     return parse_entry(raw, pr, product)
@@ -359,7 +383,7 @@ async def upsert_entries(conn, product: str, entries: list) -> int:
 async def renumber(conn, table: str) -> None:
     await conn.execute(f"""
         WITH ordered AS (
-            SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC)) - 1 AS rn
+            SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC, id ASC)) - 1 AS rn
             FROM {table}
         )
         UPDATE {table} a SET position = o.rn FROM ordered o WHERE a.id = o.id
@@ -390,9 +414,15 @@ async def run(args) -> int:
     await init_pool(settings.database_url)
     try:
         async with get_connection() as conn:
+            # Captured separately from `since_pr` below: since_pr may come from
+            # an explicit --since-pr override that's lower than what's actually
+            # stored, and set_state() at the end must never regress the real
+            # persisted watermark just because this run was told to look further back.
+            stored_pr_number = await get_state(conn)
+
             since_pr = args.since_pr
             if since_pr is None:
-                since_pr = await get_state(conn)
+                since_pr = stored_pr_number
             if since_pr is None:
                 print(
                     "No changelog_autogen_state row and no --since-pr given. "
@@ -402,7 +432,12 @@ async def run(args) -> int:
                 )
                 return 2
 
-            prs = fetch_merged_prs(since_pr, limit=args.limit)
+            try:
+                prs = fetch_merged_prs(since_pr, limit=args.limit)
+            except (subprocess.TimeoutExpired, subprocess.CalledProcessError,
+                    json.JSONDecodeError, RuntimeError) as exc:
+                print(f"ERROR fetching merged PRs: {exc}", file=sys.stderr)
+                return 2
             if not prs:
                 print(f"No merged PRs after #{since_pr}.")
                 return 0
@@ -425,8 +460,18 @@ async def run(args) -> int:
                     # Classified, but --product narrowed it away entirely
                     # (e.g. a tellus-only PR under --product matcha). Not
                     # "nothing to do" — the other product's entry for this PR
-                    # still needs a future run, so don't advance state here.
-                    continue
+                    # still needs a future run. Must stop here, not just skip:
+                    # continuing would let a LATER fully-processed PR advance
+                    # last_ok_pr past this one, and since the watermark is a
+                    # single shared value, that permanently strands it below
+                    # since_pr on every future run.
+                    print(
+                        f"STOPPING at PR #{pr.number}: touches {sorted(all_products)} "
+                        f"but --product={args.product} excludes it — state cannot advance "
+                        f"past it. Re-run with --product both to pick it up.",
+                        file=sys.stderr,
+                    )
+                    break
                 try:
                     for product in sorted(products):
                         entry = await generate_entry(client, pr, product)
@@ -459,10 +504,19 @@ async def run(args) -> int:
                 await renumber(conn, TABLE_FOR_PRODUCT[product])
 
             # last_ok_pr only ever advances past a PR once every product it
-            # touches has been generated (see the loop above), so it's always
-            # safe to persist here regardless of --product narrowing.
-            await set_state(conn, last_ok_pr)
-            print(f"Inserted {total} new changelog rows. State advanced to PR #{last_ok_pr}.")
+            # touches has been generated (see the loop above), so it's safe to
+            # persist here regardless of --product narrowing — but never let it
+            # move the watermark BACKWARDS (e.g. a manual --since-pr lower than
+            # what's already stored would otherwise make the next deploy
+            # re-Gemini everything merged since then).
+            if stored_pr_number is not None and last_ok_pr <= stored_pr_number:
+                print(
+                    f"Inserted {total} new changelog rows. State left at PR #{stored_pr_number} "
+                    f"(computed watermark #{last_ok_pr} did not advance past it)."
+                )
+            else:
+                await set_state(conn, last_ok_pr)
+                print(f"Inserted {total} new changelog rows. State advanced to PR #{last_ok_pr}.")
             return 0
     finally:
         await close_pool()

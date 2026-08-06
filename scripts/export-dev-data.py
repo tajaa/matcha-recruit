@@ -140,7 +140,7 @@ POST_HOOKS = {
 -- Re-derive changelog ordering across the merged row set (dev positions were
 -- assigned against dev's rows only, so they cannot be trusted next to prod's).
 WITH ordered AS (
-    SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC)) - 1 AS rn
+    SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC, id ASC)) - 1 AS rn
     FROM admin_updates
 )
 UPDATE admin_updates a SET position = o.rn FROM ordered o WHERE a.id = o.id;
@@ -149,7 +149,7 @@ UPDATE admin_updates a SET position = o.rn FROM ordered o WHERE a.id = o.id;
 -- Re-derive changelog ordering across the merged row set — same reasoning as
 -- admin_updates above.
 WITH ordered AS (
-    SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC)) - 1 AS rn
+    SELECT id, (row_number() OVER (ORDER BY date DESC, position ASC, id ASC)) - 1 AS rn
     FROM tellus_admin_updates
 )
 UPDATE tellus_admin_updates a SET position = o.rn FROM ordered o WHERE a.id = o.id;
@@ -541,8 +541,8 @@ async def main():
 
         for t in args.table:
             if t not in cols:
-                print(f"!! no such table: {t}", file=sys.stderr)
-                return 1
+                print(f"!! no such table: {t} — skipping (not migrated on this DB yet?)", file=sys.stderr)
+                continue
             rows = await conn.fetch(f'SELECT * FROM "{t}"')
             print(f"   collecting table {t} ({len(rows)} rows) …", file=sys.stderr)
             for r in rows:
