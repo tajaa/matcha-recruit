@@ -113,6 +113,12 @@ class TestRecordAsset:
         sql, params = conn.executed[0]
         assert "ON CONFLICT (company_id, ref_table, ref_id)" in sql
         assert "DO UPDATE SET label = EXCLUDED.label" in sql
+        # A re-write (e.g. an offer drafted in one thread, later sent from a
+        # different one) must refresh thread_id/source too, not just the
+        # label — a stale thread_id/source ('draft' after it was really
+        # sent) is the bug this pins.
+        assert "source = EXCLUDED.source" in sql
+        assert "thread_id = COALESCE(EXCLUDED.thread_id, huume_assets.thread_id)" in sql
         assert params == (COMPANY_ID, THREAD_ID, "ir_incident", "ir_incidents", "rec-1", "IR-2026-004", ACTOR_ID)
 
     @pytest.mark.asyncio
@@ -150,6 +156,54 @@ class TestRecordOfferDraftAsset:
             company_id=COMPANY_ID, thread_id=THREAD_ID, actor_user_id=ACTOR_ID,
             offer_id="offer-1", candidate_name="Maria", position_title="",
         )
+
+
+class TestStatusSqlSchema:
+    """Pins the two real-schema mismatches a review caught: inventory_items
+    has no is_archived column (archived_at TIMESTAMPTZ instead), and
+    pto_requests has no company_id at all (employee-scoped only) — both
+    would UndefinedColumnError on the first inventory/PTO asset, taking
+    down the whole /huume/assets listing (both the thread and company
+    routes) with an unguarded 500, not just that one row."""
+
+    def test_inventory_items_uses_archived_at_not_is_archived(self):
+        sql = assets._STATUS_SQL["inventory_items"]
+        assert "is_archived" not in sql
+        assert "archived_at" in sql
+
+    def test_pto_requests_joins_employees_for_company_scope(self):
+        sql = assets._STATUS_SQL["pto_requests"]
+        assert "JOIN employees" in sql
+        assert "e.org_id = $1" in sql
+        # pto_requests has no company_id column — a bare "WHERE company_id"
+        # against that table is exactly the crash this pins.
+        assert "pto_requests.company_id" not in sql
+        assert "pr.company_id" not in sql
+
+
+class TestListAssetsQueryEscaping:
+    @pytest.mark.asyncio
+    async def test_percent_and_underscore_in_query_are_escaped(self, monkeypatch):
+        class _FetchConn:
+            def __init__(self):
+                self.fetch_calls = []
+
+            async def fetch(self, sql, *params):
+                self.fetch_calls.append((sql, params))
+                return []
+
+        conn = _FetchConn()
+        monkeypatch.setattr(assets, "get_connection", lambda: _ConnCtx(conn))
+
+        await assets.list_assets(company_id=COMPANY_ID, query="50%_off")
+
+        sql, params = conn.fetch_calls[0]
+        assert "ESCAPE '\\'" in sql
+        # The literal % and _ arrive escaped so they match literally, not as
+        # ILIKE wildcards — a search for "50%_off" must not become
+        # "match any 2+ chars starting with 50, then anything, then off".
+        like_param = next(p for p in params if isinstance(p, str) and p.startswith("%"))
+        assert like_param == "%50\\%\\_off%"
 
 
 class TestAsUuid:

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Archive, ArrowUpRight, Loader2, Search } from 'lucide-react'
 import { useToast } from '../../components/ui'
 import { formatDateTimePacific } from '../../utils/dateFormat'
@@ -50,14 +50,14 @@ const RECORD_VIEWER_TYPE: Record<string, string> = {
   inventory_item: 'inventory_item',
 }
 
-function AssetDetail({ asset, base }: { asset: HuumeAsset; base: string }) {
+function AssetDetail({ asset, base, lightMode }: { asset: HuumeAsset; base: string; lightMode: boolean }) {
   const originLink = asset.thread_id ? (
-    <a
-      href={`${base}/${asset.thread_id}`}
+    <Link
+      to={`${base}/${asset.thread_id}`}
       className="inline-flex items-center gap-1 text-xs font-medium text-w-accent hover:underline"
     >
       Open originating chat <ArrowUpRight size={11} />
-    </a>
+    </Link>
   ) : null
 
   const recordType = RECORD_VIEWER_TYPE[asset.asset_type]
@@ -77,9 +77,9 @@ function AssetDetail({ asset, base }: { asset: HuumeAsset; base: string }) {
       </div>
       <div className="flex flex-1 min-h-0 flex-col overflow-y-auto">
         {asset.asset_type === 'offer_letter' ? (
-          <OfferLetterViewer offerId={asset.ref_id} />
+          <OfferLetterViewer offerId={asset.ref_id} lightMode={lightMode} />
         ) : recordType ? (
-          <RecordViewer recordType={recordType} recordId={asset.ref_id} />
+          <RecordViewer recordType={recordType} recordId={asset.ref_id} lightMode={lightMode} />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
             <Archive size={22} className="text-w-faint" />
@@ -103,36 +103,65 @@ function AssetDetail({ asset, base }: { asset: HuumeAsset; base: string }) {
  * doesn't have to remember which chat something was generated in.
  * Master/detail: the list stays on the left, the selected asset opens
  * inline on the right via the same viewers the thread panel uses
- * (OfferLetterViewer / RecordViewer) — no re-derivation of chat context. */
+ * (OfferLetterViewer / RecordViewer) — no re-derivation of chat context.
+ *
+ * `knownAssets` accumulates every asset ever fetched this session (merged
+ * by asset_id, not replaced) — the master LIST always reflects only the
+ * latest search/filter, but `selected` is resolved against the superset so
+ * opening an asset and then typing an unrelated search term doesn't yank
+ * the open detail pane out from under the admin. */
 export default function AssetsHub() {
   const navigate = useNavigate()
   const { assetId } = useParams<{ assetId: string }>()
   const base = useWorkBase()
   const { toast } = useToast()
-  const [assets, setAssets] = useState<HuumeAsset[]>([])
+  const [lightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
+  const [searchResults, setSearchResults] = useState<HuumeAsset[]>([])
+  const [knownAssets, setKnownAssets] = useState<Record<string, HuumeAsset>>({})
   const [loading, setLoading] = useState(true)
+  const [loadAttempted, setLoadAttempted] = useState(false)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('all')
+  const seqRef = useRef(0)
 
   const load = useCallback((query?: string) => {
+    const mySeq = ++seqRef.current
     setLoading(true)
     listCompanyHuumeAssets({ query: query || undefined })
-      .then((res) => setAssets(res.assets))
-      .catch(() => toast('Failed to load assets', 'error'))
-      .finally(() => setLoading(false))
+      .then((res) => {
+        if (mySeq !== seqRef.current) return // a newer request already landed — drop this stale response
+        setSearchResults(res.assets)
+        setKnownAssets((prev) => {
+          const next = { ...prev }
+          for (const a of res.assets) next[a.asset_id] = a
+          return next
+        })
+      })
+      .catch(() => { if (mySeq === seqRef.current) toast('Failed to load assets', 'error') })
+      .finally(() => { if (mySeq === seqRef.current) { setLoading(false); setLoadAttempted(true) } })
   }, [toast])
 
-  useEffect(() => { load() }, [load])
-
+  // Immediate on mount; debounced on every subsequent search keystroke —
+  // one effect, one code path, no duplicate mount+search-effect race.
+  const isFirstRun = useRef(true)
   useEffect(() => {
+    if (isFirstRun.current) {
+      isFirstRun.current = false
+      load()
+      return
+    }
     const t = setTimeout(() => load(search), 300)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
 
-  const types = Array.from(new Set(assets.map((a) => a.asset_type)))
-  const visible = typeFilter === 'all' ? assets : assets.filter((a) => a.asset_type === typeFilter)
-  const selected = assetId ? assets.find((a) => a.asset_id === assetId) ?? null : null
+  const types = Array.from(new Set(searchResults.map((a) => a.asset_type)))
+  const visible = typeFilter === 'all' ? searchResults : searchResults.filter((a) => a.asset_type === typeFilter)
+  const selected = assetId ? knownAssets[assetId] ?? null : null
+  // Bounded by the same 200-row cap the list fetch uses — a very old asset
+  // past that cap opened via a stale bookmark won't resolve. Rare enough
+  // (200 assets deep) not to warrant a dedicated single-asset fetch here.
+  const notFound = loadAttempted && !!assetId && !selected
 
   return (
     <div className="h-[calc(100vh-64px)] flex bg-w-bg text-w-text">
@@ -174,7 +203,7 @@ export default function AssetsHub() {
             <div className="flex flex-col items-center justify-center gap-2 py-16 text-center px-4">
               <Archive size={24} className="text-w-faint" />
               <p className="text-sm text-w-dim">
-                {assets.length === 0
+                {searchResults.length === 0
                   ? 'Nothing yet — offer letters, incidents, discipline records, and other things Huume creates will show up here.'
                   : 'No assets match that filter.'}
               </p>
@@ -211,17 +240,23 @@ export default function AssetsHub() {
       </div>
 
       {selected ? (
-        <AssetDetail asset={selected} base={base} />
+        <AssetDetail asset={selected} base={base} lightMode={lightMode} />
+      ) : notFound ? (
+        <div className="hidden md:flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+          <Archive size={22} className="text-w-faint" />
+          <p className="text-sm text-w-dim">Couldn't find that asset.</p>
+          <Link to={`${base}/assets`} className="text-xs font-medium text-w-accent hover:underline">
+            Back to all assets
+          </Link>
+        </div>
+      ) : assetId ? (
+        <div className="flex flex-1 items-center justify-center">
+          <Loader2 size={20} className="animate-spin text-w-dim" />
+        </div>
       ) : (
-        assetId ? (
-          <div className="flex flex-1 items-center justify-center">
-            <Loader2 size={20} className="animate-spin text-w-dim" />
-          </div>
-        ) : (
-          <div className="hidden md:flex flex-1 items-center justify-center px-4 text-center">
-            <p className="text-sm text-w-faint">Select an asset to open it.</p>
-          </div>
-        )
+        <div className="hidden md:flex flex-1 items-center justify-center px-4 text-center">
+          <p className="text-sm text-w-faint">Select an asset to open it.</p>
+        </div>
       )}
     </div>
   )

@@ -146,7 +146,11 @@ async def record_asset(
                     (company_id, thread_id, asset_type, ref_table, ref_id, label, source, created_by)
                 VALUES ($1, $2, $3, $4, $5, $6, 'huume_action', $7)
                 ON CONFLICT (company_id, ref_table, ref_id)
-                DO UPDATE SET label = EXCLUDED.label
+                DO UPDATE SET
+                    label = EXCLUDED.label,
+                    source = EXCLUDED.source,
+                    thread_id = COALESCE(EXCLUDED.thread_id, huume_assets.thread_id),
+                    created_by = COALESCE(EXCLUDED.created_by, huume_assets.created_by)
                 """,
                 company_id, thread_id, spec.asset_type, spec.ref_table,
                 str(record_id), spec.label_fn(action, result), actor_user_id,
@@ -170,7 +174,10 @@ async def record_offer_draft_asset(
                     (company_id, thread_id, asset_type, ref_table, ref_id, label, source, created_by)
                 VALUES ($1, $2, 'offer_letter', 'offer_letters', $3, $4, 'draft', $5)
                 ON CONFLICT (company_id, ref_table, ref_id)
-                DO UPDATE SET label = EXCLUDED.label
+                DO UPDATE SET
+                    label = EXCLUDED.label,
+                    thread_id = COALESCE(EXCLUDED.thread_id, huume_assets.thread_id),
+                    created_by = COALESCE(EXCLUDED.created_by, huume_assets.created_by)
                 """,
                 company_id, thread_id, offer_id, label, actor_user_id,
             )
@@ -186,9 +193,19 @@ _STATUS_SQL: dict[str, str] = {
     "ir_incidents": "SELECT id::text AS ref_id, status FROM ir_incidents WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "er_cases": "SELECT id::text AS ref_id, status FROM er_cases WHERE company_id = $1 AND id = ANY($2::uuid[])",
     "training_requirements": "SELECT id::text AS ref_id, (CASE WHEN is_active THEN 'active' ELSE 'inactive' END) AS status FROM training_requirements WHERE company_id = $1 AND id = ANY($2::uuid[])",
-    "pto_requests": "SELECT id::text AS ref_id, status FROM pto_requests WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    # pto_requests has no company_id of its own (employee-scoped) — join
+    # through employees.org_id, the company-scoping column that table uses.
+    "pto_requests": (
+        "SELECT pr.id::text AS ref_id, pr.status FROM pto_requests pr "
+        "JOIN employees e ON e.id = pr.employee_id "
+        "WHERE e.org_id = $1 AND pr.id = ANY($2::uuid[])"
+    ),
     "inventory_orders": "SELECT id::text AS ref_id, status FROM inventory_orders WHERE company_id = $1 AND id = ANY($2::uuid[])",
-    "inventory_items": "SELECT id::text AS ref_id, (CASE WHEN is_archived THEN 'archived' ELSE 'active' END) AS status FROM inventory_items WHERE company_id = $1 AND id = ANY($2::uuid[])",
+    # inventory_items has archived_at (nullable timestamp), not is_archived.
+    "inventory_items": (
+        "SELECT id::text AS ref_id, (CASE WHEN archived_at IS NOT NULL THEN 'archived' ELSE 'active' END) AS status "
+        "FROM inventory_items WHERE company_id = $1 AND id = ANY($2::uuid[])"
+    ),
     "schedule_chat_proposals": "SELECT id::text AS ref_id, status FROM schedule_chat_proposals WHERE company_id = $1 AND id = ANY($2::uuid[])",
 }
 
@@ -235,8 +252,11 @@ async def list_assets(
         params.append(asset_type)
         conditions.append(f"ha.asset_type = ${len(params)}")
     if query:
-        params.append(f"%{query}%")
-        conditions.append(f"ha.label ILIKE ${len(params)}")
+        # Escape ILIKE wildcards in user input so a literal '%' or '_' in a
+        # search term is matched literally, not as a pattern.
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{escaped}%")
+        conditions.append(f"ha.label ILIKE ${len(params)} ESCAPE '\\'")
     params.append(min(max(limit, 1), 200))
 
     async with get_connection() as conn:

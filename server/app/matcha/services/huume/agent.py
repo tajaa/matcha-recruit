@@ -428,6 +428,32 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def _send_offer_confirming(
+    existing: Any, *, offer_id: str, candidate_name: str, recipient_override: Optional[str],
+) -> bool:
+    """Pure. True iff this send_offer call is confirming the pre-turn staged
+    proposal (not staging a fresh one).
+
+    Omission-tolerant on offer_id/candidate_name AND on recipient_email — a
+    bare "confirm" repeats neither and still matches the staged offer. But a
+    DIFFERENT candidate_name ("send Bob's offer" while Maria's is staged)
+    must NOT silently reuse Maria's staged proposal: it has to compare
+    against `existing["candidate_name"]`, not just check that some name was
+    given. Missing that comparison meant any non-empty candidate_name text
+    matched, so "send Bob's offer" right after staging Maria's would confirm
+    and send MARIA's offer, skipping resolve_offer_for_send for Bob entirely."""
+    if not (isinstance(existing, dict) and existing.get("type") == "send_offer" and existing.get("status") == "proposed"):
+        return False
+    if offer_id:
+        target_matches = existing.get("offer_id") == offer_id
+    else:
+        existing_candidate_name = str(existing.get("candidate_name") or "")
+        target_matches = not candidate_name or candidate_name.lower() in existing_candidate_name.lower()
+    if not target_matches:
+        return False
+    return recipient_override is None or recipient_override == existing.get("recipient_email")
+
+
 def _build_hr_ops_staged(spec: dict[str, Any], args: dict[str, Any], existing: Any) -> tuple[dict[str, Any], bool]:
     """Pure. Returns (staged_action, confirming) for an HR-ops tool call:
     reuse the pre-turn staged dict when this call echoes its match_key, else
@@ -697,14 +723,8 @@ async def run_huume_turn(
                 # (new proposal, fresh confirm) rather than silently
                 # switching who gets the email. Strict-echo matching is the
                 # schedule_change silent-mismatch bug this avoids.
-                confirming = (
-                    isinstance(existing, dict) and existing.get("type") == "send_offer"
-                    and existing.get("status") == "proposed"
-                    and (
-                        (offer_id and existing.get("offer_id") == offer_id)
-                        or (not offer_id and candidate_name)
-                    )
-                    and (recipient_override is None or recipient_override == existing.get("recipient_email"))
+                confirming = _send_offer_confirming(
+                    existing, offer_id=offer_id, candidate_name=candidate_name, recipient_override=recipient_override,
                 )
 
                 if confirming:

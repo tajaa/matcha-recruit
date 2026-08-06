@@ -22,6 +22,7 @@ from app.matcha.services.huume.agent import (
     _cap_payload,
     _json_safe,
     _rate_limit_disposition,
+    _send_offer_confirming,
     _to_contents,
     is_sole_finish,
 )
@@ -179,3 +180,71 @@ class TestRateLimitDisposition:
     def test_mid_loop_force_finishes(self):
         for n in (2, 5, 8):
             assert _rate_limit_disposition(n) == "force_finish"
+
+
+def _staged_send_offer(**overrides):
+    base = {
+        "type": "send_offer", "offer_id": "offer-maria", "status": "proposed",
+        "candidate_name": "Maria Lopez", "recipient_email": "maria@example.com",
+    }
+    base.update(overrides)
+    return base
+
+
+class TestSendOfferConfirming:
+    def test_bare_confirm_matches_staged_offer(self):
+        # "confirm" with no offer_id/candidate_name/recipient_email at all.
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="", candidate_name="", recipient_override=None,
+        ) is True
+
+    def test_same_offer_id_matches(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="offer-maria", candidate_name="", recipient_override=None,
+        ) is True
+
+    def test_same_candidate_name_matches(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="", candidate_name="Maria", recipient_override=None,
+        ) is True
+
+    def test_different_candidate_name_does_not_match(self):
+        # The bug this regression-tests: "send Bob's offer" right after
+        # staging Maria's must NOT reuse Maria's staged proposal — any
+        # non-empty candidate_name used to satisfy the old check.
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="", candidate_name="Bob", recipient_override=None,
+        ) is False
+
+    def test_different_offer_id_does_not_match(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="offer-other", candidate_name="", recipient_override=None,
+        ) is False
+
+    def test_matching_recipient_override_matches(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="offer-maria", candidate_name="",
+            recipient_override="maria@example.com",
+        ) is True
+
+    def test_different_recipient_override_re_stages(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(), offer_id="offer-maria", candidate_name="",
+            recipient_override="other@example.com",
+        ) is False
+
+    def test_nothing_staged_never_matches(self):
+        assert _send_offer_confirming(
+            None, offer_id="", candidate_name="Maria", recipient_override=None,
+        ) is False
+
+    def test_non_proposed_status_does_not_match(self):
+        assert _send_offer_confirming(
+            _staged_send_offer(status="sent"), offer_id="offer-maria", candidate_name="", recipient_override=None,
+        ) is False
+
+    def test_different_staged_type_does_not_match(self):
+        assert _send_offer_confirming(
+            {"type": "discipline_draft", "status": "proposed"},
+            offer_id="", candidate_name="Maria", recipient_override=None,
+        ) is False
