@@ -138,7 +138,7 @@ usage: generate_changelog.py [--dry-run] [--since-pr N] [--product both|matcha|t
 
 Flow: state = `--since-pr` or `get_state()`; **no state row and no `--since-pr` ⇒ exit 2 with instruction** (explicit first-run seeding, prevents accidentally generating 149 entries). Process PRs **oldest→newest, stop on first hard failure** and set state to last fully-processed PR — a mid-list failure never silently drops a PR. `--dry-run`: print entries as JSON, no DB writes, no state advance. Per-PR Gemini "skip" verdicts and docs-only PRs advance state normally. Exit 0 even when 0 entries (deploy hook must stay green on quiet deploys).
 
-First-run seeding: `--since-pr 108` (highest PR merged ≤ 2026-07-21 — verify exact number with `gh pr list` during implementation; #109 merged 2026-07-31 is the first uncovered one).
+First-run seeding: `--since-pr 62` (PR #62, "broker<->company chat", merged 2026-07-21T06:52:36Z, is the last PR the hand-authored `admin_updates_seed.json` covers — verified via `gh pr list`. #63 is the first uncovered PR; backfill covers #63-#149, ~87 PRs across both products, not the ~40 originally estimated).
 
 ---
 
