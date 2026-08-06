@@ -379,6 +379,174 @@ export interface DmMessage {
   is_mine: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Internal admin management (require_tellus_admin surfaces) — mirrors
+// server/app/tellus/models/admin.py.
+// ---------------------------------------------------------------------------
+
+export interface AdminAccountSummary {
+  id: string
+  email: string
+  display_name: string | null
+  account_type: AccountType
+  status: string
+  email_verified: boolean
+  city: string | null
+  state: string | null
+  created_at: string
+  points_balance: number
+  report_count: number
+  brand_id: string | null
+  brand_name: string | null
+}
+
+export interface AdminAccountList {
+  items: AdminAccountSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AdminLedgerEntry {
+  id: string
+  delta: number
+  balance_after: number
+  reason: string
+  event_key: string | null
+  reference_type: string | null
+  reference_id: string | null
+  description: string | null
+  created_at: string
+}
+
+export interface AdminAuditEntry {
+  id: string
+  actor_email: string
+  action: string
+  target_type: string
+  target_id: string | null
+  detail: Record<string, unknown> | null
+  created_at: string
+}
+
+export interface AdminAccountDetail {
+  account: AdminAccountSummary
+  lifetime_points: number
+  level: number
+  current_streak: number
+  ledger: AdminLedgerEntry[]
+  recent_reports: Array<{
+    id: string; brand_name: string | null; title: string | null
+    rating: number | null; review_state: ReviewState | null
+    moderation_status: string; created_at: string
+  }>
+  redemptions: Array<{
+    id: string; listing_title: string; points_spent: number; status: string; created_at: string
+  }>
+  dm_threads: Array<{
+    id: string; brand_name: string; blocked: boolean; last_message_at: string | null
+  }>
+  audit: AdminAuditEntry[]
+}
+
+export interface AdminPasswordResetResponse {
+  reset_url: string
+  expires_in_minutes: number
+}
+
+export interface AdminPointsAdjustResult {
+  adjusted: boolean
+  applied_delta: number
+  balance: number
+  lifetime: number
+  level: number
+}
+
+export interface AdminBrandSummary {
+  id: string
+  name: string
+  slug: string
+  plan_status: BrandPlanStatus
+  source: 'signup' | 'consumer_added'
+  owner_account_id: string | null
+  owner_email: string | null
+  location_count: number
+  store_count: number
+  has_stripe_subscription: boolean
+  created_at: string
+}
+
+export interface AdminBrandList {
+  items: AdminBrandSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AdminBrandDetail {
+  brand: AdminBrandSummary
+  activated_at: string | null
+  claimed_at: string | null
+  stripe_customer_id: string | null
+  stripe_subscription_id: string | null
+  stores: Array<{ id: string; name: string; city: string | null; state: string | null }>
+  links: Array<{ id: string; is_active: boolean; revoked_at: string | null; created_at: string }>
+  prompts: Array<{ id: string; prompt: string; position: number }>
+  report_stats: { total?: number; last_30d?: number; avg_rating?: number | null }
+  audit: AdminAuditEntry[]
+}
+
+export interface AdminPlanActionResult {
+  plan_status: BrandPlanStatus
+  stripe_warning: string | null
+}
+
+export interface AdminReportItem extends Report {
+  brand_name: string | null
+}
+
+export interface AdminDmThreadSummary {
+  id: string
+  report_id: string
+  brand_name: string
+  consumer_email: string
+  blocked: boolean
+  message_count: number
+  last_message_at: string | null
+  created_at: string
+}
+
+export interface AdminEarningRule {
+  event_key: string
+  points: number
+  daily_cap: number | null
+  cooldown_seconds: number | null
+  is_active: boolean
+}
+
+export interface AdminBadge {
+  key: string
+  name: string
+  description: string | null
+  icon: string | null
+  criteria: { type?: string; threshold?: number }
+  sort_order: number
+  award_count: number
+}
+
+export interface AdminListing {
+  id: string
+  title: string
+  brand_id: string | null
+  brand_name: string | null
+  points_cost: number
+  quantity_total: number | null
+  quantity_claimed: number
+  redemption_type: 'code' | 'qr' | 'manual'
+  is_active: boolean
+  created_at: string
+}
+
 export interface TellusNotification {
   id: string
   kind: string
