@@ -20,7 +20,13 @@ export default function Verify() {
     ran.current = true
     if (!token) { setError('Missing confirmation token.'); return }
     tellusPublicPost<TokenResponse>('/auth/verify', { token })
-      .then((res) => { setSession(res); navigate(popReturnTo() ?? '/') })
+      .then((res) => {
+        setSession(res)
+        const stashed = popReturnTo() // always pop — clears the stash either way
+        // A fresh brand account can only use billing; a stashed consumer path
+        // (e.g. /i/<token>) must not swallow that redirect (mirrors Signup.tsx).
+        navigate(res.account.account_type === 'brand' ? '/brand/billing' : (stashed ?? '/'))
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Verification failed'))
   }, [token, setSession, navigate])
 

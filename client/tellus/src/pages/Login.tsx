@@ -5,14 +5,17 @@ import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
 import type { TokenResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
-import { popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
+import { clearReturnTo, popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
 
 export default function Login() {
   const { setSession } = useAccount()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const returnTo = sanitizeReturnTo(params.get('returnTo'))
-  useEffect(() => { stashReturnTo(returnTo) }, [returnTo])
+  // Bare visit (no returnTo param) kills any stale stash from an abandoned
+  // flow — otherwise popReturnTo() below could resurface an unrelated
+  // earlier redirect target.
+  useEffect(() => { returnTo ? stashReturnTo(returnTo) : clearReturnTo() }, [returnTo])
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')

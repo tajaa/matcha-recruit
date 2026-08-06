@@ -9,6 +9,14 @@ function hoursFromNow(iso: string): number {
   return Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 3_600_000))
 }
 
+// crypto.randomUUID is undefined outside secure contexts (http:// staging) and
+// on Safari < 15.4 — and it would throw before any try/catch inside onFiles.
+function newId(): string {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 const SENTIMENTS = [
   { value: 'positive', label: '😊 Good', tone: 'text-tu-good border-tu-good/40 bg-tu-good/10' },
   { value: 'neutral', label: '😐 Okay', tone: 'text-tu-dim border-tu-border bg-tu-panel2' },
@@ -25,7 +33,7 @@ interface PendingMedia extends SubmittedMedia {
 
 type IntakeDraft = {
   category: string; sentiment: string; title: string; description: string
-  contact: string; rating: number; postPublic: boolean
+  rating: number; postPublic: boolean
   answers: Record<string, string>
   media: PendingMedia[]
 }
@@ -64,6 +72,12 @@ export default function Intake() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const loggedIn = !!getTellusToken()
+  // Unclaimed (consumer-added) places also allow an anonymous public review —
+  // only a claimed brand forces anonymous submitters to sign in first.
+  const claimed = config?.claimed ?? true
+  const canPublicReview = loggedIn || !claimed
+
+  const draftLoaded = useRef(false)
 
   useEffect(() => {
     tellusPublicGet<IntakeConfig>(`/i/${token}`)
@@ -75,29 +89,39 @@ export default function Intake() {
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('tellus_intake_draft:' + token)
-      if (!raw) return
-      const d: IntakeDraft = JSON.parse(raw)
-      setCategory(d.category); setSentiment(d.sentiment); setTitle(d.title)
-      setDescription(d.description); setContact(d.contact); setRating(d.rating)
-      setPostPublic(d.postPublic); setAnswers(d.answers ?? {})
-      setMedia((d.media ?? []).map((m) => ({ ...m, progress: 100, done: true, error: undefined })))
+      if (raw) {
+        const d: IntakeDraft = JSON.parse(raw)
+        setCategory(d.category); setSentiment(d.sentiment); setTitle(d.title)
+        setDescription(d.description); setRating(d.rating)
+        setPostPublic(d.postPublic); setAnswers(d.answers ?? {})
+        setMedia((d.media ?? []).map((m) => ({ ...m, progress: 100, done: true, error: undefined })))
+      }
     } catch { /* corrupt draft — ignore */ }
+    // Only after restoring (or finding nothing to restore) is it safe for the
+    // persist effect below to start writing — otherwise its first run (with
+    // the initial empty closure) wipes the draft before this commits.
+    draftLoaded.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token])
 
   useEffect(() => {
-    if (result) return
-    sessionStorage.setItem('tellus_intake_draft:' + token, JSON.stringify({
-      category, sentiment, title, description, contact, rating, postPublic, answers,
-      media: media.filter((m) => m.done && m.storage_path),
-    }))
-  }, [category, sentiment, title, description, contact, rating, postPublic, answers, media, result, token])
+    if (!draftLoaded.current || result) return
+    const t = setTimeout(() => {
+      // reporter contact (email/phone) is deliberately excluded — it must not
+      // land in sessionStorage on shared/kiosk devices.
+      sessionStorage.setItem('tellus_intake_draft:' + token, JSON.stringify({
+        category, sentiment, title, description, rating, postPublic, answers,
+        media: media.filter((m) => m.done && m.storage_path),
+      }))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [category, sentiment, title, description, rating, postPublic, answers, media, result, token])
 
   async function onFiles(files: FileList | null) {
     if (!files) return
     for (const file of Array.from(files)) {
       const mediaType: 'photo' | 'video' = file.type.startsWith('video') ? 'video' : 'photo'
-      const id = crypto.randomUUID()
+      const id = newId()
       const entry: PendingMedia = {
         id, name: file.name, media_type: mediaType, mime_type: file.type,
         file_size: file.size, original_filename: file.name, storage_path: '', progress: 0, done: false,
@@ -125,7 +149,7 @@ export default function Intake() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setErr('')
-    if (loggedIn && postPublic && rating === 0) {
+    if (canPublicReview && postPublic && rating === 0) {
       setErr('Please pick a star rating for your public review.')
       return
     }
@@ -217,7 +241,7 @@ export default function Intake() {
           </div>
 
           <div>
-            <span className="mb-1 block text-xs font-medium text-tu-dim">Rating {postPublic && loggedIn ? '(required for a public review)' : '(optional)'}</span>
+            <span className="mb-1 block text-xs font-medium text-tu-dim">Rating {postPublic && canPublicReview ? '(required for a public review)' : '(optional)'}</span>
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button key={n} type="button" onClick={() => setRating(n)} aria-label={`${n} star${n === 1 ? '' : 's'}`}>
@@ -233,7 +257,7 @@ export default function Intake() {
               Post as a public review — goes live in 48 hours, giving the brand a chance to reach out first.
             </span>
           </label>
-          {postPublic && !loggedIn && (
+          {postPublic && !loggedIn && claimed && (
             <p className="text-xs text-tu-faint">
               Public reviews need an account —{' '}
               <Link to={'/login?returnTo=' + encodeURIComponent('/i/' + token)} className="text-tu-accent hover:underline">sign in</Link>{' '}

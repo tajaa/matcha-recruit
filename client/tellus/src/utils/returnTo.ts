@@ -19,3 +19,7 @@ export function popReturnTo(): string | null {
   sessionStorage.removeItem(KEY)
   return sanitizeReturnTo(v)
 }
+
+export function clearReturnTo() {
+  sessionStorage.removeItem(KEY)
+}

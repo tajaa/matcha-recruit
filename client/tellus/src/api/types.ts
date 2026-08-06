@@ -103,6 +103,7 @@ export interface IntakeConfig {
   store_name: string | null
   categories: string[]
   prompts: IntakePrompt[]
+  claimed: boolean
 }
 
 export interface SubmittedMedia {
