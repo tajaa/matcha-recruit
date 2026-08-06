@@ -85,6 +85,16 @@ function ReviewCard({ review, onChange }: { review: MyReview; onChange: () => vo
         <>
           {review.title && <p className="mt-2 text-sm font-medium">{review.title}</p>}
           <p className="mt-1 whitespace-pre-wrap text-sm text-tu-dim">{review.description}</p>
+          {review.answers.length > 0 && (
+            <div className="mt-2 space-y-1.5">
+              {review.answers.map((a) => (
+                <div key={a.id}>
+                  <p className="text-xs font-medium text-tu-dim">{a.prompt_text}</p>
+                  <p className="whitespace-pre-wrap text-sm">{a.answer}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <div className="mt-2 space-y-2">

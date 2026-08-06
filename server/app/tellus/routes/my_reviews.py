@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from ...database import get_connection
 from ..dependencies import require_consumer
 from ..models.tellus import TellusAccount, TellusMyReview, TellusMyReviewUpdate, TellusReportMedia
-from ._shared import _media_url, effective_review_state
+from ._shared import _answer_rows_to_models, _media_url, effective_review_state
 
 router = APIRouter()
 
@@ -31,6 +31,10 @@ async def _serialize_my_review(conn, row) -> TellusMyReview:
     dm_thread_id = await conn.fetchval(
         "SELECT id FROM tellus_dm_threads WHERE report_id = $1", row["id"]
     )
+    arows = await conn.fetch(
+        "SELECT id, prompt_text, answer, position FROM tellus_report_answers WHERE report_id = $1 ORDER BY position",
+        row["id"],
+    )
     return TellusMyReview(
         id=row["id"],
         brand_name=row["brand_name"],
@@ -48,6 +52,7 @@ async def _serialize_my_review(conn, row) -> TellusMyReview:
         brand_public_reply_at=row["brand_public_reply_at"],
         dm_thread_id=dm_thread_id,
         media=media,
+        answers=_answer_rows_to_models(arows),
     )
 
 
@@ -78,6 +83,14 @@ async def _serialize_my_reviews(conn, rows) -> list[TellusMyReview]:
     )
     dm_thread_by_report = {d["report_id"]: d["id"] for d in dm_rows}
 
+    arows = await conn.fetch(
+        "SELECT id, report_id, prompt_text, answer, position FROM tellus_report_answers "
+        "WHERE report_id = ANY($1::uuid[]) ORDER BY report_id, position", report_ids,
+    )
+    answers_by_report: dict = {}
+    for a in arows:
+        answers_by_report.setdefault(a["report_id"], []).append(a)
+
     return [
         TellusMyReview(
             id=r["id"],
@@ -96,6 +109,7 @@ async def _serialize_my_reviews(conn, rows) -> list[TellusMyReview]:
             brand_public_reply_at=r["brand_public_reply_at"],
             dm_thread_id=dm_thread_by_report.get(r["id"]),
             media=media_by_report.get(r["id"], []),
+            answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
         )
         for r in rows
     ]

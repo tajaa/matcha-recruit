@@ -130,6 +130,9 @@ export default function Landing() {
             <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-tu-faint lg:justify-start">
               <ShieldCheck className="h-3.5 w-3.5" /> Free for consumers, always.
             </p>
+            <p className="mt-2 flex items-center justify-center gap-1.5 text-xs text-tu-faint lg:justify-start">
+              <Link to="/places" className="text-tu-accent hover:underline">Review any place →</Link>
+            </p>
           </div>
           <HeroTicket />
         </div>

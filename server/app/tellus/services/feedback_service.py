@@ -110,6 +110,7 @@ async def create_report(
     media: list,
     rating: Optional[int] = None,
     post_as_review: bool = False,
+    answers: list = (),
 ) -> dict:
     """Insert a report + media, score usefulness, and credit or queue points per
     the brand's reward_mode. Returns {report, points_awarded, earned,
@@ -125,8 +126,9 @@ async def create_report(
     """
     has_media = bool(media)
     identified = reporter_account_id is not None
+    scoring_text = " ".join([description, *[a[2] for a in answers]])
     usefulness = score_usefulness(
-        description, has_media, bool(title), occurred_at is not None, identified
+        scoring_text, has_media, bool(title), occurred_at is not None, identified
     )
     public_review = bool(post_as_review and identified)
 
@@ -166,6 +168,13 @@ async def create_report(
                 report_id, m.media_type, m.storage_path, m.mime_type, m.file_size, m.original_filename,
             )
 
+        for prompt_id, prompt_text, answer, position in answers:
+            await conn.execute(
+                """INSERT INTO tellus_report_answers (report_id, prompt_id, prompt_text, answer, position)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                report_id, prompt_id, prompt_text, answer, position,
+            )
+
         points_awarded = 0
         if identified and not manual:
             points_awarded = await award_for_report(conn, dict(report))
@@ -175,7 +184,8 @@ async def create_report(
             store_name = await conn.fetchval("SELECT name FROM tellus_stores WHERE id = $1", store_id)
 
         # In-app notification to the brand owner (flag the pending decision).
-        if brand:
+        # Unclaimed brands (owner_account_id NULL) have nobody to notify.
+        if brand and brand["owner_account_id"]:
             note = f"New {sentiment} feedback" + (f" at {store_name}" if store_name else "")
             if reward_status == "pending":
                 note += " — reward approval needed"

@@ -45,7 +45,8 @@ async function _tryRefresh(): Promise<boolean> {
 function _logout() {
   clearTellusTokens()
   if (window.location.pathname !== '/tellus/login') {
-    window.location.href = '/tellus/login'
+    const rel = window.location.pathname.replace(/^\/tellus/, '') + window.location.search
+    window.location.href = '/tellus/login?returnTo=' + encodeURIComponent(rel)
   }
 }
 

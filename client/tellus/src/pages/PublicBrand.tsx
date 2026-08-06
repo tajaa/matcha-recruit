@@ -28,6 +28,17 @@ function ReviewCard({ review }: { review: PublicReview }) {
       {review.title && <h3 className="mt-2 text-sm font-semibold">{review.title}</h3>}
       {review.description && <p className="mt-1 whitespace-pre-wrap text-sm text-tu-dim">{review.description}</p>}
 
+      {review.answers.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {review.answers.map((a) => (
+            <div key={a.id}>
+              <p className="text-xs font-medium text-tu-dim">{a.prompt_text}</p>
+              <p className="whitespace-pre-wrap text-sm">{a.answer}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {review.media.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {review.media.map((m) => (
@@ -97,6 +108,9 @@ export default function PublicBrand() {
       <div className="mb-6 text-center">
         {page.logo_url && <img src={page.logo_url} alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl object-cover" />}
         <h1 className="text-2xl font-bold">{page.brand_name}</h1>
+        {!page.claimed && (
+          <span className="mt-1.5 inline-block rounded-full border border-tu-border px-2.5 py-0.5 text-xs text-tu-dim">Unclaimed</span>
+        )}
         {page.avg_rating != null && (
           <div className="mt-2 flex items-center justify-center gap-1.5">
             <div className="flex gap-0.5">
@@ -105,6 +119,14 @@ export default function PublicBrand() {
               ))}
             </div>
             <span className="text-sm text-tu-dim">{page.avg_rating.toFixed(1)} · {page.review_count} review{page.review_count === 1 ? '' : 's'}</span>
+          </div>
+        )}
+        {!page.claimed && page.intake_token && (
+          <div className="mt-3">
+            <Link to={`/i/${page.intake_token}`} className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
+              Write a review
+            </Link>
+            <p className="mt-2 text-xs text-tu-faint">Are you the owner? Claiming is coming soon.</p>
           </div>
         )}
       </div>

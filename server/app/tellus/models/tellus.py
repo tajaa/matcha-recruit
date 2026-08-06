@@ -111,7 +111,7 @@ class TellusProfileUpdate(BaseModel):
 
 class TellusBrand(BaseModel):
     id: UUID
-    owner_account_id: UUID
+    owner_account_id: Optional[UUID] = None
     name: str
     logo_url: Optional[str] = None
     # auto = useful feedback credits points immediately; manual = the brand
@@ -124,6 +124,46 @@ class TellusBrandUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
     logo_url: Optional[str] = Field(default=None, max_length=2000)
     reward_mode: Optional[Literal["auto", "manual"]] = None
+
+
+class TellusBrandPrompt(BaseModel):
+    id: UUID
+    prompt: str
+    position: int = 0
+
+
+class TellusPromptItem(BaseModel):
+    prompt: str = Field(min_length=1, max_length=500)
+
+
+class TellusBrandPromptsUpdate(BaseModel):
+    prompts: list[TellusPromptItem] = Field(default_factory=list, max_length=5)
+
+
+class TellusPlaceSearchResult(BaseModel):
+    slug: str
+    name: str
+    logo_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    claimed: bool
+    intake_token: Optional[str] = None   # only ever set for unclaimed places
+    review_count: int = 0
+
+
+class TellusPlaceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    city: str = Field(min_length=1, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=60)
+    website: Optional[str] = None  # honeypot
+
+
+class TellusPlaceCreateResponse(BaseModel):
+    slug: str
+    name: str
+    claimed: bool = False
+    intake_token: Optional[str] = None
+    existing: bool = False
 
 
 class TellusStoreCreate(BaseModel):
@@ -181,12 +221,30 @@ class TellusLink(BaseModel):
 
 # ── Public intake ─────────────────────────────────────────────────────────────
 
+class TellusIntakePrompt(BaseModel):
+    id: UUID
+    prompt: str
+
+
+class TellusSubmittedAnswer(BaseModel):
+    prompt_id: UUID
+    answer: str = Field(min_length=1, max_length=2000)
+
+
+class TellusReportAnswer(BaseModel):
+    id: UUID
+    prompt_text: str
+    answer: str
+    position: int = 0
+
+
 class TellusIntakeConfig(BaseModel):
     """What the public feedback form needs to render (resolved from token)."""
     brand_name: str
     brand_logo_url: Optional[str] = None
     store_name: Optional[str] = None
     categories: list[str] = Field(default_factory=lambda: list(ReportCategory.__args__))
+    prompts: list[TellusIntakePrompt] = Field(default_factory=list)
 
 
 class TellusFeedbackSubmit(BaseModel):
@@ -203,6 +261,7 @@ class TellusFeedbackSubmit(BaseModel):
     post_as_review: bool = False
     # Presigned media keys (storage paths returned by /media/presign).
     media_keys: list["TellusSubmittedMedia"] = Field(default_factory=list)
+    answers: list[TellusSubmittedAnswer] = Field(default_factory=list)
     # Honeypot — bots fill hidden fields; humans leave them empty.
     website: Optional[str] = None
 
@@ -287,6 +346,7 @@ class TellusReport(BaseModel):
     # "Message reviewer" without ever exposing the reporter's identity here.
     is_identified: bool = False
     has_dm_thread: bool = False
+    answers: list[TellusReportAnswer] = Field(default_factory=list)
 
 
 class TellusReportStatusUpdate(BaseModel):
@@ -465,6 +525,7 @@ class TellusMyReview(BaseModel):
     brand_public_reply_at: Optional[datetime] = None
     dm_thread_id: Optional[UUID] = None
     media: list[TellusReportMedia] = Field(default_factory=list)
+    answers: list[TellusReportAnswer] = Field(default_factory=list)
 
 
 class TellusMyReviewUpdate(BaseModel):
@@ -489,6 +550,7 @@ class TellusPublicReview(BaseModel):
     brand_reply: Optional[str] = None
     brand_reply_at: Optional[datetime] = None
     media: list[TellusReportMedia] = Field(default_factory=list)
+    answers: list[TellusReportAnswer] = Field(default_factory=list)
 
 
 class TellusPublicBrandPage(BaseModel):
@@ -499,6 +561,8 @@ class TellusPublicBrandPage(BaseModel):
     avg_rating: Optional[float] = None
     reviews: list[TellusPublicReview] = Field(default_factory=list)
     total: int = 0
+    claimed: bool = True
+    intake_token: Optional[str] = None
 
 
 # ── DMs (brand <-> reviewer) ────────────────────────────────────────────────────

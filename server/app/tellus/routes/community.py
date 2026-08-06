@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..models.tellus import TellusPublicBrandPage, TellusPublicReview, TellusReportMedia
-from ._shared import _media_url
+from ._shared import _answer_rows_to_models, _media_url
 
 router = APIRouter()
 
@@ -23,10 +23,18 @@ async def public_brand_page(
 
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url FROM tellus_brands WHERE slug = $1", slug
+            "SELECT id, name, slug, logo_url, owner_account_id FROM tellus_brands WHERE slug = $1", slug
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+
+        claimed = brand["owner_account_id"] is not None
+        intake_token = None
+        if not claimed:
+            intake_token = await conn.fetchval(
+                "SELECT token FROM tellus_links WHERE brand_id = $1 AND is_active ORDER BY created_at LIMIT 1",
+                brand["id"],
+            )
 
         # Published = held + past its 48h hold + still visible. Hits
         # ix_tellus_reports_public. Strict equality to 'visible' (not just
@@ -54,6 +62,7 @@ async def public_brand_page(
 
         report_ids = [r["id"] for r in rows]
         media_by_report: dict = {}
+        answers_by_report: dict = {}
         if report_ids:
             mrows = await conn.fetch(
                 "SELECT id, report_id, media_type, mime_type, original_filename, storage_path "
@@ -67,6 +76,13 @@ async def public_brand_page(
                         original_filename=m["original_filename"], url=_media_url(m["storage_path"]),
                     )
                 )
+
+            arows = await conn.fetch(
+                "SELECT id, report_id, prompt_text, answer, position FROM tellus_report_answers "
+                "WHERE report_id = ANY($1::uuid[]) ORDER BY report_id, position", report_ids,
+            )
+            for a in arows:
+                answers_by_report.setdefault(a["report_id"], []).append(a)
 
         reviews = [
             TellusPublicReview(
@@ -82,6 +98,7 @@ async def public_brand_page(
                 brand_reply=r["brand_public_reply"],
                 brand_reply_at=r["brand_public_reply_at"],
                 media=media_by_report.get(r["id"], []),
+                answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
             )
             for r in rows
         ]
@@ -94,4 +111,6 @@ async def public_brand_page(
         avg_rating=round(agg["avg_rating"], 2) if agg["avg_rating"] is not None else None,
         reviews=reviews,
         total=agg["review_count"] or 0,
+        claimed=claimed,
+        intake_token=intake_token,
     )

@@ -44,11 +44,17 @@ export interface SignupResponse {
 
 export interface Brand {
   id: string
-  owner_account_id: string
+  owner_account_id: string | null
   name: string
   logo_url: string | null
   reward_mode: 'auto' | 'manual'
   created_at: string
+}
+
+export interface BrandPrompt {
+  id: string
+  prompt: string
+  position: number
 }
 
 export interface Store {
@@ -79,11 +85,24 @@ export interface FeedbackLink {
   store_name: string | null
 }
 
+export interface IntakePrompt {
+  id: string
+  prompt: string
+}
+
+export interface ReportAnswer {
+  id: string
+  prompt_text: string
+  answer: string
+  position: number
+}
+
 export interface IntakeConfig {
   brand_name: string
   brand_logo_url: string | null
   store_name: string | null
   categories: string[]
+  prompts: IntakePrompt[]
 }
 
 export interface SubmittedMedia {
@@ -146,6 +165,7 @@ export interface Report {
   brand_public_reply_at: string | null
   is_identified: boolean
   has_dm_thread: boolean
+  answers: ReportAnswer[]
 }
 
 export interface FeedbackStats {
@@ -271,6 +291,7 @@ export interface MyReview {
   brand_public_reply_at: string | null
   dm_thread_id: string | null
   media: ReportMedia[]
+  answers: ReportAnswer[]
 }
 
 export interface MyReviewUpdate {
@@ -292,6 +313,7 @@ export interface PublicReview {
   brand_reply: string | null
   brand_reply_at: string | null
   media: ReportMedia[]
+  answers: ReportAnswer[]
 }
 
 export interface PublicBrandPage {
@@ -302,6 +324,17 @@ export interface PublicBrandPage {
   avg_rating: number | null
   reviews: PublicReview[]
   total: number
+  claimed: boolean
+  intake_token: string | null
+}
+
+export interface PlaceSearchResult {
+  slug: string; name: string; logo_url: string | null
+  city: string | null; state: string | null
+  claimed: boolean; intake_token: string | null; review_count: number
+}
+export interface PlaceCreateResponse {
+  slug: string; name: string; claimed: boolean; intake_token: string | null; existing: boolean
 }
 
 export interface DmThread {

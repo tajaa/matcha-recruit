@@ -5,6 +5,7 @@ import { useAccount } from '../hooks/useAccount'
 import { Card, Spinner } from '../components/ui'
 import type { TokenResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
+import { popReturnTo } from '../utils/returnTo'
 
 export default function Verify() {
   const [params] = useSearchParams()
@@ -19,7 +20,7 @@ export default function Verify() {
     ran.current = true
     if (!token) { setError('Missing confirmation token.'); return }
     tellusPublicPost<TokenResponse>('/auth/verify', { token })
-      .then((res) => { setSession(res); navigate('/') })
+      .then((res) => { setSession(res); navigate(popReturnTo() ?? '/') })
       .catch((e) => setError(e instanceof Error ? e.message : 'Verification failed'))
   }, [token, setSession, navigate])
 

@@ -19,6 +19,7 @@ from ..models.tellus import (
     TellusFeedbackSubmit,
     TellusFeedbackSubmitResponse,
     TellusIntakeConfig,
+    TellusIntakePrompt,
     TellusMediaPresignRequest,
     TellusMediaPresignResponse,
 )
@@ -89,11 +90,16 @@ async def intake_config(token: str, request: Request):
     await check_rate_limit(client_ip(request), "tellus_intake_get", 60, 3600)
     async with get_connection() as conn:
         link = await _resolve_link(conn, token)
+        prows = await conn.fetch(
+            "SELECT id, prompt FROM tellus_brand_prompts WHERE brand_id = $1 ORDER BY position LIMIT 5",
+            link["brand_id"],
+        )
     return TellusIntakeConfig(
         brand_name=link["brand_name"],
         brand_logo_url=link["logo_url"],
         store_name=link["store_name"],
         categories=_CATEGORIES,
+        prompts=[TellusIntakePrompt(id=p["id"], prompt=p["prompt"]) for p in prows],
     )
 
 
@@ -201,6 +207,22 @@ async def submit_feedback(
                     detail="This feedback link is not available.",
                 )
 
+            answers_in: list[tuple] = []
+            if body.answers:
+                prows = await conn.fetch(
+                    "SELECT id, prompt FROM tellus_brand_prompts WHERE brand_id = $1", link["brand_id"]
+                )
+                text_by_id = {p["id"]: p["prompt"] for p in prows}
+                seen: set = set()
+                for a in body.answers:
+                    text = text_by_id.get(a.prompt_id)
+                    if text is None or a.prompt_id in seen or not a.answer.strip():
+                        continue  # bogus/duplicate prompt ids are dropped, not errors
+                    seen.add(a.prompt_id)
+                    answers_in.append((a.prompt_id, text, a.answer.strip(), len(answers_in)))
+                    if len(answers_in) >= 5:
+                        break
+
             outcome = await create_report(
                 conn,
                 brand_id=link["brand_id"],
@@ -216,6 +238,7 @@ async def submit_feedback(
                 media=media,
                 rating=body.rating,
                 post_as_review=body.post_as_review,
+                answers=answers_in,
             )
 
     # Alert the brand owner by email (best-effort, after the response).

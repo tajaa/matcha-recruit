@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAccount } from './hooks/useAccount'
 import { Layout } from './components/Layout'
 import { Spinner } from './components/ui'
@@ -9,6 +9,7 @@ import Signup from './pages/Signup'
 import Verify from './pages/Verify'
 import Intake from './pages/Intake'
 import PublicBrand from './pages/PublicBrand'
+import Places from './pages/Places'
 
 import Rewards from './pages/consumer/Rewards'
 import Marketplace from './pages/consumer/Marketplace'
@@ -34,8 +35,9 @@ function Protected({
   children, requireType, allowUnpaid,
 }: { children: React.ReactNode; requireType?: 'consumer' | 'brand'; allowUnpaid?: boolean }) {
   const { account, loading } = useAccount()
+  const location = useLocation()
   if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
-  if (!account) return <Navigate to="/login" replace />
+  if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname + location.search)} replace />
   if (requireType && account.account_type !== requireType) {
     return <Navigate to={account.account_type === 'brand' ? brandHome(account.plan_status) : '/'} replace />
   }
@@ -63,6 +65,7 @@ export default function App() {
       <Route path="/verify" element={<Verify />} />
       <Route path="/i/:token" element={<Intake />} />
       <Route path="/b/:slug" element={<PublicBrand />} />
+      <Route path="/places" element={<Places />} />
 
       {/* Consumer */}
       <Route path="/" element={<Home />} />

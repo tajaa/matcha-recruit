@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from ...core.services.storage import get_storage
-from ..models.tellus import TellusReport, TellusReportMedia
+from ..models.tellus import TellusReport, TellusReportAnswer, TellusReportMedia
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
 _SLUG_MAX_LEN = 60
@@ -61,7 +61,14 @@ def _media_url(storage_path: Optional[str]) -> Optional[str]:
     return get_storage().get_presigned_download_url(storage_path, expires_in=900)
 
 
-def _build_report(row, *, store_name, media, has_dm_thread) -> TellusReport:
+def _answer_rows_to_models(arows) -> list[TellusReportAnswer]:
+    return [
+        TellusReportAnswer(id=a["id"], prompt_text=a["prompt_text"], answer=a["answer"], position=a["position"])
+        for a in arows
+    ]
+
+
+def _build_report(row, *, store_name, media, has_dm_thread, answers=()) -> TellusReport:
     return TellusReport(
         id=row["id"],
         brand_id=row["brand_id"],
@@ -92,6 +99,7 @@ def _build_report(row, *, store_name, media, has_dm_thread) -> TellusReport:
         brand_public_reply_at=row["brand_public_reply_at"] if "brand_public_reply_at" in row.keys() else None,
         is_identified=row["reporter_account_id"] is not None,
         has_dm_thread=has_dm_thread,
+        answers=list(answers),
     )
 
 
@@ -129,7 +137,15 @@ async def serialize_report(conn, row, *, include_media: bool = True) -> TellusRe
         "SELECT EXISTS (SELECT 1 FROM tellus_dm_threads WHERE report_id = $1)", row["id"]
     ))
 
-    return _build_report(row, store_name=store_name, media=media, has_dm_thread=has_dm_thread)
+    arows = await conn.fetch(
+        "SELECT id, prompt_text, answer, position FROM tellus_report_answers WHERE report_id = $1 ORDER BY position",
+        row["id"],
+    )
+
+    return _build_report(
+        row, store_name=store_name, media=media, has_dm_thread=has_dm_thread,
+        answers=_answer_rows_to_models(arows),
+    )
 
 
 async def serialize_reports(conn, rows: list) -> list[TellusReport]:
@@ -160,12 +176,21 @@ async def serialize_reports(conn, rows: list) -> list[TellusReport]:
     )
     has_dm_set = {d["report_id"] for d in dm_rows}
 
+    arows = await conn.fetch(
+        "SELECT id, report_id, prompt_text, answer, position FROM tellus_report_answers "
+        "WHERE report_id = ANY($1::uuid[]) ORDER BY report_id, position", report_ids,
+    )
+    answers_by_report: dict = {}
+    for a in arows:
+        answers_by_report.setdefault(a["report_id"], []).append(a)
+
     return [
         _build_report(
             r,
             store_name=store_names.get(r["store_id"]),
             media=_media_rows_to_models(media_by_report.get(r["id"], [])),
             has_dm_thread=r["id"] in has_dm_set,
+            answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
         )
         for r in rows
     ]

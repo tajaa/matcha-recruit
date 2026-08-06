@@ -1,0 +1,18 @@
+{
+  "CORSRules": [
+    {
+      "AllowedOrigins": [
+        "https://hey-matcha.com",
+        "https://www.hey-matcha.com",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:5191",
+        "http://127.0.0.1:5191"
+      ],
+      "AllowedMethods": ["PUT", "GET"],
+      "AllowedHeaders": ["*"],
+      "ExposeHeaders": ["ETag"],
+      "MaxAgeSeconds": 3000
+    }
+  ]
+}

@@ -117,6 +117,17 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
 
       <p className="mt-1.5 whitespace-pre-wrap text-sm text-tu-dim">{report.description}</p>
 
+      {report.answers.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {report.answers.map((a) => (
+            <div key={a.id}>
+              <p className="text-xs font-medium text-tu-dim">{a.prompt_text}</p>
+              <p className="whitespace-pre-wrap text-sm">{a.answer}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {report.media.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {report.media.map((m) => (

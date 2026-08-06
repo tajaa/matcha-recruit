@@ -16,10 +16,18 @@ const SENTIMENTS = [
 ]
 
 interface PendingMedia extends SubmittedMedia {
+  id: string
   name: string
   progress: number
   done: boolean
   error?: string
+}
+
+type IntakeDraft = {
+  category: string; sentiment: string; title: string; description: string
+  contact: string; rating: number; postPublic: boolean
+  answers: Record<string, string>
+  media: PendingMedia[]
 }
 
 function uploadToS3(url: string, file: File, onProgress: (pct: number) => void): Promise<void> {
@@ -29,7 +37,7 @@ function uploadToS3(url: string, file: File, onProgress: (pct: number) => void):
     xhr.setRequestHeader('Content-Type', file.type)
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)) }
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)))
-    xhr.onerror = () => reject(new Error('Upload failed'))
+    xhr.onerror = () => reject(new Error('Upload failed — network or permissions error'))
     xhr.send(file)
   })
 }
@@ -47,6 +55,7 @@ export default function Intake() {
   const [contact, setContact] = useState('')
   const [rating, setRating] = useState(0)
   const [postPublic, setPostPublic] = useState(true)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   const [website, setWebsite] = useState('') // honeypot
   const [media, setMedia] = useState<PendingMedia[]>([])
   const [busy, setBusy] = useState(false)
@@ -63,13 +72,34 @@ export default function Intake() {
       .finally(() => setLoading(false))
   }, [token])
 
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('tellus_intake_draft:' + token)
+      if (!raw) return
+      const d: IntakeDraft = JSON.parse(raw)
+      setCategory(d.category); setSentiment(d.sentiment); setTitle(d.title)
+      setDescription(d.description); setContact(d.contact); setRating(d.rating)
+      setPostPublic(d.postPublic); setAnswers(d.answers ?? {})
+      setMedia((d.media ?? []).map((m) => ({ ...m, progress: 100, done: true, error: undefined })))
+    } catch { /* corrupt draft — ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
+
+  useEffect(() => {
+    if (result) return
+    sessionStorage.setItem('tellus_intake_draft:' + token, JSON.stringify({
+      category, sentiment, title, description, contact, rating, postPublic, answers,
+      media: media.filter((m) => m.done && m.storage_path),
+    }))
+  }, [category, sentiment, title, description, contact, rating, postPublic, answers, media, result, token])
+
   async function onFiles(files: FileList | null) {
     if (!files) return
     for (const file of Array.from(files)) {
       const mediaType: 'photo' | 'video' = file.type.startsWith('video') ? 'video' : 'photo'
-      const idx = media.length
+      const id = crypto.randomUUID()
       const entry: PendingMedia = {
-        name: file.name, media_type: mediaType, mime_type: file.type,
+        id, name: file.name, media_type: mediaType, mime_type: file.type,
         file_size: file.size, original_filename: file.name, storage_path: '', progress: 0, done: false,
       }
       setMedia((m) => [...m, entry])
@@ -81,16 +111,16 @@ export default function Intake() {
           media_type: mediaType, mime_type: file.type, file_size: file.size, original_filename: file.name,
         })
         await uploadToS3(presign.upload_url, file, (pct) =>
-          setMedia((m) => m.map((x, i) => (i === idx ? { ...x, progress: pct } : x))))
-        setMedia((m) => m.map((x, i) => (i === idx ? { ...x, storage_path: presign.storage_path, done: true, progress: 100 } : x)))
+          setMedia((m) => m.map((x) => (x.id === id ? { ...x, progress: pct } : x))))
+        setMedia((m) => m.map((x) => (x.id === id ? { ...x, storage_path: presign.storage_path, done: true, progress: 100 } : x)))
       } catch (e) {
-        setMedia((m) => m.map((x, i) => (i === idx ? { ...x, error: e instanceof Error ? e.message : 'Upload failed' } : x)))
+        setMedia((m) => m.map((x) => (x.id === id ? { ...x, error: e instanceof Error ? e.message : 'Upload failed' } : x)))
       }
     }
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  function removeMedia(i: number) { setMedia((m) => m.filter((_, idx) => idx !== i)) }
+  function removeMedia(id: string) { setMedia((m) => m.filter((x) => x.id !== id)) }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -105,12 +135,16 @@ export default function Intake() {
         storage_path: m.storage_path, media_type: m.media_type, mime_type: m.mime_type,
         file_size: m.file_size, original_filename: m.original_filename,
       }))
+      const answers_out = Object.entries(answers)
+        .filter(([, v]) => v.trim())
+        .map(([prompt_id, answer]) => ({ prompt_id, answer: answer.trim() }))
       const res = await tellusMaybeAuthPost<FeedbackSubmitResponse>(`/i/${token}`, {
         category, sentiment, title: title || null, description, reporter_contact: contact || null,
         rating: rating || null, post_as_review: postPublic,
-        media_keys, website,
+        media_keys, website, answers: answers_out,
       })
       setResult(res)
+      sessionStorage.removeItem('tellus_intake_draft:' + token)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Submission failed')
     } finally {
@@ -144,7 +178,7 @@ export default function Intake() {
         ) : (
           <div className="mt-4">
             <p className="text-sm text-tu-dim">Sign in next time to earn points for useful feedback.</p>
-            <Link to="/login" className="mt-3 inline-block font-semibold text-tu-accent hover:underline">Create a Tell-Us account →</Link>
+            <Link to={'/login?returnTo=' + encodeURIComponent('/i/' + token)} className="mt-3 inline-block font-semibold text-tu-accent hover:underline">Create a Tell-Us account →</Link>
           </div>
         )}
         {result.public_review && result.publish_at ? (
@@ -202,7 +236,7 @@ export default function Intake() {
           {postPublic && !loggedIn && (
             <p className="text-xs text-tu-faint">
               Public reviews need an account —{' '}
-              <Link to="/login" className="text-tu-accent hover:underline">sign in</Link>{' '}
+              <Link to={'/login?returnTo=' + encodeURIComponent('/i/' + token)} className="text-tu-accent hover:underline">sign in</Link>{' '}
               or this will be sent privately to the brand instead.
             </p>
           )}
@@ -221,6 +255,11 @@ export default function Intake() {
           <Textarea label="Your feedback" required rows={5} value={description} onChange={(e) => setDescription(e.target.value)}
             placeholder="Tell them what happened — the more detail, the more useful (and the more points you earn)." />
 
+          {(config?.prompts ?? []).map((p) => (
+            <Textarea key={p.id} label={p.prompt} rows={2} value={answers[p.id] ?? ''}
+              onChange={(e) => setAnswers((a) => ({ ...a, [p.id]: e.target.value }))} />
+          ))}
+
           {/* Media */}
           <div>
             <span className="mb-1 block text-xs font-medium text-tu-dim">Photos / video (optional)</span>
@@ -231,13 +270,13 @@ export default function Intake() {
             <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
             {media.length > 0 && (
               <ul className="mt-2 space-y-1">
-                {media.map((m, i) => (
-                  <li key={i} className="flex items-center gap-2 rounded-lg bg-tu-panel2 px-3 py-2 text-xs">
+                {media.map((m) => (
+                  <li key={m.id} className="flex items-center gap-2 rounded-lg bg-tu-panel2 px-3 py-2 text-xs">
                     <span className="flex-1 truncate">{m.name}</span>
                     {m.error ? <span className="text-tu-bad">{m.error}</span>
                       : m.done ? <CheckCircle2 className="h-4 w-4 text-tu-good" />
                       : <span className="flex items-center gap-1 text-tu-dim"><Loader2 className="h-3 w-3 animate-spin" />{m.progress}%</span>}
-                    <button type="button" onClick={() => removeMedia(i)} className="text-tu-faint hover:text-tu-bad"><X className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => removeMedia(m.id)} className="text-tu-faint hover:text-tu-bad"><X className="h-3.5 w-3.5" /></button>
                   </li>
                 ))}
               </ul>
@@ -260,7 +299,7 @@ export default function Intake() {
             <p className="text-center text-xs text-tu-faint">Signed in — useful feedback earns points.</p>
           ) : (
             <p className="text-center text-xs text-tu-faint">
-              <Link to="/login" className="text-tu-accent hover:underline">Sign in</Link> to earn points for this.
+              <Link to={'/login?returnTo=' + encodeURIComponent('/i/' + token)} className="text-tu-accent hover:underline">Sign in</Link> to earn points for this.
             </p>
           )}
         </form>

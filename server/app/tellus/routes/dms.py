@@ -230,10 +230,11 @@ async def send_message(
                 )
             else:
                 counterparty_id = thread["consumer_account_id"]
-            await _notify(
-                conn, counterparty_id, "dm_message", "New message about your feedback",
-                "You have a new message.", reference_type="dm_thread", reference_id=str(thread_id),
-            )
+            if counterparty_id:
+                await _notify(
+                    conn, counterparty_id, "dm_message", "New message about your feedback",
+                    "You have a new message.", reference_type="dm_thread", reference_id=str(thread_id),
+                )
 
             recipient_email = None
             recipient_name = None
