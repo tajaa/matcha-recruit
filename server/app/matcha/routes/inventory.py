@@ -324,15 +324,19 @@ async def parse_audit_voice(
     audio = await read_wav_or_400(file)
 
     async with get_connection() as conn:
-        catalog = await movements_service.list_item_names(conn, company_id, location_id)
-        parsed = await voice_audit.parse_voice_counts(
-            audio, (file.content_type or "audio/wav").lower(),
-            item_names=[row["name"] for row in catalog],
-        )
-        resolved = await voice_audit.resolve_count_lines(
-            conn, company_id=company_id, location_id=location_id, lines=parsed["lines"],
-            existing=catalog,
-        )
+        catalog = await movements_service.list_item_names_for_audit(conn, company_id, location_id)
+
+    # Gemini call happens with no pooled connection held — it can take up to
+    # 2x VOICE_PARSE_TIMEOUT on a retry, same reasoning as ir_voice_intake's
+    # voice.py.
+    parsed = await voice_audit.parse_voice_counts(
+        audio, (file.content_type or "audio/wav").lower(),
+        item_names=[row["name"] for row in catalog],
+    )
+    resolved = await voice_audit.resolve_count_lines(
+        None, company_id=company_id, location_id=location_id, lines=parsed["lines"],
+        existing=catalog,
+    )
     return VoiceCountDraft(
         available=parsed["available"], transcript=parsed["transcript"],
         model=parsed["model"], lines=resolved,

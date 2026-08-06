@@ -21,6 +21,25 @@ async def list_item_names(conn, company_id: UUID, location_id: Optional[UUID] = 
     return [dict(r) for r in rows]
 
 
+async def list_item_names_for_audit(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
+    """Audit-sheet / voice-count catalog scope — distinct from
+    list_item_names' channel-intake semantics, where location_id=None means
+    "unscoped channel, company-wide slot only". The Audit sheet's default
+    "All locations" filter also sends no location_id but means the opposite:
+    show/match every item across every store, so a store-scoped item isn't
+    mistaken for missing and re-created as a duplicate company-wide row. A
+    specific store filter still widens to that store's items plus
+    company-wide, same as list_item_names."""
+    if location_id is None:
+        rows = await conn.fetch(
+            "SELECT id, name, normalized_name, location_id FROM inventory_items "
+            "WHERE company_id = $1 AND archived_at IS NULL",
+            company_id,
+        )
+        return [dict(r) for r in rows]
+    return await list_item_names(conn, company_id, location_id)
+
+
 async def find_item(
     conn, company_id: UUID, raw_name: str, location_id: Optional[UUID] = None,
     *, existing: Optional[list[dict]] = None,

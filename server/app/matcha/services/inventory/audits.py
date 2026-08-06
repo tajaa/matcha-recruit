@@ -67,22 +67,23 @@ async def commit_audit_lines(
 
                 item_id = line.get("item_id")
                 new_item_name = line.get("new_item_name")
+                new_item_row = None
                 if item_id is not None and new_item_name:
                     raise ValueError("line has both item_id and new_item_name")
                 elif item_id is not None:
                     pass
                 elif new_item_name:
                     if existing is None:
-                        existing = await movements_service.list_item_names(conn, company_id, location_id)
+                        existing = await movements_service.list_item_names_for_audit(conn, company_id, location_id)
                     item = await movements_service.find_or_create_item(
                         conn, company_id, new_item_name,
                         created_by=user_id, location_id=location_id, existing=existing,
                     )
                     item_id = item["id"]
-                    existing.append({
+                    new_item_row = {
                         "id": item["id"], "name": item["name"],
                         "normalized_name": item["normalized_name"], "location_id": item["location_id"],
-                    })
+                    }
                 else:
                     raise ValueError("line needs item_id or new_item_name")
 
@@ -91,6 +92,13 @@ async def commit_audit_lines(
                     quantity=quantity, user_id=user_id, note=resolved_note,
                 )
                 applied += 1
+                # Only recorded once the line's transaction is guaranteed to
+                # commit — appending before adjust_item_count could run meant
+                # a rolled-back line still left its item in `existing`, so a
+                # later same-name line in this batch would resolve to an id
+                # that was never actually inserted.
+                if new_item_row is not None:
+                    existing.append(new_item_row)
         except Exception:
             logger.warning("audit line %d commit failed", n, exc_info=True)
             errors.append({

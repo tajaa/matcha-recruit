@@ -22,6 +22,7 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
   const nodeRef = useRef<AudioWorkletNode | null>(null)
   const framesRef = useRef<ArrayBuffer[]>([])
   const timerRef = useRef<number | null>(null)
+  const maxFiredRef = useRef(false)
 
   const cleanup = useCallback(() => {
     if (timerRef.current !== null) { clearInterval(timerRef.current); timerRef.current = null }
@@ -35,8 +36,21 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
 
   useEffect(() => cleanup, [cleanup]) // tear down on unmount
 
+  // Fires onMaxDuration exactly once per recording (maxFiredRef reset in
+  // start()) — doing this as a side effect from elapsedSeconds instead of
+  // inline in the interval's setState updater avoids a StrictMode double-
+  // invoke calling stop() twice, which clobbers a real result with "no
+  // audio captured" on the second, frame-less call.
+  useEffect(() => {
+    if (elapsedSeconds >= maxDur && !maxFiredRef.current) {
+      maxFiredRef.current = true
+      onMaxRef.current?.()
+    }
+  }, [elapsedSeconds, maxDur])
+
   const start = useCallback(async () => {
     framesRef.current = []
+    maxFiredRef.current = false
     setElapsedSeconds(0)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -60,11 +74,7 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
 
       setStatus('recording')
       timerRef.current = window.setInterval(() => {
-        setElapsedSeconds((prev) => {
-          const next = prev + 1
-          if (next >= maxDur) onMaxRef.current?.()
-          return next
-        })
+        setElapsedSeconds((prev) => prev + 1)
       }, 1000)
     } catch (err) {
       const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')

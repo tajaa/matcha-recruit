@@ -18,6 +18,16 @@ function fmtElapsed(seconds: number) {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Shared by touchedCount and handleSave so the Save button's count always
+// matches what actually gets submitted. Blank/whitespace-only is
+// "untouched", not zero.
+function parseCountValue(raw: string): number | null {
+  if (raw.trim() === '') return null
+  const quantity = Number(raw)
+  if (!Number.isFinite(quantity) || quantity < 0) return null
+  return quantity
+}
+
 /** Bulk stock-count entry — a manager walks the store counting every item
  * and saves all the changed counts in one Save, instead of the one-item-
  * per-navigation `patchItem` flow on ItemDetail. Voice dictation (behind
@@ -72,7 +82,7 @@ export default function InventoryAudit() {
     return list
   }, [items, locFilter, search])
 
-  const touchedCount = Object.values(edits).filter((v) => v !== '').length + newLines.length
+  const touchedCount = Object.values(edits).filter((v) => parseCountValue(v) !== null).length + newLines.length
 
   async function finishDictation() {
     const wav = await dictation.stop()
@@ -85,15 +95,11 @@ export default function InventoryAudit() {
         setVoiceMsg("Couldn't understand the audio — try again, or type the counts below.")
         return
       }
-      const stillUnmatched: VoiceCountLine[] = []
+      const stillUnmatched = draft.lines.filter((line) => !line.item_id)
       setEdits((prev) => {
         const next = { ...prev }
         for (const line of draft.lines) {
-          if (line.item_id) {
-            next[line.item_id] = String(line.quantity)
-          } else {
-            stillUnmatched.push(line)
-          }
+          if (line.item_id) next[line.item_id] = String(line.quantity)
         }
         return next
       })
@@ -104,6 +110,12 @@ export default function InventoryAudit() {
       })
       if (stillUnmatched.length) setUnmatched((prev) => [...prev, ...stillUnmatched])
       if (!draft.lines.length) setVoiceMsg("Didn't catch any counts — try speaking closer to the mic.")
+      // Dictated counts must be visible for review before Save — a search
+      // term or a specific-store filter could otherwise hide a matched row.
+      if (draft.lines.some((line) => line.item_id)) {
+        setSearch('')
+        setLocFilter('all')
+      }
     } catch (err) {
       const tooMany = err instanceof ApiError && err.status === 429
       setVoiceMsg(tooMany
@@ -126,29 +138,55 @@ export default function InventoryAudit() {
   }
 
   async function handleSave() {
+    // `sources` mirrors `lines` 1:1 so a failed row (reported 1-indexed by
+    // the backend) maps back to the edit/newLines entry that produced it —
+    // needed to clear only what actually saved, not the whole sheet.
     const lines: AuditCommitLine[] = []
+    const sources: ({ kind: 'edit'; itemId: string } | { kind: 'new'; index: number })[] = []
     for (const [itemId, raw] of Object.entries(edits)) {
-      if (raw === '') continue
-      const quantity = Number(raw)
-      if (!Number.isFinite(quantity) || quantity < 0) continue
+      const quantity = parseCountValue(raw)
+      if (quantity === null) continue
       lines.push({ item_id: itemId, counted_quantity: quantity })
+      sources.push({ kind: 'edit', itemId })
     }
-    for (const line of newLines) {
+    newLines.forEach((line, index) => {
       lines.push({ new_item_name: line.name, counted_quantity: line.quantity })
-    }
+      sources.push({ kind: 'new', index })
+    })
     if (!lines.length) return
 
     setSaving(true)
     try {
       const result = await commitAudit({ location_id: locationId ?? null, lines })
+      const failedRows = new Set(result.errors.map((e) => e.row))
+      const failedItemIds = new Set<string>()
+      const failedNewIndexes = new Set<number>()
+      sources.forEach((source, i) => {
+        if (!failedRows.has(i + 1)) return
+        if (source.kind === 'edit') failedItemIds.add(source.itemId)
+        else failedNewIndexes.add(source.index)
+      })
+
       if (result.failed > 0) {
-        toast(`Saved ${result.applied} count${result.applied === 1 ? '' : 's'} — ${result.failed} failed`, 'error')
+        toast(`Saved ${result.applied} count${result.applied === 1 ? '' : 's'} — ${result.failed} failed, left for retry`, 'error')
       } else {
         toast(`Saved ${result.applied} count${result.applied === 1 ? '' : 's'}`, 'success')
       }
-      setEdits({})
-      setFromVoice(new Set())
-      setNewLines([])
+      // Only clear rows that actually committed — a failed row stays in the
+      // sheet (still editable) instead of silently vanishing.
+      setEdits((prev) => {
+        const next: Record<string, string> = {}
+        for (const [itemId, raw] of Object.entries(prev)) {
+          if (failedItemIds.has(itemId)) next[itemId] = raw
+        }
+        return next
+      })
+      setFromVoice((prev) => {
+        const next = new Set<string>()
+        for (const id of prev) if (failedItemIds.has(id)) next.add(id)
+        return next
+      })
+      setNewLines((prev) => prev.filter((_, index) => failedNewIndexes.has(index)))
       load()
     } catch {
       toast('Failed to save counts', 'error')
