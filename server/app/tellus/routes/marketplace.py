@@ -21,7 +21,12 @@ from ..models.tellus import (
     TellusRedemptionStatusUpdate,
 )
 from ..services.email import send_tellus_redemption_email
-from ..services.marketplace_service import list_marketplace, serialize_listing, serialize_redemption
+from ..services.marketplace_service import (
+    effective_redemption_status,
+    list_marketplace,
+    serialize_listing,
+    serialize_redemption,
+)
 from ..services.points_service import RedeemError, redeem_points
 
 router = APIRouter()
@@ -53,15 +58,22 @@ async def redeem(
             redemption = await redeem_points(conn, account.id, body.listing_id)
         except RedeemError as e:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-        listing_title = await conn.fetchval(
-            "SELECT title FROM tellus_reward_listings WHERE id = $1", body.listing_id
+        ctx = await conn.fetchrow(
+            "SELECT l.title, l.city, l.state, b.name AS brand_name "
+            "FROM tellus_reward_listings l LEFT JOIN tellus_brands b ON b.id = l.brand_id "
+            "WHERE l.id = $1",
+            body.listing_id,
         )
 
+    listing_title = ctx["title"] if ctx else None
     background.add_task(
         send_tellus_redemption_email, account.email, account.display_name,
         listing_title or "your reward", redemption.get("code"),
     )
     redemption["listing_title"] = listing_title
+    redemption["brand_name"] = ctx["brand_name"] if ctx else None
+    redemption["listing_city"] = ctx["city"] if ctx else None
+    redemption["listing_state"] = ctx["state"] if ctx else None
     return serialize_redemption(redemption)
 
 
@@ -85,12 +97,13 @@ async def create_listing(body: TellusListingCreate, account: TellusAccount = Dep
         row = await conn.fetchrow(
             """INSERT INTO tellus_reward_listings
                    (brand_id, city, state, title, description, image_url, points_cost,
-                    quantity_total, redemption_type, terms, active_from, active_to, is_active)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    quantity_total, redemption_type, terms, active_from, active_to, is_active,
+                    expiry_days)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                RETURNING *""",
             account.brand_id, body.city, body.state, body.title, body.description, body.image_url,
             body.points_cost, body.quantity_total, body.redemption_type, body.terms,
-            body.active_from, body.active_to, body.is_active,
+            body.active_from, body.active_to, body.is_active, body.expiry_days,
         )
     return serialize_listing(row)
 
@@ -114,11 +127,12 @@ async def update_listing(
                    redemption_type = COALESCE($8, redemption_type), terms = COALESCE($9, terms),
                    city = COALESCE($10, city), state = COALESCE($11, state),
                    active_from = COALESCE($12, active_from), active_to = COALESCE($13, active_to),
-                   is_active = COALESCE($14, is_active), updated_at = NOW()
+                   is_active = COALESCE($14, is_active), expiry_days = COALESCE($15, expiry_days),
+                   updated_at = NOW()
                WHERE id = $1 AND brand_id = $2 RETURNING *""",
             listing_id, account.brand_id, body.title, body.description, body.image_url,
             body.points_cost, body.quantity_total, body.redemption_type, body.terms,
-            body.city, body.state, body.active_from, body.active_to, body.is_active,
+            body.city, body.state, body.active_from, body.active_to, body.is_active, body.expiry_days,
         )
     return serialize_listing(row)
 
@@ -148,8 +162,11 @@ async def listing_redemptions(listing_id: UUID, account: TellusAccount = Depends
         if not owned:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
         rows = await conn.fetch(
-            "SELECT r.*, l.title AS listing_title FROM tellus_redemptions r "
+            "SELECT r.*, l.title AS listing_title, l.city AS listing_city, l.state AS listing_state, "
+            "       b.name AS brand_name "
+            "FROM tellus_redemptions r "
             "JOIN tellus_reward_listings l ON l.id = r.listing_id "
+            "LEFT JOIN tellus_brands b ON b.id = l.brand_id "
             "WHERE r.listing_id = $1 ORDER BY r.created_at DESC",
             listing_id,
         )
@@ -163,13 +180,26 @@ async def verify_redemption(
     """Brand marks a redemption redeemed (claimed at the counter) / cancelled /
     expired. Scoped to a listing this brand owns."""
     async with get_connection() as conn:
+        current = await conn.fetchrow(
+            "SELECT r.status, r.expires_at FROM tellus_redemptions r "
+            "JOIN tellus_reward_listings l ON l.id = r.listing_id "
+            "WHERE r.id = $1 AND l.brand_id = $2",
+            redemption_id, account.brand_id,
+        )
+        if current is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
+        if body.status == "redeemed" and effective_redemption_status(current) == "expired":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="This reward code has expired.")
+
         row = await conn.fetchrow(
             """UPDATE tellus_redemptions r SET
                    status = $3,
                    redeemed_at = CASE WHEN $3 = 'redeemed' THEN NOW() ELSE redeemed_at END
                FROM tellus_reward_listings l
                WHERE r.id = $1 AND r.listing_id = l.id AND l.brand_id = $2
-               RETURNING r.*, l.title AS listing_title""",
+               RETURNING r.*, l.title AS listing_title, l.city AS listing_city, l.state AS listing_state,
+                         (SELECT name FROM tellus_brands WHERE id = l.brand_id) AS brand_name""",
             redemption_id, account.brand_id, body.status,
         )
         if row is None:

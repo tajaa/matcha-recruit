@@ -141,6 +141,9 @@ export const tellusApi = {
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  // Multipart upload — body passed through raw; _headers() already skips
+  // Content-Type for FormData so the browser sets the boundary itself.
+  upload: <T>(path: string, form: FormData) => request<T>(path, { method: 'POST', body: form }),
 }
 
 export { _logout as tellusLogout }

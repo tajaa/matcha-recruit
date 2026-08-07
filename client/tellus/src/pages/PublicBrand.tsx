@@ -75,6 +75,9 @@ export default function PublicBrand() {
   const [claimErr, setClaimErr] = useState('')
   const [myClaim, setMyClaim] = useState<MyClaim | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [olderReviews, setOlderReviews] = useState<PublicReview[] | null>(null)   // null = collapsed
+  const [olderTotal, setOlderTotal] = useState(0)
+  const [loadingOlder, setLoadingOlder] = useState(false)
 
   useEffect(() => {
     if (!account) { setMyClaim(null); return }
@@ -135,6 +138,22 @@ export default function PublicBrand() {
     }
   }
 
+  async function loadOlder() {
+    setLoadingOlder(true)
+    try {
+      const offset = olderReviews?.length ?? 0
+      const res = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?scope=older&limit=${PAGE_SIZE}&offset=${offset}`)
+      setOlderTotal(res.older_count)
+      setOlderReviews((prev) => {
+        // Same dedupe rationale as loadMore — publish_at windows can shift results between fetches.
+        const seen = new Set((prev ?? []).map((x) => x.id))
+        return [...(prev ?? []), ...res.reviews.filter((x) => !seen.has(x.id))]
+      })
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
   if (loading) return <div className="min-h-screen"><Spinner /></div>
   if (err || !page) {
     return (
@@ -152,6 +171,11 @@ export default function PublicBrand() {
       <div className="mb-6 text-center">
         {page.logo_url && <img src={page.logo_url} alt="" className="mx-auto mb-3 h-14 w-14 rounded-xl object-cover" />}
         <h1 className="text-2xl font-bold">{page.brand_name}</h1>
+        {(page.address || page.city) && (
+          <p className="mt-1 text-xs text-tu-faint">
+            {[page.address, [page.city, page.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
+          </p>
+        )}
         {!page.claimed && (
           <span className="mt-1.5 inline-block rounded-full border border-tu-border px-2.5 py-0.5 text-xs text-tu-dim">Unclaimed</span>
         )}
@@ -239,6 +263,32 @@ export default function PublicBrand() {
       {reviews.length < page.total && (
         <div className="mt-4 text-center">
           <Button variant="soft" loading={loadingMore} onClick={loadMore}>Load more</Button>
+        </div>
+      )}
+
+      {page.older_count > 0 && (
+        <div className="mt-6">
+          {olderReviews === null ? (
+            <div className="text-center">
+              <Button variant="ghost" loading={loadingOlder} onClick={loadOlder}>
+                Show {page.older_count} older review{page.older_count === 1 ? '' : 's'}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tu-faint">
+                Older reviews — not included in the rating
+              </p>
+              <div className="space-y-3">
+                {olderReviews.map((r) => <ReviewCard key={r.id} review={r} />)}
+              </div>
+              {olderReviews.length < olderTotal && (
+                <div className="mt-3 text-center">
+                  <Button variant="soft" loading={loadingOlder} onClick={loadOlder}>Load more</Button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 

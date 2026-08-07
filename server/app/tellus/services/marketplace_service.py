@@ -1,8 +1,22 @@
 """Tell-Us marketplace helpers — row → model serialization and city queries."""
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from ..models.tellus import TellusListing, TellusRedemption
+
+
+def effective_redemption_status(row) -> str:
+    """'issued' past its expires_at reads as 'expired' — derived at read time,
+    no cron flips rows (same pattern as routes/_shared.effective_review_state).
+    Terminal states (redeemed/cancelled/expired) pass through untouched."""
+    if (
+        row["status"] == "issued"
+        and row["expires_at"] is not None
+        and row["expires_at"] <= datetime.now(timezone.utc)
+    ):
+        return "expired"
+    return row["status"]
 
 
 def serialize_listing(row) -> TellusListing:
@@ -29,6 +43,7 @@ def serialize_listing(row) -> TellusListing:
         active_to=row["active_to"],
         is_active=row["is_active"],
         created_at=row["created_at"],
+        expiry_days=row["expiry_days"] if "expiry_days" in row.keys() else 30,
     )
 
 
@@ -38,8 +53,11 @@ def serialize_redemption(row) -> TellusRedemption:
         account_id=row["account_id"],
         listing_id=row["listing_id"],
         listing_title=row["listing_title"] if "listing_title" in row.keys() else None,
+        brand_name=row["brand_name"] if "brand_name" in row.keys() else None,
+        listing_city=row["listing_city"] if "listing_city" in row.keys() else None,
+        listing_state=row["listing_state"] if "listing_state" in row.keys() else None,
         points_spent=row["points_spent"],
-        status=row["status"],
+        status=effective_redemption_status(row),
         code=row["code"],
         issued_at=row["issued_at"],
         redeemed_at=row["redeemed_at"],

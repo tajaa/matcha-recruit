@@ -27,6 +27,7 @@ async def public_brand_page(
     slug: str, request: Request,
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
+    scope: str = Query(default="recent", pattern="^(recent|older)$"),
 ):
     await check_rate_limit(client_ip(request), "tellus_public_brand", 120, 3600)
 
@@ -45,27 +46,49 @@ async def public_brand_page(
                 brand["id"],
             )
 
+        # Primary store = first created (same convention as ensure_community_link's
+        # store pick in routes/places.py).
+        store = await conn.fetchrow(
+            "SELECT address, city, state FROM tellus_stores WHERE brand_id = $1 "
+            "ORDER BY created_at LIMIT 1",
+            brand["id"],
+        )
+
         # Published = held + past its 48h hold + still visible. Hits
         # ix_tellus_reports_public. Strict equality to 'visible' (not just
         # <> 'removed') means a 'flagged' review also drops off the public
         # page while triage is pending, not just a fully 'removed' one.
+        #
+        # Rolling window: the headline rating/count only ever reflects the
+        # last 12 months — old reviews stop haunting the business but stay
+        # reachable via scope=older ("Show older reviews" on the public page).
         agg = await conn.fetchrow(
             """SELECT COUNT(*) AS review_count, AVG(rating) AS avg_rating
                FROM tellus_reports
                WHERE brand_id = $1 AND review_state = 'held' AND publish_at <= NOW()
+                 AND publish_at >= NOW() - interval '12 months'
+                 AND moderation_status = 'visible'""",
+            brand["id"],
+        )
+        older_count = await conn.fetchval(
+            """SELECT COUNT(*) FROM tellus_reports
+               WHERE brand_id = $1 AND review_state = 'held' AND publish_at <= NOW()
+                 AND publish_at < NOW() - interval '12 months'
                  AND moderation_status = 'visible'""",
             brand["id"],
         )
 
+        window = ("AND r.publish_at >= NOW() - interval '12 months'" if scope == "recent"
+                  else "AND r.publish_at < NOW() - interval '12 months'")
         rows = await conn.fetch(
-            """SELECT r.*, a.display_name, s.name AS store_name
-               FROM tellus_reports r
-               LEFT JOIN tellus_accounts a ON a.id = r.reporter_account_id
-               LEFT JOIN tellus_stores s ON s.id = r.store_id
-               WHERE r.brand_id = $1 AND r.review_state = 'held' AND r.publish_at <= NOW()
-                 AND r.moderation_status = 'visible'
-               ORDER BY r.publish_at DESC
-               LIMIT $2 OFFSET $3""",
+            f"""SELECT r.*, a.display_name, s.name AS store_name
+                FROM tellus_reports r
+                LEFT JOIN tellus_accounts a ON a.id = r.reporter_account_id
+                LEFT JOIN tellus_stores s ON s.id = r.store_id
+                WHERE r.brand_id = $1 AND r.review_state = 'held' AND r.publish_at <= NOW()
+                  {window} AND r.moderation_status = 'visible'
+                ORDER BY r.publish_at DESC
+                LIMIT $2 OFFSET $3""",
             brand["id"], limit, offset,
         )
 
@@ -112,6 +135,11 @@ async def public_brand_page(
             for r in rows
         ]
 
+    older_count = older_count or 0
+    # Pagination target tracks the requested scope so Load-more works for
+    # either list — the headline review_count/avg_rating stay recent-only.
+    total = (agg["review_count"] or 0) if scope == "recent" else older_count
+
     return TellusPublicBrandPage(
         brand_name=brand["name"],
         slug=brand["slug"],
@@ -119,9 +147,13 @@ async def public_brand_page(
         review_count=agg["review_count"] or 0,
         avg_rating=round(agg["avg_rating"], 2) if agg["avg_rating"] is not None else None,
         reviews=reviews,
-        total=agg["review_count"] or 0,
+        total=total,
         claimed=claimed,
         intake_token=intake_token,
+        address=store["address"] if store else None,
+        city=store["city"] if store else None,
+        state=store["state"] if store else None,
+        older_count=older_count,
     )
 
 

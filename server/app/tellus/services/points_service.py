@@ -298,7 +298,7 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
 
         listing = await conn.fetchrow(
             """SELECT id, title, points_cost, quantity_total, quantity_claimed,
-                      redemption_type, is_active, active_from, active_to
+                      redemption_type, is_active, active_from, active_to, expiry_days
                FROM tellus_reward_listings WHERE id = $1 FOR UPDATE""",
             listing_id,
         )
@@ -333,13 +333,14 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
         )
 
         code = _gen_code() if listing["redemption_type"] in ("code", "qr") else None
+        expiry_days = int(listing["expiry_days"] or 30)
         redemption = await conn.fetchrow(
             """INSERT INTO tellus_redemptions
-                   (account_id, listing_id, points_spent, status, code, issued_at)
-               VALUES ($1, $2, $3, 'issued', $4, NOW())
+                   (account_id, listing_id, points_spent, status, code, issued_at, expires_at)
+               VALUES ($1, $2, $3, 'issued', $4, NOW(), NOW() + make_interval(days => $5))
                RETURNING id, account_id, listing_id, points_spent, status, code,
                          issued_at, redeemed_at, expires_at, created_at""",
-            account_id, listing_id, cost, code,
+            account_id, listing_id, cost, code, expiry_days,
         )
 
         new_balance = bal["points_balance"] - cost

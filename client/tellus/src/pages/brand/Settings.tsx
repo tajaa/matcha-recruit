@@ -1,17 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Card, ErrorText, Input, Spinner } from '../../components/ui'
 import type { Brand, BrandPrompt } from '../../api/types'
 
+const LOGO_MAX_BYTES = 2 * 1024 * 1024
+
 export default function BrandSettings() {
   const [brand, setBrand] = useState<Brand | null>(null)
   const [name, setName] = useState('')
-  const [logo, setLogo] = useState('')
   const [rewardMode, setRewardMode] = useState<'auto' | 'manual'>('auto')
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [logoBusy, setLogoBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   const [questions, setQuestions] = useState<string[]>([])
   const [qBusy, setQBusy] = useState(false)
@@ -20,10 +23,26 @@ export default function BrandSettings() {
 
   useEffect(() => {
     tellusApi.get<Brand>('/brand').then((b) => {
-      setBrand(b); setName(b.name); setLogo(b.logo_url ?? ''); setRewardMode(b.reward_mode)
+      setBrand(b); setName(b.name); setRewardMode(b.reward_mode)
     })
     tellusApi.get<BrandPrompt[]>('/brand/prompts').then((ps) => setQuestions(ps.map((p) => p.prompt))).catch(() => {})
   }, [])
+
+  async function uploadLogo(f: File) {
+    if (f.size > LOGO_MAX_BYTES) { setErr('Logo must be 2MB or smaller.'); return }
+    setLogoBusy(true); setErr(''); setMsg('')
+    try {
+      const form = new FormData()
+      form.append('file', f)
+      const b = await tellusApi.upload<Brand>('/brand/logo', form)
+      setBrand(b); setMsg('Logo updated.')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setLogoBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   function moveQuestion(i: number, dir: -1 | 1) {
     setQuestions((qs) => {
@@ -53,7 +72,7 @@ export default function BrandSettings() {
   async function save() {
     setBusy(true); setErr(''); setMsg('')
     try {
-      const b = await tellusApi.patch<Brand>('/brand', { name, logo_url: logo || null, reward_mode: rewardMode })
+      const b = await tellusApi.patch<Brand>('/brand', { name, reward_mode: rewardMode })
       setBrand(b); setMsg('Saved.')
     } catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setBusy(false) }
   }
@@ -65,8 +84,26 @@ export default function BrandSettings() {
       <h1 className="text-lg font-bold">Brand settings</h1>
       <Card className="space-y-4">
         <Input label="Brand name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input label="Logo URL" value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://…" />
-        {logo && <img src={logo} alt="" className="h-16 w-16 rounded-xl object-cover" />}
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-tu-dim">Logo</p>
+          <div className="flex items-center gap-3">
+            {brand.logo_url ? (
+              <img src={brand.logo_url} alt="" className="h-16 w-16 rounded-xl object-cover" />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-tu-panel2 text-xs text-tu-faint">No logo</div>
+            )}
+            <div>
+              <input
+                ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadLogo(f) }}
+              />
+              <Button variant="soft" size="sm" loading={logoBusy} onClick={() => fileRef.current?.click()}>
+                Upload logo
+              </Button>
+              <p className="mt-1 text-xs text-tu-faint">PNG, JPEG, or WebP. Max 2MB.</p>
+            </div>
+          </div>
+        </div>
         <Button onClick={save} loading={busy} variant="soft">Save</Button>
         {msg && <p className="text-sm text-tu-good">{msg}</p>}
         <ErrorText>{err}</ErrorText>

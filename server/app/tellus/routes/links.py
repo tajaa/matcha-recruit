@@ -7,9 +7,10 @@ drive the public intake flow.
 import secrets
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 
 from ...core.services.redis_cache import client_ip
+from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_brand, require_paid_brand
 from ..models.tellus import (
@@ -48,10 +49,49 @@ async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE tellus_brands
-               SET name = COALESCE($2, name), logo_url = COALESCE($3, logo_url),
-                   reward_mode = COALESCE($4, reward_mode), updated_at = NOW()
+               SET name = COALESCE($2, name), reward_mode = COALESCE($3, reward_mode), updated_at = NOW()
                WHERE id = $1 RETURNING *""",
-            account.brand_id, body.name, body.logo_url, body.reward_mode,
+            account.brand_id, body.name, body.reward_mode,
+        )
+    return TellusBrand(**dict(row))
+
+
+_LOGO_MAX_BYTES = 2 * 1024 * 1024
+_LOGO_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+@router.post("/brand/logo", response_model=TellusBrand)
+async def upload_brand_logo(
+    file: UploadFile = File(...),
+    account: TellusAccount = Depends(require_paid_brand),
+):
+    """Multipart logo upload -> public S3 via CloudFront (storage.upload_file),
+    replacing the old free-text logo_url. Public bucket on purpose: the URL is
+    rendered on the unauthenticated /b/{slug} page, so a presigned-GET (private
+    bucket, 15-min expiry like report media) would rot."""
+    ext = _LOGO_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                            detail="Logo must be a PNG, JPEG, or WebP image.")
+    data = await file.read()
+    if len(data) > _LOGO_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="Logo must be 2MB or smaller.")
+
+    storage = get_storage()
+    if not (storage.s3_client and storage.bucket):
+        # Mirror public_intake.presign_media's unconfigured-storage behavior.
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Image uploads are not configured.")
+    url = await storage.upload_file(
+        data, f"logo.{ext}", prefix=f"tellus/logos/{account.brand_id}",
+        content_type=file.content_type,
+    )
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "UPDATE tellus_brands SET logo_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+            account.brand_id, url,
         )
     return TellusBrand(**dict(row))
 

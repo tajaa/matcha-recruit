@@ -71,9 +71,11 @@ async def get_ledger(
 async def list_redemptions(account: TellusAccount = Depends(require_consumer)):
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT r.*, l.title AS listing_title
+            """SELECT r.*, l.title AS listing_title, l.city AS listing_city, l.state AS listing_state,
+                      b.name AS brand_name
                FROM tellus_redemptions r
                JOIN tellus_reward_listings l ON l.id = r.listing_id
+               LEFT JOIN tellus_brands b ON b.id = l.brand_id
                WHERE r.account_id = $1 ORDER BY r.created_at DESC""",
             account.id,
         )

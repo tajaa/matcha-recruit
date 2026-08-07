@@ -50,6 +50,7 @@ export default function BrandListings() {
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
   const [rtype, setRtype] = useState<'code' | 'qr' | 'manual'>('code')
+  const [expiryDays, setExpiryDays] = useState(30)
 
   async function load() {
     setLoading(true)
@@ -63,9 +64,9 @@ export default function BrandListings() {
       await tellusApi.post('/listings', {
         title, description: desc || null, points_cost: cost,
         quantity_total: qty ? Number(qty) : null, city: city || null, state: state || null,
-        redemption_type: rtype, is_active: true,
+        redemption_type: rtype, is_active: true, expiry_days: expiryDays,
       })
-      setTitle(''); setDesc(''); setCost(100); setQty(''); setCity(''); setState(''); await load()
+      setTitle(''); setDesc(''); setCost(100); setQty(''); setCity(''); setState(''); setExpiryDays(30); await load()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not create listing') } finally { setCreating(false) }
   }
 
@@ -89,6 +90,8 @@ export default function BrandListings() {
           <Input label="City" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Leave blank = everywhere" />
           <Input label="State" value={state} onChange={(e) => setState(e.target.value)} />
           <Input label="Quantity (blank = unlimited)" type="number" min={1} value={qty} onChange={(e) => setQty(e.target.value)} />
+          <Input label="Code valid for (days)" type="number" min={1} max={365} value={expiryDays}
+            onChange={(e) => setExpiryDays(Number(e.target.value))} />
           <Select label="Redemption type" value={rtype} onChange={(e) => setRtype(e.target.value as 'code' | 'qr' | 'manual')}
             options={[{ value: 'code', label: 'Code' }, { value: 'qr', label: 'QR' }, { value: 'manual', label: 'Manual' }]} />
           <div className="sm:col-span-2"><Button type="submit" loading={creating}><Plus className="h-4 w-4" /> Add reward</Button></div>
@@ -112,7 +115,7 @@ export default function BrandListings() {
                   </div>
                   <p className="text-xs text-tu-faint">
                     {[l.city, l.state].filter(Boolean).join(', ') || 'Everywhere'} · {l.quantity_claimed} claimed
-                    {l.quantity_total != null ? ` / ${l.quantity_total}` : ''}
+                    {l.quantity_total != null ? ` / ${l.quantity_total}` : ''} · code valid {l.expiry_days}d
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

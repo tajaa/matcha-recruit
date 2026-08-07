@@ -124,7 +124,9 @@ class TellusBrand(BaseModel):
 
 class TellusBrandUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
-    logo_url: Optional[str] = Field(default=None, max_length=2000)
+    # logo_url is intentionally NOT settable here — POST /brand/logo (multipart
+    # upload to S3) is the only writer, closing the arbitrary-URL-that-doesn't-
+    # render bug the old free-text field had.
     reward_mode: Optional[Literal["auto", "manual"]] = None
 
 
@@ -441,6 +443,7 @@ class TellusListingCreate(BaseModel):
     active_from: Optional[datetime] = None
     active_to: Optional[datetime] = None
     is_active: bool = True
+    expiry_days: int = Field(default=30, ge=1, le=365)
 
 
 class TellusListingUpdate(BaseModel):
@@ -456,6 +459,7 @@ class TellusListingUpdate(BaseModel):
     active_from: Optional[datetime] = None
     active_to: Optional[datetime] = None
     is_active: Optional[bool] = None
+    expiry_days: Optional[int] = Field(default=None, ge=1, le=365)
 
 
 class TellusListing(BaseModel):
@@ -477,6 +481,7 @@ class TellusListing(BaseModel):
     active_to: Optional[datetime] = None
     is_active: bool = True
     created_at: datetime
+    expiry_days: int = 30   # days a redeemed code stays valid (ck 1..365)
 
 
 class TellusRedemption(BaseModel):
@@ -484,6 +489,9 @@ class TellusRedemption(BaseModel):
     account_id: UUID
     listing_id: UUID
     listing_title: Optional[str] = None
+    brand_name: Optional[str] = None      # NULL for platform-curated listings
+    listing_city: Optional[str] = None
+    listing_state: Optional[str] = None
     points_spent: int
     status: str
     code: Optional[str] = None
@@ -587,6 +595,12 @@ class TellusPublicBrandPage(BaseModel):
     total: int = 0
     claimed: bool = True
     intake_token: Optional[str] = None
+    address: Optional[str] = None   # primary store (first by created_at)
+    city: Optional[str] = None
+    state: Optional[str] = None
+    # Published reviews older than the 12-month rating window — the UI renders
+    # a "Show older reviews" toggle from this; they never count toward avg_rating.
+    older_count: int = 0
 
 
 class TellusClaimResponse(BaseModel):

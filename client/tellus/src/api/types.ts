@@ -239,6 +239,7 @@ export interface Listing {
   active_to: string | null
   is_active: boolean
   created_at: string
+  expiry_days: number
 }
 
 export interface Redemption {
@@ -246,6 +247,9 @@ export interface Redemption {
   account_id: string
   listing_id: string
   listing_title: string | null
+  brand_name: string | null
+  listing_city: string | null
+  listing_state: string | null
   points_spent: number
   status: string
   code: string | null
@@ -345,6 +349,10 @@ export interface PublicBrandPage {
   total: number
   claimed: boolean
   intake_token: string | null
+  address: string | null
+  city: string | null
+  state: string | null
+  older_count: number
 }
 
 export interface ClaimResponse {

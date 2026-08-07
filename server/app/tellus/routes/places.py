@@ -85,7 +85,8 @@ async def search_places(
                       s.city, s.state,
                       (SELECT COUNT(*) FROM tellus_reports r
                         WHERE r.brand_id = b.id AND r.review_state = 'held'
-                          AND r.publish_at <= NOW() AND r.moderation_status = 'visible') AS review_count,
+                          AND r.publish_at <= NOW() AND r.publish_at >= NOW() - interval '12 months'
+                          AND r.moderation_status = 'visible') AS review_count,
                       CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token
                FROM tellus_brands b
                LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores

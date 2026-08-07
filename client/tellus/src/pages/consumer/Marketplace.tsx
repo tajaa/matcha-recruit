@@ -62,6 +62,9 @@ export default function Marketplace() {
           <p className="text-sm font-semibold text-tu-good">Redeemed: {done.listing_title}</p>
           {done.code && <p className="mt-1 font-mono text-lg tracking-widest">{done.code}</p>}
           <p className="mt-1 text-xs text-tu-faint">Show this at the store. Find it again under “My rewards”.</p>
+          {done.expires_at && (
+            <p className="mt-1 text-xs text-tu-faint">Valid until {new Date(done.expires_at).toLocaleDateString()}</p>
+          )}
         </Card>
       )}
 
@@ -89,6 +92,7 @@ export default function Marketplace() {
                     <p className="mt-2 flex items-center gap-1 text-xs text-tu-faint"><MapPin className="h-3 w-3" />{[l.city, l.state].filter(Boolean).join(', ')}</p>
                   )}
                   {l.quantity_remaining != null && <p className="mt-1 text-xs text-tu-faint">{l.quantity_remaining} left</p>}
+                  <p className="mt-1 text-xs text-tu-faint">Valid {l.expiry_days} days after redemption</p>
                 </div>
                 <Button className="mt-4" disabled={!affordable} loading={redeeming === l.id} onClick={() => redeem(l)}>
                   {affordable ? 'Redeem' : 'Not enough points'}

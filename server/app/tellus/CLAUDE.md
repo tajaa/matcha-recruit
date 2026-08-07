@@ -93,6 +93,28 @@ Full design + endpoint-by-endpoint SQL: `TELLUS_ADMIN_MGMT_PLAN.md` at the repo 
   an early publish stays distinguishable from a normal hold expiry in a later dispute —
   the reviewer's edit window (`my_reviews.py:update_my_review` permits edits while held)
   was cut short by brand action, not by time.
+- **Public rating is a rolling 12-month window** (`routes/community.py:public_brand_page`) —
+  `review_count`/`avg_rating` only ever aggregate reviews published in the last 12 months, so
+  old reviews stop permanently haunting a business. The default review list (`scope=recent`,
+  the default query param) matches that window; `scope=older` returns everything before it,
+  with its own `older_count`-driven pagination — the public page renders this behind a "Show
+  N older reviews" toggle, never mixed into the headline rating. `routes/places.py:search_places`
+  applies the same 12-month cutoff to its `review_count` subquery so search-result counts match
+  the brand page. The brand's own dashboard (`feedback.py`) is intentionally unfiltered — brands
+  always see full history, only the public-facing rating rolls.
+- **Brand logo is upload-only** — `POST /brand/logo` (`routes/links.py`, multipart, PNG/JPEG/WebP,
+  2MB cap) writes to the **public** S3 bucket via `storage.upload_file` (CloudFront URL), because
+  `logo_url` renders on the unauthenticated `/b/{slug}` page where a presigned/private URL would
+  rot. `TellusBrandUpdate` no longer accepts `logo_url` — the old free-text field routinely pointed
+  at URLs that didn't render; this is the only writer now.
+- **Reward expiry is per-listing** — `tellus_reward_listings.expiry_days` (default 30, `tellus_app_11`)
+  is stamped onto `tellus_redemptions.expires_at` at redeem time (`services/points_service.py:
+  redeem_points`). Status is derived at read time via `services/marketplace_service.py:
+  effective_redemption_status` (same pattern as `effective_review_state`) — an `'issued'` row past
+  its `expires_at` reads as `'expired'` with no cron involved; terminal states (`redeemed`/
+  `cancelled`) never flip. The brand's counter-verification endpoint
+  (`routes/marketplace.py:verify_redemption`) 409s on an attempt to mark an expired code
+  `'redeemed'`.
 
 ## Frontend pairing
 

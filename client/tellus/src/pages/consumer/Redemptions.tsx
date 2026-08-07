@@ -28,7 +28,14 @@ export default function Redemptions() {
             <Card key={r.id} className="flex items-center justify-between">
               <div>
                 <p className="font-semibold">{r.listing_title || 'Reward'}</p>
+                <p className="text-xs text-tu-faint">
+                  {[r.brand_name ?? 'Tell-Us reward', [r.listing_city, r.listing_state].filter(Boolean).join(', ')]
+                    .filter(Boolean).join(' · ')}
+                </p>
                 <p className="text-xs text-tu-faint">{r.points_spent} pts · {new Date(r.created_at).toLocaleDateString()}</p>
+                {r.status === 'issued' && r.expires_at && (
+                  <p className="text-xs text-tu-faint">Expires {new Date(r.expires_at).toLocaleDateString()}</p>
+                )}
                 {r.code && <p className="mt-1 font-mono text-sm tracking-widest text-tu-accent">{r.code}</p>}
               </div>
               <Chip tone={STATUS_TONE[r.status]}>{r.status}</Chip>
