@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,7 +9,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str
-    oceanlab_token: str
+    oceanlab_token: str = Field(min_length=8)
     storage_root: Path = Path("var/storage")
     label_name: str = "Oceanlab"
     # YouTube

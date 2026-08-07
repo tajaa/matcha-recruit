@@ -48,3 +48,13 @@ def test_bad_token_401(client):
 def test_good_token_200(client):
     resp = client.get("/api/artists")
     assert resp.status_code == 200
+
+
+def test_settings_rejects_short_oceanlab_token():
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="postgresql://x/y", oceanlab_token="")

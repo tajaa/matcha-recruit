@@ -99,6 +99,12 @@ def db_real(engine) -> Generator[Session, None, None]:
         session.close()
         with engine.begin() as conn:
             conn.execute(sa.text(f"TRUNCATE {_TRUNCATE_TABLES} RESTART IDENTITY CASCADE"))
+            # Truncating isrc_config drops the migration-seeded id=1 row; restore it
+            # so every test starts from the same invariant as a freshly migrated DB.
+            conn.execute(sa.text(
+                "INSERT INTO isrc_config (id, registrant_prefix, year_digits, next_designation) "
+                "VALUES (1, '', '', 1) ON CONFLICT (id) DO NOTHING"
+            ))
 
 
 @pytest.fixture()
