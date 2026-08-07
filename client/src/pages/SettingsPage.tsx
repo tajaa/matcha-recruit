@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../api/client'
 import { clearToken, getToken, setToken } from '../api/client'
 import { MutationError } from '../components/MutationError'
+import { useUnassignUpc, useUpcs } from '../api/hooks'
 
 interface IsrcConfig {
   registrant_prefix: string
@@ -27,9 +28,11 @@ function useUpdateIsrcConfig() {
 }
 
 function useAddUpcs() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async (codes: string[]) =>
       (await apiClient.post<{ added: number; rejected: string[] }>('/upcs', { codes })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['upcs'] }),
   })
 }
 
@@ -37,6 +40,8 @@ export function SettingsPage() {
   const { data: isrcConfig } = useIsrcConfig()
   const updateIsrc = useUpdateIsrcConfig()
   const addUpcs = useAddUpcs()
+  const { data: upcs } = useUpcs()
+  const unassignUpc = useUnassignUpc()
   const [prefix, setPrefix] = useState('')
   const [upcText, setUpcText] = useState('')
   const [tokenInput, setTokenInput] = useState(getToken() ?? '')
@@ -96,6 +101,48 @@ export function SettingsPage() {
           <p className="text-xs mt-1 text-red-600">Rejected: {addUpcs.data.rejected.join(', ')}</p>
         )}
         <MutationError error={addUpcs.error} />
+
+        <p className="text-xs text-neutral-500 mt-4 mb-2">
+          {upcs ? `${upcs.available} available / ${upcs.assigned} assigned` : 'Loading counts…'}
+        </p>
+        {upcs && upcs.items.length > 0 && (
+          <div className="border rounded overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="px-2 py-1 font-medium">Code</th>
+                  <th className="px-2 py-1 font-medium">Status</th>
+                  <th className="px-2 py-1 font-medium">Release</th>
+                  <th className="px-2 py-1 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcs.items.map((row) => {
+                  const orphaned = row.status === 'assigned' && row.release_id === null
+                  return (
+                    <tr key={row.id} className="border-b last:border-0">
+                      <td className="px-2 py-1 font-mono">{row.code}</td>
+                      <td className="px-2 py-1">{orphaned ? 'orphaned' : row.status}</td>
+                      <td className="px-2 py-1">{row.release_id ?? '—'}</td>
+                      <td className="px-2 py-1 text-right">
+                        {row.status === 'assigned' && (
+                          <button
+                            className="px-2 py-0.5 rounded border text-xs disabled:opacity-50"
+                            disabled={unassignUpc.isPending}
+                            onClick={() => unassignUpc.mutate(row.id)}
+                          >
+                            Unassign
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <MutationError error={unassignUpc.error} />
       </section>
 
       <section>
