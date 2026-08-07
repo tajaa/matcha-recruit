@@ -100,11 +100,15 @@ export function Layout({ children }: { children: ReactNode }) {
       // best-effort — fall through to the default surface
     }
     const hasDm = notes.some((n) => n.kind === 'dm_message')
-    const boardKinds = isBrand ? BRAND_BOARD_KINDS : BOARD_KINDS
-    const hasBoard = notes.some((n) => boardKinds.has(n.kind))
+    // BRAND_BOARD_KINDS fires for real brand accounts AND consumer-typed team
+    // moderators (POST /board/team) — both land on /brand/board. BOARD_KINDS
+    // only applies to non-moderator consumers (no /brand/board access).
+    const hasMod = notes.some((n) => BRAND_BOARD_KINDS.has(n.kind))
+    const hasBoard = !isBrand && notes.some((n) => BOARD_KINDS.has(n.kind))
     if (isPendingBrand) navigate('/brand/billing')
     else if (hasDm) navigate(isBrand ? '/brand/messages' : '/messages')
-    else if (hasBoard) navigate(isBrand ? '/brand/board' : '/boards')
+    else if (hasMod) navigate('/brand/board')
+    else if (hasBoard) navigate('/boards')
     else navigate(isBrand ? '/brand/feedback' : '/my-reviews')
 
     // Only clear notifications relevant to the surface we're navigating to —
@@ -113,7 +117,8 @@ export function Layout({ children }: { children: ReactNode }) {
     // failed — `notes` is empty in that case, not actually zero unread.
     if (!fetchedNotes) return
     try {
-      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind) || BOARD_KINDS.has(n.kind) || BRAND_BOARD_KINDS.has(n.kind))
+      const surfacedBoardKinds = hasMod ? BRAND_BOARD_KINDS : hasBoard ? BOARD_KINDS : new Set<string>()
+      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind) || surfacedBoardKinds.has(n.kind))
       await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
       setUnread(notes.length - relevant.length)
     } catch {

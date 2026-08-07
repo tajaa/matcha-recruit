@@ -299,17 +299,21 @@ async def admin_force_reply_status(
     admin: TellusAccount = Depends(require_tellus_admin),
 ):
     """Force ANY transition — bypasses board_service.can_reply_transition by
-    design. held→approved goes through the same approve_reply_and_award core
-    the brand route uses (so points/reason/bypass_cooldown can't drift between
-    the two callers); every other transition is a plain status flip."""
+    design. Any →approved transition goes through the same approve_reply_and_award
+    core the brand route uses (so points/reason/bypass_cooldown can't drift between
+    the two callers, and a reject→re-approve overturn still awards the author's
+    points); every other transition is a plain status flip."""
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow("SELECT status FROM tellus_board_replies WHERE id = $1", reply_id)
             if row is None:
                 raise HTTPException(404, "Reply not found")
 
-            if body.status == "approved" and row["status"] == "held":
-                result = await bs.approve_reply_and_award(conn, reply_id, admin.id, board_id=None)
+            if body.status == "approved" and row["status"] != "approved":
+                result = await bs.approve_reply_and_award(
+                    conn, reply_id, admin.id, board_id=None,
+                    from_statuses=("held", "rejected", "removed"),
+                )
                 if result is None:
                     raise HTTPException(409, "Reply was already moderated")
             else:

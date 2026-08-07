@@ -754,6 +754,7 @@ class TellusBoardPost(BaseModel):
 
 class TellusBoardPage(BaseModel):               # GET /boards/{slug}
     board_id: UUID
+    brand_id: UUID
     brand_name: str
     brand_slug: str
     logo_url: Optional[str] = None
@@ -814,6 +815,13 @@ class TellusBoardManageSummary(BaseModel):
     held_replies: int
     member_count: int
     viewer_role: Literal["owner", "moderator"]
+
+
+class TellusModeratedBrand(BaseModel):           # GET /me/moderated-brands
+    brand_id: UUID
+    name: str
+    slug: str
+    role: Literal["owner", "moderator"]
 
 
 TellusFeedbackSubmit.model_rebuild()

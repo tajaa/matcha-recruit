@@ -28,6 +28,7 @@ from ..models.tellus import (
     TellusBoardReplyCreate,
     TellusBoardUpdate,
     TellusBrandTeamMember,
+    TellusModeratedBrand,
     TellusTeamMemberAdd,
 )
 from ..services import board_service as bs
@@ -122,6 +123,22 @@ async def request_join(
     )
 
 
+@router.get("/me/moderated-brands", response_model=list[TellusModeratedBrand])
+async def my_moderated_brands(account: TellusAccount = Depends(require_tellus_account)):
+    """Every brand this account can moderate — the bootstrap list a consumer
+    moderator's client needs before it can call anything under /board/manage,
+    since GET /board/manage itself 400s 'Specify brand_id' with 2+ boards."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT b.id AS brand_id, b.name, b.slug, bm.role
+               FROM tellus_brand_members bm JOIN tellus_brands b ON b.id = bm.brand_id
+               WHERE bm.account_id = $1
+               ORDER BY bm.created_at ASC""",
+            account.id,
+        )
+    return [TellusModeratedBrand(**dict(r)) for r in rows]
+
+
 @router.get("/me/board-memberships", response_model=list[TellusBoardMembership])
 async def my_memberships(account: TellusAccount = Depends(require_consumer)):
     async with get_connection() as conn:
@@ -155,7 +172,7 @@ async def cancel_membership(membership_id: UUID, account: TellusAccount = Depend
 @router.get("/boards/{slug}", response_model=TellusBoardPage)
 async def get_board(
     slug: str, kind: Optional[BoardPostKind] = None,
-    limit: int = Query(20, le=50), offset: int = 0,
+    limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
     account: TellusAccount = Depends(require_tellus_account),
 ):
     async with get_connection() as conn:
@@ -225,7 +242,8 @@ async def get_board(
         ]
 
     return TellusBoardPage(
-        board_id=board["id"], brand_name=brand["name"], brand_slug=brand["slug"], logo_url=brand["logo_url"],
+        board_id=board["id"], brand_id=brand["id"], brand_name=brand["name"],
+        brand_slug=brand["slug"], logo_url=brand["logo_url"],
         title=board["title"], description=board["description"], is_active=board["is_active"],
         plan_paused=brand["plan_status"] != "active",
         viewer_role=viewer_role, posts=posts, total=total,
@@ -238,19 +256,20 @@ async def list_replies(slug: str, post_id: UUID, account: TellusAccount = Depend
         brand = await conn.fetchrow("SELECT id FROM tellus_brands WHERE slug = $1", slug)
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-        post = await conn.fetchrow(
-            "SELECT p.id, p.board_id FROM tellus_board_posts p JOIN tellus_boards bo ON bo.id = p.board_id "
-            "WHERE p.id = $1 AND bo.brand_id = $2",
-            post_id, brand["id"],
-        )
-        if post is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-
         member_row = await conn.fetchrow(
             "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
             brand["id"], account.id,
         )
         viewer_is_mod = member_row is not None
+
+        post = await conn.fetchrow(
+            "SELECT p.id, p.board_id FROM tellus_board_posts p JOIN tellus_boards bo ON bo.id = p.board_id "
+            "WHERE p.id = $1 AND bo.brand_id = $2" + ("" if viewer_is_mod else " AND p.moderation_status = 'visible'"),
+            post_id, brand["id"],
+        )
+        if post is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
         if not viewer_is_mod:
             membership = await bs.get_approved_membership(conn, post["board_id"], account.id)
             if membership is None:
@@ -353,12 +372,22 @@ async def update_board_manage(
         brand, role = await bs.resolve_moderated_brand(conn, account, brand_id)
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
+
+        # model_fields_set (not COALESCE) so an explicit null in the request
+        # body clears the column instead of being indistinguishable from an
+        # omitted field — title/description are nullable text; is_active is
+        # a bool NOT NULL, so a null there stays a no-op.
+        sets, args = ["updated_at = NOW()"], [board["id"]]
+        for field in ("title", "description", "is_active"):
+            if field not in body.model_fields_set:
+                continue
+            value = getattr(body, field)
+            if field == "is_active" and value is None:
+                continue
+            args.append(value)
+            sets.append(f"{field} = ${len(args)}")
         row = await conn.fetchrow(
-            """UPDATE tellus_boards SET
-                   title = COALESCE($2, title), description = COALESCE($3, description),
-                   is_active = COALESCE($4, is_active), updated_at = NOW()
-               WHERE id = $1 RETURNING *""",
-            board["id"], body.title, body.description, body.is_active,
+            f"UPDATE tellus_boards SET {', '.join(sets)} WHERE id = $1 RETURNING *", *args,
         )
         return await _manage_summary(conn, row, role)
 
@@ -444,10 +473,11 @@ async def list_board_members(
         brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
         board = await bs.ensure_board(conn, brand["id"])
         rows = await conn.fetch(
-            """SELECT m.id, a.display_name AS account_display_name, m.decided_at AS joined_at
+            """SELECT m.id, a.display_name AS account_display_name,
+                      COALESCE(m.decided_at, m.requested_at) AS joined_at
                FROM tellus_board_memberships m JOIN tellus_accounts a ON a.id = m.account_id
                WHERE m.board_id = $1 AND m.status = 'approved'
-               ORDER BY m.decided_at DESC""",
+               ORDER BY COALESCE(m.decided_at, m.requested_at) DESC""",
             board["id"],
         )
     return [

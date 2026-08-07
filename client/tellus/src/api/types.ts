@@ -652,6 +652,7 @@ export interface BoardPost {
 
 export interface BoardPage {
   board_id: string
+  brand_id: string
   brand_name: string
   brand_slug: string
   logo_url: string | null
@@ -697,6 +698,15 @@ export interface BrandTeamMember {
   email: string
   role: 'owner' | 'moderator'
   created_at: string
+}
+
+// GET /me/moderated-brands — bootstrap list for consumer moderators (and any
+// brand-typed account moderating a board other than its own).
+export interface ModeratedBrand {
+  brand_id: string
+  name: string
+  slug: string
+  role: 'owner' | 'moderator'
 }
 
 export interface BoardManageSummary {

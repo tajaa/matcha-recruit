@@ -46,16 +46,27 @@ function brandHome(planStatus: string | null | undefined) {
 }
 
 function Protected({
-  children, requireType, allowUnpaid,
-}: { children: React.ReactNode; requireType?: 'consumer' | 'brand'; allowUnpaid?: boolean }) {
+  children, requireType, allowUnpaid, allowConsumerModerator,
+}: {
+  children: React.ReactNode
+  requireType?: 'consumer' | 'brand'
+  allowUnpaid?: boolean
+  // Lets a consumer-typed account (added as a team moderator via POST
+  // /board/team) through a requireType="brand" gate. They have no brand_id
+  // of their own — GET /me/moderated-brands is what the page uses to find
+  // the board it moderates — so the plan_status/unpaid check below only
+  // applies to true brand accounts.
+  allowConsumerModerator?: boolean
+}) {
   const { account, loading } = useAccount()
   const location = useLocation()
   if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
   if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname + location.search)} replace />
-  if (requireType && account.account_type !== requireType) {
+  const isConsumerModerator = allowConsumerModerator && account.account_type === 'consumer'
+  if (requireType && account.account_type !== requireType && !isConsumerModerator) {
     return <Navigate to={account.account_type === 'brand' ? brandHome(account.plan_status) : '/'} replace />
   }
-  if (requireType === 'brand' && !allowUnpaid && account.plan_status !== 'active') {
+  if (requireType === 'brand' && !isConsumerModerator && !allowUnpaid && account.plan_status !== 'active') {
     return <Navigate to="/brand/billing" replace />
   }
   return <Layout>{children}</Layout>
@@ -108,7 +119,7 @@ export default function App() {
       <Route path="/redemptions" element={<Protected requireType="consumer"><Redemptions /></Protected>} />
       <Route path="/my-reviews" element={<Protected requireType="consumer"><MyReviews /></Protected>} />
       <Route path="/boards" element={<Protected requireType="consumer"><Boards /></Protected>} />
-      <Route path="/boards/:slug" element={<Protected requireType="consumer"><BoardFeed /></Protected>} />
+      <Route path="/boards/:slug" element={<Protected><BoardFeed /></Protected>} />
       <Route path="/messages" element={<Protected requireType="consumer"><Messages /></Protected>} />
       <Route path="/leaderboard" element={<Protected requireType="consumer"><Leaderboard /></Protected>} />
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
@@ -119,7 +130,7 @@ export default function App() {
       <Route path="/brand/messages" element={<Protected requireType="brand"><Messages /></Protected>} />
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
-      <Route path="/brand/board" element={<Protected requireType="brand"><BrandBoard /></Protected>} />
+      <Route path="/brand/board" element={<Protected requireType="brand" allowConsumerModerator><BrandBoard /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
 
       {/* Internal admin */}

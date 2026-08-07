@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Heart, Plus, Star } from 'lucide-react'
+import { Heart, Pencil, Plus, Star } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
+import { BoardPostCard } from '../../components/BoardPostCard'
 import { Button, Card, Chip, Empty, ErrorText, Input, Select, Spinner, Textarea } from '../../components/ui'
 import type {
   BoardJoinRequest, BoardManageReplyRow, BoardManageSummary, BoardMemberEntry,
-  BoardPostKind, BrandTeamMember, Listing,
+  BoardPage, BoardPost, BoardPostKind, BrandTeamMember, Listing, ModeratedBrand,
 } from '../../api/types'
 
 function toErrorMessage(e: unknown, fallback: string): string {
@@ -46,7 +47,7 @@ function SummarySection({ summary, onSave }: { summary: BoardManageSummary; onSa
   )
 }
 
-function ComposeSection({ onPosted }: { onPosted: () => void }) {
+function ComposeSection({ qs, onPosted }: { qs: string; onPosted: () => void }) {
   const [kind, setKind] = useState<BoardPostKind>('update')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
@@ -63,7 +64,7 @@ function ComposeSection({ onPosted }: { onPosted: () => void }) {
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr(''); setPosting(true)
     try {
-      await tellusApi.post('/board/posts', {
+      await tellusApi.post(`/board/posts${qs}`, {
         kind, title, body: body || null,
         listing_id: kind === 'deal' ? (listingId || null) : null,
       })
@@ -109,13 +110,13 @@ function ComposeSection({ onPosted }: { onPosted: () => void }) {
   )
 }
 
-function RequestsSection({ items, onDecided }: { items: BoardJoinRequest[]; onDecided: () => void }) {
+function RequestsSection({ items, qs, onDecided }: { items: BoardJoinRequest[]; qs: string; onDecided: () => void }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState('')
 
   async function decide(id: string, action: 'approve' | 'decline') {
     setBusyId(id); setErr('')
-    try { await tellusApi.post(`/board/manage/requests/${id}/${action}`); onDecided() }
+    try { await tellusApi.post(`/board/manage/requests/${id}/${action}${qs}`); onDecided() }
     catch (e) { setErr(toErrorMessage(e, `Could not ${action}`)) }
     finally { setBusyId(null) }
   }
@@ -152,13 +153,13 @@ function RequestsSection({ items, onDecided }: { items: BoardJoinRequest[]; onDe
   )
 }
 
-function RepliesSection({ items, onDecided }: { items: BoardManageReplyRow[]; onDecided: () => void }) {
+function RepliesSection({ items, qs, onDecided }: { items: BoardManageReplyRow[]; qs: string; onDecided: () => void }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [err, setErr] = useState('')
 
   async function decide(id: string, action: 'approve' | 'reject') {
     setBusyId(id); setErr('')
-    try { await tellusApi.post(`/board/replies/${id}/${action}`); onDecided() }
+    try { await tellusApi.post(`/board/replies/${id}/${action}${qs}`); onDecided() }
     catch (e) { setErr(toErrorMessage(e, `Could not ${action}`)) }
     finally { setBusyId(null) }
   }
@@ -187,13 +188,13 @@ function RepliesSection({ items, onDecided }: { items: BoardManageReplyRow[]; on
   )
 }
 
-function MembersSection({ items, onRemoved }: { items: BoardMemberEntry[]; onRemoved: () => void }) {
+function MembersSection({ items, qs, onRemoved }: { items: BoardMemberEntry[]; qs: string; onRemoved: () => void }) {
   const [busyId, setBusyId] = useState<string | null>(null)
 
   async function remove(id: string) {
     if (!confirm('Remove this member from the board?')) return
     setBusyId(id)
-    try { await tellusApi.post(`/board/manage/members/${id}/remove`); onRemoved() }
+    try { await tellusApi.post(`/board/manage/members/${id}/remove${qs}`); onRemoved() }
     finally { setBusyId(null) }
   }
 
@@ -217,15 +218,15 @@ function MembersSection({ items, onRemoved }: { items: BoardMemberEntry[]; onRem
 }
 
 function TeamSection({
-  items, isOwner, onChanged,
-}: { items: BrandTeamMember[]; isOwner: boolean; onChanged: () => void }) {
+  items, isOwner, qs, onChanged,
+}: { items: BrandTeamMember[]; isOwner: boolean; qs: string; onChanged: () => void }) {
   const [email, setEmail] = useState('')
   const [adding, setAdding] = useState(false)
   const [err, setErr] = useState('')
 
   async function add(e: FormEvent) {
     e.preventDefault(); setErr(''); setAdding(true)
-    try { await tellusApi.post('/board/team', { email }); setEmail(''); onChanged() }
+    try { await tellusApi.post(`/board/team${qs}`, { email }); setEmail(''); onChanged() }
     catch (e) { setErr(toErrorMessage(e, 'Could not add team member')) }
     finally { setAdding(false) }
   }
@@ -233,7 +234,7 @@ function TeamSection({
   async function remove(id: string) {
     if (!confirm('Remove this moderator from your team?')) return
     setErr('')
-    try { await tellusApi.delete(`/board/team/${id}`); onChanged() }
+    try { await tellusApi.delete(`/board/team/${id}${qs}`); onChanged() }
     catch (e) { setErr(toErrorMessage(e, 'Could not remove team member')) }
   }
 
@@ -262,7 +263,83 @@ function TeamSection({
   )
 }
 
+function EditPostForm({ post, qs, onSaved, onCancel }: { post: BoardPost; qs: string; onSaved: () => void; onCancel: () => void }) {
+  const [title, setTitle] = useState(post.title)
+  const [body, setBody] = useState(post.body ?? '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save() {
+    setSaving(true); setErr('')
+    try {
+      await tellusApi.patch(`/board/posts/${post.id}${qs}`, { title, body: body || null })
+      onSaved()
+    } catch (e) {
+      setErr(toErrorMessage(e, 'Could not save'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className="border-tu-accent/40">
+      <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <div className="mt-2"><Textarea label="Details" rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></div>
+      <ErrorText>{err}</ErrorText>
+      <div className="mt-2 flex gap-2">
+        <Button size="sm" loading={saving} onClick={() => void save()}>Save</Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+      </div>
+    </Card>
+  )
+}
+
+function PostsSection({ page, qs, onChanged }: { page: BoardPage; qs: string; onChanged: () => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  async function remove(postId: string) {
+    await tellusApi.delete(`/board/posts/${postId}${qs}`)
+    onChanged()
+  }
+
+  return (
+    <Card>
+      <h2 className="text-sm font-semibold">Your posts ({page.posts.length})</h2>
+      {page.posts.length === 0 ? (
+        <p className="mt-2 text-sm text-tu-faint">Nothing posted yet — compose one above.</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {page.posts.map((p) => (
+            editingId === p.id ? (
+              <EditPostForm key={p.id} post={p} qs={qs} onSaved={() => { setEditingId(null); onChanged() }} onCancel={() => setEditingId(null)} />
+            ) : (
+              <div key={p.id} className="relative">
+                <button
+                  type="button" onClick={() => setEditingId(p.id)}
+                  className="absolute right-3 top-3 z-10 text-tu-faint hover:text-tu-accent" title="Edit post"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <BoardPostCard post={p} viewerRole={page.viewer_role} slug={page.brand_slug} brandId={page.brand_id} onRemove={remove} />
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 export default function BrandBoard() {
+  // Bootstrap: which brand does this account moderate? A real brand-typed
+  // owner has exactly one; a consumer-typed team moderator (POST /board/team)
+  // has no brand_id of its own, so this list is the only way to find their
+  // board. Single-brand assumption per product decision — always take the
+  // first entry, no picker, but still send brand_id explicitly on every call
+  // below so a multi-board account never trips resolve_moderated_brand's
+  // "Specify brand_id" 400.
+  const [moderated, setModerated] = useState<ModeratedBrand | null>(null)
+  const [boardPage, setBoardPage] = useState<BoardPage | null>(null)
   const [summary, setSummary] = useState<BoardManageSummary | null>(null)
   const [requests, setRequests] = useState<BoardJoinRequest[]>([])
   const [replies, setReplies] = useState<BoardManageReplyRow[]>([])
@@ -271,16 +348,18 @@ export default function BrandBoard() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
-  async function loadAll() {
+  async function loadAll(brand: ModeratedBrand) {
+    const qs = `?brand_id=${brand.brand_id}`
     try {
-      const [s, r, rep, m, t] = await Promise.all([
-        tellusApi.get<BoardManageSummary>('/board/manage'),
-        tellusApi.get<BoardJoinRequest[]>('/board/manage/requests'),
-        tellusApi.get<BoardManageReplyRow[]>('/board/manage/replies?status=held'),
-        tellusApi.get<BoardMemberEntry[]>('/board/manage/members'),
-        tellusApi.get<BrandTeamMember[]>('/board/team'),
+      const [s, r, rep, m, t, page] = await Promise.all([
+        tellusApi.get<BoardManageSummary>(`/board/manage${qs}`),
+        tellusApi.get<BoardJoinRequest[]>(`/board/manage/requests${qs}`),
+        tellusApi.get<BoardManageReplyRow[]>(`/board/manage/replies?status=held&brand_id=${brand.brand_id}`),
+        tellusApi.get<BoardMemberEntry[]>(`/board/manage/members${qs}`),
+        tellusApi.get<BrandTeamMember[]>(`/board/team${qs}`),
+        tellusApi.get<BoardPage>(`/boards/${brand.slug}?limit=50`),
       ])
-      setSummary(s); setRequests(r); setReplies(rep); setMembers(m); setTeam(t)
+      setSummary(s); setRequests(r); setReplies(rep); setMembers(m); setTeam(t); setBoardPage(page)
     } catch (e) {
       setErr(toErrorMessage(e, 'Failed to load your regulars board'))
     } finally {
@@ -288,20 +367,37 @@ export default function BrandBoard() {
     }
   }
 
-  useEffect(() => { void loadAll() }, [])
+  useEffect(() => {
+    (async () => {
+      try {
+        const brands = await tellusApi.get<ModeratedBrand[]>('/me/moderated-brands')
+        if (brands.length === 0) {
+          setErr('Not a moderator of any regulars board'); setLoading(false); return
+        }
+        setModerated(brands[0])
+        await loadAll(brands[0])
+      } catch (e) {
+        setErr(toErrorMessage(e, 'Failed to load your regulars board')); setLoading(false)
+      }
+    })()
+  }, [])
 
   if (loading) return <Spinner />
-  if (err || !summary) return <ErrorText>{err}</ErrorText>
+  if (err || !summary || !moderated || !boardPage) return <ErrorText>{err}</ErrorText>
+
+  const qs = `?brand_id=${moderated.brand_id}`
+  const refresh = () => void loadAll(moderated)
 
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-bold">Regulars board</h1>
-      <SummarySection summary={summary} onSave={async (patch) => { setSummary(await tellusApi.patch('/board/manage', patch)) }} />
-      <ComposeSection onPosted={loadAll} />
-      <RequestsSection items={requests} onDecided={loadAll} />
-      <RepliesSection items={replies} onDecided={loadAll} />
-      <MembersSection items={members} onRemoved={loadAll} />
-      <TeamSection items={team} isOwner={summary.viewer_role === 'owner'} onChanged={loadAll} />
+      <SummarySection summary={summary} onSave={async (patch) => { setSummary(await tellusApi.patch(`/board/manage${qs}`, patch)); refresh() }} />
+      <ComposeSection qs={qs} onPosted={refresh} />
+      <PostsSection page={boardPage} qs={qs} onChanged={refresh} />
+      <RequestsSection items={requests} qs={qs} onDecided={refresh} />
+      <RepliesSection items={replies} qs={qs} onDecided={refresh} />
+      <MembersSection items={members} qs={qs} onRemoved={refresh} />
+      <TeamSection items={team} isOwner={summary.viewer_role === 'owner'} qs={qs} onChanged={refresh} />
       {members.length === 0 && requests.length === 0 && <Empty>Share your brand page to start building your regulars.</Empty>}
     </div>
   )

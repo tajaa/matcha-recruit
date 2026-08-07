@@ -127,20 +127,26 @@ async def signup(body: TellusSignup, request: Request, background: BackgroundTas
                     # signup (a plain except here would otherwise leave the
                     # outer transaction aborted).
                     async with conn.transaction():
-                        await conn.execute(
+                        brand_row = await conn.fetchrow(
                             "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count) "
-                            "VALUES ($1, $2, $3, $4)",
+                            "VALUES ($1, $2, $3, $4) RETURNING id",
                             account_id, brand_name, slug, body.location_count,
                         )
                 except asyncpg.UniqueViolationError as e:
                     if e.constraint_name != "ux_tellus_brands_slug":
                         raise
                     slug = f"{slug}-{secrets.token_hex(3)}"
-                    await conn.execute(
+                    brand_row = await conn.fetchrow(
                         "INSERT INTO tellus_brands (owner_account_id, name, slug, location_count) "
-                        "VALUES ($1, $2, $3, $4)",
+                        "VALUES ($1, $2, $3, $4) RETURNING id",
                         account_id, brand_name, slug, body.location_count,
                     )
+                await conn.execute(
+                    """INSERT INTO tellus_brand_members (brand_id, account_id, role)
+                           VALUES ($1, $2, 'owner')
+                           ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner'""",
+                    brand_row["id"], account_id,
+                )
             else:
                 await conn.execute(
                     "INSERT INTO tellus_points_balances (account_id) VALUES ($1) ON CONFLICT DO NOTHING",

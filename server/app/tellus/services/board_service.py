@@ -43,16 +43,21 @@ async def resolve_moderated_brand(
 ) -> tuple[dict, str]:
     """Which brand is this caller moderating?
 
-    - account_type='brand'  → account.brand_id (member row must exist — backfill
+    - account_type='brand' and no brand_id param (or brand_id == the account's
+      own brand) → account.brand_id (member row must exist — backfill
       guarantees it for owners; falls back to 'owner' if somehow absent rather
       than 404ing the brand's own owner out of their own board).
-    - consumer w/ member rows: exactly one → it; brand_id param → verify member;
-      several + no param → 400 'Specify brand_id'.
+    - otherwise (consumer, or a brand-typed account moderating a DIFFERENT
+      brand — e.g. a moderator who later claimed their own brand): look up
+      tellus_brand_members by account_id. Exactly one row → it; brand_id
+      param → verify member; several + no param → 400 'Specify brand_id'.
     - no membership → 404 (existence-hiding, _get_thread_for_account pattern).
 
     Returns (brand row incl. plan_status, caller's role ('owner'|'moderator')).
     """
-    if account.account_type == "brand":
+    if account.account_type == "brand" and account.brand_id and (
+        brand_id is None or brand_id == account.brand_id
+    ):
         brand = await conn.fetchrow("SELECT * FROM tellus_brands WHERE id = $1", account.brand_id)
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -186,30 +191,35 @@ async def notify_board_team(
 
 async def approve_reply_and_award(
     conn, reply_id: UUID, actor_id: UUID, *, board_id: Optional[UUID] = None,
+    from_statuses: tuple = ("held",),
 ) -> Optional[dict]:
-    """Flip a held reply to approved and award the earning rule, atomically.
+    """Flip a reply to approved and award the earning rule, atomically.
     Shared by the brand-moderator approve route and the admin force-approve
     path so the two callers can't drift on reason/bypass_cooldown.
 
     board_id scopes the UPDATE to a specific board (the brand-moderator path);
     None means unscoped (the admin force path, which can act cross-brand).
-    Returns {author_account_id, post_id}, or None if no held reply matched
-    (already moderated, wrong id, or — when board_id is set — wrong board).
+    from_statuses gates which current statuses may transition to approved —
+    brand moderators only ever move held→approved; the admin force path also
+    allows rejected/removed→approved (an admin overturning a bad brand call),
+    which still can't double-credit thanks to the ledger's ON CONFLICT DO NOTHING.
+    Returns {author_account_id, post_id}, or None if no matching reply
+    (already approved, wrong id, or — when board_id is set — wrong board).
     """
     if board_id is not None:
         row = await conn.fetchrow(
             """UPDATE tellus_board_replies SET status = 'approved', moderated_at = NOW(), moderated_by = $2
-               WHERE id = $1 AND status = 'held'
+               WHERE id = $1 AND status = ANY($4::text[])
                  AND post_id IN (SELECT id FROM tellus_board_posts WHERE board_id = $3)
                RETURNING author_account_id, post_id""",
-            reply_id, actor_id, board_id,
+            reply_id, actor_id, board_id, list(from_statuses),
         )
     else:
         row = await conn.fetchrow(
             """UPDATE tellus_board_replies SET status = 'approved', moderated_at = NOW(), moderated_by = $2
-               WHERE id = $1 AND status = 'held'
+               WHERE id = $1 AND status = ANY($3::text[])
                RETURNING author_account_id, post_id""",
-            reply_id, actor_id,
+            reply_id, actor_id, list(from_statuses),
         )
     if row is None:
         return None
