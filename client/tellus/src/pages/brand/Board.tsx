@@ -216,7 +216,9 @@ function MembersSection({ items, onRemoved }: { items: BoardMemberEntry[]; onRem
   )
 }
 
-function TeamSection({ items, onChanged }: { items: BrandTeamMember[]; onChanged: () => void }) {
+function TeamSection({
+  items, isOwner, onChanged,
+}: { items: BrandTeamMember[]; isOwner: boolean; onChanged: () => void }) {
   const [email, setEmail] = useState('')
   const [adding, setAdding] = useState(false)
   const [err, setErr] = useState('')
@@ -230,16 +232,20 @@ function TeamSection({ items, onChanged }: { items: BrandTeamMember[]; onChanged
 
   async function remove(id: string) {
     if (!confirm('Remove this moderator from your team?')) return
-    await tellusApi.delete(`/board/team/${id}`); onChanged()
+    setErr('')
+    try { await tellusApi.delete(`/board/team/${id}`); onChanged() }
+    catch (e) { setErr(toErrorMessage(e, 'Could not remove team member')) }
   }
 
   return (
     <Card>
       <h2 className="text-sm font-semibold">Moderator team</h2>
-      <form onSubmit={add} className="mt-2 flex gap-2">
-        <div className="flex-1"><Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@example.com" /></div>
-        <Button type="submit" loading={adding}><Plus className="h-4 w-4" /> Add</Button>
-      </form>
+      {isOwner && (
+        <form onSubmit={add} className="mt-2 flex gap-2">
+          <div className="flex-1"><Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@example.com" /></div>
+          <Button type="submit" loading={adding}><Plus className="h-4 w-4" /> Add</Button>
+        </form>
+      )}
       <ErrorText>{err}</ErrorText>
       <div className="mt-3 space-y-1.5">
         {items.map((m) => (
@@ -247,7 +253,7 @@ function TeamSection({ items, onChanged }: { items: BrandTeamMember[]; onChanged
             <span>{m.account_display_name} <span className="text-xs text-tu-faint">({m.email})</span></span>
             <div className="flex items-center gap-2">
               <Chip>{m.role}</Chip>
-              {m.role !== 'owner' && <button onClick={() => void remove(m.id)} className="text-xs text-tu-bad hover:underline">Remove</button>}
+              {isOwner && m.role !== 'owner' && <button onClick={() => void remove(m.id)} className="text-xs text-tu-bad hover:underline">Remove</button>}
             </div>
           </div>
         ))}
@@ -295,7 +301,7 @@ export default function BrandBoard() {
       <RequestsSection items={requests} onDecided={loadAll} />
       <RepliesSection items={replies} onDecided={loadAll} />
       <MembersSection items={members} onRemoved={loadAll} />
-      <TeamSection items={team} onChanged={loadAll} />
+      <TeamSection items={team} isOwner={summary.viewer_role === 'owner'} onChanged={loadAll} />
       {members.length === 0 && requests.length === 0 && <Empty>Share your brand page to start building your regulars.</Empty>}
     </div>
   )

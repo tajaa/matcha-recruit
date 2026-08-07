@@ -609,7 +609,6 @@ class TellusPublicBrandPage(BaseModel):
     # a "Show older reviews" toggle from this; they never count toward avg_rating.
     older_count: int = 0
     has_board: bool = False
-    my_membership_status: Optional[BoardMembershipStatus] = None
 
 
 class TellusClaimResponse(BaseModel):
@@ -814,6 +813,7 @@ class TellusBoardManageSummary(BaseModel):
     pending_requests: int
     held_replies: int
     member_count: int
+    viewer_role: Literal["owner", "moderator"]
 
 
 TellusFeedbackSubmit.model_rebuild()

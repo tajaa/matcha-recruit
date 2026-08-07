@@ -140,3 +140,33 @@ class TestBoardSourceGuards:
         from app.tellus.services.marketplace_service import list_marketplace
 
         assert "visibility = 'public'" in inspect.getsource(list_marketplace)
+
+    def test_join_precheck_before_insert(self):
+        """The duplicate-membership pre-check must run BEFORE the INSERT, not
+        just live in an except block — a caught UniqueViolationError inside
+        an already-open (non-savepoint) transaction aborts it and turns the
+        next query in the handler into a 500 (see tellus/CLAUDE.md's ledger-
+        idempotency note). Pin that the pre-check SELECT precedes the INSERT,
+        and that the INSERT itself opens its own nested transaction."""
+        from app.tellus import routes
+
+        src = inspect.getsource(routes.board.request_join)
+        precheck_idx = src.index("SELECT status FROM tellus_board_memberships")
+        insert_idx = src.index("INSERT INTO tellus_board_memberships")
+        assert precheck_idx < insert_idx
+        # the INSERT must be inside its own nested `async with conn.transaction():`
+        # (a savepoint), not the outer one opened at the top of the handler
+        between = src[precheck_idx:insert_idx]
+        assert "async with conn.transaction():" in between
+
+    def test_nondeal_posts_cannot_carry_listing(self):
+        from app.tellus import routes
+
+        src = inspect.getsource(routes.board.create_post)
+        assert 'listing_id = body.listing_id if body.kind == "deal" else None' in src
+
+    def test_feed_listing_embed_brand_scoped(self):
+        from app.tellus import routes
+
+        src = inspect.getsource(routes.board.get_board)
+        assert "AND l.brand_id = $2" in src

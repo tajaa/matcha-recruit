@@ -36,7 +36,7 @@ from ..services.points_service import notify_account
 router = APIRouter()
 
 
-async def _manage_summary(conn, board: dict) -> TellusBoardManageSummary:
+async def _manage_summary(conn, board: dict, viewer_role: str) -> TellusBoardManageSummary:
     pending = await conn.fetchval(
         "SELECT COUNT(*) FROM tellus_board_memberships WHERE board_id = $1 AND status = 'pending'",
         board["id"],
@@ -53,14 +53,18 @@ async def _manage_summary(conn, board: dict) -> TellusBoardManageSummary:
     return TellusBoardManageSummary(
         board_id=board["id"], title=board["title"], description=board["description"],
         is_active=board["is_active"], pending_requests=pending, held_replies=held, member_count=members,
+        viewer_role=viewer_role,
     )
 
 
 # ── Consumer endpoints ──────────────────────────────────────────────────────
 
 @router.post("/b/{slug}/board/join", response_model=TellusBoardMembership, status_code=status.HTTP_201_CREATED)
-async def request_join(slug: str, body: TellusBoardJoin, account: TellusAccount = Depends(require_consumer)):
+async def request_join(
+    slug: str, body: Optional[TellusBoardJoin] = None, account: TellusAccount = Depends(require_consumer),
+):
     await check_rate_limit(str(account.id), "tellus_board_join", 10, 3600)
+    note = body.note if body is not None else None
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -77,20 +81,33 @@ async def request_join(slug: str, body: TellusBoardJoin, account: TellusAccount 
             if not board["is_active"]:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=bs.BOARD_PAUSED_DETAIL)
 
+            # Pre-check under the open txn so the common case never touches
+            # UniqueViolationError; the except below is a race fallback only,
+            # and it must never run another query on the aborted outer txn
+            # (savepoint-abort trap — see tellus/CLAUDE.md's ledger-idempotency
+            # note). The INSERT itself is wrapped in its own SAVEPOINT so a
+            # concurrent duplicate can raise, get caught, and the outer txn
+            # (which still needs to notify the team) survives.
+            existing = await conn.fetchval(
+                "SELECT status FROM tellus_board_memberships WHERE board_id = $1 AND account_id = $2 "
+                "AND status IN ('pending', 'approved') ORDER BY requested_at DESC LIMIT 1",
+                board["id"], account.id,
+            )
+            if existing is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Already a member" if existing == "approved" else "Request already pending",
+                )
+
             try:
-                row = await conn.fetchrow(
-                    """INSERT INTO tellus_board_memberships (board_id, account_id, note)
-                           VALUES ($1, $2, $3) RETURNING *""",
-                    board["id"], account.id, body.note,
-                )
+                async with conn.transaction():
+                    row = await conn.fetchrow(
+                        """INSERT INTO tellus_board_memberships (board_id, account_id, note)
+                               VALUES ($1, $2, $3) RETURNING *""",
+                        board["id"], account.id, note,
+                    )
             except asyncpg.UniqueViolationError:
-                existing = await conn.fetchval(
-                    "SELECT status FROM tellus_board_memberships WHERE board_id = $1 AND account_id = $2 "
-                    "AND status IN ('pending', 'approved') ORDER BY requested_at DESC LIMIT 1",
-                    board["id"], account.id,
-                )
-                detail = "Already a member" if existing == "approved" else "Request already pending"
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Request already pending")
 
             await bs.notify_board_team(
                 conn, brand["id"], "board_join_request", "New board join request",
@@ -196,8 +213,9 @@ async def get_board(
         if listing_ids:
             lrows = await conn.fetch(
                 "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
-                "LEFT JOIN tellus_brands b ON b.id = l.brand_id WHERE l.id = ANY($1::uuid[])",
-                listing_ids,
+                "LEFT JOIN tellus_brands b ON b.id = l.brand_id "
+                "WHERE l.id = ANY($1::uuid[]) AND l.brand_id = $2",
+                listing_ids, brand["id"],
             )
             listings_by_id = {r["id"]: r for r in lrows}
 
@@ -321,9 +339,9 @@ async def get_board_manage(
     brand_id: Optional[UUID] = Query(None), account: TellusAccount = Depends(require_tellus_account),
 ):
     async with get_connection() as conn:
-        brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
+        brand, role = await bs.resolve_moderated_brand(conn, account, brand_id)
         board = await bs.ensure_board(conn, brand["id"])
-        return await _manage_summary(conn, board)
+        return await _manage_summary(conn, board, role)
 
 
 @router.patch("/board/manage", response_model=TellusBoardManageSummary)
@@ -332,7 +350,7 @@ async def update_board_manage(
     account: TellusAccount = Depends(require_tellus_account),
 ):
     async with get_connection() as conn:
-        brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
+        brand, role = await bs.resolve_moderated_brand(conn, account, brand_id)
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
         row = await conn.fetchrow(
@@ -342,7 +360,7 @@ async def update_board_manage(
                WHERE id = $1 RETURNING *""",
             board["id"], body.title, body.description, body.is_active,
         )
-        return await _manage_summary(conn, row)
+        return await _manage_summary(conn, row, role)
 
 
 @router.get("/board/manage/requests", response_model=list[TellusBoardJoinRequest])
@@ -483,13 +501,17 @@ async def create_post(
                         detail="Pick a board-only reward",
                     )
 
+            # Only a validated deal listing may attach — an update/event/question
+            # post can't carry an unvalidated (possibly cross-brand) listing_id.
+            listing_id = body.listing_id if body.kind == "deal" else None
+
             row = await conn.fetchrow(
                 """INSERT INTO tellus_board_posts
                        (board_id, author_account_id, kind, title, body, listing_id,
                         event_starts_at, event_ends_at, is_pinned)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                    RETURNING *""",
-                board["id"], account.id, body.kind, body.title, body.body, body.listing_id,
+                board["id"], account.id, body.kind, body.title, body.body, listing_id,
                 body.event_starts_at, body.event_ends_at, body.is_pinned,
             )
             await bs.notify_board_members(
@@ -533,8 +555,8 @@ async def update_post(
         if row["listing_id"] is not None:
             listing_row = await conn.fetchrow(
                 "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
-                "LEFT JOIN tellus_brands b ON b.id = l.brand_id WHERE l.id = $1",
-                row["listing_id"],
+                "LEFT JOIN tellus_brands b ON b.id = l.brand_id WHERE l.id = $1 AND l.brand_id = $2",
+                row["listing_id"], brand["id"],
             )
 
     row_dict = {**dict(row), **dict(counts)}

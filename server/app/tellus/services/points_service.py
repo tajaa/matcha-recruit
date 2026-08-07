@@ -339,7 +339,7 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
             member = await conn.fetchval(
                 """SELECT 1 FROM tellus_board_memberships m
                    JOIN tellus_boards bo ON bo.id = m.board_id
-                   WHERE bo.brand_id = $1 AND m.account_id = $2 AND m.status = 'approved'""",
+                   WHERE bo.brand_id = $1 AND m.account_id = $2 AND m.status = 'approved' AND bo.is_active""",
                 listing["brand_id"], account_id,
             )
             if not member:

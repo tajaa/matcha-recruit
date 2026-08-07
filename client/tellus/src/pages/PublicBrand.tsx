@@ -98,7 +98,7 @@ export default function PublicBrand() {
   async function joinBoard() {
     setJoiningBoard(true); setBoardErr('')
     try {
-      const m = await tellusApi.post<BoardMembership>(`/b/${slug}/board/join`)
+      const m = await tellusApi.post<BoardMembership>(`/b/${slug}/board/join`, { note: null })
       setMyMembership(m)
     } catch (e) {
       setBoardErr(e instanceof Error ? e.message : 'Could not request to join')
@@ -233,6 +233,8 @@ export default function PublicBrand() {
                 </Link>
               ) : myMembership?.status === 'pending' ? (
                 <p className="text-xs text-tu-faint">Your request to join the regulars board is pending review.</p>
+              ) : myMembership?.status === 'declined' || myMembership?.status === 'removed' ? (
+                <p className="text-xs text-tu-faint">Board membership isn't available for this account.</p>
               ) : (
                 <>
                   <Button size="sm" variant="soft" loading={joiningBoard} onClick={joinBoard}>Request to join the regulars board</Button>

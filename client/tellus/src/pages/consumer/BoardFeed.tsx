@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { tellusApi } from '../../api/tellusClient'
+import { ApiError, tellusApi } from '../../api/tellusClient'
 import { BoardPostCard } from '../../components/BoardPostCard'
 import { Card, Empty, ErrorText, Select, Spinner } from '../../components/ui'
 import type { BoardPage, BoardPostKind } from '../../api/types'
@@ -28,7 +28,7 @@ export default function BoardFeed() {
       const qs = kind ? `?kind=${kind}` : ''
       setPage(await tellusApi.get<BoardPage>(`/boards/${slug}${qs}`))
     } catch (e) {
-      if (e instanceof Error && e.message.includes('Request to join')) setForbidden(true)
+      if (e instanceof ApiError && e.status === 403) setForbidden(true)
       else setErr(e instanceof Error ? e.message : 'Failed to load this board')
     } finally {
       setLoading(false)
@@ -72,7 +72,7 @@ export default function BoardFeed() {
         </div>
       </div>
 
-      {page.plan_paused && (
+      {(page.plan_paused || !page.is_active) && (
         <Card className="border-tu-bad/30 bg-tu-bad/5">
           <p className="text-sm text-tu-dim">This board is paused — you can read past posts, but new replies aren't accepted right now.</p>
         </Card>
@@ -87,7 +87,10 @@ export default function BoardFeed() {
       ) : (
         <div className="space-y-3">
           {page.posts.map((p) => (
-            <BoardPostCard key={p.id} post={p} viewerRole={page.viewer_role} slug={slug} onRedeem={redeem} />
+            <BoardPostCard
+              key={p.id} post={p} viewerRole={page.viewer_role} slug={slug} onRedeem={redeem}
+              paused={page.plan_paused || !page.is_active}
+            />
           ))}
         </div>
       )}

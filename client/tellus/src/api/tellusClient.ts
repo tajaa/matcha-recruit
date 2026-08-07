@@ -59,6 +59,14 @@ function _headers(init?: RequestInit, token?: string | null): HeadersInit {
   }
 }
 
+export class ApiError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem(ACCESS_KEY)
   const res = await fetch(`${BASE}${path}`, { ...init, headers: _headers(init, token) })
@@ -72,17 +80,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const newToken = localStorage.getItem(ACCESS_KEY)
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _headers(init, newToken) })
       if (!retry.ok) {
-        if (retry.status === 401) { _logout(); throw new Error('Session expired') }
-        throw new Error(await _errMsg(retry))
+        if (retry.status === 401) { _logout(); throw new ApiError('Session expired', 401) }
+        throw new ApiError(await _errMsg(retry), retry.status)
       }
       if (retry.status === 204) return null as T
       return retry.json()
     }
     _logout()
-    throw new Error('Session expired')
+    throw new ApiError('Session expired', 401)
   }
 
-  if (!res.ok) throw new Error(await _errMsg(res))
+  if (!res.ok) throw new ApiError(await _errMsg(res), res.status)
   if (res.status === 204) return null as T
   return res.json()
 }

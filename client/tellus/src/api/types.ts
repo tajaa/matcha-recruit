@@ -355,7 +355,6 @@ export interface PublicBrandPage {
   state: string | null
   older_count: number
   has_board: boolean
-  my_membership_status: BoardMembershipStatus | null
 }
 
 export interface ClaimResponse {
@@ -708,6 +707,7 @@ export interface BoardManageSummary {
   pending_requests: number
   held_replies: number
   member_count: number
+  viewer_role: 'owner' | 'moderator'
 }
 
 // GET /board/manage/replies — brand moderation queue row (own shape, distinct

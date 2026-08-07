@@ -22,13 +22,14 @@ function fmtRange(start: string | null, end: string | null): string {
 // server's reply_visible_to predicate is the real gate, this is just what
 // the response already contains.
 export function BoardPostCard({
-  post, viewerRole, slug, onRedeem, onRemove,
+  post, viewerRole, slug, onRedeem, onRemove, paused,
 }: {
   post: BoardPost
   viewerRole: 'member' | 'moderator' | 'owner'
   slug: string
   onRedeem?: (listingId: string) => void
   onRemove?: (postId: string) => void
+  paused?: boolean
 }) {
   const isMod = viewerRole !== 'member'
   const [expanded, setExpanded] = useState(false)
@@ -179,11 +180,14 @@ export function BoardPostCard({
           ))}
           {replies && replies.length === 0 && !loadingReplies && <p className="text-xs text-tu-faint">No replies yet.</p>}
 
-          {viewerRole === 'member' && (
+          {viewerRole === 'member' && !paused && (
             <form onSubmit={sendReply} className="flex items-end gap-2">
               <div className="flex-1"><Textarea rows={1} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Reply…" /></div>
               <Button size="sm" type="submit" loading={sending}>Send</Button>
             </form>
+          )}
+          {viewerRole === 'member' && paused && (
+            <p className="text-xs text-tu-faint">Board paused — replies disabled.</p>
           )}
           <ErrorText>{err}</ErrorText>
         </div>
