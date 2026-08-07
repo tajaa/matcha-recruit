@@ -2,6 +2,7 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -13,29 +14,34 @@ from app.services import upc as upc_service
 
 router = APIRouter(tags=["codes"], dependencies=[AuthDep])
 
-
-def _get_or_create_config(db: Session) -> IsrcConfig:
-    config = db.get(IsrcConfig, 1)
-    if config is None:
-        config = IsrcConfig(id=1, registrant_prefix="", year_digits="", next_designation=1)
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-    return config
+_DEFAULT_ISRC_CONFIG = IsrcConfigRead(registrant_prefix="", year_digits="", next_designation=1)
 
 
 @router.get("/settings/isrc", response_model=IsrcConfigRead)
 def get_isrc_config(db: Session = Depends(get_db)):
-    return _get_or_create_config(db)
+    """Read-only: the id=1 row is seeded by migration, but if it's ever
+    absent (e.g. a DB predating that migration), return the default shape
+    rather than creating it as a side effect of a GET."""
+    config = db.get(IsrcConfig, 1)
+    if config is None:
+        return _DEFAULT_ISRC_CONFIG
+    return config
 
 
 @router.put("/settings/isrc", response_model=IsrcConfigRead)
 def update_isrc_config(payload: IsrcConfigUpdate, db: Session = Depends(get_db)):
-    config = _get_or_create_config(db)
-    config.registrant_prefix = payload.registrant_prefix
+    # Idempotent upsert so two concurrent first-writes can't race each other
+    # into a duplicate-key 500 — the only place this router creates the row.
+    stmt = pg_insert(IsrcConfig).values(
+        id=1, registrant_prefix=payload.registrant_prefix, year_digits="", next_designation=1
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[IsrcConfig.id],
+        set_={"registrant_prefix": stmt.excluded.registrant_prefix},
+    )
+    db.execute(stmt)
     db.commit()
-    db.refresh(config)
-    return config
+    return db.get(IsrcConfig, 1)
 
 
 @router.get("/upcs")

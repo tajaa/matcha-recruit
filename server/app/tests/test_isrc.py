@@ -48,6 +48,31 @@ def test_unconfigured_raises(db):
         isrc_service.assign_isrc(db, r1.id)
 
 
+def test_get_isrc_config_on_fresh_db_is_read_only(client_real, db_real):
+    """The id=1 row is normally seeded by migration, but this exercises the
+    defensive "return default without creating" path for a DB where it's
+    absent (e.g. truncated test data, or a DB predating that migration)."""
+    from app.models.codes import IsrcConfig
+
+    existing = db_real.get(IsrcConfig, 1)
+    if existing is not None:
+        db_real.delete(existing)
+        db_real.commit()
+    assert db_real.get(IsrcConfig, 1) is None
+
+    resp1 = client_real.get("/api/settings/isrc")
+    assert resp1.status_code == 200
+    assert resp1.json() == {"registrant_prefix": "", "year_digits": "", "next_designation": 1}
+
+    resp2 = client_real.get("/api/settings/isrc")
+    assert resp2.status_code == 200
+    assert resp2.json() == resp1.json()
+
+    # GET must not have created the row as a side effect.
+    db_real.expire_all()
+    assert db_real.get(IsrcConfig, 1) is None
+
+
 def test_update_isrc_config_rejects_wrong_length_prefix(client):
     resp = client.put("/api/settings/isrc", json={"registrant_prefix": "QZABCEXTRA"})
     assert resp.status_code == 422

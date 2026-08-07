@@ -21,12 +21,6 @@ class AlreadyAssigned(UpcError):
     pass
 
 
-class InvalidUpcFormat(UpcError):
-    def __init__(self, codes: list[str]) -> None:
-        self.codes = codes
-        super().__init__(f"Invalid UPC/EAN codes (bad length or check digit): {codes}")
-
-
 def _gtin_check_digit_valid(code13: str) -> bool:
     digits = [int(c) for c in code13]
     payload, check = digits[:-1], digits[-1]
