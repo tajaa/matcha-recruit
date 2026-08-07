@@ -12,7 +12,7 @@ Rewards-for-feedback app. Own product, mirrors Cappe's shape — not a matcha te
 
 - `routes/` — `auth.py`, `billing.py`, `community.py` (public brand review page, `/b/{slug}`), `dms.py` (brand↔reporter DMs, any identified feedback — not review-scoped), `feedback.py`, `gamification.py`, `grants.py`, `links.py`, `marketplace.py`, `my_reviews.py` (consumer "My Reviews"), `public_intake.py`, `rewards.py`, `_shared.py`
 - `routes/admin/` — internal admin package (see "Internal admin management" below), gated by `require_tellus_admin` at the router level in every sub-router
-- `services/` — `auth.py`, `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `marketplace_service.py`, `points_service.py`, `admin_audit.py`
+- `services/` — `auth.py`, `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `google_places.py` (Google Places API (New) client — autocomplete + place details, server-proxied), `marketplace_service.py`, `points_service.py`, `admin_audit.py`
 - `models/tellus.py` — Pydantic shapes; `models/admin.py` — internal admin request/response shapes
 
 ## Internal admin management
@@ -28,6 +28,35 @@ Rewards-for-feedback app. Own product, mirrors Cappe's shape — not a matcha te
 - **Ledger idempotency is `ON CONFLICT ... DO NOTHING RETURNING id`, not a caught `UniqueViolationError`.** Both `award_points` and `adjust_points` insert into `tellus_points_ledger` under the partial unique index `ux_tellus_ledger_idem` (`account_id, reason, reference_id` WHERE `reference_id IS NOT NULL`, `tellus_app_01`). `adjust_points` is routinely called inside an already-open transaction (`routes/admin/accounts.py`'s `points-adjust` endpoint), which makes its own `conn.transaction()` a SAVEPOINT — a caught `UniqueViolationError` there leaves the savepoint aborted and the whole request 500s instead of returning `adjusted: false`. `adjust_points` also pre-checks the ledger before taking the `FOR UPDATE` balance lock, so a replayed `idempotency_key` never touches it. If you add another ledger-writing path, follow this shape, not the exception-catching one.
 
 Full design + endpoint-by-endpoint SQL: `TELLUS_ADMIN_MGMT_PLAN.md` at the repo root.
+
+## Places / reviews on unclaimed businesses
+
+- **Invariant: every unclaimed brand (`tellus_brands.owner_account_id IS NULL`) has an
+  active `tellus_links` row.** The only write path into `tellus_reports` is
+  `POST /i/{token}` (`routes/public_intake.py`), keyed solely on a link token — an
+  unclaimed brand with no active link is permanently un-reviewable. Enforced by
+  `routes/places.py:ensure_community_link()` (mints the always-on "Community feedback"
+  link + `tellus_link_history` row when none is active). Every code path that creates,
+  exposes, or un-claims a brand calls it: `create_place`'s dedupe branch (a
+  `POST /places` hit on an existing brand whose link got revoked), the fresh-insert
+  path, and `routes/admin/brands.py:unassign_owner`. Add a call there if you add
+  another such path.
+- **Google Places autocomplete** (`services/google_places.py`) — server-proxied
+  (`GOOGLE_MAPS_API_KEY` never reaches the browser); unset ⇒ every function returns
+  `None`/`[]` and the add-a-place form silently degrades to manual free-text entry, no
+  errors surfaced anywhere. `GET /places/autocomplete` is Redis-cached 5 min per
+  normalized query and rate-limited same as the rest of `places.py`.
+- **Dedupe order in `create_place`**: `google_place_id` match first
+  (`ux_tellus_brands_google_place_id`, a partial unique index — NULLs exempt), then the
+  pre-existing name+city advisory-lock match, then a fresh insert. Google Place Details
+  are always re-resolved **server-side** from the `place_id` — the client-submitted
+  name/city are only the fallback when that lookup fails, never trusted directly for a
+  `google_place_id` submission (a squatter could otherwise pair a real place_id with a
+  fake name).
+- **ToS note (decided)**: `place_id` is stored indefinitely (Google explicitly permits
+  this); resolved name/address/lat/lng are stored as part of the consumer's own
+  submission despite Google's 30-day cache guidance for raw autocomplete results —
+  accepted, these are facts the user selected, not a cached search index.
 
 ## Frontend pairing
 

@@ -74,6 +74,17 @@ function Home() {
   return <Protected requireType="consumer"><Rewards /></Protected>
 }
 
+// Places is public (marketing entry, e.g. from Landing) but shell-wrapped for
+// a signed-in consumer so the new nav entry doesn't dump them out of the app
+// chrome. Unlike Protected/AdminOnly, this never redirects — logged-out and
+// brand accounts both just get the bare page.
+function PlacesRoute() {
+  const { account, loading } = useAccount()
+  if (loading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
+  if (account?.account_type === 'consumer') return <Layout><Places /></Layout>
+  return <Places />
+}
+
 export default function App() {
   return (
     <Routes>
@@ -85,7 +96,7 @@ export default function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/i/:token" element={<Intake />} />
       <Route path="/b/:slug" element={<PublicBrand />} />
-      <Route path="/places" element={<Places />} />
+      <Route path="/places" element={<PlacesRoute />} />
 
       {/* Consumer */}
       <Route path="/" element={<Home />} />

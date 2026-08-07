@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....database import get_connection
 from .._shared import escape_like
+from ..places import ensure_community_link
 from ._shared import decode_audit_rows
 from ...dependencies import require_tellus_admin
 from ...models.tellus import TellusAccount
@@ -270,9 +271,13 @@ async def unassign_owner(
                     )
                     reverted_type = True
 
+            # A brand leaving claimed status must stay reviewable — the
+            # invariant this helper enforces (routes/places.py docstring).
+            await ensure_community_link(conn, brand_id, detail="admin unassign-owner")
+
             await record_admin_action(
                 conn, admin, "brand.unassign_owner", "brand", brand_id,
-                {"account_id": str(owner_id), "reverted_type": reverted_type},
+                {"account_id": str(owner_id), "reverted_type": reverted_type, "community_link_ensured": True},
             )
 
         row = await conn.fetchrow(f"{_BRAND_SELECT} WHERE b.id = $1", brand_id)

@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Search, Star } from 'lucide-react'
 import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
 import { Button, Card, ErrorText, Input } from '../components/ui'
-import type { PlaceCreateResponse, PlaceSearchResult } from '../api/types'
+import type { PlaceAutocompleteResult, PlaceCreateResponse, PlaceSearchResult } from '../api/types'
 
 export default function Places() {
   const navigate = useNavigate()
@@ -19,6 +19,39 @@ export default function Places() {
   const [website, setWebsite] = useState('') // honeypot
   const [adding, setAdding] = useState(false)
   const [addErr, setAddErr] = useState('')
+
+  // Google Places autocomplete on the add-form name field. Silent no-op when
+  // GOOGLE_MAPS_API_KEY is unset server-side — /places/autocomplete just
+  // returns [] and the form behaves exactly like manual entry.
+  const [suggestions, setSuggestions] = useState<PlaceAutocompleteResult[]>([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [pickedPlaceId, setPickedPlaceId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (pickedPlaceId || addName.trim().length < 2) { setSuggestions([]); return }
+    const t = setTimeout(() => {
+      const params = new URLSearchParams({ q: addName.trim() })
+      if (addCity.trim()) params.set('city', addCity.trim())
+      tellusPublicGet<PlaceAutocompleteResult[]>(`/places/autocomplete?${params.toString()}`)
+        .then(setSuggestions)
+        .catch(() => setSuggestions([])) // autocomplete is best-effort — never blocks manual entry
+    }, 300)
+    return () => clearTimeout(t)
+  }, [addName, addCity, pickedPlaceId])
+
+  function pickSuggestion(s: PlaceAutocompleteResult) {
+    setAddName(s.name)
+    setPickedPlaceId(s.place_id)
+    setShowSuggestions(false)
+    // Best-effort city/state prefill from "123 Main St, Springfield, IL" —
+    // the server re-resolves the real address from Place Details regardless,
+    // this just saves the user retyping it.
+    const parts = (s.secondary_text || '').split(',').map((p) => p.trim()).filter(Boolean)
+    if (parts.length >= 2) {
+      setAddCity(parts[parts.length - 2])
+      setAddState(parts[parts.length - 1])
+    }
+  }
 
   async function search(e: React.FormEvent) {
     e.preventDefault()
@@ -42,7 +75,8 @@ export default function Places() {
     setAdding(true); setAddErr('')
     try {
       const res = await tellusPublicPost<PlaceCreateResponse>('/places', {
-        name: addName.trim(), city: addCity.trim(), state: addState.trim() || null, website,
+        name: addName.trim(), city: addCity.trim(), state: addState.trim() || null,
+        google_place_id: pickedPlaceId, website,
       })
       if (res.intake_token) navigate('/i/' + res.intake_token)
       else navigate('/b/' + res.slug)
@@ -109,7 +143,33 @@ export default function Places() {
         <h2 className="text-sm font-semibold">Can't find it?</h2>
         <p className="mt-0.5 text-xs text-tu-dim">Add it and leave feedback right away.</p>
         <form onSubmit={addPlace} className="mt-3 space-y-3">
-          <Input label="Place name" required value={addName} onChange={(e) => setAddName(e.target.value)} />
+          <div className="relative">
+            <Input
+              label="Place name" required value={addName}
+              onChange={(e) => {
+                setAddName(e.target.value)
+                setPickedPlaceId(null) // manual edit invalidates a prior pick
+                setShowSuggestions(true)
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              autoComplete="off"
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-tu-border bg-tu-bg shadow-lg">
+                {suggestions.map((s) => (
+                  <button
+                    key={s.place_id} type="button"
+                    onMouseDown={() => pickSuggestion(s)}
+                    className="block w-full px-3 py-2 text-left text-sm hover:bg-tu-panel2/60"
+                  >
+                    <div className="text-tu-text">{s.name}</div>
+                    {s.secondary_text && <div className="text-xs text-tu-faint">{s.secondary_text}</div>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Input label="City" required value={addCity} onChange={(e) => setAddCity(e.target.value)} />
             <Input label="State" value={addState} onChange={(e) => setAddState(e.target.value)} placeholder="TX" />

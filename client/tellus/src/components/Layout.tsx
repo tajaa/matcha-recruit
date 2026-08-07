@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MessageCircle, MessageSquare, ScrollText, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
+import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, MessageCircle, MessageSquare, ScrollText, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -18,6 +18,7 @@ const CONSUMER_NAV: NavItem[] = [
   { to: '/marketplace', label: 'Marketplace', icon: Gift },
   { to: '/redemptions', label: 'Redemptions', icon: Tag },
   { to: '/my-reviews', label: 'My reviews', icon: Star },
+  { to: '/places', label: 'Places', icon: MapPin },
   { to: '/messages', label: 'Messages', icon: MessageCircle },
   { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/settings', label: 'Settings', icon: Settings },

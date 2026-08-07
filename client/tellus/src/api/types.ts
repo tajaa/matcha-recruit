@@ -355,6 +355,9 @@ export interface PlaceSearchResult {
 export interface PlaceCreateResponse {
   slug: string; name: string; claimed: boolean; intake_token: string | null; existing: boolean
 }
+export interface PlaceAutocompleteResult {
+  place_id: string; name: string; secondary_text: string | null
+}
 
 export interface DmThread {
   id: string

@@ -157,6 +157,11 @@ class TellusPlaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     city: str = Field(min_length=1, max_length=120)
     state: Optional[str] = Field(default=None, max_length=60)
+    # When set, the server re-resolves name/city/state/address/lat/lng from
+    # Google Place Details — the submitted name/city above are only the
+    # fallback if that lookup fails, never trusted directly for a place_id
+    # submission (a squatter could pair a real place_id with a fake name).
+    google_place_id: Optional[str] = Field(default=None, max_length=300)
     website: Optional[str] = None  # honeypot
 
 
@@ -166,6 +171,12 @@ class TellusPlaceCreateResponse(BaseModel):
     claimed: bool = False
     intake_token: Optional[str] = None
     existing: bool = False
+
+
+class TellusPlaceAutocompleteResult(BaseModel):
+    place_id: str
+    name: str
+    secondary_text: Optional[str] = None   # e.g. "123 Main St, Springfield, IL"
 
 
 class TellusStoreCreate(BaseModel):

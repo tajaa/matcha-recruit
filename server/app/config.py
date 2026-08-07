@@ -202,6 +202,10 @@ class Settings:
     # as master_admin_email. Override via TELLUS_ADMIN_EMAILS.
     tellus_admin_emails: str = ""
 
+    # Tell-Us "add a place" autocomplete — Google Places API (New). Optional:
+    # unset ⇒ the add-a-place form degrades to plain manual entry, no errors.
+    google_maps_api_key: Optional[str] = None
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -366,6 +370,7 @@ def load_settings() -> Settings:
         saml_sp_acs_url=os.getenv("SAML_SP_ACS_URL", "https://hey-matcha.com/api/sso/acs"),
         master_admin_email=os.getenv("MASTER_ADMIN_EMAIL", "tajatheprince@gmail.com"),
         tellus_admin_emails=os.getenv("TELLUS_ADMIN_EMAILS", ""),
+        google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(
