@@ -78,6 +78,7 @@ export default function PublicBrand() {
   const [olderReviews, setOlderReviews] = useState<PublicReview[] | null>(null)   // null = collapsed
   const [olderTotal, setOlderTotal] = useState(0)
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [feedErr, setFeedErr] = useState('')
 
   useEffect(() => {
     if (!account) { setMyClaim(null); return }
@@ -123,7 +124,7 @@ export default function PublicBrand() {
 
   async function loadMore() {
     if (!page) return
-    setLoadingMore(true)
+    setLoadingMore(true); setFeedErr('')
     try {
       const next = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=${reviews.length}`)
       // The underlying `publish_at <= NOW()` window grows between fetches, so
@@ -133,13 +134,15 @@ export default function PublicBrand() {
         const seen = new Set(r.map((x) => x.id))
         return [...r, ...next.reviews.filter((x) => !seen.has(x.id))]
       })
+    } catch (e) {
+      setFeedErr(e instanceof Error ? e.message : 'Could not load more reviews.')
     } finally {
       setLoadingMore(false)
     }
   }
 
   async function loadOlder() {
-    setLoadingOlder(true)
+    setLoadingOlder(true); setFeedErr('')
     try {
       const offset = olderReviews?.length ?? 0
       const res = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?scope=older&limit=${PAGE_SIZE}&offset=${offset}`)
@@ -149,6 +152,8 @@ export default function PublicBrand() {
         const seen = new Set((prev ?? []).map((x) => x.id))
         return [...(prev ?? []), ...res.reviews.filter((x) => !seen.has(x.id))]
       })
+    } catch (e) {
+      setFeedErr(e instanceof Error ? e.message : 'Could not load more reviews.')
     } finally {
       setLoadingOlder(false)
     }
@@ -253,7 +258,7 @@ export default function PublicBrand() {
       </div>
 
       {reviews.length === 0 ? (
-        <Empty>No public reviews yet.</Empty>
+        <Empty>{page.older_count > 0 ? 'No reviews in the last 12 months.' : 'No public reviews yet.'}</Empty>
       ) : (
         <div className="space-y-3">
           {reviews.map((r) => <ReviewCard key={r.id} review={r} />)}
@@ -265,6 +270,8 @@ export default function PublicBrand() {
           <Button variant="soft" loading={loadingMore} onClick={loadMore}>Load more</Button>
         </div>
       )}
+
+      {feedErr && <p className="mt-2 text-center text-xs text-tu-bad">{feedErr}</p>}
 
       {page.older_count > 0 && (
         <div className="mt-6">

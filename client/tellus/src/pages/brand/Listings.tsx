@@ -52,6 +52,15 @@ export default function BrandListings() {
   const [rtype, setRtype] = useState<'code' | 'qr' | 'manual'>('code')
   const [expiryDays, setExpiryDays] = useState(30)
 
+  const [editingExpiry, setEditingExpiry] = useState<string | null>(null)
+  const [expiryDraft, setExpiryDraft] = useState(30)
+
+  async function saveExpiry(id: string) {
+    await tellusApi.patch(`/listings/${id}`, { expiry_days: expiryDraft })
+    setEditingExpiry(null)
+    await load()
+  }
+
   async function load() {
     setLoading(true)
     setListings(await tellusApi.get<Listing[]>('/listings')); setLoading(false)
@@ -115,7 +124,30 @@ export default function BrandListings() {
                   </div>
                   <p className="text-xs text-tu-faint">
                     {[l.city, l.state].filter(Boolean).join(', ') || 'Everywhere'} · {l.quantity_claimed} claimed
-                    {l.quantity_total != null ? ` / ${l.quantity_total}` : ''} · code valid {l.expiry_days}d
+                    {l.quantity_total != null ? ` / ${l.quantity_total}` : ''}
+                    {' · '}
+                    {editingExpiry === l.id ? (
+                      <span className="inline-flex items-center gap-1">
+                        code valid
+                        <input
+                          type="number" min={1} max={365} value={expiryDraft} autoFocus
+                          onChange={(e) => setExpiryDraft(Number(e.target.value))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') saveExpiry(l.id); if (e.key === 'Escape') setEditingExpiry(null) }}
+                          className="w-14 rounded border border-tu-border bg-transparent px-1 py-0.5 text-xs"
+                        />
+                        d
+                        <button onClick={() => saveExpiry(l.id)} className="font-semibold text-tu-accent hover:underline">Save</button>
+                        <button onClick={() => setEditingExpiry(null)} className="text-tu-faint hover:underline">Cancel</button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => { setEditingExpiry(l.id); setExpiryDraft(l.expiry_days) }}
+                        className="hover:text-tu-accent hover:underline"
+                        title="Edit code validity"
+                      >
+                        code valid {l.expiry_days}d
+                      </button>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

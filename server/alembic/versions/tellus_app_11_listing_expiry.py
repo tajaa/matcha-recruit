@@ -13,8 +13,10 @@ depends_on = None
 
 def upgrade() -> None:
     # Days a redeemed code stays valid; stamped onto tellus_redemptions.expires_at
-    # at redeem time (points_service.redeem_points). 30 matches the pre-existing
-    # code-level default so old listings behave identically.
+    # at redeem time (points_service.redeem_points). Backfilling 30 is a behavior
+    # change for existing listings: pre-migration code never wrote expires_at, so
+    # old redemptions never expired. New codes on old listings now expire in 30
+    # days (editable per listing via PATCH /listings/{id}).
     op.execute(
         "ALTER TABLE tellus_reward_listings "
         "ADD COLUMN IF NOT EXISTS expiry_days INTEGER NOT NULL DEFAULT 30"

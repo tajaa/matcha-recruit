@@ -285,6 +285,31 @@ def _gen_code() -> str:
     return "TU-" + secrets.token_hex(4).upper()
 
 
+async def reclaim_expired_redemptions(conn, listing_id: Optional[UUID] = None) -> int:
+    """Flip overdue 'issued' redemptions to terminal 'expired' and return their
+    inventory to the listing. Points are forfeited by design (no ledger credit).
+    Read-time derivation (effective_redemption_status) already shows these as
+    expired; this makes it durable so quantity_claimed stops counting them."""
+    row = await conn.fetchrow(
+        """WITH flipped AS (
+               UPDATE tellus_redemptions
+               SET status = 'expired'
+               WHERE status = 'issued' AND expires_at IS NOT NULL AND expires_at <= NOW()
+                 AND ($1::uuid IS NULL OR listing_id = $1)
+               RETURNING listing_id
+           ), restored AS (
+               UPDATE tellus_reward_listings l
+               SET quantity_claimed = GREATEST(0, l.quantity_claimed - f.n), updated_at = NOW()
+               FROM (SELECT listing_id, count(*) AS n FROM flipped GROUP BY listing_id) f
+               WHERE l.id = f.listing_id
+               RETURNING f.n
+           )
+           SELECT COALESCE(SUM(n), 0) AS n FROM restored""",
+        listing_id,
+    )
+    return int(row["n"])
+
+
 async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
     """Atomically redeem a marketplace listing for points.
 
@@ -295,6 +320,7 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
     """
     async with conn.transaction():
         await _ensure_balance(conn, account_id)
+        await reclaim_expired_redemptions(conn, listing_id)
 
         listing = await conn.fetchrow(
             """SELECT id, title, points_cost, quantity_total, quantity_claimed,

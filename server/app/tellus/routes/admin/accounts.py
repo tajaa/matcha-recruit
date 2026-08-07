@@ -13,6 +13,7 @@ from ...models.tellus import TellusAccount
 from .._shared import effective_review_state
 from ...services.admin_audit import record_admin_action
 from ...services.email import app_url
+from ...services.marketplace_service import effective_redemption_status
 from ...services.points_service import AdjustError, adjust_points
 from ...models.admin import (
     TellusAdminAccountDetail,
@@ -103,7 +104,7 @@ async def get_account_detail(account_id: UUID):
         )
 
         redemption_rows = await conn.fetch(
-            "SELECT rd.id, l.title AS listing_title, rd.points_spent, rd.status, rd.created_at "
+            "SELECT rd.id, l.title AS listing_title, rd.points_spent, rd.status, rd.expires_at, rd.created_at "
             "FROM tellus_redemptions rd JOIN tellus_reward_listings l ON l.id = rd.listing_id "
             "WHERE rd.account_id = $1 ORDER BY rd.created_at DESC LIMIT 10",
             account_id,
@@ -130,7 +131,7 @@ async def get_account_detail(account_id: UUID):
         current_streak=bal["current_streak"] if bal else 0,
         ledger=[TellusAdminLedgerEntry(**dict(r)) for r in ledger_rows],
         recent_reports=[_report_row_to_dict(r) for r in report_rows],
-        redemptions=[dict(r) for r in redemption_rows],
+        redemptions=[{**dict(r), "status": effective_redemption_status(r)} for r in redemption_rows],
         dm_threads=[dict(r) for r in dm_rows],
         audit=[TellusAdminAuditEntry(**d) for d in decode_audit_rows(audit_rows)],
     )

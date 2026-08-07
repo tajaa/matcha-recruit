@@ -27,7 +27,7 @@ from ..services.marketplace_service import (
     serialize_listing,
     serialize_redemption,
 )
-from ..services.points_service import RedeemError, redeem_points
+from ..services.points_service import RedeemError, reclaim_expired_redemptions, redeem_points
 
 router = APIRouter()
 
@@ -45,6 +45,7 @@ async def browse_marketplace(
     use_city = city or account.city
     use_state = state or account.state
     async with get_connection() as conn:
+        await reclaim_expired_redemptions(conn)
         return await list_marketplace(conn, use_city, use_state)
 
 
@@ -192,16 +193,23 @@ async def verify_redemption(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail="This reward code has expired.")
 
-        row = await conn.fetchrow(
-            """UPDATE tellus_redemptions r SET
-                   status = $3,
-                   redeemed_at = CASE WHEN $3 = 'redeemed' THEN NOW() ELSE redeemed_at END
-               FROM tellus_reward_listings l
-               WHERE r.id = $1 AND r.listing_id = l.id AND l.brand_id = $2
-               RETURNING r.*, l.title AS listing_title, l.city AS listing_city, l.state AS listing_state,
-                         (SELECT name FROM tellus_brands WHERE id = l.brand_id) AS brand_name""",
-            redemption_id, account.brand_id, body.status,
-        )
-        if row is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """UPDATE tellus_redemptions r SET
+                       status = $3,
+                       redeemed_at = CASE WHEN $3 = 'redeemed' THEN NOW() ELSE redeemed_at END
+                   FROM tellus_reward_listings l
+                   WHERE r.id = $1 AND r.listing_id = l.id AND l.brand_id = $2
+                   RETURNING r.*, l.title AS listing_title, l.city AS listing_city, l.state AS listing_state,
+                             (SELECT name FROM tellus_brands WHERE id = l.brand_id) AS brand_name""",
+                redemption_id, account.brand_id, body.status,
+            )
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Redemption not found")
+            if current["status"] == "issued" and body.status in ("cancelled", "expired"):
+                await conn.execute(
+                    "UPDATE tellus_reward_listings SET quantity_claimed = GREATEST(0, quantity_claimed - 1), "
+                    "updated_at = NOW() WHERE id = $1",
+                    row["listing_id"],
+                )
     return serialize_redemption(row)

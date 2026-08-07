@@ -4,7 +4,9 @@ All endpoints require a brand account; everything scopes by the caller's
 `brand_id` (never a client-supplied one). Links are the per-store QR tokens that
 drive the public intake flow.
 """
+import contextlib
 import secrets
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -60,6 +62,16 @@ _LOGO_MAX_BYTES = 2 * 1024 * 1024
 _LOGO_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
 
+def _is_managed_logo(url: Optional[str]) -> bool:
+    # Only ever delete objects we uploaded — legacy free-text logo_url may be external.
+    return bool(url) and "/tellus/logos/" in url
+
+
+async def _delete_logo_object(url: str) -> None:
+    with contextlib.suppress(Exception):  # best-effort; never blocks the request
+        await get_storage().delete_file(url)
+
+
 @router.post("/brand/logo", response_model=TellusBrand)
 async def upload_brand_logo(
     file: UploadFile = File(...),
@@ -89,10 +101,28 @@ async def upload_brand_logo(
     )
 
     async with get_connection() as conn:
+        old = await conn.fetchval("SELECT logo_url FROM tellus_brands WHERE id = $1", account.brand_id)
         row = await conn.fetchrow(
             "UPDATE tellus_brands SET logo_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
             account.brand_id, url,
         )
+    if old and old != url and _is_managed_logo(old):
+        await _delete_logo_object(old)
+    return TellusBrand(**dict(row))
+
+
+@router.delete("/brand/logo", response_model=TellusBrand)
+async def delete_brand_logo(account: TellusAccount = Depends(require_paid_brand)):
+    async with get_connection() as conn:
+        old = await conn.fetchval("SELECT logo_url FROM tellus_brands WHERE id = $1", account.brand_id)
+        row = await conn.fetchrow(
+            "UPDATE tellus_brands SET logo_url = NULL, updated_at = NOW() WHERE id = $1 RETURNING *",
+            account.brand_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    if _is_managed_logo(old):
+        await _delete_logo_object(old)
     return TellusBrand(**dict(row))
 
 

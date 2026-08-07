@@ -44,6 +44,18 @@ export default function BrandSettings() {
     }
   }
 
+  async function removeLogo() {
+    setLogoBusy(true); setErr(''); setMsg('')
+    try {
+      const b = await tellusApi.delete<Brand>('/brand/logo')
+      setBrand(b); setMsg('Logo removed.')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Remove failed')
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
   function moveQuestion(i: number, dir: -1 | 1) {
     setQuestions((qs) => {
       const next = [...qs]
@@ -100,6 +112,11 @@ export default function BrandSettings() {
               <Button variant="soft" size="sm" loading={logoBusy} onClick={() => fileRef.current?.click()}>
                 Upload logo
               </Button>
+              {brand.logo_url && (
+                <Button variant="ghost" size="sm" loading={logoBusy} onClick={removeLogo} className="text-tu-bad">
+                  Remove
+                </Button>
+              )}
               <p className="mt-1 text-xs text-tu-faint">PNG, JPEG, or WebP. Max 2MB.</p>
             </div>
           </div>
