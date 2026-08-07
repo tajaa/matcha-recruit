@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { MapPin, Search, Star } from 'lucide-react'
 import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
@@ -21,47 +21,70 @@ export default function Places() {
   const [adding, setAdding] = useState(false)
   const [addErr, setAddErr] = useState('')
 
-  // Live combined search on the main field: our own DB (name+optional-later
-  // city, but we no longer collect city here — search is name-only) plus
+  // Discards a response that resolves after a newer query has already fired
+  // (out-of-order network replies) or after the component moved on.
+  const seqRef = useRef(0)
+  // Places API (New) session token — pairs every autocomplete keystroke with
+  // the eventual Details lookup so Google bills the group as one session
+  // instead of a separate call per keystroke + a separate Details call.
+  const sessionRef = useRef<string>(crypto.randomUUID())
+
+  // Live combined search on the main field: our own DB (name-only) plus
   // Google Places suggestions for anything not already on Tell-Us. Google
   // side degrades to [] silently when GOOGLE_MAPS_API_KEY is unset — the DB
   // side keeps working regardless.
   useEffect(() => {
     const query = q.trim()
     if (query.length < 2) {
-      setDbResults([]); setSuggestions([]); setSearchErr('')
+      setDbResults([]); setSuggestions([]); setSearchErr(''); setSearching(false)
       return
     }
     setSearching(true)
     const t = setTimeout(() => {
-      const params = new URLSearchParams({ q: query })
+      const mySeq = ++seqRef.current
+      const dbParams = new URLSearchParams({ q: query })
+      const acParams = new URLSearchParams({ q: query, st: sessionRef.current })
       Promise.all([
-        tellusPublicGet<PlaceSearchResult[]>(`/places/search?${params.toString()}`).catch(() => {
-          setSearchErr('Search failed')
-          return []
-        }),
-        tellusPublicGet<PlaceAutocompleteResult[]>(`/places/autocomplete?${params.toString()}`).catch(() => []),
+        tellusPublicGet<PlaceSearchResult[]>(`/places/search?${dbParams.toString()}`)
+          .catch((e: unknown) => (e instanceof Error ? e : new Error('Search failed'))),
+        tellusPublicGet<PlaceAutocompleteResult[]>(`/places/autocomplete?${acParams.toString()}`).catch(() => []),
       ]).then(([db, ac]) => {
-        setSearchErr('')
-        setDbResults(db)
-        setSuggestions(ac)
-      }).finally(() => setSearching(false))
-    }, 300)
-    return () => { clearTimeout(t); setSearching(false) }
+        if (mySeq !== seqRef.current) return // a newer query already superseded this response
+
+        if (db instanceof Error) {
+          setSearchErr(/too many|429/i.test(db.message) ? 'Searching too fast — give it a second.' : 'Search failed — try again.')
+          setDbResults([])
+        } else {
+          setSearchErr('')
+          setDbResults(db)
+        }
+
+        const okDb = db instanceof Error ? [] : db
+        const dbPlaceIds = new Set(okDb.map((r) => r.google_place_id).filter(Boolean))
+        setSuggestions(ac.filter((s) => !dbPlaceIds.has(s.place_id)))
+      }).finally(() => {
+        if (mySeq === seqRef.current) setSearching(false)
+      })
+    }, 450)
+    return () => clearTimeout(t)
   }, [q])
 
   async function addFromSuggestion(s: PlaceAutocompleteResult) {
     setAddingPlaceId(s.place_id); setAddErr('')
     try {
       const res = await tellusPublicPost<PlaceCreateResponse>('/places', {
-        name: s.name, google_place_id: s.place_id, website,
+        name: s.name, google_place_id: s.place_id, session_token: sessionRef.current, website,
       })
       if (res.intake_token) navigate('/i/' + res.intake_token)
       else navigate('/b/' + res.slug)
     } catch (e) {
+      // Google Details couldn't verify this place right now — prefill the
+      // manual form with what we already know instead of a dead-end retry.
+      setAddName(s.name)
       setAddErr(e instanceof Error ? e.message : 'Could not add this place')
     } finally {
       setAddingPlaceId(null)
+      sessionRef.current = crypto.randomUUID() // the session always ends on selection
     }
   }
 
@@ -83,7 +106,7 @@ export default function Places() {
   }
 
   const showResults = q.trim().length >= 2
-  const noMatches = showResults && !searching && dbResults.length === 0 && suggestions.length === 0
+  const noMatches = showResults && !searching && !searchErr && dbResults.length === 0 && suggestions.length === 0
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">

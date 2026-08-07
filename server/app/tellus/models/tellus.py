@@ -151,6 +151,7 @@ class TellusPlaceSearchResult(BaseModel):
     claimed: bool
     intake_token: Optional[str] = None   # only ever set for unclaimed places
     review_count: int = 0
+    google_place_id: Optional[str] = None   # lets the client dedupe vs live Google suggestions
 
 
 class TellusPlaceCreate(BaseModel):
@@ -164,6 +165,9 @@ class TellusPlaceCreate(BaseModel):
     # fallback if that lookup fails, never trusted directly for a place_id
     # submission (a squatter could pair a real place_id with a fake name).
     google_place_id: Optional[str] = Field(default=None, max_length=300)
+    # Places API (New) session token — pairs the autocomplete keystrokes with
+    # this Details lookup for session-based billing instead of per-call.
+    session_token: Optional[str] = Field(default=None, max_length=64)
     website: Optional[str] = None  # honeypot
 
 
@@ -356,6 +360,8 @@ class TellusReport(BaseModel):
     rating: Optional[int] = None
     # NULL = private feedback, never a review. 'published' is derived, not stored.
     review_state: Optional[ReviewState] = None
+    # Set only when a brand used publish-now to waive the remainder of the 48h hold.
+    published_early_at: Optional[datetime] = None
     publish_at: Optional[datetime] = None
     hearted_at: Optional[datetime] = None
     brand_public_reply: Optional[str] = None
@@ -584,9 +590,35 @@ class TellusPublicBrandPage(BaseModel):
 
 
 class TellusClaimResponse(BaseModel):
+    """Response for POST /b/{slug}/claim — files a PENDING claim only, no
+    ownership flip. status is always 'pending' here; the account is unchanged
+    until an admin approves via routes/admin/claims.py."""
     ok: bool = True
-    brand_id: UUID
+    claim_id: UUID
+    status: str = "pending"
     slug: str
+
+
+class TellusMyClaim(BaseModel):
+    id: UUID
+    brand_id: UUID
+    brand_slug: str
+    brand_name: str
+    status: str
+    created_at: datetime
+    decision_note: Optional[str] = None
+
+
+class TellusAdminClaim(TellusMyClaim):
+    account_id: UUID
+    account_email: str
+    account_display_name: Optional[str] = None
+    claimant_ip: Optional[str] = None
+    note: Optional[str] = None
+
+
+class TellusClaimDecision(BaseModel):
+    decision_note: Optional[str] = Field(default=None, max_length=1000)
 
 
 # ── DMs (brand <-> reviewer) ────────────────────────────────────────────────────

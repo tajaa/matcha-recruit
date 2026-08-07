@@ -109,6 +109,7 @@ def _build_report(row, *, store_name, media, has_dm_thread, answers=()) -> Tellu
         is_identified=row["reporter_account_id"] is not None,
         has_dm_thread=has_dm_thread,
         answers=list(answers),
+        published_early_at=row["published_early_at"] if "published_early_at" in row.keys() else None,
     )
 
 

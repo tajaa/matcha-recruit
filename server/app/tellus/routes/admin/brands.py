@@ -275,6 +275,15 @@ async def unassign_owner(
             # invariant this helper enforces (routes/places.py docstring).
             await ensure_community_link(conn, brand_id, detail="admin unassign-owner")
 
+            # Otherwise GET /me/claim keeps showing a ghost 'approved' claim
+            # for an account that no longer owns anything.
+            await conn.execute(
+                "UPDATE tellus_brand_claims SET status = 'cancelled', decided_at = NOW(), "
+                "decided_by = $1, decision_note = 'admin unassign-owner' "
+                "WHERE brand_id = $2 AND status = 'approved'",
+                admin.id, brand_id,
+            )
+
             await record_admin_action(
                 conn, admin, "brand.unassign_owner", "brand", brand_id,
                 {"account_id": str(owner_id), "reverted_type": reverted_type, "community_link_ensured": True},

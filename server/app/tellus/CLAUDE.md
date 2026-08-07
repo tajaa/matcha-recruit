@@ -42,36 +42,57 @@ Full design + endpoint-by-endpoint SQL: `TELLUS_ADMIN_MGMT_PLAN.md` at the repo 
   path, and `routes/admin/brands.py:unassign_owner`. Add a call there if you add
   another such path.
 - **Google Places autocomplete** (`services/google_places.py`) — server-proxied
-  (`GOOGLE_MAPS_API_KEY` never reaches the browser); unset ⇒ every function returns
-  `None`/`[]` and the add-a-place form silently degrades to manual free-text entry, no
-  errors surfaced anywhere. `GET /places/autocomplete` is Redis-cached 5 min per
-  normalized query and rate-limited same as the rest of `places.py`.
-- **Dedupe order in `create_place`**: `google_place_id` match first
+  (`GOOGLE_MAPS_API_KEY` never reaches the browser). `autocomplete()` returns `None` when
+  unset/failed vs `[]` for a genuine zero-result search — `GET /places/autocomplete` only
+  `cache_set`s the latter (5 min, Redis, per normalized query), so a transient Google
+  outage doesn't poison the cache; either way the add-a-place form silently degrades to
+  manual free-text entry, no errors surfaced to the user. Both `autocomplete()` and
+  `place_details()` accept a Places API (New) `sessionToken` (`?st=` query param → route →
+  service) so one autocomplete-then-select flow bills as one session, not a call per
+  keystroke plus a separate Details call.
+- **Dedupe order in `create_place`**: the advisory lock
+  (`pg_advisory_xact_lock(hashtextextended(lower(name)||'|'||lower(city)))`) is acquired
+  **before** any dedupe SELECT, then `google_place_id` match first
   (`ux_tellus_brands_google_place_id`, a partial unique index — NULLs exempt), then the
-  pre-existing name+city advisory-lock match, then a fresh insert. Google Place Details
-  are always re-resolved **server-side** from the `place_id` — the client-submitted
-  name/city are only the fallback when that lookup fails, never trusted directly for a
-  `google_place_id` submission (a squatter could otherwise pair a real place_id with a
-  fake name).
+  pre-existing name+city match, then a fresh insert. Google Place Details are always
+  re-resolved **server-side** from the `place_id` — `verified_place_id` (Google's own echo
+  from `place_details()`) is the ONLY place_id ever written to `tellus_brands`/
+  `tellus_stores`; a client-submitted `google_place_id` that fails to resolve is discarded,
+  never persisted anywhere — a squatter cannot pair a real place_id with a fake name/brand
+  by racing a Google outage.
 - **ToS note (decided)**: `place_id` is stored indefinitely (Google explicitly permits
   this); resolved name/address/lat/lng are stored as part of the consumer's own
   submission despite Google's 30-day cache guidance for raw autocomplete results —
   accepted, these are facts the user selected, not a cached search index.
-- **Self-serve claim** (`routes/community.py:claim_brand`, `POST /b/{slug}/claim`) —
-  "Is this your business?" on the public page. Mirrors admin `assign_owner`
-  (`routes/admin/brands.py`) minus the admin gate/audit: links `owner_account_id` +
-  `claimed_at`, flips `account_type` consumer→brand if needed, same one-brand-per-
-  account guard (`require_tellus_account`'s `LEFT JOIN tellus_brands` assumes it holds).
-  **Does not touch `plan_status`** — a claimed `consumer_added` brand stays `'pending'`,
-  so `require_paid_brand` keeps 402ing every dashboard surface until the caller runs the
-  existing Stripe checkout (`routes/billing.py`). Payment is the verification bar, not
-  identity proof; admin `unassign_owner` is the recourse for a bad-faith claim.
+- **Self-serve claim, approval queue** (`routes/community.py:claim_brand`,
+  `POST /b/{slug}/claim`) — "Is this your business?" on the public page. Files a
+  **PENDING** row in `tellus_brand_claims` (partial-unique on `brand_id`/`account_id`
+  WHERE `status='pending'` — one pending claim per brand and per account, race-safe at
+  the DB) and does **not** touch `owner_account_id`/`account_type`. An admin must
+  approve via `routes/admin/claims.py:approve_claim` before ownership actually flips —
+  that endpoint re-checks eligibility (brand still unowned, claimant still brandless) and
+  auto-rejects if it drifted, then runs the same ownership-flip logic `assign_owner`
+  (`routes/admin/brands.py`) always has. `POST /admin/claims/{id}/reject` declines with an
+  optional `decision_note` (claimant-visible via `GET /me/claim`). Every decision writes
+  `tellus_admin_audit` (`brand.claim_requested`/`claim_approve`/`claim_reject`) and
+  notifies the claimant. **Does not touch `plan_status`** — an approved `consumer_added`
+  brand stays `'pending'`, so `require_paid_brand` keeps 402ing every dashboard surface
+  until the caller runs the existing Stripe checkout (`routes/billing.py`). Self-serve
+  undo: `GET /me/claim` (latest non-cancelled claim) + `POST /me/claim/cancel` — cancels a
+  pending claim outright, or reverses an approved-but-unpaid one (mirrors
+  `unassign_owner`); an approved+paid claim requires support. `unassign_owner` itself also
+  cancels any dangling `approved` claim row on the brand it unassigns, so `GET /me/claim`
+  never shows a ghost approval for an account that no longer owns anything.
 - **`tellus_reports.publish_at` may only ever move earlier, never later.** The 48h hold
   (`services/feedback_service.py:create_report`) exists so a brand can't delay or
   suppress a review; the only UPDATE site is `routes/feedback.py:publish_review_now`
   (`POST /feedback/{id}/publish-now`, guarded by the pure `can_publish_now` helper —
   held + still in the future only). Anything that could push `publish_at` later would
-  reopen the suppression hole the hold closed — don't add one.
+  reopen the suppression hole the hold closed — don't add one. Every early publish also
+  stamps `published_early_at`/`published_early_by` (distinct from `publish_at` itself) so
+  an early publish stays distinguishable from a normal hold expiry in a later dispute —
+  the reviewer's edit window (`my_reviews.py:update_my_review` permits edits while held)
+  was cut short by brand action, not by time.
 
 ## Frontend pairing
 

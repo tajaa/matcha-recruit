@@ -30,6 +30,7 @@ import AdminAccounts from './pages/admin/Accounts'
 import AdminAccountDetail from './pages/admin/AccountDetail'
 import AdminBrands from './pages/admin/Brands'
 import AdminBrandDetail from './pages/admin/BrandDetail'
+import AdminClaims from './pages/admin/Claims'
 import AdminModeration from './pages/admin/Moderation'
 import AdminEconomy from './pages/admin/Economy'
 import AdminAudit from './pages/admin/Audit'
@@ -120,6 +121,7 @@ export default function App() {
       <Route path="/admin/accounts/:id" element={<AdminOnly><AdminAccountDetail /></AdminOnly>} />
       <Route path="/admin/brands" element={<AdminOnly><AdminBrands /></AdminOnly>} />
       <Route path="/admin/brands/:id" element={<AdminOnly><AdminBrandDetail /></AdminOnly>} />
+      <Route path="/admin/claims" element={<AdminOnly><AdminClaims /></AdminOnly>} />
       <Route path="/admin/moderation" element={<AdminOnly><AdminModeration /></AdminOnly>} />
       <Route path="/admin/economy" element={<AdminOnly><AdminEconomy /></AdminOnly>} />
       <Route path="/admin/updates" element={<AdminOnly><TellusAdminUpdates /></AdminOnly>} />

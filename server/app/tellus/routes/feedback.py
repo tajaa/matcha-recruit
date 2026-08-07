@@ -317,9 +317,10 @@ async def publish_review_now(report_id: UUID, account: TellusAccount = Depends(r
             if err:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
             updated = await conn.fetchrow(
-                "UPDATE tellus_reports SET publish_at = NOW(), updated_at = NOW() "
+                "UPDATE tellus_reports SET publish_at = NOW(), updated_at = NOW(), "
+                "published_early_at = NOW(), published_early_by = $3 "
                 "WHERE id = $1 AND brand_id = $2 RETURNING *",
-                report_id, account.brand_id,
+                report_id, account.brand_id, account.id,
             )
             if row["reporter_account_id"] is not None:
                 await notify_account(

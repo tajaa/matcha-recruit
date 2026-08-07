@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, MessageCircle, MessageSquare, ScrollText, ShieldAlert, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
+import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, MessageCircle, MessageSquare, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -40,6 +40,7 @@ const BRAND_PENDING_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { to: '/admin/accounts', label: 'Accounts', icon: Users },
   { to: '/admin/brands', label: 'Brands', icon: Building2 },
+  { to: '/admin/claims', label: 'Claims', icon: ShieldCheck },
   { to: '/admin/moderation', label: 'Moderation', icon: ShieldAlert },
   { to: '/admin/economy', label: 'Economy', icon: Coins },
   { to: '/admin/updates', label: 'Updates', icon: Sparkles },

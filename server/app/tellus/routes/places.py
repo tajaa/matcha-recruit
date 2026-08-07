@@ -74,14 +74,14 @@ async def search_places(
     q: str = Query(min_length=1, max_length=120),
     city: Optional[str] = Query(default=None, max_length=120),
 ):
-    await check_rate_limit(client_ip(request), "tellus_place_search", 60, 3600)
+    await check_rate_limit(client_ip(request), "tellus_place_search", 240, 3600)
     q = q.strip()
     if not q:
         return []
     city_filter = (city or "").strip() or None
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT b.slug, b.name, b.logo_url, b.owner_account_id,
+            """SELECT b.slug, b.name, b.logo_url, b.owner_account_id, b.google_place_id,
                       s.city, s.state,
                       (SELECT COUNT(*) FROM tellus_reports r
                         WHERE r.brand_id = b.id AND r.review_state = 'held'
@@ -110,6 +110,7 @@ async def search_places(
             city=r["city"], state=r["state"],
             claimed=r["owner_account_id"] is not None,
             intake_token=r["intake_token"], review_count=r["review_count"],
+            google_place_id=r["google_place_id"],
         )
         for r in rows
     ]
@@ -120,13 +121,16 @@ async def autocomplete_places(
     request: Request,
     q: str = Query(min_length=2, max_length=120),
     city: Optional[str] = Query(default=None, max_length=120),
+    st: Optional[str] = Query(default=None, max_length=64, description="Places API session token"),
 ):
     """Server-proxied Google Places autocomplete for the add-a-place form.
-    Returns [] when GOOGLE_MAPS_API_KEY is unset — the frontend silently
-    falls back to manual entry, never an error state."""
+    Returns [] when GOOGLE_MAPS_API_KEY is unset or Google fails — the
+    frontend silently falls back to manual entry, never an error state. A
+    failure is NOT cached (only genuine empty results are), so a transient
+    Google outage doesn't poison the next 5 minutes of the same query."""
     ip = client_ip(request)
-    await check_rate_limit(ip, "tellus_place_ac_min", 10, 60)
-    await check_rate_limit(ip, "tellus_place_ac_hr", 60, 3600)
+    await check_rate_limit(ip, "tellus_place_ac_min", 30, 60)
+    await check_rate_limit(ip, "tellus_place_ac_hr", 300, 3600)
 
     q = q.strip()
     city_norm = (city or "").strip()
@@ -140,7 +144,9 @@ async def autocomplete_places(
         if cached is not None:
             return cached
 
-    results = await google_places.autocomplete(q, city_norm or None)
+    results = await google_places.autocomplete(q, city_norm or None, session_token=st)
+    if results is None:
+        return []  # unconfigured/failed — never cache this as "no results"
     if redis:
         await cache_set(redis, cache_key, results, ttl=300)
     return results
@@ -156,12 +162,18 @@ async def create_place(body: TellusPlaceCreate, request: Request):
         return TellusPlaceCreateResponse(slug="place", name=body.name.strip(), intake_token=None)
 
     # Resolve Google details server-side — NEVER trust client-sent name/city
-    # for a place_id submission (TellusPlaceCreate.google_place_id docstring).
-    # Failure (Google down, bad id) falls back to the submitted free-text
-    # below; the place still gets created, just without a place_id.
+    # OR place_id for a place_id submission (TellusPlaceCreate.google_place_id
+    # docstring). Failure (Google down, bad id) falls back to the submitted
+    # free-text below; the place still gets created, just with NO place_id —
+    # a client-sent place_id we never verified is never persisted anywhere,
+    # or a squatter could pair a real place_id with a fake name/brand.
     details = None
     if body.google_place_id:
-        details = await google_places.place_details(body.google_place_id)
+        details = await google_places.place_details(body.google_place_id, session_token=body.session_token)
+
+    # The ONLY place_id we ever write to the DB — always Google's own echo,
+    # never body.google_place_id directly.
+    verified_place_id = (details or {}).get("place_id")
 
     name = ((details or {}).get("name") or body.name).strip()
     city = ((details or {}).get("city") or body.city or "").strip()
@@ -171,18 +183,38 @@ async def create_place(body: TellusPlaceCreate, request: Request):
     lng = (details or {}).get("lng")
 
     if not name or not city:
+        if body.google_place_id and details is None:
+            # Distinguishable from a plain validation 422 so the "Add & review"
+            # suggestion-click path (which never collects a city) can recover
+            # by falling back to the manual form instead of dead-ending.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="We couldn't verify this place right now — add it manually below.",
+            )
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="Name and city are required.")
 
     async with get_connection() as conn:
         async with conn.transaction():
+            # Serialize concurrent creates of the same (name, city) BEFORE any
+            # dedupe SELECT — including pass 1 below. Two concurrent requests
+            # for the same google_place_id resolve to the same name+city, so
+            # they share this lock key and can no longer both see "no active
+            # link" and both mint one (the invariant pass 1 exists to protect).
+            # The lock releases at commit; a loser then sees the winner's
+            # committed row in the SELECT.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(lower($1) || '|' || lower($2), 0))",
+                name, city,
+            )
+
             # Dedupe pass 1: exact Google place. Only meaningful when the
             # lookup above actually resolved (a bad/stale id behaves like no
             # id — falls through to the name+city path like manual entry).
-            if details:
+            if verified_place_id:
                 by_place_id = await conn.fetchrow(
                     "SELECT id, slug, name, owner_account_id FROM tellus_brands WHERE google_place_id = $1",
-                    body.google_place_id,
+                    verified_place_id,
                 )
                 if by_place_id is not None:
                     claimed = by_place_id["owner_account_id"] is not None
@@ -195,15 +227,6 @@ async def create_place(body: TellusPlaceCreate, request: Request):
                         slug=by_place_id["slug"], name=by_place_id["name"],
                         claimed=claimed, intake_token=token, existing=True,
                     )
-
-            # Serialize concurrent creates of the same (name, city): the dedup
-            # SELECT and the INSERTs below must be atomic, or duplicate places
-            # are the normal outcome under concurrency. The lock releases at
-            # commit; a loser then sees the winner's committed row in the SELECT.
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(lower($1) || '|' || lower($2), 0))",
-                name, city,
-            )
 
             # Dedupe pass 2: same name + same city (or a store-less brand with
             # the name) — the pre-existing, place_id-agnostic path.
@@ -227,12 +250,12 @@ async def create_place(body: TellusPlaceCreate, request: Request):
                 # Backfill a resolved place_id onto this legacy (pre-Google)
                 # match — best-effort, skipped if that place_id already
                 # belongs to a different brand (partial unique index).
-                if body.google_place_id and existing["google_place_id"] is None:
+                if verified_place_id and existing["google_place_id"] is None:
                     try:
                         async with conn.transaction():
                             await conn.execute(
                                 "UPDATE tellus_brands SET google_place_id = $1 WHERE id = $2",
-                                body.google_place_id, existing["id"],
+                                verified_place_id, existing["id"],
                             )
                     except asyncpg.UniqueViolationError as e:
                         if e.constraint_name != "ux_tellus_brands_google_place_id":
@@ -256,7 +279,7 @@ async def create_place(body: TellusPlaceCreate, request: Request):
                             "INSERT INTO tellus_brands "
                             "(owner_account_id, name, slug, location_count, source, google_place_id) "
                             "VALUES (NULL, $1, $2, 1, 'consumer_added', $3) RETURNING id",
-                            name, slug, body.google_place_id,
+                            name, slug, verified_place_id,
                         )
                     break
                 except asyncpg.UniqueViolationError as e:
@@ -269,8 +292,17 @@ async def create_place(body: TellusPlaceCreate, request: Request):
                         # place between our dedupe SELECT and this INSERT.
                         row = await conn.fetchrow(
                             "SELECT id, slug, name, owner_account_id FROM tellus_brands "
-                            "WHERE google_place_id = $1", body.google_place_id,
+                            "WHERE google_place_id = $1", verified_place_id,
                         )
+                        if row is None:
+                            # The winning row was deleted between the unique-
+                            # violation and this re-SELECT (admin delete /
+                            # concurrent cleanup) — surface a clean retry
+                            # instead of crashing on row["owner_account_id"].
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail="This place was just added by someone else — search for it again.",
+                            )
                         claimed = row["owner_account_id"] is not None
                         token = None
                         if not claimed:
@@ -293,7 +325,7 @@ async def create_place(body: TellusPlaceCreate, request: Request):
             store_id = await conn.fetchval(
                 "INSERT INTO tellus_stores (brand_id, name, city, state, address, lat, lng, google_place_id) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
-                brand_id, name, city, state, address, lat, lng, body.google_place_id,
+                brand_id, name, city, state, address, lat, lng, verified_place_id,
             )
             token = await ensure_community_link(
                 conn, brand_id, store_id=store_id, actor_ip=ip, detail="consumer_added place",

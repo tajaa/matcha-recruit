@@ -1,9 +1,11 @@
 """Google Places API (New) client for Tell-Us place autocomplete.
 
-Server-side proxy only — the API key never reaches the browser. Every
-function degrades to None/[] when the key is unset or Google errors; callers
-treat that as "no suggestions", never as a failure — a flaky/unconfigured
-Places API must never block the add-a-place flow (manual entry always works).
+Server-side proxy only — the API key never reaches the browser. `autocomplete()`
+distinguishes unconfigured/failed (None) from genuinely-empty (list) so the
+route can skip caching a transient Google outage; `place_details()` degrades
+to None on any failure — callers fall back to the submitter's own free-text,
+a flaky/unconfigured Places API must never block the add-a-place flow (manual
+entry always works).
 
 ToS note (decided, see server/app/tellus/CLAUDE.md): place_id is stored
 indefinitely (explicitly permitted by Google's terms); displayName/address/
@@ -44,25 +46,36 @@ def _parse_autocomplete(payload: dict[str, Any]) -> list[dict]:
         fmt = pred.get("structuredFormat", {})
         main = fmt.get("mainText", {}).get("text")
         secondary = fmt.get("secondaryText", {}).get("text")
+        name = main or pred.get("text", {}).get("text") or ""
+        if not name.strip():
+            # Nothing to show the user or to submit as a place name later —
+            # skip like a missing placeId above, don't emit a blank card.
+            continue
         out.append({
             "place_id": place_id,
-            "name": main or pred.get("text", {}).get("text") or "",
+            "name": name,
             "secondary_text": secondary,
         })
     return out
 
 
-async def autocomplete(q: str, city: Optional[str] = None) -> list[dict]:
+async def autocomplete(q: str, city: Optional[str] = None, session_token: Optional[str] = None) -> Optional[list[dict]]:
     """-> [{place_id, name, secondary_text}] (up to Google's default page,
-    establishments only). [] when no key configured, no results, or on any
-    Google/network error — never raises."""
+    establishments only). None when no key configured or on any Google/network
+    error (caller must not cache this as "no results"); [] only for a genuine
+    zero-result search. Never raises. session_token pairs this call with a
+    later place_details() call so Google bills the pair as one session."""
     key = _api_key()
-    if not key or not q:
+    if not key:
+        return None
+    if not q:
         return []
     body: dict[str, Any] = {
         "input": f"{q}, {city}" if city else q,
         "includedPrimaryTypes": ["establishment"],
     }
+    if session_token:
+        body["sessionToken"] = session_token
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
@@ -74,7 +87,7 @@ async def autocomplete(q: str, city: Optional[str] = None) -> list[dict]:
             return _parse_autocomplete(resp.json())
     except Exception:
         logger.warning("Tell-Us Google Places autocomplete failed for q=%r", q, exc_info=True)
-        return []
+        return None
 
 
 def parse_place_details(payload: dict[str, Any]) -> dict:
@@ -104,17 +117,22 @@ def parse_place_details(payload: dict[str, Any]) -> dict:
     }
 
 
-async def place_details(place_id: str) -> Optional[dict]:
+async def place_details(place_id: str, session_token: Optional[str] = None) -> Optional[dict]:
     """GET Place Details by id. None on any failure — caller falls back to
     the submitter's free-text name/city/state (the place still gets created,
-    just without a verified Google address)."""
+    just without a verified Google address). session_token, when it matches
+    the token used on the preceding autocomplete() call, closes out that
+    billing session instead of billing this as a separate request."""
     key = _api_key()
     if not key or not place_id:
         return None
+    url = _DETAILS_URL.format(place_id=place_id)
+    if session_token:
+        url += f"?sessionToken={session_token}"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
-                _DETAILS_URL.format(place_id=place_id),
+                url,
                 headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": _DETAILS_FIELD_MASK},
             )
             resp.raise_for_status()

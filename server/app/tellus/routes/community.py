@@ -3,13 +3,21 @@ published reviews at /tellus/b/{slug}. Mirrors public_intake.py's hygiene
 (rate limit, no auth) since this is the other unauthenticated surface in the
 app.
 """
+from typing import Optional
+
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import require_tellus_account
-from ..models.tellus import TellusAccount, TellusClaimResponse, TellusPublicBrandPage, TellusPublicReview, TellusReportMedia
+from ..models.tellus import (
+    TellusAccount, TellusClaimResponse, TellusMyClaim, TellusPublicBrandPage,
+    TellusPublicReview, TellusReportMedia,
+)
+from ..services.admin_audit import record_admin_action
 from ._shared import _answer_rows_to_models, _media_url
+from .places import ensure_community_link
 
 router = APIRouter()
 
@@ -121,15 +129,15 @@ async def public_brand_page(
 async def claim_brand(
     slug: str, request: Request, account: TellusAccount = Depends(require_tellus_account),
 ):
-    """'Is this your business?' self-serve claim. Mirrors admin
-    assign_owner (routes/admin/brands.py) minus the admin gate/audit:
-    ownership link only — plan_status stays 'pending' (column default), so
-    every brand-dashboard surface keeps 402ing (require_paid_brand) until
-    the caller completes the standard billing checkout. Payment is the
-    verification bar here, not identity proof; admin unassign_owner is the
-    recourse for a bad-faith claim.
+    """'Is this your business?' self-serve claim. Files a PENDING row in
+    tellus_brand_claims — does NOT flip ownership or account_type. An admin
+    must approve via routes/admin/claims.py (mirrors the old assign_owner
+    logic there) before anything changes. Payment stays the verification bar
+    after approval, same as before — plan_status is untouched here.
     """
-    await check_rate_limit(client_ip(request), "tellus_brand_claim", 5, 3600)
+    ip = client_ip(request)
+    await check_rate_limit(ip, "tellus_brand_claim", 5, 3600)
+    await check_rate_limit(str(account.id), "tellus_brand_claim_acct", 3, 86400)
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -153,14 +161,101 @@ async def claim_brand(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Your account already owns a brand — one brand per account.",
                 )
-            if account.account_type == "consumer":
+            try:
+                claim_id = await conn.fetchval(
+                    "INSERT INTO tellus_brand_claims (brand_id, account_id, claimant_ip) "
+                    "VALUES ($1, $2, $3) RETURNING id",
+                    brand["id"], account.id, ip,
+                )
+            except asyncpg.UniqueViolationError:
+                # Partial unique index — a pending claim already exists for
+                # this brand or this account (concurrent double-submit).
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A claim for this business is already pending review.",
+                )
+            await record_admin_action(
+                conn, account, "brand.claim_requested", "brand", brand["id"],
+                {"claim_id": str(claim_id), "ip": ip},
+            )
+    return TellusClaimResponse(claim_id=claim_id, status="pending", slug=slug)
+
+
+@router.get("/me/claim", response_model=Optional[TellusMyClaim])
+async def my_claim(account: TellusAccount = Depends(require_tellus_account)):
+    """Latest non-cancelled claim filed by the caller — drives the "claim
+    pending review" state on PublicBrand.tsx. None if the caller has never
+    claimed or every claim of theirs was cancelled."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT c.id, c.brand_id, b.slug AS brand_slug, b.name AS brand_name,
+                      c.status, c.created_at, c.decision_note
+               FROM tellus_brand_claims c
+               JOIN tellus_brands b ON b.id = c.brand_id
+               WHERE c.account_id = $1 AND c.status <> 'cancelled'
+               ORDER BY c.created_at DESC LIMIT 1""",
+            account.id,
+        )
+    return None if row is None else TellusMyClaim(**dict(row))
+
+
+@router.post("/me/claim/cancel")
+async def cancel_my_claim(account: TellusAccount = Depends(require_tellus_account)):
+    """Self-serve undo. A pending claim just cancels. An approved-but-unpaid
+    claim (plan_status still 'pending' — the caller never finished checkout)
+    reverses ownership the same way admin unassign_owner does, since nothing
+    external (billing, other users) depends on it yet. An approved+paid claim
+    requires support — reversing it here would strand an active subscription.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            claim = await conn.fetchrow(
+                """SELECT c.id, c.brand_id, c.status, b.plan_status
+                   FROM tellus_brand_claims c JOIN tellus_brands b ON b.id = c.brand_id
+                   WHERE c.account_id = $1 AND c.status IN ('pending', 'approved')
+                   ORDER BY c.created_at DESC LIMIT 1 FOR UPDATE OF c""",
+                account.id,
+            )
+            if claim is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "No active claim to cancel.")
+
+            if claim["status"] == "pending":
                 await conn.execute(
-                    "UPDATE tellus_accounts SET account_type = 'brand', updated_at = NOW() WHERE id = $1",
-                    account.id,
+                    "UPDATE tellus_brand_claims SET status = 'cancelled', decided_at = NOW() WHERE id = $1",
+                    claim["id"],
+                )
+                await record_admin_action(
+                    conn, account, "brand.claim_cancelled", "brand", claim["brand_id"],
+                    {"claim_id": str(claim["id"]), "reason": "self-cancel pending"},
+                )
+                return {"ok": True}
+
+            # status == 'approved'
+            if claim["plan_status"] != "pending":
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "This business is already on a paid plan — contact support to release the claim.",
                 )
             await conn.execute(
-                "UPDATE tellus_brands SET owner_account_id = $1, claimed_at = NOW(), updated_at = NOW() "
-                "WHERE id = $2",
-                account.id, brand["id"],
+                "UPDATE tellus_brands SET owner_account_id = NULL, claimed_at = NULL, updated_at = NOW() "
+                "WHERE id = $1",
+                claim["brand_id"],
             )
-    return TellusClaimResponse(brand_id=brand["id"], slug=slug)
+            still_owns = await conn.fetchval(
+                "SELECT 1 FROM tellus_brands WHERE owner_account_id = $1", account.id
+            )
+            if account.account_type == "brand" and not still_owns:
+                await conn.execute(
+                    "UPDATE tellus_accounts SET account_type = 'consumer', updated_at = NOW() WHERE id = $1",
+                    account.id,
+                )
+            await ensure_community_link(conn, claim["brand_id"], actor_ip=None, detail="claim self-cancel")
+            await conn.execute(
+                "UPDATE tellus_brand_claims SET status = 'cancelled', decided_at = NOW() WHERE id = $1",
+                claim["id"],
+            )
+            await record_admin_action(
+                conn, account, "brand.claim_cancelled", "brand", claim["brand_id"],
+                {"claim_id": str(claim["id"]), "reason": "self-cancel approved-unpaid"},
+            )
+    return {"ok": True}

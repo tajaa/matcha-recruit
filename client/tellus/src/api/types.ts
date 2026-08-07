@@ -349,14 +349,34 @@ export interface PublicBrandPage {
 
 export interface ClaimResponse {
   ok: boolean
-  brand_id: string
+  claim_id: string
+  status: string
   slug: string
+}
+
+export interface MyClaim {
+  id: string
+  brand_id: string
+  brand_slug: string
+  brand_name: string
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  created_at: string
+  decision_note: string | null
+}
+
+export interface AdminClaim extends MyClaim {
+  account_id: string
+  account_email: string
+  account_display_name: string | null
+  claimant_ip: string | null
+  note: string | null
 }
 
 export interface PlaceSearchResult {
   slug: string; name: string; logo_url: string | null
   city: string | null; state: string | null
   claimed: boolean; intake_token: string | null; review_count: number
+  google_place_id: string | null
 }
 export interface PlaceCreateResponse {
   slug: string; name: string; claimed: boolean; intake_token: string | null; existing: boolean
