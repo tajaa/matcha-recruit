@@ -78,7 +78,7 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  const FEEDBACK_SURFACE_KINDS = new Set(['dm_message', 'review_moderated', 'review_hearted', 'review_reply'])
+  const FEEDBACK_SURFACE_KINDS = new Set(['dm_message', 'review_moderated', 'review_hearted', 'review_reply', 'review_published'])
 
   async function openNotifications() {
     // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send

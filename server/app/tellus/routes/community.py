@@ -3,11 +3,12 @@ published reviews at /tellus/b/{slug}. Mirrors public_intake.py's hygiene
 (rate limit, no auth) since this is the other unauthenticated surface in the
 app.
 """
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
-from ..models.tellus import TellusPublicBrandPage, TellusPublicReview, TellusReportMedia
+from ..dependencies import require_tellus_account
+from ..models.tellus import TellusAccount, TellusClaimResponse, TellusPublicBrandPage, TellusPublicReview, TellusReportMedia
 from ._shared import _answer_rows_to_models, _media_url
 
 router = APIRouter()
@@ -114,3 +115,52 @@ async def public_brand_page(
         claimed=claimed,
         intake_token=intake_token,
     )
+
+
+@router.post("/b/{slug}/claim", response_model=TellusClaimResponse)
+async def claim_brand(
+    slug: str, request: Request, account: TellusAccount = Depends(require_tellus_account),
+):
+    """'Is this your business?' self-serve claim. Mirrors admin
+    assign_owner (routes/admin/brands.py) minus the admin gate/audit:
+    ownership link only — plan_status stays 'pending' (column default), so
+    every brand-dashboard surface keeps 402ing (require_paid_brand) until
+    the caller completes the standard billing checkout. Payment is the
+    verification bar here, not identity proof; admin unassign_owner is the
+    recourse for a bad-faith claim.
+    """
+    await check_rate_limit(client_ip(request), "tellus_brand_claim", 5, 3600)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            brand = await conn.fetchrow(
+                "SELECT id, owner_account_id FROM tellus_brands WHERE slug = $1 FOR UPDATE", slug
+            )
+            if brand is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+            if brand["owner_account_id"] is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This business has already been claimed.",
+                )
+            # One brand per account — same rule admin assign_owner enforces;
+            # require_tellus_account's LEFT JOIN tellus_brands assumes it holds.
+            already_owns = await conn.fetchval(
+                "SELECT 1 FROM tellus_brands WHERE owner_account_id = $1", account.id
+            )
+            if already_owns:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Your account already owns a brand — one brand per account.",
+                )
+            if account.account_type == "consumer":
+                await conn.execute(
+                    "UPDATE tellus_accounts SET account_type = 'brand', updated_at = NOW() WHERE id = $1",
+                    account.id,
+                )
+            await conn.execute(
+                "UPDATE tellus_brands SET owner_account_id = $1, claimed_at = NOW(), updated_at = NOW() "
+                "WHERE id = $2",
+                account.id, brand["id"],
+            )
+    return TellusClaimResponse(brand_id=brand["id"], slug=slug)

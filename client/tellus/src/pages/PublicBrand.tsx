@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Heart, ImageIcon, Star, Video } from 'lucide-react'
-import { tellusPublicGet } from '../api/tellusClient'
-import { Button, Card, Empty, Spinner } from '../components/ui'
-import type { PublicBrandPage, PublicReview } from '../api/types'
+import { tellusApi, tellusPublicGet } from '../api/tellusClient'
+import { useAccount } from '../hooks/useAccount'
+import { Button, Card, Empty, ErrorText, Spinner } from '../components/ui'
+import type { ClaimResponse, PublicBrandPage, PublicReview } from '../api/types'
 
 const PAGE_SIZE = 20
 
@@ -63,11 +64,29 @@ function ReviewCard({ review }: { review: PublicReview }) {
 
 export default function PublicBrand() {
   const { slug = '' } = useParams()
+  const navigate = useNavigate()
+  const { account, refreshAccount } = useAccount()
   const [page, setPage] = useState<PublicBrandPage | null>(null)
   const [reviews, setReviews] = useState<PublicReview[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
+  const [confirmingClaim, setConfirmingClaim] = useState(false)
+  const [claiming, setClaiming] = useState(false)
+  const [claimErr, setClaimErr] = useState('')
+
+  async function claimBrand() {
+    setClaiming(true); setClaimErr('')
+    try {
+      await tellusApi.post<ClaimResponse>(`/b/${slug}/claim`)
+      await refreshAccount()
+      navigate('/brand/billing')
+    } catch (e) {
+      setClaimErr(e instanceof Error ? e.message : 'Could not claim this business')
+    } finally {
+      setClaiming(false)
+    }
+  }
 
   useEffect(() => {
     tellusPublicGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=0`)
@@ -126,7 +145,39 @@ export default function PublicBrand() {
             <Link to={`/i/${page.intake_token}`} className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
               Write a review
             </Link>
-            <p className="mt-2 text-xs text-tu-faint">Are you the owner? Claiming is coming soon.</p>
+
+            {!account && (
+              <p className="mt-2 text-xs text-tu-faint">
+                Are you the owner?{' '}
+                <Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug)} className="font-semibold text-tu-accent hover:underline">
+                  Claim this business →
+                </Link>
+              </p>
+            )}
+
+            {account?.account_type === 'consumer' && (
+              <div className="mt-3">
+                {confirmingClaim ? (
+                  <div className="mx-auto max-w-xs rounded-lg border border-tu-border bg-tu-panel p-3 text-left">
+                    <p className="text-xs text-tu-dim">
+                      Claiming converts your account into a brand account — you'll set up billing next to unlock the dashboard.
+                    </p>
+                    <ErrorText>{claimErr}</ErrorText>
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" loading={claiming} onClick={claimBrand}>Confirm claim</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmingClaim(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-tu-faint">
+                    Are you the owner?{' '}
+                    <button onClick={() => setConfirmingClaim(true)} className="font-semibold text-tu-accent hover:underline">
+                      Claim this business →
+                    </button>
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

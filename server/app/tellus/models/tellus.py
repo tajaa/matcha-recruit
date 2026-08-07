@@ -155,7 +155,9 @@ class TellusPlaceSearchResult(BaseModel):
 
 class TellusPlaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    city: str = Field(min_length=1, max_length=120)
+    # Optional when google_place_id is set (Place Details supplies it); the
+    # route 422s if neither source yields a city.
+    city: Optional[str] = Field(default=None, max_length=120)
     state: Optional[str] = Field(default=None, max_length=60)
     # When set, the server re-resolves name/city/state/address/lat/lng from
     # Google Place Details — the submitted name/city above are only the
@@ -579,6 +581,12 @@ class TellusPublicBrandPage(BaseModel):
     total: int = 0
     claimed: bool = True
     intake_token: Optional[str] = None
+
+
+class TellusClaimResponse(BaseModel):
+    ok: bool = True
+    brand_id: UUID
+    slug: str
 
 
 # ── DMs (brand <-> reviewer) ────────────────────────────────────────────────────

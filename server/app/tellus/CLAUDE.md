@@ -57,6 +57,21 @@ Full design + endpoint-by-endpoint SQL: `TELLUS_ADMIN_MGMT_PLAN.md` at the repo 
   this); resolved name/address/lat/lng are stored as part of the consumer's own
   submission despite Google's 30-day cache guidance for raw autocomplete results —
   accepted, these are facts the user selected, not a cached search index.
+- **Self-serve claim** (`routes/community.py:claim_brand`, `POST /b/{slug}/claim`) —
+  "Is this your business?" on the public page. Mirrors admin `assign_owner`
+  (`routes/admin/brands.py`) minus the admin gate/audit: links `owner_account_id` +
+  `claimed_at`, flips `account_type` consumer→brand if needed, same one-brand-per-
+  account guard (`require_tellus_account`'s `LEFT JOIN tellus_brands` assumes it holds).
+  **Does not touch `plan_status`** — a claimed `consumer_added` brand stays `'pending'`,
+  so `require_paid_brand` keeps 402ing every dashboard surface until the caller runs the
+  existing Stripe checkout (`routes/billing.py`). Payment is the verification bar, not
+  identity proof; admin `unassign_owner` is the recourse for a bad-faith claim.
+- **`tellus_reports.publish_at` may only ever move earlier, never later.** The 48h hold
+  (`services/feedback_service.py:create_report`) exists so a brand can't delay or
+  suppress a review; the only UPDATE site is `routes/feedback.py:publish_review_now`
+  (`POST /feedback/{id}/publish-now`, guarded by the pure `can_publish_now` helper —
+  held + still in the future only). Anything that could push `publish_at` later would
+  reopen the suppression hole the hold closed — don't add one.
 
 ## Frontend pairing
 

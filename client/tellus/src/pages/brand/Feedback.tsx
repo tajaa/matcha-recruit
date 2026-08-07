@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Award, ExternalLink, Frown, Heart, ImageIcon, MessageCircle, Meh, MessageSquare, Smile, Sparkles, Star, Video } from 'lucide-react'
+import { Award, ExternalLink, Frown, Heart, ImageIcon, MessageCircle, Meh, MessageSquare, Smile, Sparkles, Star, Video, Zap } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { useAccount } from '../../hooks/useAccount'
 import { Button, Chip, Empty, Select, Spinner, Textarea } from '../../components/ui'
@@ -84,6 +84,12 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
     if (!confirm('Remove your public reply?')) return
     setBusy(true)
     try { await tellusApi.delete(`/feedback/${report.id}/reply`); onChange() } finally { setBusy(false) }
+  }
+  async function publishNow() {
+    if (!confirm('Publish this review now, skipping the rest of the 48h hold?')) return
+    setBusy(true)
+    try { await tellusApi.post(`/feedback/${report.id}/publish-now`); onChange() }
+    catch (e) { alert(e instanceof Error ? e.message : 'Could not publish now') } finally { setBusy(false) }
   }
 
   return (
@@ -187,6 +193,11 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
         </Button>
         {report.review_state != null && report.review_state !== 'withdrawn' && !report.brand_public_reply && !replying && (
           <Button size="sm" variant="ghost" onClick={() => setReplying(true)}><MessageSquare className="h-3.5 w-3.5" /> Reply publicly</Button>
+        )}
+        {report.review_state === 'held' && (
+          <Button size="sm" variant="ghost" loading={busy} onClick={publishNow}>
+            <Zap className="h-3.5 w-3.5" /> Publish now
+          </Button>
         )}
         {report.is_identified && (
           <Button size="sm" variant="ghost" onClick={() => setShowDm((s) => !s)}>

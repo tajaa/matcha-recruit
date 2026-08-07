@@ -164,7 +164,7 @@ async def create_place(body: TellusPlaceCreate, request: Request):
         details = await google_places.place_details(body.google_place_id)
 
     name = ((details or {}).get("name") or body.name).strip()
-    city = ((details or {}).get("city") or body.city).strip()
+    city = ((details or {}).get("city") or body.city or "").strip()
     state = ((details or {}).get("state") or body.state) or None
     address = (details or {}).get("address")
     lat = (details or {}).get("lat")

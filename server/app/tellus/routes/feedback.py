@@ -4,6 +4,7 @@ manual reward mode) approve/reject each submission's points.
 Brand accounts only; every query scopes by the caller's brand_id. Media URLs are
 minted (presigned) at read time in the serializer.
 """
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -26,6 +27,20 @@ from ..services.points_service import notify_account
 from ._shared import get_owned_report, serialize_report, serialize_reports
 
 router = APIRouter()
+
+
+def can_publish_now(row) -> Optional[str]:
+    """Guard for POST /feedback/{id}/publish-now. Returns an error message
+    when the row isn't eligible, None when it is. Pulled out as a pure
+    function so the guard matrix (held+future / held+past / no review /
+    withdrawn / removed) is unit-testable without a DB."""
+    if row["review_state"] != "held":
+        return "This isn't a held review — nothing to publish early."
+    if row["moderation_status"] == "removed":
+        return "This review has been removed."
+    if row["publish_at"] is None or row["publish_at"] <= datetime.now(timezone.utc):
+        return "This review is already published."
+    return None
 
 
 @router.get("/feedback", response_model=list[TellusReport])
@@ -285,3 +300,31 @@ async def remove_public_reply(report_id: UUID, account: TellusAccount = Depends(
             report_id, account.brand_id,
         )
         return await serialize_report(conn, row)
+
+
+@router.post("/feedback/{report_id}/publish-now", response_model=TellusReport)
+async def publish_review_now(report_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
+    """Brand waives the remainder of the 48h hold and publishes the review
+    immediately. Expedite-only: publish_at only ever moves EARLIER, never
+    later — the hold exists so a brand can't delay or suppress a review
+    (feedback_service.create_report / effective_review_state), and this
+    endpoint can't do either. 409 unless the review is actually held and
+    still in the future (can_publish_now)."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await get_owned_report(conn, report_id, account.brand_id)
+            err = can_publish_now(row)
+            if err:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+            updated = await conn.fetchrow(
+                "UPDATE tellus_reports SET publish_at = NOW(), updated_at = NOW() "
+                "WHERE id = $1 AND brand_id = $2 RETURNING *",
+                report_id, account.brand_id,
+            )
+            if row["reporter_account_id"] is not None:
+                await notify_account(
+                    conn, row["reporter_account_id"], "review_published", "Your review is live",
+                    "The brand published your review ahead of schedule.",
+                    reference_type="report", reference_id=str(report_id),
+                )
+        return await serialize_report(conn, updated)

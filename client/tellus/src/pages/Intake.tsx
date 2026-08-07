@@ -216,6 +216,16 @@ export default function Intake() {
           </p>
         ) : null}
         {result.report_number && <p className="mt-4 text-xs text-tu-faint">Reference: {result.report_number}</p>}
+        <div className="mt-6 flex items-center justify-center gap-4">
+          <Link to={loggedIn ? '/' : '/places'} className="text-sm font-semibold text-tu-accent hover:underline">
+            {loggedIn ? 'Back to home' : 'Review another place'}
+          </Link>
+          {loggedIn && (
+            <Link to="/places" className="text-sm font-semibold text-tu-dim hover:text-tu-text hover:underline">
+              Review another place
+            </Link>
+          )}
+        </div>
       </div>
     )
   }

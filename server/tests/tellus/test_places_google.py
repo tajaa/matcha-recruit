@@ -137,6 +137,12 @@ class TestPlaceCreateModel:
         with pytest.raises(Exception):
             TellusPlaceCreate(name="Joe's Diner", city="Austin", google_place_id="x" * 301)
 
+    def test_city_optional_when_place_id_supplied(self):
+        # The unified live-search flow posts name + google_place_id only —
+        # the server resolves city from Place Details, never from the client.
+        m = TellusPlaceCreate(name="Joe's Diner", google_place_id="ChIJabc123")
+        assert m.city is None
+
 
 # ---------------------------------------------------------------------------
 # ensure_community_link — fake conn, no DB

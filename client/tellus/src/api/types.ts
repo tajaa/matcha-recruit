@@ -347,6 +347,12 @@ export interface PublicBrandPage {
   intake_token: string | null
 }
 
+export interface ClaimResponse {
+  ok: boolean
+  brand_id: string
+  slug: string
+}
+
 export interface PlaceSearchResult {
   slug: string; name: string; logo_url: string | null
   city: string | null; state: string | null
