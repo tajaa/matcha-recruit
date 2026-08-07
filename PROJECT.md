@@ -221,15 +221,15 @@ def assign_isrc(db: Session, recording_id: UUID) -> str
 def format_isrc(prefix: str, year: str, n: int) -> str      # f"{prefix}{year}{n:05d}", no hyphens in DB
 def display_isrc(isrc: str) -> str                          # client-side too: CC-XXX-YY-NNNNN
 ```
-`assign_isrc`: `SELECT … FOR UPDATE` on `IsrcConfig` row; **year rollover**: if `current_year % 100 != int(year_digits)` → set `year_digits = now`, `next_designation = 1` (ISRC spec: designation unique per year, reset allowed); increment; commit by caller.
-Edge cases: recording already has ISRC → `AlreadyAssigned` → 409; prefix unconfigured (empty string default) → `NotConfigured` → 422 w/ pointer to Settings; `next_designation > 99999` → `Exhausted` → 500 alert (never realistic); concurrency → two parallel calls must yield distinct codes (test with threads).
+`assign_isrc`: `SELECT … FOR UPDATE` on the target `Recording` row (serializes concurrent calls for the same recording), then on the `IsrcConfig` row; **year rollover**: if `current_year % 100 != int(year_digits)` → set `year_digits = now`, `next_designation = 1` (ISRC spec: designation unique per year, reset allowed); increment; commit by caller.
+Edge cases: recording already has ISRC → `AlreadyAssigned` → 409; prefix unconfigured (empty string default) → `NotConfigured` → 422 w/ pointer to Settings; `next_designation > 99999` → `Exhausted` → 422 (never realistic); concurrency → two parallel calls (including two calls for the *same* recording) must yield distinct codes / exactly one winner (test with threads).
 
 ### `services/upc.py`
 ```python
-def add_upcs(db: Session, codes: list[str]) -> int          # validates 12/13 digits + GTIN check digit, dedupes
-def assign_upc(db: Session, release_id: UUID) -> str        # oldest available FOR UPDATE SKIP LOCKED
+def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str]]   # validates 12/13 digits + GTIN check digit, dedupes
+def assign_upc(db: Session, release_id: UUID) -> str                   # SELECT ... FOR UPDATE on the target Release, then oldest available FOR UPDATE SKIP LOCKED
 ```
-Edge cases: empty pool → 409 `"UPC pool empty — add codes in Settings"`; release already has UPC → 409; bad check digit → 422 listing offending codes; 12-digit UPC-A stored zero-padded to 13 (EAN-13).
+Edge cases: empty pool → 409 `"UPC pool empty — add codes in Settings"`; release already has UPC → 409; bad check digit → 200 with a `rejected` list of the offending codes (valid codes in the same call are still added); 12-digit UPC-A stored zero-padded to 13 (EAN-13).
 
 ### `services/jobs.py`
 ```python
@@ -469,7 +469,7 @@ pages/SettingsPage       ISRC prefix form, UPC pool textarea-add + counts, token
 
 ## Test matrix
 
-`conftest.py`: session-scoped engine on `oceanlab_test`, `Base.metadata.create_all` once; per-test nested transaction (SAVEPOINT) rollback; `client` fixture = `TestClient(app)` w/ auth header + `dependency_overrides[get_db]`; `factories.py` = plain builder functions (`make_release(db, tracks=2, complete=True)`).
+`conftest.py`: session-scoped engine on `oceanlab_test`, runs `alembic upgrade head` once (so drift between models and `alembic/versions/*.py` surfaces as failing tests); per-test nested transaction (SAVEPOINT) rollback; `client` fixture = `TestClient(app)` w/ auth header + `dependency_overrides[get_db]`; `db_real`/`client_real` fixtures for tests that need DEFERRED constraints or cross-session commits to actually fire, truncating the touched tables after; `factories.py` = plain builder functions (`make_release(db, tracks=2, complete=True)`).
 
 ```
 test_isrc:      sequential codes; year rollover resets designation to 1; already-assigned → IsrcError;
