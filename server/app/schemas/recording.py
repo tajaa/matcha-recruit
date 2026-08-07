@@ -2,16 +2,18 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import CreditRole
+
+LANGUAGE_PATTERN = r"^[a-z]{2}$"
 
 
 class RecordingBase(BaseModel):
     title: str
     version: str | None = None
     explicit: bool | None = None
-    language: str | None = None
+    language: str | None = Field(default=None, pattern=LANGUAGE_PATTERN)
     recording_year: int | None = None
     primary_artist_id: uuid.UUID
 
@@ -24,7 +26,7 @@ class RecordingUpdate(BaseModel):
     title: str | None = None
     version: str | None = None
     explicit: bool | None = None
-    language: str | None = None
+    language: str | None = Field(default=None, pattern=LANGUAGE_PATTERN)
     recording_year: int | None = None
     primary_artist_id: uuid.UUID | None = None
 
@@ -68,7 +70,7 @@ class CreditRead(CreditIn):
 class MasterSplitIn(BaseModel):
     contributor_id: uuid.UUID
     role: CreditRole | None = None
-    share_pct: Decimal
+    share_pct: Decimal = Field(ge=0, le=100)
 
 
 class MasterSplitRead(MasterSplitIn):

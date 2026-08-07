@@ -31,16 +31,16 @@ function useAddUpcs() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (codes: string[]) =>
-      (await apiClient.post<{ added: number; rejected: string[] }>('/upcs', { codes })).data,
+      (await apiClient.post<{ added: number; rejected: string[]; skipped: number }>('/upcs', { codes })).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['upcs'] }),
   })
 }
 
 export function SettingsPage() {
-  const { data: isrcConfig } = useIsrcConfig()
+  const { data: isrcConfig, isError: isrcConfigError } = useIsrcConfig()
   const updateIsrc = useUpdateIsrcConfig()
   const addUpcs = useAddUpcs()
-  const { data: upcs } = useUpcs()
+  const { data: upcs, isError: upcsError } = useUpcs()
   const unassignUpc = useUnassignUpc()
   const [prefix, setPrefix] = useState('')
   const [upcText, setUpcText] = useState('')
@@ -52,10 +52,14 @@ export function SettingsPage() {
 
       <section>
         <h2 className="font-medium mb-2">ISRC prefix</h2>
-        <p className="text-xs text-neutral-500 mb-2">
-          Current: {isrcConfig?.registrant_prefix || 'not configured'} · next designation:{' '}
-          {isrcConfig?.next_designation ?? '--'} · year {isrcConfig?.year_digits || '--'}
-        </p>
+        {isrcConfigError ? (
+          <p className="text-xs text-red-600 mb-2">Failed to load ISRC config.</p>
+        ) : (
+          <p className="text-xs text-neutral-500 mb-2">
+            Current: {isrcConfig?.registrant_prefix || 'not configured'} · next designation:{' '}
+            {isrcConfig?.next_designation ?? '--'} · year {isrcConfig?.year_digits || '--'}
+          </p>
+        )}
         <div className="flex gap-2">
           <input
             className="border rounded px-2 py-1 text-sm flex-1"
@@ -96,14 +100,23 @@ export function SettingsPage() {
         >
           Add codes
         </button>
-        {addUpcs.data && <p className="text-xs mt-1">Added {addUpcs.data.added} codes.</p>}
+        {addUpcs.data && (
+          <p className="text-xs mt-1">
+            Added {addUpcs.data.added} codes.
+            {addUpcs.data.skipped > 0 && ` ${addUpcs.data.skipped} already in the pool, skipped.`}
+          </p>
+        )}
         {addUpcs.data && addUpcs.data.rejected.length > 0 && (
           <p className="text-xs mt-1 text-red-600">Rejected: {addUpcs.data.rejected.join(', ')}</p>
         )}
         <MutationError error={addUpcs.error} />
 
-        <p className="text-xs text-neutral-500 mt-4 mb-2">
-          {upcs ? `${upcs.available} available / ${upcs.assigned} assigned` : 'Loading counts…'}
+        <p className={`text-xs mt-4 mb-2 ${upcsError ? 'text-red-600' : 'text-neutral-500'}`}>
+          {upcsError
+            ? 'Failed to load UPC pool.'
+            : upcs
+              ? `${upcs.available} available / ${upcs.assigned} assigned`
+              : 'Loading counts…'}
         </p>
         {upcs && upcs.items.length > 0 && (
           <div className="border rounded overflow-x-auto">

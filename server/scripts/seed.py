@@ -18,14 +18,14 @@ def main() -> None:
             db.add(IsrcConfig(id=1, registrant_prefix="", year_digits="", next_designation=1))
             print("Created IsrcConfig row (prefix unset — configure in Settings)")
 
-        artist = db.query(Artist).filter_by(name="Sample Artist").one_or_none()
+        artist = db.query(Artist).filter_by(name="Sample Artist").first()
         if artist is None:
             artist = Artist(name="Sample Artist")
             db.add(artist)
             db.flush()
             print(f"Created sample artist {artist.id}")
 
-        release = db.query(Release).filter_by(title="Sample Release").one_or_none()
+        release = db.query(Release).filter_by(title="Sample Release").first()
         if release is None:
             release = Release(
                 title="Sample Release",

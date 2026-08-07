@@ -6,8 +6,9 @@ import { MutationError } from '../components/MutationError'
 export function CatalogPage() {
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
-  const { data, isLoading } = useReleases({ q: q || undefined, status: status || undefined })
+  const { data, isLoading, isError } = useReleases({ q: q || undefined, status: status || undefined })
   const { data: artists } = useArtists()
+  const artistNameById = new Map((artists?.items ?? []).map((a) => [a.id, a.name]))
   const createRelease = useCreateRelease()
   const createArtist = useCreateArtist()
   const [showNew, setShowNew] = useState(false)
@@ -141,13 +142,16 @@ export function CatalogPage() {
         </dialog>
       )}
 
-      {isLoading ? (
+      {isError ? (
+        <p className="text-sm text-red-600">Failed to load releases.</p>
+      ) : isLoading ? (
         <p>Loading...</p>
       ) : (
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-left border-b">
               <th className="py-2">Title</th>
+              <th>Artist</th>
               <th>Type</th>
               <th>Status</th>
               <th>UPC</th>
@@ -162,6 +166,7 @@ export function CatalogPage() {
                     {release.title}
                   </Link>
                 </td>
+                <td>{artistNameById.get(release.primary_artist_id) ?? '--'}</td>
                 <td>{release.release_type}</td>
                 <td>
                   <span className="px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-xs">

@@ -84,6 +84,13 @@ class DeliveryStatus(StrEnum):
     manual = "manual"
 
 
+class StatementStatus(StrEnum):
+    uploaded = "uploaded"
+    parsing = "parsing"
+    parsed = "parsed"
+    failed = "failed"
+
+
 class MatchMethod(StrEnum):
     isrc = "isrc"
     iswc = "iswc"

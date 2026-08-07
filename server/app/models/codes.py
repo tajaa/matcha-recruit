@@ -10,6 +10,7 @@ from app.models.enums import UpcStatus
 
 class IsrcConfig(Base, TimestampMixin):
     __tablename__ = "isrc_config"
+    __table_args__ = (sa.CheckConstraint("id = 1", name="singleton"),)
 
     id: Mapped[int] = mapped_column(sa.Integer, primary_key=True, default=1)
     registrant_prefix: Mapped[str] = mapped_column(sa.String(5), nullable=False, default="")

@@ -9,7 +9,7 @@ from app.db import get_db
 from app.deps import AuthDep
 from app.models.codes import IsrcConfig, UpcCode
 from app.models.enums import UpcStatus
-from app.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult
+from app.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult, UpcListResponse
 from app.services import upc as upc_service
 
 router = APIRouter(tags=["codes"], dependencies=[AuthDep])
@@ -44,7 +44,7 @@ def update_isrc_config(payload: IsrcConfigUpdate, db: Session = Depends(get_db))
     return db.get(IsrcConfig, 1)
 
 
-@router.get("/upcs")
+@router.get("/upcs", response_model=UpcListResponse)
 def list_upcs(db: Session = Depends(get_db)):
     rows = db.execute(sa.select(UpcCode).order_by(UpcCode.created_at)).scalars().all()
     return {
@@ -56,9 +56,9 @@ def list_upcs(db: Session = Depends(get_db)):
 
 @router.post("/upcs", response_model=UpcAddResult)
 def add_upcs(payload: UpcAddIn, db: Session = Depends(get_db)):
-    added, rejected = upc_service.add_upcs(db, payload.codes)
+    added, rejected, skipped = upc_service.add_upcs(db, payload.codes)
     db.commit()
-    return UpcAddResult(added=added, rejected=rejected)
+    return UpcAddResult(added=added, rejected=rejected, skipped=skipped)
 
 
 @router.post("/upcs/{upc_id}/unassign", status_code=204)

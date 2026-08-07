@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import MatchMethod
+from app.models.enums import MatchMethod, StatementStatus
 
 
 class RoyaltyStatement(Base, TimestampMixin):
@@ -19,7 +19,11 @@ class RoyaltyStatement(Base, TimestampMixin):
     period_end: Mapped[date] = mapped_column(sa.Date, nullable=False)
     currency: Mapped[str] = mapped_column(sa.String(3), nullable=False)
     file_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("files.id"), nullable=False)
-    status: Mapped[str] = mapped_column(sa.String, nullable=False, default="uploaded")
+    status: Mapped[StatementStatus] = mapped_column(
+        sa.Enum(StatementStatus, native_enum=False, create_constraint=True, name="statement_status"),
+        nullable=False,
+        default=StatementStatus.uploaded,
+    )
     total_amount: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 4), nullable=True)
     line_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     matched_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)

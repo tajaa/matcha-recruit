@@ -29,7 +29,6 @@ class ReleaseCreate(ReleaseBase):
 class ReleaseUpdate(BaseModel):
     title: str | None = None
     release_type: ReleaseType | None = None
-    status: ReleaseStatus | None = None
     release_date: date | None = None
     original_release_date: date | None = None
     label_name: str | None = None
@@ -42,7 +41,7 @@ class ReleaseUpdate(BaseModel):
     catalog_number: str | None = None
     notes: str | None = None
 
-    @field_validator("title", "release_type", "status", "territories", "label_name", "primary_artist_id", mode="before")
+    @field_validator("title", "release_type", "territories", "label_name", "primary_artist_id", mode="before")
     @classmethod
     def _not_explicit_null(cls, v, info):
         if v is None:

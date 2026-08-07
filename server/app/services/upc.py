@@ -42,7 +42,7 @@ def _normalize(raw: str) -> str | None:
     return code
 
 
-def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str]]:
+def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str], int]:
     normalized: list[str] = []
     rejected: list[str] = []
     seen: set[str] = set()
@@ -57,14 +57,16 @@ def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str]]:
         normalized.append(code)
 
     added = 0
+    skipped = 0
     for code in normalized:
         exists = db.execute(sa.select(UpcCode).where(UpcCode.code == code)).scalar_one_or_none()
         if exists is not None:
+            skipped += 1
             continue
         db.add(UpcCode(code=code, status=UpcStatus.available))
         added += 1
     db.flush()
-    return added, rejected
+    return added, rejected, skipped
 
 
 def assign_upc(db: Session, release_id: UUID) -> str:
@@ -77,7 +79,7 @@ def assign_upc(db: Session, release_id: UUID) -> str:
     row = db.execute(
         sa.select(UpcCode)
         .where(UpcCode.status == UpcStatus.available)
-        .order_by(UpcCode.created_at)
+        .order_by(UpcCode.created_at, UpcCode.code)
         .with_for_update(skip_locked=True)
         .limit(1)
     ).scalar_one_or_none()

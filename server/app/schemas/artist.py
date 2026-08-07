@@ -1,13 +1,15 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+COUNTRY_PATTERN = r"^[A-Z]{2}$"
 
 
 class ArtistBase(BaseModel):
     name: str
     sort_name: str | None = None
-    country: str | None = None
+    country: str | None = Field(default=None, pattern=COUNTRY_PATTERN)
     spotify_id: str | None = None
     apple_music_id: str | None = None
     notes: str | None = None
@@ -20,7 +22,7 @@ class ArtistCreate(ArtistBase):
 class ArtistUpdate(BaseModel):
     name: str | None = None
     sort_name: str | None = None
-    country: str | None = None
+    country: str | None = Field(default=None, pattern=COUNTRY_PATTERN)
     spotify_id: str | None = None
     apple_music_id: str | None = None
     notes: str | None = None

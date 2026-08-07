@@ -1,13 +1,15 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+IPI_PATTERN = r"^\d{9,11}$"
 
 
 class ContributorBase(BaseModel):
     name: str
     legal_name: str | None = None
-    ipi_number: str | None = None
+    ipi_number: str | None = Field(default=None, pattern=IPI_PATTERN)
     pro_affiliation: str | None = None
     email: str | None = None
     notes: str | None = None
@@ -20,7 +22,7 @@ class ContributorCreate(ContributorBase):
 class ContributorUpdate(BaseModel):
     name: str | None = None
     legal_name: str | None = None
-    ipi_number: str | None = None
+    ipi_number: str | None = Field(default=None, pattern=IPI_PATTERN)
     pro_affiliation: str | None = None
     email: str | None = None
     notes: str | None = None

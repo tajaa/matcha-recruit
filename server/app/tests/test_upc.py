@@ -12,9 +12,10 @@ VALID_EAN_13 = "0036000291452"
 
 
 def test_add_upcs_validates_check_digit_and_dedupes(db):
-    added, rejected = upc_service.add_upcs(db, [VALID_UPC_12, VALID_UPC_12])
+    added, rejected, skipped = upc_service.add_upcs(db, [VALID_UPC_12, VALID_UPC_12])
     assert added == 1
     assert rejected == []
+    assert skipped == 0
 
 
 def test_add_upcs_pads_12_digit_to_13(db):
@@ -28,9 +29,18 @@ def test_add_upcs_pads_12_digit_to_13(db):
 
 def test_add_upcs_bad_check_digit_is_rejected_valid_ones_still_added(db):
     bad = "036000291459"  # wrong check digit
-    added, rejected = upc_service.add_upcs(db, [VALID_UPC_12, bad])
+    added, rejected, skipped = upc_service.add_upcs(db, [VALID_UPC_12, bad])
     assert added == 1
     assert rejected == [bad]
+    assert skipped == 0
+
+
+def test_add_upcs_skips_already_present_codes(db):
+    upc_service.add_upcs(db, [VALID_UPC_12])
+    added, rejected, skipped = upc_service.add_upcs(db, [VALID_UPC_12])
+    assert added == 0
+    assert rejected == []
+    assert skipped == 1
 
     from app.models.codes import UpcCode
 
@@ -70,6 +80,7 @@ def test_add_upcs_endpoint_partial_accept(client):
     body = resp.json()
     assert body["added"] == 1
     assert body["rejected"] == [bad]
+    assert body["skipped"] == 0
 
 
 @pytest.fixture()

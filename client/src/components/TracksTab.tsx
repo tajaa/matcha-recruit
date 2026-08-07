@@ -12,7 +12,7 @@ import { displayIsrc } from '../lib/format'
 import { MutationError } from './MutationError'
 
 export function TracksTab({ releaseId }: { releaseId: string }) {
-  const { data: tracks, isLoading } = useTracks(releaseId)
+  const { data: tracks, isLoading, isError } = useTracks(releaseId)
   const { data: recordings } = useRecordings()
   const addTrack = useAddTrack(releaseId)
   const reorderTracks = useReorderTracks(releaseId)
@@ -22,6 +22,7 @@ export function TracksTab({ releaseId }: { releaseId: string }) {
   const [selectedRecording, setSelectedRecording] = useState('')
   const [discNumber, setDiscNumber] = useState(1)
 
+  if (isError) return <div className="text-sm text-red-600">Failed to load tracks.</div>
   if (isLoading) return <div className="text-sm text-neutral-500">Loading tracks...</div>
 
   const byDisc = new Map<number, Track[]>()

@@ -2,15 +2,18 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import WriterRole
+
+ISWC_PATTERN = r"^T\d{10}$"
+LANGUAGE_PATTERN = r"^[a-z]{2}$"
 
 
 class WorkBase(BaseModel):
     title: str
-    iswc: str | None = None
-    language: str | None = None
+    iswc: str | None = Field(default=None, pattern=ISWC_PATTERN)
+    language: str | None = Field(default=None, pattern=LANGUAGE_PATTERN)
     notes: str | None = None
 
 
@@ -20,8 +23,8 @@ class WorkCreate(WorkBase):
 
 class WorkUpdate(BaseModel):
     title: str | None = None
-    iswc: str | None = None
-    language: str | None = None
+    iswc: str | None = Field(default=None, pattern=ISWC_PATTERN)
+    language: str | None = Field(default=None, pattern=LANGUAGE_PATTERN)
     notes: str | None = None
 
     @field_validator("title", mode="before")
@@ -43,9 +46,9 @@ class WorkRead(WorkBase):
 class WorkWriterIn(BaseModel):
     contributor_id: uuid.UUID
     role: WriterRole
-    share_pct: Decimal
+    share_pct: Decimal = Field(ge=0, le=100)
     publisher_name: str | None = None
-    publisher_share_pct: Decimal | None = None
+    publisher_share_pct: Decimal | None = Field(default=None, ge=0, le=100)
 
 
 class WorkWriterRead(WorkWriterIn):

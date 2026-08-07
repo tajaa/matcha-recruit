@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAssignUpc, useRelease, useUpdateRelease } from '../api/hooks'
 import { MutationError } from '../components/MutationError'
@@ -7,10 +7,11 @@ import { displayUpc } from '../lib/format'
 
 export function ReleaseDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: release, isLoading } = useRelease(id)
+  const { data: release, isLoading, isError } = useRelease(id)
   const assignUpc = useAssignUpc()
   const [tab, setTab] = useState<'tracks' | 'metadata'>('tracks')
 
+  if (isError) return <div className="p-6 text-sm text-red-600">Failed to load release.</div>
   if (isLoading || !release) return <div className="p-6">Loading...</div>
 
   return (
@@ -38,6 +39,7 @@ export function ReleaseDetailPage() {
       {tab === 'tracks' && <TracksTab releaseId={release.id} />}
       {tab === 'metadata' && (
         <MetadataTab
+          key={release.id}
           release={release}
           onAssignUpc={() => assignUpc.mutate(release.id)}
           assignUpcPending={assignUpc.isPending}
@@ -64,15 +66,6 @@ function MetadataTab({
   const [catalogNumber, setCatalogNumber] = useState(release.catalog_number ?? '')
   const [genre, setGenre] = useState(release.genre ?? '')
   const [releaseDate, setReleaseDate] = useState(release.release_date ?? '')
-  const [status, setStatus] = useState(release.status)
-
-  useEffect(() => {
-    setTitle(release.title)
-    setCatalogNumber(release.catalog_number ?? '')
-    setGenre(release.genre ?? '')
-    setReleaseDate(release.release_date ?? '')
-    setStatus(release.status)
-  }, [release])
 
   function save(patch: Record<string, unknown>) {
     update.mutate(patch)
@@ -135,24 +128,6 @@ function MetadataTab({
           onChange={(e) => setReleaseDate(e.target.value)}
           onBlur={() => releaseDate !== (release.release_date ?? '') && save({ release_date: releaseDate || null })}
         />
-      </label>
-
-      <label className="flex flex-col gap-1">
-        <span className="text-neutral-500">Status</span>
-        <select
-          className="border rounded px-2 py-1"
-          value={status}
-          onChange={(e) => {
-            setStatus(e.target.value)
-            save({ status: e.target.value })
-          }}
-        >
-          <option value="draft">Draft</option>
-          <option value="ready">Ready</option>
-          <option value="packaged">Packaged</option>
-          <option value="delivered">Delivered</option>
-          <option value="released">Released</option>
-        </select>
       </label>
 
       <MutationError error={update.error} />

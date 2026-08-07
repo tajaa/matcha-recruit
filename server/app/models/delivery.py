@@ -44,7 +44,9 @@ class DeliveryItem(Base, TimestampMixin):
     delivery_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("deliveries.id", ondelete="CASCADE"), nullable=False
     )
-    track_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False)
+    track_id: Mapped[uuid.UUID] = mapped_column(
+        sa.Uuid(as_uuid=True), sa.ForeignKey("tracks.id", ondelete="CASCADE"), nullable=False
+    )
     status: Mapped[DeliveryStatus] = mapped_column(
         sa.Enum(DeliveryStatus, native_enum=False, create_constraint=True, name="status"),
         nullable=False,

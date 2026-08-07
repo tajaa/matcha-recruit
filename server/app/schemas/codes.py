@@ -1,3 +1,5 @@
+import uuid
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -25,6 +27,20 @@ class UpcAddIn(BaseModel):
 class UpcAddResult(BaseModel):
     added: int
     rejected: list[str]
+    skipped: int
+
+
+class UpcListItem(BaseModel):
+    id: uuid.UUID
+    code: str
+    status: str
+    release_id: uuid.UUID | None
+
+
+class UpcListResponse(BaseModel):
+    items: list[UpcListItem]
+    available: int
+    assigned: int
 
 
 class AssignIsrcResult(BaseModel):

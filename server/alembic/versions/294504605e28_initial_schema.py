@@ -70,6 +70,7 @@ def upgrade() -> None:
     sa.Column('next_designation', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("id = 1", name=op.f('ck_isrc_config_singleton')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_isrc_config'))
     )
     op.create_table('jobs',
@@ -154,12 +155,13 @@ def upgrade() -> None:
     sa.Column('period_end', sa.Date(), nullable=False),
     sa.Column('currency', sa.String(length=3), nullable=False),
     sa.Column('file_id', sa.Uuid(), nullable=False),
-    sa.Column('status', sa.String(), nullable=False),
+    sa.Column('status', sa.Enum('uploaded', 'parsing', 'parsed', 'failed', name='statement_status', native_enum=False), nullable=False),
     sa.Column('total_amount', sa.Numeric(precision=12, scale=4), nullable=True),
     sa.Column('line_count', sa.Integer(), nullable=False),
     sa.Column('matched_count', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('uploaded', 'parsing', 'parsed', 'failed')", name=op.f('ck_royalty_statements_status')),
     sa.ForeignKeyConstraint(['file_id'], ['files.id'], name=op.f('fk_royalty_statements_file_id_files')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_royalty_statements'))
     )
@@ -331,7 +333,7 @@ def upgrade() -> None:
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("status IN ('pending', 'in_progress', 'complete', 'failed', 'manual')", name=op.f('ck_delivery_items_status')),
     sa.ForeignKeyConstraint(['delivery_id'], ['deliveries.id'], name=op.f('fk_delivery_items_delivery_id_deliveries'), ondelete='CASCADE'),
-    sa.ForeignKeyConstraint(['track_id'], ['tracks.id'], name=op.f('fk_delivery_items_track_id_tracks')),
+    sa.ForeignKeyConstraint(['track_id'], ['tracks.id'], name=op.f('fk_delivery_items_track_id_tracks'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_delivery_items')),
     sa.UniqueConstraint('delivery_id', 'track_id', name='uq_delivery_items_delivery_track')
     )
