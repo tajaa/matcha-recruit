@@ -23,9 +23,11 @@ class UpcCode(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(sa.String(13), unique=True, nullable=False)
     status: Mapped[UpcStatus] = mapped_column(
-        sa.Enum(UpcStatus, native_enum=False), nullable=False, default=UpcStatus.available
+        sa.Enum(UpcStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=UpcStatus.available,
     )
     release_id: Mapped[uuid.UUID | None] = mapped_column(
-        sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id"), nullable=True
+        sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id", ondelete="SET NULL"), nullable=True
     )
     assigned_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)

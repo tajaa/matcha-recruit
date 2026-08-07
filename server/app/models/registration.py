@@ -18,9 +18,14 @@ class RegistrationTask(Base, TimestampMixin):
     release_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id", ondelete="CASCADE"), nullable=False
     )
-    target: Mapped[RegTarget] = mapped_column(sa.Enum(RegTarget, native_enum=False), nullable=False)
+    target: Mapped[RegTarget] = mapped_column(
+        sa.Enum(RegTarget, native_enum=False, create_constraint=True, name="target"),
+        nullable=False,
+    )
     status: Mapped[RegStatus] = mapped_column(
-        sa.Enum(RegStatus, native_enum=False), nullable=False, default=RegStatus.not_started
+        sa.Enum(RegStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=RegStatus.not_started,
     )
     external_ref: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     export_file_id: Mapped[uuid.UUID | None] = mapped_column(

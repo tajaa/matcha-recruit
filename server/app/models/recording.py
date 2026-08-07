@@ -41,7 +41,9 @@ class Credit(Base, TimestampMixin):
     contributor_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("contributors.id"), nullable=False
     )
-    role: Mapped[CreditRole] = mapped_column(sa.Enum(CreditRole, native_enum=False), nullable=False)
+    role: Mapped[CreditRole] = mapped_column(
+        sa.Enum(CreditRole, native_enum=False, create_constraint=True, name="role"), nullable=False
+    )
     credited_as: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     position: Mapped[int] = mapped_column(sa.Integer, nullable=False)
 
@@ -59,5 +61,7 @@ class MasterSplit(Base, TimestampMixin):
     contributor_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("contributors.id"), nullable=False
     )
-    role: Mapped[CreditRole | None] = mapped_column(sa.Enum(CreditRole, native_enum=False), nullable=True)
+    role: Mapped[CreditRole | None] = mapped_column(
+        sa.Enum(CreditRole, native_enum=False, create_constraint=True, name="role"), nullable=True
+    )
     share_pct: Mapped[Decimal] = mapped_column(sa.Numeric(6, 3), nullable=False)

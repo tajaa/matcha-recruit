@@ -48,22 +48,19 @@ def _normalize(raw: str) -> str | None:
     return code
 
 
-def add_upcs(db: Session, codes: list[str]) -> int:
+def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str]]:
     normalized: list[str] = []
-    invalid: list[str] = []
+    rejected: list[str] = []
     seen: set[str] = set()
     for raw in codes:
         code = _normalize(raw)
         if code is None:
-            invalid.append(raw)
+            rejected.append(raw)
             continue
         if code in seen:
             continue
         seen.add(code)
         normalized.append(code)
-
-    if invalid:
-        raise InvalidUpcFormat(invalid)
 
     added = 0
     for code in normalized:
@@ -73,7 +70,7 @@ def add_upcs(db: Session, codes: list[str]) -> int:
         db.add(UpcCode(code=code, status=UpcStatus.available))
         added += 1
     db.flush()
-    return added
+    return added, rejected
 
 
 def assign_upc(db: Session, release_id: UUID) -> str:

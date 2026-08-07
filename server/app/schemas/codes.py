@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class IsrcConfigRead(BaseModel):
@@ -8,7 +8,14 @@ class IsrcConfigRead(BaseModel):
 
 
 class IsrcConfigUpdate(BaseModel):
-    registrant_prefix: str
+    registrant_prefix: str = Field(min_length=5, max_length=5, pattern=r"^[A-Z]{2}[A-Z0-9]{3}$")
+
+    @field_validator("registrant_prefix", mode="before")
+    @classmethod
+    def _normalize(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
 
 class UpcAddIn(BaseModel):

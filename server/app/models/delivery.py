@@ -15,9 +15,14 @@ class Delivery(Base, TimestampMixin):
     release_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id", ondelete="CASCADE"), nullable=False
     )
-    target: Mapped[DeliveryTarget] = mapped_column(sa.Enum(DeliveryTarget, native_enum=False), nullable=False)
+    target: Mapped[DeliveryTarget] = mapped_column(
+        sa.Enum(DeliveryTarget, native_enum=False, create_constraint=True, name="target"),
+        nullable=False,
+    )
     status: Mapped[DeliveryStatus] = mapped_column(
-        sa.Enum(DeliveryStatus, native_enum=False), nullable=False, default=DeliveryStatus.pending
+        sa.Enum(DeliveryStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=DeliveryStatus.pending,
     )
     package_file_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("files.id"), nullable=True
@@ -41,7 +46,9 @@ class DeliveryItem(Base, TimestampMixin):
     )
     track_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("tracks.id"), nullable=False)
     status: Mapped[DeliveryStatus] = mapped_column(
-        sa.Enum(DeliveryStatus, native_enum=False), nullable=False, default=DeliveryStatus.pending
+        sa.Enum(DeliveryStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=DeliveryStatus.pending,
     )
     external_ref: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     error: Mapped[str | None] = mapped_column(sa.Text, nullable=True)

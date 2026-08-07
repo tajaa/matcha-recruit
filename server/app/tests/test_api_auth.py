@@ -19,6 +19,20 @@ def test_health_open_no_auth(db):
         app.dependency_overrides.pop(get_db, None)
 
 
+def test_health_reports_degraded_when_storage_root_missing(db, tmp_path, monkeypatch):
+    # Calls the endpoint function directly (rather than round-tripping through
+    # TestClient) so the app lifespan's `storage_root.mkdir(...)` doesn't
+    # recreate the very directory we're testing the absence of.
+    from app.config import settings
+    from app.routers.health import health
+
+    monkeypatch.setattr(settings, "storage_root", tmp_path / "does-not-exist")
+
+    body = health(db)
+    assert body["storage"] is False
+    assert body["status"] == "degraded"
+
+
 def test_no_header_401(client):
     client.headers.pop("Authorization", None)
     resp = client.get("/api/artists")

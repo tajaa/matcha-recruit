@@ -54,5 +54,7 @@ class RoyaltyLine(Base, TimestampMixin):
         sa.Uuid(as_uuid=True), sa.ForeignKey("works.id", ondelete="SET NULL"), nullable=True
     )
     match_method: Mapped[MatchMethod] = mapped_column(
-        sa.Enum(MatchMethod, native_enum=False), nullable=False, default=MatchMethod.unmatched
+        sa.Enum(MatchMethod, native_enum=False, create_constraint=True, name="match_method"),
+        nullable=False,
+        default=MatchMethod.unmatched,
     )

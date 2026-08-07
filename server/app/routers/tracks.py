@@ -2,15 +2,37 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
+from app.models.recording import Recording
 from app.models.release import Release
 from app.models.track import Track
-from app.schemas.track import TrackCreate, TrackRead, TrackReorder, TrackUpdate
+from app.schemas.track import TrackCreate, TrackRead, TrackReadWithRecording, TrackReorder, TrackUpdate
 
 router = APIRouter(tags=["tracks"], dependencies=[AuthDep])
+
+
+@router.get("/releases/{release_id}/tracks", response_model=list[TrackReadWithRecording])
+def list_tracks(release_id: uuid.UUID, db: Session = Depends(get_db)):
+    release = db.get(Release, release_id)
+    if release is None:
+        raise HTTPException(status_code=404, detail="Release not found")
+
+    rows = db.execute(
+        sa.select(Track, Recording.title, Recording.isrc)
+        .join(Recording, Recording.id == Track.recording_id)
+        .where(Track.release_id == release_id)
+        .order_by(Track.disc_number, Track.position)
+    ).all()
+    return [
+        TrackReadWithRecording.model_validate(
+            {**TrackRead.model_validate(track, from_attributes=True).model_dump(), "recording_title": title, "recording_isrc": isrc}
+        )
+        for track, title, isrc in rows
+    ]
 
 
 @router.post("/releases/{release_id}/tracks", response_model=TrackRead, status_code=201)
@@ -18,6 +40,9 @@ def add_track(release_id: uuid.UUID, payload: TrackCreate, db: Session = Depends
     release = db.get(Release, release_id)
     if release is None:
         raise HTTPException(status_code=404, detail="Release not found")
+
+    if db.get(Recording, payload.recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
 
     disc_number = payload.disc_number
     position = payload.position
@@ -31,7 +56,11 @@ def add_track(release_id: uuid.UUID, payload: TrackCreate, db: Session = Depends
 
     track = Track(release_id=release_id, recording_id=payload.recording_id, disc_number=disc_number, position=position)
     db.add(track)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Position already taken on this disc") from e
     db.refresh(track)
     return track
 
@@ -42,16 +71,33 @@ def reorder_tracks(release_id: uuid.UUID, payload: TrackReorder, db: Session = D
     if release is None:
         raise HTTPException(status_code=404, detail="Release not found")
 
-    tracks = db.execute(sa.select(Track).where(Track.id.in_(payload.track_ids))).scalars().all()
+    tracks = db.execute(
+        sa.select(Track).where(Track.release_id == release_id, Track.disc_number == payload.disc_number)
+    ).scalars().all()
     by_id = {t.id: t for t in tracks}
-    missing = [tid for tid in payload.track_ids if tid not in by_id]
-    if missing:
-        raise HTTPException(status_code=422, detail=f"Unknown track ids: {missing}")
+
+    unknown = [str(tid) for tid in payload.track_ids if tid not in by_id]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown track ids (not tracks of this release/disc): {unknown}",
+        )
+
+    missing_from_payload = [str(tid) for tid in by_id if tid not in set(payload.track_ids)]
+    if missing_from_payload:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Reorder must include the complete set of tracks for this disc; missing: {missing_from_payload}",
+        )
 
     db.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
     for i, track_id in enumerate(payload.track_ids, start=1):
         by_id[track_id].position = i
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Reorder conflicts with existing track positions") from e
 
     rows = db.execute(sa.select(Track).where(Track.release_id == release_id).order_by(Track.disc_number, Track.position)).scalars().all()
     return rows
@@ -64,7 +110,11 @@ def update_track(track_id: uuid.UUID, payload: TrackUpdate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Track not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(track, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Position already taken on this disc") from e
     db.refresh(track)
     return track
 
@@ -75,4 +125,8 @@ def delete_track(track_id: uuid.UUID, db: Session = Depends(get_db)):
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
     db.delete(track)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Track is referenced by other records") from e

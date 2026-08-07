@@ -11,7 +11,9 @@ class File(Base, TimestampMixin):
     __tablename__ = "files"
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    kind: Mapped[FileKind] = mapped_column(sa.Enum(FileKind, native_enum=False), nullable=False)
+    kind: Mapped[FileKind] = mapped_column(
+        sa.Enum(FileKind, native_enum=False, create_constraint=True, name="kind"), nullable=False
+    )
     storage_key: Mapped[str] = mapped_column(sa.String, unique=True, nullable=False)
     original_filename: Mapped[str] = mapped_column(sa.String, nullable=False)
     mime_type: Mapped[str] = mapped_column(sa.String, nullable=False)

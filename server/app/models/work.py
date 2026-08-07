@@ -42,7 +42,9 @@ class WorkWriter(Base, TimestampMixin):
     contributor_id: Mapped[uuid.UUID] = mapped_column(
         sa.Uuid(as_uuid=True), sa.ForeignKey("contributors.id"), nullable=False
     )
-    role: Mapped[WriterRole] = mapped_column(sa.Enum(WriterRole, native_enum=False), nullable=False)
+    role: Mapped[WriterRole] = mapped_column(
+        sa.Enum(WriterRole, native_enum=False, create_constraint=True, name="role"), nullable=False
+    )
     share_pct: Mapped[Decimal] = mapped_column(sa.Numeric(6, 3), nullable=False)
     publisher_name: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     publisher_share_pct: Mapped[Decimal | None] = mapped_column(sa.Numeric(6, 3), nullable=True)

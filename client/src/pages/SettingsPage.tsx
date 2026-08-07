@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../api/client'
 import { clearToken, getToken, setToken } from '../api/client'
+import { MutationError } from '../components/MutationError'
 
 interface IsrcConfig {
   registrant_prefix: string
@@ -65,6 +66,7 @@ export function SettingsPage() {
             Save
           </button>
         </div>
+        <MutationError error={updateIsrc.error} />
       </section>
 
       <section>
@@ -90,6 +92,10 @@ export function SettingsPage() {
           Add codes
         </button>
         {addUpcs.data && <p className="text-xs mt-1">Added {addUpcs.data.added} codes.</p>}
+        {addUpcs.data && addUpcs.data.rejected.length > 0 && (
+          <p className="text-xs mt-1 text-red-600">Rejected: {addUpcs.data.rejected.join(', ')}</p>
+        )}
+        <MutationError error={addUpcs.error} />
       </section>
 
       <section>
@@ -110,7 +116,13 @@ export function SettingsPage() {
           >
             Save
           </button>
-          <button className="px-3 py-1.5 rounded border text-sm" onClick={() => clearToken()}>
+          <button
+            className="px-3 py-1.5 rounded border text-sm"
+            onClick={() => {
+              clearToken()
+              window.location.reload()
+            }}
+          >
             Clear
           </button>
         </div>

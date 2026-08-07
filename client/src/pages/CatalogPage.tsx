@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useArtists, useCreateRelease, useReleases } from '../api/hooks'
+import { useArtists, useCreateArtist, useCreateRelease, useReleases } from '../api/hooks'
+import { MutationError } from '../components/MutationError'
 
 export function CatalogPage() {
   const [q, setQ] = useState('')
@@ -8,10 +9,13 @@ export function CatalogPage() {
   const { data, isLoading } = useReleases({ q: q || undefined, status: status || undefined })
   const { data: artists } = useArtists()
   const createRelease = useCreateRelease()
+  const createArtist = useCreateArtist()
   const [showNew, setShowNew] = useState(false)
   const [title, setTitle] = useState('')
   const [artistId, setArtistId] = useState('')
   const [releaseType, setReleaseType] = useState('single')
+  const [showNewArtist, setShowNewArtist] = useState(false)
+  const [newArtistName, setNewArtistName] = useState('')
 
   return (
     <div className="p-6">
@@ -55,14 +59,57 @@ export function CatalogPage() {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
-            <select className="border rounded px-2 py-1 text-sm" value={artistId} onChange={(e) => setArtistId(e.target.value)}>
-              <option value="">Select primary artist...</option>
-              {artists?.items.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            {!showNewArtist ? (
+              <div className="flex gap-2">
+                <select
+                  className="border rounded px-2 py-1 text-sm flex-1"
+                  value={artistId}
+                  onChange={(e) => setArtistId(e.target.value)}
+                >
+                  <option value="">Select primary artist...</option>
+                  {artists?.items.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="px-2 py-1 rounded border text-xs whitespace-nowrap" onClick={() => setShowNewArtist(true)}>
+                  + New artist
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  className="border rounded px-2 py-1 text-sm flex-1"
+                  placeholder="Artist name"
+                  value={newArtistName}
+                  onChange={(e) => setNewArtistName(e.target.value)}
+                  autoFocus
+                />
+                <button
+                  className="px-2 py-1 rounded border text-xs disabled:opacity-50"
+                  disabled={!newArtistName || createArtist.isPending}
+                  onClick={() => {
+                    createArtist.mutate(
+                      { name: newArtistName },
+                      {
+                        onSuccess: (artist) => {
+                          setArtistId(artist.id)
+                          setNewArtistName('')
+                          setShowNewArtist(false)
+                        },
+                      },
+                    )
+                  }}
+                >
+                  Create
+                </button>
+                <button className="px-2 py-1 rounded border text-xs" onClick={() => setShowNewArtist(false)}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            <MutationError error={createArtist.error} />
             <select
               className="border rounded px-2 py-1 text-sm"
               value={releaseType}
@@ -73,6 +120,7 @@ export function CatalogPage() {
               <option value="album">Album</option>
             </select>
           </div>
+          <MutationError error={createRelease.error} />
           <div className="flex gap-2 mt-4 justify-end">
             <button className="px-3 py-1.5 text-sm" onClick={() => setShowNew(false)}>
               Cancel

@@ -1,4 +1,5 @@
 import threading
+from collections.abc import Generator
 
 import pytest
 from sqlalchemy.orm import Session
@@ -47,6 +48,20 @@ def test_unconfigured_raises(db):
         isrc_service.assign_isrc(db, r1.id)
 
 
+def test_update_isrc_config_rejects_wrong_length_prefix(client):
+    resp = client.put("/api/settings/isrc", json={"registrant_prefix": "QZABCEXTRA"})
+    assert resp.status_code == 422
+
+    resp = client.put("/api/settings/isrc", json={"registrant_prefix": "QZAB"})
+    assert resp.status_code == 422
+
+
+def test_update_isrc_config_accepts_valid_prefix(client):
+    resp = client.put("/api/settings/isrc", json={"registrant_prefix": "QZABC"})
+    assert resp.status_code == 200
+    assert resp.json()["registrant_prefix"] == "QZABC"
+
+
 def test_display_isrc_formats_with_hyphens():
     assert isrc_service.display_isrc("QZABC2600001") == "QZ-ABC-26-00001"
 
@@ -55,14 +70,49 @@ def test_format_isrc():
     assert isrc_service.format_isrc("QZABC", "26", 7) == "QZABC2600007"
 
 
-def test_concurrent_assignment_yields_unique_codes(engine):
+@pytest.fixture()
+def concurrent_recordings(engine) -> Generator[list, None, None]:
+    """40 recordings + a fresh ISRC config, in real (non-savepoint) transactions
+    so worker threads on separate sessions can see committed rows. Cleans up
+    on both success and failure, and self-heals if a previous crashed run
+    left rows behind.
+    """
     from sqlalchemy import delete
 
-    with Session(bind=engine, future=True) as setup:
-        make_isrc_config(setup, prefix="QZABC", year_digits="26", next_designation=1)
-        recordings = [make_recording(setup) for _ in range(40)]
-        recording_ids = [r.id for r in recordings]
-        setup.commit()
+    from app.models.codes import IsrcConfig
+    from app.models.recording import Recording
+
+    recording_ids: list = []
+    artist_ids: list = []
+    try:
+        with Session(bind=engine, future=True) as setup:
+            # Self-heal: a crashed previous run may have left id=1 behind.
+            existing = setup.get(IsrcConfig, 1)
+            if existing is not None:
+                setup.delete(existing)
+                setup.flush()
+
+            make_isrc_config(setup, prefix="QZABC", year_digits="26", next_designation=1)
+            recordings = [make_recording(setup) for _ in range(40)]
+            recording_ids = [r.id for r in recordings]
+            artist_ids = list({r.primary_artist_id for r in recordings})
+            setup.commit()
+
+        yield recording_ids
+    finally:
+        with Session(bind=engine, future=True) as cleanup:
+            if recording_ids:
+                cleanup.execute(delete(Recording).where(Recording.id.in_(recording_ids)))
+            cleanup.execute(delete(IsrcConfig).where(IsrcConfig.id == 1))
+            if artist_ids:
+                from app.models.artist import Artist
+
+                cleanup.execute(delete(Artist).where(Artist.id.in_(artist_ids)))
+            cleanup.commit()
+
+
+def test_concurrent_assignment_yields_unique_codes(engine, concurrent_recordings):
+    recording_ids = concurrent_recordings
 
     results: list[str] = []
     lock = threading.Lock()
@@ -91,11 +141,3 @@ def test_concurrent_assignment_yields_unique_codes(engine):
     assert not errors
     assert len(results) == 40
     assert len(set(results)) == 40
-
-    with Session(bind=engine, future=True) as cleanup:
-        from app.models.codes import IsrcConfig
-        from app.models.recording import Recording
-
-        cleanup.execute(delete(Recording).where(Recording.id.in_(recording_ids)))
-        cleanup.execute(delete(IsrcConfig).where(IsrcConfig.id == 1))
-        cleanup.commit()

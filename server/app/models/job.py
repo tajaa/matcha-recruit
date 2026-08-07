@@ -15,7 +15,9 @@ class Job(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(sa.String, nullable=False)
     status: Mapped[JobStatus] = mapped_column(
-        sa.Enum(JobStatus, native_enum=False), nullable=False, default=JobStatus.queued
+        sa.Enum(JobStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=JobStatus.queued,
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

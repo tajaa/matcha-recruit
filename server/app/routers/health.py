@@ -1,3 +1,5 @@
+import os
+
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -15,5 +17,5 @@ def health(db: Session = Depends(get_db)) -> dict:
         db_ok = True
     except Exception:
         db_ok = False
-    storage_ok = settings.storage_root.parent.exists() or True
-    return {"status": "ok" if db_ok else "degraded", "db": db_ok, "storage": storage_ok}
+    storage_ok = settings.storage_root.is_dir() and os.access(settings.storage_root, os.W_OK)
+    return {"status": "ok" if db_ok and storage_ok else "degraded", "db": db_ok, "storage": storage_ok}

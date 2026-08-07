@@ -58,6 +58,7 @@ def upgrade() -> None:
     sa.Column('height', sa.Integer(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("kind IN ('audio_master', 'artwork', 'royalty_statement', 'package', 'registration_export', 'rendered_video')", name=op.f('ck_files_kind')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_files')),
     sa.UniqueConstraint('storage_key', name=op.f('uq_files_storage_key'))
     )
@@ -81,6 +82,7 @@ def upgrade() -> None:
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('queued', 'running', 'done', 'failed')", name=op.f('ck_jobs_status')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_jobs'))
     )
     op.create_table('works',
@@ -136,6 +138,8 @@ def upgrade() -> None:
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("release_type IN ('album', 'ep', 'single')", name=op.f('ck_releases_release_type')),
+    sa.CheckConstraint("status IN ('draft', 'ready', 'packaged', 'delivered', 'released')", name=op.f('ck_releases_status')),
     sa.ForeignKeyConstraint(['artwork_file_id'], ['files.id'], name=op.f('fk_releases_artwork_file_id_files'), ondelete='RESTRICT'),
     sa.ForeignKeyConstraint(['primary_artist_id'], ['artists.id'], name=op.f('fk_releases_primary_artist_id_artists')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_releases')),
@@ -168,6 +172,7 @@ def upgrade() -> None:
     sa.Column('publisher_share_pct', sa.Numeric(precision=6, scale=3), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("role IN ('composer', 'lyricist', 'composer_lyricist', 'arranger', 'translator')", name=op.f('ck_work_writers_role')),
     sa.ForeignKeyConstraint(['contributor_id'], ['contributors.id'], name=op.f('fk_work_writers_contributor_id_contributors')),
     sa.ForeignKeyConstraint(['work_id'], ['works.id'], name=op.f('fk_work_writers_work_id_works'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_work_writers')),
@@ -182,6 +187,7 @@ def upgrade() -> None:
     sa.Column('position', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("role IN ('producer', 'performer', 'mixer', 'mastering_engineer', 'recording_engineer', 'featured', 'remixer', 'other')", name=op.f('ck_credits_role')),
     sa.ForeignKeyConstraint(['contributor_id'], ['contributors.id'], name=op.f('fk_credits_contributor_id_contributors')),
     sa.ForeignKeyConstraint(['recording_id'], ['recordings.id'], name=op.f('fk_credits_recording_id_recordings'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_credits'))
@@ -199,6 +205,8 @@ def upgrade() -> None:
     sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("target IN ('export_package', 'youtube', 'soundcloud')", name=op.f('ck_deliveries_target')),
+    sa.CheckConstraint("status IN ('pending', 'in_progress', 'complete', 'failed', 'manual')", name=op.f('ck_deliveries_status')),
     sa.ForeignKeyConstraint(['package_file_id'], ['files.id'], name=op.f('fk_deliveries_package_file_id_files')),
     sa.ForeignKeyConstraint(['release_id'], ['releases.id'], name=op.f('fk_deliveries_release_id_releases'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_deliveries'))
@@ -211,6 +219,7 @@ def upgrade() -> None:
     sa.Column('share_pct', sa.Numeric(precision=6, scale=3), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("role IN ('producer', 'performer', 'mixer', 'mastering_engineer', 'recording_engineer', 'featured', 'remixer', 'other')", name=op.f('ck_master_splits_role')),
     sa.ForeignKeyConstraint(['contributor_id'], ['contributors.id'], name=op.f('fk_master_splits_contributor_id_contributors')),
     sa.ForeignKeyConstraint(['recording_id'], ['recordings.id'], name=op.f('fk_master_splits_recording_id_recordings'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_master_splits')),
@@ -235,6 +244,8 @@ def upgrade() -> None:
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("target IN ('pro', 'mlc', 'soundexchange', 'distributor')", name=op.f('ck_registration_tasks_target')),
+    sa.CheckConstraint("status IN ('not_started', 'in_progress', 'submitted', 'confirmed', 'not_applicable')", name=op.f('ck_registration_tasks_status')),
     sa.ForeignKeyConstraint(['export_file_id'], ['files.id'], name=op.f('fk_registration_tasks_export_file_id_files')),
     sa.ForeignKeyConstraint(['release_id'], ['releases.id'], name=op.f('fk_registration_tasks_release_id_releases'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_registration_tasks')),
@@ -248,6 +259,7 @@ def upgrade() -> None:
     sa.Column('position', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("role IN ('primary', 'featured')", name=op.f('ck_release_artists_role')),
     sa.ForeignKeyConstraint(['artist_id'], ['artists.id'], name=op.f('fk_release_artists_artist_id_artists')),
     sa.ForeignKeyConstraint(['release_id'], ['releases.id'], name=op.f('fk_release_artists_release_id_releases'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_release_artists')),
@@ -271,6 +283,7 @@ def upgrade() -> None:
     sa.Column('match_method', sa.Enum('isrc', 'iswc', 'manual', 'unmatched', name='matchmethod', native_enum=False), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("match_method IN ('isrc', 'iswc', 'manual', 'unmatched')", name=op.f('ck_royalty_lines_match_method')),
     sa.ForeignKeyConstraint(['recording_id'], ['recordings.id'], name=op.f('fk_royalty_lines_recording_id_recordings'), ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['statement_id'], ['royalty_statements.id'], name=op.f('fk_royalty_lines_statement_id_royalty_statements'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['work_id'], ['works.id'], name=op.f('fk_royalty_lines_work_id_works'), ondelete='SET NULL'),
@@ -301,7 +314,8 @@ def upgrade() -> None:
     sa.Column('assigned_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.ForeignKeyConstraint(['release_id'], ['releases.id'], name=op.f('fk_upc_codes_release_id_releases')),
+    sa.CheckConstraint("status IN ('available', 'assigned')", name=op.f('ck_upc_codes_status')),
+    sa.ForeignKeyConstraint(['release_id'], ['releases.id'], name=op.f('fk_upc_codes_release_id_releases'), ondelete='SET NULL'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_upc_codes')),
     sa.UniqueConstraint('code', name=op.f('uq_upc_codes_code'))
     )
@@ -314,6 +328,7 @@ def upgrade() -> None:
     sa.Column('error', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.CheckConstraint("status IN ('pending', 'in_progress', 'complete', 'failed', 'manual')", name=op.f('ck_delivery_items_status')),
     sa.ForeignKeyConstraint(['delivery_id'], ['deliveries.id'], name=op.f('fk_delivery_items_delivery_id_deliveries'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['track_id'], ['tracks.id'], name=op.f('fk_delivery_items_track_id_tracks')),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_delivery_items')),

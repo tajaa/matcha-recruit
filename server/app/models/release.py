@@ -14,9 +14,14 @@ class Release(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(sa.String, nullable=False)
-    release_type: Mapped[ReleaseType] = mapped_column(sa.Enum(ReleaseType, native_enum=False), nullable=False)
+    release_type: Mapped[ReleaseType] = mapped_column(
+        sa.Enum(ReleaseType, native_enum=False, create_constraint=True, name="release_type"),
+        nullable=False,
+    )
     status: Mapped[ReleaseStatus] = mapped_column(
-        sa.Enum(ReleaseStatus, native_enum=False), nullable=False, default=ReleaseStatus.draft
+        sa.Enum(ReleaseStatus, native_enum=False, create_constraint=True, name="status"),
+        nullable=False,
+        default=ReleaseStatus.draft,
     )
     upc: Mapped[str | None] = mapped_column(sa.String(13), unique=True, nullable=True)
     catalog_number: Mapped[str | None] = mapped_column(sa.String, unique=True, nullable=True)
@@ -48,5 +53,8 @@ class ReleaseArtist(Base, TimestampMixin):
         sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id", ondelete="CASCADE"), nullable=False
     )
     artist_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("artists.id"), nullable=False)
-    role: Mapped[ArtistRole] = mapped_column(sa.Enum(ArtistRole, native_enum=False), nullable=False)
+    role: Mapped[ArtistRole] = mapped_column(
+        sa.Enum(ArtistRole, native_enum=False, create_constraint=True, name="role"),
+        nullable=False,
+    )
     position: Mapped[int] = mapped_column(sa.Integer, nullable=False)

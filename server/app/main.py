@@ -1,8 +1,18 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
+from app.config import settings
 from app.routers import artists, codes, contributors, health, recordings, releases, tracks, works
 
-app = FastAPI(title="oceanlab", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings.storage_root.mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="oceanlab", version="0.1.0", lifespan=lifespan)
 
 app.include_router(health.router, prefix="/api")
 app.include_router(artists.router, prefix="/api")

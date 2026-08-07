@@ -40,7 +40,12 @@ def assign_isrc(db: Session, recording_id: UUID) -> str:
     if recording.isrc is not None:
         raise AlreadyAssigned(f"Recording {recording_id} already has ISRC {recording.isrc}")
 
-    config = db.execute(sa.select(IsrcConfig).where(IsrcConfig.id == 1).with_for_update()).scalar_one_or_none()
+    config = db.execute(
+        sa.select(IsrcConfig)
+        .where(IsrcConfig.id == 1)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     if config is None or not config.registrant_prefix:
         raise NotConfigured("ISRC registrant prefix not configured — set it in Settings")
 

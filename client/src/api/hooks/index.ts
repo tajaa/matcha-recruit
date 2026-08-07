@@ -23,6 +23,25 @@ export interface Release {
   genre?: string | null
 }
 
+export interface Recording {
+  id: string
+  title: string
+  version?: string | null
+  isrc?: string | null
+  primary_artist_id: string
+}
+
+export interface Track {
+  id: string
+  release_id: string
+  recording_id: string
+  disc_number: number
+  position: number
+  title_override?: string | null
+  recording_title: string
+  recording_isrc?: string | null
+}
+
 interface Page<T> {
   items: T[]
   total: number
@@ -78,10 +97,69 @@ export function useCreateRelease() {
   })
 }
 
+export function useUpdateRelease(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Partial<Release>) => (await apiClient.patch<Release>(`/releases/${id}`, payload)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['releases', id] })
+      qc.invalidateQueries({ queryKey: ['releases'] })
+    },
+  })
+}
+
+export function useRecordings(q?: string) {
+  return useQuery({
+    queryKey: ['recordings', q],
+    queryFn: async () => (await apiClient.get<Page<Recording>>('/recordings', { params: { q, limit: 200 } })).data,
+  })
+}
+
+export function useTracks(releaseId: string | undefined) {
+  return useQuery({
+    queryKey: ['releases', releaseId, 'tracks'],
+    queryFn: async () => (await apiClient.get<Track[]>(`/releases/${releaseId}/tracks`)).data,
+    enabled: !!releaseId,
+  })
+}
+
+export function useAddTrack(releaseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { recording_id: string; disc_number?: number }) =>
+      (await apiClient.post<Track>(`/releases/${releaseId}/tracks`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['releases', releaseId, 'tracks'] }),
+  })
+}
+
+export function useReorderTracks(releaseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { disc_number: number; track_ids: string[] }) =>
+      (await apiClient.post<Track[]>(`/releases/${releaseId}/tracks/reorder`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['releases', releaseId, 'tracks'] }),
+  })
+}
+
+export function useDeleteTrack(releaseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (trackId: string) => {
+      await apiClient.delete(`/tracks/${trackId}`)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['releases', releaseId, 'tracks'] }),
+  })
+}
+
 export function useAssignIsrc() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async (recordingId: string) =>
       (await apiClient.post<{ isrc: string }>(`/recordings/${recordingId}/assign-isrc`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recordings'] })
+      qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'releases' && q.queryKey.includes('tracks') })
+    },
   })
 }
 
