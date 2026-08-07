@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom'
 import { useAssignUpc, useRelease, useUpdateRelease } from '../api/hooks'
 import { MutationError } from '../components/MutationError'
 import { TracksTab } from '../components/TracksTab'
-import { displayUpc } from '../lib/format'
 
 export function ReleaseDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -76,7 +75,7 @@ function MetadataTab({
       <div>
         <span className="text-neutral-500 block mb-1">UPC</span>
         {release.upc ? (
-          displayUpc(release.upc)
+          release.upc
         ) : (
           <button
             className="px-2 py-0.5 rounded border text-xs"

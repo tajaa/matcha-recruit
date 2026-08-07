@@ -2,11 +2,13 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useArtists, useCreateArtist, useCreateRelease, useReleases } from '../api/hooks'
 import { MutationError } from '../components/MutationError'
+import { useDebouncedValue } from '../lib/useDebouncedValue'
 
 export function CatalogPage() {
   const [q, setQ] = useState('')
+  const debouncedQ = useDebouncedValue(q)
   const [status, setStatus] = useState('')
-  const { data, isLoading, isError } = useReleases({ q: q || undefined, status: status || undefined })
+  const { data, isLoading, isError } = useReleases({ q: debouncedQ || undefined, status: status || undefined })
   const { data: artists } = useArtists()
   const artistNameById = new Map((artists?.items ?? []).map((a) => [a.id, a.name]))
   const createRelease = useCreateRelease()

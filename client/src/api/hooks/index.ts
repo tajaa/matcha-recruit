@@ -195,12 +195,16 @@ interface UpcsResponse {
   items: UpcRow[]
   available: number
   assigned: number
+  total: number
+  limit: number
+  offset: number
 }
 
 export function useUpcs() {
   return useQuery({
     queryKey: ['upcs'],
-    queryFn: async () => (await apiClient.get<UpcsResponse>('/upcs')).data,
+    // TODO Phase 2: pagination past 200
+    queryFn: async () => (await apiClient.get<UpcsResponse>('/upcs', { params: { limit: 200 } })).data,
   })
 }
 
