@@ -25,6 +25,10 @@ scripts/sql/sync_to_prod.undo.sql
 scripts/sql/sync_to_dev.sql
 scripts/sql/sync_to_dev.undo.sql
 scripts/sql/sync_admin_updates.sql
+scripts/sql/sync_admin_updates.undo.sql
+
+# Generated S3 CORS backups (written by deploy/apply-s3-cors.sh on every run)
+deploy/cors-backup-*.json
 
 # Generated research artifacts
 server/scripts/*_gaps.md
