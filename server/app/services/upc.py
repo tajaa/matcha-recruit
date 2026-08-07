@@ -74,7 +74,7 @@ def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str]]:
 
 
 def assign_upc(db: Session, release_id: UUID) -> str:
-    release = db.get(Release, release_id)
+    release = db.get(Release, release_id, with_for_update=True)
     if release is None:
         raise UpcError(f"Release {release_id} not found")
     if release.upc is not None:

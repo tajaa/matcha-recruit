@@ -1,4 +1,8 @@
+import threading
+from collections.abc import Generator
+
 import pytest
+from sqlalchemy.orm import Session
 
 from app.services import upc as upc_service
 from app.tests.factories import make_release
@@ -67,3 +71,97 @@ def test_add_upcs_endpoint_partial_accept(client):
     body = resp.json()
     assert body["added"] == 1
     assert body["rejected"] == [bad]
+
+
+@pytest.fixture()
+def same_release_with_pool(engine) -> Generator[str, None, None]:
+    """A single release + several available UPC codes, in real (non-savepoint)
+    transactions so worker threads on separate sessions see committed rows.
+    """
+    from sqlalchemy import delete
+
+    from app.models.codes import UpcCode
+
+    release_id = None
+    artist_id = None
+    upc_codes = [
+        "036000291452",
+        "819788020007",
+        "025192204013",
+        "885909950805",
+        "888462641898",
+    ]
+    try:
+        with Session(bind=engine, future=True) as setup:
+            release = make_release(setup)
+            release_id = release.id
+            artist_id = release.primary_artist_id
+            upc_service.add_upcs(setup, upc_codes)
+            setup.commit()
+
+        yield release_id
+    finally:
+        with Session(bind=engine, future=True) as cleanup:
+            if release_id is not None:
+                from app.models.release import Release
+
+                cleanup.execute(delete(Release).where(Release.id == release_id))
+            cleanup.execute(delete(UpcCode))
+            if artist_id is not None:
+                from app.models.artist import Artist
+
+                cleanup.execute(delete(Artist).where(Artist.id == artist_id))
+            cleanup.commit()
+
+
+def test_concurrent_assignment_to_same_release_yields_exactly_one_winner(engine, same_release_with_pool):
+    """TOCTOU regression: N threads race assign_upc for the SAME release.
+    Locking the release row (with_for_update) must serialize them so exactly
+    one succeeds and the rest see the committed upc and raise AlreadyAssigned
+    — no burned pool code, no lost update.
+    """
+    from app.models.codes import UpcCode
+    from app.models.enums import UpcStatus
+    from app.models.release import Release
+
+    release_id = same_release_with_pool
+    N = 5
+
+    successes: list[str] = []
+    already_assigned_count = 0
+    other_errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def worker():
+        nonlocal already_assigned_count
+        try:
+            with Session(bind=engine, future=True) as session:
+                code = upc_service.assign_upc(session, release_id)
+                session.commit()
+                with lock:
+                    successes.append(code)
+        except upc_service.AlreadyAssigned:
+            with lock:
+                already_assigned_count += 1
+        except Exception as e:  # pragma: no cover - surfaced via other_errors list
+            with lock:
+                other_errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(N)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not other_errors
+    assert len(successes) == 1
+    assert already_assigned_count == N - 1
+
+    with Session(bind=engine, future=True) as check:
+        release = check.get(Release, release_id)
+        assert release.upc == successes[0]
+
+        assigned_rows = check.query(UpcCode).filter_by(status=UpcStatus.assigned).all()
+        assert len(assigned_rows) == 1
+        assert assigned_rows[0].code == successes[0]
+        assert assigned_rows[0].release_id == release_id

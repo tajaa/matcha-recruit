@@ -34,7 +34,7 @@ def display_isrc(isrc: str) -> str:
 
 
 def assign_isrc(db: Session, recording_id: UUID) -> str:
-    recording = db.get(Recording, recording_id)
+    recording = db.get(Recording, recording_id, with_for_update=True)
     if recording is None:
         raise IsrcError(f"Recording {recording_id} not found")
     if recording.isrc is not None:

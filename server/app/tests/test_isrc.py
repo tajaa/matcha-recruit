@@ -141,3 +141,92 @@ def test_concurrent_assignment_yields_unique_codes(engine, concurrent_recordings
     assert not errors
     assert len(results) == 40
     assert len(set(results)) == 40
+
+
+@pytest.fixture()
+def same_recording(engine) -> Generator[str, None, None]:
+    """A single recording + fresh ISRC config, for the TOCTOU test: many
+    threads race to assign an ISRC to the *same* recording. Real (non-savepoint)
+    transactions so worker threads on separate sessions see committed rows.
+    """
+    from sqlalchemy import delete
+
+    from app.models.codes import IsrcConfig
+    from app.models.recording import Recording
+
+    recording_id = None
+    artist_id = None
+    try:
+        with Session(bind=engine, future=True) as setup:
+            existing = setup.get(IsrcConfig, 1)
+            if existing is not None:
+                setup.delete(existing)
+                setup.flush()
+
+            make_isrc_config(setup, prefix="QZABC", year_digits="26", next_designation=1)
+            recording = make_recording(setup)
+            recording_id = recording.id
+            artist_id = recording.primary_artist_id
+            setup.commit()
+
+        yield recording_id
+    finally:
+        with Session(bind=engine, future=True) as cleanup:
+            if recording_id is not None:
+                cleanup.execute(delete(Recording).where(Recording.id == recording_id))
+            cleanup.execute(delete(IsrcConfig).where(IsrcConfig.id == 1))
+            if artist_id is not None:
+                from app.models.artist import Artist
+
+                cleanup.execute(delete(Artist).where(Artist.id == artist_id))
+            cleanup.commit()
+
+
+def test_concurrent_assignment_to_same_recording_yields_exactly_one_winner(engine, same_recording):
+    """TOCTOU regression: N threads all call assign_isrc for the SAME recording.
+    Locking the recording row (with_for_update) must serialize them so exactly
+    one succeeds and the rest see the committed isrc and raise AlreadyAssigned
+    — no double-burned designation, no lost update.
+    """
+    recording_id = same_recording
+    N = 10
+
+    successes: list[str] = []
+    already_assigned_count = 0
+    other_errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def worker():
+        nonlocal already_assigned_count
+        try:
+            with Session(bind=engine, future=True) as session:
+                code = isrc_service.assign_isrc(session, recording_id)
+                session.commit()
+                with lock:
+                    successes.append(code)
+        except isrc_service.AlreadyAssigned:
+            with lock:
+                already_assigned_count += 1
+        except Exception as e:  # pragma: no cover - surfaced via other_errors list
+            with lock:
+                other_errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(N)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not other_errors
+    assert len(successes) == 1
+    assert already_assigned_count == N - 1
+
+    from app.models.codes import IsrcConfig
+    from app.models.recording import Recording
+
+    with Session(bind=engine, future=True) as check:
+        config = check.get(IsrcConfig, 1)
+        assert config.next_designation == 2  # advanced by exactly 1, not N
+
+        recording = check.get(Recording, recording_id)
+        assert recording.isrc == successes[0]
