@@ -1,14 +1,21 @@
 import uuid
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.recording import Recording
 
 
 class Track(Base, TimestampMixin):
     __tablename__ = "tracks"
     __table_args__ = (
+        # INITIALLY DEFERRED so reorder_tracks can renumber a whole disc's
+        # positions within one transaction without hitting a transient
+        # duplicate on the (release_id, disc_number, position) tuple.
         sa.UniqueConstraint(
             "release_id",
             "disc_number",
@@ -29,3 +36,5 @@ class Track(Base, TimestampMixin):
     disc_number: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
     position: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     title_override: Mapped[str | None] = mapped_column(sa.String, nullable=True)
+
+    recording: Mapped["Recording"] = relationship(lazy="joined")

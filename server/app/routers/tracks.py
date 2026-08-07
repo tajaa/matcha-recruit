@@ -10,6 +10,7 @@ from app.deps import AuthDep
 from app.models.recording import Recording
 from app.models.release import Release
 from app.models.track import Track
+from app.routers._errors import integrity_error_to_http
 from app.schemas.track import TrackCreate, TrackRead, TrackReadWithRecording, TrackReorder, TrackUpdate
 
 router = APIRouter(tags=["tracks"], dependencies=[AuthDep])
@@ -21,18 +22,12 @@ def list_tracks(release_id: uuid.UUID, db: Session = Depends(get_db)):
     if release is None:
         raise HTTPException(status_code=404, detail="Release not found")
 
-    rows = db.execute(
-        sa.select(Track, Recording.title, Recording.isrc)
-        .join(Recording, Recording.id == Track.recording_id)
+    tracks = db.execute(
+        sa.select(Track)
         .where(Track.release_id == release_id)
         .order_by(Track.disc_number, Track.position)
-    ).all()
-    return [
-        TrackReadWithRecording.model_validate(
-            {**TrackRead.model_validate(track, from_attributes=True).model_dump(), "recording_title": title, "recording_isrc": isrc}
-        )
-        for track, title, isrc in rows
-    ]
+    ).scalars().all()
+    return tracks
 
 
 @router.post("/releases/{release_id}/tracks", response_model=TrackRead, status_code=201)
@@ -60,7 +55,7 @@ def add_track(release_id: uuid.UUID, payload: TrackCreate, db: Session = Depends
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Position already taken on this disc") from e
+        raise integrity_error_to_http(e) from e
     db.refresh(track)
     return track
 
@@ -90,14 +85,13 @@ def reorder_tracks(release_id: uuid.UUID, payload: TrackReorder, db: Session = D
             detail=f"Reorder must include the complete set of tracks for this disc; missing: {missing_from_payload}",
         )
 
-    db.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
     for i, track_id in enumerate(payload.track_ids, start=1):
         by_id[track_id].position = i
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Reorder conflicts with existing track positions") from e
+        raise integrity_error_to_http(e) from e
 
     rows = db.execute(sa.select(Track).where(Track.release_id == release_id).order_by(Track.disc_number, Track.position)).scalars().all()
     return rows
@@ -114,7 +108,7 @@ def update_track(track_id: uuid.UUID, payload: TrackUpdate, db: Session = Depend
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Position already taken on this disc") from e
+        raise integrity_error_to_http(e) from e
     db.refresh(track)
     return track
 

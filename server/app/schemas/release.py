@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.enums import ReleaseStatus, ReleaseType
 
@@ -41,6 +41,13 @@ class ReleaseUpdate(BaseModel):
     primary_artist_id: uuid.UUID | None = None
     catalog_number: str | None = None
     notes: str | None = None
+
+    @field_validator("title", "release_type", "status", "territories", "label_name", "primary_artist_id", mode="before")
+    @classmethod
+    def _not_explicit_null(cls, v, info):
+        if v is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return v
 
 
 class ReleaseRead(ReleaseBase):

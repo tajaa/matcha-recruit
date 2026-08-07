@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasPath, BaseModel, ConfigDict, Field, field_validator
 
 
 class TrackCreate(BaseModel):
@@ -30,8 +30,8 @@ class TrackRead(BaseModel):
 
 
 class TrackReadWithRecording(TrackRead):
-    recording_title: str
-    recording_isrc: str | None = None
+    recording_title: str = Field(validation_alias=AliasPath("recording", "title"))
+    recording_isrc: str | None = Field(default=None, validation_alias=AliasPath("recording", "isrc"))
 
 
 class TrackReorder(BaseModel):

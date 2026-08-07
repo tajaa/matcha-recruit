@@ -1,13 +1,14 @@
 import uuid
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.artist import Artist
+from app.routers._errors import integrity_error_to_http
 from app.schemas.artist import ArtistCreate, ArtistRead, ArtistUpdate
 from app.schemas.common import Page
 
@@ -15,7 +16,12 @@ router = APIRouter(prefix="/artists", tags=["artists"], dependencies=[AuthDep])
 
 
 @router.get("", response_model=Page[ArtistRead])
-def list_artists(limit: int = 50, offset: int = 0, q: str | None = None, db: Session = Depends(get_db)):
+def list_artists(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str | None = None,
+    db: Session = Depends(get_db),
+):
     stmt = sa.select(Artist)
     if q:
         stmt = stmt.where(Artist.name.ilike(f"%{q}%"))
@@ -32,7 +38,7 @@ def create_artist(payload: ArtistCreate, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Artist name already exists") from e
+        raise integrity_error_to_http(e) from e
     db.refresh(artist)
     return artist
 
@@ -56,7 +62,7 @@ def update_artist(artist_id: uuid.UUID, payload: ArtistUpdate, db: Session = Dep
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="Artist name already exists") from e
+        raise integrity_error_to_http(e) from e
     db.refresh(artist)
     return artist
 

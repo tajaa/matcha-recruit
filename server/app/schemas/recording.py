@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.enums import CreditRole
 
@@ -27,6 +27,13 @@ class RecordingUpdate(BaseModel):
     language: str | None = None
     recording_year: int | None = None
     primary_artist_id: uuid.UUID | None = None
+
+    @field_validator("title", "primary_artist_id", mode="before")
+    @classmethod
+    def _not_explicit_null(cls, v, info):
+        if v is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return v
 
 
 class RecordingRead(RecordingBase):

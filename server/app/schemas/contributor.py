@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class ContributorBase(BaseModel):
@@ -24,6 +24,13 @@ class ContributorUpdate(BaseModel):
     pro_affiliation: str | None = None
     email: str | None = None
     notes: str | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _not_explicit_null(cls, v, info):
+        if v is None:
+            raise ValueError(f"{info.field_name} cannot be null")
+        return v
 
 
 class ContributorRead(ContributorBase):

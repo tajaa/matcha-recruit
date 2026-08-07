@@ -1,13 +1,14 @@
 import uuid
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.contributor import Contributor
+from app.routers._errors import integrity_error_to_http
 from app.schemas.common import Page
 from app.schemas.contributor import ContributorCreate, ContributorRead, ContributorUpdate
 
@@ -15,7 +16,12 @@ router = APIRouter(prefix="/contributors", tags=["contributors"], dependencies=[
 
 
 @router.get("", response_model=Page[ContributorRead])
-def list_contributors(limit: int = 50, offset: int = 0, q: str | None = None, db: Session = Depends(get_db)):
+def list_contributors(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str | None = None,
+    db: Session = Depends(get_db),
+):
     stmt = sa.select(Contributor)
     if q:
         stmt = stmt.where(Contributor.name.ilike(f"%{q}%"))
@@ -28,7 +34,11 @@ def list_contributors(limit: int = 50, offset: int = 0, q: str | None = None, db
 def create_contributor(payload: ContributorCreate, db: Session = Depends(get_db)):
     contributor = Contributor(**payload.model_dump())
     db.add(contributor)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise integrity_error_to_http(e) from e
     db.refresh(contributor)
     return contributor
 
@@ -48,7 +58,11 @@ def update_contributor(contributor_id: uuid.UUID, payload: ContributorUpdate, db
         raise HTTPException(status_code=404, detail="Contributor not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(contributor, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise integrity_error_to_http(e) from e
     db.refresh(contributor)
     return contributor
 

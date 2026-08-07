@@ -1,13 +1,14 @@
 import uuid
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.work import Work, WorkWriter
+from app.routers._errors import integrity_error_to_http
 from app.schemas.common import Page
 from app.schemas.work import WorkCreate, WorkRead, WorkUpdate, WorkWriterIn, WorkWriterRead
 
@@ -15,7 +16,12 @@ router = APIRouter(tags=["works"], dependencies=[AuthDep])
 
 
 @router.get("/works", response_model=Page[WorkRead])
-def list_works(limit: int = 50, offset: int = 0, q: str | None = None, db: Session = Depends(get_db)):
+def list_works(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    q: str | None = None,
+    db: Session = Depends(get_db),
+):
     stmt = sa.select(Work)
     if q:
         stmt = stmt.where(Work.title.ilike(f"%{q}%"))
@@ -32,7 +38,7 @@ def create_work(payload: WorkCreate, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(status_code=409, detail="ISWC already exists") from e
+        raise integrity_error_to_http(e) from e
     db.refresh(work)
     return work
 
@@ -52,7 +58,11 @@ def update_work(work_id: uuid.UUID, payload: WorkUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Work not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(work, k, v)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise integrity_error_to_http(e) from e
     db.refresh(work)
     return work
 
@@ -81,7 +91,11 @@ def replace_writers(work_id: uuid.UUID, payload: list[WorkWriterIn], db: Session
         row = WorkWriter(work_id=work_id, **item.model_dump())
         db.add(row)
         rows.append(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        raise integrity_error_to_http(e) from e
     for row in rows:
         db.refresh(row)
     return rows
