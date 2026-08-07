@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -10,6 +10,8 @@ from app.models.enums import ReleaseType
 from app.models.recording import Recording
 from app.models.release import Release
 from app.models.track import Track
+
+CURRENT_YEAR_2 = datetime.now(timezone.utc).strftime("%y")
 
 
 def make_artist(db: Session, **kwargs) -> Artist:
@@ -67,7 +69,7 @@ def make_release(
     for i in range(tracks):
         recording = make_recording(db, artist=artist)
         if complete:
-            recording.isrc = f"QZABC26{i + 1:05d}"
+            recording.isrc = f"QZABC{CURRENT_YEAR_2}{i + 1:05d}"
             recording.explicit = False
             recording.duration_seconds = Decimal("180.0")
             recording.sample_rate = 44100
@@ -78,7 +80,9 @@ def make_release(
     return release
 
 
-def make_isrc_config(db: Session, *, prefix: str = "QZABC", year_digits: str = "26", next_designation: int = 1):
+def make_isrc_config(
+    db: Session, *, prefix: str = "QZABC", year_digits: str = CURRENT_YEAR_2, next_designation: int = 1
+):
     config = db.get(IsrcConfig, 1)
     if config is None:
         config = IsrcConfig(id=1, registrant_prefix=prefix, year_digits=year_digits, next_designation=next_designation)

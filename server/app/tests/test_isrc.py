@@ -5,19 +5,19 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.services import isrc as isrc_service
-from app.tests.factories import make_isrc_config, make_recording
+from app.tests.factories import CURRENT_YEAR_2, make_isrc_config, make_recording
 
 
 def test_sequential_codes(db):
-    make_isrc_config(db, prefix="QZABC", year_digits="26", next_designation=1)
+    make_isrc_config(db, prefix="QZABC", year_digits=CURRENT_YEAR_2, next_designation=1)
     r1 = make_recording(db)
     r2 = make_recording(db)
 
     code1 = isrc_service.assign_isrc(db, r1.id)
     code2 = isrc_service.assign_isrc(db, r2.id)
 
-    assert code1 == "QZABC2600001"
-    assert code2 == "QZABC2600002"
+    assert code1 == f"QZABC{CURRENT_YEAR_2}00001"
+    assert code2 == f"QZABC{CURRENT_YEAR_2}00002"
 
 
 def test_year_rollover_resets_designation(db):
