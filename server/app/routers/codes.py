@@ -1,0 +1,56 @@
+import sqlalchemy as sa
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from app.deps import AuthDep
+from app.models.codes import IsrcConfig, UpcCode
+from app.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult
+from app.services import upc as upc_service
+
+router = APIRouter(tags=["codes"], dependencies=[AuthDep])
+
+
+def _get_or_create_config(db: Session) -> IsrcConfig:
+    config = db.get(IsrcConfig, 1)
+    if config is None:
+        config = IsrcConfig(id=1, registrant_prefix="", year_digits="", next_designation=1)
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+    return config
+
+
+@router.get("/settings/isrc", response_model=IsrcConfigRead)
+def get_isrc_config(db: Session = Depends(get_db)):
+    return _get_or_create_config(db)
+
+
+@router.put("/settings/isrc", response_model=IsrcConfigRead)
+def update_isrc_config(payload: IsrcConfigUpdate, db: Session = Depends(get_db)):
+    config = _get_or_create_config(db)
+    config.registrant_prefix = payload.registrant_prefix
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+@router.get("/upcs")
+def list_upcs(db: Session = Depends(get_db)):
+    rows = db.execute(sa.select(UpcCode).order_by(UpcCode.created_at)).scalars().all()
+    return {
+        "items": [{"id": r.id, "code": r.code, "status": r.status, "release_id": r.release_id} for r in rows],
+        "available": sum(1 for r in rows if r.status == "available"),
+        "assigned": sum(1 for r in rows if r.status == "assigned"),
+    }
+
+
+@router.post("/upcs", response_model=UpcAddResult)
+def add_upcs(payload: UpcAddIn, db: Session = Depends(get_db)):
+    try:
+        added = upc_service.add_upcs(db, payload.codes)
+        db.commit()
+    except upc_service.InvalidUpcFormat as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail={"message": str(e), "rejected": e.codes}) from e
+    return UpcAddResult(added=added, rejected=[])

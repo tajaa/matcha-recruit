@@ -16,7 +16,7 @@ docker exec matcha-postgres createdb -U matcha oceanlab_test
 ## Domain reality (verified Aug 2026)
 
 - **DSPs:** no direct upload for new labels → v1 export package (audio+artwork+manifest) for manual DistroKid/TuneCore upload. **DDEX ERN cut** (distributors generate it themselves; model stays ERN-mappable). TuneCore accepts own ISRC+UPC; DistroKid own ISRC only.
-- **YouTube:** `videos.insert` = 1 unit, dedicated 100/day bucket — quota fine. Uploads from **unaudited API projects locked private**; audit form + OAuth app "In production" required (testing status → refresh token dies in 7 days). Build works day one; videos stay private until audit passes.
+- **YouTube:** `videos.insert` = **1600 units** against the default 10,000 units/day project quota (~6 uploads/day); `playlists.insert`/`playlistItems.insert` = 50 units each. The 100/day figure is the separate per-channel upload cap, not a quota grant. Request a quota increase together with the API audit form; until granted, multi-track deliveries span multiple days. Uploads from **unaudited API projects locked private**; audit form + OAuth app "In production" required (testing status → refresh token dies in 7 days). Build works day one; videos stay private until audit passes.
 - **SoundCloud:** self-serve app registration open, requires Artist Pro sub on label account. `POST /tracks` multipart, 4GB cap.
 - **Royalty orgs have no write APIs.** Max automation = generate each org's bulk file: MLC bulk work-registration spreadsheet (mechanical), ASCAP/BMI portal or MusicMark EBR/CWR (performance), SoundExchange "ISRC Ingest" spreadsheet (neighboring), distributor CSV reports in (master).
 - **ISRC:** $95 once, usisrc.org prefix, self-assign `PREFIX-YY-NNNNN`, designation unique per year. **UPC:** GS1 Single GTIN $30/each or free distributor-assigned.
@@ -32,7 +32,7 @@ docker exec matcha-postgres createdb -U matcha oceanlab_test
 | Auth | Static bearer token `OCEANLAB_TOKEN`; one dependency; 401 on mismatch. `/api/health` open. |
 | CORS | None — Vite proxy `/api` → `127.0.0.1:8000`. |
 | Storage | `Storage` protocol, opaque S3-style keys, `LocalDiskStorage` under `server/var/storage`. DB stores keys only. |
-| YouTube upload unit | **One video per track** (still-image render via ffmpeg) + **one playlist per release** on the label channel. Privacy from config (`private` until audit passes, then `public`). |
+| YouTube upload unit | **One video per track** (still-image render via ffmpeg) + **one playlist per release** on the label channel. Privacy from config (`private` until audit passes, then `public`). Delivery is resumable across days: quota exhaustion is the *normal* case, not an edge case. |
 | Money | `Numeric(12,4)` + `currency: str(3)`. Never floats. |
 | PKs | UUIDv4 (`sqlalchemy.Uuid`). |
 | Splits | Warn ≠100% while editing; **block at packaging gate**. |
@@ -335,6 +335,7 @@ Edge cases: work with no writers → excluded + noted in job result; generation 
 ```python
 class RenderError(Exception): ...
 def render_track_video(audio: Path, cover: Path, out: Path, *, ffmpeg: str = "ffmpeg") -> None
+    # out is the COMPLETE output path (e.g. …/{track_id}.mp4); no suffix is appended
 ```
 Exact command (subprocess, `check=True`, stderr captured into `RenderError`):
 ```
@@ -342,9 +343,9 @@ ffmpeg -y -loop 1 -i {cover} -i {audio} \
   -c:v libx264 -tune stillimage -r 2 -pix_fmt yuv420p \
   -vf scale=1920:1920:flags=lanczos \
   -c:a aac -b:a 384k -ar 48000 \
-  -movflags +faststart -shortest {out}.mp4
+  -movflags +faststart -shortest {out}
 ```
-Edge cases: PNG cover w/ odd dimension → `scale` to even 1920 handles; FLAC input fine (ffmpeg decodes); output duration must be within 1s of master duration → verify with ffprobe post-render else `RenderError`; temp output in scratchpad-style `var/tmp`, moved into storage on success.
+Edge cases: PNG cover w/ odd dimension → `scale` to even 1920 handles; FLAC input fine (ffmpeg decodes); output duration must be within 1s of master duration → verify with ffprobe post-render, reading `out` itself, else `RenderError`; temp output in scratchpad-style `var/tmp`, moved into storage on success. Callers (`delivery/youtube.py`) pass the storage-derived `renders/{delivery_id}/{track_id}.mp4` temp path directly as `out`.
 
 ## YouTube auto-upload (label channel)
 
@@ -525,7 +526,7 @@ test_api_releases: create→add tracks→validation 409 on package→complete→
 | ASCAP or BMI | Publisher entity | $50 / $175+ |
 | SoundExchange | Rights-owner + featured-artist reg | free |
 | SoundCloud | Artist Pro on label acct → register API app → creds in .env | ~$12–16/mo |
-| Google Cloud | Project + OAuth client (In production) + `youtube_auth.py` + **audit form** | free; audit = weeks |
+| Google Cloud | Project + OAuth client (In production) + `youtube_auth.py` + **audit form** + quota-increase request (audit form has a quota section) | free; audit = weeks |
 | Distributor | TuneCore (own ISRC+UPC) or DistroKid (own ISRC only) | per pricing |
 
 ## Verification
