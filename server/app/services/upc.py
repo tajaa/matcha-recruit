@@ -1,12 +1,16 @@
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.codes import UpcCode
 from app.models.enums import UpcStatus
 from app.models.release import Release
+
+_SEPARATORS = re.compile(r"[\s\-]")
 
 
 class UpcError(Exception):
@@ -32,10 +36,10 @@ def _gtin_check_digit_valid(code13: str) -> bool:
 
 
 def _normalize(raw: str) -> str | None:
-    code = raw.strip()
-    if len(code) == 12 and code.isdigit():
+    code = _SEPARATORS.sub("", raw)
+    if len(code) == 12 and code.isascii() and code.isdigit():
         code = "0" + code
-    if len(code) != 13 or not code.isdigit():
+    if len(code) != 13 or not code.isascii() or not code.isdigit():
         return None
     if not _gtin_check_digit_valid(code):
         return None
@@ -57,15 +61,15 @@ def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str], int]:
         normalized.append(code)
 
     added = 0
-    skipped = 0
-    for code in normalized:
-        exists = db.execute(sa.select(UpcCode).where(UpcCode.code == code)).scalar_one_or_none()
-        if exists is not None:
-            skipped += 1
-            continue
-        db.add(UpcCode(code=code, status=UpcStatus.available))
-        added += 1
-    db.flush()
+    if normalized:
+        inserted = db.execute(
+            pg_insert(UpcCode)
+            .values([{"code": c, "status": UpcStatus.available} for c in normalized])
+            .on_conflict_do_nothing(index_elements=[UpcCode.code])
+            .returning(UpcCode.code)
+        ).scalars().all()
+        added = len(inserted)
+    skipped = len(normalized) - added
     return added, rejected, skipped
 
 

@@ -21,7 +21,7 @@ class IsrcConfigUpdate(BaseModel):
 
 
 class UpcAddIn(BaseModel):
-    codes: list[str]
+    codes: list[str] = Field(max_length=10_000)
 
 
 class UpcAddResult(BaseModel):
@@ -41,6 +41,9 @@ class UpcListResponse(BaseModel):
     items: list[UpcListItem]
     available: int
     assigned: int
+    total: int
+    limit: int
+    offset: int
 
 
 class AssignIsrcResult(BaseModel):

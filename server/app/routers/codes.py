@@ -1,7 +1,7 @@
 import uuid
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from app.db import get_db
 from app.deps import AuthDep
 from app.models.codes import IsrcConfig, UpcCode
 from app.models.enums import UpcStatus
+from app.models.release import Release
 from app.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult, UpcListResponse
 from app.services import upc as upc_service
 
@@ -45,12 +46,22 @@ def update_isrc_config(payload: IsrcConfigUpdate, db: Session = Depends(get_db))
 
 
 @router.get("/upcs", response_model=UpcListResponse)
-def list_upcs(db: Session = Depends(get_db)):
-    rows = db.execute(sa.select(UpcCode).order_by(UpcCode.created_at)).scalars().all()
+def list_upcs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    counts = dict(db.execute(sa.select(UpcCode.status, sa.func.count()).group_by(UpcCode.status)).all())
+    rows = db.execute(
+        sa.select(UpcCode).order_by(UpcCode.created_at, UpcCode.code).limit(limit).offset(offset)
+    ).scalars().all()
     return {
         "items": [{"id": r.id, "code": r.code, "status": r.status, "release_id": r.release_id} for r in rows],
-        "available": sum(1 for r in rows if r.status == "available"),
-        "assigned": sum(1 for r in rows if r.status == "assigned"),
+        "available": counts.get(UpcStatus.available, 0),
+        "assigned": counts.get(UpcStatus.assigned, 0),
+        "total": sum(counts.values()),
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -63,16 +74,28 @@ def add_upcs(payload: UpcAddIn, db: Session = Depends(get_db)):
 
 @router.post("/upcs/{upc_id}/unassign", status_code=204)
 def unassign_upc(upc_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Explicitly return a UPC to the available pool (deliberate action, e.g. after a release delete)."""
+    """Explicitly return a UPC to the available pool (deliberate action, e.g. after a release delete).
+
+    Locks in the same order as assign_upc (Release, then UpcCode) to avoid
+    the reverse-order deadlock shape, and revalidates release_id under lock
+    since a concurrent assign/unassign can move it between the initial
+    unlocked read and the lock being taken.
+    """
     upc = db.get(UpcCode, upc_id)
     if upc is None:
         raise HTTPException(status_code=404, detail="UPC not found")
-    if upc.release_id is not None:
-        from app.models.release import Release
+    original_release_id = upc.release_id
 
-        release = db.get(Release, upc.release_id)
-        if release is not None and release.upc == upc.code:
-            release.upc = None
+    release = None
+    if original_release_id is not None:
+        release = db.get(Release, original_release_id, with_for_update=True)
+
+    upc = db.get(UpcCode, upc_id, with_for_update=True, populate_existing=True)
+    if upc is None or upc.release_id != original_release_id:
+        raise HTTPException(status_code=409, detail="UPC changed concurrently — retry")
+
+    if release is not None and release.upc == upc.code:
+        release.upc = None
     upc.status = UpcStatus.available
     upc.release_id = None
     upc.assigned_at = None

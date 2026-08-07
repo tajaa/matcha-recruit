@@ -73,6 +73,27 @@ def test_assign_upc_already_assigned_raises(db):
         upc_service.assign_upc(db, release.id)
 
 
+def test_add_upcs_rejects_non_ascii_digits(db):
+    non_ascii = "²²²²²²²²²²²²²"  # superscript digits: str.isdigit() is True, int() raises
+    arabic_indic = "٢٢٢٢٢٢٢٢٢٢٢٢٢"  # str.isdigit() and int() both succeed on these
+    added, rejected, skipped = upc_service.add_upcs(db, [non_ascii, arabic_indic])
+    assert added == 0
+    assert skipped == 0
+    assert set(rejected) == {non_ascii, arabic_indic}
+
+
+def test_add_upcs_accepts_separator_formats(db):
+    added, rejected, skipped = upc_service.add_upcs(db, ["0-36000-29145-2", "0 36000 29145 2"])
+    assert added == 1
+    assert rejected == []
+    assert skipped == 0  # both normalize to the same code, deduped pre-insert like a plain repeat
+
+    from app.models.codes import UpcCode
+
+    row = db.query(UpcCode).one()
+    assert row.code == VALID_EAN_13
+
+
 def test_add_upcs_endpoint_partial_accept(client):
     bad = "036000291459"  # wrong check digit
     resp = client.post("/api/upcs", json={"codes": [VALID_UPC_12, bad]})
@@ -81,6 +102,26 @@ def test_add_upcs_endpoint_partial_accept(client):
     assert body["added"] == 1
     assert body["rejected"] == [bad]
     assert body["skipped"] == 0
+
+
+def test_add_upcs_endpoint_rejects_oversized_payload(client):
+    resp = client.post("/api/upcs", json={"codes": ["1"] * 10_001})
+    assert resp.status_code == 422
+
+
+def test_list_upcs_endpoint_paginates_and_counts_full_pool(client):
+    codes = ["036000291452", "819788020007", "885909950805"]
+    resp = client.post("/api/upcs", json={"codes": codes})
+    assert resp.json()["added"] == 3
+
+    resp = client.get("/api/upcs", params={"limit": 2, "offset": 0})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["items"]) == 2
+    assert body["total"] == 3
+    assert body["available"] == 3
+    assert body["limit"] == 2
+    assert body["offset"] == 0
 
 
 @pytest.fixture()
