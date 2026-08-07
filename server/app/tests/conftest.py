@@ -2,12 +2,12 @@ from collections.abc import Generator
 
 import pytest
 import sqlalchemy as sa
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
+from alembic import command
 from app.config import settings
 from app.db import get_db
 from app.main import app
@@ -85,8 +85,8 @@ def client(db) -> Generator[TestClient, None, None]:
 # it runs inside a savepoint that's always rolled back).
 _TRUNCATE_TABLES = (
     "delivery_items, deliveries, registration_tasks, royalty_lines, royalty_statements, "
-    "tracks, upc_codes, recording_works, master_splits, credits, work_writers, releases, "
-    "recordings, works, isrc_config, files, artists, contributors, jobs"
+    "tracks, upc_codes, recording_works, master_splits, credits, work_writers, release_artists, "
+    "releases, recordings, works, isrc_config, files, artists, contributors, jobs"
 )
 
 

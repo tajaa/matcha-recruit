@@ -93,7 +93,9 @@ def reorder_tracks(release_id: uuid.UUID, payload: TrackReorder, db: Session = D
         db.rollback()
         raise integrity_error_to_http(e) from e
 
-    rows = db.execute(sa.select(Track).where(Track.release_id == release_id).order_by(Track.disc_number, Track.position)).scalars().all()
+    rows = db.execute(
+        sa.select(Track).where(Track.release_id == release_id).order_by(Track.disc_number, Track.position)
+    ).scalars().all()
     return rows
 
 

@@ -6,9 +6,9 @@ FK/not-null violations) instead of ad-hoc, sometimes-wrong hard-coded
 messages per endpoint.
 """
 
+from fastapi import HTTPException
 from psycopg.errors import ForeignKeyViolation, NotNullViolation, UniqueViolation
 from sqlalchemy.exc import IntegrityError
-from fastapi import HTTPException
 
 # Friendly overrides for well-known unique constraints; falls back to a
 # generic message built from the constraint name when not listed here.

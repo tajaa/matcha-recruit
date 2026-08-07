@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.services import upc as upc_service
 from app.tests.factories import make_release
 
-
 VALID_UPC_12 = "036000291452"  # well-known valid UPC-A (Kellogg's Corn Flakes-style test code)
 VALID_EAN_13 = "0036000291452"
 

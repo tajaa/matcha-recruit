@@ -5,7 +5,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.services import isrc as isrc_service
-from app.tests.conftest import TEST_DATABASE_URL
 from app.tests.factories import make_isrc_config, make_recording
 
 
