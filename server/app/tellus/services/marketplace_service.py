@@ -44,6 +44,7 @@ def serialize_listing(row) -> TellusListing:
         is_active=row["is_active"],
         created_at=row["created_at"],
         expiry_days=row["expiry_days"] if "expiry_days" in row.keys() else 30,
+        visibility=row["visibility"] if "visibility" in row.keys() else "public",
     )
 
 
@@ -74,6 +75,8 @@ async def list_marketplace(conn, city: Optional[str], state: Optional[str]) -> l
            FROM tellus_reward_listings l
            LEFT JOIN tellus_brands b ON b.id = l.brand_id
            WHERE l.is_active
+             AND l.visibility = 'public'
+             -- board-only deals surface inside their board, never the city marketplace
              AND (l.active_from IS NULL OR NOW() >= l.active_from)
              AND (l.active_to IS NULL OR NOW() <= l.active_to)
              AND (l.quantity_total IS NULL OR l.quantity_claimed < l.quantity_total)

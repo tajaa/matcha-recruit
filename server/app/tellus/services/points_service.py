@@ -324,12 +324,26 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
 
         listing = await conn.fetchrow(
             """SELECT id, title, points_cost, quantity_total, quantity_claimed,
-                      redemption_type, is_active, active_from, active_to, expiry_days
+                      redemption_type, is_active, active_from, active_to, expiry_days,
+                      visibility, brand_id
                FROM tellus_reward_listings WHERE id = $1 FOR UPDATE""",
             listing_id,
         )
         if listing is None or not listing["is_active"]:
             raise RedeemError("This reward is not available.")
+
+        if listing["visibility"] == "board":
+            # Board-gated: approved membership required, checked inside the
+            # same FOR-UPDATE transaction. A membership revoked mid-redeem is
+            # benign — worst case one final redemption by a just-removed regular.
+            member = await conn.fetchval(
+                """SELECT 1 FROM tellus_board_memberships m
+                   JOIN tellus_boards bo ON bo.id = m.board_id
+                   WHERE bo.brand_id = $1 AND m.account_id = $2 AND m.status = 'approved'""",
+                listing["brand_id"], account_id,
+            )
+            if not member:
+                raise RedeemError("This reward is for board members.")
 
         # Active window.
         window_ok = await conn.fetchval(

@@ -4,7 +4,7 @@ import { Heart, ImageIcon, Star, Video } from 'lucide-react'
 import { tellusApi, tellusPublicGet } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, Empty, ErrorText, Spinner } from '../components/ui'
-import type { ClaimResponse, MyClaim, PublicBrandPage, PublicReview } from '../api/types'
+import type { BoardMembership, ClaimResponse, MyClaim, PublicBrandPage, PublicReview } from '../api/types'
 
 const PAGE_SIZE = 20
 
@@ -75,6 +75,9 @@ export default function PublicBrand() {
   const [claimErr, setClaimErr] = useState('')
   const [myClaim, setMyClaim] = useState<MyClaim | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const [myMembership, setMyMembership] = useState<BoardMembership | null>(null)
+  const [joiningBoard, setJoiningBoard] = useState(false)
+  const [boardErr, setBoardErr] = useState('')
   const [olderReviews, setOlderReviews] = useState<PublicReview[] | null>(null)   // null = collapsed
   const [olderTotal, setOlderTotal] = useState(0)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -84,6 +87,25 @@ export default function PublicBrand() {
     if (!account) { setMyClaim(null); return }
     tellusApi.get<MyClaim | null>('/me/claim').then(setMyClaim).catch(() => {})
   }, [account, slug])
+
+  useEffect(() => {
+    if (!account || account.account_type !== 'consumer') { setMyMembership(null); return }
+    tellusApi.get<BoardMembership[]>('/me/board-memberships')
+      .then((ms) => setMyMembership(ms.find((m) => m.brand_slug === slug) ?? null))
+      .catch(() => {})
+  }, [account, slug])
+
+  async function joinBoard() {
+    setJoiningBoard(true); setBoardErr('')
+    try {
+      const m = await tellusApi.post<BoardMembership>(`/b/${slug}/board/join`)
+      setMyMembership(m)
+    } catch (e) {
+      setBoardErr(e instanceof Error ? e.message : 'Could not request to join')
+    } finally {
+      setJoiningBoard(false)
+    }
+  }
 
   async function claimBrand() {
     setClaiming(true); setClaimErr('')
@@ -192,6 +214,32 @@ export default function PublicBrand() {
               ))}
             </div>
             <span className="text-sm text-tu-dim">{page.avg_rating.toFixed(1)} · {page.review_count} review{page.review_count === 1 ? '' : 's'}</span>
+          </div>
+        )}
+
+        {page.has_board && (
+          <div className="mt-3">
+            {!account && (
+              <p className="text-xs text-tu-faint">
+                <Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug)} className="font-semibold text-tu-accent hover:underline">
+                  Log in to join {page.brand_name}'s regulars board →
+                </Link>
+              </p>
+            )}
+            {account?.account_type === 'consumer' && (
+              myMembership?.status === 'approved' ? (
+                <Link to={`/boards/${slug}`} className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
+                  View regulars board
+                </Link>
+              ) : myMembership?.status === 'pending' ? (
+                <p className="text-xs text-tu-faint">Your request to join the regulars board is pending review.</p>
+              ) : (
+                <>
+                  <Button size="sm" variant="soft" loading={joiningBoard} onClick={joinBoard}>Request to join the regulars board</Button>
+                  <ErrorText>{boardErr}</ErrorText>
+                </>
+              )
+            )}
           </div>
         )}
 

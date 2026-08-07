@@ -99,12 +99,12 @@ async def create_listing(body: TellusListingCreate, account: TellusAccount = Dep
             """INSERT INTO tellus_reward_listings
                    (brand_id, city, state, title, description, image_url, points_cost,
                     quantity_total, redemption_type, terms, active_from, active_to, is_active,
-                    expiry_days)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    expiry_days, visibility)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                RETURNING *""",
             account.brand_id, body.city, body.state, body.title, body.description, body.image_url,
             body.points_cost, body.quantity_total, body.redemption_type, body.terms,
-            body.active_from, body.active_to, body.is_active, body.expiry_days,
+            body.active_from, body.active_to, body.is_active, body.expiry_days, body.visibility,
         )
     return serialize_listing(row)
 
@@ -129,11 +129,13 @@ async def update_listing(
                    city = COALESCE($10, city), state = COALESCE($11, state),
                    active_from = COALESCE($12, active_from), active_to = COALESCE($13, active_to),
                    is_active = COALESCE($14, is_active), expiry_days = COALESCE($15, expiry_days),
+                   visibility = COALESCE($16, visibility),
                    updated_at = NOW()
                WHERE id = $1 AND brand_id = $2 RETURNING *""",
             listing_id, account.brand_id, body.title, body.description, body.image_url,
             body.points_cost, body.quantity_total, body.redemption_type, body.terms,
             body.city, body.state, body.active_from, body.active_to, body.is_active, body.expiry_days,
+            body.visibility,
         )
     return serialize_listing(row)
 

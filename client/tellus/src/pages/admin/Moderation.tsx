@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { Loader2, Sparkles, Star } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Chip, ErrorText, Input, Select } from '../../components/ui'
-import type { AdminDmMessage, AdminDmThreadSummary, AdminReportItem } from '../../api/types'
+import type {
+  AdminBoardPostRow, AdminBoardReplyRow, AdminDmMessage, AdminDmThreadSummary, AdminReportItem,
+} from '../../api/types'
 
 const fmtDateTime = (iso: string) => new Date(iso).toLocaleString()
 
@@ -303,8 +305,133 @@ function DmsTab() {
   )
 }
 
+function BoardPostsTab() {
+  const [items, setItems] = useState<AdminBoardPostRow[]>([])
+  const [moderationStatus, setModerationStatus] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [pendingStatus, setPendingStatus] = useState<Record<string, string>>({})
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true); setError('')
+    const params = new URLSearchParams()
+    if (moderationStatus) params.set('moderation_status', moderationStatus)
+    try {
+      setItems(await tellusApi.get<AdminBoardPostRow[]>(`/admin/board-posts?${params.toString()}`))
+    } catch (e) {
+      setError(toErrorMessage(e, 'Failed to load board posts'))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void load() }, [moderationStatus])
+
+  async function apply(id: string) {
+    const next = pendingStatus[id]
+    if (!next) return
+    if (next === 'removed' && !window.confirm('Remove this post?')) return
+    setBusyId(id); setError('')
+    try { await tellusApi.patch(`/admin/board-posts/${id}/moderation`, { moderation_status: next }); await load() }
+    catch (e) { setError(toErrorMessage(e, 'Failed to update moderation status')) }
+    finally { setBusyId(null) }
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 border-b border-tu-border px-4 py-3">
+        <div className="w-44">
+          <Select value={moderationStatus} onChange={(e) => setModerationStatus(e.target.value)} options={[
+            { value: '', label: 'All moderation states' }, { value: 'visible', label: 'Visible' },
+            { value: 'flagged', label: 'Flagged' }, { value: 'removed', label: 'Removed' },
+          ]} />
+        </div>
+      </div>
+      {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
+      {loading && items.length === 0 && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
+      {items.map((p) => (
+        <div key={p.id} className="border-b border-tu-border/70 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-tu-text">{p.title}</span>
+            <Chip>{p.kind}</Chip>
+            <Chip tone={p.moderation_status === 'removed' ? 'negative' : undefined}>{p.moderation_status}</Chip>
+          </div>
+          <div className="mt-0.5 text-xs text-tu-faint">{p.brand_name} · {p.author_display_name ?? 'unknown'} · {fmtDateTime(p.created_at)}</div>
+          <div className="mt-2 flex items-end gap-2">
+            <div className="w-40">
+              <Select value={pendingStatus[p.id] ?? p.moderation_status} onChange={(e) => setPendingStatus((s) => ({ ...s, [p.id]: e.target.value }))}
+                options={[{ value: 'visible', label: 'Visible' }, { value: 'flagged', label: 'Flagged' }, { value: 'removed', label: 'Removed' }]} />
+            </div>
+            <Button size="sm" variant="soft" loading={busyId === p.id} onClick={() => void apply(p.id)}>Apply</Button>
+          </div>
+        </div>
+      ))}
+      {!loading && items.length === 0 && <p className="px-4 py-8 text-center text-sm text-tu-faint">No board posts match these filters.</p>}
+    </div>
+  )
+}
+
+function BoardRepliesTab() {
+  const [items, setItems] = useState<AdminBoardReplyRow[]>([])
+  const [statusFilter, setStatusFilter] = useState('held')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [pendingStatus, setPendingStatus] = useState<Record<string, string>>({})
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true); setError('')
+    try {
+      setItems(await tellusApi.get<AdminBoardReplyRow[]>(`/admin/board-replies?status=${statusFilter}`))
+    } catch (e) {
+      setError(toErrorMessage(e, 'Failed to load board replies'))
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { void load() }, [statusFilter])
+
+  async function apply(id: string) {
+    const next = pendingStatus[id]
+    if (!next) return
+    setBusyId(id); setError('')
+    try { await tellusApi.patch(`/admin/board-replies/${id}/status`, { status: next }); await load() }
+    catch (e) { setError(toErrorMessage(e, 'Failed to update reply status')) }
+    finally { setBusyId(null) }
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-end gap-3 border-b border-tu-border px-4 py-3">
+        <div className="w-44">
+          <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} options={[
+            { value: 'held', label: 'Held' }, { value: 'approved', label: 'Approved' },
+            { value: 'rejected', label: 'Rejected' }, { value: 'removed', label: 'Removed' },
+          ]} />
+        </div>
+      </div>
+      {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
+      {loading && items.length === 0 && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
+      {items.map((r) => (
+        <div key={r.id} className="border-b border-tu-border/70 px-4 py-3">
+          <div className="text-xs text-tu-faint">{r.brand_name} · {r.post_title} · {r.author_display_name} · {fmtDateTime(r.created_at)}</div>
+          <p className="mt-1 whitespace-pre-wrap text-sm">{r.body}</p>
+          <div className="mt-2 flex items-end gap-2">
+            <div className="w-40">
+              <Select value={pendingStatus[r.id] ?? r.status} onChange={(e) => setPendingStatus((s) => ({ ...s, [r.id]: e.target.value }))}
+                options={[{ value: 'held', label: 'Held' }, { value: 'approved', label: 'Approved' }, { value: 'rejected', label: 'Rejected' }, { value: 'removed', label: 'Removed' }]} />
+            </div>
+            <Button size="sm" variant="soft" loading={busyId === r.id} onClick={() => void apply(r.id)}>Apply</Button>
+          </div>
+        </div>
+      ))}
+      {!loading && items.length === 0 && <p className="px-4 py-8 text-center text-sm text-tu-faint">No board replies match this filter.</p>}
+    </div>
+  )
+}
+
 export default function AdminModeration() {
-  const [tab, setTab] = useState<'reviews' | 'dms'>('reviews')
+  const [tab, setTab] = useState<'reviews' | 'dms' | 'board-posts' | 'board-replies'>('reviews')
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-tu-border bg-tu-bg">
@@ -325,10 +452,22 @@ export default function AdminModeration() {
           >
             DMs
           </button>
+          <button
+            type="button" onClick={() => setTab('board-posts')}
+            className={`rounded px-2.5 py-1 text-xs font-medium ${tab === 'board-posts' ? 'bg-tu-panel2 text-tu-text' : 'text-tu-faint hover:text-tu-dim'}`}
+          >
+            Board posts
+          </button>
+          <button
+            type="button" onClick={() => setTab('board-replies')}
+            className={`rounded px-2.5 py-1 text-xs font-medium ${tab === 'board-replies' ? 'bg-tu-panel2 text-tu-text' : 'text-tu-faint hover:text-tu-dim'}`}
+          >
+            Board replies
+          </button>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {tab === 'reviews' ? <ReviewsTab /> : <DmsTab />}
+        {tab === 'reviews' ? <ReviewsTab /> : tab === 'dms' ? <DmsTab /> : tab === 'board-posts' ? <BoardPostsTab /> : <BoardRepliesTab />}
       </div>
     </div>
   )

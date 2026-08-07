@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from .admin import router as admin_router
 from .auth import router as auth_router
 from .billing import router as billing_router
+from .board import router as board_router
 from .community import router as community_router
 from .dms import router as dms_router
 from .feedback import router as feedback_router
@@ -53,6 +54,7 @@ tellus_router.include_router(billing_router)
 
 # Mixed-role (per-endpoint dependency — brand opens, either side replies).
 tellus_router.include_router(dms_router)
+tellus_router.include_router(board_router)
 
 # Internal admin (require_tellus_admin per-route — TELLUS_ADMIN_EMAILS allowlist).
 tellus_router.include_router(admin_router)

@@ -17,6 +17,8 @@ import Redemptions from './pages/consumer/Redemptions'
 import Leaderboard from './pages/consumer/Leaderboard'
 import ConsumerSettings from './pages/consumer/Settings'
 import MyReviews from './pages/consumer/MyReviews'
+import Boards from './pages/consumer/Boards'
+import BoardFeed from './pages/consumer/BoardFeed'
 import Messages from './pages/Messages'
 
 import BrandFeedback from './pages/brand/Feedback'
@@ -24,6 +26,7 @@ import BrandStores from './pages/brand/Stores'
 import BrandListings from './pages/brand/Listings'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
+import BrandBoard from './pages/brand/Board'
 
 import TellusAdminUpdates from './pages/admin/Updates'
 import AdminAccounts from './pages/admin/Accounts'
@@ -104,6 +107,8 @@ export default function App() {
       <Route path="/marketplace" element={<Protected requireType="consumer"><Marketplace /></Protected>} />
       <Route path="/redemptions" element={<Protected requireType="consumer"><Redemptions /></Protected>} />
       <Route path="/my-reviews" element={<Protected requireType="consumer"><MyReviews /></Protected>} />
+      <Route path="/boards" element={<Protected requireType="consumer"><Boards /></Protected>} />
+      <Route path="/boards/:slug" element={<Protected requireType="consumer"><BoardFeed /></Protected>} />
       <Route path="/messages" element={<Protected requireType="consumer"><Messages /></Protected>} />
       <Route path="/leaderboard" element={<Protected requireType="consumer"><Leaderboard /></Protected>} />
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
@@ -114,6 +119,7 @@ export default function App() {
       <Route path="/brand/messages" element={<Protected requireType="brand"><Messages /></Protected>} />
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
+      <Route path="/brand/board" element={<Protected requireType="brand"><BrandBoard /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
 
       {/* Internal admin */}

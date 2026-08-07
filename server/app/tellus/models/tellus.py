@@ -16,6 +16,10 @@ RedemptionStatus = Literal["pending", "issued", "redeemed", "expired", "cancelle
 # publish_at <= NOW()) and never stored; see tellus_app_05.
 ReviewState = Literal["held", "published", "withdrawn"]
 DmSenderRole = Literal["brand", "consumer"]
+BoardPostKind = Literal["update", "deal", "event", "question"]
+BoardReplyStatus = Literal["held", "approved", "rejected", "removed"]
+BoardMembershipStatus = Literal["pending", "approved", "declined", "removed", "left", "cancelled"]
+ListingVisibility = Literal["public", "board"]
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
@@ -444,6 +448,7 @@ class TellusListingCreate(BaseModel):
     active_to: Optional[datetime] = None
     is_active: bool = True
     expiry_days: int = Field(default=30, ge=1, le=365)
+    visibility: ListingVisibility = "public"
 
 
 class TellusListingUpdate(BaseModel):
@@ -460,6 +465,7 @@ class TellusListingUpdate(BaseModel):
     active_to: Optional[datetime] = None
     is_active: Optional[bool] = None
     expiry_days: Optional[int] = Field(default=None, ge=1, le=365)
+    visibility: Optional[ListingVisibility] = None
 
 
 class TellusListing(BaseModel):
@@ -482,6 +488,7 @@ class TellusListing(BaseModel):
     is_active: bool = True
     created_at: datetime
     expiry_days: int = 30   # days a redeemed code stays valid (ck 1..365)
+    visibility: ListingVisibility = "public"
 
 
 class TellusRedemption(BaseModel):
@@ -601,6 +608,8 @@ class TellusPublicBrandPage(BaseModel):
     # Published reviews older than the 12-month rating window — the UI renders
     # a "Show older reviews" toggle from this; they never count toward avg_rating.
     older_count: int = 0
+    has_board: bool = False
+    my_membership_status: Optional[BoardMembershipStatus] = None
 
 
 class TellusClaimResponse(BaseModel):
@@ -679,6 +688,132 @@ class TellusNotification(BaseModel):
     reference_id: Optional[str] = None
     is_read: bool = False
     created_at: datetime
+
+
+# ── Regulars board ────────────────────────────────────────────────────────────
+
+class TellusBoardUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    is_active: Optional[bool] = None
+
+
+class TellusBoardJoin(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class TellusBoardPostCreate(BaseModel):
+    kind: BoardPostKind = "update"
+    title: str = Field(min_length=1, max_length=255)
+    body: Optional[str] = Field(default=None, max_length=8000)
+    listing_id: Optional[UUID] = None
+    event_starts_at: Optional[datetime] = None
+    event_ends_at: Optional[datetime] = None
+    is_pinned: bool = False
+
+    @model_validator(mode="after")
+    def _deal_needs_listing(self):
+        if self.kind == "deal" and self.listing_id is None:
+            raise ValueError("A deal post needs a listing_id")
+        return self
+
+
+class TellusBoardPostUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=255)
+    body: Optional[str] = Field(default=None, max_length=8000)
+    is_pinned: Optional[bool] = None
+
+
+class TellusBoardReplyCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class TellusBoardReply(BaseModel):
+    id: UUID
+    post_id: UUID
+    author_name: str                       # display_name fallback 'Tell-Us member'
+    is_mine: bool = False
+    status: BoardReplyStatus               # author sees own held/rejected; members only ever get 'approved'
+    body: str
+    created_at: datetime
+
+
+class TellusBoardPost(BaseModel):
+    id: UUID
+    kind: BoardPostKind
+    title: str
+    body: Optional[str] = None
+    listing: Optional[TellusListing] = None     # embedded for kind='deal'
+    event_starts_at: Optional[datetime] = None
+    event_ends_at: Optional[datetime] = None
+    is_pinned: bool = False
+    moderation_status: str = "visible"          # mods see flagged; members only get visible
+    approved_reply_count: int = 0
+    held_reply_count: Optional[int] = None      # mods only, else None
+    created_at: datetime
+
+
+class TellusBoardPage(BaseModel):               # GET /boards/{slug}
+    board_id: UUID
+    brand_name: str
+    brand_slug: str
+    logo_url: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    plan_paused: bool                           # plan lapsed → composer disabled client-side
+    viewer_role: Literal["member", "moderator", "owner"]
+    posts: list[TellusBoardPost]
+    total: int
+
+
+class TellusBoardMembership(BaseModel):         # consumer's own view
+    id: UUID
+    brand_id: UUID
+    brand_name: str
+    brand_slug: str
+    logo_url: Optional[str] = None
+    status: BoardMembershipStatus
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+
+
+class TellusBoardJoinRequest(BaseModel):        # brand queue view
+    id: UUID
+    account_display_name: str
+    note: Optional[str] = None
+    requested_at: datetime
+    review_count: int = 0                       # loyalty signals — identified activity only
+    hearted: bool = False
+    redemption_count: int = 0
+
+
+class TellusBoardMemberEntry(BaseModel):
+    id: UUID                                    # membership id
+    account_display_name: str
+    joined_at: datetime
+
+
+class TellusBrandTeamMember(BaseModel):
+    id: UUID                                    # member row id
+    account_display_name: str
+    email: str                                  # team page is brand-internal; email OK here
+    role: Literal["owner", "moderator"]
+    created_at: datetime
+
+
+class TellusTeamMemberAdd(BaseModel):
+    email: EmailStr
+
+
+class TellusBoardManageSummary(BaseModel):
+    board_id: UUID
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    pending_requests: int
+    held_replies: int
+    member_count: int
 
 
 TellusFeedbackSubmit.model_rebuild()

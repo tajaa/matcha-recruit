@@ -51,6 +51,7 @@ export default function BrandListings() {
   const [state, setState] = useState('')
   const [rtype, setRtype] = useState<'code' | 'qr' | 'manual'>('code')
   const [expiryDays, setExpiryDays] = useState(30)
+  const [visibility, setVisibility] = useState<'public' | 'board'>('public')
 
   const [editingExpiry, setEditingExpiry] = useState<string | null>(null)
   const [expiryDraft, setExpiryDraft] = useState(30)
@@ -73,14 +74,17 @@ export default function BrandListings() {
       await tellusApi.post('/listings', {
         title, description: desc || null, points_cost: cost,
         quantity_total: qty ? Number(qty) : null, city: city || null, state: state || null,
-        redemption_type: rtype, is_active: true, expiry_days: expiryDays,
+        redemption_type: rtype, is_active: true, expiry_days: expiryDays, visibility,
       })
-      setTitle(''); setDesc(''); setCost(100); setQty(''); setCity(''); setState(''); setExpiryDays(30); await load()
+      setTitle(''); setDesc(''); setCost(100); setQty(''); setCity(''); setState(''); setExpiryDays(30); setVisibility('public'); await load()
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not create listing') } finally { setCreating(false) }
   }
 
   async function toggle(l: Listing) {
     await tellusApi.patch(`/listings/${l.id}`, { is_active: !l.is_active }); await load()
+  }
+  async function toggleVisibility(l: Listing) {
+    await tellusApi.patch(`/listings/${l.id}`, { visibility: l.visibility === 'board' ? 'public' : 'board' }); await load()
   }
   async function remove(l: Listing) {
     if (!confirm('Deactivate this reward?')) return
@@ -103,6 +107,8 @@ export default function BrandListings() {
             onChange={(e) => setExpiryDays(Number(e.target.value))} />
           <Select label="Redemption type" value={rtype} onChange={(e) => setRtype(e.target.value as 'code' | 'qr' | 'manual')}
             options={[{ value: 'code', label: 'Code' }, { value: 'qr', label: 'QR' }, { value: 'manual', label: 'Manual' }]} />
+          <Select label="Visibility" value={visibility} onChange={(e) => setVisibility(e.target.value as 'public' | 'board')}
+            options={[{ value: 'public', label: 'Public marketplace' }, { value: 'board', label: 'Board only (regulars)' }]} />
           <div className="sm:col-span-2"><Button type="submit" loading={creating}><Plus className="h-4 w-4" /> Add reward</Button></div>
         </form>
       </Card>
@@ -121,6 +127,7 @@ export default function BrandListings() {
                     <h3 className="font-semibold">{l.title}</h3>
                     <Chip>{l.points_cost} pts</Chip>
                     {!l.is_active && <Chip tone="negative">inactive</Chip>}
+                    {l.visibility === 'board' && <Chip tone="positive">Board only</Chip>}
                   </div>
                   <p className="text-xs text-tu-faint">
                     {[l.city, l.state].filter(Boolean).join(', ') || 'Everywhere'} · {l.quantity_claimed} claimed
@@ -152,6 +159,7 @@ export default function BrandListings() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="soft" onClick={() => setOpen(open === l.id ? null : l.id)}>Redemptions</Button>
+                  <Button variant="soft" onClick={() => toggleVisibility(l)}>{l.visibility === 'board' ? 'Make public' : 'Make board-only'}</Button>
                   <Button variant="soft" onClick={() => toggle(l)}>{l.is_active ? 'Deactivate' : 'Activate'}</Button>
                   <Button variant="ghost" onClick={() => remove(l)} className="text-tu-bad">Delete</Button>
                 </div>

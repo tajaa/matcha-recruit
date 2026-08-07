@@ -253,6 +253,14 @@ class TestAdminModels:
         assert ACCOUNT_STATUSES == ("active", "suspended")
 
 
+class TestBoardAdminActionsRegistered:
+    def test_board_actions_registered(self):
+        from app.tellus.services.admin_audit import ADMIN_ACTIONS
+
+        assert "board_post.moderate" in ADMIN_ACTIONS
+        assert "board_reply.moderate" in ADMIN_ACTIONS
+
+
 class TestAdminGateSweep:
     def test_every_admin_route_is_gated(self):
         from app.tellus.dependencies import require_tellus_admin

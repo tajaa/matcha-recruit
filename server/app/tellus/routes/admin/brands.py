@@ -221,6 +221,11 @@ async def assign_owner(
                 "WHERE id = $2",
                 body.account_id, brand_id,
             )
+            await conn.execute(
+                """INSERT INTO tellus_brand_members (brand_id, account_id, role) VALUES ($1, $2, 'owner')
+                       ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner'""",
+                brand_id, body.account_id,
+            )
 
             await record_admin_action(
                 conn, admin, "brand.assign_owner", "brand", brand_id,
@@ -254,6 +259,11 @@ async def unassign_owner(
                 "UPDATE tellus_brands SET owner_account_id = NULL, claimed_at = NULL, "
                 "updated_at = NOW() WHERE id = $1",
                 brand_id,
+            )
+            # Moderators deliberately persist through ownership handover — only
+            # the owner row goes.
+            await conn.execute(
+                "DELETE FROM tellus_brand_members WHERE brand_id = $1 AND role = 'owner'", brand_id,
             )
 
             reverted_type = False

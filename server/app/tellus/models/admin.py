@@ -191,6 +191,36 @@ class TellusAdminListingUpdate(BaseModel):
     is_active: bool
 
 
+class TellusAdminBoardPostRow(BaseModel):
+    id: UUID
+    board_id: UUID
+    brand_id: UUID
+    brand_name: str
+    kind: str
+    title: str
+    moderation_status: str
+    author_display_name: Optional[str] = None
+    created_at: datetime
+
+
+class TellusAdminBoardReplyRow(BaseModel):
+    id: UUID
+    post_id: UUID
+    post_title: str
+    brand_id: UUID
+    brand_name: str
+    author_display_name: str
+    body: str
+    status: str
+    created_at: datetime
+
+
+class TellusAdminBoardReplyStatusUpdate(BaseModel):
+    # Force ANY transition — bypasses board_service.can_reply_transition by
+    # design (that's the point of an admin override).
+    status: Literal["held", "approved", "rejected", "removed"]
+
+
 class TellusPasswordResetConfirm(BaseModel):
     token: str = Field(..., min_length=16)
     new_password: str = Field(..., min_length=8, max_length=128)

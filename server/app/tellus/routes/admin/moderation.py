@@ -11,9 +11,16 @@ from ....database import get_connection
 from ...dependencies import require_tellus_admin
 from ...models.tellus import TellusAccount, TellusReport
 from .._shared import serialize_report, serialize_reports
+from ...services import board_service as bs
 from ...services.admin_audit import record_admin_action
 from ...services.points_service import notify_account
-from ...models.admin import TellusAdminDmThreadSummary, TellusAdminModerationUpdate
+from ...models.admin import (
+    TellusAdminBoardPostRow,
+    TellusAdminBoardReplyRow,
+    TellusAdminBoardReplyStatusUpdate,
+    TellusAdminDmThreadSummary,
+    TellusAdminModerationUpdate,
+)
 from ._shared import report_filter_sql
 
 router = APIRouter(dependencies=[Depends(require_tellus_admin)])
@@ -182,3 +189,137 @@ async def unblock_thread(
                 raise HTTPException(404, "Conversation not found")
             await record_admin_action(conn, admin, "dm_thread.unblock", "dm_thread", thread_id, None)
     return {"blocked": False}
+
+
+# ── Regulars board oversight ─────────────────────────────────────────────────
+
+@router.get("/admin/board-posts", response_model=list[TellusAdminBoardPostRow])
+async def admin_list_board_posts(
+    brand_id: Optional[UUID] = None,
+    moderation_status: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    clauses: list[str] = []
+    params: list = []
+    i = 1
+    if brand_id:
+        clauses.append(f"bo.brand_id = ${i}")
+        params.append(brand_id)
+        i += 1
+    if moderation_status:
+        clauses.append(f"p.moderation_status = ${i}")
+        params.append(moderation_status)
+        i += 1
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""SELECT p.id, p.board_id, bo.brand_id, b.name AS brand_name, p.kind, p.title,
+                       p.moderation_status, a.display_name AS author_display_name, p.created_at
+                FROM tellus_board_posts p
+                JOIN tellus_boards bo ON bo.id = p.board_id
+                JOIN tellus_brands b ON b.id = bo.brand_id
+                LEFT JOIN tellus_accounts a ON a.id = p.author_account_id
+                {where}
+                ORDER BY p.created_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+            *params, limit, offset,
+        )
+    return [TellusAdminBoardPostRow(**dict(r)) for r in rows]
+
+
+@router.patch("/admin/board-posts/{post_id}/moderation", status_code=204)
+async def admin_moderate_board_post(
+    post_id: UUID, body: TellusAdminModerationUpdate,
+    admin: TellusAccount = Depends(require_tellus_admin),
+):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT moderation_status FROM tellus_board_posts WHERE id = $1", post_id)
+            if row is None:
+                raise HTTPException(404, "Post not found")
+            await conn.execute(
+                "UPDATE tellus_board_posts SET moderation_status = $2, updated_at = NOW() WHERE id = $1",
+                post_id, body.moderation_status,
+            )
+            await record_admin_action(
+                conn, admin, "board_post.moderate", "board_post", post_id,
+                {"from": row["moderation_status"], "to": body.moderation_status, "note": body.note},
+            )
+
+
+@router.get("/admin/board-replies", response_model=list[TellusAdminBoardReplyRow])
+async def admin_list_board_replies(
+    brand_id: Optional[UUID] = None,
+    reply_status: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Includes held/rejected — the suppression-oversight view: an admin sees
+    what a brand rejected and can force-approve it."""
+    clauses: list[str] = []
+    params: list = []
+    i = 1
+    if brand_id:
+        clauses.append(f"bo.brand_id = ${i}")
+        params.append(brand_id)
+        i += 1
+    if reply_status:
+        clauses.append(f"r.status = ${i}")
+        params.append(reply_status)
+        i += 1
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""SELECT r.id, r.post_id, p.title AS post_title, bo.brand_id, b.name AS brand_name,
+                       a.display_name AS author_display_name, r.body, r.status, r.created_at
+                FROM tellus_board_replies r
+                JOIN tellus_board_posts p ON p.id = r.post_id
+                JOIN tellus_boards bo ON bo.id = p.board_id
+                JOIN tellus_brands b ON b.id = bo.brand_id
+                JOIN tellus_accounts a ON a.id = r.author_account_id
+                {where}
+                ORDER BY r.created_at DESC LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+            *params, limit, offset,
+        )
+    return [
+        TellusAdminBoardReplyRow(
+            id=r["id"], post_id=r["post_id"], post_title=r["post_title"], brand_id=r["brand_id"],
+            brand_name=r["brand_name"], author_display_name=r["author_display_name"] or "Tell-Us member",
+            body=r["body"], status=r["status"], created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+@router.patch("/admin/board-replies/{reply_id}/status", status_code=204)
+async def admin_force_reply_status(
+    reply_id: UUID, body: TellusAdminBoardReplyStatusUpdate,
+    admin: TellusAccount = Depends(require_tellus_admin),
+):
+    """Force ANY transition — bypasses board_service.can_reply_transition by
+    design. held→approved goes through the same approve_reply_and_award core
+    the brand route uses (so points/reason/bypass_cooldown can't drift between
+    the two callers); every other transition is a plain status flip."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("SELECT status FROM tellus_board_replies WHERE id = $1", reply_id)
+            if row is None:
+                raise HTTPException(404, "Reply not found")
+
+            if body.status == "approved" and row["status"] == "held":
+                result = await bs.approve_reply_and_award(conn, reply_id, admin.id, board_id=None)
+                if result is None:
+                    raise HTTPException(409, "Reply was already moderated")
+            else:
+                await conn.execute(
+                    "UPDATE tellus_board_replies SET status = $2, moderated_at = NOW(), moderated_by = $3 "
+                    "WHERE id = $1",
+                    reply_id, body.status, admin.id,
+                )
+
+            await record_admin_action(
+                conn, admin, "board_reply.moderate", "board_reply", reply_id,
+                {"from": row["status"], "to": body.status},
+            )

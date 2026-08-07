@@ -97,6 +97,11 @@ async def approve_claim(
                 claim["account_id"], claim["brand_id"],
             )
             await conn.execute(
+                """INSERT INTO tellus_brand_members (brand_id, account_id, role) VALUES ($1, $2, 'owner')
+                       ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner'""",
+                claim["brand_id"], claim["account_id"],
+            )
+            await conn.execute(
                 "UPDATE tellus_brand_claims SET status = 'approved', decided_at = NOW(), "
                 "decided_by = $1, decision_note = $2 WHERE id = $3",
                 admin.id, body.decision_note, claim_id,

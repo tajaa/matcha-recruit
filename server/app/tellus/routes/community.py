@@ -33,10 +33,14 @@ async def public_brand_page(
 
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url, owner_account_id FROM tellus_brands WHERE slug = $1", slug
+            "SELECT id, name, slug, logo_url, owner_account_id, plan_status FROM tellus_brands WHERE slug = $1", slug
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+
+        has_board = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM tellus_boards WHERE brand_id = $1 AND is_active)", brand["id"],
+        )) and brand["plan_status"] == "active"
 
         claimed = brand["owner_account_id"] is not None
         intake_token = None
@@ -154,6 +158,7 @@ async def public_brand_page(
         city=store["city"] if store else None,
         state=store["state"] if store else None,
         older_count=older_count,
+        has_board=has_board,
     )
 
 
@@ -272,6 +277,9 @@ async def cancel_my_claim(account: TellusAccount = Depends(require_tellus_accoun
                 "UPDATE tellus_brands SET owner_account_id = NULL, claimed_at = NULL, updated_at = NOW() "
                 "WHERE id = $1",
                 claim["brand_id"],
+            )
+            await conn.execute(
+                "DELETE FROM tellus_brand_members WHERE brand_id = $1 AND role = 'owner'", claim["brand_id"],
             )
             still_owns = await conn.fetchval(
                 "SELECT 1 FROM tellus_brands WHERE owner_account_id = $1", account.id

@@ -240,6 +240,7 @@ export interface Listing {
   is_active: boolean
   created_at: string
   expiry_days: number
+  visibility: ListingVisibility
 }
 
 export interface Redemption {
@@ -353,6 +354,8 @@ export interface PublicBrandPage {
   city: string | null
   state: string | null
   older_count: number
+  has_board: boolean
+  my_membership_status: BoardMembershipStatus | null
 }
 
 export interface ClaimResponse {
@@ -610,5 +613,138 @@ export interface TellusNotification {
   reference_type: string | null
   reference_id: string | null
   is_read: boolean
+  created_at: string
+}
+
+// ---------------------------------------------------------------------------
+// Regulars board — mirrors the board_* additions in
+// server/app/tellus/models/tellus.py.
+// ---------------------------------------------------------------------------
+
+export type BoardPostKind = 'update' | 'deal' | 'event' | 'question'
+export type BoardReplyStatus = 'held' | 'approved' | 'rejected' | 'removed'
+export type BoardMembershipStatus = 'pending' | 'approved' | 'declined' | 'removed' | 'left' | 'cancelled'
+export type ListingVisibility = 'public' | 'board'
+
+export interface BoardReply {
+  id: string
+  post_id: string
+  author_name: string
+  is_mine: boolean
+  status: BoardReplyStatus
+  body: string
+  created_at: string
+}
+
+export interface BoardPost {
+  id: string
+  kind: BoardPostKind
+  title: string
+  body: string | null
+  listing: Listing | null
+  event_starts_at: string | null
+  event_ends_at: string | null
+  is_pinned: boolean
+  moderation_status: string
+  approved_reply_count: number
+  held_reply_count: number | null
+  created_at: string
+}
+
+export interface BoardPage {
+  board_id: string
+  brand_name: string
+  brand_slug: string
+  logo_url: string | null
+  title: string | null
+  description: string | null
+  is_active: boolean
+  plan_paused: boolean
+  viewer_role: 'member' | 'moderator' | 'owner'
+  posts: BoardPost[]
+  total: number
+}
+
+export interface BoardMembership {
+  id: string
+  brand_id: string
+  brand_name: string
+  brand_slug: string
+  logo_url: string | null
+  status: BoardMembershipStatus
+  requested_at: string
+  decided_at: string | null
+}
+
+export interface BoardJoinRequest {
+  id: string
+  account_display_name: string
+  note: string | null
+  requested_at: string
+  review_count: number
+  hearted: boolean
+  redemption_count: number
+}
+
+export interface BoardMemberEntry {
+  id: string
+  account_display_name: string
+  joined_at: string
+}
+
+export interface BrandTeamMember {
+  id: string
+  account_display_name: string
+  email: string
+  role: 'owner' | 'moderator'
+  created_at: string
+}
+
+export interface BoardManageSummary {
+  board_id: string
+  title: string | null
+  description: string | null
+  is_active: boolean
+  pending_requests: number
+  held_replies: number
+  member_count: number
+}
+
+// GET /board/manage/replies — brand moderation queue row (own shape, distinct
+// from BoardReply: carries post_title, never is_mine).
+export interface BoardManageReplyRow {
+  id: string
+  post_id: string
+  post_title: string
+  author_name: string
+  body: string
+  status: BoardReplyStatus
+  created_at: string
+}
+
+// GET /admin/board-posts — admin oversight row, mirrors
+// TellusAdminBoardPostRow.
+export interface AdminBoardPostRow {
+  id: string
+  board_id: string
+  brand_id: string
+  brand_name: string
+  kind: BoardPostKind
+  title: string
+  moderation_status: string
+  author_display_name: string | null
+  created_at: string
+}
+
+// GET /admin/board-replies — mirrors TellusAdminBoardReplyRow.
+export interface AdminBoardReplyRow {
+  id: string
+  post_id: string
+  post_title: string
+  brand_id: string
+  brand_name: string
+  author_display_name: string
+  body: string
+  status: BoardReplyStatus
   created_at: string
 }

@@ -15,6 +15,7 @@ ADMIN_ACTIONS = (
     "brand.claim_requested", "brand.claim_approve", "brand.claim_reject", "brand.claim_cancelled",
     "report.moderate", "dm_thread.block", "dm_thread.unblock",
     "earning_rule.update", "badge.update", "listing.update",
+    "board_post.moderate", "board_reply.moderate",
 )
 
 

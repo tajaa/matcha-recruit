@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, MessageCircle, MessageSquare, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
+import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, Megaphone, MessageCircle, MessageSquare, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
 import type { TellusNotification } from '../api/types'
@@ -20,6 +20,7 @@ const CONSUMER_NAV: NavItem[] = [
   { to: '/my-reviews', label: 'My reviews', icon: Star },
   { to: '/places', label: 'Places', icon: MapPin },
   { to: '/messages', label: 'Messages', icon: MessageCircle },
+  { to: '/boards', label: 'Boards', icon: Megaphone },
   { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -27,6 +28,7 @@ const CONSUMER_NAV: NavItem[] = [
 const BRAND_NAV: NavItem[] = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
   { to: '/brand/messages', label: 'Messages', icon: MessageCircle },
+  { to: '/brand/board', label: 'Regulars', icon: Users },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
@@ -80,12 +82,15 @@ export function Layout({ children }: { children: ReactNode }) {
   }, [])
 
   const FEEDBACK_SURFACE_KINDS = new Set(['dm_message', 'review_moderated', 'review_hearted', 'review_reply', 'review_published'])
+  // Consumer-side board notifications vs. the brand-side moderation queue —
+  // different destination surface, so kept as two sets.
+  const BOARD_KINDS = new Set(['board_post', 'board_reply_approved', 'membership_approved', 'board_team_added'])
+  const BRAND_BOARD_KINDS = new Set(['board_join_request', 'board_reply_pending'])
 
   async function openNotifications() {
     // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send
-    // them to their own status page instead. A pending DM takes priority
-    // over the default feedback/reviews surface — that's where the actual
-    // unread thing lives.
+    // them to their own status page instead. Priority once paid: a pending DM
+    // beats a board notification beats the default feedback/reviews surface.
     let notes: TellusNotification[] = []
     let fetchedNotes = true
     try {
@@ -95,8 +100,11 @@ export function Layout({ children }: { children: ReactNode }) {
       // best-effort — fall through to the default surface
     }
     const hasDm = notes.some((n) => n.kind === 'dm_message')
+    const boardKinds = isBrand ? BRAND_BOARD_KINDS : BOARD_KINDS
+    const hasBoard = notes.some((n) => boardKinds.has(n.kind))
     if (isPendingBrand) navigate('/brand/billing')
     else if (hasDm) navigate(isBrand ? '/brand/messages' : '/messages')
+    else if (hasBoard) navigate(isBrand ? '/brand/board' : '/boards')
     else navigate(isBrand ? '/brand/feedback' : '/my-reviews')
 
     // Only clear notifications relevant to the surface we're navigating to —
@@ -105,7 +113,7 @@ export function Layout({ children }: { children: ReactNode }) {
     // failed — `notes` is empty in that case, not actually zero unread.
     if (!fetchedNotes) return
     try {
-      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind))
+      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind) || BOARD_KINDS.has(n.kind) || BRAND_BOARD_KINDS.has(n.kind))
       await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
       setUnread(notes.length - relevant.length)
     } catch {
