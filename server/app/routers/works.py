@@ -2,13 +2,11 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.work import Work, WorkWriter
-from app.routers._errors import integrity_error_to_http
 from app.schemas.common import Page
 from app.schemas.work import WorkCreate, WorkRead, WorkUpdate, WorkWriterIn, WorkWriterRead
 
@@ -34,11 +32,7 @@ def list_works(
 def create_work(payload: WorkCreate, db: Session = Depends(get_db)):
     work = Work(**payload.model_dump())
     db.add(work)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(work)
     return work
 
@@ -58,11 +52,7 @@ def update_work(work_id: uuid.UUID, payload: WorkUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Work not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(work, k, v)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(work)
     return work
 
@@ -73,11 +63,7 @@ def delete_work(work_id: uuid.UUID, db: Session = Depends(get_db)):
     if work is None:
         raise HTTPException(status_code=404, detail="Work not found")
     db.delete(work)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Work is referenced by other records") from e
+    db.commit()
 
 
 @router.put("/works/{work_id}/writers", response_model=list[WorkWriterRead])
@@ -91,11 +77,7 @@ def replace_writers(work_id: uuid.UUID, payload: list[WorkWriterIn], db: Session
         row = WorkWriter(work_id=work_id, **item.model_dump())
         db.add(row)
         rows.append(row)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     for row in rows:
         db.refresh(row)
     return rows

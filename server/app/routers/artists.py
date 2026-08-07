@@ -2,13 +2,11 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.artist import Artist
-from app.routers._errors import integrity_error_to_http
 from app.schemas.artist import ArtistCreate, ArtistRead, ArtistUpdate
 from app.schemas.common import Page
 
@@ -34,11 +32,7 @@ def list_artists(
 def create_artist(payload: ArtistCreate, db: Session = Depends(get_db)):
     artist = Artist(**payload.model_dump())
     db.add(artist)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(artist)
     return artist
 
@@ -58,11 +52,7 @@ def update_artist(artist_id: uuid.UUID, payload: ArtistUpdate, db: Session = Dep
         raise HTTPException(status_code=404, detail="Artist not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(artist, k, v)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(artist)
     return artist
 
@@ -73,8 +63,4 @@ def delete_artist(artist_id: uuid.UUID, db: Session = Depends(get_db)):
     if artist is None:
         raise HTTPException(status_code=404, detail="Artist not found")
     db.delete(artist)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Artist is referenced by other records") from e
+    db.commit()

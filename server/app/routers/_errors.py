@@ -32,6 +32,9 @@ def integrity_error_to_http(e: IntegrityError) -> HTTPException:
         return HTTPException(status_code=409, detail=message)
     if isinstance(orig, ForeignKeyViolation):
         constraint = getattr(orig.diag, "constraint_name", None)
+        detail = getattr(orig.diag, "message_detail", None) or ""
+        if "still referenced" in detail:
+            return HTTPException(status_code=409, detail=f"Row is referenced by other records ({constraint})")
         return HTTPException(status_code=422, detail=f"Referenced row does not exist ({constraint})")
     if isinstance(orig, NotNullViolation):
         col = getattr(orig.diag, "column_name", None)

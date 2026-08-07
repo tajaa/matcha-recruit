@@ -2,14 +2,12 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.recording import Credit, MasterSplit, Recording
 from app.models.work import RecordingWork
-from app.routers._errors import integrity_error_to_http
 from app.schemas.codes import AssignIsrcResult
 from app.schemas.common import Page
 from app.schemas.recording import (
@@ -46,11 +44,7 @@ def list_recordings(
 def create_recording(payload: RecordingCreate, db: Session = Depends(get_db)):
     recording = Recording(**payload.model_dump())
     db.add(recording)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(recording)
     return recording
 
@@ -70,11 +64,7 @@ def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Recording not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(recording, k, v)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(recording)
     return recording
 
@@ -85,11 +75,7 @@ def delete_recording(recording_id: uuid.UUID, db: Session = Depends(get_db)):
     if recording is None:
         raise HTTPException(status_code=404, detail="Recording not found")
     db.delete(recording)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Recording is referenced by other records") from e
+    db.commit()
 
 
 @router.post("/{recording_id}/assign-isrc", response_model=AssignIsrcResult)
@@ -114,11 +100,7 @@ def replace_splits(recording_id: uuid.UUID, payload: list[MasterSplitIn], db: Se
     db.execute(sa.delete(MasterSplit).where(MasterSplit.recording_id == recording_id))
     rows = [MasterSplit(recording_id=recording_id, **item.model_dump()) for item in payload]
     db.add_all(rows)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     for row in rows:
         db.refresh(row)
     return rows
@@ -132,11 +114,7 @@ def replace_credits(recording_id: uuid.UUID, payload: list[CreditIn], db: Sessio
     db.execute(sa.delete(Credit).where(Credit.recording_id == recording_id))
     rows = [Credit(recording_id=recording_id, **item.model_dump()) for item in payload]
     db.add_all(rows)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     for row in rows:
         db.refresh(row)
     return rows
@@ -150,9 +128,5 @@ def replace_works(recording_id: uuid.UUID, payload: WorkLinksIn, db: Session = D
     db.execute(sa.delete(RecordingWork).where(RecordingWork.recording_id == recording_id))
     for work_id in payload.work_ids:
         db.add(RecordingWork(recording_id=recording_id, work_id=work_id))
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     return {"work_ids": payload.work_ids}

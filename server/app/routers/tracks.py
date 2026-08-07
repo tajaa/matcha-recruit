@@ -2,7 +2,6 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -10,7 +9,6 @@ from app.deps import AuthDep
 from app.models.recording import Recording
 from app.models.release import Release
 from app.models.track import Track
-from app.routers._errors import integrity_error_to_http
 from app.schemas.track import TrackCreate, TrackRead, TrackReadWithRecording, TrackReorder, TrackUpdate
 
 router = APIRouter(tags=["tracks"], dependencies=[AuthDep])
@@ -51,11 +49,7 @@ def add_track(release_id: uuid.UUID, payload: TrackCreate, db: Session = Depends
 
     track = Track(release_id=release_id, recording_id=payload.recording_id, disc_number=disc_number, position=position)
     db.add(track)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(track)
     return track
 
@@ -87,11 +81,7 @@ def reorder_tracks(release_id: uuid.UUID, payload: TrackReorder, db: Session = D
 
     for i, track_id in enumerate(payload.track_ids, start=1):
         by_id[track_id].position = i
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
 
     rows = db.execute(
         sa.select(Track).where(Track.release_id == release_id).order_by(Track.disc_number, Track.position)
@@ -106,11 +96,7 @@ def update_track(track_id: uuid.UUID, payload: TrackUpdate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Track not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(track, k, v)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(track)
     return track
 
@@ -121,8 +107,4 @@ def delete_track(track_id: uuid.UUID, db: Session = Depends(get_db)):
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
     db.delete(track)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Track is referenced by other records") from e
+    db.commit()

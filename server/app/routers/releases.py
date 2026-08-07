@@ -2,14 +2,12 @@ import uuid
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import AuthDep
 from app.models.enums import ReleaseStatus
 from app.models.release import Release
-from app.routers._errors import integrity_error_to_http
 from app.schemas.codes import AssignUpcResult
 from app.schemas.common import Page
 from app.schemas.release import ReleaseCreate, ReleaseRead, ReleaseUpdate
@@ -46,11 +44,7 @@ def create_release(payload: ReleaseCreate, db: Session = Depends(get_db)):
         data.pop("label_name")
     release = Release(**data)
     db.add(release)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(release)
     return release
 
@@ -70,11 +64,7 @@ def update_release(release_id: uuid.UUID, payload: ReleaseUpdate, db: Session = 
         raise HTTPException(status_code=404, detail="Release not found")
     for k, v in payload.model_dump(exclude_unset=True).items():
         setattr(release, k, v)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise integrity_error_to_http(e) from e
+    db.commit()
     db.refresh(release)
     return release
 
@@ -85,11 +75,7 @@ def delete_release(release_id: uuid.UUID, db: Session = Depends(get_db)):
     if release is None:
         raise HTTPException(status_code=404, detail="Release not found")
     db.delete(release)
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Release is referenced by other records") from e
+    db.commit()
 
 
 @router.post("/{release_id}/assign-upc", response_model=AssignUpcResult)
