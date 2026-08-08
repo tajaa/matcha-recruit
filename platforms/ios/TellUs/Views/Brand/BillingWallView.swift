@@ -4,6 +4,7 @@ struct BillingWallView: View {
     @Environment(AppState.self) private var appState
     @State private var isRefreshing = false
     @State private var showLogoutConfirm = false
+    @State private var showBilling = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -14,15 +15,15 @@ struct BillingWallView: View {
             Text("Your Tell-Us plan isn't active")
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
-            Text("Manage billing on the web to reactivate your brand dashboard.")
+            Text("Manage billing to reactivate your brand dashboard.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             Button {
-                SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/brand/billing"))
+                showBilling = true
             } label: {
-                Text("Manage billing on web").bold()
+                Text("Manage billing").bold()
             }
             .frame(maxWidth: .infinity)
             .padding()
@@ -54,5 +55,6 @@ struct BillingWallView: View {
         } message: {
             Text("Tell-Us has one shared session — this signs you out everywhere.")
         }
+        .sheet(isPresented: $showBilling) { NavigationStack { BillingView() } }
     }
 }
