@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Consumer overflow tab — everything that doesn't fit the 4 primary tabs
 /// (Home/Market/Scan/Boards). Rows are added incrementally as their features
-/// land natively (Messages, Leaderboard, Settings); Places and the admin
-/// console stay web-only permanently.
+/// land natively (Messages, Leaderboard, Settings, Places); the admin
+/// console stays web-only permanently.
 struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var showLogoutConfirm = false
@@ -15,22 +15,11 @@ struct MoreView: View {
                 NavigationLink("Redemptions") { RedemptionsView() }
                 NavigationLink("Messages") { MessagesListView() }
                 NavigationLink("Leaderboard") { LeaderboardView() }
+                NavigationLink("Places") { PlacesView() }
             }
 
             Section {
                 NavigationLink("Settings") { ConsumerSettingsView() }
-            }
-
-            Section {
-                Button {
-                    SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/places"))
-                } label: {
-                    HStack {
-                        Text("Places")
-                        Spacer()
-                        Image(systemName: "arrow.up.right.square")
-                    }
-                }
             }
 
             if !appState.moderatedBrands.isEmpty {

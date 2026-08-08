@@ -43,7 +43,7 @@ Consumer: auth (incl. self-service password reset from an admin-minted token), Q
 
 Brand: feedback dashboard + triage (status/reward/heart/reply/publish-now, "Message reporter" DM for identified feedback), board moderation (requests/held replies/posts incl. create+edit/members/team), stores + feedback-link QR management, reward-listings CRUD + redemption fulfillment, brand settings (name/reward mode/logo/intake prompts), billing status/pricing/location-count. A brand whose plan lapses (`plan_status != active`) hits a billing wall — its own screen still resolves natively now, not a bare web link.
 
-**Web-only in v1** (native app links out via `SafeURL.open`): Stripe checkout itself (native Stripe integration is out of scope), Places (Google Places session tokens + honeypot), admin console, self-serve password-reset *request* (the backend has none — resets consume admin-minted tokens only, requesting one is still admin-side).
+**Web-only in v1** (native app links out via `SafeURL.open`): Stripe checkout itself (native Stripe integration is out of scope), admin console, self-serve password-reset *request* (the backend has none — resets consume admin-minted tokens only, requesting one is still admin-side).
 
 No push notifications, no universal links/deep links, no WebSocket — the Tell-Us backend has none of that infrastructure today; the app polls `/notifications` every 60s like the web client does.
 
