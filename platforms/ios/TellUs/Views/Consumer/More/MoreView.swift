@@ -14,6 +14,11 @@ struct MoreView: View {
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
                 NavigationLink("Messages") { MessagesListView() }
+                NavigationLink("Leaderboard") { LeaderboardView() }
+            }
+
+            Section {
+                NavigationLink("Settings") { ConsumerSettingsView() }
             }
 
             Section {

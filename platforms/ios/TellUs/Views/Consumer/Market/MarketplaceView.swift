@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MarketplaceView: View {
+    @Environment(AppState.self) private var appState
     @State private var vm = MarketplaceViewModel()
     @State private var selected: Listing?
 
@@ -47,7 +48,13 @@ struct MarketplaceView: View {
         }) { listing in
             RedeemConfirmSheet(listing: listing, flow: vm.redeemFlow)
         }
-        .task { await vm.load() }
+        .task {
+            // Seeds from the account's city on first load so a Settings
+            // location change (ConsumerSettingsView) actually narrows
+            // results next time this tab is opened.
+            if vm.city == nil { vm.city = appState.account?.city }
+            await vm.load()
+        }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
     }
