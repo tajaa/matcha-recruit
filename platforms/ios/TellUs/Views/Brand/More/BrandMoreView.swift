@@ -7,6 +7,9 @@ struct BrandMoreView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink("Stores & QR codes") { StoresView() }
+            }
+            Section {
                 NavigationLink("Alerts") { NotificationsView() }
                 NavigationLink("Account") { BrandAccountView() }
             }
