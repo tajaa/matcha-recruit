@@ -4,15 +4,19 @@ DB-touching paths (join/approve/reply/redeem atomicity, points award) are
 integration-level — run manually against dev per the repo's DB-test policy.
 """
 import inspect
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
 from app.tellus.models.tellus import (
     BoardMembershipStatus,
     BoardReplyStatus,
     BoardPostKind,
+    TellusBoardManageReplyRow,
     TellusBoardPostCreate,
+    TellusBoardPostUpdate,
     TellusBoardReplyCreate,
     TellusListingCreate,
 )
@@ -104,6 +108,41 @@ class TestBoardModels:
         assert set(BoardPostKind.__args__) == {"update", "deal", "event", "question"}
 
 
+class TestBoardPostUpdateContract:
+    """update_post's model_fields_set-based UPDATE (routes/board.py) depends on
+    Pydantic distinguishing an explicit null from an omitted field — pin that
+    contract directly so a pydantic version bump or model refactor can't
+    silently reintroduce the COALESCE bug (an explicit null becoming a no-op)."""
+
+    def test_fields_set_distinguishes_omitted_from_explicit_null(self):
+        assert TellusBoardPostUpdate().model_fields_set == set()
+        assert TellusBoardPostUpdate(body=None).model_fields_set == {"body"}
+
+    def test_event_fields_round_trip(self):
+        start = datetime(2026, 9, 1, 18, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 9, 1, 20, 0, tzinfo=timezone.utc)
+        update = TellusBoardPostUpdate(event_starts_at=start, event_ends_at=end)
+        assert update.event_starts_at == start
+        assert update.event_ends_at == end
+        assert update.model_fields_set == {"event_starts_at", "event_ends_at"}
+
+
+class TestBoardManageReplyRow:
+    def test_constructs_from_row_shape(self):
+        row = TellusBoardManageReplyRow(
+            id=uuid4(), post_id=uuid4(), post_title="Happy hour", author_name="Jane",
+            body="Count me in", status="held", created_at=datetime.now(timezone.utc),
+        )
+        assert row.status == "held"
+
+    def test_status_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            TellusBoardManageReplyRow(
+                id=uuid4(), post_id=uuid4(), post_title="Happy hour", author_name="Jane",
+                body="Count me in", status="aproved", created_at=datetime.now(timezone.utc),
+            )
+
+
 class TestListingVisibility:
     def test_default_public(self):
         listing = TellusListingCreate(title="Free coffee", points_cost=100)
@@ -170,3 +209,30 @@ class TestBoardSourceGuards:
 
         src = inspect.getsource(routes.board.get_board)
         assert "AND l.brand_id = $2" in src
+
+    def test_reply_transitions_wired_into_moderator_routes(self):
+        """can_reply_transition must actually gate approve/reject/remove_reply,
+        not just exist as a tested-but-uncalled pure function (the gap this PR
+        closed — see tellus/CLAUDE.md's Regulars board section)."""
+        from app.tellus import routes
+
+        for fn in (routes.board.approve_reply, routes.board.reject_reply, routes.board.remove_reply):
+            assert "can_reply_transition(" in inspect.getsource(fn)
+
+    def test_request_join_blocks_declined_and_removed(self):
+        from app.tellus import routes
+
+        src = inspect.getsource(routes.board.request_join)
+        assert '"declined", "removed"' in src or "'declined', 'removed'" in src
+
+    def test_notification_fanout_casts_params(self):
+        """asyncpg can fail to infer parameter types inside an INSERT...SELECT
+        target list — the ::text casts on $2-$6 are load-bearing, not
+        decoration. See services/board_service.py's notify_board_members
+        docstring."""
+        from app.tellus.services import board_service
+
+        for fn in (board_service.notify_board_members, board_service.notify_board_team):
+            src = inspect.getsource(fn)
+            assert "$2::text" in src
+            assert "$6::text" in src

@@ -47,19 +47,23 @@ function SummarySection({ summary, onSave }: { summary: BoardManageSummary; onSa
   )
 }
 
-function ComposeSection({ qs, onPosted }: { qs: string; onPosted: () => void }) {
+function ComposeSection({ qs, isOwner, onPosted }: { qs: string; isOwner: boolean; onPosted: () => void }) {
   const [kind, setKind] = useState<BoardPostKind>('update')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [listingId, setListingId] = useState('')
   const [boardListings, setBoardListings] = useState<Listing[] | null>(null)
+  const [eventStart, setEventStart] = useState('')
+  const [eventEnd, setEventEnd] = useState('')
   const [posting, setPosting] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
     if (kind !== 'deal' || boardListings !== null) return
-    tellusApi.get<Listing[]>('/listings').then((all) => setBoardListings(all.filter((l) => l.visibility === 'board'))).catch(() => setBoardListings([]))
-  }, [kind, boardListings])
+    // resolve_moderated_brand-gated, not require_paid_brand (GET /listings) —
+    // a consumer-typed team moderator has no brand account, so /listings 403s.
+    tellusApi.get<Listing[]>(`/board/manage/listings${qs}`).then(setBoardListings).catch(() => setBoardListings([]))
+  }, [kind, boardListings, qs])
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setErr(''); setPosting(true)
@@ -67,8 +71,10 @@ function ComposeSection({ qs, onPosted }: { qs: string; onPosted: () => void }) 
       await tellusApi.post(`/board/posts${qs}`, {
         kind, title, body: body || null,
         listing_id: kind === 'deal' ? (listingId || null) : null,
+        event_starts_at: kind === 'event' && eventStart ? new Date(eventStart).toISOString() : null,
+        event_ends_at: kind === 'event' && eventEnd ? new Date(eventEnd).toISOString() : null,
       })
-      setTitle(''); setBody(''); setListingId('')
+      setTitle(''); setBody(''); setListingId(''); setEventStart(''); setEventEnd('')
       onPosted()
     } catch (e) {
       setErr(toErrorMessage(e, 'Could not post'))
@@ -91,10 +97,20 @@ function ComposeSection({ qs, onPosted }: { qs: string; onPosted: () => void }) 
           <div className="flex-1"><Input required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" /></div>
         </div>
         <Textarea rows={2} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Details (optional)" />
+        {kind === 'event' && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input label="Starts" type="datetime-local" value={eventStart} onChange={(e) => setEventStart(e.target.value)} />
+            <Input label="Ends (optional)" type="datetime-local" value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} />
+          </div>
+        )}
         {kind === 'deal' && (
           boardListings === null ? <Spinner /> : boardListings.length === 0 ? (
             <p className="text-xs text-tu-faint">
-              No board-only rewards yet — <Link to="/brand/listings" className="font-semibold text-tu-accent hover:underline">create one on Listings</Link>.
+              {isOwner ? (
+                <>No board-only rewards yet — <Link to="/brand/listings" className="font-semibold text-tu-accent hover:underline">create one on Listings</Link>.</>
+              ) : (
+                'No board-only rewards yet — ask the brand owner to create one.'
+              )}
             </p>
           ) : (
             <Select required value={listingId} onChange={(e) => setListingId(e.target.value)} options={[
@@ -190,17 +206,20 @@ function RepliesSection({ items, qs, onDecided }: { items: BoardManageReplyRow[]
 
 function MembersSection({ items, qs, onRemoved }: { items: BoardMemberEntry[]; qs: string; onRemoved: () => void }) {
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [err, setErr] = useState('')
 
   async function remove(id: string) {
     if (!confirm('Remove this member from the board?')) return
-    setBusyId(id)
+    setBusyId(id); setErr('')
     try { await tellusApi.post(`/board/manage/members/${id}/remove${qs}`); onRemoved() }
+    catch (e) { setErr(toErrorMessage(e, 'Could not remove member')) }
     finally { setBusyId(null) }
   }
 
   return (
     <Card>
       <h2 className="text-sm font-semibold">Members ({items.length})</h2>
+      <ErrorText>{err}</ErrorText>
       {items.length === 0 ? (
         <p className="mt-2 text-sm text-tu-faint">No members yet.</p>
       ) : (
@@ -263,16 +282,32 @@ function TeamSection({
   )
 }
 
+function toLocalInput(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 function EditPostForm({ post, qs, onSaved, onCancel }: { post: BoardPost; qs: string; onSaved: () => void; onCancel: () => void }) {
   const [title, setTitle] = useState(post.title)
   const [body, setBody] = useState(post.body ?? '')
+  const [isPinned, setIsPinned] = useState(post.is_pinned)
+  const [eventStart, setEventStart] = useState(toLocalInput(post.event_starts_at))
+  const [eventEnd, setEventEnd] = useState(toLocalInput(post.event_ends_at))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   async function save() {
     setSaving(true); setErr('')
     try {
-      await tellusApi.patch(`/board/posts/${post.id}${qs}`, { title, body: body || null })
+      await tellusApi.patch(`/board/posts/${post.id}${qs}`, {
+        title, body: body || null, is_pinned: isPinned,
+        ...(post.kind === 'event' ? {
+          event_starts_at: eventStart ? new Date(eventStart).toISOString() : null,
+          event_ends_at: eventEnd ? new Date(eventEnd).toISOString() : null,
+        } : {}),
+      })
       onSaved()
     } catch (e) {
       setErr(toErrorMessage(e, 'Could not save'))
@@ -285,6 +320,16 @@ function EditPostForm({ post, qs, onSaved, onCancel }: { post: BoardPost; qs: st
     <Card className="border-tu-accent/40">
       <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} />
       <div className="mt-2"><Textarea label="Details" rows={2} value={body} onChange={(e) => setBody(e.target.value)} /></div>
+      {post.kind === 'event' && (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <Input label="Starts" type="datetime-local" value={eventStart} onChange={(e) => setEventStart(e.target.value)} />
+          <Input label="Ends (optional)" type="datetime-local" value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} />
+        </div>
+      )}
+      <label className="mt-2 flex items-center gap-1.5 text-xs">
+        <input type="checkbox" checked={isPinned} onChange={(e) => setIsPinned(e.target.checked)} />
+        Pinned
+      </label>
       <ErrorText>{err}</ErrorText>
       <div className="mt-2 flex gap-2">
         <Button size="sm" loading={saving} onClick={() => void save()}>Save</Button>
@@ -296,15 +341,20 @@ function EditPostForm({ post, qs, onSaved, onCancel }: { post: BoardPost; qs: st
 
 function PostsSection({ page, qs, onChanged }: { page: BoardPage; qs: string; onChanged: () => void }) {
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [err, setErr] = useState('')
 
   async function remove(postId: string) {
-    await tellusApi.delete(`/board/posts/${postId}${qs}`)
-    onChanged()
+    setErr('')
+    try { await tellusApi.delete(`/board/posts/${postId}${qs}`); onChanged() }
+    catch (e) { setErr(toErrorMessage(e, 'Could not delete post')) }
   }
 
   return (
     <Card>
-      <h2 className="text-sm font-semibold">Your posts ({page.posts.length})</h2>
+      <h2 className="text-sm font-semibold">
+        Your posts ({page.posts.length}{page.posts.length < page.total ? ` of ${page.total}` : ''})
+      </h2>
+      <ErrorText>{err}</ErrorText>
       {page.posts.length === 0 ? (
         <p className="mt-2 text-sm text-tu-faint">Nothing posted yet — compose one above.</p>
       ) : (
@@ -348,18 +398,35 @@ export default function BrandBoard() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
+  // Scoped loaders — each action refetches only the section(s) it can have
+  // changed, instead of a blanket loadAll (was 6 endpoints on every checkbox
+  // toggle or approve/decline click). Mount still uses loadAll for the
+  // initial fetch.
+  function loadSummary(brand: ModeratedBrand) {
+    return tellusApi.get<BoardManageSummary>(`/board/manage?brand_id=${brand.brand_id}`).then(setSummary)
+  }
+  function loadRequests(brand: ModeratedBrand) {
+    return tellusApi.get<BoardJoinRequest[]>(`/board/manage/requests?brand_id=${brand.brand_id}`).then(setRequests)
+  }
+  function loadReplies(brand: ModeratedBrand) {
+    return tellusApi.get<BoardManageReplyRow[]>(`/board/manage/replies?status=held&brand_id=${brand.brand_id}`).then(setReplies)
+  }
+  function loadMembers(brand: ModeratedBrand) {
+    return tellusApi.get<BoardMemberEntry[]>(`/board/manage/members?brand_id=${brand.brand_id}`).then(setMembers)
+  }
+  function loadTeam(brand: ModeratedBrand) {
+    return tellusApi.get<BrandTeamMember[]>(`/board/team?brand_id=${brand.brand_id}`).then(setTeam)
+  }
+  function loadPage(brand: ModeratedBrand) {
+    return tellusApi.get<BoardPage>(`/boards/${brand.slug}?limit=50`).then(setBoardPage)
+  }
+
   async function loadAll(brand: ModeratedBrand) {
-    const qs = `?brand_id=${brand.brand_id}`
     try {
-      const [s, r, rep, m, t, page] = await Promise.all([
-        tellusApi.get<BoardManageSummary>(`/board/manage${qs}`),
-        tellusApi.get<BoardJoinRequest[]>(`/board/manage/requests${qs}`),
-        tellusApi.get<BoardManageReplyRow[]>(`/board/manage/replies?status=held&brand_id=${brand.brand_id}`),
-        tellusApi.get<BoardMemberEntry[]>(`/board/manage/members${qs}`),
-        tellusApi.get<BrandTeamMember[]>(`/board/team${qs}`),
-        tellusApi.get<BoardPage>(`/boards/${brand.slug}?limit=50`),
+      await Promise.all([
+        loadSummary(brand), loadRequests(brand), loadReplies(brand),
+        loadMembers(brand), loadTeam(brand), loadPage(brand),
       ])
-      setSummary(s); setRequests(r); setReplies(rep); setMembers(m); setTeam(t); setBoardPage(page)
     } catch (e) {
       setErr(toErrorMessage(e, 'Failed to load your regulars board'))
     } finally {
@@ -386,18 +453,29 @@ export default function BrandBoard() {
   if (err || !summary || !moderated || !boardPage) return <ErrorText>{err}</ErrorText>
 
   const qs = `?brand_id=${moderated.brand_id}`
-  const refresh = () => void loadAll(moderated)
+  const isOwner = summary.viewer_role === 'owner'
 
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-bold">Regulars board</h1>
-      <SummarySection summary={summary} onSave={async (patch) => { setSummary(await tellusApi.patch(`/board/manage${qs}`, patch)); refresh() }} />
-      <ComposeSection qs={qs} onPosted={refresh} />
-      <PostsSection page={boardPage} qs={qs} onChanged={refresh} />
-      <RequestsSection items={requests} qs={qs} onDecided={refresh} />
-      <RepliesSection items={replies} qs={qs} onDecided={refresh} />
-      <MembersSection items={members} qs={qs} onRemoved={refresh} />
-      <TeamSection items={team} isOwner={summary.viewer_role === 'owner'} qs={qs} onChanged={refresh} />
+      {!summary.is_active && (
+        <Card className="border-tu-accent/40 bg-tu-accent/5">
+          <p className="text-sm text-tu-dim">Your board isn't visible yet — check "Board active" below to publish it on your brand page.</p>
+        </Card>
+      )}
+      <SummarySection
+        summary={summary}
+        onSave={async (patch) => { setSummary(await tellusApi.patch(`/board/manage${qs}`, patch)) }}
+      />
+      <ComposeSection qs={qs} isOwner={isOwner} onPosted={() => void Promise.all([loadPage(moderated), loadSummary(moderated)])} />
+      <PostsSection page={boardPage} qs={qs} onChanged={() => void Promise.all([loadPage(moderated), loadSummary(moderated)])} />
+      <RequestsSection
+        items={requests} qs={qs}
+        onDecided={() => void Promise.all([loadRequests(moderated), loadMembers(moderated), loadSummary(moderated)])}
+      />
+      <RepliesSection items={replies} qs={qs} onDecided={() => void Promise.all([loadReplies(moderated), loadSummary(moderated)])} />
+      <MembersSection items={members} qs={qs} onRemoved={() => void Promise.all([loadMembers(moderated), loadSummary(moderated)])} />
+      <TeamSection items={team} isOwner={isOwner} qs={qs} onChanged={() => void loadTeam(moderated)} />
       {members.length === 0 && requests.length === 0 && <Empty>Share your brand page to start building your regulars.</Empty>}
     </div>
   )

@@ -14,9 +14,11 @@ from ...database import get_connection
 from ..dependencies import require_consumer, require_tellus_account
 from ..models.tellus import (
     BoardPostKind,
+    BoardReplyStatus,
     TellusAccount,
     TellusBoardJoin,
     TellusBoardJoinRequest,
+    TellusBoardManageReplyRow,
     TellusBoardManageSummary,
     TellusBoardMemberEntry,
     TellusBoardMembership,
@@ -28,33 +30,30 @@ from ..models.tellus import (
     TellusBoardReplyCreate,
     TellusBoardUpdate,
     TellusBrandTeamMember,
+    TellusListing,
     TellusModeratedBrand,
     TellusTeamMemberAdd,
 )
 from ..services import board_service as bs
+from ..services.marketplace_service import serialize_listing
 from ..services.points_service import notify_account
 
 router = APIRouter()
 
 
 async def _manage_summary(conn, board: dict, viewer_role: str) -> TellusBoardManageSummary:
-    pending = await conn.fetchval(
-        "SELECT COUNT(*) FROM tellus_board_memberships WHERE board_id = $1 AND status = 'pending'",
-        board["id"],
-    )
-    held = await conn.fetchval(
-        "SELECT COUNT(*) FROM tellus_board_replies r JOIN tellus_board_posts p ON p.id = r.post_id "
-        "WHERE p.board_id = $1 AND r.status = 'held'",
-        board["id"],
-    )
-    members = await conn.fetchval(
-        "SELECT COUNT(*) FROM tellus_board_memberships WHERE board_id = $1 AND status = 'approved'",
+    counts = await conn.fetchrow(
+        """SELECT
+               (SELECT COUNT(*) FROM tellus_board_memberships WHERE board_id = $1 AND status = 'pending') AS pending,
+               (SELECT COUNT(*) FROM tellus_board_replies r JOIN tellus_board_posts p ON p.id = r.post_id
+                  WHERE p.board_id = $1 AND r.status = 'held') AS held,
+               (SELECT COUNT(*) FROM tellus_board_memberships WHERE board_id = $1 AND status = 'approved') AS members""",
         board["id"],
     )
     return TellusBoardManageSummary(
         board_id=board["id"], title=board["title"], description=board["description"],
-        is_active=board["is_active"], pending_requests=pending, held_replies=held, member_count=members,
-        viewer_role=viewer_role,
+        is_active=board["is_active"], pending_requests=counts["pending"], held_replies=counts["held"],
+        member_count=counts["members"], viewer_role=viewer_role,
     )
 
 
@@ -89,15 +88,25 @@ async def request_join(
             # note). The INSERT itself is wrapped in its own SAVEPOINT so a
             # concurrent duplicate can raise, get caught, and the outer txn
             # (which still needs to notify the team) survives.
+            #
+            # Looks at the LATEST row of any status, not just pending/approved —
+            # a brand's decline/removal must stick (no infinite re-request
+            # spamming the moderator team on every retry); left/cancelled were
+            # the account's own choice, so those fall through to a fresh INSERT.
             existing = await conn.fetchval(
                 "SELECT status FROM tellus_board_memberships WHERE board_id = $1 AND account_id = $2 "
-                "AND status IN ('pending', 'approved') ORDER BY requested_at DESC LIMIT 1",
+                "ORDER BY requested_at DESC LIMIT 1",
                 board["id"], account.id,
             )
-            if existing is not None:
+            if existing in ("pending", "approved"):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Already a member" if existing == "approved" else "Request already pending",
+                )
+            if existing in ("declined", "removed"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The brand has declined this request.",
                 )
 
             try:
@@ -177,7 +186,8 @@ async def get_board(
 ):
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url, plan_status FROM tellus_brands WHERE slug = $1", slug,
+            "SELECT id, name, slug, logo_url, plan_status, owner_account_id FROM tellus_brands WHERE slug = $1",
+            slug,
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -187,8 +197,11 @@ async def get_board(
             "SELECT role FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
             brand["id"], account.id,
         )
-        viewer_is_mod = member_row is not None
-        viewer_role = member_row["role"] if member_row is not None else None
+        # Falls back to owner rather than 403ing the brand's own owner out of
+        # their own board — same rationale as resolve_moderated_brand's fallback
+        # for a member row that's somehow missing (board_service.py).
+        viewer_is_mod = member_row is not None or brand["owner_account_id"] == account.id
+        viewer_role = member_row["role"] if member_row is not None else ("owner" if viewer_is_mod else None)
 
         if not viewer_is_mod:
             if board is None:
@@ -516,6 +529,8 @@ async def create_post(
         bs.require_active_plan(brand)
         async with conn.transaction():
             board = await bs.ensure_board(conn, brand["id"])
+            if not board["is_active"]:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=bs.BOARD_PAUSED_DETAIL)
 
             listing_row = None
             if body.kind == "deal":
@@ -525,7 +540,7 @@ async def create_post(
                     "WHERE l.id = $1 AND l.brand_id = $2",
                     body.listing_id, brand["id"],
                 )
-                if listing_row is None or listing_row["visibility"] != "board":
+                if listing_row is None or listing_row["visibility"] != "board" or not listing_row["is_active"]:
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                         detail="Pick a board-only reward",
@@ -547,6 +562,7 @@ async def create_post(
             await bs.notify_board_members(
                 conn, board["id"], "board_post", f"{brand['name']}: {row['title']}", body.body,
                 reference_type="board_post", reference_id=str(row["id"]),
+                exclude_account_id=account.id,
             )
 
     row_dict = {**dict(row), "approved_reply_count": 0, "held_reply_count": 0}
@@ -562,13 +578,24 @@ async def update_post(
         brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
+        # model_fields_set (not COALESCE) so an explicit null clears a nullable
+        # column (body/event_starts_at/event_ends_at) instead of being
+        # indistinguishable from an omitted field — same pattern as
+        # update_board_manage above. title/is_pinned are NOT NULL, so an
+        # explicit null on either is a no-op, not a clear.
+        sets, args = ["updated_at = NOW()"], [post_id, board["id"]]
+        for field in ("title", "body", "is_pinned", "event_starts_at", "event_ends_at"):
+            if field not in body.model_fields_set:
+                continue
+            value = getattr(body, field)
+            if field in ("title", "is_pinned") and value is None:
+                continue
+            args.append(value)
+            sets.append(f"{field} = ${len(args)}")
         # Ownership fetch scoped to this board — 404 not 403 (get_owned_report pattern).
         row = await conn.fetchrow(
-            """UPDATE tellus_board_posts SET
-                   title = COALESCE($3, title), body = COALESCE($4, body), is_pinned = COALESCE($5, is_pinned),
-                   updated_at = NOW()
-               WHERE id = $1 AND board_id = $2 RETURNING *""",
-            post_id, board["id"], body.title, body.body, body.is_pinned,
+            f"UPDATE tellus_board_posts SET {', '.join(sets)} WHERE id = $1 AND board_id = $2 RETURNING *",
+            *args,
         )
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
@@ -611,9 +638,9 @@ async def delete_post(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
 
-@router.get("/board/manage/replies")
+@router.get("/board/manage/replies", response_model=list[TellusBoardManageReplyRow])
 async def list_manage_replies(
-    reply_status: str = Query("held", alias="status"), brand_id: Optional[UUID] = Query(None),
+    reply_status: BoardReplyStatus = Query("held", alias="status"), brand_id: Optional[UUID] = Query(None),
     account: TellusAccount = Depends(require_tellus_account),
 ):
     async with get_connection() as conn:
@@ -630,11 +657,11 @@ async def list_manage_replies(
             board["id"], reply_status,
         )
     return [
-        {
-            "id": r["id"], "post_id": r["post_id"], "post_title": r["post_title"],
-            "author_name": r["author_display_name"] or "Tell-Us member",
-            "body": r["body"], "status": r["status"], "created_at": r["created_at"],
-        }
+        TellusBoardManageReplyRow(
+            id=r["id"], post_id=r["post_id"], post_title=r["post_title"],
+            author_name=r["author_display_name"] or "Tell-Us member",
+            body=r["body"], status=r["status"], created_at=r["created_at"],
+        )
         for r in rows
     ]
 
@@ -648,6 +675,13 @@ async def approve_reply(
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
         async with conn.transaction():
+            cur = await conn.fetchval(
+                """SELECT r.status FROM tellus_board_replies r
+                   WHERE r.id = $1 AND r.post_id IN (SELECT id FROM tellus_board_posts WHERE board_id = $2)""",
+                reply_id, board["id"],
+            )
+            if cur is None or not bs.can_reply_transition(cur, "approved"):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reply not found or already moderated")
             result = await bs.approve_reply_and_award(conn, reply_id, account.id, board_id=board["id"])
         if result is None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reply not found or already moderated")
@@ -661,6 +695,13 @@ async def reject_reply(
         brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
+        cur = await conn.fetchval(
+            """SELECT r.status FROM tellus_board_replies r
+               WHERE r.id = $1 AND r.post_id IN (SELECT id FROM tellus_board_posts WHERE board_id = $2)""",
+            reply_id, board["id"],
+        )
+        if cur is None or not bs.can_reply_transition(cur, "rejected"):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reply not found or already moderated")
         result = await conn.execute(
             """UPDATE tellus_board_replies SET status = 'rejected', moderated_at = NOW(), moderated_by = $2
                WHERE id = $1 AND status = 'held'
@@ -682,6 +723,13 @@ async def remove_reply(
         brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
         bs.require_active_plan(brand)
         board = await bs.ensure_board(conn, brand["id"])
+        cur = await conn.fetchval(
+            """SELECT r.status FROM tellus_board_replies r
+               WHERE r.id = $1 AND r.post_id IN (SELECT id FROM tellus_board_posts WHERE board_id = $2)""",
+            reply_id, board["id"],
+        )
+        if cur is None or not bs.can_reply_transition(cur, "removed"):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Reply not found or already moderated")
         result = await conn.execute(
             """UPDATE tellus_board_replies SET status = 'removed', moderated_at = NOW(), moderated_by = $2
                WHERE id = $1 AND status = 'approved'
@@ -711,6 +759,26 @@ async def list_team(
         )
         for r in rows
     ]
+
+
+@router.get("/board/manage/listings", response_model=list[TellusListing])
+async def list_board_listings(
+    brand_id: Optional[UUID] = Query(None), account: TellusAccount = Depends(require_tellus_account),
+):
+    """Board-only rewards for the deal-post composer. Gated by
+    resolve_moderated_brand (not require_paid_brand — GET /listings) so a
+    consumer-typed team moderator (POST /board/team) can compose a deal post
+    without hitting a 403 from an endpoint scoped to real brand accounts."""
+    async with get_connection() as conn:
+        brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
+        rows = await conn.fetch(
+            """SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l
+               LEFT JOIN tellus_brands b ON b.id = l.brand_id
+               WHERE l.brand_id = $1 AND l.visibility = 'board' AND l.is_active
+               ORDER BY l.created_at DESC""",
+            brand["id"],
+        )
+    return [serialize_listing(r) for r in rows]
 
 
 @router.post("/board/team", response_model=TellusBrandTeamMember, status_code=status.HTTP_201_CREATED)

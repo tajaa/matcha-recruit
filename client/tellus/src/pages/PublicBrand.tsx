@@ -107,6 +107,20 @@ export default function PublicBrand() {
     }
   }
 
+  async function cancelMembership() {
+    if (!myMembership) return
+    if (myMembership.status === 'approved' && !confirm('Leave this regulars board?')) return
+    setJoiningBoard(true); setBoardErr('')
+    try {
+      await tellusApi.post(`/me/board-memberships/${myMembership.id}/cancel`)
+      setMyMembership(null)
+    } catch (e) {
+      setBoardErr(e instanceof Error ? e.message : 'Could not update your membership')
+    } finally {
+      setJoiningBoard(false)
+    }
+  }
+
   async function claimBrand() {
     setClaiming(true); setClaimErr('')
     try {
@@ -228,11 +242,21 @@ export default function PublicBrand() {
             )}
             {account?.account_type === 'consumer' && (
               myMembership?.status === 'approved' ? (
-                <Link to={`/boards/${slug}`} className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
-                  View regulars board
-                </Link>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link to={`/boards/${slug}`} className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-4 py-2 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
+                    View regulars board
+                  </Link>
+                  <button type="button" disabled={joiningBoard} onClick={() => void cancelMembership()} className="text-xs text-tu-faint hover:underline disabled:opacity-50">
+                    Leave board
+                  </button>
+                </div>
               ) : myMembership?.status === 'pending' ? (
-                <p className="text-xs text-tu-faint">Your request to join the regulars board is pending review.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-xs text-tu-faint">Your request to join the regulars board is pending review.</p>
+                  <button type="button" disabled={joiningBoard} onClick={() => void cancelMembership()} className="text-xs text-tu-faint hover:underline disabled:opacity-50">
+                    Cancel request
+                  </button>
+                </div>
               ) : myMembership?.status === 'declined' || myMembership?.status === 'removed' ? (
                 <p className="text-xs text-tu-faint">Board membership isn't available for this account.</p>
               ) : (

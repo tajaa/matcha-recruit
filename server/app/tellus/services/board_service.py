@@ -19,9 +19,12 @@ BOARD_PAUSED_DETAIL = "This board is paused."     # plan lapsed / is_active=fals
 
 async def ensure_board(conn, brand_id: UUID) -> dict:
     """Lazy-create the brand's single board row. ON CONFLICT (brand_id) DO NOTHING
-    + re-select — safe under concurrent first hits."""
+    + re-select — safe under concurrent first hits. Created PAUSED (is_active=FALSE):
+    this is reached from GET endpoints too, so a mere page view must not flip the
+    public /b/{slug} join CTA on — the owner explicitly publishes via
+    PATCH /board/manage {is_active: true}."""
     row = await conn.fetchrow(
-        """INSERT INTO tellus_boards (brand_id) VALUES ($1)
+        """INSERT INTO tellus_boards (brand_id, is_active) VALUES ($1, FALSE)
            ON CONFLICT (brand_id) DO NOTHING RETURNING *""",
         brand_id,
     )
@@ -114,7 +117,12 @@ def reply_visible_to(reply_status: str, author_id: UUID, viewer_id: UUID, viewer
 
 def can_reply_transition(from_status: str, to_status: str) -> bool:
     """Pure. held→approved, held→rejected, approved→removed. Nothing else
-    (no un-reject, no un-remove — admin force path bypasses via its own endpoint)."""
+    (no un-reject, no un-remove — admin force path bypasses via its own endpoint).
+    Called by the three brand-moderator routes in routes/board.py (approve_reply,
+    reject_reply, remove_reply) before their UPDATE; the admin force path
+    (routes/admin/moderation.py:admin_force_reply_status) deliberately does not
+    call this — it can move rejected/removed→approved to overturn a bad brand
+    call, which this matrix forbids by design."""
     return (from_status, to_status) in {
         ("held", "approved"),
         ("held", "rejected"),
@@ -160,31 +168,34 @@ async def notify_board_members(
     reference_type: str, reference_id: str,
     exclude_account_id: Optional[UUID] = None,
 ) -> None:
-    """Fan-out to every approved board member in one statement."""
-    if exclude_account_id is not None:
-        await conn.execute(
-            """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
-               SELECT account_id, $2, $3, $4, $5, $6 FROM tellus_board_memberships
-               WHERE board_id = $1 AND status = 'approved' AND account_id <> $7""",
-            board_id, kind, title, body, reference_type, reference_id, exclude_account_id,
-        )
-    else:
-        await conn.execute(
-            """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
-               SELECT account_id, $2, $3, $4, $5, $6 FROM tellus_board_memberships
-               WHERE board_id = $1 AND status = 'approved'""",
-            board_id, kind, title, body, reference_type, reference_id,
-        )
+    """Fan-out to every approved board member in one statement.
+
+    The `::text` casts on $2-$6 are load-bearing, not decoration — inside an
+    INSERT...SELECT, parameter types are only reachable through the SELECT's
+    target list, which Postgres can fail to infer (asyncpg's Parse then errors
+    with "could not determine data type of parameter $2"). Every caller here
+    passes plain strings (kind/title/reference_type/reference_id) or a
+    possibly-NULL string (body), so casting the lot to text is always correct."""
+    await conn.execute(
+        """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
+           SELECT account_id, $2::text, $3::text, $4::text, $5::text, $6::text
+           FROM tellus_board_memberships
+           WHERE board_id = $1 AND status = 'approved'
+             AND ($7::uuid IS NULL OR account_id <> $7)""",
+        board_id, kind, title, body, reference_type, reference_id, exclude_account_id,
+    )
 
 
 async def notify_board_team(
     conn, brand_id: UUID, kind: str, title: str, body: Optional[str],
     reference_type: str, reference_id: str,
 ) -> None:
-    """Same shape over tellus_brand_members."""
+    """Same shape over tellus_brand_members — see notify_board_members for why
+    the ::text casts on $2-$6 aren't optional."""
     await conn.execute(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
-           SELECT account_id, $2, $3, $4, $5, $6 FROM tellus_brand_members WHERE brand_id = $1""",
+           SELECT account_id, $2::text, $3::text, $4::text, $5::text, $6::text
+           FROM tellus_brand_members WHERE brand_id = $1""",
         brand_id, kind, title, body, reference_type, reference_id,
     )
 

@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, tellusApi } from '../../api/tellusClient'
 import { BoardPostCard } from '../../components/BoardPostCard'
-import { Card, Empty, ErrorText, Select, Spinner } from '../../components/ui'
-import type { BoardPage, BoardPostKind } from '../../api/types'
+import { Button, Card, Empty, ErrorText, Select, Spinner } from '../../components/ui'
+import type { BoardPage, BoardPost, BoardPostKind } from '../../api/types'
+
+const PAGE_SIZE = 20
 
 const KIND_OPTIONS: { value: BoardPostKind | ''; label: string }[] = [
   { value: '', label: 'All posts' },
@@ -16,26 +18,32 @@ const KIND_OPTIONS: { value: BoardPostKind | ''; label: string }[] = [
 export default function BoardFeed() {
   const { slug = '' } = useParams()
   const [page, setPage] = useState<BoardPage | null>(null)
+  const [posts, setPosts] = useState<BoardPost[]>([])
   const [kind, setKind] = useState<BoardPostKind | ''>('')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
   const [forbidden, setForbidden] = useState(false)
   const [redeemMsg, setRedeemMsg] = useState('')
 
-  async function load() {
-    setLoading(true); setErr(''); setForbidden(false)
+  async function load(reset: boolean) {
+    if (reset) { setLoading(true); setForbidden(false) } else { setLoadingMore(true) }
+    setErr('')
     try {
-      const qs = kind ? `?kind=${kind}` : ''
-      setPage(await tellusApi.get<BoardPage>(`/boards/${slug}${qs}`))
+      const offset = reset ? 0 : posts.length
+      const kindQs = kind ? `&kind=${kind}` : ''
+      const p = await tellusApi.get<BoardPage>(`/boards/${slug}?limit=${PAGE_SIZE}&offset=${offset}${kindQs}`)
+      setPage(p)
+      setPosts(reset ? p.posts : [...posts, ...p.posts])
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) setForbidden(true)
       else setErr(e instanceof Error ? e.message : 'Failed to load this board')
     } finally {
-      setLoading(false)
+      setLoading(false); setLoadingMore(false)
     }
   }
 
-  useEffect(() => { void load() }, [slug, kind])
+  useEffect(() => { void load(true) }, [slug, kind])
 
   async function redeem(listingId: string) {
     setRedeemMsg('')
@@ -82,16 +90,24 @@ export default function BoardFeed() {
 
       {redeemMsg && <p className="text-sm text-tu-accent">{redeemMsg}</p>}
 
-      {page.posts.length === 0 ? (
+      {posts.length === 0 ? (
         <Empty>No posts here yet.</Empty>
       ) : (
         <div className="space-y-3">
-          {page.posts.map((p) => (
+          {posts.map((p) => (
             <BoardPostCard
               key={p.id} post={p} viewerRole={page.viewer_role} slug={slug} brandId={page.brand_id} onRedeem={redeem}
               paused={page.plan_paused || !page.is_active}
             />
           ))}
+        </div>
+      )}
+
+      {posts.length < page.total && (
+        <div className="flex justify-center">
+          <Button variant="soft" loading={loadingMore} onClick={() => void load(false)}>
+            Show more ({page.total - posts.length})
+          </Button>
         </div>
       )}
     </div>

@@ -18,6 +18,7 @@ ReviewState = Literal["held", "published", "withdrawn"]
 DmSenderRole = Literal["brand", "consumer"]
 BoardPostKind = Literal["update", "deal", "event", "question"]
 BoardReplyStatus = Literal["held", "approved", "rejected", "removed"]
+BoardModerationStatus = Literal["visible", "flagged", "removed"]
 BoardMembershipStatus = Literal["pending", "approved", "declined", "removed", "left", "cancelled"]
 ListingVisibility = Literal["public", "board"]
 
@@ -721,6 +722,8 @@ class TellusBoardPostUpdate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=255)
     body: Optional[str] = Field(default=None, max_length=8000)
     is_pinned: Optional[bool] = None
+    event_starts_at: Optional[datetime] = None
+    event_ends_at: Optional[datetime] = None
 
 
 class TellusBoardReplyCreate(BaseModel):
@@ -786,6 +789,16 @@ class TellusBoardJoinRequest(BaseModel):        # brand queue view
     review_count: int = 0                       # loyalty signals — identified activity only
     hearted: bool = False
     redemption_count: int = 0
+
+
+class TellusBoardManageReplyRow(BaseModel):     # GET /board/manage/replies
+    id: UUID
+    post_id: UUID
+    post_title: str
+    author_name: str
+    body: str
+    status: BoardReplyStatus
+    created_at: datetime
 
 
 class TellusBoardMemberEntry(BaseModel):

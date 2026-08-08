@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ....database import get_connection
 from ...dependencies import require_tellus_admin
-from ...models.tellus import TellusAccount, TellusReport
+from ...models.tellus import BoardModerationStatus, BoardReplyStatus, TellusAccount, TellusReport
 from .._shared import serialize_report, serialize_reports
 from ...services import board_service as bs
 from ...services.admin_audit import record_admin_action
@@ -196,7 +196,7 @@ async def unblock_thread(
 @router.get("/admin/board-posts", response_model=list[TellusAdminBoardPostRow])
 async def admin_list_board_posts(
     brand_id: Optional[UUID] = None,
-    moderation_status: Optional[str] = None,
+    moderation_status: Optional[BoardModerationStatus] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -251,7 +251,7 @@ async def admin_moderate_board_post(
 @router.get("/admin/board-replies", response_model=list[TellusAdminBoardReplyRow])
 async def admin_list_board_replies(
     brand_id: Optional[UUID] = None,
-    reply_status: Optional[str] = Query(None, alias="status"),
+    reply_status: Optional[BoardReplyStatus] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):

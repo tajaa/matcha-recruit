@@ -5,6 +5,10 @@ import { tellusApi } from '../../api/tellusClient'
 import { Card, Chip, Empty, ErrorText, Spinner } from '../../components/ui'
 import type { BoardMembership } from '../../api/types'
 
+function toErrorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
+
 function statusChip(status: BoardMembership['status']) {
   if (status === 'approved') return <Chip tone="positive">Member</Chip>
   if (status === 'pending') return <Chip>Pending approval</Chip>
@@ -18,13 +22,30 @@ export default function Boards() {
   const [items, setItems] = useState<BoardMembership[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  function refresh() {
+    return tellusApi.get<BoardMembership[]>('/me/board-memberships').then(setItems)
+  }
 
   useEffect(() => {
-    tellusApi.get<BoardMembership[]>('/me/board-memberships')
-      .then(setItems)
+    refresh()
       .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load boards'))
       .finally(() => setLoading(false))
   }, [])
+
+  async function cancel(id: string, isApproved: boolean) {
+    if (isApproved && !confirm('Leave this regulars board?')) return
+    setBusyId(id)
+    try {
+      await tellusApi.post(`/me/board-memberships/${id}/cancel`)
+      await refresh()
+    } catch (e) {
+      setErr(toErrorMessage(e, 'Could not update your membership'))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   if (loading) return <Spinner />
   if (err) return <ErrorText>{err}</ErrorText>
@@ -44,13 +65,25 @@ export default function Boards() {
       ) : (
         <div className="space-y-3">
           {items.map((m) => {
+            const cancellable = m.status === 'pending' || m.status === 'approved'
             const content = (
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   {m.logo_url && <img src={m.logo_url} alt="" className="h-9 w-9 rounded-lg object-cover" />}
                   <span className="text-sm font-semibold">{m.brand_name}</span>
                 </div>
-                {statusChip(m.status)}
+                <div className="flex items-center gap-2">
+                  {statusChip(m.status)}
+                  {cancellable && (
+                    <button
+                      type="button" disabled={busyId === m.id}
+                      onClick={(e) => { e.preventDefault(); void cancel(m.id, m.status === 'approved') }}
+                      className="text-xs text-tu-faint hover:underline disabled:opacity-50"
+                    >
+                      {m.status === 'approved' ? 'Leave' : 'Cancel'}
+                    </button>
+                  )}
+                </div>
               </div>
             )
             return m.status === 'approved' ? (

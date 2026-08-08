@@ -336,10 +336,15 @@ async def redeem_points(conn, account_id: UUID, listing_id: UUID) -> dict:
             # Board-gated: approved membership required, checked inside the
             # same FOR-UPDATE transaction. A membership revoked mid-redeem is
             # benign — worst case one final redemption by a just-removed regular.
+            # plan_status='active' too — a lapsed brand has no live dashboard to
+            # counter-verify a redemption code, matching has_board on the public
+            # page (see routes/community.py:public_brand_page).
             member = await conn.fetchval(
                 """SELECT 1 FROM tellus_board_memberships m
                    JOIN tellus_boards bo ON bo.id = m.board_id
-                   WHERE bo.brand_id = $1 AND m.account_id = $2 AND m.status = 'approved' AND bo.is_active""",
+                   JOIN tellus_brands br ON br.id = bo.brand_id
+                   WHERE bo.brand_id = $1 AND m.account_id = $2 AND m.status = 'approved'
+                     AND bo.is_active AND br.plan_status = 'active'""",
                 listing["brand_id"], account_id,
             )
             if not member:

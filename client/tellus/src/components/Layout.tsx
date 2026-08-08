@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, Megaphone, MessageCircle, MessageSquare, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Star, Store, Tag, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
-import type { TellusNotification } from '../api/types'
+import type { ModeratedBrand, TellusNotification } from '../api/types'
 
 interface NavItem {
   to: string
@@ -62,9 +62,30 @@ export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const isBrand = account?.account_type === 'brand'
   const isPendingBrand = isBrand && account?.plan_status !== 'active'
-  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : CONSUMER_NAV
-  const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
   const [unread, setUnread] = useState(0)
+  const [moderatesBoard, setModeratesBoard] = useState(false)
+
+  useEffect(() => {
+    if (!account || isBrand) { setModeratesBoard(false); return }
+    let cancelled = false
+    tellusApi.get<ModeratedBrand[]>('/me/moderated-brands')
+      .then((brands) => { if (!cancelled) setModeratesBoard(brands.length > 0) })
+      .catch(() => { if (!cancelled) setModeratesBoard(false) })
+    return () => { cancelled = true }
+  }, [account?.id, isBrand])
+
+  // A consumer-typed team moderator (POST /board/team) has no /brand/board
+  // link in CONSUMER_NAV by default — insert one when they moderate ≥1 board,
+  // right after the existing /boards entry.
+  const consumerNav = moderatesBoard
+    ? [
+        ...CONSUMER_NAV.slice(0, 7),
+        { to: '/brand/board', label: 'Regulars', icon: Users },
+        ...CONSUMER_NAV.slice(7),
+      ]
+    : CONSUMER_NAV
+  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : consumerNav
+  const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
 
   useEffect(() => {
     let cancelled = false
@@ -81,16 +102,20 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  const FEEDBACK_SURFACE_KINDS = new Set(['dm_message', 'review_moderated', 'review_hearted', 'review_reply', 'review_published'])
+  const DM_KINDS = new Set(['dm_message'])
+  const REVIEW_KINDS = new Set(['review_moderated', 'review_hearted', 'review_reply', 'review_published'])
   // Consumer-side board notifications vs. the brand-side moderation queue —
-  // different destination surface, so kept as two sets.
-  const BOARD_KINDS = new Set(['board_post', 'board_reply_approved', 'membership_approved', 'board_team_added'])
-  const BRAND_BOARD_KINDS = new Set(['board_join_request', 'board_reply_pending'])
+  // different destination surface, so kept as two sets. board_team_added
+  // lives in MOD_KINDS (not BOARD_KINDS): its recipient is a newly-added
+  // moderator, who needs to land on /brand/board, not /boards.
+  const BOARD_KINDS = new Set(['board_post', 'board_reply_approved', 'membership_approved'])
+  const MOD_KINDS = new Set(['board_join_request', 'board_reply_pending', 'board_team_added'])
 
   async function openNotifications() {
     // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send
     // them to their own status page instead. Priority once paid: a pending DM
-    // beats a board notification beats the default feedback/reviews surface.
+    // beats a mod-queue notification beats a board notification beats the
+    // default feedback/reviews surface.
     let notes: TellusNotification[] = []
     let fetchedNotes = true
     try {
@@ -99,17 +124,34 @@ export function Layout({ children }: { children: ReactNode }) {
       fetchedNotes = false
       // best-effort — fall through to the default surface
     }
-    const hasDm = notes.some((n) => n.kind === 'dm_message')
-    // BRAND_BOARD_KINDS fires for real brand accounts AND consumer-typed team
+
+    // Resolve destination AND the exact kind-set that surface actually shows,
+    // together — so marking-read never clears a kind the user was never
+    // routed to see (the bug this replaced: a blanket board-kind clear on
+    // any board-adjacent navigation silently dropped unrelated unread
+    // notices, e.g. a DM notification never shown because /messages won).
+    // MOD_KINDS fires for real brand accounts AND consumer-typed team
     // moderators (POST /board/team) — both land on /brand/board. BOARD_KINDS
     // only applies to non-moderator consumers (no /brand/board access).
-    const hasMod = notes.some((n) => BRAND_BOARD_KINDS.has(n.kind))
-    const hasBoard = !isBrand && notes.some((n) => BOARD_KINDS.has(n.kind))
-    if (isPendingBrand) navigate('/brand/billing')
-    else if (hasDm) navigate(isBrand ? '/brand/messages' : '/messages')
-    else if (hasMod) navigate('/brand/board')
-    else if (hasBoard) navigate('/boards')
-    else navigate(isBrand ? '/brand/feedback' : '/my-reviews')
+    let dest: string
+    let surfaced: Set<string>
+    if (isPendingBrand) {
+      dest = '/brand/billing'
+      surfaced = new Set()
+    } else if (notes.some((n) => DM_KINDS.has(n.kind))) {
+      dest = isBrand ? '/brand/messages' : '/messages'
+      surfaced = DM_KINDS
+    } else if (notes.some((n) => MOD_KINDS.has(n.kind))) {
+      dest = '/brand/board'
+      surfaced = MOD_KINDS
+    } else if (!isBrand && notes.some((n) => BOARD_KINDS.has(n.kind))) {
+      dest = '/boards'
+      surfaced = BOARD_KINDS
+    } else {
+      dest = isBrand ? '/brand/feedback' : '/my-reviews'
+      surfaced = REVIEW_KINDS
+    }
+    navigate(dest)
 
     // Only clear notifications relevant to the surface we're navigating to —
     // a blanket mark-all-read here would silently drop unrelated points/
@@ -117,8 +159,7 @@ export function Layout({ children }: { children: ReactNode }) {
     // failed — `notes` is empty in that case, not actually zero unread.
     if (!fetchedNotes) return
     try {
-      const surfacedBoardKinds = hasMod ? BRAND_BOARD_KINDS : hasBoard ? BOARD_KINDS : new Set<string>()
-      const relevant = notes.filter((n) => FEEDBACK_SURFACE_KINDS.has(n.kind) || surfacedBoardKinds.has(n.kind))
+      const relevant = notes.filter((n) => surfaced.has(n.kind))
       await Promise.all(relevant.map((n) => tellusApi.post(`/notifications/read?notification_id=${n.id}`)))
       setUnread(notes.length - relevant.length)
     } catch {

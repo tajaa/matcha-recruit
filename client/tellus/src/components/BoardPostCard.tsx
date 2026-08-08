@@ -125,8 +125,12 @@ export function BoardPostCard({
             <p className="text-sm font-semibold">{post.listing.title}</p>
             <p className="text-xs text-tu-faint">{post.listing.points_cost} pts</p>
           </div>
-          {viewerRole === 'member' && onRedeem && (
-            <Button size="sm" onClick={() => onRedeem(post.listing!.id)}>Redeem</Button>
+          {post.listing.is_active === false ? (
+            <Chip tone="negative">No longer available</Chip>
+          ) : (
+            viewerRole === 'member' && onRedeem && (
+              <Button size="sm" onClick={() => onRedeem(post.listing!.id)}>Redeem</Button>
+            )
           )}
         </div>
       )}
