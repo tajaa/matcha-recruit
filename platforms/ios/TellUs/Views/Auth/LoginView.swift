@@ -45,7 +45,7 @@ struct LoginView: View {
                     .riseIn(2)
                     .padding(.top, 16)
 
-                    orDivider
+                    OrDivider()
                         .riseIn(3)
                         .padding(.top, 20)
 
@@ -79,16 +79,6 @@ struct LoginView: View {
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showResetPassword) { ResetPasswordView() }
-    }
-
-    private var orDivider: some View {
-        HStack(spacing: 12) {
-            Rectangle().fill(TU.hairline).frame(height: 1)
-            Text("OR")
-                .font(TU.eyebrow())
-                .foregroundStyle(TU.textDim)
-            Rectangle().fill(TU.hairline).frame(height: 1)
-        }
     }
 
     private var header: some View {

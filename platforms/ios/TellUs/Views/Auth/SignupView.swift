@@ -1,4 +1,5 @@
 import SwiftUI
+import GoogleSignInSwift
 
 struct SignupView: View {
     @Environment(AppState.self) private var appState
@@ -67,6 +68,20 @@ struct SignupView: View {
                     .disabled(!canSubmit)
                     .riseIn(3)
                     .padding(.top, 32)
+
+                    if vm.accountType == .consumer {
+                        OrDivider()
+                            .riseIn(4)
+                            .padding(.top, 20)
+
+                        GoogleSignInButton(scheme: .dark, style: .wide) {
+                            focusedField = nil
+                            Task { await vm.signInWithGoogle(appState: appState) }
+                        }
+                        .disabled(vm.isLoading)
+                        .riseIn(4)
+                        .padding(.top, 12)
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)

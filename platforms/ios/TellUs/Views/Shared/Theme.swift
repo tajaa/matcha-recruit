@@ -204,6 +204,23 @@ struct EmberRing: View {
     }
 }
 
+// MARK: - Divider
+
+/// Hairline / "OR" / hairline row separating password auth from Google
+/// sign-in — shared by LoginView and SignupView so the two screens stay
+/// visually identical.
+struct OrDivider: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(TU.hairline).frame(height: 1)
+            Text("OR")
+                .font(TU.eyebrow())
+                .foregroundStyle(TU.textDim)
+            Rectangle().fill(TU.hairline).frame(height: 1)
+        }
+    }
+}
+
 // MARK: - Entrance
 
 /// One quiet load sequence per screen — elements fade in in reading order.
