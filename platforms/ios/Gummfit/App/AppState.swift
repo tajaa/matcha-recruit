@@ -41,6 +41,15 @@ final class AppState {
     private var sessionEpoch = 0
     private var sitesTask: Task<Void, Never>?
 
+    /// Inbox unread badge — one poll, owned here (not per-tab) so it survives
+    /// tab switches and pauses while backgrounded instead of burning a
+    /// `GET /threads` every 60s with the app suspended. `OwnerTabView.body`
+    /// drives `scenePhase` into `setScenePhase` (an `@Environment` value
+    /// isn't readable outside a View).
+    var unreadCount = 0
+    private var unreadTask: Task<Void, Never>?
+    private var scenePhaseIsActive = true
+
     private static let lastSiteIdKey = "cappe.lastSiteId"
 
     init() {
@@ -100,6 +109,7 @@ final class AppState {
                 let lastId = UserDefaults.standard.string(forKey: Self.lastSiteIdKey)
                 activeSite = sites.first(where: { $0.id == lastId }) ?? sites.first
             }
+            restartUnreadPoll()
         } catch {
             guard epoch == sessionEpoch, !error.isCancellation else { return }
             sitesError = error.localizedDescription
@@ -109,6 +119,42 @@ final class AppState {
     func selectSite(_ site: CappeSite) {
         activeSite = site
         UserDefaults.standard.set(site.id, forKey: Self.lastSiteIdKey)
+        restartUnreadPoll()
+    }
+
+    /// Cooperative-cancellation poll (`Task.isCancelled`, no timer to leak) —
+    /// restarted on site switch and on `.active` scenePhase, stopped on
+    /// logout and while backgrounded.
+    func restartUnreadPoll() {
+        unreadTask?.cancel()
+        guard scenePhaseIsActive, let siteId = activeSite?.id else { return }
+        unreadTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let threads = try? await MessagesService.shared.listThreads(siteId: siteId) {
+                    self.unreadCount = threads.reduce(0) { $0 + $1.owner_unread }
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    /// Called from `OwnerTabView` on `.onChange(of: scenePhase)` — pauses the
+    /// poll while backgrounded rather than burning a request every 60s with
+    /// nothing on screen to show it to.
+    func setScenePhaseActive(_ active: Bool) {
+        guard active != scenePhaseIsActive else { return }
+        scenePhaseIsActive = active
+        restartUnreadPoll()
+    }
+
+    /// Called after a thread is read — refreshes the count immediately
+    /// rather than waiting up to 60s for the next poll tick.
+    func refreshUnreadCount() async {
+        guard let siteId = activeSite?.id else { return }
+        if let threads = try? await MessagesService.shared.listThreads(siteId: siteId) {
+            unreadCount = threads.reduce(0) { $0 + $1.owner_unread }
+        }
     }
 
     /// Called after `SitesService.create` — the new site becomes active
@@ -146,6 +192,9 @@ final class AppState {
         }
         sitesTask?.cancel()
         sitesTask = nil
+        unreadTask?.cancel()
+        unreadTask = nil
+        unreadCount = 0
         sessionEpoch += 1
         account = nil
         pendingCredentials = nil

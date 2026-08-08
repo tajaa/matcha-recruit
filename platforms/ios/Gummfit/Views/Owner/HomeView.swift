@@ -11,14 +11,18 @@ struct HomeView: View {
 
     @Environment(AppState.self) private var appState
     @State private var vm = HomeViewModel()
+    @State private var requestsVM = RequestsQueueViewModel()
     @State private var showDirectory = false
     @State private var showCreateSite = false
+    @State private var declineTarget: CappeRequestSummary?
+    @State private var declineReason = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 ErrorBanner(message: vm.error)
                 siteCard
+                pendingRequestsSection
                 readinessSection
                 publishButton
             }
@@ -37,14 +41,58 @@ struct HomeView: View {
         .sheet(isPresented: $showCreateSite) {
             NavigationStack { CreateSiteView() }
         }
+        .alert("Decline request", isPresented: Binding(get: { declineTarget != nil }, set: { if !$0 { declineTarget = nil } })) {
+            TextField("Reason (optional)", text: $declineReason)
+            Button("Decline", role: .destructive) {
+                if let target = declineTarget {
+                    Task { await requestsVM.decline(siteId: site.id, target, reason: declineReason.isEmpty ? nil : declineReason) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .task(id: site.id) {
             vm.reset()
-            await vm.loadReadiness(siteId: site.id)
+            async let readiness: Void = vm.loadReadiness(siteId: site.id)
+            async let requests: Void = requestsVM.load(siteId: site.id)
+            _ = await (readiness, requests)
         }
         .refreshable {
             async let sites: Void = appState.loadSites()
             async let readiness: Void = vm.loadReadiness(siteId: site.id)
-            _ = await (sites, readiness)
+            async let requests: Void = requestsVM.load(siteId: site.id)
+            _ = await (sites, readiness, requests)
+        }
+    }
+
+    /// Empty state renders nothing — no "no requests" clutter on a fresh site.
+    @ViewBuilder
+    private var pendingRequestsSection: some View {
+        if !requestsVM.requests.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Needs your review").font(.subheadline.bold())
+                ForEach(requestsVM.requests) { request in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(request.customer_name ?? request.customer_email ?? request.title)
+                                .font(.subheadline)
+                            Text(request.title).font(.caption).foregroundStyle(GummfitTheme.textDim)
+                        }
+                        Spacer()
+                        Button("Accept") { Task { await requestsVM.accept(siteId: site.id, request) } }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        Button("Decline") {
+                            declineTarget = request
+                            declineReason = ""
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
     }
 
