@@ -31,4 +31,11 @@ enum SafeURL {
         UIApplication.shared.open(url)
         return true
     }
+
+    /// Parse + scheme-check without opening — for SwiftUI `Link`, which
+    /// opens the URL itself and never reaches `open(_:)`.
+    static func validated(_ raw: String?) -> URL? {
+        guard let raw, let url = URL(string: raw), isSafe(url) else { return nil }
+        return url
+    }
 }

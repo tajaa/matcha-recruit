@@ -374,12 +374,15 @@ async def publish_site(
         # Publish gate: every REQUIRED checklist item must be done first.
         readiness = await compute_readiness(conn, site_id, site)
         if not readiness["ready"]:
-            missing = [i["label"] for i in readiness["items"] if i["required"] and not i["done"]]
+            blocked = [i for i in readiness["items"] if i["required"] and not i["done"]]
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
-                    "message": "Finish these before publishing: " + "; ".join(missing),
-                    "missing": missing,
+                    # `message` stays label-based — the user-facing sentence.
+                    "message": "Finish these before publishing: " + "; ".join(i["label"] for i in blocked),
+                    # `missing` is machine-readable: stable checklist keys, so
+                    # clients highlight rows without matching display copy.
+                    "missing": [i["key"] for i in blocked],
                 },
             )
         async with conn.transaction():
