@@ -29,6 +29,14 @@ struct PostRepliesView: View {
                             Spacer()
                         }
                         Text(reply.body)
+                        // Only approved replies are likeable — the server 404s
+                        // a held/rejected one, so don't offer the affordance.
+                        if reply.status == .approved {
+                            LikeButton(
+                                target: .boardReply, id: reply.id,
+                                count: reply.likeCount, liked: reply.likedByMe
+                            )
+                        }
                     }
                     .swipeActions {
                         if reply.is_mine && reply.status == .held {

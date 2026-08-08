@@ -66,6 +66,10 @@ struct Listing: Codable, Identifiable {
     let created_at: String
     let expiry_days: Int
     let visibility: ListingVisibility
+    let like_count: Int?
+    let liked_by_me: Bool?
+    var likeCount: Int { like_count ?? 0 }
+    var likedByMe: Bool { liked_by_me ?? false }
 }
 
 struct Redemption: Codable, Identifiable {

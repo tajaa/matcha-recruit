@@ -77,7 +77,7 @@ def _answer_rows_to_models(arows) -> list[TellusReportAnswer]:
     ]
 
 
-def _build_report(row, *, store_name, media, has_dm_thread, answers=()) -> TellusReport:
+def _build_report(row, *, store_name, media, has_dm_thread, answers=(), like_count: int = 0) -> TellusReport:
     return TellusReport(
         id=row["id"],
         brand_id=row["brand_id"],
@@ -110,6 +110,7 @@ def _build_report(row, *, store_name, media, has_dm_thread, answers=()) -> Tellu
         has_dm_thread=has_dm_thread,
         answers=list(answers),
         published_early_at=row["published_early_at"] if "published_early_at" in row.keys() else None,
+        like_count=like_count,
     )
 
 
@@ -152,9 +153,13 @@ async def serialize_report(conn, row, *, include_media: bool = True) -> TellusRe
         row["id"],
     )
 
+    like_count = await conn.fetchval(
+        "SELECT COUNT(*)::int FROM tellus_likes WHERE report_id = $1", row["id"],
+    )
+
     return _build_report(
         row, store_name=store_name, media=media, has_dm_thread=has_dm_thread,
-        answers=_answer_rows_to_models(arows),
+        answers=_answer_rows_to_models(arows), like_count=like_count,
     )
 
 
@@ -194,6 +199,12 @@ async def serialize_reports(conn, rows: list) -> list[TellusReport]:
     for a in arows:
         answers_by_report.setdefault(a["report_id"], []).append(a)
 
+    like_rows = await conn.fetch(
+        "SELECT report_id, COUNT(*)::int AS like_count FROM tellus_likes "
+        "WHERE report_id = ANY($1::uuid[]) GROUP BY report_id", report_ids,
+    )
+    like_counts = {r["report_id"]: r["like_count"] for r in like_rows}
+
     return [
         _build_report(
             r,
@@ -201,6 +212,7 @@ async def serialize_reports(conn, rows: list) -> list[TellusReport]:
             media=_media_rows_to_models(media_by_report.get(r["id"], [])),
             has_dm_thread=r["id"] in has_dm_set,
             answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
+            like_count=like_counts.get(r["id"], 0),
         )
         for r in rows
     ]

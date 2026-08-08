@@ -271,6 +271,8 @@ def serialize_post(row, *, viewer_is_mod: bool, listing_row=None) -> TellusBoard
             else None
         ),
         created_at=row["created_at"],
+        like_count=row["like_count"] if "like_count" in row.keys() else 0,
+        liked_by_me=row["liked_by_me"] if "liked_by_me" in row.keys() else False,
     )
 
 
@@ -285,4 +287,6 @@ def serialize_reply(row, *, viewer_id: UUID) -> TellusBoardReply:
         status=row["status"],
         body=row["body"],
         created_at=row["created_at"],
+        like_count=row["like_count"] if "like_count" in row.keys() else 0,
+        liked_by_me=row["liked_by_me"] if "liked_by_me" in row.keys() else False,
     )

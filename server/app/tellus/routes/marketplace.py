@@ -46,7 +46,7 @@ async def browse_marketplace(
     use_state = state or account.state
     async with get_connection() as conn:
         await reclaim_expired_redemptions(conn)
-        return await list_marketplace(conn, use_city, use_state)
+        return await list_marketplace(conn, use_city, use_state, account.id)
 
 
 @router.post("/redeem", response_model=TellusRedemption, status_code=status.HTTP_201_CREATED)
@@ -84,7 +84,9 @@ async def redeem(
 async def list_listings(account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
+            "SELECT l.*, b.name AS brand_name, "
+            "  (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.listing_id = l.id) AS like_count "
+            "FROM tellus_reward_listings l "
             "LEFT JOIN tellus_brands b ON b.id = l.brand_id "
             "WHERE l.brand_id = $1 ORDER BY l.created_at DESC",
             account.brand_id,

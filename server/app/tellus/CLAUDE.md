@@ -137,6 +137,42 @@ Per-brand channel (`routes/board.py`, `services/board_service.py`, `tellus_app_1
   (`routes/marketplace.py:verify_redemption`) 409s on an attempt to mark an expired code
   `'redeemed'`.
 
+## Likes
+
+Pure counter on four targets — `tellus_board_posts`, `tellus_board_replies`, `tellus_reports`
+(published reviews), `tellus_reward_listings`. **No points, no notifications, no earning rule.**
+`routes/likes.py` + `services/likes_service.py` + migration `tellus_app_15_likes.py`.
+
+- **Strictly disjoint from the brand heart.** `tellus_reports.hearted_at/hearted_by`
+  (`feedback.py`, `require_paid_brand`) is a *brand* acknowledging a review — one bit on the row.
+  A like is a *consumer* action in its own table. Brands are 403'd from liking reports and
+  listings precisely so the two can't blur; `TellusReport` therefore carries `like_count` but
+  deliberately **no** `liked_by_me`. A test pins that `routes/likes.py` never mentions `hearted_*`.
+- **Four nullable FK columns, not polymorphic `(target_type, target_id)`.** `delete_own_reply`
+  (`board.py`) **hard-deletes** a held reply, and Tell-Us has no orphan-sweep cron — a polymorphic
+  table would silently accumulate orphaned likes. All four FKs plus `account_id` are
+  `ON DELETE CASCADE`, so there is no cleanup code anywhere. A `CHECK
+  (num_nonnulls(...) = 1)` keeps exactly one target set. Don't "simplify" this to polymorphic.
+- **`ON CONFLICT DO NOTHING` with no inference spec** — the four unique indexes are *partial*
+  (`WHERE <col> IS NOT NULL`), which an explicit `ON CONFLICT (col, account_id)` fails to match.
+  Never catch `UniqueViolationError` here instead (same reason as the ledger-idempotency note above).
+- **The count is a second statement inside the same transaction, never a data-modifying CTE.**
+  `WITH ins AS (INSERT … RETURNING 1) SELECT COUNT(*) …` shares one snapshot with the CTE and
+  returns a count **stale by one**. Both facts are pinned by source-guard tests.
+- **Unlike is self-scoped and pause-exempt.** `DELETE … WHERE account_id = $1 AND <col> = $2` can
+  only touch the caller's own row, so it does no target authorization at all — and it deliberately
+  skips the paused-board 409 that `like` gets, or a like would get trapped on content that later
+  went paused/invisible. Unliking something never liked is a 200 no-op, not a 404.
+- **Reads count at query time** (`COUNT(*)` subqueries / one batched `hydrate_likes` per page),
+  matching the existing `approved_reply_count` pattern — no denormalized `like_count` column, no
+  triggers. `hydrate_likes`' column name comes from the module-level `_TARGET_COLUMNS` dict,
+  never a request value; the `LikeTargetType` `Literal` on the path param makes an unknown target
+  a 422 before any code runs.
+- `community.py`'s public `/b/{slug}` is unauthenticated but needs `liked_by_me`, so it uses
+  `dependencies.optional_consumer_account_id` (hoisted out of `public_intake.py`, which still
+  uses it). On the web the page fetches via `tellusMaybeAuthGet`, **not** `tellusPublicGet` —
+  the latter never attaches the bearer, so `liked_by_me` would always read false.
+
 ## Frontend pairing
 
 Paired frontend is a separate Vite app at `client/tellus/` (React 19), served by the same nginx at `/tellus/`. No dedicated CLAUDE.md there yet — see root CLAUDE.md's repo-layout table.

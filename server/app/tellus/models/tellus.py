@@ -382,6 +382,11 @@ class TellusReport(BaseModel):
     is_identified: bool = False
     has_dm_thread: bool = False
     answers: list[TellusReportAnswer] = Field(default_factory=list)
+    # Consumer likes (tellus_likes) — distinct from hearted_at above, which is
+    # the brand's own one-bit acknowledgment. No liked_by_me here: this is the
+    # brand-dashboard model and brands can't like, so pairing it with
+    # hearted_at would invite exactly the confusion this field must avoid.
+    like_count: int = 0
 
 
 class TellusReportStatusUpdate(BaseModel):
@@ -494,6 +499,8 @@ class TellusListing(BaseModel):
     created_at: datetime
     expiry_days: int = 30   # days a redeemed code stays valid (ck 1..365)
     visibility: ListingVisibility = "public"
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class TellusRedemption(BaseModel):
@@ -537,6 +544,15 @@ class TellusLeaderboardEntry(BaseModel):
     is_you: bool = False
 
 
+# ── Likes ──────────────────────────────────────────────────────────────────────
+
+class TellusLikeState(BaseModel):
+    """Response for POST/DELETE /likes/{target_type}/{target_id} — authoritative
+    post-write state so a client can reconcile an optimistic toggle without a refetch."""
+    like_count: int = 0
+    liked_by_me: bool = False
+
+
 # ── Grants ─────────────────────────────────────────────────────────────────────
 
 class TellusGrantRequest(BaseModel):
@@ -570,6 +586,8 @@ class TellusMyReview(BaseModel):
     dm_thread_id: Optional[UUID] = None
     media: list[TellusReportMedia] = Field(default_factory=list)
     answers: list[TellusReportAnswer] = Field(default_factory=list)
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class TellusMyReviewUpdate(BaseModel):
@@ -595,6 +613,8 @@ class TellusPublicReview(BaseModel):
     brand_reply_at: Optional[datetime] = None
     media: list[TellusReportMedia] = Field(default_factory=list)
     answers: list[TellusReportAnswer] = Field(default_factory=list)
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class TellusPublicBrandPage(BaseModel):
@@ -742,6 +762,8 @@ class TellusBoardReply(BaseModel):
     status: BoardReplyStatus               # author sees own held/rejected; members only ever get 'approved'
     body: str
     created_at: datetime
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class TellusBoardPost(BaseModel):
@@ -757,6 +779,8 @@ class TellusBoardPost(BaseModel):
     approved_reply_count: int = 0
     held_reply_count: Optional[int] = None      # mods only, else None
     created_at: datetime
+    like_count: int = 0
+    liked_by_me: bool = False
 
 
 class TellusBoardPage(BaseModel):               # GET /boards/{slug}

@@ -11,6 +11,13 @@ struct BoardReply: Codable, Identifiable {
     let status: BoardReplyStatus
     let body: String
     let created_at: String
+    /// Optional (not a plain Int) so a feed payload from a server build that
+    /// predates likes still decodes — a missing key would otherwise fail the
+    /// whole list, same tolerance as held_reply_count below.
+    let like_count: Int?
+    let liked_by_me: Bool?
+    var likeCount: Int { like_count ?? 0 }
+    var likedByMe: Bool { liked_by_me ?? false }
 }
 
 struct BoardPost: Codable, Identifiable {
@@ -28,6 +35,10 @@ struct BoardPost: Codable, Identifiable {
     /// Present only for moderators.
     let held_reply_count: Int?
     let created_at: String
+    let like_count: Int?
+    let liked_by_me: Bool?
+    var likeCount: Int { like_count ?? 0 }
+    var likedByMe: Bool { liked_by_me ?? false }
 }
 
 struct BoardPage: Codable {

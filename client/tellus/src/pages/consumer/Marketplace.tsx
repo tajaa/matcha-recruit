@@ -3,6 +3,7 @@ import { Gift, MapPin } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { useAccount } from '../../hooks/useAccount'
 import { Button, Card, Empty, ErrorText, Input, Spinner } from '../../components/ui'
+import { LikeButton } from '../../components/LikeButton'
 import type { Listing, PointsBalance, Redemption } from '../../api/types'
 
 export default function Marketplace() {
@@ -93,6 +94,9 @@ export default function Marketplace() {
                   )}
                   {l.quantity_remaining != null && <p className="mt-1 text-xs text-tu-faint">{l.quantity_remaining} left</p>}
                   <p className="mt-1 text-xs text-tu-faint">Valid {l.expiry_days} days after redemption</p>
+                  <div className="mt-2">
+                    <LikeButton target="listing" targetId={l.id} count={l.like_count} liked={l.liked_by_me} onError={setErr} />
+                  </div>
                 </div>
                 <Button className="mt-4" disabled={!affordable} loading={redeeming === l.id} onClick={() => redeem(l)}>
                   {affordable ? 'Redeem' : 'Not enough points'}

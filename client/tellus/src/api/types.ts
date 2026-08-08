@@ -185,6 +185,7 @@ export interface Report {
   is_identified: boolean
   has_dm_thread: boolean
   answers: ReportAnswer[]
+  like_count: number
 }
 
 export interface FeedbackStats {
@@ -241,6 +242,8 @@ export interface Listing {
   created_at: string
   expiry_days: number
   visibility: ListingVisibility
+  like_count: number
+  liked_by_me: boolean
 }
 
 export interface Redemption {
@@ -316,6 +319,8 @@ export interface MyReview {
   dm_thread_id: string | null
   media: ReportMedia[]
   answers: ReportAnswer[]
+  like_count: number
+  liked_by_me: boolean
 }
 
 export interface MyReviewUpdate {
@@ -338,6 +343,8 @@ export interface PublicReview {
   brand_reply_at: string | null
   media: ReportMedia[]
   answers: ReportAnswer[]
+  like_count: number
+  liked_by_me: boolean
 }
 
 export interface PublicBrandPage {
@@ -624,6 +631,12 @@ export type BoardPostKind = 'update' | 'deal' | 'event' | 'question'
 export type BoardReplyStatus = 'held' | 'approved' | 'rejected' | 'removed'
 export type BoardMembershipStatus = 'pending' | 'approved' | 'declined' | 'removed' | 'left' | 'cancelled'
 export type ListingVisibility = 'public' | 'board'
+export type LikeTarget = 'board_post' | 'board_reply' | 'report' | 'listing'
+
+export interface LikeState {
+  like_count: number
+  liked_by_me: boolean
+}
 
 export interface BoardReply {
   id: string
@@ -633,6 +646,8 @@ export interface BoardReply {
   status: BoardReplyStatus
   body: string
   created_at: string
+  like_count: number
+  liked_by_me: boolean
 }
 
 export interface BoardPost {
@@ -648,6 +663,8 @@ export interface BoardPost {
   approved_reply_count: number
   held_reply_count: number | null
   created_at: string
+  like_count: number
+  liked_by_me: boolean
 }
 
 export interface BoardPage {

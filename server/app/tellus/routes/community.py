@@ -6,16 +6,17 @@ app.
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
-from ..dependencies import require_tellus_account
+from ..dependencies import optional_consumer_account_id, require_tellus_account
 from ..models.tellus import (
     TellusAccount, TellusClaimResponse, TellusMyClaim, TellusPublicBrandPage,
     TellusPublicReview, TellusReportMedia,
 )
 from ..services.admin_audit import record_admin_action
+from ..services.likes_service import hydrate_likes
 from ._shared import _answer_rows_to_models, _media_url
 from .places import ensure_community_link
 
@@ -28,8 +29,10 @@ async def public_brand_page(
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
     scope: str = Query(default="recent", pattern="^(recent|older)$"),
+    authorization: Optional[str] = Header(default=None),
 ):
     await check_rate_limit(client_ip(request), "tellus_public_brand", 120, 3600)
+    viewer_id = await optional_consumer_account_id(authorization)
 
     async with get_connection() as conn:
         brand = await conn.fetchrow(
@@ -120,6 +123,8 @@ async def public_brand_page(
             for a in arows:
                 answers_by_report.setdefault(a["report_id"], []).append(a)
 
+        likes = await hydrate_likes(conn, "report", report_ids, viewer_id)
+
         reviews = [
             TellusPublicReview(
                 id=r["id"],
@@ -135,6 +140,8 @@ async def public_brand_page(
                 brand_reply_at=r["brand_public_reply_at"],
                 media=media_by_report.get(r["id"], []),
                 answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
+                like_count=likes.get(r["id"], (0, False))[0],
+                liked_by_me=likes.get(r["id"], (0, False))[1],
             )
             for r in rows
         ]

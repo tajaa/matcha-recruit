@@ -37,6 +37,10 @@ struct MyReview: Codable, Identifiable {
     let dm_thread_id: String?
     let media: [ReportMedia]
     let answers: [ReportAnswer]
+    let like_count: Int?
+    let liked_by_me: Bool?
+    var likeCount: Int { like_count ?? 0 }
+    var likedByMe: Bool { liked_by_me ?? false }
 
     /// PATCH only valid while held and before publish_at — server 409s
     /// otherwise.

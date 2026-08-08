@@ -23,7 +23,7 @@ from ..models.tellus import (
     TellusMediaPresignRequest,
     TellusMediaPresignResponse,
 )
-from ..services.auth import decode_tellus_token
+from ..dependencies import optional_consumer_account_id
 from ..services.email import send_tellus_feedback_alert_email
 from ..services.feedback_service import create_report
 
@@ -40,24 +40,6 @@ _MAX_VIDEO_BYTES = 200 * 1024 * 1024     # 200 MB (direct-to-S3, bypasses nginx)
 _MAX_MEDIA_PER_REPORT = 6
 
 
-async def _optional_account_id(authorization: Optional[str]) -> Optional[UUID]:
-    """Resolve a consumer account_id from a bearer token if one is present and
-    valid; otherwise None (anonymous). Never raises — auth is optional here."""
-    if not authorization or not authorization.lower().startswith("bearer "):
-        return None
-    payload = decode_tellus_token(authorization.split(" ", 1)[1].strip(), expected_type="access")
-    if payload is None:
-        return None
-    try:
-        account_id = UUID(payload["sub"])
-    except (KeyError, ValueError, TypeError):
-        return None
-    async with get_connection() as conn:
-        ok = await conn.fetchval(
-            "SELECT 1 FROM tellus_accounts WHERE id = $1 AND status = 'active' AND account_type = 'consumer'",
-            account_id,
-        )
-    return account_id if ok else None
 
 
 async def _resolve_link(conn, token: str) -> dict:
@@ -178,7 +160,7 @@ async def submit_feedback(
                 detail="Invalid media reference.",
             )
 
-    reporter_account_id = await _optional_account_id(authorization)
+    reporter_account_id = await optional_consumer_account_id(authorization)
 
     async with get_connection() as conn:
         async with conn.transaction():

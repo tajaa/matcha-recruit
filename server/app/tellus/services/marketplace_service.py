@@ -45,6 +45,8 @@ def serialize_listing(row) -> TellusListing:
         created_at=row["created_at"],
         expiry_days=row["expiry_days"] if "expiry_days" in row.keys() else 30,
         visibility=row["visibility"] if "visibility" in row.keys() else "public",
+        like_count=row["like_count"] if "like_count" in row.keys() else 0,
+        liked_by_me=row["liked_by_me"] if "liked_by_me" in row.keys() else False,
     )
 
 
@@ -67,11 +69,17 @@ def serialize_redemption(row) -> TellusRedemption:
     )
 
 
-async def list_marketplace(conn, city: Optional[str], state: Optional[str]) -> list[TellusListing]:
+async def list_marketplace(
+    conn, city: Optional[str], state: Optional[str], viewer_id: Optional[UUID] = None,
+) -> list[TellusListing]:
     """Active listings for a city (case-insensitive) plus platform-curated
     (brand_id IS NULL, city IS NULL) rewards available everywhere."""
     rows = await conn.fetch(
-        """SELECT l.*, b.name AS brand_name
+        """SELECT l.*, b.name AS brand_name,
+                  (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.listing_id = l.id) AS like_count,
+                  EXISTS (
+                      SELECT 1 FROM tellus_likes lk WHERE lk.listing_id = l.id AND lk.account_id = $3
+                  ) AS liked_by_me
            FROM tellus_reward_listings l
            LEFT JOIN tellus_brands b ON b.id = l.brand_id
            WHERE l.is_active
@@ -86,6 +94,6 @@ async def list_marketplace(conn, city: Optional[str], state: Optional[str]) -> l
                        AND ($2::text IS NULL OR l.state IS NULL OR lower(l.state) = lower($2)))
                  )
            ORDER BY (l.city IS NULL), l.points_cost ASC, l.created_at DESC""",
-        city, state,
+        city, state, viewer_id,
     )
     return [serialize_listing(r) for r in rows]

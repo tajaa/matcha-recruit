@@ -35,8 +35,14 @@ struct BoardPostCard: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Text("\(post.approved_reply_count) replies")
-                .font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Text("\(post.approved_reply_count) replies")
+                    .font(.caption).foregroundStyle(.secondary)
+                LikeButton(
+                    target: .boardPost, id: post.id,
+                    count: post.likeCount, liked: post.likedByMe
+                )
+            }
         }
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))

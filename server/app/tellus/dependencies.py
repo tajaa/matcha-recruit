@@ -10,6 +10,7 @@ Deps:
   - require_brand          — account_type='brand' (brand_id guaranteed populated)
   - require_tellus_admin   — email in TELLUS_ADMIN_EMAILS (internal changelog only)
 """
+from typing import Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -22,6 +23,28 @@ from .models.tellus import TellusAccount
 from .services.auth import decode_tellus_token, is_tellus_token_revoked
 
 security = HTTPBearer()
+
+
+async def optional_consumer_account_id(authorization: Optional[str]) -> Optional[UUID]:
+    """Resolve a consumer account_id from a bearer token if one is present and
+    valid; otherwise None (anonymous). Never raises — auth is optional here.
+    Shared by public_intake.py (anonymous feedback submission) and
+    community.py (unauthenticated /b/{slug} page, for liked_by_me)."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    payload = decode_tellus_token(authorization.split(" ", 1)[1].strip(), expected_type="access")
+    if payload is None:
+        return None
+    try:
+        account_id = UUID(payload["sub"])
+    except (KeyError, ValueError, TypeError):
+        return None
+    async with get_connection() as conn:
+        ok = await conn.fetchval(
+            "SELECT 1 FROM tellus_accounts WHERE id = $1 AND status = 'active' AND account_type = 'consumer'",
+            account_id,
+        )
+    return account_id if ok else None
 
 
 def _is_tellus_admin(email: str) -> bool:

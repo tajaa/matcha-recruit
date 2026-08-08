@@ -16,6 +16,7 @@ from .dms import router as dms_router
 from .feedback import router as feedback_router
 from .gamification import router as gamification_router
 from .grants import router as grants_router
+from .likes import router as likes_router
 from .links import router as links_router
 from .marketplace import router as marketplace_router
 from .my_reviews import router as my_reviews_router
@@ -55,6 +56,7 @@ tellus_router.include_router(billing_router)
 # Mixed-role (per-endpoint dependency — brand opens, either side replies).
 tellus_router.include_router(dms_router)
 tellus_router.include_router(board_router)
+tellus_router.include_router(likes_router)
 
 # Internal admin (require_tellus_admin per-route — TELLUS_ADMIN_EMAILS allowlist).
 tellus_router.include_router(admin_router)

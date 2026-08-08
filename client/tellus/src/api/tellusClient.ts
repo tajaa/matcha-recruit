@@ -124,6 +124,19 @@ export async function tellusPublicPost<T>(path: string, body: unknown): Promise<
   return res.json()
 }
 
+// Public GET that optionally carries the Tell-Us token if the user is logged
+// in — e.g. /b/{slug}, whose liked_by_me only resolves for a bearer the
+// backend can actually decode. Unlike tellusApi.get, never 401-redirects: a
+// missing/expired token just means anonymous, not a session to recover.
+export async function tellusMaybeAuthGet<T>(path: string): Promise<T> {
+  const token = localStorage.getItem(ACCESS_KEY)
+  const res = await fetch(`${BASE}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(await _errMsg(res))
+  return res.json()
+}
+
 // Public POST that optionally carries the Tell-Us token if the user is logged
 // in (feedback submit: anonymous by default, attributed when signed in).
 export async function tellusMaybeAuthPost<T>(path: string, body: unknown): Promise<T> {

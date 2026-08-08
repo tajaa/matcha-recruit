@@ -224,28 +224,44 @@ async def get_board(
             params.append(kind)
             where += f" AND p.kind = ${len(params)}"
 
+        # total's COUNT(*) must NOT see the account_id param appended below —
+        # slice params back to the where-clause-only prefix for that query.
+        n_where_params = len(params)
+        params.append(account.id)
+        viewer_idx = len(params)
+
         rows = await conn.fetch(
             f"""SELECT p.*,
                        (SELECT COUNT(*) FROM tellus_board_replies rr
                           WHERE rr.post_id = p.id AND rr.status = 'approved') AS approved_reply_count,
                        (SELECT COUNT(*) FROM tellus_board_replies rr
-                          WHERE rr.post_id = p.id AND rr.status = 'held') AS held_reply_count
+                          WHERE rr.post_id = p.id AND rr.status = 'held') AS held_reply_count,
+                       (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.post_id = p.id) AS like_count,
+                       EXISTS (
+                           SELECT 1 FROM tellus_likes lk
+                           WHERE lk.post_id = p.id AND lk.account_id = ${viewer_idx}
+                       ) AS liked_by_me
                 FROM tellus_board_posts p
                 {where}
                 ORDER BY p.is_pinned DESC, p.created_at DESC
                 LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
             *params, limit, offset,
         )
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM tellus_board_posts p {where}", *params)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM tellus_board_posts p {where}", *params[:n_where_params],
+        )
 
         listing_ids = [r["listing_id"] for r in rows if r["listing_id"] is not None]
         listings_by_id = {}
         if listing_ids:
             lrows = await conn.fetch(
-                "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
+                "SELECT l.*, b.name AS brand_name, "
+                "  (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.listing_id = l.id) AS like_count, "
+                "  EXISTS (SELECT 1 FROM tellus_likes lk WHERE lk.listing_id = l.id AND lk.account_id = $3) AS liked_by_me "
+                "FROM tellus_reward_listings l "
                 "LEFT JOIN tellus_brands b ON b.id = l.brand_id "
                 "WHERE l.id = ANY($1::uuid[]) AND l.brand_id = $2",
-                listing_ids, brand["id"],
+                listing_ids, brand["id"], account.id,
             )
             listings_by_id = {r["id"]: r for r in lrows}
 
@@ -291,7 +307,11 @@ async def list_replies(slug: str, post_id: UUID, account: TellusAccount = Depend
         # SQL prefilter narrows the round trip; bs.reply_visible_to is THE
         # predicate — the belt-and-braces filter below is what actually decides.
         rows = await conn.fetch(
-            """SELECT r.*, a.display_name AS author_display_name
+            """SELECT r.*, a.display_name AS author_display_name,
+                      (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.reply_id = r.id) AS like_count,
+                      EXISTS (
+                          SELECT 1 FROM tellus_likes lk WHERE lk.reply_id = r.id AND lk.account_id = $2
+                      ) AS liked_by_me
                FROM tellus_board_replies r JOIN tellus_accounts a ON a.id = r.author_account_id
                WHERE r.post_id = $1 AND (r.status = 'approved' OR r.author_account_id = $2 OR $3)
                ORDER BY r.created_at ASC LIMIT 200""",
@@ -605,8 +625,10 @@ async def update_post(
                    (SELECT COUNT(*) FROM tellus_board_replies WHERE post_id = $1 AND status = 'approved')
                        AS approved_reply_count,
                    (SELECT COUNT(*) FROM tellus_board_replies WHERE post_id = $1 AND status = 'held')
-                       AS held_reply_count""",
-            post_id,
+                       AS held_reply_count,
+                   (SELECT COUNT(*)::int FROM tellus_likes WHERE post_id = $1) AS like_count,
+                   EXISTS (SELECT 1 FROM tellus_likes WHERE post_id = $1 AND account_id = $2) AS liked_by_me""",
+            post_id, account.id,
         )
         listing_row = None
         if row["listing_id"] is not None:

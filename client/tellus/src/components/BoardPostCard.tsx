@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Calendar, ChevronDown, ChevronUp, MessageCircle, Pin } from 'lucide-react'
 import { tellusApi } from '../api/tellusClient'
 import { Button, Card, Chip, ErrorText, Textarea } from './ui'
+import { LikeButton } from './LikeButton'
 import type { BoardPost, BoardReply } from '../api/types'
 
 const KIND_LABEL: Record<BoardPost['kind'], string> = {
@@ -136,12 +137,20 @@ export function BoardPostCard({
       )}
 
       <div className="mt-3 flex items-center justify-between border-t border-tu-border pt-2">
-        <button type="button" onClick={() => void toggleExpand()} className="flex items-center gap-1.5 text-xs text-tu-dim hover:text-tu-accent">
-          <MessageCircle className="h-3.5 w-3.5" />
-          {post.approved_reply_count} repl{post.approved_reply_count === 1 ? 'y' : 'ies'}
-          {isMod && !!post.held_reply_count && <Chip tone="negative">{post.held_reply_count} pending</Chip>}
-          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </button>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => void toggleExpand()} className="flex items-center gap-1.5 text-xs text-tu-dim hover:text-tu-accent">
+            <MessageCircle className="h-3.5 w-3.5" />
+            {post.approved_reply_count} repl{post.approved_reply_count === 1 ? 'y' : 'ies'}
+            {isMod && !!post.held_reply_count && <Chip tone="negative">{post.held_reply_count} pending</Chip>}
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+          <LikeButton
+            target="board_post" targetId={post.id}
+            count={post.like_count} liked={post.liked_by_me}
+            disabled={viewerRole === 'member' && paused}
+            onError={setErr}
+          />
+        </div>
         {isMod && onRemove && (
           <button
             type="button"
@@ -184,6 +193,16 @@ export function BoardPostCard({
                 </div>
               </div>
               <p className="mt-0.5 whitespace-pre-wrap text-sm">{r.body}</p>
+              {r.status === 'approved' && (
+                <div className="mt-1">
+                  <LikeButton
+                    target="board_reply" targetId={r.id}
+                    count={r.like_count} liked={r.liked_by_me}
+                    disabled={viewerRole === 'member' && paused}
+                    onError={setErr}
+                  />
+                </div>
+              )}
             </div>
           ))}
           {replies && replies.length === 0 && !loadingReplies && <p className="text-xs text-tu-faint">No replies yet.</p>}

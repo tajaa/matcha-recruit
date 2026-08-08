@@ -11,34 +11,46 @@ struct MarketplaceView: View {
                 EmptyState(icon: "gift", title: "No rewards yet", hint: "Check back soon.")
             } else {
                 List(vm.listings) { listing in
-                    Button {
-                        vm.redeemFlow.begin()
-                        selected = listing
-                    } label: {
-                        HStack(spacing: 12) {
-                            if let urlString = listing.image_url, let url = URL(string: urlString) {
-                                AsyncImage(url: url) { image in
-                                    image.resizable().scaledToFill()
-                                } placeholder: {
-                                    Color.gray.opacity(0.15)
+                    // Redeem button and LikeButton are siblings, not nested —
+                    // a Button inside another Button's label swallows the
+                    // inner tap. Both carry .plain/.borderless styles so the
+                    // List row doesn't treat the whole cell as one hit target.
+                    HStack(spacing: 12) {
+                        Button {
+                            vm.redeemFlow.begin()
+                            selected = listing
+                        } label: {
+                            HStack(spacing: 12) {
+                                if let urlString = listing.image_url, let url = URL(string: urlString) {
+                                    AsyncImage(url: url) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        Color.gray.opacity(0.15)
+                                    }
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
-                                .frame(width: 56, height: 56)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(listing.title).font(.headline).foregroundStyle(.primary)
-                                if let brand = listing.brand_name {
-                                    Text(brand).font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(listing.title).font(.headline).foregroundStyle(.primary)
+                                    if let brand = listing.brand_name {
+                                        Text(brand).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    PointsPill(points: listing.points_cost)
                                 }
-                                PointsPill(points: listing.points_cost)
-                            }
-                            Spacer()
-                            if listing.quantity_remaining == 0 {
-                                StatusChip(text: "Sold out", tint: .gray)
+                                Spacer()
+                                if listing.quantity_remaining == 0 {
+                                    StatusChip(text: "Sold out", tint: .gray)
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(listing.quantity_remaining == 0)
+
+                        LikeButton(
+                            target: .listing, id: listing.id,
+                            count: listing.likeCount, liked: listing.likedByMe
+                        )
                     }
-                    .disabled(listing.quantity_remaining == 0)
                 }
                 .listStyle(.plain)
             }

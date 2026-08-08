@@ -15,7 +15,7 @@ from ._shared import _answer_rows_to_models, _media_url, effective_review_state
 router = APIRouter()
 
 
-async def _serialize_my_review(conn, row) -> TellusMyReview:
+async def _serialize_my_review(conn, row, viewer_id: UUID) -> TellusMyReview:
     mrows = await conn.fetch(
         "SELECT id, media_type, mime_type, original_filename, storage_path "
         "FROM tellus_report_media WHERE report_id = $1 ORDER BY created_at",
@@ -35,6 +35,11 @@ async def _serialize_my_review(conn, row) -> TellusMyReview:
         "SELECT id, prompt_text, answer, position FROM tellus_report_answers WHERE report_id = $1 ORDER BY position",
         row["id"],
     )
+    likes = await conn.fetchrow(
+        "SELECT COUNT(*)::int AS like_count, COUNT(*) FILTER (WHERE account_id = $2) > 0 AS liked_by_me "
+        "FROM tellus_likes WHERE report_id = $1",
+        row["id"], viewer_id,
+    )
     return TellusMyReview(
         id=row["id"],
         brand_name=row["brand_name"],
@@ -53,10 +58,12 @@ async def _serialize_my_review(conn, row) -> TellusMyReview:
         dm_thread_id=dm_thread_id,
         media=media,
         answers=_answer_rows_to_models(arows),
+        like_count=likes["like_count"],
+        liked_by_me=likes["liked_by_me"],
     )
 
 
-async def _serialize_my_reviews(conn, rows) -> list[TellusMyReview]:
+async def _serialize_my_reviews(conn, rows, viewer_id: UUID) -> list[TellusMyReview]:
     """Batched sibling of _serialize_my_review for the list endpoint — one
     media query and one DM-thread query for the whole page instead of 2N."""
     if not rows:
@@ -91,6 +98,14 @@ async def _serialize_my_reviews(conn, rows) -> list[TellusMyReview]:
     for a in arows:
         answers_by_report.setdefault(a["report_id"], []).append(a)
 
+    like_rows = await conn.fetch(
+        "SELECT report_id, COUNT(*)::int AS like_count, "
+        "  COUNT(*) FILTER (WHERE account_id = $2) > 0 AS liked_by_me "
+        "FROM tellus_likes WHERE report_id = ANY($1::uuid[]) GROUP BY report_id",
+        report_ids, viewer_id,
+    )
+    likes_by_report = {r["report_id"]: r for r in like_rows}
+
     return [
         TellusMyReview(
             id=r["id"],
@@ -110,6 +125,8 @@ async def _serialize_my_reviews(conn, rows) -> list[TellusMyReview]:
             dm_thread_id=dm_thread_by_report.get(r["id"]),
             media=media_by_report.get(r["id"], []),
             answers=_answer_rows_to_models(answers_by_report.get(r["id"], [])),
+            like_count=likes_by_report.get(r["id"], {}).get("like_count", 0),
+            liked_by_me=likes_by_report.get(r["id"], {}).get("liked_by_me", False),
         )
         for r in rows
     ]
@@ -143,7 +160,7 @@ async def list_my_reviews(
                LIMIT $2 OFFSET $3""",
             account.id, limit, offset,
         )
-        return await _serialize_my_reviews(conn, rows)
+        return await _serialize_my_reviews(conn, rows, account.id)
 
 
 @router.patch("/me/reviews/{report_id}", response_model=TellusMyReview)
@@ -176,7 +193,7 @@ async def update_my_review(
                WHERE r.id = $1""",
             updated["id"],
         )
-        return await _serialize_my_review(conn, full)
+        return await _serialize_my_review(conn, full, account.id)
 
 
 @router.post("/me/reviews/{report_id}/withdraw", response_model=TellusMyReview)
@@ -198,4 +215,4 @@ async def withdraw_my_review(report_id: UUID, account: TellusAccount = Depends(r
                WHERE r.id = $1""",
             report_id,
         )
-        return await _serialize_my_review(conn, full)
+        return await _serialize_my_review(conn, full, account.id)

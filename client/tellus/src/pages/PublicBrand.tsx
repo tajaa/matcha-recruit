@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Heart, ImageIcon, Star, Video } from 'lucide-react'
-import { tellusApi, tellusPublicGet } from '../api/tellusClient'
+import { tellusApi, tellusMaybeAuthGet } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, Empty, ErrorText, Spinner } from '../components/ui'
+import { LikeButton } from '../components/LikeButton'
 import type { BoardMembership, ClaimResponse, MyClaim, PublicBrandPage, PublicReview } from '../api/types'
 
 const PAGE_SIZE = 20
 
-function ReviewCard({ review }: { review: PublicReview }) {
+function ReviewCard({ review, loggedIn }: { review: PublicReview; loggedIn: boolean }) {
+  const navigate = useNavigate()
   return (
     <Card>
       <div className="flex items-start justify-between gap-3">
@@ -58,6 +60,15 @@ function ReviewCard({ review }: { review: PublicReview }) {
           <p className="mt-1 whitespace-pre-wrap text-sm text-tu-text">{review.brand_reply}</p>
         </div>
       )}
+
+      <div className="mt-2.5 border-t border-tu-border pt-2">
+        <LikeButton
+          target="report" targetId={review.id}
+          count={review.like_count} liked={review.liked_by_me}
+          disabled={!loggedIn}
+          onDisabledClick={() => navigate('/login')}
+        />
+      </div>
     </Card>
   )
 }
@@ -152,7 +163,7 @@ export default function PublicBrand() {
   }
 
   useEffect(() => {
-    tellusPublicGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=0`)
+    tellusMaybeAuthGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=0`)
       .then((p) => { setPage(p); setReviews(p.reviews) })
       .catch((e) => setErr(e instanceof Error ? e.message : 'This page is unavailable.'))
       .finally(() => setLoading(false))
@@ -162,7 +173,7 @@ export default function PublicBrand() {
     if (!page) return
     setLoadingMore(true); setFeedErr('')
     try {
-      const next = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=${reviews.length}`)
+      const next = await tellusMaybeAuthGet<PublicBrandPage>(`/b/${slug}?limit=${PAGE_SIZE}&offset=${reviews.length}`)
       // The underlying `publish_at <= NOW()` window grows between fetches, so
       // a review crossing the 48h boundary can shift the offset and reappear
       // in the next page — dedupe by id rather than trusting offset alone.
@@ -181,7 +192,7 @@ export default function PublicBrand() {
     setLoadingOlder(true); setFeedErr('')
     try {
       const offset = olderReviews?.length ?? 0
-      const res = await tellusPublicGet<PublicBrandPage>(`/b/${slug}?scope=older&limit=${PAGE_SIZE}&offset=${offset}`)
+      const res = await tellusMaybeAuthGet<PublicBrandPage>(`/b/${slug}?scope=older&limit=${PAGE_SIZE}&offset=${offset}`)
       setOlderTotal(res.older_count)
       setOlderReviews((prev) => {
         // Same dedupe rationale as loadMore — publish_at windows can shift results between fetches.
@@ -335,7 +346,7 @@ export default function PublicBrand() {
         <Empty>{page.older_count > 0 ? 'No reviews in the last 12 months.' : 'No public reviews yet.'}</Empty>
       ) : (
         <div className="space-y-3">
-          {reviews.map((r) => <ReviewCard key={r.id} review={r} />)}
+          {reviews.map((r) => <ReviewCard key={r.id} review={r} loggedIn={!!account} />)}
         </div>
       )}
 
@@ -361,7 +372,7 @@ export default function PublicBrand() {
                 Older reviews — not included in the rating
               </p>
               <div className="space-y-3">
-                {olderReviews.map((r) => <ReviewCard key={r.id} review={r} />)}
+                {olderReviews.map((r) => <ReviewCard key={r.id} review={r} loggedIn={!!account} />)}
               </div>
               {olderReviews.length < olderTotal && (
                 <div className="mt-3 text-center">

@@ -3,6 +3,7 @@ import { ExternalLink, Heart, MessageCircle, Star } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Card, Chip, Empty, ErrorText, Spinner, Textarea } from '../../components/ui'
 import { DmThreadPanel } from '../../components/DmThreadPanel'
+import { LikeButton } from '../../components/LikeButton'
 import type { MyReview } from '../../api/types'
 
 function hoursLeft(publishAt: string): number {
@@ -132,6 +133,9 @@ function ReviewCard({ review, onChange }: { review: MyReview; onChange: () => vo
             <Button size="sm" variant="ghost" onClick={() => setShowDm((s) => !s)}>
               <MessageCircle className="h-3.5 w-3.5" /> Messages
             </Button>
+          )}
+          {!withdrawn && (
+            <LikeButton target="report" targetId={review.id} count={review.like_count} liked={review.liked_by_me} />
           )}
           {!withdrawn && (
             <Button size="sm" variant="ghost" loading={busy} onClick={withdraw} className="ml-auto text-tu-bad">Withdraw</Button>

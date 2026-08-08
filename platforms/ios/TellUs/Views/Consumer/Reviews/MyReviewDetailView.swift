@@ -77,6 +77,17 @@ struct MyReviewDetailView: View {
                 Label("Hearted by the brand", systemImage: "heart.fill").foregroundStyle(.pink)
             }
 
+            // Only a published review is likeable — the server 404s one still
+            // inside its 48h hold, or withdrawn.
+            if review.review_state == .published {
+                Section {
+                    LikeButton(
+                        target: .report, id: review.id,
+                        count: review.likeCount, liked: review.likedByMe
+                    )
+                }
+            }
+
             if review.isEditable {
                 Section {
                     Button("Save changes") {
