@@ -54,10 +54,11 @@ Which frontend pairs with which backend package (don't re-derive this):
 | **Espresso** (macOS, formerly Werk) | `platforms/desktop/Espresso/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
 | **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/cappe/host.ts`, pages in `client/src/cappe/pages/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
 | **Tell-Us** | `client/tellus/` — separate Vite app (React 19), served by the same frontend nginx at `/tellus/` | `server/app/tellus/` at `/api/tellus` | `tellus_accounts` (consumer + brand), JWT `scope=tellus`, `tellus_*` tables | Rewards-for-feedback |
+| **Oceanlab** | `client/oceanlab/` — separate Vite app (React 19), served by the same frontend nginx at `/oceanlab/` | `server/app/oceanlab/` at `/api/oceanlab` | static bearer `OCEANLAB_TOKEN` (env), `oceanlab_*` tables (no matcha tenant model) | Music catalog / label ingestion pipeline |
 | **MatchaTutor** (iOS) | `platforms/ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
 | **Ops agent** | `agent-ui/` (Preact; build copied into `server/agent/static/` by `build-and-push.sh`) | `server/agent/` — standalone service :9100 (not part of `app/`) | — | Internal leads/ops console |
 
-Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property.property_cat.geocode` (single US Census geocoder — keep its signature stable). Verified 2026-07-27: `cappe → matcha` is 0 edges, `tellus → matcha` is that 1.
+Cross-product import rule: `cappe/`, `tellus/`, and `oceanlab/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property.property_cat.geocode` (single US Census geocoder — keep its signature stable). Verified 2026-07-27: `cappe → matcha` is 0 edges, `tellus → matcha` is that 1. `oceanlab → matcha` is 0 edges (oceanlab doesn't yet use `app/core/*` either — it's self-contained with its own sync SQLAlchemy engine, see `server/app/oceanlab/CLAUDE.md`).
 
 **`werk/` is the fourth backend app and its rule is different — say so rather than assume.** `werk → matcha.services` is allowed and intentional (9 files / 59 imports, verified 2026-08-03; one deliberate module-level import at `werk/routes/channels.py:18` — don't "fix" it lazy). `matcha → werk` is exactly 2 lazy imports of `werk.routes.channels_ws.manager` — adding a third kind is the thing to refuse. Routes importing routes must stay 0 in both directions. Full edge inventory: `server/app/werk/CLAUDE.md`
 
@@ -137,6 +138,7 @@ server/
 │   │                               #   pilots/hr_pilot_corpus/, risk_analytics/risk_assessment_service/
 │   ├── cappe/                      # Cappe (website builder) at /api/cappe — see repo-layout table
 │   ├── tellus/                     # Tell-Us (rewards-for-feedback) at /api/tellus
+│   ├── oceanlab/                   # Oceanlab (music catalog / label pipeline) at /api/oceanlab
 │   ├── werk/                       # Werk / Werk-Lite channels, calls, job postings
 │   ├── workers/                    # Celery app + scheduled tasks
 │   ├── orm/                        # SQLAlchemy helpers (limited use)
