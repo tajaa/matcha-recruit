@@ -25,15 +25,31 @@ final class AuthViewModel {
     /// login without asking the user to re-enter credentials.
     private var pendingCredentials: (email: String, password: String)?
 
+    enum LoginFailureAction: Equatable { case verifyPending, showError(String) }
+
+    /// Dispatches a login-failure HTTP status+detail to an action. Pure, unit-
+    /// tested (Tests/AuthErrorMappingTests.swift). Server (routes/auth.py):
+    /// 401 = wrong email/password; 403 "Account is not active" = suspended;
+    /// 403 "Please confirm your email…" = unverified ⇒ verify screen.
+    static func loginFailureAction(status: Int, detail: String) -> LoginFailureAction {
+        guard status == 403 else { return .showError(detail) }
+        return detail.lowercased().contains("confirm your email") ? .verifyPending : .showError(detail)
+    }
+
     func login(appState: AppState) async {
         isLoading = true; defer { isLoading = false }
         error = nil
         do {
             let response = try await AuthService.shared.login(email: loginEmail, password: loginPassword)
             appState.didLogin(response)
-        } catch APIError.httpError(403, _) {
-            pendingCredentials = (loginEmail, loginPassword)
-            appState.phase = .verifyPending(email: loginEmail)
+        } catch let APIError.httpError(status, detail) {
+            switch Self.loginFailureAction(status: status, detail: detail) {
+            case .verifyPending:
+                pendingCredentials = (loginEmail, loginPassword)
+                appState.phase = .verifyPending(email: loginEmail)
+            case .showError(let message):
+                self.error = message
+            }
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription
@@ -95,8 +111,11 @@ final class AuthViewModel {
         do {
             let response = try await AuthService.shared.login(email: creds.email, password: creds.password)
             appState.didLogin(response)
-        } catch APIError.httpError(403, _) {
-            self.error = "Not verified yet."
+        } catch let APIError.httpError(status, detail) {
+            switch Self.loginFailureAction(status: status, detail: detail) {
+            case .verifyPending: self.error = "Not verified yet."
+            case .showError(let message): self.error = message
+            }
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

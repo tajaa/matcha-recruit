@@ -219,8 +219,8 @@ class APIClient {
 
     /// Fire-and-check for 204-No-Content endpoints (approve/decline/heart/
     /// notifications-read/etc.) — discards the (empty) body.
-    func requestVoid(method: String, path: String, body: (any Encodable)? = nil) async throws {
-        _ = try await requestData(method: method, path: path, body: body)
+    func requestVoid(method: String, path: String, body: (any Encodable)? = nil, retryOnUnauthorized: Bool = true) async throws {
+        _ = try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized)
     }
 
     func requestData(
@@ -279,8 +279,11 @@ class APIClient {
                     try await failAfterRefreshFailure(error)
                 }
             } else {
-                await MainActor.run { onUnauthorized?() }
-                throw APIError.unauthorized
+                // retryOnUnauthorized == false ⇒ this is a credential endpoint
+                // (login/signup/verify/resend) or the refresh call itself —
+                // surface the server detail, don't nuke the session.
+                // failAfterRefreshFailure() stays the ONLY onUnauthorized site.
+                throw APIError.httpError(401, _extractErrorMessage(from: data) ?? "Unauthorized")
             }
         }
 

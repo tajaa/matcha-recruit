@@ -7,11 +7,6 @@ struct VerifyWaitView: View {
     @State private var pastedToken = ""
     @State private var resendCooldownUntil: Date?
 
-    private var resendDisabled: Bool {
-        if let until = resendCooldownUntil { return Date() < until }
-        return false
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -45,11 +40,14 @@ struct VerifyWaitView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal)
 
-                Button("Resend email") {
-                    resendCooldownUntil = Date().addingTimeInterval(30)
-                    Task { await vm.resend(email: email) }
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    let remaining = resendCooldownUntil.map { max(0, Int(ceil($0.timeIntervalSince(context.date)))) } ?? 0
+                    Button(remaining > 0 ? "Resend email (\(remaining)s)" : "Resend email") {
+                        resendCooldownUntil = Date().addingTimeInterval(30)
+                        Task { await vm.resend(email: email) }
+                    }
+                    .disabled(remaining > 0)
                 }
-                .disabled(resendDisabled)
 
                 VStack(spacing: 8) {
                     Text("Or paste the verification link/token")

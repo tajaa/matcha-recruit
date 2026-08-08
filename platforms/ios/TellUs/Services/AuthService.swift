@@ -16,7 +16,13 @@ final class AuthService {
     /// and route to the verify-pending screen.
     func login(email: String, password: String) async throws -> TokenResponse {
         let body = LoginRequest(email: email, password: password)
-        let response: TokenResponse = try await client.request(method: "POST", path: "/auth/login", body: body)
+        // retryOnUnauthorized: false — a wrong password is a 401 from THIS
+        // endpoint, not a stale access token. Letting the default retry fire
+        // would drive AuthService.refresh() with whatever refresh token
+        // happens to be in the keychain (possibly a DIFFERENT account's,
+        // since restoreSession() never deletes on failure) and replay the
+        // login under the wrong bearer.
+        let response: TokenResponse = try await client.request(method: "POST", path: "/auth/login", body: body, retryOnUnauthorized: false)
         saveTokens(response)
         return response
     }
@@ -26,7 +32,7 @@ final class AuthService {
     /// otherwise verification_required is true and the caller shows the
     /// "check your email" screen without a session.
     func signup(_ req: SignupRequest) async throws -> SignupResponse {
-        let response: SignupResponse = try await client.request(method: "POST", path: "/auth/signup", body: req)
+        let response: SignupResponse = try await client.request(method: "POST", path: "/auth/signup", body: req, retryOnUnauthorized: false)
         if let access = response.access_token, let refresh = response.refresh_token, let expires = response.expires_in,
            let account = response.account {
             saveTokens(TokenResponse(access_token: access, refresh_token: refresh, expires_in: expires, account: account))
@@ -36,7 +42,7 @@ final class AuthService {
 
     /// POST /auth/verify — consumes the emailed token, auto-signs in.
     func verify(token: String) async throws -> TokenResponse {
-        let response: TokenResponse = try await client.request(method: "POST", path: "/auth/verify", body: VerifyRequest(token: token))
+        let response: TokenResponse = try await client.request(method: "POST", path: "/auth/verify", body: VerifyRequest(token: token), retryOnUnauthorized: false)
         saveTokens(response)
         return response
     }
@@ -44,7 +50,7 @@ final class AuthService {
     /// POST /auth/resend-verification — always 202, never leaks whether the
     /// email exists. Rate-limited 2/min + 6/hr server-side.
     func resendVerification(email: String) async throws {
-        try await client.requestVoid(method: "POST", path: "/auth/resend-verification", body: ResendRequest(email: email))
+        try await client.requestVoid(method: "POST", path: "/auth/resend-verification", body: ResendRequest(email: email), retryOnUnauthorized: false)
     }
 
     func refresh() async throws -> TokenResponse {
