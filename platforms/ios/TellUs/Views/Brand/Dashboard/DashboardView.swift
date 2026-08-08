@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @State private var vm = FeedbackListViewModel()
+    @State private var vm = FeedbackListViewModel(pageSize: 5)
+    @State private var didLoad = false
 
     var body: some View {
         ScrollView {
@@ -15,11 +16,28 @@ struct DashboardView: View {
                         statTile("Negative", stats.negative, .red)
                     }
                     .padding(.horizontal)
+
+                    if !stats.by_category.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("By category").font(.headline)
+                            ForEach(stats.by_category.sorted { $0.value > $1.value }, id: \.key) { key, count in
+                                HStack {
+                                    Text(key.capitalized)
+                                    Spacer()
+                                    Text("\(count)").foregroundStyle(.secondary)
+                                }
+                                .font(.subheadline)
+                            }
+                        }
+                        .padding()
+                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Recent feedback").font(.headline).padding(.horizontal)
-                    ForEach(vm.reports.prefix(5)) { report in
+                    ForEach(vm.reports) { report in
                         NavigationLink {
                             ReportDetailView(id: report.id)
                         } label: {
@@ -45,6 +63,8 @@ struct DashboardView: View {
         }
         .navigationTitle("Dashboard")
         .task {
+            guard !didLoad else { return }
+            didLoad = true
             await vm.loadStats()
             await vm.load(reset: true)
         }

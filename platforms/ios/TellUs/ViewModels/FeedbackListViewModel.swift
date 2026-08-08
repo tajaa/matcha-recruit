@@ -12,10 +12,13 @@ final class FeedbackListViewModel {
     var error: String?
     var hasMore = true
 
-    private let pageSize = 25
+    private let pageSize: Int
     private var offset = 0
 
+    init(pageSize: Int = 25) { self.pageSize = pageSize }
+
     func load(reset: Bool) async {
+        if !reset && isLoading { return }   // in-flight guard: avoids duplicate pages from a fast double onAppear
         if reset { offset = 0; hasMore = true }
         guard hasMore || reset else { return }
         isLoading = true; defer { isLoading = false }

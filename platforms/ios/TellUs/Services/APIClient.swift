@@ -149,6 +149,9 @@ class APIClient {
 
     /// Set by AppState to handle logout on a definitive 401/403.
     var onUnauthorized: (() -> Void)?
+    /// Set by AppState to route a brand account to the billing wall on any
+    /// runtime 402 (not just the plan_status check at login/restore).
+    var onPaymentRequired: (() -> Void)?
 
     /// Shared failure policy for the 401 → refresh → retry path, stated ONCE
     /// so `request` and `requestData` cannot drift. Only a definitive
@@ -288,6 +291,7 @@ class APIClient {
         }
 
         if httpResponse.statusCode == 402 {
+            await MainActor.run { onPaymentRequired?() }
             throw APIError.paymentRequired(_extractErrorMessage(from: data) ?? "")
         }
 

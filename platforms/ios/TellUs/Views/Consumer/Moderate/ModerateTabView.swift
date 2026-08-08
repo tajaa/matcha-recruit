@@ -8,6 +8,7 @@ struct ModerateTabView: View {
         Group {
             if appState.moderatedBrands.count == 1, let only = appState.moderatedBrands.first {
                 BoardManageView(brandId: only.brand_id)
+                    .id(only.brand_id)
                     .navigationTitle(only.name)
             } else {
                 VStack {
@@ -21,6 +22,7 @@ struct ModerateTabView: View {
 
                     if let brand = selectedBrand {
                         BoardManageView(brandId: brand.brand_id)
+                            .id(brand.brand_id)
                     } else {
                         EmptyState(icon: "checkmark.shield", title: "Pick a brand to moderate")
                     }
@@ -30,9 +32,4 @@ struct ModerateTabView: View {
         }
         .navigationTitle("Moderate")
     }
-}
-
-extension ModeratedBrand: Hashable {
-    static func == (lhs: ModeratedBrand, rhs: ModeratedBrand) -> Bool { lhs.brand_id == rhs.brand_id }
-    func hash(into hasher: inout Hasher) { hasher.combine(brand_id) }
 }

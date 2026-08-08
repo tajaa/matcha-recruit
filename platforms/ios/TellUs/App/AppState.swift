@@ -30,6 +30,9 @@ final class AppState {
         APIClient.shared.onUnauthorized = { [weak self] in
             Task { @MainActor in self?.didLogout(serverSide: false) }
         }
+        APIClient.shared.onPaymentRequired = { [weak self] in
+            Task { @MainActor in self?.handle402() }
+        }
         Task { await restore() }
     }
 
@@ -95,7 +98,7 @@ final class AppState {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                if let items = try? await NotificationsService.shared.list(unreadOnly: true, limit: 50) {
+                if let items = try? await NotificationsService.shared.list(unreadOnly: true, limit: 100) {
                     self?.unreadCount = items.count
                 }
                 try? await Task.sleep(for: .seconds(60))
@@ -109,7 +112,11 @@ final class AppState {
     }
 
     func resumePolling() {
-        guard phase == .consumer || phase == .brand else { return }
+        // Consistent with route()'s unconditional startPolling(): a walled
+        // brand's own GET /notifications still works (require_tellus_account),
+        // so don't stop polling for it on backgrounding just to silently
+        // never resume.
+        guard phase == .consumer || phase == .brand || phase == .brandWall else { return }
         startPolling()
     }
 }

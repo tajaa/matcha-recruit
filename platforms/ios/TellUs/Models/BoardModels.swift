@@ -81,6 +81,11 @@ struct ModeratedBrand: Codable, Identifiable {
     var id: String { brand_id }
 }
 
+extension ModeratedBrand: Hashable {
+    static func == (lhs: ModeratedBrand, rhs: ModeratedBrand) -> Bool { lhs.brand_id == rhs.brand_id }
+    func hash(into hasher: inout Hasher) { hasher.combine(brand_id) }
+}
+
 struct BoardManageSummary: Codable {
     let board_id: String
     let title: String?
