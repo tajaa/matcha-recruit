@@ -12,7 +12,7 @@ struct BillingWallView: View {
             Image(systemName: "creditcard.trianglebadge.exclamationmark")
                 .font(.system(size: 48))
                 .foregroundStyle(.orange)
-            Text("Your Tell-Us plan isn't active")
+            Text("Your Beetlejuse plan isn't active")
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
             Text("Manage billing to reactivate your brand dashboard.")
@@ -53,7 +53,7 @@ struct BillingWallView: View {
         ) {
             Button("Sign out on all devices", role: .destructive) { appState.didLogout() }
         } message: {
-            Text("Tell-Us has one shared session — this signs you out everywhere.")
+            Text("Beetlejuse has one shared session — this signs you out everywhere.")
         }
         .sheet(isPresented: $showBilling) { NavigationStack { BillingView() } }
     }

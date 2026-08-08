@@ -8,66 +8,108 @@ struct LoginView: View {
 
     private enum Field { case email, password }
 
+    private var canSubmit: Bool {
+        !vm.loginEmail.isEmpty && !vm.loginPassword.isEmpty && !vm.isLoading
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.tint)
-                    .padding(.top, 40)
+        ZStack {
+            EmberBackground()
 
-                Text("Tell-Us")
-                    .font(.largeTitle.bold())
+            ScrollView {
+                VStack(spacing: 0) {
+                    header
+                        .riseIn(0)
+                        .padding(.top, 72)
 
-                ErrorBanner(message: vm.error)
+                    ErrorBanner(message: vm.error)
+                        .padding(.top, 24)
 
-                VStack(spacing: 12) {
-                    TextField("Email", text: $vm.loginEmail)
-                        .textContentType(.emailAddress)
-                        .keyboardType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($focusedField, equals: .email)
-                        .submitLabel(.next)
-                        .onSubmit { focusedField = .password }
-                        .padding()
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    fields
+                        .riseIn(1)
+                        .padding(.top, 40)
 
-                    SecureField("Password", text: $vm.loginPassword)
-                        .textContentType(.password)
-                        .focused($focusedField, equals: .password)
-                        .submitLabel(.go)
-                        .onSubmit { Task { await vm.login(appState: appState) } }
-                        .padding()
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .padding(.horizontal)
-
-                Button {
-                    Task { await vm.login(appState: appState) }
-                } label: {
-                    if vm.isLoading {
-                        ProgressView().tint(.white)
-                    } else {
-                        Text("Log In").bold()
+                    Button {
+                        focusedField = nil
+                        Task { await vm.login(appState: appState) }
+                    } label: {
+                        if vm.isLoading {
+                            ProgressView().tint(TU.ink)
+                        } else {
+                            Text("Log in")
+                        }
                     }
+                    .buttonStyle(EmberButtonStyle(enabled: canSubmit))
+                    .disabled(!canSubmit)
+                    .riseIn(2)
+                    .padding(.top, 16)
+
+                    Button("Have a reset link?") { showResetPassword = true }
+                        .font(.system(size: 14))
+                        .foregroundStyle(TU.textDim)
+                        .riseIn(3)
+                        .padding(.top, 20)
+
+                    NavigationLink {
+                        SignupView()
+                    } label: {
+                        Text("Create an account")
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                    .riseIn(4)
+                    .padding(.top, 40)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.tint, in: RoundedRectangle(cornerRadius: 10))
-                .foregroundStyle(.white)
-                .disabled(vm.loginEmail.isEmpty || vm.loginPassword.isEmpty || vm.isLoading)
-                .padding(.horizontal)
-
-                NavigationLink("Create an account") { SignupView() }
-                    .padding(.top, 8)
-
-                Button("Have a reset link?") { showResetPassword = true }
-                    .font(.footnote)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 48)
             }
-            .padding(.bottom, 40)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showResetPassword) { ResetPasswordView() }
+    }
+
+    private var header: some View {
+        VStack(spacing: 16) {
+            BrandMark()
+
+            VStack(spacing: 8) {
+                Text("Beetlejuse")
+                    .font(.system(size: 34, weight: .bold))
+                    .tracking(-0.8)
+                    .foregroundStyle(.white)
+
+                Text("Say what you think. Leave with points.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(TU.textDim)
+                    .multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var fields: some View {
+        VStack(spacing: 12) {
+            GlassField(isFocused: focusedField == .email) {
+                TextField("", text: $vm.loginEmail, prompt: Text("Email").foregroundColor(TU.textDim))
+                    .textContentType(.emailAddress)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focusedField, equals: .email)
+                    .submitLabel(.next)
+                    .onSubmit { focusedField = .password }
+            }
+
+            GlassField(isFocused: focusedField == .password) {
+                SecureField("", text: $vm.loginPassword, prompt: Text("Password").foregroundColor(TU.textDim))
+                    .textContentType(.password)
+                    .focused($focusedField, equals: .password)
+                    .submitLabel(.go)
+                    .onSubmit {
+                        guard canSubmit else { return }
+                        focusedField = nil
+                        Task { await vm.login(appState: appState) }
+                    }
+            }
+        }
     }
 }

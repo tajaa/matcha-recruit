@@ -42,6 +42,7 @@
 		3CBD4E85B031FA445F4E5883 /* ConsumerSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167A76D9756F79AC4623B1BB /* ConsumerSettingsViewModel.swift */; };
 		3D90493CD9A9F0B8ABC40E34 /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0380EB70DA824F7877DEA8E7 /* ResetPasswordView.swift */; };
 		3E2399ECBB2BC1F193A0CD34 /* RedemptionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8267CDD10EE596CB506C02A3 /* RedemptionsViewModel.swift */; };
+		3FF06B8B5A212DF0E49BAFB7 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76505E7AA1162E834E83E7A4 /* Theme.swift */; };
 		42D6C59A2F43C08009A62CEC /* IntakeLoaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7043EEB1E2B785717EA5264 /* IntakeLoaderView.swift */; };
 		435E1AA1FE8B53BF5DB8ED68 /* LinkQRSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C501A7A7280D1BA0996F4A6 /* LinkQRSheet.swift */; };
 		44C3C0E9BEDADF489BF9C003 /* MediaByteLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3337A22A71AAAB0228580D /* MediaByteLoader.swift */; };
@@ -218,6 +219,7 @@
 		7293E8082F9281BC2CF26002 /* RedeemFlowModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemFlowModel.swift; sourceTree = "<group>"; };
 		755D92DCC3B85F6A79B2D14D /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		7579BE36B7660D6C65F72532 /* NotificationsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsViewModel.swift; sourceTree = "<group>"; };
+		76505E7AA1162E834E83E7A4 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		769EEE79DD3209263DAACE7B /* BoardsListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardsListViewModel.swift; sourceTree = "<group>"; };
 		78D1FD5B706D42F86DB6C5FD /* HeldRepliesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeldRepliesView.swift; sourceTree = "<group>"; };
 		79CE8E4C26165CC6BE6B7049 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
@@ -382,6 +384,7 @@
 				9F02C950A92539061E2F85CF /* MediaVideoView.swift */,
 				B9A3C219569DF4F0A878CB51 /* NotificationsView.swift */,
 				4E9CFF63EBA5637561862B6E /* QRCodeView.swift */,
+				76505E7AA1162E834E83E7A4 /* Theme.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -916,6 +919,7 @@
 				FCBCEEC1D3BC7621FBEB305D /* StoresViewModel.swift in Sources */,
 				F577F1E6931A120B0E40A914 /* TeamView.swift in Sources */,
 				252F908591A0CDC05FB5FA19 /* TellUsApp.swift in Sources */,
+				3FF06B8B5A212DF0E49BAFB7 /* Theme.swift in Sources */,
 				F9554CB17D04F86C02574FB2 /* VerifyWaitView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

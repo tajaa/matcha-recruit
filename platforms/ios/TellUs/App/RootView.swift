@@ -23,11 +23,13 @@ struct RootView: View {
 
 private struct SplashView: View {
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "bubble.left.and.bubble.right.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.tint)
-            ProgressView()
+        ZStack {
+            EmberBackground()
+            VStack(spacing: 20) {
+                BrandMark()
+                ProgressView()
+                    .tint(TU.textDim)
+            }
         }
     }
 }

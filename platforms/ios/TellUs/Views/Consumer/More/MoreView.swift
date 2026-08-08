@@ -49,7 +49,7 @@ struct MoreView: View {
         ) {
             Button("Sign out on all devices", role: .destructive) { appState.didLogout() }
         } message: {
-            Text("Tell-Us has one shared session — this signs you out everywhere.")
+            Text("Beetlejuse has one shared session — this signs you out everywhere.")
         }
     }
 }

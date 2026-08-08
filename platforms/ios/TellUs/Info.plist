@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Tell-Us</string>
+	<string>Beetlejuse</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -38,7 +38,7 @@
 		</dict>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Tell-Us uses the camera to scan feedback QR codes and take photos for your feedback.</string>
+	<string>Beetlejuse uses the camera to scan feedback QR codes and take photos for your feedback.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
