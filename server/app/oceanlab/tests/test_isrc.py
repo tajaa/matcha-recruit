@@ -4,8 +4,8 @@ from collections.abc import Generator
 import pytest
 from sqlalchemy.orm import Session
 
-from app.services import isrc as isrc_service
-from app.tests.factories import CURRENT_YEAR_2, make_isrc_config, make_recording
+from app.oceanlab.services import isrc as isrc_service
+from app.oceanlab.tests.factories import CURRENT_YEAR_2, make_isrc_config, make_recording
 
 
 def test_sequential_codes(db):
@@ -51,7 +51,7 @@ def test_get_isrc_config_on_fresh_db_is_read_only(client_real, db_real):
     """The id=1 row is normally seeded by migration, but this exercises the
     defensive "return default without creating" path for a DB where it's
     absent (e.g. truncated test data, or a DB predating that migration)."""
-    from app.models.codes import IsrcConfig
+    from app.oceanlab.models.codes import IsrcConfig
 
     existing = db_real.get(IsrcConfig, 1)
     if existing is not None:
@@ -103,8 +103,8 @@ def concurrent_recordings(engine) -> Generator[list, None, None]:
     """
     from sqlalchemy import delete
 
-    from app.models.codes import IsrcConfig
-    from app.models.recording import Recording
+    from app.oceanlab.models.codes import IsrcConfig
+    from app.oceanlab.models.recording import Recording
 
     recording_ids: list = []
     artist_ids: list = []
@@ -129,7 +129,7 @@ def concurrent_recordings(engine) -> Generator[list, None, None]:
                 cleanup.execute(delete(Recording).where(Recording.id.in_(recording_ids)))
             cleanup.execute(delete(IsrcConfig).where(IsrcConfig.id == 1))
             if artist_ids:
-                from app.models.artist import Artist
+                from app.oceanlab.models.artist import Artist
 
                 cleanup.execute(delete(Artist).where(Artist.id.in_(artist_ids)))
             cleanup.commit()
@@ -175,8 +175,8 @@ def same_recording(engine) -> Generator[str, None, None]:
     """
     from sqlalchemy import delete
 
-    from app.models.codes import IsrcConfig
-    from app.models.recording import Recording
+    from app.oceanlab.models.codes import IsrcConfig
+    from app.oceanlab.models.recording import Recording
 
     recording_id = None
     artist_id = None
@@ -200,7 +200,7 @@ def same_recording(engine) -> Generator[str, None, None]:
                 cleanup.execute(delete(Recording).where(Recording.id == recording_id))
             cleanup.execute(delete(IsrcConfig).where(IsrcConfig.id == 1))
             if artist_id is not None:
-                from app.models.artist import Artist
+                from app.oceanlab.models.artist import Artist
 
                 cleanup.execute(delete(Artist).where(Artist.id == artist_id))
             cleanup.commit()
@@ -245,8 +245,8 @@ def test_concurrent_assignment_to_same_recording_yields_exactly_one_winner(engin
     assert len(successes) == 1
     assert already_assigned_count == N - 1
 
-    from app.models.codes import IsrcConfig
-    from app.models.recording import Recording
+    from app.oceanlab.models.codes import IsrcConfig
+    from app.oceanlab.models.recording import Recording
 
     with Session(bind=engine, future=True) as check:
         config = check.get(IsrcConfig, 1)

@@ -5,15 +5,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.codes import IsrcConfig, UpcCode
-from app.models.enums import UpcStatus
-from app.models.release import Release
-from app.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult, UpcListResponse
-from app.services import upc as upc_service
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.codes import IsrcConfig, UpcCode
+from app.oceanlab.models.enums import UpcStatus
+from app.oceanlab.models.release import Release
+from app.oceanlab.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult, UpcListResponse
+from app.oceanlab.services import upc as upc_service
 
-router = APIRouter(tags=["codes"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, tags=["codes"], dependencies=[AuthDep])
 
 _DEFAULT_ISRC_CONFIG = IsrcConfigRead(registrant_prefix="", year_digits="", next_designation=1)
 

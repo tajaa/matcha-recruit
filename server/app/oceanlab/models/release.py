@@ -4,13 +4,13 @@ from datetime import date
 import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.config import settings
-from app.models.base import Base, TimestampMixin
-from app.models.enums import ArtistRole, ReleaseStatus, ReleaseType
+from app.oceanlab.config import settings
+from app.oceanlab.models.base import Base, TimestampMixin
+from app.oceanlab.models.enums import ArtistRole, ReleaseStatus, ReleaseType
 
 
 class Release(Base, TimestampMixin):
-    __tablename__ = "releases"
+    __tablename__ = "oceanlab_releases"
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(sa.String, nullable=False)
@@ -34,25 +34,25 @@ class Release(Base, TimestampMixin):
     subgenre: Mapped[str | None] = mapped_column(sa.String, nullable=True)
     territories: Mapped[str] = mapped_column(sa.String, nullable=False, default="WW")
     artwork_file_id: Mapped[uuid.UUID | None] = mapped_column(
-        sa.Uuid(as_uuid=True), sa.ForeignKey("files.id", ondelete="RESTRICT"), nullable=True
+        sa.Uuid(as_uuid=True), sa.ForeignKey("oceanlab_files.id", ondelete="RESTRICT"), nullable=True
     )
     primary_artist_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid(as_uuid=True), sa.ForeignKey("artists.id"), nullable=False
+        sa.Uuid(as_uuid=True), sa.ForeignKey("oceanlab_artists.id"), nullable=False
     )
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
 
 class ReleaseArtist(Base, TimestampMixin):
-    __tablename__ = "release_artists"
+    __tablename__ = "oceanlab_release_artists"
     __table_args__ = (
-        sa.UniqueConstraint("release_id", "artist_id", "role", name="uq_release_artists_release_artist_role"),
+        sa.UniqueConstraint("release_id", "artist_id", "role", name="uq_oceanlab_release_artists_release_artist_role"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     release_id: Mapped[uuid.UUID] = mapped_column(
-        sa.Uuid(as_uuid=True), sa.ForeignKey("releases.id", ondelete="CASCADE"), nullable=False
+        sa.Uuid(as_uuid=True), sa.ForeignKey("oceanlab_releases.id", ondelete="CASCADE"), nullable=False
     )
-    artist_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("artists.id"), nullable=False)
+    artist_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), sa.ForeignKey("oceanlab_artists.id"), nullable=False)
     role: Mapped[ArtistRole] = mapped_column(
         sa.Enum(ArtistRole, native_enum=False, create_constraint=True, name="role"),
         nullable=False,

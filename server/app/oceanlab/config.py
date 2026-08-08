@@ -1,16 +1,19 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_prefix="OCEANLAB_", env_file=".env", extra="ignore")
 
-    database_url: str
-    oceanlab_token: str = Field(min_length=8)
-    storage_root: Path = Path("var/storage")
+    # Empty by default so a missing env var can't crash the monolith at
+    # import time; require_auth() (deps.py) treats "" as auth-not-configured
+    # and returns 503 rather than silently accepting any bearer token.
+    token: str = ""
+    # None -> db.py derives from the monolith's shared DATABASE_URL.
+    database_url: str | None = None
+    storage_root: Path = Path("var/oceanlab-storage")
     label_name: str = "Oceanlab"
     # YouTube
     youtube_client_secret_path: Path = Path("var/yt_client_secret.json")

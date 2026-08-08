@@ -4,10 +4,11 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.db import get_db
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.config import settings
+from app.oceanlab.db import get_db
 
-router = APIRouter(tags=["health"])
+router = APIRouter(route_class=OceanlabRoute, tags=["health"])
 
 
 @router.get("/health")

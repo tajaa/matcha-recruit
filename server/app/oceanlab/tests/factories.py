@@ -4,12 +4,12 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
-from app.models.artist import Artist
-from app.models.codes import IsrcConfig
-from app.models.enums import ReleaseType
-from app.models.recording import Recording
-from app.models.release import Release
-from app.models.track import Track
+from app.oceanlab.models.artist import Artist
+from app.oceanlab.models.codes import IsrcConfig
+from app.oceanlab.models.enums import ReleaseType
+from app.oceanlab.models.recording import Recording
+from app.oceanlab.models.release import Release
+from app.oceanlab.models.track import Track
 
 CURRENT_YEAR_2 = datetime.now(timezone.utc).strftime("%y")
 

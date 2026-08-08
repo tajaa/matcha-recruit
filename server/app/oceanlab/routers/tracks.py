@@ -4,14 +4,15 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.recording import Recording
-from app.models.release import Release
-from app.models.track import Track
-from app.schemas.track import TrackCreate, TrackRead, TrackReadWithRecording, TrackReorder, TrackUpdate
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.recording import Recording
+from app.oceanlab.models.release import Release
+from app.oceanlab.models.track import Track
+from app.oceanlab.schemas.track import TrackCreate, TrackRead, TrackReadWithRecording, TrackReorder, TrackUpdate
 
-router = APIRouter(tags=["tracks"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, tags=["tracks"], dependencies=[AuthDep])
 
 
 @router.get("/releases/{release_id}/tracks", response_model=list[TrackReadWithRecording])

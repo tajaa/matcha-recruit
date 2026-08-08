@@ -4,13 +4,14 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.contributor import Contributor
-from app.schemas.common import Page
-from app.schemas.contributor import ContributorCreate, ContributorRead, ContributorUpdate
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.contributor import Contributor
+from app.oceanlab.schemas.common import Page
+from app.oceanlab.schemas.contributor import ContributorCreate, ContributorRead, ContributorUpdate
 
-router = APIRouter(prefix="/contributors", tags=["contributors"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, prefix="/contributors", tags=["contributors"], dependencies=[AuthDep])
 
 
 @router.get("", response_model=Page[ContributorRead])

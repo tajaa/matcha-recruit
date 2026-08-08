@@ -6,19 +6,25 @@ FK/not-null violations) instead of ad-hoc, sometimes-wrong hard-coded
 messages per endpoint.
 """
 
-from fastapi import HTTPException
+import logging
+
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from psycopg.errors import ForeignKeyViolation, NotNullViolation, UniqueViolation
 from sqlalchemy.exc import IntegrityError
+
+logger = logging.getLogger(__name__)
 
 # Friendly overrides for well-known unique constraints; falls back to a
 # generic message built from the constraint name when not listed here.
 _UNIQUE_CONSTRAINT_MESSAGES = {
-    "uq_releases_upc": "UPC already in use",
-    "uq_releases_catalog_number": "Catalog number already exists",
-    "uq_artists_name": "Artist name already exists",
-    "uq_works_iswc": "ISWC already exists",
-    "uq_recordings_isrc": "ISRC already exists",
-    "uq_tracks_release_disc_position": "Position already taken on this disc",
+    "uq_oceanlab_releases_upc": "UPC already in use",
+    "uq_oceanlab_releases_catalog_number": "Catalog number already exists",
+    "uq_oceanlab_artists_name": "Artist name already exists",
+    "uq_oceanlab_works_iswc": "ISWC already exists",
+    "uq_oceanlab_recordings_isrc": "ISRC already exists",
+    "uq_oceanlab_tracks_release_disc_position": "Position already taken on this disc",
 }
 
 
@@ -47,3 +53,26 @@ def integrity_error_to_http(e: IntegrityError) -> HTTPException:
         col = getattr(orig.diag, "column_name", None)
         return HTTPException(status_code=422, detail=f"Field {col!r} cannot be null")
     return HTTPException(status_code=409, detail="Database integrity error")
+
+
+class OceanlabRoute(APIRoute):
+    """Route class that translates IntegrityError into an HTTP response.
+
+    Scoped to oceanlab's own routers (via `APIRouter(route_class=OceanlabRoute)`)
+    instead of a monolith-wide `app.exception_handler` — the monolith hosts
+    other products whose IntegrityErrors must not be swallowed by oceanlab's
+    translation rules.
+    """
+
+    def get_route_handler(self):
+        original_route_handler = super().get_route_handler()
+
+        async def custom_route_handler(request: Request) -> Response:
+            try:
+                return await original_route_handler(request)
+            except IntegrityError as exc:
+                logger.exception("IntegrityError on %s %s", request.method, request.url.path, exc_info=exc)
+                http = integrity_error_to_http(exc)
+                return JSONResponse(status_code=http.status_code, content={"detail": http.detail})
+
+        return custom_route_handler

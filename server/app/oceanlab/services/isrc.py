@@ -4,8 +4,8 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.models.codes import IsrcConfig
-from app.models.recording import Recording
+from app.oceanlab.models.codes import IsrcConfig
+from app.oceanlab.models.recording import Recording
 
 
 class IsrcError(Exception):

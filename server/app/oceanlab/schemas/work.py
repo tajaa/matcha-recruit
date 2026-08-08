@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.enums import WriterRole
+from app.oceanlab.models.enums import WriterRole
 
 ISWC_PATTERN = r"^T\d{10}$"
 LANGUAGE_PATTERN = r"^[a-z]{2}$"

@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.enums import CreditRole
+from app.oceanlab.models.enums import CreditRole
 
 LANGUAGE_PATTERN = r"^[a-z]{2}$"
 

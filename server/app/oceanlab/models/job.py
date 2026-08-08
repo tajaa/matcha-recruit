@@ -5,12 +5,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin
-from app.models.enums import JobStatus
+from app.oceanlab.models.base import Base, TimestampMixin
+from app.oceanlab.models.enums import JobStatus
 
 
 class Job(Base, TimestampMixin):
-    __tablename__ = "jobs"
+    __tablename__ = "oceanlab_jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     kind: Mapped[str] = mapped_column(sa.String, nullable=False)

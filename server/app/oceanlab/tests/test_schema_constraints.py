@@ -5,7 +5,7 @@ constraint and RoyaltyStatement.status enum enforcement.
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from app.models.codes import IsrcConfig
+from app.oceanlab.models.codes import IsrcConfig
 
 
 def test_isrc_config_singleton_constraint_rejects_second_row(db):

@@ -6,9 +6,9 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models.codes import UpcCode
-from app.models.enums import UpcStatus
-from app.models.release import Release
+from app.oceanlab.models.codes import UpcCode
+from app.oceanlab.models.enums import UpcStatus
+from app.oceanlab.models.release import Release
 
 _SEPARATORS = re.compile(r"[\s\-]")
 

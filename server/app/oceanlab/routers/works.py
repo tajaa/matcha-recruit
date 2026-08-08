@@ -4,13 +4,14 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.work import Work, WorkWriter
-from app.schemas.common import Page
-from app.schemas.work import WorkCreate, WorkRead, WorkUpdate, WorkWriterIn, WorkWriterRead
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.work import Work, WorkWriter
+from app.oceanlab.schemas.common import Page
+from app.oceanlab.schemas.work import WorkCreate, WorkRead, WorkUpdate, WorkWriterIn, WorkWriterRead
 
-router = APIRouter(tags=["works"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, tags=["works"], dependencies=[AuthDep])
 
 
 @router.get("/works", response_model=Page[WorkRead])

@@ -1,47 +1,50 @@
+import importlib.util
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
-from alembic import command
-from app.config import settings
-from app.db import get_db
-from app.main import app
-from app.models.base import Base
+from app.oceanlab.config import settings
+from app.oceanlab.db import get_db
+from app.oceanlab.main import app
+from app.oceanlab.models.base import Base
 
 TEST_DATABASE_URL = "postgresql+psycopg://matcha:matcha_dev@127.0.0.1:5432/oceanlab_test"
 
+# The oceanlab schema now ships as a hand-SQL migration in matcha's shared
+# alembic chain (server/alembic/versions/), not a standalone alembic dir.
+# Load and run it directly against the test engine rather than shelling out
+# through matcha's full multi-head chain, so drift between models and the
+# shipped migration still surfaces as a failing test.
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[3] / "alembic" / "versions" / "oceanlab_app_01_standalone.py"
+)
 
-def _alembic_config() -> Config:
-    cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
-    return cfg
+
+def _load_migration():
+    spec = importlib.util.spec_from_file_location("oceanlab_app_01_standalone", _MIGRATION_PATH)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(scope="session")
 def engine():
     eng = create_engine(TEST_DATABASE_URL, future=True)
-    # Build the schema by actually running the migrations, so drift between
-    # models and alembic/versions/*.py surfaces as failing tests (Phase 1
-    # exit criterion: `alembic upgrade head` works cleanly).
     Base.metadata.drop_all(eng)
     with eng.begin() as conn:
         conn.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
-    cfg = _alembic_config()
-    # alembic/env.py always resolves the URL from `settings.database_url`
-    # (so plain `alembic upgrade head` on the CLI keeps working against the
-    # real dev DB); point that at the test DB for the duration of the
-    # upgrade so migrations land in oceanlab_test, not the dev database.
-    original_url = settings.database_url
-    settings.database_url = TEST_DATABASE_URL
-    try:
-        command.upgrade(cfg, "head")
-    finally:
-        settings.database_url = original_url
+    migration = _load_migration()
+    with eng.begin() as conn:
+        ctx = MigrationContext.configure(conn)
+        with Operations.context(ctx):
+            migration.upgrade()
     yield eng
     eng.dispose()
 
@@ -79,7 +82,7 @@ def client(db) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_db] = _get_db_override
     with TestClient(app) as c:
-        c.headers.update({"Authorization": f"Bearer {settings.oceanlab_token}"})
+        c.headers.update({"Authorization": f"Bearer {settings.token}"})
         yield c
     app.dependency_overrides.pop(get_db, None)
 
@@ -88,9 +91,11 @@ def client(db) -> Generator[TestClient, None, None]:
 # fire (they only fire at COMMIT, and the `db` fixture above never commits —
 # it runs inside a savepoint that's always rolled back).
 _TRUNCATE_TABLES = (
-    "delivery_items, deliveries, registration_tasks, royalty_lines, royalty_statements, "
-    "tracks, upc_codes, recording_works, master_splits, credits, work_writers, release_artists, "
-    "releases, recordings, works, isrc_config, files, artists, contributors, jobs"
+    "oceanlab_delivery_items, oceanlab_deliveries, oceanlab_registration_tasks, oceanlab_royalty_lines, "
+    "oceanlab_royalty_statements, oceanlab_tracks, oceanlab_upc_codes, oceanlab_recording_works, "
+    "oceanlab_master_splits, oceanlab_credits, oceanlab_work_writers, oceanlab_release_artists, "
+    "oceanlab_releases, oceanlab_recordings, oceanlab_works, oceanlab_isrc_config, oceanlab_files, "
+    "oceanlab_artists, oceanlab_contributors, oceanlab_jobs"
 )
 
 
@@ -106,7 +111,7 @@ def db_real(engine) -> Generator[Session, None, None]:
             # Truncating isrc_config drops the migration-seeded id=1 row; restore it
             # so every test starts from the same invariant as a freshly migrated DB.
             conn.execute(sa.text(
-                "INSERT INTO isrc_config (id, registrant_prefix, year_digits, next_designation) "
+                "INSERT INTO oceanlab_isrc_config (id, registrant_prefix, year_digits, next_designation) "
                 "VALUES (1, '', '', 1) ON CONFLICT (id) DO NOTHING"
             ))
 
@@ -122,6 +127,6 @@ def client_real(db_real) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_db] = _get_db_override
     with TestClient(app) as c:
-        c.headers.update({"Authorization": f"Bearer {settings.oceanlab_token}"})
+        c.headers.update({"Authorization": f"Bearer {settings.token}"})
         yield c
     app.dependency_overrides.pop(get_db, None)

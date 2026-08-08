@@ -3,11 +3,11 @@
 Usage: uv run scripts/seed.py
 """
 
-from app.db import SessionLocal
-from app.models.artist import Artist
-from app.models.codes import IsrcConfig
-from app.models.enums import ReleaseType
-from app.models.release import Release
+from app.oceanlab.db import SessionLocal
+from app.oceanlab.models.artist import Artist
+from app.oceanlab.models.codes import IsrcConfig
+from app.oceanlab.models.enums import ReleaseType
+from app.oceanlab.models.release import Release
 
 
 def main() -> None:

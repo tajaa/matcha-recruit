@@ -4,13 +4,14 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.recording import Credit, MasterSplit, Recording
-from app.models.work import RecordingWork
-from app.schemas.codes import AssignIsrcResult
-from app.schemas.common import Page
-from app.schemas.recording import (
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.recording import Credit, MasterSplit, Recording
+from app.oceanlab.models.work import RecordingWork
+from app.oceanlab.schemas.codes import AssignIsrcResult
+from app.oceanlab.schemas.common import Page
+from app.oceanlab.schemas.recording import (
     CreditIn,
     CreditRead,
     MasterSplitIn,
@@ -20,9 +21,9 @@ from app.schemas.recording import (
     RecordingUpdate,
     WorkLinksIn,
 )
-from app.services import isrc as isrc_service
+from app.oceanlab.services import isrc as isrc_service
 
-router = APIRouter(prefix="/recordings", tags=["recordings"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, prefix="/recordings", tags=["recordings"], dependencies=[AuthDep])
 
 
 @router.get("", response_model=Page[RecordingRead])

@@ -4,16 +4,17 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db import get_db
-from app.deps import AuthDep
-from app.models.enums import ReleaseStatus
-from app.models.release import Release
-from app.schemas.codes import AssignUpcResult
-from app.schemas.common import Page
-from app.schemas.release import ReleaseCreate, ReleaseRead, ReleaseUpdate
-from app.services import upc as upc_service
+from app.oceanlab.routers._errors import OceanlabRoute
+from app.oceanlab.db import get_db
+from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.enums import ReleaseStatus
+from app.oceanlab.models.release import Release
+from app.oceanlab.schemas.codes import AssignUpcResult
+from app.oceanlab.schemas.common import Page
+from app.oceanlab.schemas.release import ReleaseCreate, ReleaseRead, ReleaseUpdate
+from app.oceanlab.services import upc as upc_service
 
-router = APIRouter(prefix="/releases", tags=["releases"], dependencies=[AuthDep])
+router = APIRouter(route_class=OceanlabRoute, prefix="/releases", tags=["releases"], dependencies=[AuthDep])
 
 
 @router.get("", response_model=Page[ReleaseRead])

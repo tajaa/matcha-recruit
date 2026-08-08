@@ -600,6 +600,7 @@ from .core.routes.billing.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
 from .cappe.routes import cappe_router
 from .tellus.routes import tellus_router
+from .oceanlab.routers import oceanlab_router
 
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
@@ -613,6 +614,10 @@ app.include_router(cappe_router, prefix="/api/cappe")
 # Mounted standalone, NOT under matcha_router, so it bypasses the
 # require_feature/company gate chain. Its own tellus-scoped JWT gates per-endpoint.
 app.include_router(tellus_router, prefix="/api/tellus")
+# Oceanlab (music catalog/label platform) — a separate product, same pattern
+# as Cappe/Tell-Us. Mounted standalone, NOT under matcha_router. Static
+# bearer-token auth (OCEANLAB_TOKEN) gates per-endpoint.
+app.include_router(oceanlab_router, prefix="/api/oceanlab")
 # Webhook router under /api so prod nginx proxy_pass /api/ → backend works.
 # Stripe dashboard endpoint must be https://hey-matcha.com/api/webhooks/stripe.
 app.include_router(stripe_webhook_router, prefix="/api")

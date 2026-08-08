@@ -3,7 +3,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from app.models.enums import ReleaseStatus, ReleaseType
+from app.oceanlab.models.enums import ReleaseStatus, ReleaseType
 
 
 class ReleaseBase(BaseModel):

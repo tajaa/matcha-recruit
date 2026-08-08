@@ -4,8 +4,8 @@ from collections.abc import Generator
 import pytest
 from sqlalchemy.orm import Session
 
-from app.services import upc as upc_service
-from app.tests.factories import make_release
+from app.oceanlab.services import upc as upc_service
+from app.oceanlab.tests.factories import make_release
 
 VALID_UPC_12 = "036000291452"  # well-known valid UPC-A (Kellogg's Corn Flakes-style test code)
 VALID_EAN_13 = "0036000291452"
@@ -20,7 +20,7 @@ def test_add_upcs_validates_check_digit_and_dedupes(db):
 
 def test_add_upcs_pads_12_digit_to_13(db):
     upc_service.add_upcs(db, [VALID_UPC_12])
-    from app.models.codes import UpcCode
+    from app.oceanlab.models.codes import UpcCode
 
     row = db.query(UpcCode).one()
     assert row.code == VALID_EAN_13
@@ -42,7 +42,7 @@ def test_add_upcs_skips_already_present_codes(db):
     assert rejected == []
     assert skipped == 1
 
-    from app.models.codes import UpcCode
+    from app.oceanlab.models.codes import UpcCode
 
     row = db.query(UpcCode).one()
     assert row.code == VALID_EAN_13
@@ -88,7 +88,7 @@ def test_add_upcs_accepts_separator_formats(db):
     assert rejected == []
     assert skipped == 1  # both normalize to the same code, deduped pre-insert like a plain repeat
 
-    from app.models.codes import UpcCode
+    from app.oceanlab.models.codes import UpcCode
 
     row = db.query(UpcCode).one()
     assert row.code == VALID_EAN_13
@@ -131,7 +131,7 @@ def same_release_with_pool(engine) -> Generator[str, None, None]:
     """
     from sqlalchemy import delete
 
-    from app.models.codes import UpcCode
+    from app.oceanlab.models.codes import UpcCode
 
     release_id = None
     artist_id = None
@@ -154,12 +154,12 @@ def same_release_with_pool(engine) -> Generator[str, None, None]:
     finally:
         with Session(bind=engine, future=True) as cleanup:
             if release_id is not None:
-                from app.models.release import Release
+                from app.oceanlab.models.release import Release
 
                 cleanup.execute(delete(Release).where(Release.id == release_id))
             cleanup.execute(delete(UpcCode))
             if artist_id is not None:
-                from app.models.artist import Artist
+                from app.oceanlab.models.artist import Artist
 
                 cleanup.execute(delete(Artist).where(Artist.id == artist_id))
             cleanup.commit()
@@ -171,9 +171,9 @@ def test_concurrent_assignment_to_same_release_yields_exactly_one_winner(engine,
     one succeeds and the rest see the committed upc and raise AlreadyAssigned
     — no burned pool code, no lost update.
     """
-    from app.models.codes import UpcCode
-    from app.models.enums import UpcStatus
-    from app.models.release import Release
+    from app.oceanlab.models.codes import UpcCode
+    from app.oceanlab.models.enums import UpcStatus
+    from app.oceanlab.models.release import Release
 
     release_id = same_release_with_pool
     N = 5
