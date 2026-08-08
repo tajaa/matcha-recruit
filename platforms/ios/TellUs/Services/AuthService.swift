@@ -91,6 +91,26 @@ final class AuthService {
         try await client.request(method: "GET", path: "/auth/me")
     }
 
+    func updateProfile(_ patch: ProfileUpdate) async throws -> TellusAccount {
+        try await client.request(method: "PATCH", path: "/me", body: patch)
+    }
+
+    /// Consumer's own city — geocoded server-side, powers the marketplace
+    /// city filter.
+    func updateLocation(_ update: LocationUpdate) async throws -> TellusAccount {
+        try await client.request(method: "POST", path: "/me/location", body: update)
+    }
+
+    /// Consumes an admin-minted reset token (no self-serve request endpoint
+    /// exists — flagged as a backend gap). Revokes all existing sessions.
+    func resetPassword(token: String, newPassword: String) async throws {
+        try await client.requestVoid(
+            method: "POST", path: "/auth/reset-password",
+            body: PasswordResetConfirm(token: token, new_password: newPassword),
+            retryOnUnauthorized: false
+        )
+    }
+
     /// Server logout is GLOBAL — it advances tokens_valid_after, which kills
     /// every device's session at once. Best-effort POST (never blocks local
     /// logout on a network failure), then clear local state unconditionally.

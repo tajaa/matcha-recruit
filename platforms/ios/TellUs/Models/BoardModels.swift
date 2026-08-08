@@ -122,3 +122,9 @@ struct BoardPostCreate: Encodable {
 
 struct BoardJoinBody: Encodable { let note: String? }
 struct ReplyCreate: Encodable { let body: String }
+
+struct BoardPostUpdate: Encodable {
+    let title: String?
+    let body: String?
+    let is_pinned: Bool?
+}

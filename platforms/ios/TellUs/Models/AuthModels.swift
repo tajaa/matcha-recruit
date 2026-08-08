@@ -71,3 +71,22 @@ struct VerifyRequest: Encodable {
 struct ResendRequest: Encodable {
     let email: String
 }
+
+struct ProfileUpdate: Encodable {
+    let display_name: String?
+    let leaderboard_opt_in: Bool?
+}
+
+/// Consumer's own city update (POST /me/location) — distinct from the
+/// brand's LocationUpdateRequest (PATCH /billing/locations), a different
+/// field set on a different endpoint.
+struct LocationUpdate: Encodable {
+    let city: String
+    let state: String?
+    let zipcode: String?
+}
+
+struct PasswordResetConfirm: Encodable {
+    let token: String
+    let new_password: String
+}

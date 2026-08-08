@@ -65,4 +65,20 @@ final class BoardManageService {
     func deletePost(id: String, brandId: String?) async throws {
         try await client.requestVoid(method: "DELETE", path: "/board/posts/\(id)" + query(brandId))
     }
+
+    func updatePost(id: String, brandId: String?, _ body: BoardPostUpdate) async throws -> BoardPost {
+        try await client.request(method: "PATCH", path: "/board/posts/\(id)" + query(brandId), body: body)
+    }
+
+    func team(brandId: String?) async throws -> [BrandTeamMember] {
+        try await client.request(method: "GET", path: "/board/team" + query(brandId))
+    }
+
+    func addTeamMember(email: String, brandId: String?) async throws -> BrandTeamMember {
+        try await client.request(method: "POST", path: "/board/team" + query(brandId), body: TeamMemberAdd(email: email))
+    }
+
+    func removeTeamMember(id: String, brandId: String?) async throws {
+        try await client.requestVoid(method: "DELETE", path: "/board/team/\(id)" + query(brandId))
+    }
 }

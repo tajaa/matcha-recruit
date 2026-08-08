@@ -309,6 +309,48 @@ class APIClient {
         return data
     }
 
+    /// Multipart form upload (currently: brand logo). Unlike the S3 presigned
+    /// PUT path (MediaUploadService), this goes through APIClient with the
+    /// bearer attached — the server itself receives and stores the file.
+    func uploadMultipart<T: Decodable>(
+        path: String, field: String = "file", data: Data, mimeType: String, filename: String
+    ) async throws -> T {
+        guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let boundary = "tellus-" + UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.noData }
+
+        if httpResponse.statusCode == 401 {
+            _ = try await AuthService.shared.refresh()
+            return try await uploadMultipart(path: path, field: field, data: data, mimeType: mimeType, filename: filename)
+        }
+        if httpResponse.statusCode == 402 {
+            await MainActor.run { onPaymentRequired?() }
+            throw APIError.paymentRequired(_extractErrorMessage(from: responseData) ?? "")
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.httpError(httpResponse.statusCode, _extractErrorMessage(from: responseData) ?? "HTTP \(httpResponse.statusCode)")
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try JSONDecoder().decode(T.self, from: responseData)
+        }.value
+    }
+
     /// Extract a human-readable error from a typical FastAPI error response
     /// (`{"detail": "..."}`) or fall back to the raw body.
     private func _extractErrorMessage(from data: Data) -> String? {
