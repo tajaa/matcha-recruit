@@ -1,14 +1,11 @@
 import SwiftUI
 
 struct LedgerView: View {
-    @State private var entries: [LedgerEntry] = []
-    @State private var isLoading = false
-    @State private var offset = 0
-    @State private var hasMore = true
+    @State private var vm = LedgerViewModel()
 
     var body: some View {
         List {
-            ForEach(entries) { entry in
+            ForEach(vm.entries) { entry in
                 HStack {
                     VStack(alignment: .leading) {
                         Text(entry.description ?? entry.reason.replacingOccurrences(of: "_", with: " ").capitalized)
@@ -21,22 +18,13 @@ struct LedgerView: View {
                         .bold()
                 }
                 .onAppear {
-                    if entry.id == entries.last?.id { Task { await loadMore() } }
+                    if entry.id == vm.entries.last?.id { Task { await vm.loadMore() } }
                 }
             }
-            if isLoading { ProgressView().frame(maxWidth: .infinity) }
+            if vm.isLoading { ProgressView().frame(maxWidth: .infinity) }
         }
         .navigationTitle("Ledger")
-        .task { await loadMore() }
-    }
-
-    private func loadMore() async {
-        guard hasMore, !isLoading else { return }
-        isLoading = true; defer { isLoading = false }
-        if let page = try? await RewardsService.shared.ledger(limit: 50, offset: offset) {
-            entries += page
-            offset += page.count
-            hasMore = page.count == 50
-        }
+        .task { await vm.loadMore() }
+        .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
     }
 }

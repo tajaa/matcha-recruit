@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class RewardsHomeViewModel {
+final class RewardsHomeViewModel: LoadableVM {
     var balance: PointsBalance?
     var badges: [BadgeItem] = []
     var recentLedger: [LedgerEntry] = []
@@ -11,8 +11,7 @@ final class RewardsHomeViewModel {
     var error: String?
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             async let b = RewardsService.shared.balance()
             async let badgesResult = RewardsService.shared.badges()
             async let ledger = RewardsService.shared.ledger(limit: 8)
@@ -20,10 +19,6 @@ final class RewardsHomeViewModel {
             PointsStore.shared.balance = balance
             badges = try await badgesResult
             recentLedger = try await ledger
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 }

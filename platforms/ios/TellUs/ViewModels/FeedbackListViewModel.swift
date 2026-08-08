@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class FeedbackListViewModel {
+final class FeedbackListViewModel: LoadableVM {
     var reports: [Report] = []
     var stats: FeedbackStats?
     var statusFilter: ReportStatus?
@@ -37,6 +37,14 @@ final class FeedbackListViewModel {
     }
 
     func loadStats() async {
-        stats = try? await FeedbackService.shared.stats()
+        do {
+            stats = try await FeedbackService.shared.stats()
+        } catch {
+            if error.isCancellation { return }
+            // Stats are supplementary to the report list — a failure here
+            // shouldn't blank out the (separately loaded) list or its error
+            // banner, so this is intentionally silent beyond the console.
+            NSLog("[FeedbackListViewModel] loadStats failed: \(error.localizedDescription)")
+        }
     }
 }

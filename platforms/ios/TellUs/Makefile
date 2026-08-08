@@ -31,5 +31,5 @@ deps:
 
 run: build
 	xcrun simctl boot "$(SIM)" 2>/dev/null || true
-	xcrun simctl install "$(SIM)" build/Debug-iphonesimulator/TellUs.app
+	xcrun simctl install "$(SIM)" "$$(xcodebuild -scheme TellUs -destination 'platform=iOS Simulator,name=$(SIM)' -showBuildSettings 2>/dev/null | awk '/ CODESIGNING_FOLDER_PATH/{print $$3}')"
 	xcrun simctl launch "$(SIM)" com.matcha.tellus

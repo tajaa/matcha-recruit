@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class MyReviewsViewModel {
+final class MyReviewsViewModel: LoadableVM {
     var reviews: [MyReview] = []
     var isLoading = false
     var error: String?
@@ -18,35 +18,22 @@ final class MyReviewsViewModel {
     }
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             reviews = try await ReviewsService.shared.myReviews()
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 
     func save(id: String, _ patch: MyReviewUpdate) async {
-        error = nil
-        do {
+        await withLoad {
             _ = try await ReviewsService.shared.update(id: id, patch)
-            await load()
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
+            reviews = try await ReviewsService.shared.myReviews()
         }
     }
 
     func withdraw(id: String) async {
-        error = nil
-        do {
+        await withLoad {
             try await ReviewsService.shared.withdraw(id: id)
-            await load()
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
+            reviews = try await ReviewsService.shared.myReviews()
         }
     }
 }

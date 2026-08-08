@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class ReportDetailViewModel {
+final class ReportDetailViewModel: LoadableVM {
     let id: String
     var report: Report?
     var isLoading = false
@@ -21,13 +21,8 @@ final class ReportDetailViewModel {
     }
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             report = try await FeedbackService.shared.detail(id: id)
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 

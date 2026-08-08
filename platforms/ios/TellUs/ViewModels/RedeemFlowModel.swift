@@ -25,7 +25,7 @@ final class RedeemFlowModel {
             lastRedemption = try await RewardsService.shared.redeem(listingId: listing.id)
             await PointsStore.shared.refresh()
         } catch let APIError.httpError(409, detail) {
-            error = MarketplaceViewModel.redeemMessage(from: detail)
+            error = RedeemErrorMapping.message(from: detail)
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

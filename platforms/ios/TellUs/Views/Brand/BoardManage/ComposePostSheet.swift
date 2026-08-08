@@ -16,6 +16,9 @@ struct ComposePostSheet: View {
     @State private var isPinned = false
 
     private let composableKinds: [BoardPostKind] = [.update, .event, .question]
+    private static let iso = ISO8601DateFormatter()
+
+    private var eventRangeInvalid: Bool { kind == .event && eventEnd <= eventStart }
 
     var body: some View {
         NavigationStack {
@@ -28,6 +31,9 @@ struct ComposePostSheet: View {
                 if kind == .event {
                     DatePicker("Starts", selection: $eventStart)
                     DatePicker("Ends", selection: $eventEnd)
+                    if eventRangeInvalid {
+                        Text("End time must be after the start time.").foregroundStyle(.red).font(.footnote)
+                    }
                 }
                 Toggle("Pin to top", isOn: $isPinned)
 
@@ -41,17 +47,16 @@ struct ComposePostSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Post") {
                         Task {
-                            let iso = ISO8601DateFormatter()
                             await vm.createPost(BoardPostCreate(
                                 kind: kind.rawValue, title: title, body: body_.isEmpty ? nil : body_,
                                 listing_id: nil,
-                                event_starts_at: kind == .event ? iso.string(from: eventStart) : nil,
-                                event_ends_at: kind == .event ? iso.string(from: eventEnd) : nil
+                                event_starts_at: kind == .event ? Self.iso.string(from: eventStart) : nil,
+                                event_ends_at: kind == .event ? Self.iso.string(from: eventEnd) : nil
                             ))
                             dismiss()
                         }
                     }
-                    .disabled(title.isEmpty)
+                    .disabled(title.isEmpty || eventRangeInvalid)
                 }
             }
         }

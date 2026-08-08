@@ -316,8 +316,12 @@ class APIClient {
            let detail = json["detail"] as? String {
             return detail
         }
-        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return raw?.isEmpty == false ? raw : nil
+        guard let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return nil }
+        // An HTML error page (proxy/WAF block page, unmatched route) is never
+        // a useful user-facing message.
+        guard !raw.lowercased().hasPrefix("<") else { return nil }
+        return String(raw.prefix(300))
     }
 }
 

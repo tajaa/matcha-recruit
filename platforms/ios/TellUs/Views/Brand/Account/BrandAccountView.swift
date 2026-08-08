@@ -14,6 +14,7 @@ struct BrandAccountView: View {
                     if let slug = account.brand_slug {
                         Text("tellus/b/\(slug)").font(.caption).foregroundStyle(.secondary)
                     }
+                    LabeledContent("Plan", value: account.plan_status?.rawValue.capitalized ?? "—")
                 }
             }
 
@@ -22,7 +23,7 @@ struct BrandAccountView: View {
                 webLink("Stores & QR codes", "/stores")
                 webLink("Reward listings", "/listings")
                 webLink("Settings & prompts", "/settings")
-                webLink("Messages", "/../messages")
+                webLink("Messages", "/messages")
             }
 
             Section {

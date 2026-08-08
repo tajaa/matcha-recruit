@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class BoardManageViewModel {
+final class BoardManageViewModel: LoadableVM {
     /// nil for a brand account managing its own board; set when a
     /// consumer-typed moderator moderates a specific brand's board.
     let brandId: String?
@@ -22,8 +22,7 @@ final class BoardManageViewModel {
     init(brandId: String?) { self.brandId = brandId }
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             async let s = BoardManageService.shared.summary(brandId: brandId)
             async let r = BoardManageService.shared.requests(brandId: brandId)
             async let h = BoardManageService.shared.heldReplies(brandId: brandId)
@@ -32,10 +31,6 @@ final class BoardManageViewModel {
             requests = try await r
             heldReplies = try await h
             members = try await m
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 

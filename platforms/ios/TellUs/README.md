@@ -10,7 +10,7 @@ make generate            # generates TellUs.xcodeproj from project.yml
 make open                 # opens the generated project in Xcode
 ```
 
-Do not edit `TellUs.xcodeproj` directly — it's regenerated from `project.yml` on every `make generate`. Adding a new source file just means dropping it under `App/`, `Models/`, `Services/`, `ViewModels/`, or `Views/`; xcodegen picks it up automatically on the next generate (no manual pbxproj editing).
+Do not edit `TellUs.xcodeproj` directly — it's regenerated from `project.yml` on every `make generate`. `TellUs.xcodeproj` stays committed (Xcode/CI need a project file to open), but `project.yml` is the source of truth; a hand-edit to the `.xcodeproj` (or to `Info.plist` directly — its custom keys must live under `project.yml`'s `info.properties`) is silently discarded on the next generate. Adding a new source file just means dropping it under `App/`, `Models/`, `Services/`, `ViewModels/`, or `Views/`; xcodegen picks it up automatically on the next generate (no manual pbxproj editing).
 
 ## Running against the local dev backend
 

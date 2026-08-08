@@ -3,29 +3,21 @@ import Observation
 
 @MainActor
 @Observable
-final class NotificationsViewModel {
+final class NotificationsViewModel: LoadableVM {
     var items: [TellusNotification] = []
     var isLoading = false
     var error: String?
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             items = try await NotificationsService.shared.list(limit: 50)
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 
     func markAllRead() async {
-        do {
+        await withLoad {
             try await NotificationsService.shared.markRead(id: nil)
-            await load()
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
+            items = try await NotificationsService.shared.list(limit: 50)
         }
     }
 }

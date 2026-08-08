@@ -3,19 +3,14 @@ import Observation
 
 @MainActor
 @Observable
-final class RedemptionsViewModel {
+final class RedemptionsViewModel: LoadableVM {
     var redemptions: [Redemption] = []
     var isLoading = false
     var error: String?
 
     func load() async {
-        isLoading = true; defer { isLoading = false }
-        do {
+        await withLoad {
             redemptions = try await RewardsService.shared.redemptions()
-            error = nil
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 }

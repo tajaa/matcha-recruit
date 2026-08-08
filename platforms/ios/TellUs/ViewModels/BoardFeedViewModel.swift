@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class BoardFeedViewModel {
+final class BoardFeedViewModel: LoadableVM {
     let slug: String
     var page: BoardPage?
     var repliesByPost: [String: [BoardReply]] = [:]
@@ -14,6 +14,8 @@ final class BoardFeedViewModel {
 
     init(slug: String) { self.slug = slug }
 
+    // Custom (not withLoad): a 403 here means "not a member yet", a
+    // recoverable state distinct from a generic error banner.
     func load() async {
         isLoading = true; defer { isLoading = false }
         do {
