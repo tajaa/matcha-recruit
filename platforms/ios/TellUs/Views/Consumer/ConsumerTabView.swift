@@ -18,13 +18,8 @@ struct ConsumerTabView: View {
             NavigationStack { BoardsListView() }
                 .tabItem { Label("Boards", systemImage: "person.3") }
 
-            NavigationStack { MyReviewsView() }
-                .tabItem { Label("Reviews", systemImage: "star.bubble") }
-
-            if !appState.moderatedBrands.isEmpty {
-                NavigationStack { ModerateTabView() }
-                    .tabItem { Label("Moderate", systemImage: "checkmark.shield") }
-            }
+            NavigationStack { MoreView() }
+                .tabItem { Label("More", systemImage: "ellipsis.circle") }
         }
     }
 }
