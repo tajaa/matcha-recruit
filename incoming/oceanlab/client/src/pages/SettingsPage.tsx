@@ -1,0 +1,215 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiClient } from '../api/client'
+import { clearToken, getToken, setToken } from '../api/client'
+import { MutationError } from '../components/MutationError'
+import { useUnassignUpc, useUpcs } from '../api/hooks'
+
+interface IsrcConfig {
+  registrant_prefix: string
+  year_digits: string
+  next_designation: number
+}
+
+function useIsrcConfig() {
+  return useQuery({
+    queryKey: ['settings', 'isrc'],
+    queryFn: async () => (await apiClient.get<IsrcConfig>('/settings/isrc')).data,
+  })
+}
+
+function useUpdateIsrcConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (registrant_prefix: string) =>
+      (await apiClient.put<IsrcConfig>('/settings/isrc', { registrant_prefix })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'isrc'] }),
+  })
+}
+
+function useAddUpcs() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (codes: string[]) =>
+      (await apiClient.post<{ added: number; rejected: string[]; skipped: number }>('/upcs', { codes })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['upcs'] }),
+  })
+}
+
+export function SettingsPage() {
+  const { data: isrcConfig, isError: isrcConfigError } = useIsrcConfig()
+  const updateIsrc = useUpdateIsrcConfig()
+  const addUpcs = useAddUpcs()
+  const [upcOffset, setUpcOffset] = useState(0)
+  const upcLimit = 50
+  const { data: upcs, isError: upcsError } = useUpcs(upcOffset, upcLimit)
+  const unassignUpc = useUnassignUpc()
+  const [prefix, setPrefix] = useState('')
+  const [upcText, setUpcText] = useState('')
+  const [tokenInput, setTokenInput] = useState(getToken() ?? '')
+
+  return (
+    <div className="p-6 max-w-lg flex flex-col gap-8">
+      <h1 className="text-2xl font-semibold">Settings</h1>
+
+      <section>
+        <h2 className="font-medium mb-2">ISRC prefix</h2>
+        {isrcConfigError ? (
+          <p className="text-xs text-red-600 mb-2">Failed to load ISRC config.</p>
+        ) : (
+          <p className="text-xs text-neutral-500 mb-2">
+            Current: {isrcConfig?.registrant_prefix || 'not configured'} · next designation:{' '}
+            {isrcConfig?.next_designation ?? '--'} · year {isrcConfig?.year_digits || '--'}
+          </p>
+        )}
+        <div className="flex gap-2">
+          <input
+            className="border rounded px-2 py-1 text-sm flex-1"
+            placeholder="e.g. QZABC"
+            value={prefix}
+            onChange={(e) => setPrefix(e.target.value.toUpperCase())}
+          />
+          <button
+            className="px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
+            onClick={() => updateIsrc.mutate(prefix)}
+            disabled={!prefix || updateIsrc.isPending}
+          >
+            Save
+          </button>
+        </div>
+        <MutationError error={updateIsrc.error} />
+      </section>
+
+      <section>
+        <h2 className="font-medium mb-2">UPC pool</h2>
+        <p className="text-xs text-neutral-500 mb-2">One UPC/EAN code per line.</p>
+        <textarea
+          className="border rounded px-2 py-1 text-sm w-full h-24"
+          value={upcText}
+          onChange={(e) => setUpcText(e.target.value)}
+        />
+        <button
+          className="mt-2 px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
+          onClick={() =>
+            addUpcs.mutate(
+              upcText
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean),
+              { onSuccess: () => setUpcText('') },
+            )
+          }
+        >
+          Add codes
+        </button>
+        {addUpcs.data && (
+          <p className="text-xs mt-1">
+            Added {addUpcs.data.added} codes.
+            {addUpcs.data.skipped > 0 && ` ${addUpcs.data.skipped} already in the pool, skipped.`}
+          </p>
+        )}
+        {addUpcs.data && addUpcs.data.rejected.length > 0 && (
+          <p className="text-xs mt-1 text-red-600">Rejected: {addUpcs.data.rejected.join(', ')}</p>
+        )}
+        <MutationError error={addUpcs.error} />
+
+        <p className={`text-xs mt-4 mb-2 ${upcsError ? 'text-red-600' : 'text-neutral-500'}`}>
+          {upcsError
+            ? 'Failed to load UPC pool.'
+            : upcs
+              ? `${upcs.available} available / ${upcs.assigned} assigned`
+              : 'Loading counts…'}
+        </p>
+        {upcs && upcs.items.length > 0 && (
+          <div className="border rounded overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="px-2 py-1 font-medium">Code</th>
+                  <th className="px-2 py-1 font-medium">Status</th>
+                  <th className="px-2 py-1 font-medium">Release</th>
+                  <th className="px-2 py-1 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcs.items.map((row) => {
+                  const orphaned = row.status === 'assigned' && row.release_id === null
+                  return (
+                    <tr key={row.id} className="border-b last:border-0">
+                      <td className="px-2 py-1 font-mono">{row.code}</td>
+                      <td className="px-2 py-1">{orphaned ? 'orphaned' : row.status}</td>
+                      <td className="px-2 py-1">{row.release_id ?? '—'}</td>
+                      <td className="px-2 py-1 text-right">
+                        {row.status === 'assigned' && (
+                          <button
+                            className="px-2 py-0.5 rounded border text-xs disabled:opacity-50"
+                            disabled={unassignUpc.isPending}
+                            onClick={() => unassignUpc.mutate(row.id)}
+                          >
+                            Unassign
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {upcs && upcs.total > upcLimit && (
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <button
+              className="px-2 py-0.5 rounded border disabled:opacity-50"
+              disabled={upcOffset === 0}
+              onClick={() => setUpcOffset((o) => Math.max(0, o - upcLimit))}
+            >
+              Prev
+            </button>
+            <span className="text-neutral-500">
+              {upcOffset + 1}–{Math.min(upcOffset + upcLimit, upcs.total)} of {upcs.total}
+            </span>
+            <button
+              className="px-2 py-0.5 rounded border disabled:opacity-50"
+              disabled={upcOffset + upcLimit >= upcs.total}
+              onClick={() => setUpcOffset((o) => o + upcLimit)}
+            >
+              Next
+            </button>
+          </div>
+        )}
+        <MutationError error={unassignUpc.error} />
+      </section>
+
+      <section>
+        <h2 className="font-medium mb-2">API token</h2>
+        <div className="flex gap-2">
+          <input
+            className="border rounded px-2 py-1 text-sm flex-1"
+            type="password"
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+          />
+          <button
+            className="px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
+            onClick={() => {
+              setToken(tokenInput)
+              window.location.reload()
+            }}
+          >
+            Save
+          </button>
+          <button
+            className="px-3 py-1.5 rounded border text-sm"
+            onClick={() => {
+              clearToken()
+              window.location.reload()
+            }}
+          >
+            Clear
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
