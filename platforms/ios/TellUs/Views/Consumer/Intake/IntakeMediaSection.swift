@@ -56,7 +56,14 @@ struct IntakeMediaSection: View {
             .overlay {
                 switch item.state {
                 case .uploading: ProgressView().background(.black.opacity(0.3))
-                case .failed: Color.red.opacity(0.4)
+                case .failed:
+                    ZStack {
+                        Color.red.opacity(0.4)
+                        Button { vm.retryMedia(id: item.id) } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundStyle(.white)
+                        }
+                    }
                 case .done: EmptyView()
                 }
             }

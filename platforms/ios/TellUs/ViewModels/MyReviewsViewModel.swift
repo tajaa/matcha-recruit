@@ -7,6 +7,15 @@ final class MyReviewsViewModel {
     var reviews: [MyReview] = []
     var isLoading = false
     var error: String?
+    private var refetchedMediaFor: Set<String> = []
+
+    /// Re-mints expired presigned media URLs by refetching the whole list —
+    /// guarded per review id so a genuinely broken media host can't loop.
+    func refetchOnceForExpiredMedia(reviewId: String) {
+        guard !refetchedMediaFor.contains(reviewId) else { return }
+        refetchedMediaFor.insert(reviewId)
+        Task { await load() }
+    }
 
     func load() async {
         isLoading = true; defer { isLoading = false }

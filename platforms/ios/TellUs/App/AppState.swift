@@ -77,6 +77,11 @@ final class AppState {
         moderatedBrands = []
         unreadCount = 0
         phase = .loggedOut
+        // Cross-account media leak: a shared device relaunching into a
+        // different account must not see the previous account's cached
+        // report-media bytes or URLCache entries.
+        MediaByteLoader.shared.reset()
+        URLCache.shared.removeAllCachedResponses()
     }
 
     /// Runtime 402 on a brand-account call — route to the wall. Consumer

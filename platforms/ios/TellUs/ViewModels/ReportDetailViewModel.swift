@@ -8,8 +8,17 @@ final class ReportDetailViewModel {
     var report: Report?
     var isLoading = false
     var error: String?
+    /// Guards AsyncMediaImage's onFailure-triggered refetch (re-mints expired
+    /// presigned URLs) so a genuinely broken media host can't loop refetches.
+    private var didRefetchForExpiredMedia = false
 
     init(id: String) { self.id = id }
+
+    func refetchOnceForExpiredMedia() {
+        guard !didRefetchForExpiredMedia else { return }
+        didRefetchForExpiredMedia = true
+        Task { await load() }
+    }
 
     func load() async {
         isLoading = true; defer { isLoading = false }

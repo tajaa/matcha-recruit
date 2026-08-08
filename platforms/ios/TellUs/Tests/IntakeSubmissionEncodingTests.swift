@@ -14,12 +14,10 @@ final class IntakeSubmissionEncodingTests: XCTestCase {
     }
 
     func testAnswersTrimmedNonEmpty() {
-        // Mirrors the filter/trim step in IntakeViewModel.submit().
+        // Calls the actual production transform (IntakeViewModel.trimmedAnswers)
+        // instead of re-implementing it, so a regression there fails this test.
         let raw: [String: String] = ["p1": " hi ", "p2": "  "]
-        let answers = raw
-            .map { ($0.key, $0.value.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            .filter { !$0.1.isEmpty }
-            .map { IntakeAnswerOut(prompt_id: $0.0, answer: $0.1) }
+        let answers = IntakeViewModel.trimmedAnswers(raw)
         XCTAssertEqual(answers.count, 1)
         XCTAssertEqual(answers.first?.prompt_id, "p1")
         XCTAssertEqual(answers.first?.answer, "hi")

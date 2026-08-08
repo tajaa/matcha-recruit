@@ -49,6 +49,27 @@ final class MediaPrepareTests: XCTestCase {
         }
     }
 
+    func testValidateVideoOversizeThrows() {
+        XCTAssertThrowsError(try MediaUploadService.validateVideo(mime: "video/mp4", bytes: 200_000_001)) { error in
+            XCTAssertEqual(error as? MediaError, .videoTooLarge)
+        }
+    }
+
+    func testValidateVideoBadMimeThrows() {
+        XCTAssertThrowsError(try MediaUploadService.validateVideo(mime: "video/x-flv", bytes: 1_000)) { error in
+            XCTAssertEqual(error as? MediaError, .unsupportedType)
+        }
+    }
+
+    func testPrepareFileReadsSize() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        try Data(count: 1024).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let prepared = try MediaUploadService.prepareFile(url: url, mimeType: "video/mp4", filename: "clip.mp4")
+        XCTAssertEqual(prepared.fileSize, 1024)
+        XCTAssertEqual(prepared.mimeType, "video/mp4")
+    }
+
     private func smallJPEGData() throws -> Data {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 10, height: 10)).image { ctx in
             UIColor.blue.setFill()

@@ -45,7 +45,9 @@ private struct ReportDetailForm: View {
             replySection
             if report.review_state == .held { publishSection }
             if !report.media.isEmpty {
-                Section("Media") { ReportMediaGallery(media: report.media) }
+                Section("Media") {
+                    ReportMediaGallery(media: report.media) { vm.refetchOnceForExpiredMedia() }
+                }
             }
             if !report.answers.isEmpty { answersSection }
         }

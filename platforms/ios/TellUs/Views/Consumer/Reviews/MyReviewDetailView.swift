@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct MyReviewDetailView: View {
-    let review: MyReview
+    let initialReview: MyReview
     @Bindable var vm: MyReviewsViewModel
 
     @State private var title: String
@@ -10,8 +10,16 @@ struct MyReviewDetailView: View {
     @State private var showWithdrawConfirm = false
     @Environment(\.dismiss) private var dismiss
 
+    /// vm.reviews is refetched by refetchOnceForExpiredMedia (and by
+    /// save/withdraw) to re-mint media URLs — read live from the VM so this
+    /// stays a struct constant only until the first refresh, instead of a
+    /// permanently stale capture from the list row that pushed this view.
+    private var review: MyReview {
+        vm.reviews.first(where: { $0.id == initialReview.id }) ?? initialReview
+    }
+
     init(review: MyReview, vm: MyReviewsViewModel) {
-        self.review = review
+        self.initialReview = review
         self.vm = vm
         _title = State(initialValue: review.title ?? "")
         _description = State(initialValue: review.description ?? "")
@@ -41,7 +49,14 @@ struct MyReviewDetailView: View {
                     ScrollView(.horizontal) {
                         HStack {
                             ForEach(review.media) { media in
-                                AsyncMediaImage(media: media).frame(width: 80, height: 80)
+                                Group {
+                                    if media.media_type == .video {
+                                        MediaVideoView(media: media) { vm.refetchOnceForExpiredMedia(reviewId: review.id) }
+                                    } else {
+                                        AsyncMediaImage(media: media) { vm.refetchOnceForExpiredMedia(reviewId: review.id) }
+                                    }
+                                }
+                                .frame(width: 80, height: 80)
                             }
                         }
                     }
