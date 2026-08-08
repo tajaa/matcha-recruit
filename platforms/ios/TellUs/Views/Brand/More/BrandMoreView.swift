@@ -8,6 +8,7 @@ struct BrandMoreView: View {
         List {
             Section {
                 NavigationLink("Stores & QR codes") { StoresView() }
+                NavigationLink("Reward listings") { BrandListingsView() }
             }
             Section {
                 NavigationLink("Alerts") { NotificationsView() }
