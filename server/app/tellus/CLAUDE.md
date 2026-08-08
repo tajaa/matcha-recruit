@@ -41,6 +41,15 @@ Per-brand channel (`routes/board.py`, `services/board_service.py`, `tellus_app_1
 - **Membership statuses**: `pending`/`approved` are guarded by partial unique indexes + the savepoint-then-INSERT pattern in `request_join` (a genuine UniqueViolationError race falls back to a 409, never a 500 on the aborted outer txn). `declined`/`removed` permanently block a fresh `POST /b/{slug}/board/join` (409 "The brand has declined this request.") — don't loosen this without a product decision, it's what stops re-request spam on the moderator team's notifications. `left`/`cancelled` (self-service via `POST /me/board-memberships/{id}/cancel`) do NOT block — the account chose to leave, it may rejoin.
 - **Notification fan-out** (`services/board_service.py:notify_board_members`/`notify_board_team`) is `INSERT INTO tellus_notifications (...) SELECT ... FROM ...` — inside an INSERT...SELECT, asyncpg/Postgres can fail to infer parameter types from the SELECT's target list alone, so every text parameter is explicitly cast (`$2::text` etc.). Don't drop the casts "to simplify" — that reintroduces `could not determine data type of parameter $2` on every join/reply/post notification.
 
+## Google sign-in
+
+`POST /auth/google` (`routes/auth.py`, `tellus_app_14`) — verifies an ID token via the shared `app/core/services/google_identity.py:verify_google_id_token` (also used by matcha core's `/api/auth/google`; audience allowlist is `settings.google_allowed_audiences`, fails closed when empty), then either links `google_sub` onto an existing account matched by email or creates a new one.
+
+- **Google-created accounts are always `account_type='consumer'`** — a brand needs `brand_name`/`location_count`/Stripe, none of which a Google token carries. An *existing* brand account still links and signs in normally.
+- **`password_hash IS NULL` is the Google-only marker** — deliberately not a random unusable hash (unlike matcha core's version). `login()` checks this before attempting `verify_password_async` and returns a distinguishable 401 ("uses Google sign-in") rather than 500ing on `None.encode(...)`. Never backfill a real hash onto a Google-only row without also clearing `google_sub`, or the account becomes reachable by both paths with divergent state.
+- **Every new-account insert path must also write `tellus_points_balances`** — same invariant `signup()`'s consumer branch follows (`routes/auth.py:150-154`).
+- Linking sets `email_verified_at = COALESCE(email_verified_at, NOW())` — Google has already proven control of the address, so this also clears a stuck unverified password signup.
+
 ## Places / reviews on unclaimed businesses
 
 - **Invariant: every unclaimed brand (`tellus_brands.owner_account_id IS NULL`) has an

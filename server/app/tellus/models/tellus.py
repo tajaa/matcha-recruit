@@ -65,6 +65,10 @@ class TellusResendRequest(BaseModel):
     email: EmailStr
 
 
+class TellusGoogleAuth(BaseModel):
+    id_token: str = Field(min_length=16, max_length=8192)
+
+
 class TellusAccount(BaseModel):
     """The authenticated Tell-Us identity (returned by require_tellus_account)."""
     id: UUID

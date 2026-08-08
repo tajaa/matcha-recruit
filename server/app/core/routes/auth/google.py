@@ -61,24 +61,17 @@ async def google_auth(request: GoogleAuthRequest, http_request: Request):
     """Sign in or register with Google. Creates an individual account if the user is new."""
     ip = client_ip(http_request)
     await check_rate_limit(ip, "google_auth", 15, 3600)
-    from google.oauth2 import id_token as google_id_token
-    from google.auth.transport import requests as google_requests
     from app.core.feature_flags import DEFAULT_COMPANY_FEATURES
+    from app.core.services.google_identity import GoogleTokenError, verify_google_id_token
     from app.matcha.services.billing.token_budget_service import FREE_TOKEN_GRANT
 
     try:
-        idinfo = google_id_token.verify_oauth2_token(
-            request.id_token,
-            google_requests.Request(),
-        )
-    except Exception:
+        identity = await verify_google_id_token(request.id_token)
+    except GoogleTokenError:
         raise HTTPException(status_code=400, detail="Invalid Google ID token")
 
-    email = idinfo.get("email")
-    name = idinfo.get("name", email.split("@")[0])
-
-    if not email:
-        raise HTTPException(status_code=400, detail="No email in Google token")
+    email = identity.email
+    name = identity.name or email.split("@")[0]
 
     async with get_connection() as conn:
         # Check if user exists

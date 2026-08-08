@@ -1,4 +1,5 @@
 import SwiftUI
+import GoogleSignIn
 
 @main
 struct TellUsApp: App {
@@ -20,6 +21,9 @@ struct TellUsApp: App {
                     } else {
                         appState.pausePolling()
                     }
+                }
+                .onOpenURL { url in
+                    GIDSignIn.sharedInstance.handle(url)
                 }
         }
     }

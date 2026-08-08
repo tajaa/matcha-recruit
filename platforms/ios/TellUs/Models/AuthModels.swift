@@ -60,6 +60,10 @@ struct LoginRequest: Encodable {
     let password: String
 }
 
+struct GoogleSignInRequest: Encodable {
+    let id_token: String
+}
+
 struct RefreshRequest: Encodable {
     let refresh_token: String
 }

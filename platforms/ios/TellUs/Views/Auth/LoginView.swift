@@ -1,4 +1,5 @@
 import SwiftUI
+import GoogleSignInSwift
 
 struct LoginView: View {
     @Environment(AppState.self) private var appState
@@ -44,10 +45,22 @@ struct LoginView: View {
                     .riseIn(2)
                     .padding(.top, 16)
 
+                    orDivider
+                        .riseIn(3)
+                        .padding(.top, 20)
+
+                    GoogleSignInButton(scheme: .dark, style: .wide) {
+                        focusedField = nil
+                        Task { await vm.signInWithGoogle(appState: appState) }
+                    }
+                    .disabled(vm.isLoading)
+                    .riseIn(3)
+                    .padding(.top, 12)
+
                     Button("Have a reset link?") { showResetPassword = true }
                         .font(.system(size: 14))
                         .foregroundStyle(TU.textDim)
-                        .riseIn(3)
+                        .riseIn(4)
                         .padding(.top, 20)
 
                     NavigationLink {
@@ -56,7 +69,7 @@ struct LoginView: View {
                         Text("Create an account")
                     }
                     .buttonStyle(GhostButtonStyle())
-                    .riseIn(4)
+                    .riseIn(5)
                     .padding(.top, 40)
                 }
                 .padding(.horizontal, 28)
@@ -66,6 +79,16 @@ struct LoginView: View {
         }
         .toolbarBackground(.hidden, for: .navigationBar)
         .sheet(isPresented: $showResetPassword) { ResetPasswordView() }
+    }
+
+    private var orDivider: some View {
+        HStack(spacing: 12) {
+            Rectangle().fill(TU.hairline).frame(height: 1)
+            Text("OR")
+                .font(TU.eyebrow())
+                .foregroundStyle(TU.textDim)
+            Rectangle().fill(TU.hairline).frame(height: 1)
+        }
     }
 
     private var header: some View {

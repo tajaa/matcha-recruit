@@ -206,6 +206,17 @@ class Settings:
     # unset ⇒ the add-a-place form degrades to plain manual entry, no errors.
     google_maps_api_key: Optional[str] = None
 
+    # Google Sign-In (Continue with Google) — audience allowlist for
+    # verify_google_id_token. iOS OAuth clients are public (no secret) and
+    # safe to expose in project.yml. Unset ⇒ google_identity.py fails closed
+    # and rejects every token, rather than accepting every token.
+    google_ios_client_id: Optional[str] = None
+    google_web_client_id: Optional[str] = None
+
+    @property
+    def google_allowed_audiences(self) -> list[str]:
+        return [c for c in (self.google_ios_client_id, self.google_web_client_id) if c]
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -371,6 +382,8 @@ def load_settings() -> Settings:
         master_admin_email=os.getenv("MASTER_ADMIN_EMAIL", "tajatheprince@gmail.com"),
         tellus_admin_emails=os.getenv("TELLUS_ADMIN_EMAILS", ""),
         google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
+        google_ios_client_id=os.getenv("GOOGLE_IOS_CLIENT_ID"),
+        google_web_client_id=os.getenv("GOOGLE_WEB_CLIENT_ID"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(

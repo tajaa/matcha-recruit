@@ -87,6 +87,26 @@ final class AuthViewModel {
         }
     }
 
+    /// "Continue with Google" — auto-creates or links a consumer account and
+    /// signs in through the same funnel as login()/verify(). A cancelled
+    /// Google sheet is silent, not an error banner.
+    func signInWithGoogle(appState: AppState) async {
+        isLoading = true; defer { isLoading = false }
+        error = nil
+        do {
+            let idToken = try await GoogleSignInService.presentAndFetchIDToken()
+            let response = try await AuthService.shared.signInWithGoogle(idToken: idToken)
+            appState.didLogin(response)
+        } catch is GoogleSignInService.Cancelled {
+            return
+        } catch let APIError.httpError(_, detail) {
+            self.error = detail
+        } catch {
+            if error.isCancellation { return }
+            self.error = error.localizedDescription
+        }
+    }
+
     func resend(email: String) async {
         error = nil
         do {

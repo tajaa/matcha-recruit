@@ -53,6 +53,18 @@ final class AuthService {
         try await client.requestVoid(method: "POST", path: "/auth/resend-verification", body: ResendRequest(email: email), retryOnUnauthorized: false)
     }
 
+    /// POST /auth/google. Auto-creates a consumer account on first use, or
+    /// links Google to an existing account matched by email — same funnel
+    /// as login/verify, tokens persisted here.
+    func signInWithGoogle(idToken: String) async throws -> TokenResponse {
+        let body = GoogleSignInRequest(id_token: idToken)
+        // retryOnUnauthorized: false — a rejected Google token is a 400/401
+        // from THIS endpoint, not a stale access token (same reasoning as login).
+        let response: TokenResponse = try await client.request(method: "POST", path: "/auth/google", body: body, retryOnUnauthorized: false)
+        saveTokens(response)
+        return response
+    }
+
     func refresh() async throws -> TokenResponse {
         if let existing = refreshTask {
             return try await existing.value

@@ -16,6 +16,11 @@ settings:
     DEVELOPMENT_TEAM: 5D6TJVCPBK
     CODE_SIGN_STYLE: Automatic
 
+packages:
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: "8.0.0"
+
 targets:
   TellUs:
     type: application
@@ -36,6 +41,10 @@ targets:
         CFBundleDisplayName: Beetlejuse
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: "Beetlejuse uses the camera to scan feedback QR codes and take photos for your feedback."
+        GIDClientID: "62787429179-qskffndotvi3hqpnu12oeigjaojd3402.apps.googleusercontent.com"
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - "com.googleusercontent.apps.62787429179-qskffndotvi3hqpnu12oeigjaojd3402"
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UILaunchScreen:
@@ -63,6 +72,11 @@ targets:
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    dependencies:
+      - package: GoogleSignIn
+        product: GoogleSignIn
+      - package: GoogleSignIn
+        product: GoogleSignInSwift
     entitlements:
       path: TellUs.entitlements
   TellUsTests:

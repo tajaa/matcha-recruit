@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 
 from ...config import get_settings
 from ...core.services.email import _is_reserved_test_domain
+from ...core.services.google_identity import GoogleTokenError, verify_google_id_token
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import _is_tellus_admin, require_tellus_account
@@ -20,6 +21,7 @@ from ._shared import slugify
 from ..models.admin import TellusPasswordResetConfirm
 from ..models.tellus import (
     TellusAccount,
+    TellusGoogleAuth,
     TellusLocationUpdate,
     TellusLogin,
     TellusProfileUpdate,
@@ -227,6 +229,66 @@ async def resend_verification(body: TellusResendRequest, request: Request, backg
     return {"status": "ok"}
 
 
+@router.post("/auth/google", response_model=TellusTokenResponse)
+async def google_auth(body: TellusGoogleAuth, request: Request):
+    """Sign in with Google. Auto-creates a consumer account on first use, or
+    links Google to an existing account matched by email (Google has already
+    proven control of the address, so this also clears a stuck unverified
+    signup). Brand accounts can never be created this way — a brand needs
+    brand_name/location_count/Stripe, none of which a Google token carries —
+    but an existing brand account links and signs in like any other."""
+    await check_rate_limit(client_ip(request), "tellus_google_auth", 15, 3600)
+    try:
+        identity = await verify_google_id_token(body.id_token)
+    except GoogleTokenError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Google sign-in")
+    email = identity.email.strip().lower()
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT id, status FROM tellus_accounts WHERE google_sub = $1", identity.sub
+            )
+            if row is None:
+                existing = await conn.fetchrow(
+                    "SELECT id, status FROM tellus_accounts WHERE lower(email) = $1", email
+                )
+                if existing is not None:
+                    row = await conn.fetchrow(
+                        "UPDATE tellus_accounts SET google_sub = $1, "
+                        "email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() "
+                        "WHERE id = $2 RETURNING id, status",
+                        identity.sub, existing["id"],
+                    )
+                else:
+                    try:
+                        row = await conn.fetchrow(
+                            "INSERT INTO tellus_accounts "
+                            "(email, password_hash, google_sub, display_name, account_type, email_verified_at) "
+                            "VALUES ($1, NULL, $2, $3, 'consumer', NOW()) RETURNING id, status",
+                            email, identity.sub, identity.name,
+                        )
+                    except asyncpg.UniqueViolationError:
+                        # Concurrent double-tap raced us on the email or
+                        # google_sub unique constraint — re-resolve once.
+                        row = await conn.fetchrow(
+                            "SELECT id, status FROM tellus_accounts WHERE google_sub = $1 OR lower(email) = $2",
+                            identity.sub, email,
+                        )
+                        if row is None:
+                            raise
+                    else:
+                        await conn.execute(
+                            "INSERT INTO tellus_points_balances (account_id) VALUES ($1) "
+                            "ON CONFLICT DO NOTHING",
+                            row["id"],
+                        )
+            if row["status"] != "active":
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is not active")
+            account = await _load_account(conn, row["id"])
+    return _token_response(account)
+
+
 @router.post("/auth/login", response_model=TellusTokenResponse)
 async def login(body: TellusLogin, request: Request):
     """Authenticate a Tell-Us account by email + password."""
@@ -241,6 +303,11 @@ async def login(body: TellusLogin, request: Request):
             "FROM tellus_accounts WHERE lower(email) = $1",
             email,
         )
+        if row is not None and row["password_hash"] is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="This account uses Google sign-in. Tap Continue with Google.",
+            )
         if row is None or not await verify_password_async(body.password, row["password_hash"]):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
         if row["status"] != "active":
