@@ -48,8 +48,13 @@ struct VerifyWaitView: View {
                 .disabled(pastedToken.isEmpty || vm.isLoading)
 
                 Button(resendCooldown > 0 ? "Resend in \(resendCooldown)s" : "Resend confirmation email") {
-                    Task { await vm.resend(email: email) }
-                    startCooldown()
+                    Task {
+                        await vm.resend(email: email)
+                        // Only lock the button out if the send actually went
+                        // through — a rate-limited (429) or failed resend
+                        // must not cost the user a 60s wait with nothing sent.
+                        if vm.error == nil { startCooldown() }
+                    }
                 }
                 .disabled(resendCooldown > 0)
 
@@ -64,7 +69,7 @@ struct VerifyWaitView: View {
     private func startCooldown() {
         resendCooldown = 60
         cooldownTask?.cancel()
-        cooldownTask = Task {
+        cooldownTask = Task { @MainActor in
             while resendCooldown > 0 {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }

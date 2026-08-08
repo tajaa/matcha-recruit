@@ -24,6 +24,7 @@
 		A2C8100FFBB286F1A679E7EB /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEC54C727EE328AEC4BB3CD6 /* ErrorBanner.swift */; };
 		B7061EEF16F2801F8C4CF19B /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB4403D7509F0041D0B65666 /* RootView.swift */; };
 		D02454DA53C0843EF72AEDF0 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2A88D7E973D4852301004FB /* APIClient.swift */; };
+		D809BE13EBDC22E68649E5AE /* AuthErrorMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44B95F2FADFFD4C2F322E99E /* AuthErrorMappingTests.swift */; };
 		DE9B0871F7F5D40CA045C3C9 /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097D6FFB8E0F13EE363D7E3D /* Enums.swift */; };
 /* End PBXBuildFile section */
 
@@ -42,6 +43,7 @@
 		10AB876AD2EF45D769778E18 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		33C36082AA0FA86747459318 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		3B8F0E5732F8E339929FC05B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		44B95F2FADFFD4C2F322E99E /* AuthErrorMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthErrorMappingTests.swift; sourceTree = "<group>"; };
 		54D68D31C01866C59E71DE6B /* ServiceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceCache.swift; sourceTree = "<group>"; };
 		6ADDA879F63EEF7DF452FFD0 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		806BE31C99A7267B309B4E45 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
@@ -195,6 +197,7 @@
 		F1B28E41A5BFF300932949F0 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				44B95F2FADFFD4C2F322E99E /* AuthErrorMappingTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -316,6 +319,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D809BE13EBDC22E68649E5AE /* AuthErrorMappingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

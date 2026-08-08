@@ -35,9 +35,8 @@ final class AuthService {
     /// "check your email" screen without a session.
     func signup(_ req: CappeSignupRequest) async throws -> CappeSignupResponse {
         let response: CappeSignupResponse = try await client.request(method: "POST", path: "/auth/signup", body: req, retryOnUnauthorized: false)
-        if let access = response.access_token, let refresh = response.refresh_token, let expires = response.expires_in,
-           let account = response.account {
-            saveTokens(CappeTokenResponse(access_token: access, refresh_token: refresh, expires_in: expires, account: account))
+        if let tokens = response.sessionTokens {
+            saveTokens(tokens)
         }
         return response
     }
@@ -93,14 +92,36 @@ final class AuthService {
         try await client.request(method: "GET", path: "/auth/me")
     }
 
-    /// Server logout is GLOBAL — it advances tokens_valid_after, which kills
-    /// every device's session at once. Best-effort POST (never blocks local
-    /// logout on a network failure), then clear local state unconditionally.
-    func logout() async {
-        try? await client.requestVoid(method: "POST", path: "/auth/logout")
+    /// Clears the keychain + in-memory bearer unconditionally — the local
+    /// half of a logout, and the ONLY place either keychain key is deleted.
+    /// Used both for a user-initiated logout and for a DEFINITIVE refresh
+    /// rejection (AppState.didLogout's `_isAuthRejection` branch) — a dead
+    /// refresh token must never survive to the next cold launch.
+    func clearLocalSession() {
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
         client.accessToken = nil
+    }
+
+    /// Server logout is GLOBAL — it advances tokens_valid_after, which kills
+    /// every device's session at once. Clears local state SYNCHRONOUSLY
+    /// (both this and a subsequent re-login run on @MainActor, so there is
+    /// no window for the two to interleave), then fires the server POST
+    /// best-effort in the background using the bearer captured BEFORE
+    /// clearing — routed around APIClient so it can't observe or touch
+    /// whatever session a fast re-login has since established.
+    func logout() {
+        let token = client.accessToken
+        clearLocalSession()
+        guard let token else { return }
+        let baseURL = client.baseURL
+        Task.detached(priority: .utility) {
+            guard let url = URL(string: baseURL + "/auth/logout") else { return }
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            _ = try? await URLSession.shared.data(for: request)
+        }
     }
 
     private func saveTokens(_ response: CappeTokenResponse) {

@@ -164,7 +164,16 @@ class APIClient {
     /// `onPaymentRequired` wall equivalent — Cappe's only runtime 402 is the
     /// booking-rider plan gate, handled inline as a per-screen upsell alert,
     /// not a global app phase (see GUMMFIT_IOS_APP_PLAN.md §5/§7).
-    var onUnauthorized: (() -> Void)?
+    ///
+    /// Written once from @MainActor (AppState.init) and read from background
+    /// executors inside `failAfterRefreshFailure` — same non-atomic-Optional
+    /// race as `accessToken` above, guarded the same way.
+    private let _callbackLock = NSLock()
+    private var _onUnauthorized: (() -> Void)?
+    var onUnauthorized: (() -> Void)? {
+        get { _callbackLock.lock(); defer { _callbackLock.unlock() }; return _onUnauthorized }
+        set { _callbackLock.lock(); defer { _callbackLock.unlock() }; _onUnauthorized = newValue }
+    }
 
     /// Shared failure policy for the 401 → refresh → retry path, stated ONCE
     /// so `request` and `requestData` cannot drift. Only a definitive
@@ -226,9 +235,15 @@ class APIClient {
                 return try d.decode(T.self, from: data)
             }.value
         } catch {
+            #if DEBUG
+            // Never compiled into Release — a decode failure is precisely
+            // the case where the payload shape is unpredictable from the
+            // path allowlist, so it can carry names/emails/addresses from
+            // any endpoint (orders, bookings, collab, billing, ...).
             let isSensitive = path.contains("/auth") || path.lowercased().contains("token")
             let snippet = isSensitive ? "<redacted>" : (String(data: data.prefix(500), encoding: .utf8) ?? "<binary>")
             print("[APIClient] decode failed for \(T.self) at \(path): \(error.localizedDescription)\nresponse snippet: \(snippet)")
+            #endif
             throw APIError.decodingError(error)
         }
     }
@@ -317,7 +332,7 @@ class APIClient {
 
         guard (200...299).contains(httpResponse.statusCode) else {
             if _isTransientMaintenance(httpResponse, data: data) {
-                if retryOnMaintenance && method.uppercased() == "GET" {
+                if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                     return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
@@ -334,7 +349,8 @@ class APIClient {
     /// Unlike a presigned S3 PUT, this goes through APIClient with the
     /// bearer attached — the server itself receives and stores the file.
     func uploadMultipart<T: Decodable>(
-        path: String, field: String = "file", data: Data, mimeType: String, filename: String
+        path: String, field: String = "file", data: Data, mimeType: String, filename: String,
+        retryOnUnauthorized: Bool = true
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
         var request = URLRequest(url: url)
@@ -357,8 +373,16 @@ class APIClient {
         guard let httpResponse = response as? HTTPURLResponse else { throw APIError.noData }
 
         if httpResponse.statusCode == 401 {
-            _ = try await AuthService.shared.refresh()
-            return try await uploadMultipart(path: path, field: field, data: data, mimeType: mimeType, filename: filename)
+            if retryOnUnauthorized {
+                do {
+                    _ = try await AuthService.shared.refresh()
+                    return try await uploadMultipart(path: path, field: field, data: data, mimeType: mimeType, filename: filename, retryOnUnauthorized: false)
+                } catch {
+                    try await failAfterRefreshFailure(error)
+                }
+            } else {
+                throw APIError.httpError(401, _extractErrorMessage(from: responseData) ?? "Unauthorized")
+            }
         }
         if httpResponse.statusCode == 402 {
             throw APIError.paymentRequired(_extractErrorMessage(from: responseData) ?? "")

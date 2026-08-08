@@ -12,10 +12,10 @@ protocol LoadableVM: AnyObject {
 extension LoadableVM {
     func withLoad(_ body: () async throws -> Void) async {
         isLoading = true
+        error = nil
         defer { isLoading = false }
         do {
             try await body()
-            error = nil
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

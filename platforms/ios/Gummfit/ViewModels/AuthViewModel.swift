@@ -3,7 +3,7 @@ import Observation
 
 @MainActor
 @Observable
-final class AuthViewModel {
+final class AuthViewModel: LoadableVM {
     // Login fields
     var loginEmail = ""
     var loginPassword = ""
@@ -17,10 +17,6 @@ final class AuthViewModel {
     var isLoading = false
     var error: String?
 
-    /// Retained so VerifyWaitView's "I've verified — sign me in" can retry
-    /// login without asking the user to re-enter credentials.
-    private var pendingCredentials: (email: String, password: String)?
-
     enum LoginFailureAction: Equatable { case verifyPending, showError(String) }
 
     /// Dispatches a login-failure HTTP status+detail to an action. Server
@@ -32,6 +28,11 @@ final class AuthViewModel {
         return detail.lowercased().contains("confirm your email") ? .verifyPending : .showError(detail)
     }
 
+    /// login/retryLoginAfterVerify pattern-match `APIError.httpError` to
+    /// route 403-unverified to the verify screen, so they keep their own
+    /// do/catch rather than `withLoad` — but still clear `error` up front
+    /// the same way withLoad does, so a repeat attempt doesn't show a stale
+    /// message if the new attempt also fails to produce one.
     func login(appState: AppState) async {
         isLoading = true; defer { isLoading = false }
         error = nil
@@ -41,7 +42,7 @@ final class AuthViewModel {
         } catch let APIError.httpError(status, detail) {
             switch Self.loginFailureAction(status: status, detail: detail) {
             case .verifyPending:
-                pendingCredentials = (loginEmail, loginPassword)
+                appState.pendingCredentials = (loginEmail, loginPassword)
                 appState.phase = .verifyPending(email: loginEmail)
             case .showError(let message):
                 self.error = message
@@ -53,43 +54,35 @@ final class AuthViewModel {
     }
 
     func signup(appState: AppState) async {
-        isLoading = true; defer { isLoading = false }
-        error = nil
         let req = CappeSignupRequest(
             email: email,
             password: password,
             name: displayName.isEmpty ? nil : displayName,
             account_type: accountType.rawValue
         )
-        do {
+        await withLoad {
             let response = try await AuthService.shared.signup(req)
-            if let account = response.account, response.access_token != nil {
-                appState.route(account)
+            if let tokens = response.sessionTokens {
+                appState.route(tokens.account)
             } else {
-                pendingCredentials = (email, password)
+                appState.pendingCredentials = (self.email, self.password)
                 appState.phase = .verifyPending(email: response.email)
             }
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 
     func resend(email: String) async {
-        error = nil
-        do {
+        await withLoad {
             try await AuthService.shared.resendVerification(email: email)
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 
-    /// "I've verified — sign me in": retries the in-memory credentials.
-    /// Falls back to a generic error asking the user to log in manually if
-    /// this VM instance didn't see the original attempt (e.g. app relaunch).
+    /// "I've verified — sign me in": retries the credentials AppState
+    /// retained since the login/signup attempt that led here. Falls back to
+    /// a generic error asking the user to log in manually if the app was
+    /// relaunched in between (AppState.pendingCredentials is memory-only).
     func retryLoginAfterVerify(appState: AppState) async {
-        guard let creds = pendingCredentials else {
+        guard let creds = appState.pendingCredentials else {
             self.error = "Please log in again."
             appState.phase = .loggedOut
             return
@@ -112,14 +105,9 @@ final class AuthViewModel {
 
     func verifyPastedToken(_ token: String, appState: AppState) async {
         guard !token.isEmpty else { return }
-        isLoading = true; defer { isLoading = false }
-        error = nil
-        do {
+        await withLoad {
             let response = try await AuthService.shared.verify(token: token)
             appState.didLogin(response)
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
         }
     }
 }

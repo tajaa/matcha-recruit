@@ -14,10 +14,6 @@ enum AccountType: String, Codable {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = AccountType(rawValue: raw) ?? .unknown
     }
-
-    /// True for both storefront personas (org or solo pro) — routes to the
-    /// owner tab surface. `creator` routes to the creator tab surface.
-    var isOwner: Bool { self == .business || self == .personal }
 }
 
 // The remaining open-set enums (OrderStatus, BookingStatus, CampaignStatus,

@@ -31,6 +31,15 @@ struct CappeSignupResponse: Codable {
     let refresh_token: String?
     let expires_in: Int?
     let account: CappeAccount?
+
+    /// Single statement of "is this signup response a real session" — all
+    /// four fields are independently Optional on the wire, so callers must
+    /// not check a subset (a partial response with e.g. `account` +
+    /// `access_token` but no `refresh_token` is not a usable session).
+    var sessionTokens: CappeTokenResponse? {
+        guard let access_token, let refresh_token, let expires_in, let account else { return nil }
+        return CappeTokenResponse(access_token: access_token, refresh_token: refresh_token, expires_in: expires_in, account: account)
+    }
 }
 
 /// Mirrors server CappeSignup (models/auth.py:9-17).

@@ -1,6 +1,6 @@
 SIM ?= iPhone 17 Pro
 
-.PHONY: generate open build test clean run run-prod release release-dry deps
+.PHONY: generate open build test clean run run-prod deps
 
 generate:
 	@which xcodegen > /dev/null || (echo "Installing XcodeGen..." && brew install xcodegen)
@@ -39,13 +39,6 @@ run:
 run-prod:
 	SIM="$(SIM)" ./run-prod.sh
 
-# Bump build number, archive, and upload to App Store Connect / TestFlight.
-# Requires APPLE_API_KEY_ID / APPLE_API_ISSUER_ID / APPLE_API_KEY_PATH — see
-# release-appstore.sh's header for one-time setup.
-release:
-	./release-appstore.sh
-
-# Archive only, no upload — use to sanity-check signing/build before
-# spending an ASC upload slot.
-release-dry:
-	./release-appstore.sh --no-upload
+# `release`/`release-dry` (archive + TestFlight upload) land in Phase 7 once
+# release-appstore.sh is ported from TellUs — no App Store submission this
+# early, and the AppIcon slot has no image yet either (see project.yml).

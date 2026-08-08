@@ -14,6 +14,12 @@ final class AppState {
 
     var phase: Phase = .restoring
     var account: CappeAccount?
+    /// Set by AuthViewModel right before transitioning to `.verifyPending` so
+    /// VerifyWaitView's "I've confirmed — sign me in" can retry without the
+    /// user re-entering credentials. Session-scoped (memory-only, never
+    /// persisted) — a cold relaunch into `.verifyPending` finds this nil and
+    /// the view falls back to asking for manual re-login.
+    var pendingCredentials: (email: String, password: String)?
 
     init() {
         // Fired by APIClient only after a DEFINITIVE refresh rejection
@@ -38,6 +44,7 @@ final class AppState {
     /// 403s non-creators). Site loading + last-site restore land in Phase 1.
     func route(_ account: CappeAccount) {
         self.account = account
+        pendingCredentials = nil
         phase = account.account_type == .creator ? .creator : .owner
     }
 
@@ -46,15 +53,21 @@ final class AppState {
     }
 
     /// Idempotent — a background 401 firing `onUnauthorized` and a manual
-    /// logout tap can both land here without double side effects.
+    /// logout tap can both land here without double side effects. Both
+    /// branches clear the keychain: `serverSide` is a real user-initiated
+    /// logout (best-effort server notify, see AuthService.logout); the other
+    /// is a DEFINITIVE refresh rejection (`_isAuthRejection` in APIClient) —
+    /// the stored refresh token is dead either way and must not survive to
+    /// the next cold launch.
     func didLogout(serverSide: Bool = true) {
         guard phase != .loggedOut else { return }
         if serverSide {
-            Task { await AuthService.shared.logout() }
+            AuthService.shared.logout()
         } else {
-            APIClient.shared.accessToken = nil
+            AuthService.shared.clearLocalSession()
         }
         account = nil
+        pendingCredentials = nil
         phase = .loggedOut
         URLCache.shared.removeAllCachedResponses()
     }
