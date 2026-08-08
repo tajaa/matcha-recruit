@@ -1,0 +1,84 @@
+import SwiftUI
+
+struct MyReviewDetailView: View {
+    let review: MyReview
+    @Bindable var vm: MyReviewsViewModel
+
+    @State private var title: String
+    @State private var description: String
+    @State private var rating: Int
+    @State private var showWithdrawConfirm = false
+    @Environment(\.dismiss) private var dismiss
+
+    init(review: MyReview, vm: MyReviewsViewModel) {
+        self.review = review
+        self.vm = vm
+        _title = State(initialValue: review.title ?? "")
+        _description = State(initialValue: review.description ?? "")
+        _rating = State(initialValue: review.rating ?? 0)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                StatusChip(text: review.review_state.rawValue, tint: review.review_state == .published ? .green : .orange)
+            }
+
+            Section("Your review") {
+                TextField("Title", text: $title).disabled(!review.isEditable)
+                TextField("Description", text: $description, axis: .vertical).disabled(!review.isEditable)
+                HStack {
+                    ForEach(1...5, id: \.self) { star in
+                        Image(systemName: star <= rating ? "star.fill" : "star")
+                            .foregroundStyle(.yellow)
+                            .onTapGesture { if review.isEditable { rating = star } }
+                    }
+                }
+            }
+
+            if !review.media.isEmpty {
+                Section("Photos") {
+                    ScrollView(.horizontal) {
+                        HStack {
+                            ForEach(review.media) { media in
+                                AsyncMediaImage(media: media).frame(width: 80, height: 80)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let reply = review.brand_public_reply {
+                Section("Brand reply") { Text(reply) }
+            }
+
+            if review.hearted {
+                Label("Hearted by the brand", systemImage: "heart.fill").foregroundStyle(.pink)
+            }
+
+            if review.isEditable {
+                Section {
+                    Button("Save changes") {
+                        Task {
+                            await vm.save(id: review.id, MyReviewUpdate(title: title, description: description, rating: rating))
+                            dismiss()
+                        }
+                    }
+                }
+                Section {
+                    Button("Withdraw review", role: .destructive) { showWithdrawConfirm = true }
+                }
+            }
+
+            if let error = vm.error {
+                Section { Text(error).foregroundStyle(.red).font(.footnote) }
+            }
+        }
+        .navigationTitle(review.brand_name)
+        .confirmationDialog("Withdraw this review?", isPresented: $showWithdrawConfirm, titleVisibility: .visible) {
+            Button("Withdraw", role: .destructive) {
+                Task { await vm.withdraw(id: review.id); dismiss() }
+            }
+        }
+    }
+}
