@@ -3,6 +3,7 @@ import SwiftUI
 struct LoginView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = AuthViewModel()
+    @State private var showResetPassword = false
     @FocusState private var focusedField: Field?
 
     private enum Field { case email, password }
@@ -60,9 +61,13 @@ struct LoginView: View {
 
                 NavigationLink("Create an account") { SignupView() }
                     .padding(.top, 8)
+
+                Button("Have a reset link?") { showResetPassword = true }
+                    .font(.footnote)
             }
             .padding(.bottom, 40)
         }
         .scrollDismissesKeyboard(.interactively)
+        .sheet(isPresented: $showResetPassword) { ResetPasswordView() }
     }
 }
