@@ -23,6 +23,20 @@ make test    # unit tests (XCTest, no network — model decode fixtures + pure-f
 make run     # build, install, and launch on $(SIM), default "iPhone 17 Pro"
 ```
 
+## Scripts
+
+Same shape as `platforms/desktop/Espresso`'s scripts, adapted for iOS + XcodeGen:
+
+| Script | Purpose |
+|---|---|
+| `./run.sh [build\|clean]` | Simulator dev loop — build (with compact error/warning output), install, launch. `SIM="iPhone 16" ./run.sh` to override the simulator. Same as `make run`. |
+| `./run-prod.sh` | Same as `run.sh`, but launches with `TELLUS_API_URL` pointed at `https://hey-matcha.com/api/tellus` instead of the local dev backend. Tell-Us's API is public, so unlike Espresso's `run-prod.sh` no SSH tunnel is needed. Same as `make run-prod`. |
+| `./release-appstore.sh` | Bump build number → archive → upload to App Store Connect / TestFlight. Flags: `--no-upload` (archive only), `--no-bump` (retry a failed upload without reusing a build number), `--status` (show current build + attempt history), `--set-build N` (recover from build-number drift). Same as `make release` / `make release-dry`. Requires `APPLE_API_KEY_ID` / `APPLE_API_ISSUER_ID` / `APPLE_API_KEY_PATH` — see the script's header comment for one-time App Store Connect setup. |
+
+**XcodeGen bump mechanics**: since `project.yml` (not the pbxproj) is source of truth here, `release-appstore.sh` bumps `CURRENT_PROJECT_VERSION` in `project.yml`, runs `xcodegen generate` to regenerate `TellUs.xcodeproj`, then archives — and auto-commits both files together so a fresh checkout never regresses the build number.
+
+Signing: `DEVELOPMENT_TEAM: 5D6TJVCPBK` in `project.yml` (same team as Espresso/Matcha), `CODE_SIGN_STYLE: Automatic`. Bundle ID `com.beetlejuse.app` (tests: `com.beetlejuse.app.tests`) must be registered under that team in the Apple Developer portal before `release-appstore.sh` can archive for device/App Store.
+
 ## v1 scope
 
 Consumer: auth (incl. self-service password reset from an admin-minted token), QR/link intake with photo/video upload (video streams to S3 from a temp file, not held in memory), rewards home (balance/level/streak/badges/ledger), marketplace + redeem, my reviews, boards (join/feed/reply), leaderboard, direct messages (both roles), profile/location settings, notifications (60s poll — no push).
