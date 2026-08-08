@@ -210,17 +210,49 @@ do_archive() {
     <key>method</key>           <string>app-store</string>
     <key>destination</key>      <string>upload</string>
     <key>teamID</key>           <string>$APPLE_TEAM_ID</string>
-    <key>signingStyle</key>     <string>automatic</string>
+    <key>signingStyle</key>     <string>manual</string>
+    <key>signingCertificate</key> <string>Apple Distribution</string>
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>${BUNDLE_ID_OVERRIDE:-com.beetlejuse.app}</key>
+        <string>Beetlejuse App Store</string>
+    </dict>
     <key>uploadSymbols</key>    <true/>
 </dict>
 </plist>
 PLIST
 
+    # NOTE: do NOT add CODE_SIGN_STYLE / CODE_SIGN_IDENTITY /
+    # PROVISIONING_PROFILE_SPECIFIER here. A build setting passed on the
+    # xcodebuild command line applies to EVERY target in the build, including
+    # the SwiftPM dependency targets (GoogleSignIn, AppAuth, GTMSessionFetcher,
+    # …), which are always automatically signed for development — forcing a
+    # distribution identity globally makes all of them fail with "conflicting
+    # provisioning settings", and forcing Automatic here would override the
+    # manual Release signing project.yml sets on the TellUs target alone.
+    # Signing config lives in project.yml (TellUs target, Release config).
     local xcode_settings=(
         DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
-        CODE_SIGN_STYLE=Automatic
     )
     [[ -n "$BUNDLE_ID_OVERRIDE" ]] && xcode_settings+=(PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID_OVERRIDE")
+
+    # CODE_SIGN_STYLE=Automatic alone only lets xcodebuild USE a profile
+    # already on disk — it cannot create one. A bundle id that has never been
+    # archived therefore fails with "No profiles for '<id>' were found ...
+    # Automatic signing is disabled". -allowProvisioningUpdates is what lets
+    # xcodebuild register the App ID and fetch the distribution profile
+    # itself; the App Store Connect API key authenticates that (otherwise it
+    # falls back to needing an interactive Xcode login). Same key the upload
+    # step uses — passed here too so a --no-upload run can still sign, as
+    # long as the vars happen to be set.
+    local provisioning_args=(-allowProvisioningUpdates)
+    if [[ -n "${APPLE_API_KEY_PATH:-}" && -f "${APPLE_API_KEY_PATH}" ]]; then
+        provisioning_args+=(
+            -authenticationKeyPath "$APPLE_API_KEY_PATH"
+            -authenticationKeyID "$APPLE_API_KEY_ID"
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID"
+        )
+    fi
 
     local log
     log="$(mktemp -t tellus-asc.XXXXXX)"
@@ -232,6 +264,7 @@ PLIST
             -configuration "$CONFIG" \
             -destination 'generic/platform=iOS' \
             -archivePath "$ARCHIVE_PATH" \
+            "${provisioning_args[@]}" \
             "${xcode_settings[@]}" \
             archive >"$log" 2>&1; then
         echo "${RED}archive failed${NC}"

@@ -102,6 +102,9 @@ server/agent/static/
 xcuserdata/
 **/*.xcworkspace/xcuserdata/
 **/DerivedData/
+# release-appstore.sh scratch dir (export plists, archive staging)
+platforms/ios/*/build/
+*.xcarchive/
 *.xcuserstate
 *.xccheckout
 *.moved-aside
