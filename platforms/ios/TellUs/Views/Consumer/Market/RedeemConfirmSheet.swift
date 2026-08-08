@@ -2,8 +2,14 @@ import SwiftUI
 
 struct RedeemConfirmSheet: View {
     let listing: Listing
-    @Bindable var vm: MarketplaceViewModel
+    @Bindable var flow: RedeemFlowModel
     @Environment(\.dismiss) private var dismiss
+
+    private var balance: Int? { PointsStore.shared.balance?.points_balance }
+    private var insufficientBalance: Bool {
+        guard let balance else { return false }
+        return balance < listing.points_cost
+    }
 
     var body: some View {
         NavigationStack {
@@ -13,17 +19,26 @@ struct RedeemConfirmSheet: View {
                     Text(description).foregroundStyle(.secondary)
                 }
                 PointsPill(points: listing.points_cost)
+                if let balance {
+                    Text("Your balance: \(balance) pts")
+                        .font(.footnote)
+                        .foregroundStyle(insufficientBalance ? .red : .secondary)
+                }
                 if let terms = listing.terms {
                     Text(terms).font(.caption).foregroundStyle(.secondary)
                 }
 
-                ErrorBanner(message: vm.error)
+                ErrorBanner(message: flow.error)
 
-                if let redemption = vm.lastRedemption {
+                if let redemption = flow.lastRedemption {
                     VStack(spacing: 8) {
                         Text("Redeemed!").font(.headline).foregroundStyle(.green)
                         if let code = redemption.code {
                             Text(code).font(.system(.title3, design: .monospaced))
+                        }
+                        if let expires = redemption.expires_at {
+                            Text("Expires \(Formatters.relativeString(from: expires))")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Button("Done") { dismiss() }
@@ -32,13 +47,15 @@ struct RedeemConfirmSheet: View {
                         .foregroundStyle(.white)
                 } else {
                     Button {
-                        Task { await vm.redeem(listing) }
+                        Task { await flow.redeem(listing) }
                     } label: {
-                        Text("Redeem for \(listing.points_cost) points").bold()
+                        if flow.isRedeeming { ProgressView().tint(.white) }
+                        else { Text("Redeem for \(listing.points_cost) points").bold() }
                     }
                     .frame(maxWidth: .infinity).padding()
-                    .background(.tint, in: RoundedRectangle(cornerRadius: 10))
+                    .background(insufficientBalance ? Color.gray : Color.accentColor, in: RoundedRectangle(cornerRadius: 10))
                     .foregroundStyle(.white)
+                    .disabled(insufficientBalance || flow.isRedeeming)
                 }
             }
             .padding()

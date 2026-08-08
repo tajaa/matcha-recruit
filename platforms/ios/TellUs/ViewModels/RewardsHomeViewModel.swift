@@ -17,6 +17,7 @@ final class RewardsHomeViewModel {
             async let badgesResult = RewardsService.shared.badges()
             async let ledger = RewardsService.shared.ledger(limit: 8)
             balance = try await b
+            PointsStore.shared.balance = balance
             badges = try await badgesResult
             recentLedger = try await ledger
             error = nil

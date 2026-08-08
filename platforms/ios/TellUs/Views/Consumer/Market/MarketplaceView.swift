@@ -10,8 +10,20 @@ struct MarketplaceView: View {
                 EmptyState(icon: "gift", title: "No rewards yet", hint: "Check back soon.")
             } else {
                 List(vm.listings) { listing in
-                    Button { selected = listing } label: {
+                    Button {
+                        vm.redeemFlow.begin()
+                        selected = listing
+                    } label: {
                         HStack(spacing: 12) {
+                            if let urlString = listing.image_url, let url = URL(string: urlString) {
+                                AsyncImage(url: url) { image in
+                                    image.resizable().scaledToFill()
+                                } placeholder: {
+                                    Color.gray.opacity(0.15)
+                                }
+                                .frame(width: 56, height: 56)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(listing.title).font(.headline).foregroundStyle(.primary)
                                 if let brand = listing.brand_name {
@@ -30,8 +42,10 @@ struct MarketplaceView: View {
                 .listStyle(.plain)
             }
         }
-        .sheet(item: $selected) { listing in
-            RedeemConfirmSheet(listing: listing, vm: vm)
+        .sheet(item: $selected, onDismiss: {
+            if vm.redeemFlow.lastRedemption != nil { Task { await vm.load() } }
+        }) { listing in
+            RedeemConfirmSheet(listing: listing, flow: vm.redeemFlow)
         }
         .task { await vm.load() }
         .refreshable { await vm.load() }

@@ -47,16 +47,20 @@ struct IntakeFormView: View {
                     IntakeMediaSection(vm: vm)
                 }
 
-                if !config.claimed {
-                    Section {
-                        Toggle("Post as a public review", isOn: $vm.postAsReview)
-                        if vm.postAsReview {
-                            HStack {
-                                ForEach(1...5, id: \.self) { star in
-                                    Image(systemName: star <= vm.rating ? "star.fill" : "star")
-                                        .foregroundStyle(.yellow)
-                                        .onTapGesture { vm.rating = star }
-                                }
+                // Web gates this on `loggedIn || !claimed` (Intake.tsx:77-78)
+                // — in-app the submitter is always signed in (bearer-attached),
+                // so it's always shown. Gating on `!config.claimed` instead
+                // hid the rating control for the common (claimed-brand) case
+                // while canSubmit still required rating > 0, permanently
+                // disabling Submit.
+                Section {
+                    Toggle("Post as a public review", isOn: $vm.postAsReview)
+                    if vm.postAsReview {
+                        HStack {
+                            ForEach(1...5, id: \.self) { star in
+                                Image(systemName: star <= vm.rating ? "star.fill" : "star")
+                                    .foregroundStyle(.yellow)
+                                    .onTapGesture { vm.rating = star }
                             }
                         }
                     }

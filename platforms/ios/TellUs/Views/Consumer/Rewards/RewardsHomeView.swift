@@ -9,7 +9,7 @@ struct RewardsHomeView: View {
             VStack(spacing: 20) {
                 ErrorBanner(message: vm.error)
 
-                if let balance = vm.balance {
+                if let balance = PointsStore.shared.balance ?? vm.balance {
                     VStack(spacing: 12) {
                         Text("\(balance.points_balance)")
                             .font(.system(size: 48, weight: .bold, design: .rounded))
@@ -66,7 +66,13 @@ struct RewardsHomeView: View {
                     Image(systemName: "bell")
                         .overlay(alignment: .topTrailing) {
                             if appState.unreadCount > 0 {
-                                Circle().fill(.red).frame(width: 8, height: 8)
+                                Text(appState.unreadCount >= 100 ? "99+" : "\(appState.unreadCount)")
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(.red, in: Capsule())
+                                    .foregroundStyle(.white)
+                                    .offset(x: 10, y: -10)
                             }
                         }
                 }

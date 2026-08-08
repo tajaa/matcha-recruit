@@ -8,7 +8,7 @@ final class MarketplaceViewModel {
     var city: String?
     var isLoading = false
     var error: String?
-    var lastRedemption: Redemption?
+    let redeemFlow = RedeemFlowModel()
 
     func load() async {
         isLoading = true; defer { isLoading = false }
@@ -35,18 +35,5 @@ final class MarketplaceViewModel {
             return "Members-only reward — join the brand's board first."
         }
         return detail
-    }
-
-    func redeem(_ listing: Listing) async {
-        error = nil
-        do {
-            lastRedemption = try await RewardsService.shared.redeem(listingId: listing.id)
-            await load()
-        } catch let APIError.httpError(409, detail) {
-            error = Self.redeemMessage(from: detail)
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
-        }
     }
 }

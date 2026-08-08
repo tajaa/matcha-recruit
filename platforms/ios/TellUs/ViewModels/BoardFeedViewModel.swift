@@ -10,7 +10,7 @@ final class BoardFeedViewModel {
     var isLoading = false
     var error: String?
     var notAMember = false
-    var lastRedemption: Redemption?
+    let redeemFlow = RedeemFlowModel()
 
     init(slug: String) { self.slug = slug }
 
@@ -57,15 +57,4 @@ final class BoardFeedViewModel {
         }
     }
 
-    func redeemBoardListing(_ listing: Listing) async {
-        error = nil
-        do {
-            lastRedemption = try await RewardsService.shared.redeem(listingId: listing.id)
-        } catch let APIError.httpError(409, detail) {
-            error = MarketplaceViewModel.redeemMessage(from: detail)
-        } catch {
-            if error.isCancellation { return }
-            self.error = error.localizedDescription
-        }
-    }
 }

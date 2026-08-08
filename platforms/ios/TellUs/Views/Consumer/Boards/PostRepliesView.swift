@@ -4,6 +4,7 @@ struct PostRepliesView: View {
     let post: BoardPost
     @Bindable var vm: BoardFeedViewModel
     @State private var newReply = ""
+    @State private var redeemListing: Listing?
 
     private var replies: [BoardReply] { vm.repliesByPost[post.id] ?? [] }
 
@@ -11,7 +12,8 @@ struct PostRepliesView: View {
         List {
             Section {
                 BoardPostCard(post: post) { listing in
-                    Task { await vm.redeemBoardListing(listing) }
+                    vm.redeemFlow.begin()
+                    redeemListing = listing
                 }
                 .listRowSeparator(.hidden)
             }
@@ -57,5 +59,8 @@ struct PostRepliesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await vm.loadReplies(postId: post.id) }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
+        .sheet(item: $redeemListing) { listing in
+            RedeemConfirmSheet(listing: listing, flow: vm.redeemFlow)
+        }
     }
 }

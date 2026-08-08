@@ -16,9 +16,14 @@ func intakeToken(from raw: String) -> String? {
     return range != nil ? trimmed : nil
 }
 
+struct ScannedToken: Identifiable, Hashable {
+    let id = UUID()
+    let token: String
+}
+
 struct ScanView: View {
     @State private var pastedText = ""
-    @State private var navigateToken: String?
+    @State private var navigate: ScannedToken?
     private var scannerAvailable: Bool {
         DataScannerViewController.isSupported && DataScannerViewController.isAvailable
     }
@@ -26,8 +31,8 @@ struct ScanView: View {
     var body: some View {
         VStack(spacing: 16) {
             if scannerAvailable {
-                QRScannerView { code in
-                    if let token = intakeToken(from: code) { navigateToken = token }
+                QRScannerView(isActive: navigate == nil) { code in
+                    if let token = intakeToken(from: code) { navigate = ScannedToken(token: token) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -44,7 +49,7 @@ struct ScanView: View {
                     .padding()
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 Button("Go") {
-                    if let token = intakeToken(from: pastedText) { navigateToken = token }
+                    if let token = intakeToken(from: pastedText) { navigate = ScannedToken(token: token) }
                 }
                 .disabled(intakeToken(from: pastedText) == nil)
             }
@@ -52,12 +57,8 @@ struct ScanView: View {
             .padding(.bottom)
         }
         .navigationTitle("Scan")
-        .navigationDestination(item: $navigateToken) { token in
-            IntakeLoaderView(token: token)
+        .navigationDestination(item: $navigate) { scanned in
+            IntakeLoaderView(token: scanned.token)
         }
     }
-}
-
-extension String: @retroactive Identifiable {
-    public var id: String { self }
 }
