@@ -10,7 +10,7 @@ import UIKit
 struct MovieFile: Transferable {
     let url: URL
     static var transferRepresentation: some TransferRepresentation {
-        FileRepresentation(contentType: .movie) { received in
+        FileRepresentation(importedContentType: .movie) { received in
             let dest = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString + "_" + received.file.lastPathComponent)
             try FileManager.default.copyItem(at: received.file, to: dest)
@@ -32,7 +32,7 @@ struct PendingMedia: Identifiable {
         case done(SubmittedMediaBox)
         case failed(String)
     }
-    let id = UUID().uuidString
+    let id: String
     var thumbnail: UIImage?
     var state: State
     let mediaType: MediaType
