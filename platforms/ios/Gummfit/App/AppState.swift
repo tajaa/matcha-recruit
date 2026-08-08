@@ -21,6 +21,17 @@ final class AppState {
     /// the view falls back to asking for manual re-login.
     var pendingCredentials: (email: String, password: String)?
 
+    /// Owner's site list + current selection. `siteId` is passed per call to
+    /// domain services (never stored there — plan §4), so this is the ONE
+    /// place a site switch can race; every mutation goes through
+    /// `selectSite`/`addSite`/`updateSite` below.
+    var sites: [CappeSite] = []
+    var activeSite: CappeSite?
+    var sitesLoading = false
+    var sitesError: String?
+
+    private static let lastSiteIdKey = "cappe.lastSiteId"
+
     init() {
         // Fired by APIClient only after a DEFINITIVE refresh rejection
         // (401/403), never on network blips or decode errors. There is no
@@ -41,11 +52,55 @@ final class AppState {
 
     /// `account_type` is single-valued and fixed at signup — never both
     /// owner+creator (server/app/cappe/models/auth.py:17; routes/creators.py:43
-    /// 403s non-creators). Site loading + last-site restore land in Phase 1.
+    /// 403s non-creators).
     func route(_ account: CappeAccount) {
         self.account = account
         pendingCredentials = nil
         phase = account.account_type == .creator ? .creator : .owner
+        if phase == .owner {
+            Task { await loadSites() }
+        }
+    }
+
+    /// Fetches the owner's sites and resolves `activeSite`: keep the current
+    /// selection if it still exists, else restore the last-used site id, else
+    /// fall back to the newest site (server returns `ORDER BY created_at
+    /// DESC` — sites.py:112).
+    func loadSites() async {
+        sitesLoading = true
+        defer { sitesLoading = false }
+        do {
+            sites = try await SitesService.shared.list()
+            sitesError = nil
+            if let current = activeSite, let match = sites.first(where: { $0.id == current.id }) {
+                activeSite = match
+            } else {
+                let lastId = UserDefaults.standard.string(forKey: Self.lastSiteIdKey)
+                activeSite = sites.first(where: { $0.id == lastId }) ?? sites.first
+            }
+        } catch {
+            if !error.isCancellation { sitesError = error.localizedDescription }
+        }
+    }
+
+    func selectSite(_ site: CappeSite) {
+        activeSite = site
+        UserDefaults.standard.set(site.id, forKey: Self.lastSiteIdKey)
+    }
+
+    /// Called after `SitesService.create` — the new site becomes active
+    /// immediately (matches web's post-create redirect into the new site).
+    func addSite(_ site: CappeSite) {
+        sites.insert(site, at: 0)
+        selectSite(site)
+    }
+
+    /// Called after a mutation that returns the updated row (e.g. publish) so
+    /// every view reading `sites`/`activeSite` sees the change without a
+    /// full `loadSites()` round-trip.
+    func updateSite(_ site: CappeSite) {
+        if let idx = sites.firstIndex(where: { $0.id == site.id }) { sites[idx] = site }
+        if activeSite?.id == site.id { activeSite = site }
     }
 
     func didLogin(_ response: CappeTokenResponse) {
@@ -68,6 +123,9 @@ final class AppState {
         }
         account = nil
         pendingCredentials = nil
+        sites = []
+        activeSite = nil
+        sitesError = nil
         phase = .loggedOut
         URLCache.shared.removeAllCachedResponses()
     }

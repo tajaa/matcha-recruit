@@ -16,8 +16,21 @@ enum AccountType: String, Codable {
     }
 }
 
+/// Mirrors `CappeSiteStatus = 'draft' | 'published' | 'archived'`
+/// (client/src/cappe/types.ts:50).
+enum SiteStatus: String, Codable {
+    case draft
+    case published
+    case archived
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SiteStatus(rawValue: raw) ?? .unknown
+    }
+}
+
 // The remaining open-set enums (OrderStatus, BookingStatus, CampaignStatus,
 // OfferStatus, DeliverableStatus, PaymentStatus, CreatorProfileStatus,
-// Fulfillment, SiteStatus) land with their owning model files in later
-// phases (Sites/Catalog/Orders/Bookings/Collab/Creator) — see
-// GUMMFIT_IOS_APP_PLAN.md §2.
+// Fulfillment) land with their owning model files in later phases
+// (Catalog/Orders/Bookings/Collab/Creator) — see GUMMFIT_IOS_APP_PLAN.md §2.
