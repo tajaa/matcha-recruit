@@ -44,7 +44,10 @@ struct CreateSiteView: View {
             .buttonStyle(.borderedProminent)
             .disabled(!vm.canSubmit)
 
-            if !isFirstSite {
+            if isFirstSite {
+                Button("Sign out", role: .destructive) { appState.didLogout() }
+                    .disabled(vm.isLoading)
+            } else {
                 Button("Cancel") { dismiss() }
                     .disabled(vm.isLoading)
             }
@@ -60,13 +63,13 @@ struct CreateSiteView: View {
     private func submit() {
         guard vm.canSubmit else { return }
         Task {
-            await vm.create(appState: appState)
-            // vm.error is nil only on success (withLoad clears it up front
-            // and only sets it on a caught error) — dismiss the sheet rather
-            // than making the user tap again. The first-site flow doesn't
-            // dismiss; AppState.sites becoming non-empty switches RootView
-            // away from this screen entirely.
-            if !isFirstSite && vm.error == nil {
+            // `created` is explicit success, not "error == nil" — withLoad
+            // also returns with a nil error on cancellation, which would
+            // otherwise dismiss the sheet with no site actually created. The
+            // first-site flow doesn't dismiss; AppState.sites becoming
+            // non-empty switches RootView away from this screen entirely.
+            let created = await vm.create(appState: appState)
+            if !isFirstSite && created {
                 dismiss()
             }
         }

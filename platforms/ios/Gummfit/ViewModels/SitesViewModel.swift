@@ -14,10 +14,15 @@ final class SitesViewModel: LoadableVM {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoading
     }
 
-    func create(appState: AppState) async {
+    @discardableResult
+    func create(appState: AppState) async -> Bool {
+        var created = false
         await withLoad {
-            let site = try await SitesService.shared.create(name: self.name)
+            let trimmed = self.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let site = try await SitesService.shared.create(name: trimmed)
             appState.addSite(site)
+            created = true
         }
+        return created
     }
 }

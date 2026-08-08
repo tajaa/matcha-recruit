@@ -20,15 +20,19 @@ final class DirectoryViewModel: LoadableVM {
     }
 
     func toggleListed(siteId: String) async {
-        guard let listing else { return }
+        guard let current = listing else { return }
+        let target = !current.listed
         isSaving = true
+        error = nil               // a stale load error must not outlive a fresh action
+        listing?.listed = target  // optimistic — DirectorySheet's Binding reads this
         defer { isSaving = false }
         do {
             self.listing = try await SitesService.shared.updateDirectory(
                 siteId: siteId,
-                CappeDirectoryListingUpdate(listed: !listing.listed)
+                CappeDirectoryListingUpdate(listed: target)
             )
         } catch {
+            listing?.listed = current.listed  // revert the optimistic flip
             if error.isCancellation { return }
             self.error = error.localizedDescription
         }

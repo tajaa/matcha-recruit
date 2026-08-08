@@ -29,6 +29,17 @@ final class AppState {
     var activeSite: CappeSite?
     var sitesLoading = false
     var sitesError: String?
+    /// True only after a load has actually completed. RootView gates the
+    /// blocking first-site screen on this, so "not started yet" and
+    /// "cancelled" are never misread as "this account genuinely has no sites".
+    private(set) var sitesLoaded = false
+
+    /// Bumped on every session boundary (login/route, logout). `loadSites`
+    /// captures it and drops any write whose epoch is stale — cancellation
+    /// alone isn't enough, a response that already resumed its continuation
+    /// would still land.
+    private var sessionEpoch = 0
+    private var sitesTask: Task<Void, Never>?
 
     private static let lastSiteIdKey = "cappe.lastSiteId"
 
@@ -57,8 +68,15 @@ final class AppState {
         self.account = account
         pendingCredentials = nil
         phase = account.account_type == .creator ? .creator : .owner
+        sitesTask?.cancel()
+        sessionEpoch += 1
+        sitesLoaded = false
+        sitesError = nil
         if phase == .owner {
-            Task { await loadSites() }
+            sitesLoading = true  // set SYNCHRONOUSLY — the Task below runs later
+            sitesTask = Task { await loadSites() }
+        } else {
+            sitesLoading = false
         }
     }
 
@@ -67,11 +85,15 @@ final class AppState {
     /// fall back to the newest site (server returns `ORDER BY created_at
     /// DESC` — sites.py:112).
     func loadSites() async {
+        let epoch = sessionEpoch
         sitesLoading = true
-        defer { sitesLoading = false }
+        defer { if epoch == sessionEpoch { sitesLoading = false } }
         do {
-            sites = try await SitesService.shared.list()
+            let fetched = try await SitesService.shared.list()
+            guard epoch == sessionEpoch else { return }
+            sites = fetched
             sitesError = nil
+            sitesLoaded = true
             if let current = activeSite, let match = sites.first(where: { $0.id == current.id }) {
                 activeSite = match
             } else {
@@ -79,7 +101,8 @@ final class AppState {
                 activeSite = sites.first(where: { $0.id == lastId }) ?? sites.first
             }
         } catch {
-            if !error.isCancellation { sitesError = error.localizedDescription }
+            guard epoch == sessionEpoch, !error.isCancellation else { return }
+            sitesError = error.localizedDescription
         }
     }
 
@@ -121,11 +144,16 @@ final class AppState {
         } else {
             AuthService.shared.clearLocalSession()
         }
+        sitesTask?.cancel()
+        sitesTask = nil
+        sessionEpoch += 1
         account = nil
         pendingCredentials = nil
         sites = []
         activeSite = nil
         sitesError = nil
+        sitesLoaded = false
+        sitesLoading = false
         phase = .loggedOut
         URLCache.shared.removeAllCachedResponses()
     }

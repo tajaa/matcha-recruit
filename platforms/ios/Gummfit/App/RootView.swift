@@ -37,7 +37,11 @@ private struct OwnerRootView: View {
 
     var body: some View {
         Group {
-            if appState.sites.isEmpty && appState.sitesLoading {
+            if !appState.sitesLoaded && appState.sitesError == nil {
+                // Covers "task hasn't run yet" and "in flight" — gating on
+                // `sitesLoading` alone flips true→false in the wrong order
+                // (route() sets phase synchronously, sitesLoading later) and
+                // would fall through to the blocking create screen.
                 ZStack {
                     Color(GummfitTheme.background).ignoresSafeArea()
                     ProgressView()
@@ -53,6 +57,7 @@ private struct OwnerRootView: View {
                         Text(sitesError).multilineTextAlignment(.center).foregroundStyle(GummfitTheme.textDim)
                         Button("Retry") { Task { await appState.loadSites() } }
                             .buttonStyle(.borderedProminent)
+                        Button("Sign out", role: .destructive) { appState.didLogout() }
                     }
                     .padding()
                 }

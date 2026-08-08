@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Owner's Home tab: site card + readiness checklist + publish + site
 /// switcher. `site` is read fresh from `appState.activeSite` by the caller
-/// (OwnerTabView) on every switch, so this view gets recreated (not just
-/// re-rendered) when the active site changes — `.task(id:)` below reloads
-/// readiness for the new id.
+/// (OwnerTabView), which pins `.id(site.id)` so this view is genuinely
+/// recreated — not just re-rendered — on a site switch; `.task(id:)` below
+/// also resets the VM as a belt-and-braces guard against that identity ever
+/// being dropped.
 struct HomeView: View {
     let site: CappeSite
 
@@ -37,10 +38,13 @@ struct HomeView: View {
             NavigationStack { CreateSiteView() }
         }
         .task(id: site.id) {
+            vm.reset()
             await vm.loadReadiness(siteId: site.id)
         }
         .refreshable {
-            await vm.loadReadiness(siteId: site.id)
+            async let sites: Void = appState.loadSites()
+            async let readiness: Void = vm.loadReadiness(siteId: site.id)
+            _ = await (sites, readiness)
         }
     }
 
@@ -72,7 +76,7 @@ struct HomeView: View {
                 Spacer()
                 statusPill
             }
-            if let urlString = site.publicURLString, let url = URL(string: urlString) {
+            if let urlString = site.publicURLString, let url = SafeURL.validated(urlString) {
                 Link(urlString, destination: url)
                     .font(.footnote)
                     .lineLimit(1)
@@ -110,7 +114,7 @@ struct HomeView: View {
     }
 
     private func readinessRow(_ item: CappeReadinessItem) -> some View {
-        let blocked = vm.publishBlockedLabels?.contains(item.label) ?? false
+        let blocked = vm.publishBlockedKeys?.contains(item.key) ?? false
         return HStack(alignment: .top, spacing: 10) {
             Image(systemName: item.done ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(item.done ? GummfitTheme.accent : (blocked ? .red : GummfitTheme.textDim))

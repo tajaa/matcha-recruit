@@ -12,7 +12,7 @@ struct OwnerTabView: View {
         TabView {
             NavigationStack {
                 if let site = appState.activeSite {
-                    HomeView(site: site)
+                    HomeView(site: site).id(site.id)
                 }
             }
             .tabItem { Label("Home", systemImage: "house") }
