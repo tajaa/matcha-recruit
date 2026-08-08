@@ -12,7 +12,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "4"
     DEVELOPMENT_TEAM: 5D6TJVCPBK
     CODE_SIGN_STYLE: Automatic
 
@@ -39,6 +39,11 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Beetlejuse
+        # Required by App Store validation for any app built against the iOS 11+
+        # SDK. actool only auto-injects this when Xcode generates the Info.plist
+        # itself; XcodeGen writes a fully-specified one, so it has to be stated
+        # here or upload fails with "Missing Info.plist value ... CFBundleIconName".
+        CFBundleIconName: AppIcon
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: "Beetlejuse uses the camera to scan feedback QR codes and take photos for your feedback."
         GIDClientID: "62787429179-qskffndotvi3hqpnu12oeigjaojd3402.apps.googleusercontent.com"
