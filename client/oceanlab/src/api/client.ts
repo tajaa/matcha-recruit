@@ -15,7 +15,7 @@ export function clearToken(): void {
 }
 
 export const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/oceanlab',
 })
 
 apiClient.interceptors.request.use((config) => {

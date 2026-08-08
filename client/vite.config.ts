@@ -37,6 +37,13 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
       },
+      // Oceanlab is a SEPARATE Vite app (client/oceanlab, base '/oceanlab/')
+      // with its own dev server. Same pattern as Tell-Us above.
+      '/oceanlab': {
+        target: process.env.VITE_OCEANLAB_TARGET || 'http://127.0.0.1:5201',
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: backendTarget,
         changeOrigin: true,

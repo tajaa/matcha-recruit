@@ -23,6 +23,17 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY tellus ./tellus
 RUN cd tellus && npx vite build
 
+# Oceanlab (music catalog / label platform) — a SEPARATE Vite app in the same
+# repo (client/oceanlab); emits under base '/oceanlab/' and is served from
+# /usr/share/nginx/html/oceanlab by the same nginx (see nginx.conf). Same
+# pattern as Tell-Us above: own package-lock, own npm ci, own cache mount,
+# built before the main app's COPY . . so unrelated edits don't invalidate it.
+COPY oceanlab/package*.json ./oceanlab/
+RUN --mount=type=cache,target=/root/.npm \
+    cd oceanlab && npm ci --legacy-peer-deps
+COPY oceanlab ./oceanlab
+RUN cd oceanlab && npx vite build
+
 # Copy source code
 COPY . .
 
@@ -41,9 +52,10 @@ FROM nginx:1.25-alpine
 # Install gettext for envsubst
 RUN apk add --no-cache gettext
 
-# Copy built files (main app at root, Tell-Us under /tellus)
+# Copy built files (main app at root, Tell-Us under /tellus, Oceanlab under /oceanlab)
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY --from=builder /app/tellus/dist /usr/share/nginx/html/tellus
+COPY --from=builder /app/oceanlab/dist /usr/share/nginx/html/oceanlab
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf

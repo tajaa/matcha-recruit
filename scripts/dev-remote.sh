@@ -266,6 +266,18 @@ if [ -n "$TELLUS_PORT" ]; then
     TELLUS_ENV="VITE_TELLUS_TARGET='http://127.0.0.1:$TELLUS_PORT' "
 fi
 
+# Oceanlab frontend port — same pattern as Tell-Us above, picked before the
+# panes so the main frontend can receive VITE_OCEANLAB_TARGET (its '/oceanlab'
+# proxy -> this server). Default oceanlab port is 5201.
+OCEANLAB_PORT=""
+if [ -d "$PROJECT_ROOT/client/oceanlab/node_modules" ]; then
+    OCEANLAB_PORT="$(pick_available_port 5201 5209)"
+fi
+OCEANLAB_ENV=""
+if [ -n "$OCEANLAB_PORT" ]; then
+    OCEANLAB_ENV="VITE_OCEANLAB_TARGET='http://127.0.0.1:$OCEANLAB_PORT' "
+fi
+
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
@@ -294,7 +306,7 @@ tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
@@ -311,6 +323,13 @@ if [ -n "$TELLUS_PORT" ]; then
         "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
 fi
 
+# Extra window: Oceanlab frontend (separate Vite app served at /oceanlab/).
+# Same pattern as the Tell-Us window above.
+if [ -n "$OCEANLAB_PORT" ]; then
+    tmux new-window -t "$SESSION_NAME" -n "oceanlab" -c "$PROJECT_ROOT/client/oceanlab" \
+        "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
+fi
+
 # Select the server pane as active
 tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
@@ -322,6 +341,9 @@ echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
 if [ -n "$TELLUS_PORT" ]; then
     echo -e "  - Tell-Us:  http://localhost:$FRONTEND_PORT/tellus/ (proxied; direct :$TELLUS_PORT, window: tellus)"
+fi
+if [ -n "$OCEANLAB_PORT" ]; then
+    echo -e "  - Oceanlab: http://localhost:$FRONTEND_PORT/oceanlab/ (proxied; direct :$OCEANLAB_PORT, window: oceanlab)"
 fi
 if [ "$ENABLE_CHAT" = true ]; then
     echo -e "  - AI Chat:  http://localhost:$CHAT_PORT (Qwen2-VL-2B)"
