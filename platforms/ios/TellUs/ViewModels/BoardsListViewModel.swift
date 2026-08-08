@@ -18,4 +18,15 @@ final class BoardsListViewModel {
             self.error = error.localizedDescription
         }
     }
+
+    func cancel(_ id: String) async {
+        error = nil
+        do {
+            try await BoardService.shared.cancelMembership(id: id)
+            memberships.removeAll { $0.id == id }
+        } catch {
+            if error.isCancellation { return }
+            self.error = error.localizedDescription
+        }
+    }
 }

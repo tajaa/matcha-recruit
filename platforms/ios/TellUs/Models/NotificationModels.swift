@@ -13,11 +13,3 @@ struct TellusNotification: Codable, Identifiable {
     let is_read: Bool
     let created_at: String
 }
-
-enum NotificationKind {
-    static let known: Set<String> = [
-        "points_earned", "level_up", "badge", "redemption", "points_adjustment",
-        "feedback", "dm_message", "board_join_request", "board_post",
-        "board_reply_pending", "board_reply_approved", "membership_approved", "board_team_added",
-    ]
-}

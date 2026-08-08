@@ -19,6 +19,13 @@ struct BoardsListView: View {
                             Spacer()
                             StatusChip(text: membership.status.rawValue)
                         }
+                        .swipeActions {
+                            if membership.status == .pending {
+                                Button("Cancel request", role: .destructive) {
+                                    Task { await vm.cancel(membership.id) }
+                                }
+                            }
+                        }
                     }
                 }
                 .listStyle(.plain)

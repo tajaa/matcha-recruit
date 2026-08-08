@@ -39,29 +39,66 @@ final class BoardManageViewModel {
         }
     }
 
-    func approveRequest(_ id: String) async { await run { try await BoardManageService.shared.approveRequest(id: id, brandId: self.brandId) } }
-    func declineRequest(_ id: String) async { await run { try await BoardManageService.shared.declineRequest(id: id, brandId: self.brandId) } }
-    func removeMember(_ id: String) async { await run { try await BoardManageService.shared.removeMember(id: id, brandId: self.brandId) } }
-    func approveReply(_ id: String) async { await run { try await BoardManageService.shared.approveReply(id: id, brandId: self.brandId) } }
-    func rejectReply(_ id: String) async { await run { try await BoardManageService.shared.rejectReply(id: id, brandId: self.brandId) } }
-
-    func createPost(_ body: BoardPostCreate) async {
-        await run { _ = try await BoardManageService.shared.createPost(brandId: self.brandId, body) }
+    func approveRequest(_ id: String) async {
+        await run({ try await BoardManageService.shared.approveRequest(id: id, brandId: self.brandId) }) {
+            self.requests.removeAll { $0.id == id }
+        }
     }
 
-    func deletePost(_ id: String) async { await run { try await BoardManageService.shared.deletePost(id: id, brandId: self.brandId) } }
+    func declineRequest(_ id: String) async {
+        await run({ try await BoardManageService.shared.declineRequest(id: id, brandId: self.brandId) }) {
+            self.requests.removeAll { $0.id == id }
+        }
+    }
 
-    private func run(_ action: @escaping () async throws -> Void) async {
+    func removeMember(_ id: String) async {
+        await run({ try await BoardManageService.shared.removeMember(id: id, brandId: self.brandId) }) {
+            self.members.removeAll { $0.id == id }
+        }
+    }
+
+    func approveReply(_ id: String) async {
+        await run({ try await BoardManageService.shared.approveReply(id: id, brandId: self.brandId) }) {
+            self.heldReplies.removeAll { $0.id == id }
+        }
+    }
+
+    func rejectReply(_ id: String) async {
+        await run({ try await BoardManageService.shared.rejectReply(id: id, brandId: self.brandId) }) {
+            self.heldReplies.removeAll { $0.id == id }
+        }
+    }
+
+    func createPost(_ body: BoardPostCreate) async {
+        await run({ _ = try await BoardManageService.shared.createPost(brandId: self.brandId, body) }) {}
+    }
+
+    func deletePost(_ id: String) async {
+        await run({ try await BoardManageService.shared.deletePost(id: id, brandId: self.brandId) }) {}
+    }
+
+    /// Runs a mutation and applies a targeted local update on success instead
+    /// of refetching all 4 endpoints (summary/requests/held/members) — that
+    /// refetch is reserved for .task/.refreshable. Still refreshes the
+    /// summary's counters (cheap, single endpoint) so the header badges track.
+    private func run(_ action: @escaping () async throws -> Void, onSuccess: @escaping @MainActor () -> Void) async {
         error = nil
         do {
             try await action()
-            await load()
+            onSuccess()
+            summary = (try? await BoardManageService.shared.summary(brandId: brandId)) ?? summary
         } catch APIError.paymentRequired {
             if brandId != nil {
                 planPausedAlert = true
             } else {
                 error = "This brand's plan isn't active."
             }
+        } catch let APIError.httpError(409, _) {
+            // Another moderator already acted on this row — refetch the
+            // queue it came from instead of leaving a stale row on screen.
+            error = "Already moderated — refreshing."
+            heldReplies = (try? await BoardManageService.shared.heldReplies(brandId: brandId)) ?? heldReplies
+            requests = (try? await BoardManageService.shared.requests(brandId: brandId)) ?? requests
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

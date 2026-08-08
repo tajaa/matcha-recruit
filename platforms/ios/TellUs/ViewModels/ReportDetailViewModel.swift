@@ -31,27 +31,27 @@ final class ReportDetailViewModel {
         }
     }
 
-    // Every mutation refetches — re-mints the 15-min media URLs and picks up
-    // server-derived fields (review_state, moderation_status) in one place.
+    // Every mutation applies the response Report directly — the server
+    // returns the updated row (fresh 15-min media URLs, server-derived
+    // fields like review_state/moderation_status included), so a separate
+    // refetch is redundant.
     func setStatus(_ status: ReportStatus) async { await run { try await FeedbackService.shared.setStatus(id: self.id, status) } }
     func decideReward(approve: Bool) async { await run { try await FeedbackService.shared.decideReward(id: self.id, approve: approve) } }
     func toggleHeart() async {
         guard let report else { return }
         let hearted = report.hearted_at != nil
         await run {
-            if hearted { try await FeedbackService.shared.unheart(id: self.id) }
-            else { try await FeedbackService.shared.heart(id: self.id) }
+            hearted ? try await FeedbackService.shared.unheart(id: self.id) : try await FeedbackService.shared.heart(id: self.id)
         }
     }
     func saveReply(_ body: String) async { await run { try await FeedbackService.shared.setReply(id: self.id, body: body) } }
     func deleteReply() async { await run { try await FeedbackService.shared.deleteReply(id: self.id) } }
     func publishNow() async { await run { try await FeedbackService.shared.publishNow(id: self.id) } }
 
-    private func run(_ action: @escaping () async throws -> Void) async {
+    private func run(_ action: @escaping () async throws -> Report) async {
         error = nil
         do {
-            try await action()
-            await load()
+            report = try await action()
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

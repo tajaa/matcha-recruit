@@ -28,33 +28,44 @@ final class FeedbackService {
         try await client.request(method: "GET", path: "/feedback/\(id)")
     }
 
-    func setStatus(id: String, _ status: ReportStatus) async throws {
-        try await client.requestVoid(method: "PATCH", path: "/feedback/\(id)/status", body: StatusPatch(status: status.rawValue))
+    // Every mutation below returns the updated Report (response_model=TellusReport
+    // on all of them server-side) — callers apply it directly instead of a
+    // separate GET /feedback/{id} refetch.
+
+    @discardableResult
+    func setStatus(id: String, _ status: ReportStatus) async throws -> Report {
+        try await client.request(method: "PATCH", path: "/feedback/\(id)/status", body: StatusPatch(status: status.rawValue))
     }
 
-    func decideReward(id: String, approve: Bool) async throws {
-        try await client.requestVoid(method: "POST", path: "/feedback/\(id)/reward", body: RewardDecision(approve: approve))
+    @discardableResult
+    func decideReward(id: String, approve: Bool) async throws -> Report {
+        try await client.request(method: "POST", path: "/feedback/\(id)/reward", body: RewardDecision(approve: approve))
     }
 
-    func heart(id: String) async throws {
-        try await client.requestVoid(method: "POST", path: "/feedback/\(id)/heart")
+    @discardableResult
+    func heart(id: String) async throws -> Report {
+        try await client.request(method: "POST", path: "/feedback/\(id)/heart")
     }
 
-    func unheart(id: String) async throws {
-        try await client.requestVoid(method: "DELETE", path: "/feedback/\(id)/heart")
+    @discardableResult
+    func unheart(id: String) async throws -> Report {
+        try await client.request(method: "DELETE", path: "/feedback/\(id)/heart")
     }
 
     /// Public reply shown on /b/{slug}, ≤2000 chars.
-    func setReply(id: String, body: String) async throws {
-        try await client.requestVoid(method: "PUT", path: "/feedback/\(id)/reply", body: ReplyPut(body: body))
+    @discardableResult
+    func setReply(id: String, body: String) async throws -> Report {
+        try await client.request(method: "PUT", path: "/feedback/\(id)/reply", body: ReplyPut(body: body))
     }
 
-    func deleteReply(id: String) async throws {
-        try await client.requestVoid(method: "DELETE", path: "/feedback/\(id)/reply")
+    @discardableResult
+    func deleteReply(id: String) async throws -> Report {
+        try await client.request(method: "DELETE", path: "/feedback/\(id)/reply")
     }
 
     /// publish_at only ever moves EARLIER — irreversible, confirm in UI.
-    func publishNow(id: String) async throws {
-        try await client.requestVoid(method: "POST", path: "/feedback/\(id)/publish-now")
+    @discardableResult
+    func publishNow(id: String) async throws -> Report {
+        try await client.request(method: "POST", path: "/feedback/\(id)/publish-now")
     }
 }

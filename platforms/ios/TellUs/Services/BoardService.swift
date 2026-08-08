@@ -21,8 +21,13 @@ final class BoardService {
     }
 
     /// 403 if the caller isn't a member.
-    func board(slug: String, limit: Int = 20, offset: Int = 0) async throws -> BoardPage {
-        try await client.request(method: "GET", path: "/boards/\(slug)?limit=\(limit)&offset=\(offset)")
+    func board(slug: String, kind: String? = nil, limit: Int = 20, offset: Int = 0) async throws -> BoardPage {
+        var components = URLComponents()
+        var items = [URLQueryItem(name: "limit", value: String(limit)), URLQueryItem(name: "offset", value: String(offset))]
+        if let kind { items.append(URLQueryItem(name: "kind", value: kind)) }
+        components.queryItems = items
+        let query = components.percentEncodedQuery.map { "?" + $0 } ?? ""
+        return try await client.request(method: "GET", path: "/boards/\(slug)" + query)
     }
 
     func replies(slug: String, postId: String) async throws -> [BoardReply] {

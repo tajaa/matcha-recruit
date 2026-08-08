@@ -15,12 +15,6 @@ enum SafeURL {
         return allowedSchemes.contains(scheme)
     }
 
-    /// True if the string is a web URL safe to open.
-    static func isAllowed(_ raw: String?) -> Bool {
-        guard let raw, let url = URL(string: raw) else { return false }
-        return isSafe(url)
-    }
-
     /// Open an external URL string only if its scheme is http/https. Returns
     /// true if it opened. Silently ignores other schemes.
     @discardableResult
