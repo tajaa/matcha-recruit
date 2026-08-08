@@ -25,7 +25,11 @@ greenlet>=3.0.0
 feedparser>=6.0.0
 stripe>=8.0.0
 python3-saml>=1.16.0
-playwright>=1.49.0
+# Pinned exactly, not floated: the ~400MB Chromium bundle is baked into the
+# Dockerfile `base` stage so a dep bump doesn't force a re-push of it. That
+# stage installs browsers for PLAYWRIGHT_VERSION, which MUST equal this pin —
+# the runtime build asserts it and fails loudly on skew.
+playwright==1.62.0
 twilio>=9.0.0
 audioop-lts>=0.2.1; python_version >= "3.13"
 aioapns>=3.1

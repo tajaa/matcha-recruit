@@ -16,6 +16,27 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
+# Headless Chromium for Merlin's agent loop — it renders the page it is editing
+# and screenshots it so the model can check its own design work
+# (app/cappe/services/browser_pool.py). Installed into a shared path rather than
+# the default ~/.cache so the non-root runtime user can reach it.
+#
+# This lives in `base`, ABOVE the requirements.txt COPY, on purpose: the bundle
+# is ~1GB on disk / ~433MB compressed, and when it sat in the runtime stage every
+# requirements.txt edit invalidated it and re-pushed the whole thing to ECR (~50
+# min on a home uplink). Up here it only rebuilds when this block changes.
+#
+# PLAYWRIGHT_VERSION must match the exact pin in requirements.txt — browser
+# revisions are per-playwright-version, and the runtime stage asserts they agree.
+# `--with-deps` also apt-installs Chromium's system libs, which is why this has
+# to be in `base` (inherited by runtime) rather than a COPY-only stage.
+ARG PLAYWRIGHT_VERSION=1.62.0
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN pip install --no-cache-dir "playwright==${PLAYWRIGHT_VERSION}" \
+    && python -m playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # Stage 2: Dependencies installation
 FROM base AS dependencies
 
@@ -41,16 +62,21 @@ COPY --from=dependencies /usr/local/bin /usr/local/bin
 # Create non-root user
 RUN groupadd -r matcha && useradd -r -g matcha matcha
 
-# Headless Chromium for Merlin's agent loop — it renders the page it is editing
-# and screenshots it so the model can check its own design work
-# (app/cappe/services/browser_pool.py). Installed into a shared path rather than
-# the default ~/.cache so the non-root runtime user can reach it. ~400MB with
-# its system libs; if this layer is ever dropped, Merlin degrades to editing
-# blind rather than failing, so the build stays green either way.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN python -m playwright install --with-deps chromium \
-    && chmod -R a+rX /opt/playwright \
-    && rm -rf /var/lib/apt/lists/*
+# Chromium itself was already installed in `base` (see the note there). The
+# COPY above just replaced site-packages with the resolved dependency set, so
+# assert the playwright package now present still points at browser revisions
+# that exist on disk. A skew here means requirements.txt's pin drifted from
+# base's PLAYWRIGHT_VERSION — fail the build rather than let Merlin discover it
+# at runtime as "Executable doesn't exist".
+RUN set -eu; \
+    for p in $(python -m playwright install --dry-run chromium \
+                 | awk '/Install location:/ {print $3}'); do \
+        [ -d "$p" ] || { \
+            echo "playwright browser skew: $p missing."; \
+            echo "Bump ARG PLAYWRIGHT_VERSION in the base stage to match requirements.txt."; \
+            exit 1; \
+        }; \
+    done
 
 # Create uploads directory
 RUN mkdir -p /app/uploads && chown -R matcha:matcha /app/uploads
