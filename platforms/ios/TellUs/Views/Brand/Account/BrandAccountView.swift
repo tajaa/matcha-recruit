@@ -18,12 +18,10 @@ struct BrandAccountView: View {
                 }
             }
 
+            // Stores/Listings/Settings/Messages all have native screens now
+            // (More tab) — Billing checkout stays web-only (Stripe).
             Section("Manage on web") {
-                webLink("Billing", "/billing")
-                webLink("Stores & QR codes", "/stores")
-                webLink("Reward listings", "/listings")
-                webLink("Settings & prompts", "/settings")
-                webLink("Messages", "/messages")
+                webLink("Billing checkout", "/billing")
             }
 
             Section {
