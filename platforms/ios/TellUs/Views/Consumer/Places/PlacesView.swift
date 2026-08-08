@@ -105,14 +105,17 @@ private struct PlaceResultRow: View {
             }
 
             Spacer()
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if let token = place.intake_token {
-                vm.navigateToken = ScannedToken(token: token)
-            } else {
-                SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(place.slug)"))
+
+            VStack(alignment: .trailing, spacing: 6) {
+                Button("See reviews") {
+                    SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(place.slug)"))
+                }
+                if !place.claimed, let token = place.intake_token {
+                    Button("Leave feedback") { vm.navigateToken = ScannedToken(token: token) }
+                }
             }
+            .font(.caption.bold())
+            .buttonStyle(.borderless)
         }
     }
 }

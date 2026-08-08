@@ -25,18 +25,23 @@ final class PlacesViewModel {
 
     var noMatches: Bool {
         query.trimmingCharacters(in: .whitespaces).count >= 2
-            && !searching && dbResults.isEmpty && suggestions.isEmpty
+            && !searching && searchError == nil
+            && dbResults.isEmpty && suggestions.isEmpty
     }
 
     private func queryChanged() {
         searchTask?.cancel()
+        showManualForm = false
+        manualError = nil
         let q = query.trimmingCharacters(in: .whitespaces)
         guard q.count >= 2 else {
             dbResults = []
             suggestions = []
             searchError = nil
+            searching = false
             return
         }
+        searching = true                                      // sync, matches web's setSearching(true)
         searchTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 450_000_000)   // debounce, matches web Places.tsx
             guard !Task.isCancelled else { return }
@@ -45,20 +50,20 @@ final class PlacesViewModel {
     }
 
     private func runSearch(_ q: String) async {
-        searching = true
-        defer { searching = false }
+        defer { if !Task.isCancelled { searching = false } }
         async let dbCall = PlacesService.shared.search(q: q)
         async let acCall = PlacesService.shared.autocomplete(q: q, sessionToken: sessionToken)
+        let ac = (try? await acCall) ?? []                    // autocomplete degrades silently
         do {
             let db = try await dbCall
-            let ac = (try? await acCall) ?? []               // autocomplete degrades silently
             guard !Task.isCancelled else { return }
             dbResults = db
             suggestions = Self.dedupe(ac, against: db)
             searchError = nil
         } catch {
-            guard !Task.isCancelled else { return }
-            if error.isCancellation { return }
+            guard !Task.isCancelled, !error.isCancellation else { return }
+            dbResults = []                                    // web: setDbResults([]) on db error
+            suggestions = ac                                  // web: okDb=[] ⇒ all ac kept
             if case APIError.httpError(429, _) = error {
                 searchError = "Searching too fast — give it a second."
             } else {
