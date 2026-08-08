@@ -3,7 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
-import type { AccountType, BrandPricing, SignupResponse } from '../api/types'
+import { GoogleSignInButton } from '../components/GoogleSignInButton'
+import type { AccountType, BrandPricing, SignupResponse, TokenResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
 import { clearReturnTo, popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
 
@@ -60,6 +61,22 @@ export default function Signup() {
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Signup failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleGoogle(idToken: string) {
+    setErr(''); setBusy(true)
+    try {
+      const res = await tellusPublicPost<TokenResponse>('/auth/google', { id_token: idToken })
+      setSession(res)
+      const stashed = popReturnTo()
+      // Google-created accounts are always consumer server-side — never the
+      // brand billing redirect.
+      navigate(returnTo ?? stashed ?? '/')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Google sign-in failed')
     } finally {
       setBusy(false)
     }
@@ -125,6 +142,16 @@ export default function Signup() {
           <ErrorText>{err}</ErrorText>
           <Button type="submit" loading={busy} className="w-full">Create account</Button>
         </form>
+        {type === 'consumer' && (
+          <>
+            <div className="my-4 flex items-center gap-3">
+              <div className="h-px flex-1 bg-tu-border" />
+              <span className="text-xs text-tu-dim">OR</span>
+              <div className="h-px flex-1 bg-tu-border" />
+            </div>
+            <GoogleSignInButton onCredential={handleGoogle} disabled={busy} />
+          </>
+        )}
       </Card>
       <p className="mt-4 text-center text-sm text-tu-dim">
         Already have an account? <Link to="/login" className="font-semibold text-tu-accent hover:underline">Sign in</Link>

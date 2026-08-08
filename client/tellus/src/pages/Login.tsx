@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { tellusPublicPost } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, ErrorText, Input } from '../components/ui'
+import { GoogleSignInButton } from '../components/GoogleSignInButton'
 import type { TokenResponse } from '../api/types'
 import { AuthShell } from './AuthShell'
 import { clearReturnTo, popReturnTo, sanitizeReturnTo, stashReturnTo } from '../utils/returnTo'
@@ -43,6 +44,20 @@ export default function Login() {
     try { await tellusPublicPost('/auth/resend-verification', { email }); setErr('Confirmation email sent — check your inbox.') } catch { /* ignore */ }
   }
 
+  async function handleGoogle(idToken: string) {
+    setErr(''); setNeedsConfirm(false); setBusy(true)
+    try {
+      const res = await tellusPublicPost<TokenResponse>('/auth/google', { id_token: idToken })
+      setSession(res)
+      const stashed = popReturnTo()
+      navigate(returnTo ?? stashed ?? '/')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Google sign-in failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <AuthShell title="Welcome back" subtitle="Sign in to give feedback and claim rewards.">
       <Card>
@@ -57,6 +72,12 @@ export default function Login() {
           )}
           <Button type="submit" loading={busy} className="w-full">Sign in</Button>
         </form>
+        <div className="my-4 flex items-center gap-3">
+          <div className="h-px flex-1 bg-tu-border" />
+          <span className="text-xs text-tu-dim">OR</span>
+          <div className="h-px flex-1 bg-tu-border" />
+        </div>
+        <GoogleSignInButton onCredential={handleGoogle} disabled={busy} />
       </Card>
       <p className="mt-4 text-center text-sm text-tu-dim">
         New here? <Link to={returnTo ? '/signup?returnTo=' + encodeURIComponent(returnTo) : '/signup'} className="font-semibold text-tu-accent hover:underline">Create an account</Link>

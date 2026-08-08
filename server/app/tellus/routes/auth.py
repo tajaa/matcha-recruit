@@ -306,7 +306,7 @@ async def login(body: TellusLogin, request: Request):
         if row is not None and row["password_hash"] is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="This account uses Google sign-in. Tap Continue with Google.",
+                detail="This account uses Google sign-in. Use the Google button to sign in.",
             )
         if row is None or not await verify_password_async(body.password, row["password_hash"]):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
