@@ -149,6 +149,14 @@ class TestLikeAuthMatrixSourceGuards:
         assert "get_approved_membership" in src
         assert "BOARD_PAUSED_DETAIL" in src
 
+    def test_assert_board_access_exempts_privileged_from_is_active_pause(self):
+        """Boards are born is_active=FALSE (board_service.ensure_board) — a
+        moderator or owner previewing their own unpublished board must not
+        409 on their own post. plan_status stays absolute for everyone."""
+        src = _code_only(likes_service._assert_board_access)
+        assert "is_privileged" in src
+        assert 'row["plan_status"] != "active" or (not row["is_active"] and not is_privileged)' in src
+
     def test_check_listing_gates_on_active_and_visibility(self):
         src = inspect.getsource(likes_service._check_listing)
         assert "is_active" in src

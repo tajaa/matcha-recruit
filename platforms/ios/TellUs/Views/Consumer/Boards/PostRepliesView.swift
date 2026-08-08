@@ -11,10 +11,18 @@ struct PostRepliesView: View {
     var body: some View {
         List {
             Section {
-                BoardPostCard(post: post) { listing in
-                    vm.redeemFlow.begin()
-                    redeemListing = listing
-                }
+                BoardPostCard(
+                    post: post,
+                    onRedeem: { listing in
+                        vm.redeemFlow.begin()
+                        redeemListing = listing
+                    },
+                    // Mirrors client/tellus BoardPostCard.tsx's disabled prop:
+                    // a plain member can't like on a paused/plan-inactive board.
+                    likeDisabled: vm.page?.viewer_role == .member
+                        && (vm.page?.plan_paused == true || vm.page?.is_active == false),
+                    onLikeError: { vm.error = $0 }
+                )
                 .listRowSeparator(.hidden)
             }
 
@@ -34,7 +42,8 @@ struct PostRepliesView: View {
                         if reply.status == .approved {
                             LikeButton(
                                 target: .boardReply, id: reply.id,
-                                count: reply.likeCount, liked: reply.likedByMe
+                                count: reply.likeCount, liked: reply.likedByMe,
+                                onError: { vm.error = $0 }
                             )
                         }
                     }

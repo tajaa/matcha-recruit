@@ -12,9 +12,21 @@ let scriptPromise: Promise<void> | null = null
 export function loadGoogleIdentityScript(): Promise<void> {
   if (scriptPromise) return scriptPromise
   scriptPromise = new Promise((resolve, reject) => {
+    // window.google already means GIS finished executing, regardless of
+    // which <script> tag triggered it — resolve immediately. Otherwise a
+    // matching tag may exist but not yet have run (Vite HMR can reset this
+    // module's scriptPromise while the DOM tag survives, or a duplicate
+    // injection races us) — attach load/error listeners rather than
+    // resolving blind, or the caller ends up waiting on a promise that
+    // already settled and never learns whether the script actually loaded.
+    if (window.google) {
+      resolve()
+      return
+    }
     const existing = document.querySelector<HTMLScriptElement>(`script[src="${GSI_SRC}"]`)
     if (existing) {
-      resolve()
+      existing.addEventListener('load', () => resolve())
+      existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity Services')))
       return
     }
     const script = document.createElement('script')

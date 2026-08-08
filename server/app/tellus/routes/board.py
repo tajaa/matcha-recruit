@@ -633,9 +633,12 @@ async def update_post(
         listing_row = None
         if row["listing_id"] is not None:
             listing_row = await conn.fetchrow(
-                "SELECT l.*, b.name AS brand_name FROM tellus_reward_listings l "
+                "SELECT l.*, b.name AS brand_name, "
+                "  (SELECT COUNT(*)::int FROM tellus_likes lk WHERE lk.listing_id = l.id) AS like_count, "
+                "  EXISTS (SELECT 1 FROM tellus_likes lk WHERE lk.listing_id = l.id AND lk.account_id = $3) AS liked_by_me "
+                "FROM tellus_reward_listings l "
                 "LEFT JOIN tellus_brands b ON b.id = l.brand_id WHERE l.id = $1 AND l.brand_id = $2",
-                row["listing_id"], brand["id"],
+                row["listing_id"], brand["id"], account.id,
             )
 
     row_dict = {**dict(row), **dict(counts)}

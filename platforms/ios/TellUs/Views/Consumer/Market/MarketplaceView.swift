@@ -48,7 +48,8 @@ struct MarketplaceView: View {
 
                         LikeButton(
                             target: .listing, id: listing.id,
-                            count: listing.likeCount, liked: listing.likedByMe
+                            count: listing.likeCount, liked: listing.likedByMe,
+                            onError: { vm.error = $0 }
                         )
                     }
                 }

@@ -16,7 +16,14 @@ export function GoogleSignInButton({
     let cancelled = false
     loadGoogleIdentityScript()
       .then(() => {
-        if (cancelled || !containerRef.current || !window.google) return
+        if (cancelled || !containerRef.current) return
+        if (!window.google) {
+          // The load promise settled but GIS never attached window.google —
+          // degrade to nothing rendered rather than leaving the spinner
+          // running forever (same fallback as a genuinely blocked script).
+          setStatus('error')
+          return
+        }
         window.google.accounts.id.initialize({
           client_id: GOOGLE_CLIENT_ID,
           callback: (response) => onCredential(response.credential),

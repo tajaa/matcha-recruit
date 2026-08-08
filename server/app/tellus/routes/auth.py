@@ -234,7 +234,11 @@ async def google_auth(body: TellusGoogleAuth, request: Request):
     """Sign in with Google. Auto-creates a consumer account on first use, or
     links Google to an existing account matched by email (Google has already
     proven control of the address, so this also clears a stuck unverified
-    signup). Brand accounts can never be created this way — a brand needs
+    signup). If that account was never email-verified, its password_hash is
+    nulled and sessions revoked — an unverified password was never proven to
+    belong to this address, so keeping it would let someone who pre-registered
+    the victim's email log in by password once Google's proof lands. Brand
+    accounts can never be created this way — a brand needs
     brand_name/location_count/Stripe, none of which a Google token carries —
     but an existing brand account links and signs in like any other."""
     await check_rate_limit(client_ip(request), "tellus_google_auth", 15, 3600)
@@ -255,22 +259,39 @@ async def google_auth(body: TellusGoogleAuth, request: Request):
                 )
                 if existing is not None:
                     row = await conn.fetchrow(
-                        "UPDATE tellus_accounts SET google_sub = $1, "
-                        "email_verified_at = COALESCE(email_verified_at, NOW()), updated_at = NOW() "
-                        "WHERE id = $2 RETURNING id, status",
+                        """UPDATE tellus_accounts SET
+                               google_sub = $1,
+                               -- A never-verified password was never proven
+                               -- to belong to this address; Google just
+                               -- proved the address belongs to the caller.
+                               -- Keeping the hash would hand a pre-registered
+                               -- attacker a live password login.
+                               password_hash = CASE WHEN email_verified_at IS NULL
+                                                     THEN NULL ELSE password_hash END,
+                               tokens_valid_after = CASE WHEN email_verified_at IS NULL
+                                                          THEN NOW() ELSE tokens_valid_after END,
+                               email_verified_at = COALESCE(email_verified_at, NOW()),
+                               updated_at = NOW()
+                           WHERE id = $2 RETURNING id, status""",
                         identity.sub, existing["id"],
                     )
                 else:
                     try:
-                        row = await conn.fetchrow(
-                            "INSERT INTO tellus_accounts "
-                            "(email, password_hash, google_sub, display_name, account_type, email_verified_at) "
-                            "VALUES ($1, NULL, $2, $3, 'consumer', NOW()) RETURNING id, status",
-                            email, identity.sub, identity.name,
-                        )
+                        # Nested conn.transaction() = a SAVEPOINT — a
+                        # concurrent double-tap racing us on the email or
+                        # google_sub unique constraint only rolls back this
+                        # insert, not the whole request (a plain except here
+                        # would otherwise leave the outer transaction aborted
+                        # and the recovery SELECT below would 500 — see
+                        # signup()'s brand-slug branch for the same pattern).
+                        async with conn.transaction():
+                            row = await conn.fetchrow(
+                                "INSERT INTO tellus_accounts "
+                                "(email, password_hash, google_sub, display_name, account_type, email_verified_at) "
+                                "VALUES ($1, NULL, $2, $3, 'consumer', NOW()) RETURNING id, status",
+                                email, identity.sub, identity.name,
+                            )
                     except asyncpg.UniqueViolationError:
-                        # Concurrent double-tap raced us on the email or
-                        # google_sub unique constraint — re-resolve once.
                         row = await conn.fetchrow(
                             "SELECT id, status FROM tellus_accounts WHERE google_sub = $1 OR lower(email) = $2",
                             identity.sub, email,

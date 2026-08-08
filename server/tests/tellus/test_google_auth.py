@@ -1,16 +1,21 @@
-"""Pure-function tests for Google ID-token verification (no DB, no network).
+"""Pure-function + source-guard tests for Google sign-in (no DB, no network).
 
 verify_google_id_token is the shared gate for both matcha core's
 /api/auth/google and Tell-Us's /api/tellus/auth/google — these tests are the
 regression pin for the audience-validation hole the core endpoint originally
 shipped with (no `audience=` passed to verify_oauth2_token).
+
+TestGoogleAuthRouteSourceGuards uses inspect.getsource — repo pattern (see
+test_likes.py), never spec_from_file_location.
 """
+import inspect
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from app.core.services.google_identity import GoogleTokenError, verify_google_id_token
+from app.tellus.routes import auth as auth_routes
 
 _VALID_CLAIMS = {
     "aud": "ios-client-id",
@@ -77,3 +82,29 @@ class TestVerifyGoogleIdToken:
         ):
             with pytest.raises(GoogleTokenError):
                 await verify_google_id_token("raw-token")
+
+
+class TestGoogleAuthRouteSourceGuards:
+    """DB-touching paths are integration-level — run manually per
+    server/app/tellus/CLAUDE.md. These pin the two SQL-shape invariants a
+    live test can't cheaply cover without a real double-tap race / a real
+    unverified account."""
+
+    def test_new_account_insert_is_a_savepoint(self):
+        """A concurrent double-tap's INSERT can raise UniqueViolationError —
+        it must be caught OUTSIDE the transaction() block it's nested in, or
+        the recovery SELECT below runs on an aborted transaction and 500s
+        (the exact bug signup()'s brand-slug branch documents avoiding)."""
+        src = inspect.getsource(auth_routes.google_auth)
+        # One for the outer per-request transaction, one SAVEPOINT around
+        # just the new-account INSERT.
+        assert src.count("async with conn.transaction():") == 2
+
+    def test_link_nulls_password_only_when_never_verified(self):
+        """Linking Google onto an account matched by email must not silently
+        keep a password nobody proved belongs to that address — see the
+        pre-hijack note in tellus/CLAUDE.md's Google sign-in section."""
+        src = inspect.getsource(auth_routes.google_auth)
+        assert "password_hash = CASE WHEN email_verified_at IS NULL" in src
+        assert "THEN NULL ELSE password_hash END" in src
+        assert "tokens_valid_after = CASE WHEN email_verified_at IS NULL" in src

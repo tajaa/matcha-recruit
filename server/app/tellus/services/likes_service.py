@@ -65,10 +65,16 @@ async def _assert_board_access(conn, account, row: dict) -> None:
         row["brand_id"], account.id,
     )
     is_owner = row.get("owner_account_id") == account.id
-    if not is_mod and not is_owner:
+    is_privileged = bool(is_mod) or is_owner
+    if not is_privileged:
         if await bs.get_approved_membership(conn, row["board_id"], account.id) is None:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a board member")
-    if row["plan_status"] != "active" or not row["is_active"]:
+    # Boards are born is_active=FALSE (board_service.ensure_board) — a
+    # privileged caller previewing their own not-yet-published board must
+    # not get trapped by the same gate a member does. plan_status stays
+    # absolute for everyone: a lapsed brand goes fully dark by design,
+    # matching points_service.redeem_points' three-way gate.
+    if row["plan_status"] != "active" or (not row["is_active"] and not is_privileged):
         raise HTTPException(status.HTTP_409_CONFLICT, bs.BOARD_PAUSED_DETAIL)
 
 

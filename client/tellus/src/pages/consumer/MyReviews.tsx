@@ -134,14 +134,19 @@ function ReviewCard({ review, onChange }: { review: MyReview; onChange: () => vo
               <MessageCircle className="h-3.5 w-3.5" /> Messages
             </Button>
           )}
-          {!withdrawn && (
-            <LikeButton target="report" targetId={review.id} count={review.like_count} liked={review.liked_by_me} />
+          {review.review_state === 'published' && (
+            <LikeButton
+              target="report" targetId={review.id}
+              count={review.like_count} liked={review.liked_by_me}
+              onError={setErr}
+            />
           )}
           {!withdrawn && (
             <Button size="sm" variant="ghost" loading={busy} onClick={withdraw} className="ml-auto text-tu-bad">Withdraw</Button>
           )}
         </div>
       )}
+      {!editing && err && <ErrorText>{err}</ErrorText>}
     </Card>
   )
 }

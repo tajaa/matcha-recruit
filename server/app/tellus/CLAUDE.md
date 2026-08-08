@@ -48,7 +48,7 @@ Per-brand channel (`routes/board.py`, `services/board_service.py`, `tellus_app_1
 - **Google-created accounts are always `account_type='consumer'`** — a brand needs `brand_name`/`location_count`/Stripe, none of which a Google token carries. An *existing* brand account still links and signs in normally.
 - **`password_hash IS NULL` is the Google-only marker** — deliberately not a random unusable hash (unlike matcha core's version). `login()` checks this before attempting `verify_password_async` and returns a distinguishable 401 ("uses Google sign-in") rather than 500ing on `None.encode(...)`. Never backfill a real hash onto a Google-only row without also clearing `google_sub`, or the account becomes reachable by both paths with divergent state.
 - **Every new-account insert path must also write `tellus_points_balances`** — same invariant `signup()`'s consumer branch follows (`routes/auth.py:150-154`).
-- Linking sets `email_verified_at = COALESCE(email_verified_at, NOW())` — Google has already proven control of the address, so this also clears a stuck unverified password signup.
+- Linking sets `email_verified_at = COALESCE(email_verified_at, NOW())` — Google has already proven control of the address, so this also clears a stuck unverified password signup. **If the matched account was never verified, linking also nulls `password_hash` and bumps `tokens_valid_after`** — an unverified password was never proven to belong to that address, so an attacker who pre-registered someone else's email could otherwise log in by password the moment the real owner's Google proof lands. An already-verified account's password is left untouched.
 
 ## Places / reviews on unclaimed businesses
 

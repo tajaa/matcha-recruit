@@ -8,7 +8,7 @@ submissions still land (0 points). Honeypot + layered rate limits, mirroring
 """
 import logging
 from typing import Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, status
 
@@ -38,8 +38,6 @@ _ALLOWED_VIDEO = {"video/mp4", "video/webm", "video/quicktime"}
 _MAX_PHOTO_BYTES = 10 * 1024 * 1024      # 10 MB
 _MAX_VIDEO_BYTES = 200 * 1024 * 1024     # 200 MB (direct-to-S3, bypasses nginx)
 _MAX_MEDIA_PER_REPORT = 6
-
-
 
 
 async def _resolve_link(conn, token: str) -> dict:

@@ -3,6 +3,8 @@ import SwiftUI
 struct BoardPostCard: View {
     let post: BoardPost
     let onRedeem: (Listing) -> Void
+    var likeDisabled: Bool = false
+    var onLikeError: ((String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -40,7 +42,8 @@ struct BoardPostCard: View {
                     .font(.caption).foregroundStyle(.secondary)
                 LikeButton(
                     target: .boardPost, id: post.id,
-                    count: post.likeCount, liked: post.likedByMe
+                    count: post.likeCount, liked: post.likedByMe,
+                    disabled: likeDisabled, onError: onLikeError
                 )
             }
         }

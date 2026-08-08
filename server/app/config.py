@@ -210,6 +210,13 @@ class Settings:
     # verify_google_id_token. iOS OAuth clients are public (no secret) and
     # safe to expose in project.yml. Unset ⇒ google_identity.py fails closed
     # and rejects every token, rather than accepting every token.
+    #
+    # ONE web + ONE iOS client ID, shared across every caller of
+    # verify_google_id_token (currently matcha core's /api/auth/google and
+    # Tell-Us's /api/tellus/auth/google — verified 2026-08-08, Tell-Us has no
+    # frontend caller of the matcha-core endpoint). Both products currently
+    # live in the same GCP project (62787429179). If a future product needs
+    # its own OAuth client, this needs to become a list, not two scalars.
     google_ios_client_id: Optional[str] = None
     google_web_client_id: Optional[str] = None
 

@@ -83,7 +83,8 @@ struct MyReviewDetailView: View {
                 Section {
                     LikeButton(
                         target: .report, id: review.id,
-                        count: review.likeCount, liked: review.likedByMe
+                        count: review.likeCount, liked: review.likedByMe,
+                        onError: { vm.error = $0 }
                     )
                 }
             }
