@@ -13,6 +13,7 @@ struct MoreView: View {
             Section {
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
+                NavigationLink("Messages") { MessagesListView() }
             }
 
             Section {

@@ -35,6 +35,9 @@ private struct ReportDetailForm: View {
     @Bindable var vm: ReportDetailViewModel
     @State private var replyText = ""
     @State private var showPublishConfirm = false
+    @State private var messageThread: DmThread?
+    @State private var messageError: String?
+    @State private var isOpeningThread = false
 
     var body: some View {
         Form {
@@ -44,6 +47,8 @@ private struct ReportDetailForm: View {
             heartSection
             replySection
             if report.review_state == .held { publishSection }
+            // Identified feedback only, matching web's dm gating.
+            if report.is_identified { messageSection }
             if !report.media.isEmpty {
                 Section("Media") {
                     ReportMediaGallery(media: report.media) { vm.refetchOnceForExpiredMedia() }
@@ -58,6 +63,30 @@ private struct ReportDetailForm: View {
             titleVisibility: .visible
         ) {
             Button("Publish now", role: .destructive) { Task { await vm.publishNow() } }
+        }
+        .navigationDestination(item: $messageThread) { thread in
+            DmThreadView(vm: DmThreadViewModel(thread: thread))
+        }
+    }
+
+    private var messageSection: some View {
+        Section {
+            Button {
+                Task {
+                    isOpeningThread = true; defer { isOpeningThread = false }
+                    do {
+                        messageThread = try await DmService.shared.openFromReport(reportId: report.id)
+                    } catch {
+                        if !error.isCancellation { messageError = error.localizedDescription }
+                    }
+                }
+            } label: {
+                if isOpeningThread { ProgressView() } else { Text("Message reporter") }
+            }
+            .disabled(isOpeningThread)
+            if let messageError {
+                Text(messageError).foregroundStyle(.red).font(.footnote)
+            }
         }
     }
 

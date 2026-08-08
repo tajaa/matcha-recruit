@@ -67,6 +67,12 @@ struct MyReviewDetailView: View {
                 Section("Brand reply") { Text(reply) }
             }
 
+            if let threadId = review.dm_thread_id {
+                Section {
+                    NavigationLink("Messages") { DmThreadView(vm: DmThreadViewModel(threadId: threadId)) }
+                }
+            }
+
             if review.hearted {
                 Label("Hearted by the brand", systemImage: "heart.fill").foregroundStyle(.pink)
             }

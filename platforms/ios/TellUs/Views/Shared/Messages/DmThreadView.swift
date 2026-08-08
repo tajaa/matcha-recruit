@@ -1,0 +1,95 @@
+import SwiftUI
+
+struct DmThreadView: View {
+    @Environment(AppState.self) private var appState
+    @Bindable var vm: DmThreadViewModel
+    @State private var draft = ""
+    @State private var showBlockConfirm = false
+
+    private var isConsumer: Bool { appState.account?.account_type == .consumer }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            List {
+                ForEach(vm.messages) { message in
+                    DmBubbleRow(message: message)
+                        .id(message.id)
+                        .listRowSeparator(.hidden)
+                }
+            }
+            .listStyle(.plain)
+            .onChange(of: vm.messages.count) { _, _ in
+                if let last = vm.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if vm.thread?.blocked == true {
+                Text("This conversation has ended.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
+            } else {
+                HStack {
+                    TextField("Message…", text: $draft)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Send") {
+                        Task {
+                            let toSend = draft
+                            draft = ""
+                            await vm.send(toSend)
+                        }
+                    }
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isSending)
+                }
+                .padding()
+                .background(.bar)
+            }
+        }
+        .navigationTitle(vm.thread?.counterparty_name ?? "Message")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // Only the consumer side can block/unblock a brand thread.
+            if isConsumer, vm.thread != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if vm.thread?.blocked == true {
+                        Button("Unblock") { Task { await vm.unblock() } }
+                    } else {
+                        Button("Block", role: .destructive) { showBlockConfirm = true }
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Block this conversation?", isPresented: $showBlockConfirm, titleVisibility: .visible) {
+            Button("Block", role: .destructive) { Task { await vm.block() } }
+        }
+        .task { await vm.load() }
+        .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
+    }
+}
+
+/// Split out of DmThreadView's ForEach body — the ternary-laden background/
+/// foregroundStyle/Spacer chain inline defeated the type-checker (same class
+/// of issue documented for ReportDetailForm's Sections).
+private struct DmBubbleRow: View {
+    let message: DmMessage
+
+    var body: some View {
+        HStack {
+            if message.is_mine { Spacer(minLength: 40) }
+            Text(message.body)
+                .padding(10)
+                .background(bubbleColor, in: RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(textColor)
+            if !message.is_mine { Spacer(minLength: 40) }
+        }
+    }
+
+    private var bubbleColor: Color {
+        message.is_mine ? Color.accentColor : Color(.secondarySystemBackground)
+    }
+
+    private var textColor: Color {
+        message.is_mine ? .white : .primary
+    }
+}

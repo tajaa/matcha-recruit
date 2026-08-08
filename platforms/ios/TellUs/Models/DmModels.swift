@@ -5,7 +5,7 @@ import Foundation
 
 enum DmSenderRole: String, Codable, FallbackDecodable { case brand, consumer, unknown }
 
-struct DmThread: Codable, Identifiable {
+struct DmThread: Codable, Identifiable, Hashable {
     let id: String
     let report_id: String
     let counterparty_name: String
