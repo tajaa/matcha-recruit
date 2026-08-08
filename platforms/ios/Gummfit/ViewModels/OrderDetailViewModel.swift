@@ -26,13 +26,14 @@ final class OrderDetailViewModel: LoadableVM {
 
     @discardableResult
     func updateStatus(siteId: String, status: String? = nil, carrier: Clearable<String> = .unset, trackingNumber: Clearable<String> = .unset) async -> Bool {
+        guard let orderId = order?.id else { return false }
         guard Self.isValidStatusUpdate(status: status, carrier: carrier, trackingNumber: trackingNumber) else { return false }
         isActing = true
         error = nil
         defer { isActing = false }
         do {
             order = try await OrdersService.shared.updateStatus(
-                siteId: siteId, orderId: order?.id ?? "",
+                siteId: siteId, orderId: orderId,
                 CappeOrderStatusUpdate(status: status, carrier: carrier, tracking_number: trackingNumber)
             )
             return true

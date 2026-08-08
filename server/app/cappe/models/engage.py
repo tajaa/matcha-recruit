@@ -186,7 +186,7 @@ class CappeClientCreate(BaseModel):
     phone: Optional[str] = Field(default=None, max_length=40)
     location_id: Optional[UUID] = None
     notes: Optional[str] = None
-    tags: list[str] = Field(default_factory=list)
+    tags: Optional[list[str]] = None  # None = leave unchanged (no absent-vs-clear signal needed today)
     add_to_newsletter: bool = False
 
 

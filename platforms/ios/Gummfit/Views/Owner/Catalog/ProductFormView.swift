@@ -96,8 +96,15 @@ struct ProductFormView: View {
                 }
             }
 
-            Section("Options") {
+            Section {
                 optionGroupsEditor
+            } header: {
+                Text("Options")
+            } footer: {
+                if !vm.optionsValid {
+                    Text("Name every option group and option, or delete the empty rows.")
+                        .foregroundStyle(.red)
+                }
             }
         }
         .navigationTitle(existing == nil ? "New product" : "Edit product")
@@ -118,8 +125,7 @@ struct ProductFormView: View {
             if let existing {
                 NavigationStack {
                     StockAdjustSheet(site: site, product: existing, currentInventory: vm.inventory, onAdjusted: { updated in
-                        vm.inventory = updated.inventory ?? 0
-                        vm.isTrackingStock = updated.inventory != nil
+                        vm.applyAdjusted(updated)
                     })
                 }
             }

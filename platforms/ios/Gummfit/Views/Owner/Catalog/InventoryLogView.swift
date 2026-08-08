@@ -6,6 +6,7 @@ struct InventoryLogView: View {
 
     @State private var entries: [CappeInventoryAdjustment] = []
     @State private var isLoading = false
+    @State private var error: String?
 
     var body: some View {
         Group {
@@ -33,11 +34,13 @@ struct InventoryLogView: View {
                 }
             }
         }
+        .overlay(alignment: .top) { ErrorBanner(message: error) }
         .navigationTitle("Inventory log")
         .task {
             isLoading = true
-            entries = (try? await CatalogService.shared.inventoryLog(siteId: site.id, productId: productId)) ?? []
-            isLoading = false
+            defer { isLoading = false }
+            do { entries = try await CatalogService.shared.inventoryLog(siteId: site.id, productId: productId) }
+            catch { if !error.isCancellation { self.error = error.localizedDescription } }
         }
     }
 }

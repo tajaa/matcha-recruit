@@ -173,34 +173,111 @@ struct CappeDiscount: Codable, Identifiable, Equatable {
     var label: String
     var percent_off: Int
     var scope: DiscountScope
+    /// The wire string `scope` was decoded from — `DiscountScope`'s own
+    /// decoder drops this once it falls back to `.unknown`, but
+    /// `CappeDiscountInput.init(from:)` needs it to round-trip a scope this
+    /// build doesn't recognize instead of overwriting it with the literal
+    /// string `"unknown"` on save.
+    var scopeRaw: String
     var target_id: String?
     var active: Bool
     var starts_on: String?
     var ends_on: String?
     var location_id: String?
     let created_at: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, site_id, label, percent_off, scope, target_id, active, starts_on, ends_on, location_id, created_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        site_id = try c.decode(String.self, forKey: .site_id)
+        label = try c.decode(String.self, forKey: .label)
+        percent_off = try c.decode(Int.self, forKey: .percent_off)
+        scopeRaw = try c.decode(String.self, forKey: .scope)
+        scope = DiscountScope(rawValue: scopeRaw) ?? .unknown
+        target_id = try c.decodeIfPresent(String.self, forKey: .target_id)
+        active = try c.decode(Bool.self, forKey: .active)
+        starts_on = try c.decodeIfPresent(String.self, forKey: .starts_on)
+        ends_on = try c.decodeIfPresent(String.self, forKey: .ends_on)
+        location_id = try c.decodeIfPresent(String.self, forKey: .location_id)
+        created_at = try c.decode(String.self, forKey: .created_at)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(site_id, forKey: .site_id)
+        try c.encode(label, forKey: .label)
+        try c.encode(percent_off, forKey: .percent_off)
+        try c.encode(scopeRaw, forKey: .scope)
+        try c.encodeIfPresent(target_id, forKey: .target_id)
+        try c.encode(active, forKey: .active)
+        try c.encodeIfPresent(starts_on, forKey: .starts_on)
+        try c.encodeIfPresent(ends_on, forKey: .ends_on)
+        try c.encodeIfPresent(location_id, forKey: .location_id)
+        try c.encode(created_at, forKey: .created_at)
+    }
 }
 
 /// Write-side row for the whole-set discount replace (server/app/cappe/models/shop.py:290-298).
 struct CappeDiscountInput: Codable, Identifiable, Equatable {
     let id = UUID()
     var label: String = "Discount"
-    var percent_off: Int
-    var scope: DiscountScope = .all
     var target_id: String?
     var active: Bool = true
     var starts_on: String?
     var ends_on: String?
     var location_id: String?
+    var percent_off: Int
+
+    /// Backing storage for `scope` — kept as the raw wire string so a scope
+    /// value this build doesn't recognize (decoded to `.unknown`) survives
+    /// unchanged through the whole-set PUT instead of being re-encoded as the
+    /// literal `"unknown"`, which would 422 against the server's
+    /// `Literal[...]` field (see `DiscountScope.isWritable`-style concern —
+    /// this type has no such flag because it never blocks on it).
+    private var scopeWire: String = DiscountScope.all.rawValue
+
+    var scope: DiscountScope {
+        get { DiscountScope(rawValue: scopeWire) ?? .unknown }
+        set { scopeWire = newValue.rawValue }
+    }
 
     enum CodingKeys: String, CodingKey {
         case label, percent_off, scope, target_id, active, starts_on, ends_on, location_id
     }
 
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(String.self, forKey: .label)
+        percent_off = try c.decode(Int.self, forKey: .percent_off)
+        scopeWire = try c.decode(String.self, forKey: .scope)
+        target_id = try c.decodeIfPresent(String.self, forKey: .target_id)
+        active = try c.decode(Bool.self, forKey: .active)
+        starts_on = try c.decodeIfPresent(String.self, forKey: .starts_on)
+        ends_on = try c.decodeIfPresent(String.self, forKey: .ends_on)
+        location_id = try c.decodeIfPresent(String.self, forKey: .location_id)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(label, forKey: .label)
+        try c.encode(percent_off, forKey: .percent_off)
+        try c.encode(scopeWire, forKey: .scope)
+        try c.encodeIfPresent(target_id, forKey: .target_id)
+        try c.encode(active, forKey: .active)
+        try c.encodeIfPresent(starts_on, forKey: .starts_on)
+        try c.encodeIfPresent(ends_on, forKey: .ends_on)
+        try c.encodeIfPresent(location_id, forKey: .location_id)
+    }
+
     init(from existing: CappeDiscount) {
         label = existing.label
         percent_off = existing.percent_off
-        scope = existing.scope
+        scopeWire = existing.scopeRaw
         target_id = existing.target_id
         active = existing.active
         starts_on = existing.starts_on

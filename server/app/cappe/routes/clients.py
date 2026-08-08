@@ -160,13 +160,13 @@ async def add_client(
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "That branch doesn't belong to this site.")
         await conn.execute(
             """INSERT INTO cappe_clients (site_id, email, name, phone, location_id, notes, tags, source)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, 'manual')
+               VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, '{}'::text[]), 'manual')
                ON CONFLICT (site_id, email) DO UPDATE SET
                    name = COALESCE(EXCLUDED.name, cappe_clients.name),
                    phone = COALESCE(EXCLUDED.phone, cappe_clients.phone),
-                   location_id = EXCLUDED.location_id,
+                   location_id = COALESCE($5, cappe_clients.location_id),
                    notes = COALESCE(EXCLUDED.notes, cappe_clients.notes),
-                   tags = EXCLUDED.tags,
+                   tags = COALESCE($7, cappe_clients.tags),
                    updated_at = NOW()""",
             site_id, email, body.name, body.phone, body.location_id, body.notes, body.tags,
         )

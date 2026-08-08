@@ -16,6 +16,7 @@ struct HomeView: View {
     @State private var showCreateSite = false
     @State private var declineTarget: CappeRequestSummary?
     @State private var declineReason = ""
+    @State private var showDecline = false
 
     var body: some View {
         ScrollView {
@@ -41,12 +42,10 @@ struct HomeView: View {
         .sheet(isPresented: $showCreateSite) {
             NavigationStack { CreateSiteView() }
         }
-        .alert("Decline request", isPresented: Binding(get: { declineTarget != nil }, set: { if !$0 { declineTarget = nil } })) {
+        .alert("Decline request", isPresented: $showDecline, presenting: declineTarget) { target in
             TextField("Reason (optional)", text: $declineReason)
             Button("Decline", role: .destructive) {
-                if let target = declineTarget {
-                    Task { await requestsVM.decline(siteId: site.id, target, reason: declineReason.isEmpty ? nil : declineReason) }
-                }
+                Task { await requestsVM.decline(siteId: site.id, target, reason: declineReason.isEmpty ? nil : declineReason) }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -84,6 +83,7 @@ struct HomeView: View {
                         Button("Decline") {
                             declineTarget = request
                             declineReason = ""
+                            showDecline = true
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

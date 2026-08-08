@@ -100,18 +100,19 @@ struct OrderDetailView: View {
                         }
                     }
                 }
-                .onAppear {
-                    statusChoice = order.status.rawValue
-                    carrier = order.carrier ?? ""
-                    originalCarrier = carrier
-                    tracking = order.tracking_number ?? ""
-                    originalTracking = tracking
-                }
             } else if vm.isLoading {
                 ProgressView()
             }
         }
         .navigationTitle("Order")
+        .onChange(of: vm.order, initial: true) { _, newOrder in
+            guard let o = newOrder else { return }
+            statusChoice = o.status.rawValue
+            carrier = o.carrier ?? ""
+            originalCarrier = carrier
+            tracking = o.tracking_number ?? ""
+            originalTracking = tracking
+        }
         .sheet(item: $receiptURL.map(PresentedURL.init)) { wrapped in
             QLPreviewRepresentable(url: wrapped.url)
         }

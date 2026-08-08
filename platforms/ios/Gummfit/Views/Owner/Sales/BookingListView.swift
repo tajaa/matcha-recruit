@@ -6,6 +6,7 @@ struct BookingListView: View {
     @State private var vm = BookingsListViewModel()
     @State private var declineTarget: CappeBooking?
     @State private var declineReason = ""
+    @State private var showDecline = false
 
     var body: some View {
         Group {
@@ -23,6 +24,7 @@ struct BookingListView: View {
                                 Button("Decline", role: .destructive) {
                                     declineTarget = booking
                                     declineReason = ""
+                                    showDecline = true
                                 }
                             }
                         }
@@ -31,12 +33,10 @@ struct BookingListView: View {
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
-        .alert("Decline booking", isPresented: Binding(get: { declineTarget != nil }, set: { if !$0 { declineTarget = nil } })) {
+        .alert("Decline booking", isPresented: $showDecline, presenting: declineTarget) { target in
             TextField("Reason (optional)", text: $declineReason)
             Button("Decline", role: .destructive) {
-                if let target = declineTarget {
-                    Task { await vm.decline(siteId: site.id, bookingId: target.id, reason: declineReason.isEmpty ? nil : declineReason) }
-                }
+                Task { await vm.decline(siteId: site.id, bookingId: target.id, reason: declineReason.isEmpty ? nil : declineReason) }
             }
             Button("Cancel", role: .cancel) {}
         }

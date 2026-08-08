@@ -80,7 +80,8 @@ struct DiscountsView: View {
         .task {
             await vm.load(siteId: site.id, locationId: selectedLocationId)
             if site.is_multi_location {
-                locations = (try? await VenueService.shared.listLocations(siteId: site.id)) ?? []
+                do { locations = try await VenueService.shared.listLocations(siteId: site.id) }
+                catch { if !error.isCancellation { vm.error = error.localizedDescription } }
             }
         }
     }

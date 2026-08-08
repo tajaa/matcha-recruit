@@ -88,7 +88,11 @@ struct CappeClientCreate: Encodable {
     var phone: String?
     var location_id: String?
     var notes: String?
-    var tags: [String] = []
+    /// nil = leave the client's existing tags/location unchanged server-side
+    /// (`CappeClientCreate.tags`/`location_id` in engage.py — both COALESCE
+    /// against the stored row rather than overwrite). `[]` would still wipe
+    /// tags to empty, so callers that don't edit tags must pass nil, not [].
+    var tags: [String]? = nil
     var add_to_newsletter: Bool = false
 }
 

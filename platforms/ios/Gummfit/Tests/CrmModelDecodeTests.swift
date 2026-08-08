@@ -45,4 +45,25 @@ final class CrmModelDecodeTests: XCTestCase {
         XCTAssertNil(review.rating)
         XCTAssertEqual(review.status, "pending")
     }
+
+    /// `tags` defaulting to `nil` (not `[]`) is load-bearing: the server's
+    /// upsert (routes/clients.py) COALESCEs an absent `tags` key against the
+    /// stored row, but would wipe it to `[]` if the key were always sent.
+    /// Same story for `location_id`. A save that doesn't touch either field
+    /// must omit both keys entirely.
+    func testClientCreateOmitsTagsAndLocationWhenNotTouched() throws {
+        let body = CappeClientCreate(email: "jane@example.com", name: "Jane", phone: "555-0100")
+        let data = try JSONEncoder().encode(body)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(obj["tags"])
+        XCTAssertNil(obj["location_id"])
+        XCTAssertEqual(obj["name"] as? String, "Jane")
+    }
+
+    func testClientCreateSendsTagsWhenExplicitlySet() throws {
+        let body = CappeClientCreate(email: "jane@example.com", tags: ["vip", "newsletter"])
+        let data = try JSONEncoder().encode(body)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["tags"] as? [String], ["vip", "newsletter"])
+    }
 }

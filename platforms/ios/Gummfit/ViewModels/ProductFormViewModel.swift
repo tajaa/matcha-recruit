@@ -15,6 +15,13 @@ final class ProductFormViewModel {
     /// `"fulfillment" in body.model_fields_set` check), and re-sending the
     /// unchanged value on every save would defeat that.
     private var originalFulfillment: Fulfillment?
+    /// Captured on `load(from:)`/`applyAdjusted(_:)` so `save()` only sends an
+    /// absolute `inventory` when the form itself changed it — the server also
+    /// exposes an atomic `/adjust` endpoint precisely so a stale form draft
+    /// can't clobber stock a checkout or another device moved in the
+    /// meantime; re-sending the value captured at load defeats that.
+    private var originalIsTrackingStock = false
+    private var originalInventory = 0
 
     var name = ""
     var description = ""
@@ -40,8 +47,36 @@ final class ProductFormViewModel {
     var isUploadingPhoto = false
     var error: String?
 
+    /// Groups/options the user tapped "Add" on but never filled in. An option
+    /// with an empty name and no price delta is abandoned; a group with an
+    /// empty name and no surviving options is abandoned. Both are dropped
+    /// silently on save rather than tripping the server's `min_length=1`
+    /// (models/shop.py:21,29), which would 422 the *entire* product save —
+    /// name/price/photo edits included — over a stray empty row.
+    private var prunedOptionGroups: [CappeProductOptionGroupInput] {
+        optionGroups.compactMap { group in
+            var g = group
+            g.options.removeAll {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.price_delta_cents == 0
+            }
+            let nameEmpty = g.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if nameEmpty && g.options.isEmpty { return nil }
+            return g
+        }
+    }
+
+    /// True once every group/option that will actually be sent is named —
+    /// mirrors the server's `min_length=1` check so Save disables instead of
+    /// round-tripping a 422.
+    var optionsValid: Bool {
+        prunedOptionGroups.allSatisfy { g in
+            !g.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && g.options.allSatisfy { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+    }
+
     var canSubmit: Bool {
-        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isLoading
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && optionsValid && !isLoading
     }
 
     func load(from product: CappeProduct) {
@@ -54,6 +89,8 @@ final class ProductFormViewModel {
         sku = product.sku ?? ""
         isTrackingStock = product.inventory != nil
         inventory = product.inventory ?? 0
+        originalIsTrackingStock = isTrackingStock
+        originalInventory = inventory
         lowStockThreshold = product.low_stock_threshold
         status = product.status
         fulfillment = product.fulfillment
@@ -71,6 +108,17 @@ final class ProductFormViewModel {
                 }
             )
         }
+    }
+
+    /// Re-baselines `original*` after the stock-adjust sheet commits — it
+    /// writes through the atomic `/adjust` endpoint directly, so the form's
+    /// draft `inventory` must catch up without itself counting as "the form
+    /// changed the stock" on the next Save.
+    func applyAdjusted(_ updated: CappeProduct) {
+        inventory = updated.inventory ?? 0
+        isTrackingStock = updated.inventory != nil
+        originalInventory = inventory
+        originalIsTrackingStock = isTrackingStock
     }
 
     func uploadPhoto(data: Data, mimeType: String, filename: String, siteId: String) async {
@@ -106,20 +154,26 @@ final class ProductFormViewModel {
                 let bookingTypeIdToSend: Clearable<String> = fulfillment == .booking
                     ? (bookingTypeId.map { .value($0) } ?? .clear)
                     : .unset
+                // Only send inventory when the form itself changed it — see
+                // `originalIsTrackingStock`/`originalInventory` doc comment.
+                let inventoryToSend: Clearable<Int> =
+                    (isTrackingStock == originalIsTrackingStock && inventory == originalInventory)
+                    ? .unset
+                    : (isTrackingStock ? .value(inventory) : .clear)
                 _ = try await CatalogService.shared.update(siteId: siteId, productId: productId, CappeProductUpdate(
                     name: trimmedName,
                     description: .from(description, touched: true),
                     price_cents: priceCents, currency: currency,
                     image_url: imageUrl.map { .value($0) } ?? .unset,
                     sku: .from(sku, touched: true),
-                    inventory: isTrackingStock ? .value(inventory) : .clear,
+                    inventory: inventoryToSend,
                     low_stock_threshold: (isTrackingStock ? lowStockThreshold : nil).map { .value($0) } ?? .clear,
                     status: status, sort_order: nil, fulfillment: fulfillmentToSend,
                     digital_file_url: .from(digitalFileUrl, touched: true),
                     booking_type_id: bookingTypeIdToSend,
                     requires_approval: requiresApproval,
                     category: .from(category, touched: true),
-                    option_groups: optionGroups
+                    option_groups: prunedOptionGroups
                 ))
             } else {
                 _ = try await CatalogService.shared.create(siteId: siteId, CappeProductCreate(
@@ -132,7 +186,7 @@ final class ProductFormViewModel {
                     digital_file_url: digitalFileUrl.isEmpty ? nil : digitalFileUrl,
                     booking_type_id: fulfillment == .booking ? bookingTypeId : nil,
                     requires_approval: requiresApproval,
-                    category: category.isEmpty ? nil : category, option_groups: optionGroups
+                    category: category.isEmpty ? nil : category, option_groups: prunedOptionGroups
                 ))
             }
             return true

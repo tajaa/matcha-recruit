@@ -52,4 +52,43 @@ final class ShopModelDecodeTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(OrderStatus.self, from: Data("\"chargeback\"".utf8)), .unknown)
         XCTAssertEqual(try JSONDecoder().decode(DiscountScope.self, from: Data("\"bundle\"".utf8)), .unknown)
     }
+
+    /// `DiscountScope.unknown` used to be re-encoded as the literal string
+    /// `"unknown"`, which would 422 the whole discount PUT against the
+    /// server's `Literal[...]` field. `CappeDiscountInput` now threads the
+    /// raw wire string through so a scope this build doesn't recognize
+    /// survives a load→save round trip unchanged.
+    func testUnknownDiscountScopeRoundTripsRawValue() throws {
+        let json = """
+        {"id": "disc-1", "site_id": "site-1", "label": "Flash sale", "percent_off": 20,
+         "scope": "flash_sale", "target_id": null, "active": true, "starts_on": null,
+         "ends_on": null, "location_id": null, "created_at": "2026-08-01T00:00:00Z"}
+        """
+        let discount = try JSONDecoder().decode(CappeDiscount.self, from: Data(json.utf8))
+        XCTAssertEqual(discount.scope, .unknown)
+
+        let input = CappeDiscountInput(from: discount)
+        let encoded = try JSONEncoder().encode(input)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(obj["scope"] as? String, "flash_sale")
+    }
+
+    /// A known scope still round-trips normally, and switching the picker to
+    /// a different known scope (simulated by reassigning `.scope`) updates
+    /// the encoded value rather than sticking to the original raw string.
+    func testKnownDiscountScopeRoundTripsAndIsSettable() throws {
+        let json = """
+        {"id": "disc-2", "site_id": "site-1", "label": "10% off", "percent_off": 10,
+         "scope": "all", "target_id": null, "active": true, "starts_on": null,
+         "ends_on": null, "location_id": null, "created_at": "2026-08-01T00:00:00Z"}
+        """
+        let discount = try JSONDecoder().decode(CappeDiscount.self, from: Data(json.utf8))
+        var input = CappeDiscountInput(from: discount)
+        XCTAssertEqual(input.scope, .all)
+
+        input.scope = .booking_type
+        let encoded = try JSONEncoder().encode(input)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(obj["scope"] as? String, "booking_type")
+    }
 }

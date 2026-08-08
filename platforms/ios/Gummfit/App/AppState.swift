@@ -128,10 +128,12 @@ final class AppState {
     func restartUnreadPoll() {
         unreadTask?.cancel()
         guard scenePhaseIsActive, let siteId = activeSite?.id else { return }
+        let epoch = sessionEpoch
         unreadTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self else { return }
-                if let threads = try? await MessagesService.shared.listThreads(siteId: siteId) {
+                guard let self, epoch == self.sessionEpoch else { return }
+                if let threads = try? await MessagesService.shared.listThreads(siteId: siteId),
+                   epoch == self.sessionEpoch {
                     self.unreadCount = threads.reduce(0) { $0 + $1.owner_unread }
                 }
                 try? await Task.sleep(for: .seconds(60))
@@ -152,7 +154,8 @@ final class AppState {
     /// rather than waiting up to 60s for the next poll tick.
     func refreshUnreadCount() async {
         guard let siteId = activeSite?.id else { return }
-        if let threads = try? await MessagesService.shared.listThreads(siteId: siteId) {
+        let epoch = sessionEpoch
+        if let threads = try? await MessagesService.shared.listThreads(siteId: siteId), epoch == sessionEpoch {
             unreadCount = threads.reduce(0) { $0 + $1.owner_unread }
         }
     }

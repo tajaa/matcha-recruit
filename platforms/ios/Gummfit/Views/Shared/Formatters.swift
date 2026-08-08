@@ -4,14 +4,18 @@ import Foundation
 /// (several endpoints pass it explicitly for exactly this reason), never a
 /// hardcoded "$" symbol.
 enum Formatters {
-    private static var cache: [String: NumberFormatter] = [:]
+    // NSCache, not a plain dictionary — every caller happens to be main-actor
+    // today, but a dictionary mutation from any other context would be an
+    // unguarded data race. NSCache is thread-safe without adding isolation.
+    private static let cache = NSCache<NSString, NumberFormatter>()
 
     private static func formatter(for currency: String) -> NumberFormatter {
-        if let cached = cache[currency] { return cached }
+        let key = currency as NSString
+        if let cached = cache.object(forKey: key) { return cached }
         let f = NumberFormatter()
         f.numberStyle = .currency
         f.currencyCode = currency
-        cache[currency] = f
+        cache.setObject(f, forKey: key)
         return f
     }
 
