@@ -32,9 +32,16 @@ def integrity_error_to_http(e: IntegrityError) -> HTTPException:
         return HTTPException(status_code=409, detail=message)
     if isinstance(orig, ForeignKeyViolation):
         constraint = getattr(orig.diag, "constraint_name", None)
-        detail = getattr(orig.diag, "message_detail", None) or ""
-        if "still referenced" in detail:
-            return HTTPException(status_code=409, detail=f"Row is referenced by other records ({constraint})")
+        table = getattr(orig.diag, "table_name", None)
+        # Discriminate by statement kind, not by parsing the (locale-dependent)
+        # Postgres DETAIL string: a DELETE/UPDATE tripping a FK means the row is
+        # still referenced (409); an INSERT/UPDATE tripping a FK means it points
+        # at something that doesn't exist (422). SQLAlchemy always renders its
+        # own SQL keywords in English regardless of server locale.
+        statement = str(e.statement or "").strip().upper()
+        if statement.startswith("DELETE"):
+            what = table.replace("_", " ") if table else "other records"
+            return HTTPException(status_code=409, detail=f"Cannot delete — still referenced by {what}")
         return HTTPException(status_code=422, detail=f"Referenced row does not exist ({constraint})")
     if isinstance(orig, NotNullViolation):
         col = getattr(orig.diag, "column_name", None)

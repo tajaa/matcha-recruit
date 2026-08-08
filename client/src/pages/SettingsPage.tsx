@@ -40,7 +40,9 @@ export function SettingsPage() {
   const { data: isrcConfig, isError: isrcConfigError } = useIsrcConfig()
   const updateIsrc = useUpdateIsrcConfig()
   const addUpcs = useAddUpcs()
-  const { data: upcs, isError: upcsError } = useUpcs()
+  const [upcOffset, setUpcOffset] = useState(0)
+  const upcLimit = 50
+  const { data: upcs, isError: upcsError } = useUpcs(upcOffset, upcLimit)
   const unassignUpc = useUnassignUpc()
   const [prefix, setPrefix] = useState('')
   const [upcText, setUpcText] = useState('')
@@ -153,6 +155,27 @@ export function SettingsPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+        {upcs && upcs.total > upcLimit && (
+          <div className="flex items-center gap-2 mt-2 text-xs">
+            <button
+              className="px-2 py-0.5 rounded border disabled:opacity-50"
+              disabled={upcOffset === 0}
+              onClick={() => setUpcOffset((o) => Math.max(0, o - upcLimit))}
+            >
+              Prev
+            </button>
+            <span className="text-neutral-500">
+              {upcOffset + 1}–{Math.min(upcOffset + upcLimit, upcs.total)} of {upcs.total}
+            </span>
+            <button
+              className="px-2 py-0.5 rounded border disabled:opacity-50"
+              disabled={upcOffset + upcLimit >= upcs.total}
+              onClick={() => setUpcOffset((o) => o + upcLimit)}
+            >
+              Next
+            </button>
           </div>
         )}
         <MutationError error={unassignUpc.error} />

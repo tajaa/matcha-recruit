@@ -15,7 +15,7 @@ def test_add_upcs_validates_check_digit_and_dedupes(db):
     added, rejected, skipped = upc_service.add_upcs(db, [VALID_UPC_12, VALID_UPC_12])
     assert added == 1
     assert rejected == []
-    assert skipped == 0
+    assert skipped == 1
 
 
 def test_add_upcs_pads_12_digit_to_13(db):
@@ -86,7 +86,7 @@ def test_add_upcs_accepts_separator_formats(db):
     added, rejected, skipped = upc_service.add_upcs(db, ["0-36000-29145-2", "0 36000 29145 2"])
     assert added == 1
     assert rejected == []
-    assert skipped == 0  # both normalize to the same code, deduped pre-insert like a plain repeat
+    assert skipped == 1  # both normalize to the same code, deduped pre-insert like a plain repeat
 
     from app.models.codes import UpcCode
 

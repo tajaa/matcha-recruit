@@ -200,11 +200,10 @@ interface UpcsResponse {
   offset: number
 }
 
-export function useUpcs() {
+export function useUpcs(offset = 0, limit = 50) {
   return useQuery({
-    queryKey: ['upcs'],
-    // TODO Phase 2: pagination past 200
-    queryFn: async () => (await apiClient.get<UpcsResponse>('/upcs', { params: { limit: 200 } })).data,
+    queryKey: ['upcs', offset, limit],
+    queryFn: async () => (await apiClient.get<UpcsResponse>('/upcs', { params: { limit, offset } })).data,
   })
 }
 

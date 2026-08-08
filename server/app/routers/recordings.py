@@ -36,7 +36,7 @@ def list_recordings(
     if q:
         stmt = stmt.where(Recording.title.ilike(f"%{q}%"))
     total = db.execute(sa.select(sa.func.count()).select_from(stmt.subquery())).scalar_one()
-    rows = db.execute(stmt.order_by(Recording.title).limit(limit).offset(offset)).scalars().all()
+    rows = db.execute(stmt.order_by(Recording.title, Recording.id).limit(limit).offset(offset)).scalars().all()
     return Page(items=rows, total=total, limit=limit, offset=offset)
 
 

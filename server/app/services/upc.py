@@ -50,12 +50,14 @@ def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str], int]:
     normalized: list[str] = []
     rejected: list[str] = []
     seen: set[str] = set()
+    duplicates = 0
     for raw in codes:
         code = _normalize(raw)
         if code is None:
             rejected.append(raw)
             continue
         if code in seen:
+            duplicates += 1
             continue
         seen.add(code)
         normalized.append(code)
@@ -69,7 +71,7 @@ def add_upcs(db: Session, codes: list[str]) -> tuple[int, list[str], int]:
             .returning(UpcCode.code)
         ).scalars().all()
         added = len(inserted)
-    skipped = len(normalized) - added
+    skipped = (len(normalized) - added) + duplicates
     return added, rejected, skipped
 
 

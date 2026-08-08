@@ -71,7 +71,11 @@ def db(engine) -> Generator[Session, None, None]:
 @pytest.fixture()
 def client(db) -> Generator[TestClient, None, None]:
     def _get_db_override():
-        yield db
+        try:
+            yield db
+        except Exception:
+            db.rollback()
+            raise
 
     app.dependency_overrides[get_db] = _get_db_override
     with TestClient(app) as c:
@@ -110,7 +114,11 @@ def db_real(engine) -> Generator[Session, None, None]:
 @pytest.fixture()
 def client_real(db_real) -> Generator[TestClient, None, None]:
     def _get_db_override():
-        yield db_real
+        try:
+            yield db_real
+        except Exception:
+            db_real.rollback()
+            raise
 
     app.dependency_overrides[get_db] = _get_db_override
     with TestClient(app) as c:
