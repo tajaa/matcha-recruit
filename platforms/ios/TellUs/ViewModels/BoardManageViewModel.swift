@@ -7,6 +7,10 @@ final class BoardManageViewModel: LoadableVM {
     /// nil for a brand account managing its own board; set when a
     /// consumer-typed moderator moderates a specific brand's board.
     let brandId: String?
+    /// The board's slug — needed for the Posts tab (GET /boards/{slug} is
+    /// the only listing endpoint; server has no /board/manage/posts). Brand
+    /// accounts pass their own brand_slug; moderators pass ModeratedBrand.slug.
+    let slug: String?
     /// True only when brandId != nil — a moderator's own account is fine
     /// even if the moderated brand's plan lapses, so this never routes to
     /// AppState.brandWall; it's a local, dismissable alert instead.
@@ -16,10 +20,48 @@ final class BoardManageViewModel: LoadableVM {
     var requests: [BoardJoinRequest] = []
     var heldReplies: [BoardManageReplyRow] = []
     var members: [BoardMemberEntry] = []
+    var posts: [BoardPost] = []
+    var team: [BrandTeamMember] = []
     var isLoading = false
     var error: String?
 
-    init(brandId: String?) { self.brandId = brandId }
+    init(brandId: String?, slug: String? = nil) {
+        self.brandId = brandId
+        self.slug = slug
+    }
+
+    func loadPosts() async {
+        guard let slug else { return }
+        await withLoad {
+            posts = try await BoardService.shared.board(slug: slug, limit: 50).posts
+        }
+    }
+
+    func loadTeam() async {
+        await withLoad {
+            team = try await BoardManageService.shared.team(brandId: brandId)
+        }
+    }
+
+    func updatePost(_ id: String, _ body: BoardPostUpdate) async {
+        await run({
+            let updated = try await BoardManageService.shared.updatePost(id: id, brandId: self.brandId, body)
+            if let idx = self.posts.firstIndex(where: { $0.id == id }) { self.posts[idx] = updated }
+        }) {}
+    }
+
+    func addTeamMember(email: String) async {
+        await run({
+            let member = try await BoardManageService.shared.addTeamMember(email: email, brandId: self.brandId)
+            self.team.append(member)
+        }) {}
+    }
+
+    func removeTeamMember(_ id: String) async {
+        await run({ try await BoardManageService.shared.removeTeamMember(id: id, brandId: self.brandId) }) {
+            self.team.removeAll { $0.id == id }
+        }
+    }
 
     func load() async {
         await withLoad {
@@ -65,11 +107,16 @@ final class BoardManageViewModel: LoadableVM {
     }
 
     func createPost(_ body: BoardPostCreate) async {
-        await run({ _ = try await BoardManageService.shared.createPost(brandId: self.brandId, body) }) {}
+        await run({
+            let created = try await BoardManageService.shared.createPost(brandId: self.brandId, body)
+            self.posts.insert(created, at: 0)
+        }) {}
     }
 
     func deletePost(_ id: String) async {
-        await run({ try await BoardManageService.shared.deletePost(id: id, brandId: self.brandId) }) {}
+        await run({ try await BoardManageService.shared.deletePost(id: id, brandId: self.brandId) }) {
+            self.posts.removeAll { $0.id == id }
+        }
     }
 
     /// Runs a mutation and applies a targeted local update on success instead

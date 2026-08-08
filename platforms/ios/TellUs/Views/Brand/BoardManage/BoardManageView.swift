@@ -6,9 +6,9 @@ struct BoardManageView: View {
     @State private var tab = 0
     @State private var showCompose = false
 
-    init(brandId: String?) {
+    init(brandId: String?, slug: String? = nil) {
         self.brandId = brandId
-        _vm = State(initialValue: BoardManageViewModel(brandId: brandId))
+        _vm = State(initialValue: BoardManageViewModel(brandId: brandId, slug: slug))
     }
 
     var body: some View {
@@ -29,6 +29,7 @@ struct BoardManageView: View {
                 Text("Held").tag(1)
                 Text("Posts").tag(2)
                 Text("Members").tag(3)
+                Text("Team").tag(4)
             }
             .pickerStyle(.segmented)
             .padding()
@@ -37,8 +38,9 @@ struct BoardManageView: View {
                 switch tab {
                 case 0: JoinRequestsView(vm: vm)
                 case 1: HeldRepliesView(vm: vm)
-                case 2: postsPlaceholder
-                default: MembersView(vm: vm)
+                case 2: BoardPostsView(vm: vm)
+                case 3: MembersView(vm: vm)
+                default: TeamView(vm: vm)
                 }
             }
         }
@@ -52,6 +54,7 @@ struct BoardManageView: View {
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
         .task { await vm.load() }
+        .task(id: tab) { if tab == 2 { await vm.loadPosts() } }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
         .alert("Plan paused", isPresented: $vm.planPausedAlert) {
@@ -59,9 +62,5 @@ struct BoardManageView: View {
         } message: {
             Text("This brand's plan isn't active — board mutations are disabled until they reactivate.")
         }
-    }
-
-    private var postsPlaceholder: some View {
-        EmptyState(icon: "square.and.pencil", title: "Compose a post", hint: "Use the + button above.")
     }
 }

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct BrandTabView: View {
+    @Environment(AppState.self) private var appState
+
     var body: some View {
         TabView {
             NavigationStack { DashboardView() }
@@ -9,14 +11,14 @@ struct BrandTabView: View {
             NavigationStack { FeedbackListView() }
                 .tabItem { Label("Feedback", systemImage: "bubble.left.and.text.bubble.right") }
 
-            NavigationStack { BoardManageView(brandId: nil) }
+            NavigationStack { BoardManageView(brandId: nil, slug: appState.account?.brand_slug) }
                 .tabItem { Label("Board", systemImage: "person.3") }
 
-            NavigationStack { NotificationsView() }
-                .tabItem { Label("Alerts", systemImage: "bell") }
+            NavigationStack { MessagesListView() }
+                .tabItem { Label("Messages", systemImage: "message") }
 
-            NavigationStack { BrandAccountView() }
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+            NavigationStack { BrandMoreView() }
+                .tabItem { Label("More", systemImage: "ellipsis.circle") }
         }
     }
 }
