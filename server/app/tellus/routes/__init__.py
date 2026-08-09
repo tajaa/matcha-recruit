@@ -14,6 +14,7 @@ from .board import router as board_router
 from .community import router as community_router
 from .dms import router as dms_router
 from .feedback import router as feedback_router
+from .flyer_ai import router as flyer_ai_router
 from .gamification import router as gamification_router
 from .grants import router as grants_router
 from .likes import router as likes_router
@@ -55,6 +56,7 @@ tellus_router.include_router(prompts_router)
 tellus_router.include_router(feedback_router)
 tellus_router.include_router(grants_router)
 tellus_router.include_router(billing_router)
+tellus_router.include_router(flyer_ai_router)
 
 # Mixed-role (per-endpoint dependency — brand opens, either side replies).
 tellus_router.include_router(dms_router)
