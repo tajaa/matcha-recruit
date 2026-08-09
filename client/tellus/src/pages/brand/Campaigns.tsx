@@ -1,0 +1,262 @@
+import { useEffect, useState } from 'react'
+import { QRCodeCanvas } from 'qrcode.react'
+import { Ban, Copy, Pause, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
+import { tellusApi } from '../../api/tellusClient'
+import { promoApi } from '../../api/promo'
+import { Button, Card, Chip, Empty, ErrorText, Input, Modal, Select, Spinner, Textarea } from '../../components/ui'
+import type { PromoCampaign, ScannerDevice, Store } from '../../api/types'
+
+function absoluteUrl(path: string) {
+  return `${window.location.origin}${path}`
+}
+
+function campaignTone(status: PromoCampaign['status']): string | undefined {
+  if (status === 'active') return 'positive'
+  if (status === 'cancelled') return 'negative'
+  return undefined
+}
+
+function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [title, setTitle] = useState('')
+  const [rewardText, setRewardText] = useState('')
+  const [description, setDescription] = useState('')
+  const [maxClaims, setMaxClaims] = useState(50)
+  const [expiryDays, setExpiryDays] = useState(30)
+  const [endsAt, setEndsAt] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState('')
+
+  function reset() {
+    setTitle(''); setRewardText(''); setDescription(''); setMaxClaims(50); setExpiryDays(30); setEndsAt(''); setErr('')
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setErr(''); setSaving(true)
+    try {
+      await promoApi.createCampaign({
+        title, reward_text: rewardText, description: description || null,
+        max_claims: maxClaims, card_expiry_days: expiryDays,
+        ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+      })
+      reset(); onClose(); onCreated()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create campaign')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={() => { reset(); onClose() }} title="New promo campaign">
+      <form onSubmit={submit} className="space-y-3">
+        <Input label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Today only: free coffee" />
+        <Input label="Reward" required value={rewardText} onChange={(e) => setRewardText(e.target.value)}
+          placeholder="What the card is good for, e.g. One free coffee" />
+        <Textarea label="Description (optional)" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Claim limit" type="number" min={1} max={10000} value={maxClaims}
+            onChange={(e) => setMaxClaims(Number(e.target.value))} />
+          <Input label="Card valid for (days)" type="number" min={1} max={365} value={expiryDays}
+            onChange={(e) => setExpiryDays(Number(e.target.value))} />
+        </div>
+        <Input label="Ends (optional)" type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
+        <ErrorText>{err}</ErrorText>
+        <Button type="submit" loading={saving} className="w-full"><Plus className="h-4 w-4" /> Create campaign</Button>
+      </form>
+    </Modal>
+  )
+}
+
+function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChanged: () => void }) {
+  const [showQr, setShowQr] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const claimUrl = absoluteUrl(campaign.claim_url)
+
+  async function togglePause() {
+    setBusy(true)
+    try {
+      await promoApi.patchCampaign(campaign.id, { status: campaign.status === 'active' ? 'paused' : 'active' })
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function cancel() {
+    if (!confirm('Cancel this campaign? Every unredeemed card is invalidated immediately.')) return
+    setBusy(true)
+    try {
+      const { invalidated_count } = await promoApi.cancelCampaign(campaign.id)
+      alert(`Campaign cancelled. ${invalidated_count} outstanding card(s) invalidated.`)
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const stats = campaign.stats
+  return (
+    <Card className={campaign.status === 'cancelled' ? 'opacity-60' : ''}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold">{campaign.title}</h3>
+            <Chip tone={campaignTone(campaign.status)}>{campaign.status}</Chip>
+          </div>
+          <p className="text-sm text-tu-dim">{campaign.reward_text}</p>
+          <p className="mt-1 text-xs text-tu-faint">
+            {campaign.claim_count} / {campaign.max_claims} claimed
+            {stats ? ` · ${stats.redeemed} redeemed · ${stats.outstanding} outstanding` : ''}
+            {campaign.ends_at ? ` · ends ${new Date(campaign.ends_at).toLocaleString()}` : ''}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="soft" onClick={() => setShowQr((v) => !v)}><QrCode className="h-4 w-4" /> QR</Button>
+          <Button variant="soft" onClick={() => navigator.clipboard.writeText(claimUrl)}><Copy className="h-4 w-4" /></Button>
+          {campaign.status !== 'cancelled' && (
+            <Button variant="soft" loading={busy} onClick={togglePause}>
+              {campaign.status === 'active' ? <><Pause className="h-4 w-4" /> Pause</> : <><Play className="h-4 w-4" /> Resume</>}
+            </Button>
+          )}
+          {campaign.status !== 'cancelled' && (
+            <Button variant="ghost" loading={busy} onClick={cancel} className="text-tu-bad"><Ban className="h-4 w-4" /> Cancel</Button>
+          )}
+        </div>
+      </div>
+      {showQr && (
+        <div className="mt-4 flex flex-col items-center gap-2 border-t border-tu-border pt-4">
+          <div className="rounded-xl bg-white p-3"><QRCodeCanvas value={claimUrl} size={160} /></div>
+          <p className="break-all text-center text-xs text-tu-faint">{claimUrl}</p>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function ScannersSection() {
+  const [stores, setStores] = useState<Store[]>([])
+  const [scanners, setScanners] = useState<ScannerDevice[]>([])
+  const [loading, setLoading] = useState(true)
+  const [storeId, setStoreId] = useState('')
+  const [label, setLabel] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [err, setErr] = useState('')
+  const [qrToken, setQrToken] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    const [s, sc] = await Promise.all([
+      tellusApi.get<Store[]>('/stores'),
+      promoApi.listScanners(),
+    ])
+    setStores(s); setScanners(sc); setLoading(false)
+  }
+  useEffect(() => { void load() }, [])
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault(); setErr(''); setCreating(true)
+    try {
+      await promoApi.createScanner({ store_id: storeId, label: label || undefined })
+      setStoreId(''); setLabel(''); await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create scanner')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  async function revoke(id: string) {
+    if (!confirm('Revoke this scanner? The device will stop being able to redeem cards.')) return
+    await promoApi.revokeScanner(id); await load()
+  }
+
+  if (loading) return <Spinner />
+
+  return (
+    <section className="space-y-4">
+      <h2 className="text-lg font-bold">Counter scanners</h2>
+      {stores.length === 0 ? (
+        <Empty>Add a store first (Stores &amp; QR) before minting a scanner.</Empty>
+      ) : (
+        <Card>
+          <form onSubmit={create} className="grid gap-3 sm:grid-cols-4">
+            <Select label="Store" value={storeId} onChange={(e) => setStoreId(e.target.value)}
+              options={[{ value: '', label: 'Select a store' }, ...stores.map((s) => ({ value: s.id, label: s.name }))]}
+              required />
+            <div className="sm:col-span-2"><Input label="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Front register" /></div>
+            <div className="flex items-end">
+              <Button type="submit" loading={creating} className="w-full" disabled={!storeId}><ScanLine className="h-4 w-4" /> Create</Button>
+            </div>
+          </form>
+        </Card>
+      )}
+      <ErrorText>{err}</ErrorText>
+
+      {scanners.length === 0 ? <Empty>No scanners yet.</Empty> : (
+        <div className="space-y-3">
+          {scanners.map((sc) => {
+            const scannerUrl = absoluteUrl(sc.scanner_url)
+            return (
+              <Card key={sc.id} className={sc.is_active ? '' : 'opacity-50'}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">{sc.label || 'Scanner'}</p>
+                    <p className="text-xs text-tu-faint">{sc.store_name}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="soft" onClick={() => setQrToken(qrToken === sc.token ? null : sc.token)}><QrCode className="h-4 w-4" /> QR</Button>
+                    <Button variant="soft" onClick={() => navigator.clipboard.writeText(scannerUrl)}><Copy className="h-4 w-4" /></Button>
+                    {sc.is_active && <Button variant="ghost" onClick={() => revoke(sc.id)} className="text-tu-bad"><Trash2 className="h-4 w-4" /></Button>}
+                  </div>
+                </div>
+                {qrToken === sc.token && (
+                  <div className="mt-4 flex flex-col items-center gap-2 border-t border-tu-border pt-4">
+                    <div className="rounded-xl bg-white p-3"><QRCodeCanvas value={scannerUrl} size={160} /></div>
+                    <p className="break-all text-center text-xs text-tu-faint">{scannerUrl}</p>
+                    <p className="text-center text-xs text-tu-faint">Open this link on the counter device — no login needed.</p>
+                  </div>
+                )}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export default function BrandCampaigns() {
+  const [campaigns, setCampaigns] = useState<PromoCampaign[]>([])
+  const [loading, setLoading] = useState(true)
+  const [modalOpen, setModalOpen] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    setCampaigns(await promoApi.listCampaigns())
+    setLoading(false)
+  }
+  useEffect(() => { void load() }, [])
+
+  return (
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-bold">Promo campaigns</h1>
+          <Button onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> New campaign</Button>
+        </div>
+
+        {loading ? <Spinner /> : campaigns.length === 0 ? (
+          <Empty>No campaigns yet. Create one to generate a claimable QR flyer.</Empty>
+        ) : (
+          <div className="space-y-3">
+            {campaigns.map((c) => <CampaignCard key={c.id} campaign={c} onChanged={load} />)}
+          </div>
+        )}
+      </section>
+
+      <ScannersSection />
+
+      <CreateCampaignModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={load} />
+    </div>
+  )
+}

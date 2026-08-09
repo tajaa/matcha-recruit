@@ -24,6 +24,7 @@ import Messages from './pages/Messages'
 import BrandFeedback from './pages/brand/Feedback'
 import BrandStores from './pages/brand/Stores'
 import BrandListings from './pages/brand/Listings'
+import BrandCampaigns from './pages/brand/Campaigns'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 import BrandBoard from './pages/brand/Board'
@@ -130,6 +131,7 @@ export default function App() {
       <Route path="/brand/messages" element={<Protected requireType="brand"><Messages /></Protected>} />
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
+      <Route path="/brand/campaigns" element={<Protected requireType="brand"><BrandCampaigns /></Protected>} />
       <Route path="/brand/board" element={<Protected requireType="brand" allowConsumerModerator><BrandBoard /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
 

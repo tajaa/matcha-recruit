@@ -775,3 +775,163 @@ export interface AdminBoardReplyRow {
   status: BoardReplyStatus
   created_at: string
 }
+
+// ── Promo campaigns / QR reward cards ───────────────────────────────────────
+
+export type PromoCampaignStatus = 'active' | 'paused' | 'cancelled'
+export type EffectiveCardStatus = 'issued' | 'redeemed' | 'cancelled' | 'expired'
+export type ClaimUnavailableReason = 'ok' | 'cap_reached' | 'cancelled' | 'paused' | 'not_started' | 'ended'
+
+export interface PromoCampaignStats {
+  claimed: number
+  redeemed: number
+  outstanding: number
+  expired: number
+  cancelled: number
+}
+
+export interface PromoCampaign {
+  id: string
+  title: string
+  description: string | null
+  reward_text: string
+  claim_token: string
+  claim_url: string
+  max_claims: number
+  claim_count: number
+  status: PromoCampaignStatus
+  card_expiry_days: number
+  starts_at: string | null
+  ends_at: string | null
+  flyer_image_url: string | null
+  has_design: boolean
+  cancelled_at: string | null
+  created_at: string
+  stats: PromoCampaignStats | null
+}
+
+export interface PromoCard {
+  id: string
+  card_token: string
+  card_url: string
+  status: EffectiveCardStatus
+  campaign_title: string
+  reward_text: string
+  brand_name: string
+  brand_logo_url: string | null
+  issued_at: string
+  expires_at: string
+  redeemed_at: string | null
+  redeemed_store_name: string | null
+}
+
+export interface PromoClaimResult extends PromoCard {
+  created: boolean
+}
+
+export interface ClaimPreview {
+  brand_name: string
+  brand_logo_url: string | null
+  title: string
+  reward_text: string
+  description: string | null
+  flyer_image_url: string | null
+  available: boolean
+  reason: ClaimUnavailableReason
+  already_claimed: boolean
+  card_token: string | null
+}
+
+export interface ScannerDevice {
+  id: string
+  store_id: string
+  store_name: string
+  label: string | null
+  token: string
+  scanner_url: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface PromoRedeemResult {
+  campaign_title: string
+  reward_text: string
+  redeemed_at: string
+  store_name: string | null
+}
+
+export interface PromoScanBootstrap {
+  store_name: string
+  brand_name: string
+  brand_logo_url: string | null
+}
+
+// Designer document model — QR layers store no URL; the campaign's
+// claim_token is resolved into an absolute claim URL at render/export time.
+export type ArtboardPreset = 'flyer_letter' | 'reward_card' | 'social_square' | 'story'
+
+export interface FlyerDesign {
+  version: 1
+  artboard: { preset: ArtboardPreset; w: number; h: number }
+  background: { kind: 'color'; color: string } | { kind: 'image'; src: string; fit: 'cover' }
+  layers: DesignLayer[]
+}
+
+interface DesignLayerBase {
+  id: string
+  x: number
+  y: number
+  rotation: number
+  opacity: number
+  locked?: boolean
+}
+
+export type DesignLayer =
+  | (DesignLayerBase & {
+      type: 'text'
+      text: string
+      fontFamily: string
+      fontSize: number
+      fontStyle: 'normal' | 'bold' | 'italic'
+      fill: string
+      align: 'left' | 'center' | 'right'
+      width: number
+      lineHeight: number
+      letterSpacing: number
+    })
+  | (DesignLayerBase & { type: 'image'; src: string; width: number; height: number; slot?: 'logo' })
+  | (DesignLayerBase & { type: 'sticker'; assetId: string; width: number; height: number })
+  | (DesignLayerBase & {
+      type: 'shape'
+      shape: 'rect' | 'circle' | 'line'
+      width: number
+      height: number
+      fill: string
+      stroke?: string
+      strokeWidth?: number
+      cornerRadius?: number
+    })
+  | (DesignLayerBase & { type: 'qr'; size: number; fg: string; bg: string })
+
+export interface FontManifestEntry {
+  family: string
+  file: string
+  weight: number
+  preview: string
+}
+
+export interface StickerManifestEntry {
+  id: string
+  file: string
+  thumb: string
+  w: number
+  h: number
+}
+
+export interface TemplateManifestEntry {
+  id: string
+  name: string
+  preset: ArtboardPreset
+  file: string
+  thumb: string
+}

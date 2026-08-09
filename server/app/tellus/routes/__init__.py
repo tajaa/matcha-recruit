@@ -21,6 +21,8 @@ from .links import router as links_router
 from .marketplace import router as marketplace_router
 from .my_reviews import router as my_reviews_router
 from .places import router as places_router
+from .promo import router as promo_router
+from .promo_public import router as promo_public_router
 from .prompts import router as prompts_router
 from .public_intake import router as public_intake_router
 from .rewards import router as rewards_router
@@ -37,6 +39,7 @@ async def tellus_health():
 # Unauthenticated surfaces.
 tellus_router.include_router(auth_router)
 tellus_router.include_router(public_intake_router)
+tellus_router.include_router(promo_public_router)
 tellus_router.include_router(community_router)
 tellus_router.include_router(places_router)
 
@@ -57,6 +60,9 @@ tellus_router.include_router(billing_router)
 tellus_router.include_router(dms_router)
 tellus_router.include_router(board_router)
 tellus_router.include_router(likes_router)
+# Mixed-role: brand campaign/scanner CRUD (require_paid_brand) + consumer
+# card reads (require_consumer), per-endpoint.
+tellus_router.include_router(promo_router)
 
 # Internal admin (require_tellus_admin per-route — TELLUS_ADMIN_EMAILS allowlist).
 tellus_router.include_router(admin_router)

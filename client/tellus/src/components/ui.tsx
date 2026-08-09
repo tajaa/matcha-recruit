@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { useEffect } from 'react'
+import { ChevronDown, Loader2, X } from 'lucide-react'
 
 export function Button({
   children, loading, disabled, variant = 'primary', size = 'md', className = '', ...props
@@ -98,4 +99,34 @@ const SENTIMENT_STYLE: Record<string, string> = {
 export function Chip({ children, tone }: { children: ReactNode; tone?: string }) {
   const cls = tone && SENTIMENT_STYLE[tone] ? SENTIMENT_STYLE[tone] : 'bg-tu-panel2 text-tu-dim'
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>
+}
+
+export function Modal({
+  open, onClose, title, children, footer,
+}: { open: boolean; onClose: () => void; title?: string; children: ReactNode; footer?: ReactNode }) {
+  useEffect(() => {
+    if (!open) return
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onClose])
+
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border border-tu-border bg-tu-panel p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {title && (
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-base font-bold">{title}</h2>
+            <button onClick={onClose} className="text-tu-faint hover:text-tu-text"><X className="h-4 w-4" /></button>
+          </div>
+        )}
+        {children}
+        {footer && <div className="mt-5 flex justify-end gap-2">{footer}</div>}
+      </div>
+    </div>
+  )
 }
