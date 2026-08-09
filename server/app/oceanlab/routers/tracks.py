@@ -107,5 +107,23 @@ def delete_track(track_id: uuid.UUID, db: Session = Depends(get_db)):
     track = db.get(Track, track_id)
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
+
+    release_id, disc_number, position = track.release_id, track.disc_number, track.position
     db.delete(track)
+    db.flush()
+
+    # Close the hole the delete just made. Positions must stay 1..n per disc or
+    # the packaging validator's T-GAP rule fires on a release the user never
+    # broke. Safe as one statement: the (release_id, disc_number, position)
+    # unique is DEFERRABLE INITIALLY DEFERRED, so the intermediate states
+    # inside this transaction are not checked.
+    db.execute(
+        sa.update(Track)
+        .where(
+            Track.release_id == release_id,
+            Track.disc_number == disc_number,
+            Track.position > position,
+        )
+        .values(position=Track.position - 1)
+    )
     db.commit()

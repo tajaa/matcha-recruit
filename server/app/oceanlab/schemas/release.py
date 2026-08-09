@@ -1,9 +1,9 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from app.oceanlab.models.enums import ReleaseStatus, ReleaseType
+from app.oceanlab.models.enums import ArtistRole, ReleaseStatus, ReleaseType
 
 
 class ReleaseBase(BaseModel):
@@ -58,3 +58,34 @@ class ReleaseRead(ReleaseBase):
     artwork_file_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+class ReleaseArtistIn(BaseModel):
+    artist_id: uuid.UUID
+    role: ArtistRole
+    position: int
+
+
+class ReleaseArtistRead(ReleaseArtistIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    release_id: uuid.UUID
+
+
+class ReleaseArtistsIn(BaseModel):
+    """Replace-all payload for a release's artist credits.
+
+    The DB unique is (release_id, artist_id, role), so the same artist may
+    appear once as primary and once as featured — dedupe on the pair, not on
+    artist_id alone, or a legitimate credit becomes unexpressible.
+    """
+
+    artists: list[ReleaseArtistIn]
+
+    @model_validator(mode="after")
+    def _no_duplicate_artist_role(self):
+        pairs = [(a.artist_id, a.role) for a in self.artists]
+        if len(set(pairs)) != len(pairs):
+            raise ValueError("artists must not repeat the same (artist_id, role) pair")
+        return self

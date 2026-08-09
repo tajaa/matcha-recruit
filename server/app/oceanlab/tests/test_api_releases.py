@@ -242,3 +242,142 @@ def test_reorder_is_scoped_per_disc(client_real):
     assert by_id[t1b["id"]]["position"] == 2
     assert by_id[t2b["id"]]["position"] == 1
     assert by_id[t2a["id"]]["position"] == 2
+
+
+def test_delete_track_compacts_positions(client_real):
+    # Positions must stay 1..n per disc or the Phase-3 validator's T-GAP rule
+    # fires on a release the user never actually broke.
+    client = client_real
+    artist_id = _make_artist(client)
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "album", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    tracks = [
+        client.post(
+            f"/api/releases/{release_id}/tracks",
+            json={"recording_id": _make_recording(client, artist_id, f"T{i}")},
+        ).json()
+        for i in range(3)
+    ]
+    assert [t["position"] for t in tracks] == [1, 2, 3]
+
+    assert client.delete(f"/api/tracks/{tracks[1]['id']}").status_code == 204
+
+    remaining = client.get(f"/api/releases/{release_id}/tracks").json()
+    assert [t["position"] for t in remaining] == [1, 2]
+    assert [t["id"] for t in remaining] == [tracks[0]["id"], tracks[2]["id"]]
+
+
+def test_delete_track_compaction_is_scoped_per_disc(client_real):
+    client = client_real
+    artist_id = _make_artist(client)
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "album", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    d1 = [
+        client.post(
+            f"/api/releases/{release_id}/tracks",
+            json={"recording_id": _make_recording(client, artist_id, f"D1-{i}"), "disc_number": 1},
+        ).json()
+        for i in range(2)
+    ]
+    d2 = [
+        client.post(
+            f"/api/releases/{release_id}/tracks",
+            json={"recording_id": _make_recording(client, artist_id, f"D2-{i}"), "disc_number": 2},
+        ).json()
+        for i in range(2)
+    ]
+
+    client.delete(f"/api/tracks/{d1[0]['id']}")
+
+    by_id = {t["id"]: t for t in client.get(f"/api/releases/{release_id}/tracks").json()}
+    assert by_id[d1[1]["id"]]["position"] == 1, "disc 1 compacts"
+    assert by_id[d2[0]["id"]]["position"] == 1, "disc 2 untouched"
+    assert by_id[d2[1]["id"]]["position"] == 2
+
+
+def test_put_release_artists_replace_all(client):
+    artist_id = _make_artist(client)
+    featured = client.post("/api/artists", json={"name": "Featured One"}).json()["id"]
+    other = client.post("/api/artists", json={"name": "Featured Two"}).json()["id"]
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "single", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    resp = client.put(
+        f"/api/releases/{release_id}/artists",
+        json={"artists": [
+            {"artist_id": artist_id, "role": "primary", "position": 1},
+            {"artist_id": featured, "role": "featured", "position": 1},
+        ]},
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+    # Replace-all: the second PUT wins outright, it does not merge.
+    resp = client.put(
+        f"/api/releases/{release_id}/artists",
+        json={"artists": [{"artist_id": other, "role": "featured", "position": 1}]},
+    )
+    assert resp.status_code == 200
+    rows = client.get(f"/api/releases/{release_id}/artists").json()
+    assert [r["artist_id"] for r in rows] == [other]
+
+
+def test_put_release_artists_same_artist_both_roles_allowed(client):
+    # The DB unique is (release_id, artist_id, role) — an artist credited both
+    # as primary and featured is legitimate and must not be deduped away.
+    artist_id = _make_artist(client)
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "single", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    resp = client.put(
+        f"/api/releases/{release_id}/artists",
+        json={"artists": [
+            {"artist_id": artist_id, "role": "primary", "position": 1},
+            {"artist_id": artist_id, "role": "featured", "position": 2},
+        ]},
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 2
+
+
+def test_put_release_artists_duplicate_pair_422(client):
+    artist_id = _make_artist(client)
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "single", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    resp = client.put(
+        f"/api/releases/{release_id}/artists",
+        json={"artists": [
+            {"artist_id": artist_id, "role": "featured", "position": 1},
+            {"artist_id": artist_id, "role": "featured", "position": 2},
+        ]},
+    )
+    assert resp.status_code == 422
+
+
+def test_put_release_artists_unknown_artist_422(client):
+    artist_id = _make_artist(client)
+    release_id = client.post(
+        "/api/releases", json={"title": "R", "release_type": "single", "primary_artist_id": artist_id}
+    ).json()["id"]
+
+    resp = client.put(
+        f"/api/releases/{release_id}/artists",
+        json={"artists": [
+            {"artist_id": "00000000-0000-0000-0000-000000000000", "role": "featured", "position": 1}
+        ]},
+    )
+    assert resp.status_code == 422
+    assert "Artist not found" in resp.json()["detail"]
+
+
+def test_get_release_artists_unknown_release_404(client):
+    resp = client.get("/api/releases/00000000-0000-0000-0000-000000000000/artists")
+    assert resp.status_code == 404
