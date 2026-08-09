@@ -79,7 +79,9 @@ export interface ReleaseFilters {
 export function useReleases(filters: ReleaseFilters = {}) {
   return useQuery({
     queryKey: ['releases', filters],
-    queryFn: async () => (await apiClient.get<Page<Release>>('/releases', { params: filters })).data,
+    // TODO Phase 2: typeahead/pagination past 200
+    queryFn: async () =>
+      (await apiClient.get<Page<Release>>('/releases', { params: { ...filters, limit: 200 } })).data,
   })
 }
 

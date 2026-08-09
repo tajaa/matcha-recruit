@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import AliasPath, BaseModel, ConfigDict, Field, field_validator
 
+from app.oceanlab.schemas.common import no_duplicates
+
 
 class TrackCreate(BaseModel):
     recording_id: uuid.UUID
@@ -38,9 +40,4 @@ class TrackReorder(BaseModel):
     disc_number: int = 1
     track_ids: list[uuid.UUID]
 
-    @field_validator("track_ids")
-    @classmethod
-    def _no_duplicates(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
-        if len(set(v)) != len(v):
-            raise ValueError("track_ids must not contain duplicates")
-        return v
+    _no_duplicates = field_validator("track_ids")(no_duplicates)

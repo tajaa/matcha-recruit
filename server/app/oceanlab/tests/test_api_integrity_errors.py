@@ -46,14 +46,16 @@ def test_update_recording_null_title_is_422(client):
     assert resp.status_code == 422
 
 
-def test_replace_works_duplicate_work_ids_is_409(client_real):
+def test_replace_works_duplicate_work_ids_is_422(client_real):
+    # WorkLinksIn.work_ids rejects duplicates at the schema layer (mirrors
+    # TrackReorder.track_ids) — no longer reaches the DB / PK-violation 409.
     client = client_real
     artist_id = _make_artist(client)
     recording_id = _make_recording(client, artist_id)
     work_id = _make_work(client)
 
     resp = client.put(f"/api/recordings/{recording_id}/works", json={"work_ids": [work_id, work_id]})
-    assert resp.status_code == 409
+    assert resp.status_code == 422
 
 
 def test_replace_splits_unknown_contributor_is_422(client):

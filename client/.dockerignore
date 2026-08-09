@@ -2,6 +2,8 @@ node_modules/
 dist/
 tellus/node_modules/
 tellus/dist/
+oceanlab/node_modules/
+oceanlab/dist/
 .env*
 *.log
 .git

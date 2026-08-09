@@ -25,11 +25,12 @@ operations in a threadpool, so this coexists fine with the async pool — just
 don't `await` anything inside an oceanlab route, and don't try to share a
 connection/session between oceanlab and matcha code.
 
-`db.py` calls `load_dotenv()` itself before building the engine, because the
-engine is constructed at **import time** (module-level `create_engine(...)`),
-which happens before matcha's own `lifespan` handler has loaded `.env` via
-`load_settings()`. Don't remove that call or imports will intermittently fail
-with an empty `DATABASE_URL` depending on import order.
+`db.py` calls `load_dotenv()` itself inside `_database_url()`, because the
+engine is built **lazily** (`get_engine()`, `lru_cache`d) on first use rather
+than at module import — a missing `DATABASE_URL` now raises on the first
+oceanlab request instead of crashing `app.main` import for the whole
+monolith. Don't remove the `load_dotenv()` call or revert to a module-level
+`create_engine(...)`.
 
 ## Tables
 

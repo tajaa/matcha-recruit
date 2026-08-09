@@ -15,13 +15,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.oceanlab.config import settings
+from app.oceanlab.config import ensure_storage_root
 from app.oceanlab.routers import oceanlab_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings.storage_root.mkdir(parents=True, exist_ok=True)
+    ensure_storage_root()
     yield
 
 

@@ -5,6 +5,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.oceanlab.models.enums import CreditRole
+from app.oceanlab.schemas.common import no_duplicates
 
 LANGUAGE_PATTERN = r"^[a-z]{2}$"
 
@@ -82,3 +83,5 @@ class MasterSplitRead(MasterSplitIn):
 
 class WorkLinksIn(BaseModel):
     work_ids: list[uuid.UUID]
+
+    _no_duplicates = field_validator("work_ids")(no_duplicates)

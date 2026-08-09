@@ -17,6 +17,15 @@ from app.oceanlab.models.base import Base
 
 TEST_DATABASE_URL = "postgresql+psycopg://matcha:matcha_dev@127.0.0.1:5432/oceanlab_test"
 
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_test_token():
+    # require_auth (deps.py) 503s when settings.token is unset — this suite's
+    # `client`/`client_real` fixtures send Bearer settings.token, so tests
+    # must not depend on an ambient OCEANLAB_TOKEN env var to pass.
+    if not settings.token:
+        settings.token = "oceanlab-test-token"
+
 # The oceanlab schema now ships as a hand-SQL migration in matcha's shared
 # alembic chain (server/alembic/versions/), not a standalone alembic dir.
 # Load and run it directly against the test engine rather than shelling out

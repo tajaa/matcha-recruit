@@ -33,3 +33,7 @@ settings = Settings()
 
 def get_settings() -> Settings:
     return settings
+
+
+def ensure_storage_root() -> None:
+    settings.storage_root.mkdir(parents=True, exist_ok=True)

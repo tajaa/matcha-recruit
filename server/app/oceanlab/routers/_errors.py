@@ -71,7 +71,11 @@ class OceanlabRoute(APIRoute):
             try:
                 return await original_route_handler(request)
             except IntegrityError as exc:
-                logger.exception("IntegrityError on %s %s", request.method, request.url.path, exc_info=exc)
+                # WARNING, not ERROR: these are routine 409s (dup name/UPC/position),
+                # not bugs. The root ServerErrorDBHandler persists ERROR+ log calls to
+                # server_error_reports — logging at ERROR here would write a durable
+                # error row for every ordinary uniqueness conflict.
+                logger.warning("IntegrityError on %s %s", request.method, request.url.path, exc_info=exc)
                 http = integrity_error_to_http(exc)
                 return JSONResponse(status_code=http.status_code, content={"detail": http.detail})
 

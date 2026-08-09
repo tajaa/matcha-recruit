@@ -3,7 +3,7 @@
 Usage: uv run scripts/seed.py
 """
 
-from app.oceanlab.db import SessionLocal
+from app.oceanlab.db import _session_factory
 from app.oceanlab.models.artist import Artist
 from app.oceanlab.models.codes import IsrcConfig
 from app.oceanlab.models.enums import ReleaseType
@@ -11,7 +11,7 @@ from app.oceanlab.models.release import Release
 
 
 def main() -> None:
-    db = SessionLocal()
+    db = _session_factory()()
     try:
         config = db.get(IsrcConfig, 1)
         if config is None:
