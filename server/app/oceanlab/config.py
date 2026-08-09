@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     token: str = ""
     # None -> db.py derives from the monolith's shared DATABASE_URL.
     database_url: str | None = None
+    # Object storage. When s3_bucket is None the store falls back to the
+    # monolith's shared private bucket, and when THAT is also unset (local
+    # dev with no AWS creds) to LocalDiskStore under storage_root. Masters
+    # must never live on container disk in prod — blue-green deploys remove
+    # the container. See services/storage.py.
+    s3_bucket: str | None = None
+    key_prefix: str = "oceanlab"
     storage_root: Path = Path("var/oceanlab-storage")
     label_name: str = "Oceanlab"
     # YouTube
@@ -33,7 +40,3 @@ settings = Settings()
 
 def get_settings() -> Settings:
     return settings
-
-
-def ensure_storage_root() -> None:
-    settings.storage_root.mkdir(parents=True, exist_ok=True)

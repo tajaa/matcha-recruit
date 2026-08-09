@@ -102,11 +102,17 @@ services:
     # and max_retries applies to in-Python self.retry(). A SIGKILLed task is
     # marked FAILURE and dropped. reset_stale_er_documents (dispatched on
     # worker startup) is what releases any row an OOM stranded in 'processing'.
+    #
+    # Raised 320M -> 768M for the oceanlab release pipeline: a delivery task
+    # shells out to ffmpeg to render a 1920x1920 still-image video per track,
+    # then resumable-uploads it to YouTube in 8MB chunks. The ffmpeg child's
+    # RSS counts against this same cgroup, and per the paragraph above an OOM
+    # here is a silent FAILURE, not a retry.
     command: python -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=5
     deploy:
       resources:
         limits:
-          memory: 320M
+          memory: 768M
     logging:
       driver: "json-file"
       options:

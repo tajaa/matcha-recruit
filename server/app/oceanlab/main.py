@@ -11,19 +11,14 @@ IntegrityError handling is scoped per-router via `OceanlabRoute`
 routers behave identically whether mounted here or in the monolith.
 """
 
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 
-from app.oceanlab.config import ensure_storage_root
 from app.oceanlab.routers import oceanlab_router
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    ensure_storage_root()
-    yield
-
-
-app = FastAPI(title="oceanlab", version="0.1.0", lifespan=lifespan)
+# No lifespan: object storage self-initializes on first use (services/storage.py
+# get_store(), and LocalDiskStore creates its own root), so there is nothing to
+# set up at boot. The monolith mounts oceanlab_router directly and never runs
+# this module's lifespan anyway — anything put here would silently not run in
+# prod, which is exactly the bug the storage_root mkdir used to be.
+app = FastAPI(title="oceanlab", version="0.1.0")
 app.include_router(oceanlab_router, prefix="/api")
