@@ -1,5 +1,5 @@
 // Designer top bar: insert actions, history, save state.
-import { Circle, Minus, QrCode, Redo2, Save, Square, Type, Undo2 } from 'lucide-react'
+import { Circle, Minus, QrCode, Redo2, Save, Sparkles, Square, Type, Undo2 } from 'lucide-react'
 import { Button } from '../ui'
 
 export interface ToolbarProps {
@@ -14,10 +14,13 @@ export interface ToolbarProps {
   saving: boolean
   onSave: () => void
   hasQr: boolean
+  assistantOpen: boolean
+  onToggleAssistant: () => void
 }
 
 export function Toolbar({
   onAddText, onAddShape, onAddQr, onUndo, onRedo, canUndo, canRedo, dirty, saving, onSave, hasQr,
+  assistantOpen, onToggleAssistant,
 }: ToolbarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-tu-border bg-tu-panel px-3 py-2">
@@ -34,6 +37,13 @@ export function Toolbar({
       <Button size="sm" variant="ghost" onClick={onRedo} disabled={!canRedo}><Redo2 className="h-3.5 w-3.5" /></Button>
 
       <div className="ml-auto flex items-center gap-3">
+        <Button
+          size="sm"
+          variant={assistantOpen ? 'primary' : 'soft'}
+          onClick={onToggleAssistant}
+        >
+          <Sparkles className="h-3.5 w-3.5" /> Assistant
+        </Button>
         <span className="text-xs text-tu-faint">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'All changes saved'}</span>
         <Button size="sm" variant="soft" loading={saving} onClick={onSave} disabled={!dirty}>
           <Save className="h-3.5 w-3.5" /> Save

@@ -12,6 +12,7 @@ import { promoApi } from '../../api/promo'
 import type { ArtboardPreset, Brand, DesignLayer, FlyerDesign, PromoCampaign, StickerManifestEntry } from '../../api/types'
 import { Button, ErrorText, Spinner } from '../../components/ui'
 import { AssetPanel } from '../../components/designer/AssetPanel'
+import { AssistantPanel } from '../../components/designer/AssistantPanel'
 import { DesignerCanvas } from '../../components/designer/DesignerCanvas'
 import { ExportMenu } from '../../components/designer/ExportMenu'
 import { InspectorPanel } from '../../components/designer/InspectorPanel'
@@ -19,9 +20,10 @@ import { Toolbar } from '../../components/designer/Toolbar'
 import { useQrCanvases } from '../../components/designer/useQrCanvases'
 import { useDesignHistory } from '../../hooks/useDesignHistory'
 import { useDesignerFonts } from '../../hooks/useDesignerFonts'
+import { useFlyerAssistant } from '../../hooks/useFlyerAssistant'
 import { useTextEditOverlay } from '../../hooks/useTextEditOverlay'
 import {
-  ASSET_BASE, blankDesign, hasQrInBounds, instantiateTemplate, makeImageLayer, makeQrLayer,
+  ASSET_BASE, blankDesign, hasQrInBounds, instantiateTemplate, layerLabel, makeImageLayer, makeQrLayer,
   makeShapeLayer, makeStickerLayer, makeTextLayer, newLayerId, retargetArtboard,
 } from '../../utils/designer'
 
@@ -184,6 +186,41 @@ export default function CampaignDesigner() {
     set(retargetArtboard(design, preset), { commit: true })
   }
 
+  // ---- design assistant ----
+  // The server validates AND applies, so a turn hands back a finished document.
+  // Pushing it through `set(..., commit: true)` is what makes one turn exactly
+  // one undo step — no special history handling needed, unlike Cappe's Merlin,
+  // which had to force a checkpoint to escape its own edit debounce.
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  const designRef = useRef(design)
+  designRef.current = design
+  const selectedRef = useRef(selectedId)
+  selectedRef.current = selectedId
+
+  const assistant = useFlyerAssistant({
+    campaignId: id,
+    // Read through refs: `send` would otherwise be re-created on every drag
+    // frame, and the panel's submit handler would churn with it.
+    getDesign: () => designRef.current,
+    onDesign: useCallback((next: FlyerDesign) => {
+      set(next, { commit: true })
+      setSelectedId(null)
+    }, [set]),
+    getSelection: () => {
+      const sid = selectedRef.current
+      if (!sid) return undefined
+      const layer = designRef.current.layers.find((l) => l.id === sid)
+      if (!layer) return undefined
+      return {
+        layer: sid,
+        kind: layer.type,
+        text: layer.type === 'text' ? layer.text : undefined,
+      }
+    },
+  })
+
+  const selectedLayer = design.layers.find((l) => l.id === selectedId) ?? null
+
   function commitTextEdit() {
     const pending = editor.commit()
     if (!pending) return
@@ -283,6 +320,8 @@ export default function CampaignDesigner() {
         saving={saving}
         onSave={() => void save()}
         hasQr={hasQr}
+        assistantOpen={assistantOpen}
+        onToggleAssistant={() => setAssistantOpen((v) => !v)}
       />
       {saveErr && <div className="border-b border-tu-border bg-tu-panel px-3 py-1.5"><ErrorText>{saveErr}</ErrorText></div>}
 
@@ -312,6 +351,7 @@ export default function CampaignDesigner() {
           qrHidden={qrHidden}
           stickerSrc={stickerSrc}
           stageRef={stageRef}
+          interactive={!assistant.sending}
           editingLayerId={editor.editing?.layerId ?? null}
           overlay={editor.editing && (
             <textarea
@@ -328,16 +368,34 @@ export default function CampaignDesigner() {
           )}
         />
 
-        <InspectorPanel
-          design={design}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-          onLayerChange={(layerId, p) => patchLayer(layerId, p, true)}
-          onDelete={deleteLayer}
-          onDuplicate={duplicateLayer}
-          onReorder={reorderLayer}
-          fonts={fonts}
-        />
+        {/* Swaps with the inspector rather than sitting beside it — a third
+            rail would leave the artboard too narrow to work on. */}
+        {assistantOpen ? (
+          <AssistantPanel
+            messages={assistant.messages}
+            sending={assistant.sending}
+            error={assistant.error}
+            onSend={assistant.send}
+            ideas={assistant.ideas}
+            ideasLoading={assistant.ideasLoading}
+            onLoadIdeas={assistant.loadIdeas}
+            onApplyIdea={assistant.applyIdea}
+            onClose={() => setAssistantOpen(false)}
+            stickerSrc={stickerSrc}
+            selectedLabel={selectedLayer ? layerLabel(selectedLayer) : null}
+          />
+        ) : (
+          <InspectorPanel
+            design={design}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onLayerChange={(layerId, p) => patchLayer(layerId, p, true)}
+            onDelete={deleteLayer}
+            onDuplicate={duplicateLayer}
+            onReorder={reorderLayer}
+            fonts={fonts}
+          />
+        )}
       </div>
     </div>
   )

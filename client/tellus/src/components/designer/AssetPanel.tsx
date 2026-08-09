@@ -5,46 +5,17 @@
 // behind. Manifest entries may still carry a `thumb` path; when they do it is
 // used instead (cheaper for a large pack).
 import { useEffect, useState } from 'react'
-import { Layer, Stage } from 'react-konva'
 import { Image as ImageIcon, LayoutTemplate, Palette, Sticker as StickerIcon } from 'lucide-react'
 import type {
   ArtboardPreset, FlyerDesign, FlyerPalette, PalettePreset, StickerManifestEntry, TemplateManifestEntry,
 } from '../../api/types'
 import { ARTBOARD_PRESETS, ASSET_BASE, DEFAULT_PALETTE, PALETTE_TOKENS, resolveColor } from '../../utils/designer'
 import { Button, ErrorText, Select } from '../ui'
-import { BackgroundNode, LayerNode } from './LayerRenderer'
+import { TemplatePreview } from './TemplatePreview'
 
 const PREVIEW_W = 132
 
 type Tab = 'templates' | 'stickers' | 'brand'
-
-function TemplatePreview({ design, stickerSrc }: { design: FlyerDesign; stickerSrc: (id: string) => string }) {
-  const scale = PREVIEW_W / design.artboard.w
-  return (
-    <Stage
-      width={PREVIEW_W}
-      height={Math.round(design.artboard.h * scale)}
-      scaleX={scale}
-      scaleY={scale}
-      listening={false}
-    >
-      <Layer listening={false}>
-        <BackgroundNode design={design} />
-        {design.layers.map((l) => (
-          <LayerNode
-            key={l.id}
-            layer={l}
-            palette={design.palette}
-            stickerSrc={stickerSrc}
-            qrCanvas={() => undefined}
-            draggable={false}
-            listening={false}
-          />
-        ))}
-      </Layer>
-    </Stage>
-  )
-}
 
 export interface AssetPanelProps {
   design: FlyerDesign
@@ -130,7 +101,7 @@ export function AssetPanel({
                 >
                   {entry.thumb
                     ? <img src={`${ASSET_BASE}/templates/${entry.thumb}`} alt="" className="w-full" />
-                    : <TemplatePreview design={t} stickerSrc={stickerSrc} />}
+                    : <TemplatePreview design={t} width={PREVIEW_W} stickerSrc={stickerSrc} />}
                   <span className="block px-2 py-1.5 text-left text-xs text-tu-dim">{entry.name}</span>
                 </button>
               ))}

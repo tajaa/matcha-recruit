@@ -938,6 +938,41 @@ export type DesignLayer =
     })
   | (DesignLayerBase & { type: 'qr'; size: number; fg: string; bg: string })
 
+// --- design assistant ------------------------------------------------------
+// The server validates AND applies, so a turn hands back the finished document
+// rather than ops for the client to fold. `ops`/`results` are for the
+// transcript; `design` is what the editor adopts (one undo step).
+export interface FlyerOpResult {
+  ok: boolean
+  summary: string
+}
+
+export interface FlyerAssistResponse {
+  message: string
+  design: FlyerDesign
+  ops: Record<string, unknown>[]
+  results: FlyerOpResult[]
+  rejected: { op: Record<string, unknown>; reason: string }[]
+}
+
+export interface FlyerIdea {
+  key: string
+  label: string
+  blurb: string
+  design: FlyerDesign
+}
+
+export interface FlyerAiSchema {
+  palette_tokens: string[]
+  palettes: PalettePreset[]
+  layouts: { key: string; label: string; blurb: string; preset: ArtboardPreset }[]
+  fonts: string[]
+  layer_kinds: string[]
+  addable_layer_kinds: string[]
+  ops: string[]
+  max_ops_per_turn: number
+}
+
 export interface FontManifestEntry {
   family: string
   // null = rely on the platform having the family installed (the shipped

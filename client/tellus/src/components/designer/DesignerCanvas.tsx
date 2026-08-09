@@ -31,11 +31,16 @@ export interface DesignerCanvasProps {
   editingLayerId: string | null
   /** Text-edit textarea, positioned against the stage container. */
   overlay?: ReactNode
+  /** False while an assistant turn is in flight. The server applies ops to the
+   *  document the turn was sent with and returns the result wholesale, so an
+   *  edit made mid-flight has nothing to rebase onto and would be silently
+   *  overwritten — better to refuse the edit than to lose it. */
+  interactive?: boolean
 }
 
 export function DesignerCanvas({
   design, selectedId, onSelect, onLayerChange, onBeginTextEdit,
-  qrCanvasFor, qrHidden, stickerSrc, stageRef, editingLayerId, overlay,
+  qrCanvasFor, qrHidden, stickerSrc, stageRef, editingLayerId, overlay, interactive = true,
 }: DesignerCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const trRef = useRef<Konva.Transformer>(null)
@@ -160,8 +165,8 @@ export function DesignerCanvas({
                 palette={design.palette}
                 stickerSrc={stickerSrc}
                 qrCanvas={qrCanvasFor}
-                draggable
-                listening
+                draggable={interactive}
+                listening={interactive}
                 visible={layer.id !== editingLayerId}
                 onSelect={() => onSelect(layer.id)}
                 onDragMove={(x, y) => handleDragMove(layer, x, y)}
@@ -174,7 +179,7 @@ export function DesignerCanvas({
           </Layer>
 
           {/* Overlay layer: chrome only, never exported (ExportMenu hides it). */}
-          <Layer name="designer-overlay" listening={!!selected}>
+          <Layer name="designer-overlay" listening={interactive && !!selected}>
             <Rect
               x={0} y={0} width={design.artboard.w} height={design.artboard.h}
               stroke="#3f3f46" strokeWidth={1 / scale} listening={false}
