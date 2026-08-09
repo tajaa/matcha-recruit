@@ -41,7 +41,7 @@ class StorageService:
         self.app_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.uploads_root = os.path.join(self.app_root, "uploads")
 
-        if self.bucket:
+        if self.bucket or self.private_bucket:
             self.s3_client = boto3.client(
                 "s3",
                 region_name=self.region,
@@ -87,7 +87,9 @@ class StorageService:
 
         resolved = os.path.realpath(candidate)
         uploads_root = os.path.realpath(self.uploads_root)
-        if resolved != uploads_root and not resolved.startswith(f"{uploads_root}{os.sep}"):
+        if resolved != uploads_root and not resolved.startswith(
+            f"{uploads_root}{os.sep}"
+        ):
             raise RuntimeError("Local storage path is outside uploads directory")
         return resolved
 
@@ -96,7 +98,9 @@ class StorageService:
         if not path or not isinstance(path, str):
             return False
 
-        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
+        if self.cloudfront_domain and path.startswith(
+            f"https://{self.cloudfront_domain}/"
+        ):
             return True
         # Recognize legacy CloudFront URLs from previous distributions
         if path.startswith("https://") and ".cloudfront.net/" in path:
@@ -164,8 +168,10 @@ class StorageService:
             File contents as bytes
         """
         # Handle CloudFront URLs - convert back to S3 path
-        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
-            key = path[len(f"https://{self.cloudfront_domain}/"):]
+        if self.cloudfront_domain and path.startswith(
+            f"https://{self.cloudfront_domain}/"
+        ):
+            key = path[len(f"https://{self.cloudfront_domain}/") :]
             if not self.s3_client or not self.bucket:
                 raise RuntimeError("S3 not configured but CloudFront path provided")
             try:
@@ -181,7 +187,9 @@ class StorageService:
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     return resp.read()
             except Exception as e:
-                raise RuntimeError(f"Failed to download from legacy CloudFront URL: {e}")
+                raise RuntimeError(
+                    f"Failed to download from legacy CloudFront URL: {e}"
+                )
 
         if path.startswith("s3://"):
             if not self.s3_client:
@@ -226,7 +234,9 @@ class StorageService:
             b64 = base64.b64encode(data).decode("ascii")
             return f"data:{mime};base64,{b64}"
         except Exception:
-            logger.warning("Could not inline storage image for PDF: %s", src, exc_info=True)
+            logger.warning(
+                "Could not inline storage image for PDF: %s", src, exc_info=True
+            )
             return None
 
     async def inline_storage_images(self, html: str) -> str:
@@ -256,10 +266,12 @@ class StorageService:
             True if deleted, False if not found
         """
         # Handle CloudFront URLs - convert back to S3 path
-        if self.cloudfront_domain and path.startswith(f"https://{self.cloudfront_domain}/"):
+        if self.cloudfront_domain and path.startswith(
+            f"https://{self.cloudfront_domain}/"
+        ):
             if not self.s3_client or not self.bucket:
                 return False
-            key = path[len(f"https://{self.cloudfront_domain}/"):]
+            key = path[len(f"https://{self.cloudfront_domain}/") :]
             try:
                 self.s3_client.delete_object(Bucket=self.bucket, Key=key)
                 return True
@@ -326,7 +338,9 @@ class StorageService:
         )
         return f"s3://{bucket}/{key}"
 
-    def get_presigned_download_url(self, path: str, expires_in: int = 900) -> Optional[str]:
+    def get_presigned_download_url(
+        self, path: str, expires_in: int = 900
+    ) -> Optional[str]:
         """Get a time-limited presigned download URL for a private s3:// path."""
         if not path.startswith("s3://") or not self.s3_client:
             return None

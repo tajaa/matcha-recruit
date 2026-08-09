@@ -8,7 +8,7 @@ from app.oceanlab.routers._errors import OceanlabRoute
 from app.oceanlab.db import get_db
 from app.oceanlab.deps import AuthDep
 from app.oceanlab.models.recording import Credit, MasterSplit, Recording
-from app.oceanlab.models.work import RecordingWork
+from app.oceanlab.models.work import RecordingWork, Work
 from app.oceanlab.schemas.codes import AssignIsrcResult
 from app.oceanlab.schemas.common import Page
 from app.oceanlab.schemas.recording import (
@@ -21,10 +21,16 @@ from app.oceanlab.schemas.recording import (
     RecordingUpdate,
     WorkLinksIn,
 )
+from app.oceanlab.schemas.work import WorkRead
 from app.oceanlab.services import isrc as isrc_service
 from app.oceanlab.services.defaults import seed_recording_ownership
 
-router = APIRouter(route_class=OceanlabRoute, prefix="/recordings", tags=["recordings"], dependencies=[AuthDep])
+router = APIRouter(
+    route_class=OceanlabRoute,
+    prefix="/recordings",
+    tags=["recordings"],
+    dependencies=[AuthDep],
+)
 
 
 @router.get("", response_model=Page[RecordingRead])
@@ -37,8 +43,16 @@ def list_recordings(
     stmt = sa.select(Recording)
     if q:
         stmt = stmt.where(Recording.title.ilike(f"%{q}%"))
-    total = db.execute(sa.select(sa.func.count()).select_from(stmt.subquery())).scalar_one()
-    rows = db.execute(stmt.order_by(Recording.title, Recording.id).limit(limit).offset(offset)).scalars().all()
+    total = db.execute(
+        sa.select(sa.func.count()).select_from(stmt.subquery())
+    ).scalar_one()
+    rows = (
+        db.execute(
+            stmt.order_by(Recording.title, Recording.id).limit(limit).offset(offset)
+        )
+        .scalars()
+        .all()
+    )
     return Page(items=rows, total=total, limit=limit, offset=offset)
 
 
@@ -64,7 +78,9 @@ def get_recording(recording_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.patch("/{recording_id}", response_model=RecordingRead)
-def update_recording(recording_id: uuid.UUID, payload: RecordingUpdate, db: Session = Depends(get_db)):
+def update_recording(
+    recording_id: uuid.UUID, payload: RecordingUpdate, db: Session = Depends(get_db)
+):
     recording = db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -99,12 +115,16 @@ def assign_isrc(recording_id: uuid.UUID, db: Session = Depends(get_db)):
 
 
 @router.put("/{recording_id}/splits", response_model=list[MasterSplitRead])
-def replace_splits(recording_id: uuid.UUID, payload: list[MasterSplitIn], db: Session = Depends(get_db)):
+def replace_splits(
+    recording_id: uuid.UUID, payload: list[MasterSplitIn], db: Session = Depends(get_db)
+):
     recording = db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="Recording not found")
     db.execute(sa.delete(MasterSplit).where(MasterSplit.recording_id == recording_id))
-    rows = [MasterSplit(recording_id=recording_id, **item.model_dump()) for item in payload]
+    rows = [
+        MasterSplit(recording_id=recording_id, **item.model_dump()) for item in payload
+    ]
     db.add_all(rows)
     db.commit()
     for row in rows:
@@ -112,8 +132,25 @@ def replace_splits(recording_id: uuid.UUID, payload: list[MasterSplitIn], db: Se
     return rows
 
 
+@router.get("/{recording_id}/splits", response_model=list[MasterSplitRead])
+def list_splits(recording_id: uuid.UUID, db: Session = Depends(get_db)):
+    if db.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return (
+        db.execute(
+            sa.select(MasterSplit)
+            .where(MasterSplit.recording_id == recording_id)
+            .order_by(MasterSplit.id)
+        )
+        .scalars()
+        .all()
+    )
+
+
 @router.put("/{recording_id}/credits", response_model=list[CreditRead])
-def replace_credits(recording_id: uuid.UUID, payload: list[CreditIn], db: Session = Depends(get_db)):
+def replace_credits(
+    recording_id: uuid.UUID, payload: list[CreditIn], db: Session = Depends(get_db)
+):
     recording = db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="Recording not found")
@@ -127,12 +164,32 @@ def replace_credits(recording_id: uuid.UUID, payload: list[CreditIn], db: Sessio
 
 
 @router.put("/{recording_id}/works")
-def replace_works(recording_id: uuid.UUID, payload: WorkLinksIn, db: Session = Depends(get_db)):
+def replace_works(
+    recording_id: uuid.UUID, payload: WorkLinksIn, db: Session = Depends(get_db)
+):
     recording = db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="Recording not found")
-    db.execute(sa.delete(RecordingWork).where(RecordingWork.recording_id == recording_id))
+    db.execute(
+        sa.delete(RecordingWork).where(RecordingWork.recording_id == recording_id)
+    )
     for work_id in payload.work_ids:
         db.add(RecordingWork(recording_id=recording_id, work_id=work_id))
     db.commit()
     return {"work_ids": payload.work_ids}
+
+
+@router.get("/{recording_id}/works", response_model=list[WorkRead])
+def list_works(recording_id: uuid.UUID, db: Session = Depends(get_db)):
+    if db.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return (
+        db.execute(
+            sa.select(Work)
+            .join(RecordingWork, RecordingWork.work_id == Work.id)
+            .where(RecordingWork.recording_id == recording_id)
+            .order_by(Work.title, Work.id)
+        )
+        .scalars()
+        .all()
+    )

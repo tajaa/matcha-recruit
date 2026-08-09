@@ -79,6 +79,7 @@ class MasterSplitRead(MasterSplitIn):
 
     id: uuid.UUID
     recording_id: uuid.UUID
+    auto_created: bool
 
 
 class WorkLinksIn(BaseModel):

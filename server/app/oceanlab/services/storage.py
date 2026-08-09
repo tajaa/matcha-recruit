@@ -85,7 +85,11 @@ class S3Store:
         self._prefix = prefix.strip("/")
 
     def _full_key(self, key: str) -> str:
-        return f"{self._prefix}/{_validate_key(key)}" if self._prefix else _validate_key(key)
+        return (
+            f"{self._prefix}/{_validate_key(key)}"
+            if self._prefix
+            else _validate_key(key)
+        )
 
     def put(self, key: str, src: BinaryIO, *, content_type: str) -> tuple[int, str]:
         # Two passes over the caller's already-on-disk temp file: hash, then
@@ -203,27 +207,31 @@ class LocalDiskStore:
 def get_store() -> ObjectStore:
     """Resolve the configured store once per process.
 
-    S3 when a bucket is configured (oceanlab's own, else the monolith's shared
-    private bucket), LocalDiskStore otherwise so local dev works with no AWS
-    credentials at all.
+    S3 by default. LocalDiskStore is an explicit local-development mode only;
+    production must fail rather than lose masters on container replacement.
     """
     from app.oceanlab.config import settings
 
+    if settings.storage_mode == "local":
+        logger.warning(
+            "oceanlab: using explicitly configured LocalDiskStore at %s",
+            settings.storage_root,
+        )
+        return LocalDiskStore(settings.storage_root)
+
+    from app.core.services.storage import StorageService
+
     try:
-        from app.core.services.storage import StorageService
-
         core = StorageService()
-        bucket = settings.s3_bucket or core.private_bucket or core.bucket
-        if core.s3_client and bucket:
-            return S3Store(core.s3_client, bucket, settings.key_prefix)
     except Exception as e:
-        logger.warning("oceanlab: S3 unavailable (%s), falling back to local disk", e)
+        raise StorageError(f"Oceanlab S3 initialization failed: {e}") from e
 
-    logger.warning(
-        "oceanlab: using LocalDiskStore at %s — masters will NOT survive a container replacement",
-        settings.storage_root,
-    )
-    return LocalDiskStore(settings.storage_root)
+    bucket = settings.s3_bucket or core.private_bucket or core.bucket
+    if not core.s3_client:
+        raise StorageError("Oceanlab S3 storage is not configured")
+    if not bucket:
+        raise StorageError("Oceanlab S3 bucket is not configured")
+    return S3Store(core.s3_client, bucket, settings.key_prefix)
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../api/client'
 import { clearToken, getToken, setToken } from '../api/client'
 import { MutationError } from '../components/MutationError'
-import { useUnassignUpc, useUpcs } from '../api/hooks'
+import {
+  useArtists,
+  useContributors,
+  useLabelSettings,
+  useUnassignUpc,
+  useUpcs,
+  useUpdateLabelSettings,
+  type LabelSettings,
+} from '../api/hooks'
 
 interface IsrcConfig {
   registrant_prefix: string
@@ -37,6 +45,10 @@ function useAddUpcs() {
 }
 
 export function SettingsPage() {
+  const { data: labelSettings, isError: labelSettingsError } = useLabelSettings()
+  const { data: artists } = useArtists()
+  const { data: contributors } = useContributors()
+  const updateLabelSettings = useUpdateLabelSettings()
   const { data: isrcConfig, isError: isrcConfigError } = useIsrcConfig()
   const updateIsrc = useUpdateIsrcConfig()
   const addUpcs = useAddUpcs()
@@ -47,10 +59,99 @@ export function SettingsPage() {
   const [prefix, setPrefix] = useState('')
   const [upcText, setUpcText] = useState('')
   const [tokenInput, setTokenInput] = useState(getToken() ?? '')
+  const [labelDraft, setLabelDraft] = useState<LabelSettings | null>(null)
+
+  useEffect(() => {
+    if (labelSettings) setLabelDraft(labelSettings)
+  }, [labelSettings])
+
+  const updateLabelDraft = <K extends keyof LabelSettings>(key: K, value: LabelSettings[K]) => {
+    setLabelDraft((current) => (current ? { ...current, [key]: value } : current))
+  }
 
   return (
-    <div className="p-6 max-w-lg flex flex-col gap-8">
+      <div className="p-6 max-w-lg flex flex-col gap-8">
       <h1 className="text-2xl font-semibold">Settings</h1>
+
+      <section>
+        <h2 className="font-medium mb-2">Label defaults</h2>
+        {labelSettingsError && <p className="text-xs text-red-600 mb-2">Failed to load label defaults.</p>}
+        {labelDraft && (
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-neutral-500">
+              Default artist
+              <select
+                className="border rounded px-2 py-1 text-sm w-full text-neutral-900"
+                value={labelDraft.default_artist_id ?? ''}
+                onChange={(e) => updateLabelDraft('default_artist_id', e.target.value || null)}
+              >
+                <option value="">None</option>
+                {artists?.items.map((artist) => <option key={artist.id} value={artist.id}>{artist.name}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-neutral-500">
+              Default contributor
+              <select
+                className="border rounded px-2 py-1 text-sm w-full text-neutral-900"
+                value={labelDraft.default_contributor_id ?? ''}
+                onChange={(e) => updateLabelDraft('default_contributor_id', e.target.value || null)}
+              >
+                <option value="">None</option>
+                {contributors?.items.map((contributor) => (
+                  <option key={contributor.id} value={contributor.id}>{contributor.name}</option>
+                ))}
+              </select>
+            </label>
+            {([
+              ['default_genre', 'Genre'],
+              ['default_territories', 'Territories'],
+              ['c_line_template', 'C-line template'],
+              ['p_line_template', 'P-line template'],
+            ] as const).map(([key, label]) => (
+              <label key={key} className="text-xs text-neutral-500">
+                {label}
+                <input
+                  className="border rounded px-2 py-1 text-sm w-full text-neutral-900"
+                  value={labelDraft[key] ?? ''}
+                  onChange={(e) => updateLabelDraft(key, e.target.value)}
+                />
+              </label>
+            ))}
+            <div className="flex gap-2">
+              <label className="text-xs text-neutral-500 flex-1">
+                ISRC source
+                <select
+                  className="border rounded px-2 py-1 text-sm w-full text-neutral-900"
+                  value={labelDraft.isrc_source}
+                  onChange={(e) => updateLabelDraft('isrc_source', e.target.value as LabelSettings['isrc_source'])}
+                >
+                  <option value="distributor">Distributor</option>
+                  <option value="own">Own</option>
+                </select>
+              </label>
+              <label className="text-xs text-neutral-500 flex-1">
+                UPC source
+                <select
+                  className="border rounded px-2 py-1 text-sm w-full text-neutral-900"
+                  value={labelDraft.upc_source}
+                  onChange={(e) => updateLabelDraft('upc_source', e.target.value as LabelSettings['upc_source'])}
+                >
+                  <option value="distributor">Distributor</option>
+                  <option value="own">Own</option>
+                </select>
+              </label>
+            </div>
+            <button
+              className="self-start px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm disabled:opacity-50"
+              disabled={updateLabelSettings.isPending}
+              onClick={() => labelDraft && updateLabelSettings.mutate(labelDraft)}
+            >
+              Save label defaults
+            </button>
+            <MutationError error={updateLabelSettings.error} />
+          </div>
+        )}
+      </section>
 
       <section>
         <h2 className="font-medium mb-2">ISRC prefix</h2>

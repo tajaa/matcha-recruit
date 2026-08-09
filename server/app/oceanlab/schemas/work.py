@@ -41,6 +41,7 @@ class WorkRead(WorkBase):
     id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    auto_created: bool
 
 
 class WorkWriterIn(BaseModel):
@@ -56,3 +57,4 @@ class WorkWriterRead(WorkWriterIn):
 
     id: uuid.UUID
     work_id: uuid.UUID
+    auto_created: bool

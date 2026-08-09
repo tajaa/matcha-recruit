@@ -2,8 +2,12 @@ import { useState } from 'react'
 import {
   useAddTrack,
   useAssignIsrc,
+  useArtists,
+  useCreateRecording,
   useDeleteTrack,
   useRecordings,
+  useRecordingSplits,
+  useRecordingWorks,
   useReorderTracks,
   useTracks,
   type Track,
@@ -14,13 +18,19 @@ import { MutationError } from './MutationError'
 export function TracksTab({ releaseId }: { releaseId: string }) {
   const { data: tracks, isLoading, isError } = useTracks(releaseId)
   const { data: recordings } = useRecordings()
+  const { data: artists } = useArtists()
   const addTrack = useAddTrack(releaseId)
   const reorderTracks = useReorderTracks(releaseId)
   const deleteTrack = useDeleteTrack(releaseId)
   const assignIsrc = useAssignIsrc()
+  const createRecording = useCreateRecording()
 
   const [selectedRecording, setSelectedRecording] = useState('')
   const [discNumber, setDiscNumber] = useState(1)
+  const [newRecordingTitle, setNewRecordingTitle] = useState('')
+  const [newRecordingArtist, setNewRecordingArtist] = useState('')
+  const { data: splits } = useRecordingSplits(selectedRecording)
+  const { data: works } = useRecordingWorks(selectedRecording)
 
   if (isError) return <div className="text-sm text-red-600">Failed to load tracks.</div>
   if (isLoading) return <div className="text-sm text-neutral-500">Loading tracks...</div>
@@ -155,6 +165,64 @@ export function TracksTab({ releaseId }: { releaseId: string }) {
         </div>
         <MutationError error={addTrack.error} />
       </div>
+
+      <div className="border-t pt-4">
+        <h3 className="text-xs font-medium text-neutral-500 mb-2">Create recording</h3>
+        <div className="flex gap-2">
+          <input
+            className="border rounded px-2 py-1 text-sm flex-1"
+            placeholder="Recording title"
+            value={newRecordingTitle}
+            onChange={(e) => setNewRecordingTitle(e.target.value)}
+          />
+          <select
+            className="border rounded px-2 py-1 text-sm flex-1"
+            value={newRecordingArtist}
+            onChange={(e) => setNewRecordingArtist(e.target.value)}
+          >
+            <option value="">Artist...</option>
+            {artists?.items.map((artist) => <option key={artist.id} value={artist.id}>{artist.name}</option>)}
+          </select>
+          <button
+            className="px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm disabled:opacity-50"
+            disabled={!newRecordingTitle.trim() || !newRecordingArtist || createRecording.isPending}
+            onClick={() => createRecording.mutate(
+              { title: newRecordingTitle.trim(), primary_artist_id: newRecordingArtist },
+              {
+                onSuccess: (recording) => {
+                  setNewRecordingTitle('')
+                  setSelectedRecording(recording.id)
+                  addTrack.mutate(
+                    { recording_id: recording.id, disc_number: discNumber },
+                    { onSuccess: () => setSelectedRecording(recording.id) },
+                  )
+                },
+              },
+            )}
+          >
+            Create
+          </button>
+        </div>
+        <MutationError error={createRecording.error} />
+      </div>
+
+      {selectedRecording && (splits || works) && (
+        <div className="border-t pt-4 text-sm">
+          <h3 className="text-xs font-medium text-neutral-500 mb-2">Ownership</h3>
+          {splits?.map((split) => (
+            <div key={split.id} className="flex gap-2 items-center">
+              <span>Master {split.share_pct}%</span>
+              {split.auto_created && <span className="rounded border px-1 text-[10px]">auto</span>}
+            </div>
+          ))}
+          {works?.map((work) => (
+            <div key={work.id} className="flex gap-2 items-center">
+              <span>Work: {work.title}</span>
+              {work.auto_created && <span className="rounded border px-1 text-[10px]">auto</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

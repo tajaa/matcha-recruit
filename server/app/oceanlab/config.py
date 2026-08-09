@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="OCEANLAB_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="OCEANLAB_", env_file=".env", extra="ignore"
+    )
 
     # Empty by default so a missing env var can't crash the monolith at
     # import time; require_auth() (deps.py) treats "" as auth-not-configured
@@ -14,10 +16,10 @@ class Settings(BaseSettings):
     # None -> db.py derives from the monolith's shared DATABASE_URL.
     database_url: str | None = None
     # Object storage. When s3_bucket is None the store falls back to the
-    # monolith's shared private bucket, and when THAT is also unset (local
-    # dev with no AWS creds) to LocalDiskStore under storage_root. Masters
-    # must never live on container disk in prod — blue-green deploys remove
-    # the container. See services/storage.py.
+    # monolith's shared private bucket. LocalDiskStore is available only when
+    # storage_mode is explicitly set to local; masters must never silently
+    # fall onto container disk in prod.
+    storage_mode: Literal["s3", "local"] = "s3"
     s3_bucket: str | None = None
     key_prefix: str = "oceanlab"
     storage_root: Path = Path("var/oceanlab-storage")

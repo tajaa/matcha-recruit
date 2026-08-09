@@ -404,7 +404,7 @@ Client: Registrations tab on `ReleaseDetailPage` (4 target cards: status select,
 
 ## Stage 7 — royalty ingestion + matching (see the money per song)
 
-### Migration `oceanlab_app_03_royalty_ingest` (chained off `oceanlab_app_02`)
+### Migration `oceanlab_app_04_royalty_ingest` (chained off `oceanlab_app_03`)
 
 ```sql
 ALTER TABLE oceanlab_royalty_lines ADD COLUMN external_id VARCHAR;          -- YouTube video id etc.

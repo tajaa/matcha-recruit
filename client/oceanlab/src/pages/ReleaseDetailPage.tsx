@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useAssignUpc, useRelease, useUpdateRelease } from '../api/hooks'
+import { useArtists, useAssignUpc, useRelease, useUpdateRelease, type Release } from '../api/hooks'
 import { MutationError } from '../components/MutationError'
 import { TracksTab } from '../components/TracksTab'
 
@@ -55,16 +55,24 @@ function MetadataTab({
   assignUpcPending,
   assignUpcError,
 }: {
-  release: { id: string; title: string; catalog_number?: string | null; genre?: string | null; release_date?: string | null; status: string; upc?: string | null }
+  release: Release
   onAssignUpc: () => void
   assignUpcPending: boolean
   assignUpcError: unknown
 }) {
   const update = useUpdateRelease(release.id)
+  const { data: artists } = useArtists()
   const [title, setTitle] = useState(release.title)
   const [catalogNumber, setCatalogNumber] = useState(release.catalog_number ?? '')
   const [genre, setGenre] = useState(release.genre ?? '')
   const [releaseDate, setReleaseDate] = useState(release.release_date ?? '')
+  const [originalReleaseDate, setOriginalReleaseDate] = useState(release.original_release_date ?? '')
+  const [labelName, setLabelName] = useState(release.label_name ?? '')
+  const [cLine, setCLine] = useState(release.c_line ?? '')
+  const [pLine, setPLine] = useState(release.p_line ?? '')
+  const [subgenre, setSubgenre] = useState(release.subgenre ?? '')
+  const [territories, setTerritories] = useState(release.territories ?? '')
+  const [notes, setNotes] = useState(release.notes ?? '')
 
   function save(patch: Record<string, unknown>) {
     update.mutate(patch)
@@ -99,12 +107,62 @@ function MetadataTab({
       </label>
 
       <label className="flex flex-col gap-1">
+        <span className="text-neutral-500">Primary artist</span>
+        <select
+          className="border rounded px-2 py-1"
+          value={release.primary_artist_id}
+          onChange={(e) => save({ primary_artist_id: e.target.value })}
+        >
+          {artists?.items.map((artist) => <option key={artist.id} value={artist.id}>{artist.name}</option>)}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1">
         <span className="text-neutral-500">Catalog #</span>
         <input
           className="border rounded px-2 py-1"
           value={catalogNumber}
           onChange={(e) => setCatalogNumber(e.target.value)}
           onBlur={() => catalogNumber !== (release.catalog_number ?? '') && save({ catalog_number: catalogNumber || null })}
+        />
+      </label>
+
+      {([
+        ['label_name', 'Label name', labelName, setLabelName, release.label_name ?? ''],
+        ['c_line', 'C-line', cLine, setCLine, release.c_line ?? ''],
+        ['p_line', 'P-line', pLine, setPLine, release.p_line ?? ''],
+        ['subgenre', 'Subgenre', subgenre, setSubgenre, release.subgenre ?? ''],
+        ['territories', 'Territories', territories, setTerritories, release.territories ?? ''],
+      ] as const).map(([key, label, value, setter, original]) => (
+        <label key={key} className="flex flex-col gap-1">
+          <span className="text-neutral-500">{label}</span>
+          <input
+            className="border rounded px-2 py-1"
+            value={value}
+            onChange={(e) => setter(e.target.value)}
+            onBlur={() => value !== original && save({ [key]: value || null })}
+          />
+        </label>
+      ))}
+
+      <label className="flex flex-col gap-1">
+        <span className="text-neutral-500">Original release date</span>
+        <input
+          type="date"
+          className="border rounded px-2 py-1"
+          value={originalReleaseDate}
+          onChange={(e) => setOriginalReleaseDate(e.target.value)}
+          onBlur={() => originalReleaseDate !== (release.original_release_date ?? '') && save({ original_release_date: originalReleaseDate || null })}
+        />
+      </label>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-neutral-500">Notes</span>
+        <textarea
+          className="border rounded px-2 py-1"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => notes !== (release.notes ?? '') && save({ notes: notes || null })}
         />
       </label>
 

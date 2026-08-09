@@ -57,6 +57,7 @@ Chain so far:
 |---|---|---|
 | `oceanlab_app_01` | `oceanlab_app_01_standalone.py` | the 20 `oceanlab_*` tables |
 | `oceanlab_app_02` | `oceanlab_app_02_label_defaults.py` | `oceanlab_label_settings` singleton |
+| `oceanlab_app_03` | `oceanlab_app_03_prefill_provenance.py` | auto-created markers on seeded ownership rows |
 
 **`tests/conftest.py` builds the test schema by executing these migration
 modules directly** (not `Base.metadata.create_all`), so model/migration drift

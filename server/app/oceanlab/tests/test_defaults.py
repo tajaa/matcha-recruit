@@ -66,7 +66,11 @@ def test_create_release_fills_c_line_p_line_territories(client):
     artist_id = _make_artist(client)
     release = client.post(
         "/api/releases",
-        json={"title": "Nocturne", "release_type": "single", "primary_artist_id": artist_id},
+        json={
+            "title": "Nocturne",
+            "release_type": "single",
+            "primary_artist_id": artist_id,
+        },
     ).json()
 
     assert release["c_line"] == f"{CURRENT_YEAR} Oceanlab"
@@ -111,6 +115,27 @@ def test_explicit_value_wins_over_default(client):
     assert release["genre"] == "Jazz"
 
 
+def test_explicit_blank_values_are_not_treated_as_omitted(client):
+    artist_id = _make_artist(client)
+    release = client.post(
+        "/api/releases",
+        json={
+            "title": "Blank Metadata",
+            "release_type": "single",
+            "primary_artist_id": artist_id,
+            "label_name": "",
+            "territories": "",
+            "c_line": "",
+            "p_line": "",
+        },
+    ).json()
+
+    assert release["label_name"] == ""
+    assert release["territories"] == ""
+    assert release["c_line"] == ""
+    assert release["p_line"] == ""
+
+
 def test_default_artist_used_when_payload_omits_one(client, db):
     artist_id = _make_artist(client, "Default Artist")
     settings_row = get_label_settings(db)
@@ -118,14 +143,18 @@ def test_default_artist_used_when_payload_omits_one(client, db):
     settings_row.default_genre = "Electronic"
     db.flush()
 
-    release = client.post("/api/releases", json={"title": "No Artist", "release_type": "single"}).json()
+    release = client.post(
+        "/api/releases", json={"title": "No Artist", "release_type": "single"}
+    ).json()
 
     assert release["primary_artist_id"] == artist_id
     assert release["genre"] == "Electronic"
 
 
 def test_release_without_artist_or_default_is_422(client):
-    resp = client.post("/api/releases", json={"title": "Orphan", "release_type": "single"})
+    resp = client.post(
+        "/api/releases", json={"title": "Orphan", "release_type": "single"}
+    )
     assert resp.status_code == 422
     assert "primary_artist_id" in resp.json()["detail"]
 
@@ -143,10 +172,17 @@ def test_create_recording_seeds_100pct_master_split(client, db):
         "/api/recordings", json={"title": "Nocturne", "primary_artist_id": artist_id}
     ).json()["id"]
 
-    splits = db.execute(sa.select(MasterSplit).where(MasterSplit.recording_id == recording_id)).scalars().all()
+    splits = (
+        db.execute(
+            sa.select(MasterSplit).where(MasterSplit.recording_id == recording_id)
+        )
+        .scalars()
+        .all()
+    )
     assert len(splits) == 1
     assert splits[0].share_pct == Decimal("100.000")
     assert str(splits[0].contributor_id) == contributor_id
+    assert splits[0].auto_created is True
 
 
 def test_create_recording_seeds_work_and_writer(client, db):
@@ -158,7 +194,8 @@ def test_create_recording_seeds_work_and_writer(client, db):
     db.flush()
 
     recording_id = client.post(
-        "/api/recordings", json={"title": "Nocturne", "primary_artist_id": artist_id, "language": "en"}
+        "/api/recordings",
+        json={"title": "Nocturne", "primary_artist_id": artist_id, "language": "en"},
     ).json()["id"]
 
     link = db.execute(
@@ -168,21 +205,38 @@ def test_create_recording_seeds_work_and_writer(client, db):
     assert work.title == "Nocturne"
     assert work.language == "en"
 
-    writers = db.execute(sa.select(WorkWriter).where(WorkWriter.work_id == work.id)).scalars().all()
+    writers = (
+        db.execute(sa.select(WorkWriter).where(WorkWriter.work_id == work.id))
+        .scalars()
+        .all()
+    )
     assert len(writers) == 1
     assert writers[0].role == WriterRole.composer_lyricist
     assert writers[0].share_pct == Decimal("100.000")
     assert str(writers[0].contributor_id) == contributor_id
+    assert work.auto_created is True
+    assert writers[0].auto_created is True
 
 
 def test_no_default_contributor_seeds_nothing(client, db):
     artist_id = _make_artist(client)
     recording_id = client.post(
-        "/api/recordings", json={"title": "Unattributed", "primary_artist_id": artist_id}
+        "/api/recordings",
+        json={"title": "Unattributed", "primary_artist_id": artist_id},
     ).json()["id"]
 
-    assert db.execute(sa.select(MasterSplit).where(MasterSplit.recording_id == recording_id)).first() is None
-    assert db.execute(sa.select(RecordingWork).where(RecordingWork.recording_id == recording_id)).first() is None
+    assert (
+        db.execute(
+            sa.select(MasterSplit).where(MasterSplit.recording_id == recording_id)
+        ).first()
+        is None
+    )
+    assert (
+        db.execute(
+            sa.select(RecordingWork).where(RecordingWork.recording_id == recording_id)
+        ).first()
+        is None
+    )
 
 
 def test_seeded_rows_are_editable_not_overlaid(client, db):
@@ -222,7 +276,10 @@ def test_get_label_settings_endpoint(client):
 def test_put_label_settings_partial_update(client):
     artist_id = _make_artist(client)
 
-    resp = client.put("/api/settings/label", json={"default_artist_id": artist_id, "upc_source": "own"})
+    resp = client.put(
+        "/api/settings/label",
+        json={"default_artist_id": artist_id, "upc_source": "own"},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["default_artist_id"] == artist_id
@@ -270,7 +327,12 @@ def test_settings_drive_a_full_solo_release(client, db):
     )
 
     release = client.post(
-        "/api/releases", json={"title": "Nocturne", "release_type": "single", "release_date": "2026-09-01"}
+        "/api/releases",
+        json={
+            "title": "Nocturne",
+            "release_type": "single",
+            "release_date": "2026-09-01",
+        },
     ).json()
 
     assert release["primary_artist_id"] == artist_id

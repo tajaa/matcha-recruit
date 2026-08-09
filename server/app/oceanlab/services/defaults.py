@@ -42,9 +42,16 @@ def get_label_settings(db: Session) -> LabelSettings:
     if row is not None:
         return row
 
-    db.execute(pg_insert(LabelSettings).values(id=1).on_conflict_do_nothing(index_elements=[LabelSettings.id]))
+    db.execute(
+        pg_insert(LabelSettings)
+        .values(id=1)
+        .on_conflict_do_nothing(index_elements=[LabelSettings.id])
+    )
     db.flush()
-    return db.get(LabelSettings, 1)
+    row = db.get(LabelSettings, 1)
+    if row is None:
+        raise RuntimeError("Could not create Oceanlab label settings singleton")
+    return row
 
 
 def render_line(template: str, *, year: int, label: str) -> str:
@@ -64,21 +71,21 @@ def apply_release_defaults(db: Session, data: dict) -> dict:
     """
     cfg = get_label_settings(db)
 
-    if not data.get("label_name"):
+    if data.get("label_name") is None:
         data["label_name"] = app_settings.label_name
-    if not data.get("territories"):
+    if data.get("territories") is None:
         data["territories"] = cfg.default_territories
-    if not data.get("genre") and cfg.default_genre:
+    if data.get("genre") is None and cfg.default_genre:
         data["genre"] = cfg.default_genre
-    if not data.get("primary_artist_id") and cfg.default_artist_id:
+    if data.get("primary_artist_id") is None and cfg.default_artist_id:
         data["primary_artist_id"] = cfg.default_artist_id
 
     release_date = data.get("release_date")
     year = release_date.year if release_date else _current_year()
     label = data["label_name"]
-    if not data.get("c_line"):
+    if data.get("c_line") is None:
         data["c_line"] = render_line(cfg.c_line_template, year=year, label=label)
-    if not data.get("p_line"):
+    if data.get("p_line") is None:
         data["p_line"] = render_line(cfg.p_line_template, year=year, label=label)
 
     return data
@@ -104,10 +111,11 @@ def seed_recording_ownership(db: Session, recording: Recording) -> uuid.UUID | N
             recording_id=recording.id,
             contributor_id=cfg.default_contributor_id,
             share_pct=FULL_SHARE,
+            auto_created=True,
         )
     )
 
-    work = Work(title=recording.title, language=recording.language)
+    work = Work(title=recording.title, language=recording.language, auto_created=True)
     db.add(work)
     db.flush()
     db.add(RecordingWork(recording_id=recording.id, work_id=work.id))
@@ -117,6 +125,7 @@ def seed_recording_ownership(db: Session, recording: Recording) -> uuid.UUID | N
             contributor_id=cfg.default_contributor_id,
             role=WriterRole.composer_lyricist,
             share_pct=FULL_SHARE,
+            auto_created=True,
         )
     )
     db.flush()

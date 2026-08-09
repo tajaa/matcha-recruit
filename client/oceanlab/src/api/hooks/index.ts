@@ -11,6 +11,29 @@ export interface Artist {
   notes?: string | null
 }
 
+export interface Contributor {
+  id: string
+  name: string
+  legal_name?: string | null
+  ipi_number?: string | null
+  pro_affiliation?: string | null
+  email?: string | null
+  notes?: string | null
+}
+
+export type CodeSource = 'own' | 'distributor'
+
+export interface LabelSettings {
+  default_artist_id: string | null
+  default_contributor_id: string | null
+  default_genre: string | null
+  default_territories: string
+  c_line_template: string
+  p_line_template: string
+  isrc_source: CodeSource
+  upc_source: CodeSource
+}
+
 export interface Release {
   id: string
   title: string
@@ -19,8 +42,15 @@ export interface Release {
   upc?: string | null
   catalog_number?: string | null
   release_date?: string | null
+  original_release_date?: string | null
+  label_name?: string | null
+  c_line?: string | null
+  p_line?: string | null
   primary_artist_id: string
   genre?: string | null
+  subgenre?: string | null
+  territories?: string | null
+  notes?: string | null
 }
 
 export interface Recording {
@@ -67,6 +97,29 @@ export function useCreateArtist() {
   return useMutation({
     mutationFn: async (payload: { name: string }) => (await apiClient.post<Artist>('/artists', payload)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['artists'] }),
+  })
+}
+
+export function useContributors() {
+  return useQuery({
+    queryKey: ['contributors'],
+    queryFn: async () => (await apiClient.get<Page<Contributor>>('/contributors', { params: { limit: 200 } })).data,
+  })
+}
+
+export function useLabelSettings() {
+  return useQuery({
+    queryKey: ['settings', 'label'],
+    queryFn: async () => (await apiClient.get<LabelSettings>('/settings/label')).data,
+  })
+}
+
+export function useUpdateLabelSettings() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Partial<LabelSettings>) =>
+      (await apiClient.put<LabelSettings>('/settings/label', payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'label'] }),
   })
 }
 
@@ -120,6 +173,56 @@ export function useRecordings(q?: string) {
   return useQuery({
     queryKey: ['recordings', q],
     queryFn: async () => (await apiClient.get<Page<Recording>>('/recordings', { params: { q, limit: 200 } })).data,
+  })
+}
+
+export interface RecordingCreate {
+  title: string
+  version?: string | null
+  explicit?: boolean | null
+  language?: string | null
+  recording_year?: number | null
+  primary_artist_id: string
+}
+
+export function useCreateRecording() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: RecordingCreate) =>
+      (await apiClient.post<Recording>('/recordings', payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recordings'] }),
+  })
+}
+
+export interface MasterSplit {
+  id: string
+  recording_id: string
+  contributor_id: string
+  role: string | null
+  share_pct: string
+  auto_created: boolean
+}
+
+export interface Work {
+  id: string
+  title: string
+  language?: string | null
+  auto_created: boolean
+}
+
+export function useRecordingSplits(recordingId: string | undefined) {
+  return useQuery({
+    queryKey: ['recordings', recordingId, 'splits'],
+    queryFn: async () => (await apiClient.get<MasterSplit[]>(`/recordings/${recordingId}/splits`)).data,
+    enabled: !!recordingId,
+  })
+}
+
+export function useRecordingWorks(recordingId: string | undefined) {
+  return useQuery({
+    queryKey: ['recordings', recordingId, 'works'],
+    queryFn: async () => (await apiClient.get<Work[]>(`/recordings/${recordingId}/works`)).data,
+    enabled: !!recordingId,
   })
 }
 

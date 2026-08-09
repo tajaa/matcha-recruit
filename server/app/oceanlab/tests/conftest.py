@@ -15,7 +15,9 @@ from app.oceanlab.db import get_db
 from app.oceanlab.main import app
 from app.oceanlab.models.base import Base
 
-TEST_DATABASE_URL = "postgresql+psycopg://matcha:matcha_dev@127.0.0.1:5432/oceanlab_test"
+TEST_DATABASE_URL = (
+    "postgresql+psycopg://matcha:matcha_dev@127.0.0.1:5432/oceanlab_test"
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -25,6 +27,8 @@ def _ensure_test_token():
     # must not depend on an ambient OCEANLAB_TOKEN env var to pass.
     if not settings.token:
         settings.token = "oceanlab-test-token"
+    settings.storage_mode = "local"
+
 
 # The oceanlab schema now ships as a hand-SQL migration in matcha's shared
 # alembic chain (server/alembic/versions/), not a standalone alembic dir.
@@ -37,13 +41,16 @@ _VERSIONS_DIR = Path(__file__).resolve().parents[3] / "alembic" / "versions"
 _MIGRATION_MODULES = (
     "oceanlab_app_01_standalone",
     "oceanlab_app_02_label_defaults",
+    "oceanlab_app_03_prefill_provenance",
 )
 
 
 def _load_migrations():
     modules = []
     for name in _MIGRATION_MODULES:
-        spec = importlib.util.spec_from_file_location(name, _VERSIONS_DIR / f"{name}.py")
+        spec = importlib.util.spec_from_file_location(
+            name, _VERSIONS_DIR / f"{name}.py"
+        )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         modules.append(module)
@@ -123,17 +130,23 @@ def db_real(engine) -> Generator[Session, None, None]:
     finally:
         session.close()
         with engine.begin() as conn:
-            conn.execute(sa.text(f"TRUNCATE {_TRUNCATE_TABLES} RESTART IDENTITY CASCADE"))
+            conn.execute(
+                sa.text(f"TRUNCATE {_TRUNCATE_TABLES} RESTART IDENTITY CASCADE")
+            )
             # Truncating isrc_config / label_settings drops their migration-seeded
             # id=1 rows; restore both so every test starts from the same invariant
             # as a freshly migrated DB.
-            conn.execute(sa.text(
-                "INSERT INTO oceanlab_isrc_config (id, registrant_prefix, year_digits, next_designation) "
-                "VALUES (1, '', '', 1) ON CONFLICT (id) DO NOTHING"
-            ))
-            conn.execute(sa.text(
-                "INSERT INTO oceanlab_label_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
-            ))
+            conn.execute(
+                sa.text(
+                    "INSERT INTO oceanlab_isrc_config (id, registrant_prefix, year_digits, next_designation) "
+                    "VALUES (1, '', '', 1) ON CONFLICT (id) DO NOTHING"
+                )
+            )
+            conn.execute(
+                sa.text(
+                    "INSERT INTO oceanlab_label_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
+                )
+            )
 
 
 @pytest.fixture()
