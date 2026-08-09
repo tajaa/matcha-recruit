@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import type { FlyerDesign } from '../../api/types'
+import { resolveColor } from '../../utils/designer'
 
 // Raster resolution is decoupled from the on-artboard size so a 300dpi export
 // (pixelRatio 2) still gets clean module edges. Capped so a huge QR layer
@@ -35,16 +36,22 @@ interface QrSpec {
 export function useQrCanvases(design: FlyerDesign, claimUrl: string) {
   // One raster per DISTINCT (value, size, colours) tuple — two QR layers with
   // the same settings share a canvas instead of encoding twice.
+  // Keyed on RESOLVED colours, never the stored value. A token like 'ink' is
+  // the same string under every palette, so keying on it would collapse all of
+  // them onto one cached raster and a palette swap would leave the QR painted
+  // in the old colours (with nothing to indicate it hadn't updated).
   const specs = useMemo<QrSpec[]>(() => {
     const seen = new Map<string, QrSpec>()
     for (const layer of design.layers) {
       if (layer.type !== 'qr') continue
       const px = rasterPx(layer.size)
-      const key = `${claimUrl}|${px}|${layer.fg}|${layer.bg}`
-      if (!seen.has(key)) seen.set(key, { key, value: claimUrl, px, fg: layer.fg, bg: layer.bg })
+      const fg = resolveColor(design.palette, layer.fg)
+      const bg = resolveColor(design.palette, layer.bg)
+      const key = `${claimUrl}|${px}|${fg}|${bg}`
+      if (!seen.has(key)) seen.set(key, { key, value: claimUrl, px, fg, bg })
     }
     return [...seen.values()]
-  }, [design.layers, claimUrl])
+  }, [design.layers, design.palette, claimUrl])
 
   const [canvases, setCanvases] = useState<Record<string, HTMLCanvasElement>>({})
   const hosts = useRef(new Map<string, HTMLCanvasElement | null>())
@@ -85,6 +92,7 @@ export function useQrCanvases(design: FlyerDesign, claimUrl: string) {
     return () => { cancelled = true; cancelAnimationFrame(raf) }
   }, [specs])
 
+  /** `fg`/`bg` must already be RESOLVED — see the specs memo above. */
   function canvasFor(size: number, fg: string, bg: string): HTMLCanvasElement | undefined {
     return canvases[`${claimUrl}|${rasterPx(size)}|${fg}|${bg}`]
   }

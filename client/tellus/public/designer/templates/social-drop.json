@@ -1,15 +1,124 @@
 {
   "version": 1,
-  "artboard": { "preset": "social_square", "w": 1080, "h": 1080 },
-  "background": { "kind": "color", "color": "#0b0b0d" },
+  "artboard": {
+    "preset": "social_square",
+    "w": 1080,
+    "h": 1080
+  },
+  "background": {
+    "kind": "color",
+    "color": "ink"
+  },
   "layers": [
-    { "id": "t4-blob", "type": "shape", "shape": "circle", "x": 640, "y": -120, "width": 620, "height": 620, "rotation": 0, "opacity": 1, "fill": "#f97316" },
-    { "id": "t4-sparkle", "type": "sticker", "assetId": "sparkle.svg", "x": 84, "y": 96, "width": 150, "height": 150, "rotation": -12, "opacity": 1 },
-    { "id": "t4-title", "type": "text", "text": "Drop day", "x": 84, "y": 300, "width": 800, "rotation": 0, "opacity": 1, "fontFamily": "Arial Black", "fontSize": 128, "fontStyle": "bold", "fill": "#f3ede0", "align": "left", "lineHeight": 1.05, "letterSpacing": 0 },
-    { "id": "t4-reward", "type": "text", "text": "First 50 scans get a free tote", "x": 84, "y": 470, "width": 700, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 46, "fontStyle": "normal", "fill": "#fb923c", "align": "left", "lineHeight": 1.25, "letterSpacing": 0 },
-    { "id": "t4-qrpad", "type": "shape", "shape": "rect", "x": 84, "y": 660, "width": 360, "height": 360, "rotation": 0, "opacity": 1, "fill": "#ffffff", "cornerRadius": 22 },
-    { "id": "t4-qr", "type": "qr", "x": 114, "y": 690, "size": 300, "rotation": 0, "opacity": 1, "fg": "#0b0b0d", "bg": "#ffffff" },
-    { "id": "t4-scan", "type": "text", "text": "Scan to claim", "x": 490, "y": 790, "width": 500, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 44, "fontStyle": "bold", "fill": "#f3ede0", "align": "left", "lineHeight": 1.2, "letterSpacing": 0 },
-    { "id": "t4-logo", "type": "image", "src": "", "slot": "logo", "x": 490, "y": 880, "width": 110, "height": 110, "rotation": 0, "opacity": 1 }
+    {
+      "id": "t4-blob",
+      "type": "shape",
+      "shape": "circle",
+      "x": 640,
+      "y": -120,
+      "width": 620,
+      "height": 620,
+      "rotation": 0,
+      "opacity": 1,
+      "fill": "brand"
+    },
+    {
+      "id": "t4-sparkle",
+      "type": "sticker",
+      "assetId": "sparkle.svg",
+      "x": 84,
+      "y": 96,
+      "width": 150,
+      "height": 150,
+      "rotation": -12,
+      "opacity": 1
+    },
+    {
+      "id": "t4-title",
+      "type": "text",
+      "text": "Drop day",
+      "x": 84,
+      "y": 300,
+      "width": 800,
+      "rotation": 0,
+      "opacity": 1,
+      "fontFamily": "Arial Black",
+      "fontSize": 128,
+      "fontStyle": "bold",
+      "fill": "paper",
+      "align": "left",
+      "lineHeight": 1.05,
+      "letterSpacing": 0
+    },
+    {
+      "id": "t4-reward",
+      "type": "text",
+      "text": "First 50 scans get a free tote",
+      "x": 84,
+      "y": 470,
+      "width": 700,
+      "rotation": 0,
+      "opacity": 1,
+      "fontFamily": "Helvetica Neue",
+      "fontSize": 46,
+      "fontStyle": "normal",
+      "fill": "brandSoft",
+      "align": "left",
+      "lineHeight": 1.25,
+      "letterSpacing": 0
+    },
+    {
+      "id": "t4-qrpad",
+      "type": "shape",
+      "shape": "rect",
+      "x": 84,
+      "y": 660,
+      "width": 360,
+      "height": 360,
+      "rotation": 0,
+      "opacity": 1,
+      "fill": "#ffffff",
+      "cornerRadius": 22
+    },
+    {
+      "id": "t4-qr",
+      "type": "qr",
+      "x": 114,
+      "y": 690,
+      "size": 300,
+      "rotation": 0,
+      "opacity": 1,
+      "fg": "#0b0b0d",
+      "bg": "#ffffff"
+    },
+    {
+      "id": "t4-scan",
+      "type": "text",
+      "text": "Scan to claim",
+      "x": 490,
+      "y": 790,
+      "width": 500,
+      "rotation": 0,
+      "opacity": 1,
+      "fontFamily": "Helvetica Neue",
+      "fontSize": 44,
+      "fontStyle": "bold",
+      "fill": "paper",
+      "align": "left",
+      "lineHeight": 1.2,
+      "letterSpacing": 0
+    },
+    {
+      "id": "t4-logo",
+      "type": "image",
+      "src": "",
+      "slot": "logo",
+      "x": 490,
+      "y": 880,
+      "width": 110,
+      "height": 110,
+      "rotation": 0,
+      "opacity": 1
+    }
   ]
 }

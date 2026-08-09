@@ -157,6 +157,7 @@ export function DesignerCanvas({
               <LayerNode
                 key={layer.id}
                 layer={layer}
+                palette={design.palette}
                 stickerSrc={stickerSrc}
                 qrCanvas={qrCanvasFor}
                 draggable

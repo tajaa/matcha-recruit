@@ -8,7 +8,8 @@
 import { useEffect, useState } from 'react'
 import { Circle, Image as KonvaImage, Line, Rect, Text } from 'react-konva'
 import type Konva from 'konva'
-import type { DesignLayer } from '../../api/types'
+import type { DesignLayer, FlyerPalette } from '../../api/types'
+import { resolveColor } from '../../utils/designer'
 
 function useHtmlImage(src: string | null): HTMLImageElement | undefined {
   const [img, setImg] = useState<HTMLImageElement>()
@@ -27,7 +28,11 @@ function useHtmlImage(src: string | null): HTMLImageElement | undefined {
 
 export interface LayerNodeProps {
   layer: DesignLayer
+  /** The document's palette. Colour fields may name a token instead of a hex. */
+  palette: FlyerPalette | undefined
   stickerSrc: (assetId: string) => string
+  /** Takes RESOLVED colours — the raster cache is keyed on them, so handing it
+   *  a token would make every palette share one cache entry. */
   qrCanvas: (size: number, fg: string, bg: string) => HTMLCanvasElement | undefined
   draggable: boolean
   listening: boolean
@@ -39,10 +44,11 @@ export interface LayerNodeProps {
 }
 
 export function LayerNode({
-  layer, stickerSrc, qrCanvas, draggable, listening, onSelect, onDragMove, onDragEnd, onDblClick, visible = true,
+  layer, palette, stickerSrc, qrCanvas, draggable, listening, onSelect, onDragMove, onDragEnd, onDblClick, visible = true,
 }: LayerNodeProps) {
   const imageSrc = layer.type === 'image' ? layer.src : layer.type === 'sticker' ? stickerSrc(layer.assetId) : null
   const img = useHtmlImage(imageSrc)
+  const color = (value: string) => resolveColor(palette, value)
 
   const common = {
     id: layer.id,
@@ -71,7 +77,7 @@ export function LayerNode({
           fontFamily={layer.fontFamily}
           fontSize={layer.fontSize}
           fontStyle={layer.fontStyle}
-          fill={layer.fill}
+          fill={color(layer.fill)}
           align={layer.align}
           width={layer.width}
           lineHeight={layer.lineHeight}
@@ -84,7 +90,9 @@ export function LayerNode({
       if (!img) return null
       return <KonvaImage {...common} image={img} width={layer.width} height={layer.height} />
     case 'qr': {
-      const canvas = qrCanvas(layer.size, layer.fg, layer.bg)
+      const fg = color(layer.fg)
+      const bg = color(layer.bg)
+      const canvas = qrCanvas(layer.size, fg, bg)
       // Placeholder rather than nothing while the raster is a frame behind —
       // and it is what template thumbnails render, since those have no
       // campaign (and therefore no claim URL) to encode. Deliberately drawn as
@@ -98,8 +106,8 @@ export function LayerNode({
             {...common}
             width={layer.size}
             height={layer.size}
-            fill={layer.bg}
-            stroke={layer.fg}
+            fill={bg}
+            stroke={fg}
             strokeWidth={Math.max(2, layer.size * 0.02)}
             dash={[layer.size * 0.08, layer.size * 0.06]}
           />
@@ -118,8 +126,8 @@ export function LayerNode({
             x={layer.x + r}
             y={layer.y + r}
             radius={r}
-            fill={layer.fill}
-            stroke={layer.stroke}
+            fill={color(layer.fill)}
+            stroke={layer.stroke ? color(layer.stroke) : undefined}
             strokeWidth={layer.strokeWidth}
           />
         )
@@ -129,7 +137,7 @@ export function LayerNode({
           <Line
             {...common}
             points={[0, 0, layer.width, 0]}
-            stroke={layer.stroke || layer.fill}
+            stroke={color(layer.stroke || layer.fill)}
             strokeWidth={layer.height}
             lineCap="round"
           />
@@ -140,8 +148,8 @@ export function LayerNode({
           {...common}
           width={layer.width}
           height={layer.height}
-          fill={layer.fill}
-          stroke={layer.stroke}
+          fill={color(layer.fill)}
+          stroke={layer.stroke ? color(layer.stroke) : undefined}
           strokeWidth={layer.strokeWidth}
           cornerRadius={layer.cornerRadius}
         />
@@ -149,12 +157,16 @@ export function LayerNode({
   }
 }
 
-export function BackgroundNode({ design }: { design: { artboard: { w: number; h: number }; background: DesignBackground } }) {
+export function BackgroundNode({
+  design,
+}: {
+  design: { artboard: { w: number; h: number }; background: DesignBackground; palette?: FlyerPalette }
+}) {
   const src = design.background.kind === 'image' ? design.background.src : null
   const img = useHtmlImage(src)
   const { w, h } = design.artboard
   if (design.background.kind === 'color') {
-    return <Rect x={0} y={0} width={w} height={h} fill={design.background.color} listening={false} />
+    return <Rect x={0} y={0} width={w} height={h} fill={resolveColor(design.palette, design.background.color)} listening={false} />
   }
   if (!img) return <Rect x={0} y={0} width={w} height={h} fill="#ffffff" listening={false} />
   // 'cover': scale up to fill, centre the overflow.

@@ -1,0 +1,67 @@
+[
+  {
+    "key": "warm-paper",
+    "label": "Warm paper",
+    "blurb": "the default — warm off-white stock, near-black ink, orange brand accent",
+    "colors": {
+      "ink": "#17140f",
+      "paper": "#f3ede0",
+      "brand": "#f97316",
+      "brandSoft": "#fb923c",
+      "accent": "#34d399",
+      "muted": "#8a8371"
+    }
+  },
+  {
+    "key": "midnight",
+    "label": "Midnight",
+    "blurb": "dark stock with pale ink and an ember accent — high contrast, reads at distance",
+    "colors": {
+      "ink": "#f4f1ea",
+      "paper": "#111014",
+      "brand": "#f97316",
+      "brandSoft": "#fdba74",
+      "accent": "#38bdf8",
+      "muted": "#8b8894"
+    }
+  },
+  {
+    "key": "fresh-mint",
+    "label": "Fresh mint",
+    "blurb": "cool pale green stock, deep green ink — calm, food-and-drink friendly",
+    "colors": {
+      "ink": "#0f2a22",
+      "paper": "#eaf5ef",
+      "brand": "#0f9d6e",
+      "brandSoft": "#5ecfa5",
+      "accent": "#f59e0b",
+      "muted": "#6f8b81"
+    }
+  },
+  {
+    "key": "bold-citrus",
+    "label": "Bold citrus",
+    "blurb": "saturated yellow stock with black ink — loud, built for a noticeboard",
+    "colors": {
+      "ink": "#161206",
+      "paper": "#fde047",
+      "brand": "#dc2626",
+      "brandSoft": "#f87171",
+      "accent": "#1d4ed8",
+      "muted": "#7c6f2a"
+    }
+  },
+  {
+    "key": "mono-ink",
+    "label": "Mono ink",
+    "blurb": "pure black on white with grey support — cheapest to photocopy, never misprints",
+    "colors": {
+      "ink": "#000000",
+      "paper": "#ffffff",
+      "brand": "#000000",
+      "brandSoft": "#4b4b4b",
+      "accent": "#000000",
+      "muted": "#8a8a8a"
+    }
+  }
+]

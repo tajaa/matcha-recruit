@@ -298,6 +298,7 @@ export default function CampaignDesigner() {
           onAddSticker={(s: StickerManifestEntry) => addLayer(makeStickerLayer(design, s.file, s.w, s.h))}
           onAddLogo={() => { if (brand?.logo_url) addLayer(makeImageLayer(design, brand.logo_url, 512, 512, 'logo')) }}
           onSetBackgroundColor={(color) => set({ ...design, background: { kind: 'color', color } }, { commit: true })}
+          onSetPalette={(palette) => set({ ...design, palette }, { commit: true })}
           onSetPreset={applyPreset}
         />
 
@@ -351,10 +352,10 @@ function starterDesign(campaign: PromoCampaign, logoUrl: string | null): FlyerDe
   if (logoUrl) layers.push(makeImageLayer(base, logoUrl, 512, 512, 'logo'))
   layers.push(makeTextLayer(base, campaign.title, { y: Math.round(base.artboard.h * 0.28), fontSize: 96 }))
   layers.push(makeTextLayer(base, campaign.reward_text, {
-    y: Math.round(base.artboard.h * 0.44), fontSize: 52, fontStyle: 'normal', fill: '#4b4436',
+    y: Math.round(base.artboard.h * 0.44), fontSize: 52, fontStyle: 'normal', fill: 'ink',
   }))
   layers.push(makeTextLayer(base, 'Scan to claim', {
-    y: Math.round(base.artboard.h * 0.58), fontSize: 34, fontStyle: 'normal', fill: '#8a8371',
+    y: Math.round(base.artboard.h * 0.58), fontSize: 34, fontStyle: 'normal', fill: 'muted',
   }))
   layers.push(makeQrLayer(base))
   return { ...base, layers }

@@ -7,8 +7,10 @@
 import { useEffect, useState } from 'react'
 import { Layer, Stage } from 'react-konva'
 import { Image as ImageIcon, LayoutTemplate, Palette, Sticker as StickerIcon } from 'lucide-react'
-import type { ArtboardPreset, FlyerDesign, StickerManifestEntry, TemplateManifestEntry } from '../../api/types'
-import { ARTBOARD_PRESETS, ASSET_BASE } from '../../utils/designer'
+import type {
+  ArtboardPreset, FlyerDesign, FlyerPalette, PalettePreset, StickerManifestEntry, TemplateManifestEntry,
+} from '../../api/types'
+import { ARTBOARD_PRESETS, ASSET_BASE, DEFAULT_PALETTE, PALETTE_TOKENS, resolveColor } from '../../utils/designer'
 import { Button, ErrorText, Select } from '../ui'
 import { BackgroundNode, LayerNode } from './LayerRenderer'
 
@@ -32,6 +34,7 @@ function TemplatePreview({ design, stickerSrc }: { design: FlyerDesign; stickerS
           <LayerNode
             key={l.id}
             layer={l}
+            palette={design.palette}
             stickerSrc={stickerSrc}
             qrCanvas={() => undefined}
             draggable={false}
@@ -50,25 +53,28 @@ export interface AssetPanelProps {
   onAddSticker: (entry: StickerManifestEntry) => void
   onAddLogo: () => void
   onSetBackgroundColor: (color: string) => void
+  onSetPalette: (colors: FlyerPalette) => void
   onSetPreset: (preset: ArtboardPreset) => void
   stickerSrc: (assetId: string) => string
 }
 
 export function AssetPanel({
-  design, brandLogoUrl, onApplyTemplate, onAddSticker, onAddLogo, onSetBackgroundColor, onSetPreset, stickerSrc,
+  design, brandLogoUrl, onApplyTemplate, onAddSticker, onAddLogo, onSetBackgroundColor, onSetPalette, onSetPreset, stickerSrc,
 }: AssetPanelProps) {
   const [tab, setTab] = useState<Tab>('templates')
   const [templates, setTemplates] = useState<{ entry: TemplateManifestEntry; design: FlyerDesign }[]>([])
   const [stickers, setStickers] = useState<StickerManifestEntry[]>([])
+  const [palettes, setPalettes] = useState<PalettePreset[]>([])
   const [assetErr, setAssetErr] = useState('')
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [tRes, sRes] = await Promise.all([
+        const [tRes, sRes, pRes] = await Promise.all([
           fetch(`${ASSET_BASE}/templates/index.json`),
           fetch(`${ASSET_BASE}/stickers/index.json`),
+          fetch(`${ASSET_BASE}/palettes.json`),
         ])
         if (tRes.ok) {
           const list = (await tRes.json()) as TemplateManifestEntry[]
@@ -79,6 +85,7 @@ export function AssetPanel({
           if (alive) setTemplates(loaded.filter((x): x is { entry: TemplateManifestEntry; design: FlyerDesign } => !!x))
         }
         if (sRes.ok && alive) setStickers((await sRes.json()) as StickerManifestEntry[])
+        if (pRes.ok && alive) setPalettes((await pRes.json()) as PalettePreset[])
       } catch {
         if (alive) setAssetErr('Could not load the design asset pack.')
       }
@@ -154,14 +161,52 @@ export function AssetPanel({
             </Button>
             {!brandLogoUrl && <p className="text-xs text-tu-faint">Upload a logo under Settings to place it on the flyer.</p>}
 
+            {/* A palette swap restyles every layer that named a token, which is
+                how "make it warmer" stays a one-click change instead of an
+                edit per layer. Layers pinned to a literal hex keep it. */}
+            <div>
+              <span className="mb-1 block text-xs font-medium text-tu-dim">Palette</span>
+              {palettes.length === 0 ? (
+                <p className="text-xs text-tu-faint">No palettes in the asset pack.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {palettes.map((p) => {
+                    const active = PALETTE_TOKENS.every((t) => (design.palette ?? DEFAULT_PALETTE)[t] === p.colors[t])
+                    return (
+                      <button
+                        key={p.key}
+                        onClick={() => onSetPalette(p.colors)}
+                        title={p.blurb}
+                        className={`flex w-full items-center gap-2 rounded-lg border p-1.5 text-left transition ${
+                          active ? 'border-tu-accent' : 'border-tu-border hover:border-tu-accent/60'
+                        }`}
+                      >
+                        <span className="flex shrink-0 gap-0.5">
+                          {PALETTE_TOKENS.map((t) => (
+                            <span key={t} className="h-4 w-2.5 rounded-sm" style={{ background: p.colors[t] }} />
+                          ))}
+                        </span>
+                        <span className="truncate text-xs text-tu-dim">{p.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-tu-dim">Background</span>
               <input
                 type="color"
-                value={design.background.kind === 'color' ? design.background.color : '#ffffff'}
+                value={design.background.kind === 'color'
+                  ? resolveColor(design.palette, design.background.color)
+                  : '#ffffff'}
                 onChange={(e) => onSetBackgroundColor(e.target.value)}
                 className="h-9 w-full cursor-pointer rounded-lg border border-tu-border bg-tu-panel2"
               />
+              <span className="mt-1 block text-xs text-tu-faint">
+                Overrides the palette's paper colour for this flyer only.
+              </span>
             </label>
 
             <Select

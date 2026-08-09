@@ -3,8 +3,8 @@
 // Every edit here is a discrete user action, so all of them commit (one undo
 // step each) — unlike a drag, which streams uncommitted updates.
 import { ArrowDown, ArrowUp, Copy, Lock, Trash2, Unlock } from 'lucide-react'
-import type { DesignLayer, FlyerDesign, FontManifestEntry } from '../../api/types'
-import { layerLabel } from '../../utils/designer'
+import type { DesignLayer, FlyerDesign, FlyerPalette, FontManifestEntry } from '../../api/types'
+import { PALETTE_TOKENS, layerLabel, resolveColor } from '../../utils/designer'
 import { Input, Select } from '../ui'
 
 export interface InspectorPanelProps {
@@ -18,17 +18,49 @@ export interface InspectorPanelProps {
   fonts: FontManifestEntry[]
 }
 
-function ColorRow({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+// Tokens first, a hex well second. Picking a token is what makes a flyer
+// survive a palette swap, so the swatch strip is the default affordance and the
+// custom colour is the escape hatch — not the other way round.
+function ColorRow({
+  label, value, palette, onChange,
+}: {
+  label: string
+  value: string
+  palette: FlyerPalette | undefined
+  onChange: (v: string) => void
+}) {
+  const isToken = value.charCodeAt(0) !== 35
   return (
-    <label className="block">
+    <div className="block">
       <span className="mb-1 block text-xs font-medium text-tu-dim">{label}</span>
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-9 w-full cursor-pointer rounded-lg border border-tu-border bg-tu-panel2"
-      />
-    </label>
+      <div className="flex items-center gap-1.5">
+        {PALETTE_TOKENS.map((token) => (
+          <button
+            key={token}
+            type="button"
+            title={token}
+            onClick={() => onChange(token)}
+            style={{ background: resolveColor(palette, token) }}
+            className={`h-7 w-7 rounded-md border transition ${
+              isToken && value === token ? 'border-tu-accent ring-2 ring-tu-accent/40' : 'border-tu-border'
+            }`}
+          />
+        ))}
+        <label
+          className={`relative ml-auto h-7 w-9 shrink-0 overflow-hidden rounded-md border ${
+            isToken ? 'border-tu-border' : 'border-tu-accent ring-2 ring-tu-accent/40'
+          }`}
+          title="Custom colour"
+        >
+          <input
+            type="color"
+            value={resolveColor(palette, value)}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer border-0 bg-transparent p-0"
+          />
+        </label>
+      </div>
+    </div>
   )
 }
 
@@ -100,13 +132,13 @@ export function InspectorPanel({
                   <Input label="Tracking" type="number" step={1} min={-20} max={80} value={layer.letterSpacing}
                     onChange={(e) => patch({ letterSpacing: Number(e.target.value) } as Partial<DesignLayer>)} />
                 </div>
-                <ColorRow label="Colour" value={layer.fill} onChange={(v) => patch({ fill: v } as Partial<DesignLayer>)} />
+                <ColorRow label="Colour" value={layer.fill} palette={design.palette} onChange={(v) => patch({ fill: v } as Partial<DesignLayer>)} />
               </>
             )}
 
             {layer.type === 'shape' && (
               <>
-                <ColorRow label="Fill" value={layer.fill} onChange={(v) => patch({ fill: v } as Partial<DesignLayer>)} />
+                <ColorRow label="Fill" value={layer.fill} palette={design.palette} onChange={(v) => patch({ fill: v } as Partial<DesignLayer>)} />
                 {layer.shape === 'rect' && (
                   <Input label="Corner radius" type="number" min={0} max={400} value={layer.cornerRadius ?? 0}
                     onChange={(e) => patch({ cornerRadius: Number(e.target.value) } as Partial<DesignLayer>)} />
@@ -122,8 +154,8 @@ export function InspectorPanel({
               <>
                 <Input label="Size" type="number" min={96} max={2000} value={layer.size}
                   onChange={(e) => patch({ size: Number(e.target.value) } as Partial<DesignLayer>)} />
-                <ColorRow label="Foreground" value={layer.fg} onChange={(v) => patch({ fg: v } as Partial<DesignLayer>)} />
-                <ColorRow label="Background" value={layer.bg} onChange={(v) => patch({ bg: v } as Partial<DesignLayer>)} />
+                <ColorRow label="Foreground" value={layer.fg} palette={design.palette} onChange={(v) => patch({ fg: v } as Partial<DesignLayer>)} />
+                <ColorRow label="Background" value={layer.bg} palette={design.palette} onChange={(v) => patch({ bg: v } as Partial<DesignLayer>)} />
                 <p className="text-xs text-tu-faint">
                   Keep strong contrast and leave the quiet zone clear — a low-contrast QR will not scan off paper.
                 </p>

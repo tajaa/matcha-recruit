@@ -871,10 +871,34 @@ export interface PromoScanBootstrap {
 // claim_token is resolved into an absolute claim URL at render/export time.
 export type ArtboardPreset = 'flyer_letter' | 'reward_card' | 'social_square' | 'story'
 
+// Semantic colour tokens. Every colour-bearing field below accepts EITHER a
+// '#rrggbb' literal OR one of these names, resolved against the document's own
+// palette at render time (utils/designer.ts:resolveColor).
+//
+// The point of the indirection is that one palette swap restyles the whole
+// flyer coherently, and a template authored in tokens is correct on every
+// palette instead of needing a variant per look. Hex stays legal forever — the
+// human colour pickers still write it, and no saved design breaks.
+export type FlyerPaletteToken = 'ink' | 'paper' | 'brand' | 'brandSoft' | 'accent' | 'muted'
+export type FlyerPalette = Record<FlyerPaletteToken, string>
+
+// One entry of public/designer/palettes.json. That file is the single source of
+// truth for the curated looks: this picker reads it, and the backend's parity
+// test reads the same file, so a palette can't exist on one side only.
+export interface PalettePreset {
+  key: string
+  label: string
+  blurb: string
+  colors: FlyerPalette
+}
+
 export interface FlyerDesign {
   version: 1
   artboard: { preset: ArtboardPreset; w: number; h: number }
   background: { kind: 'color'; color: string } | { kind: 'image'; src: string; fit: 'cover' }
+  // Absent = DEFAULT_PALETTE. Optional so documents saved before tokens
+  // existed keep loading unchanged.
+  palette?: FlyerPalette
   layers: DesignLayer[]
 }
 

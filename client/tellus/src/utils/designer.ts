@@ -1,11 +1,38 @@
 // Flyer-designer document helpers — artboard geometry, layer factories, and
 // template instantiation. Pure functions only; nothing here touches Konva or
 // the DOM so the designer page and the export path can share them.
-import type { ArtboardPreset, DesignLayer, FlyerDesign } from '../api/types'
+import type { ArtboardPreset, DesignLayer, FlyerDesign, FlyerPalette, FlyerPaletteToken } from '../api/types'
 
 // Vite's base is '/tellus/', so files under client/tellus/public/designer/ are
 // served here. Moving the pack to S3/CloudFront later is a one-line change.
 export const ASSET_BASE = '/tellus/designer'
+
+// The palette a document falls back to when it carries none of its own, and
+// the vocabulary every colour field may name instead of a hex literal.
+export const DEFAULT_PALETTE: FlyerPalette = {
+  ink: '#17140f',
+  paper: '#f3ede0',
+  brand: '#f97316',
+  brandSoft: '#fb923c',
+  accent: '#34d399',
+  muted: '#8a8371',
+}
+
+export const PALETTE_TOKENS = Object.keys(DEFAULT_PALETTE) as FlyerPaletteToken[]
+
+// Resolve a stored colour to something a renderer can paint.
+//
+// Anything starting '#' is a literal and passes through untouched — that is
+// what keeps hand-picked colours working alongside tokens. A token missing from
+// the document's own palette falls back to the default one rather than to
+// nothing: a palette written by an older build (or a partial one) should lose
+// the custom shade, not paint the layer black.
+export function resolveColor(palette: FlyerPalette | undefined, value: string): string {
+  if (!value) return DEFAULT_PALETTE.ink
+  if (value.charCodeAt(0) === 35 /* '#' */) return value
+  const token = value as FlyerPaletteToken
+  return palette?.[token] ?? DEFAULT_PALETTE[token] ?? DEFAULT_PALETTE.ink
+}
 
 // Artboards are stored in PRINT pixels, not screen pixels: 1275x1650 is US
 // Letter at 150dpi. That makes a 150dpi export a straight 1:1 stage capture
@@ -26,7 +53,7 @@ export function blankDesign(preset: ArtboardPreset = 'flyer_letter'): FlyerDesig
   return {
     version: 1,
     artboard: { preset, w, h },
-    background: { kind: 'color', color: '#f3ede0' },
+    background: { kind: 'color', color: 'paper' },
     layers: [],
   }
 }
@@ -47,7 +74,7 @@ export function makeTextLayer(design: FlyerDesign, text: string, over?: Partial<
     fontFamily: 'Helvetica Neue',
     fontSize: Math.round(design.artboard.h * 0.05),
     fontStyle: 'bold',
-    fill: '#17140f',
+    fill: 'ink',
     align: 'center',
     width,
     lineHeight: 1.2,
@@ -67,7 +94,7 @@ export function makeShapeLayer(design: FlyerDesign, shape: 'rect' | 'circle' | '
     y: Math.round((design.artboard.h - size) / 2),
     width: size,
     height: shape === 'line' ? 8 : size,
-    fill: '#f97316',
+    fill: 'brand',
     cornerRadius: shape === 'rect' ? 16 : 0,
   }
 }
@@ -111,6 +138,12 @@ export function makeQrLayer(design: FlyerDesign): DesignLayer {
     x: Math.round((design.artboard.w - size) / 2),
     y: Math.round(design.artboard.h - size - design.artboard.h * 0.08),
     size,
+    // Literals, not tokens, and deliberately so. Everywhere else on the flyer a
+    // palette swap is a taste change; on the QR it is a scanning requirement.
+    // `ink` on `paper` looks like a safe pair until a dark palette inverts them
+    // — midnight's ink is near-white, which on a white pad is a code no scanner
+    // will read, on a flyer that still looks finished. The AI catalog may set
+    // these, but only through a contrast check.
     fg: '#17140f',
     bg: '#ffffff',
   }
