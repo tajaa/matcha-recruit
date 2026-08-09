@@ -12,6 +12,7 @@ from app.oceanlab.config import settings
 from app.oceanlab.services.storage import (
     CHUNK_SIZE,
     LocalDiskStore,
+    S3Store,
     StorageError,
     artwork_key,
     hash_and_size,
@@ -92,6 +93,36 @@ def test_exists(store):
 
 def test_exists_false_for_unsafe_key(store):
     assert store.exists("../../etc/passwd") is False
+
+
+def test_local_ping(store):
+    store.ping()
+
+
+def test_local_ping_raises_for_missing_root(tmp_path):
+    store = LocalDiskStore(tmp_path / "store")
+    store._root.rmdir()
+    with pytest.raises(StorageError, match="Local storage unavailable"):
+        store.ping()
+
+
+def test_s3_ping_tolerates_missing_healthcheck():
+    class Missing:
+        def head_object(self, **kwargs):
+            error = RuntimeError("not found")
+            error.response = {"Error": {"Code": "404"}}
+            raise error
+
+    S3Store(Missing(), "bucket", "oceanlab").ping()
+
+
+def test_s3_ping_raises_when_unreachable():
+    class Unreachable:
+        def head_object(self, **kwargs):
+            raise ConnectionError("network down")
+
+    with pytest.raises(StorageError, match="storage unavailable"):
+        S3Store(Unreachable(), "bucket", "oceanlab").ping()
 
 
 def test_delete_missing_is_noop(store):

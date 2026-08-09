@@ -17,12 +17,16 @@ def health(db: Session = Depends(get_db)) -> dict:
     except Exception:
         db_ok = False
 
-    # Probing a key that is never written: a reachable store answers "no", an
-    # unreachable one raises. Either way we never create anything to find out.
+    # A missing healthcheck object is healthy; only backend-unavailable errors
+    # should degrade the service. The probe never creates anything.
     try:
-        get_store().exists("__healthcheck__")
+        get_store().ping()
         storage_ok = True
     except Exception:
         storage_ok = False
 
-    return {"status": "ok" if db_ok and storage_ok else "degraded", "db": db_ok, "storage": storage_ok}
+    return {
+        "status": "ok" if db_ok and storage_ok else "degraded",
+        "db": db_ok,
+        "storage": storage_ok,
+    }

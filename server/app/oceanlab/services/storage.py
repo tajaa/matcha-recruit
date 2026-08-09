@@ -61,19 +61,27 @@ def hash_and_size(src: BinaryIO) -> tuple[int, str]:
 class ObjectStore(Protocol):
     def put(self, key: str, src: BinaryIO, *, content_type: str) -> tuple[int, str]:
         """Store `src` at `key`. Returns (size_bytes, sha256_hex). Overwrites."""
+        ...
 
     def open(self, key: str) -> BinaryIO: ...
 
     def exists(self, key: str) -> bool: ...
 
+    def ping(self) -> None:
+        """Verify backend reachability, raising StorageError when unavailable."""
+        ...
+
     def delete(self, key: str) -> None:
         """Delete `key`. Missing key is a no-op, not an error."""
+        ...
 
     def local_copy(self, key: str) -> AbstractContextManager[Path]:
         """Yield a real filesystem path for `key` — ffmpeg cannot read a stream."""
+        ...
 
     def presigned_url(self, key: str, expires_in: int = 900) -> str | None:
         """Time-limited download URL, or None when the backend can't mint one."""
+        ...
 
 
 class S3Store:
@@ -117,6 +125,22 @@ class S3Store:
             return True
         except Exception:
             return False
+
+    def ping(self) -> None:
+        """Verify S3 is reachable without requiring a healthcheck object."""
+        try:
+            self._client.head_object(
+                Bucket=self._bucket, Key=self._full_key("__healthcheck__")
+            )
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            code = (
+                response.get("Error", {}).get("Code")
+                if isinstance(response, dict)
+                else None
+            )
+            if code not in {"404", "NoSuchKey"}:
+                raise StorageError(f"Oceanlab S3 storage unavailable: {exc}") from exc
 
     def delete(self, key: str) -> None:
         try:
@@ -188,6 +212,10 @@ class LocalDiskStore:
             return self._path(key).is_file()
         except StorageError:
             return False
+
+    def ping(self) -> None:
+        if not self._root.is_dir() or not os.access(self._root, os.W_OK):
+            raise StorageError(f"Local storage unavailable: {self._root}")
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)

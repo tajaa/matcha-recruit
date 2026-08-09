@@ -26,7 +26,7 @@ def test_health_reports_degraded_when_storage_unreachable(db, monkeypatch):
     from app.oceanlab.routers import health as health_module
 
     class _DeadStore:
-        def exists(self, key):
+        def ping(self):
             raise RuntimeError("S3 unreachable")
 
     monkeypatch.setattr(health_module, "get_store", lambda: _DeadStore())
