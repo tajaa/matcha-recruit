@@ -51,6 +51,10 @@ files chained off the previous one — run `./scripts/migrate-dev.sh` /
 `migrate-prod.sh` like any other matcha migration, not a separate alembic
 invocation.
 
+Oceanlab uses the shared `app/core/services/storage.py` S3 client for production
+object storage; local disk is available only with explicit
+`OCEANLAB_STORAGE_MODE=local`.
+
 Chain so far:
 
 | Revision | File | What |

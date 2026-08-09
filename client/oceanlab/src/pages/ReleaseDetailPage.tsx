@@ -140,7 +140,7 @@ function MetadataTab({
             className="border rounded px-2 py-1"
             value={value}
             onChange={(e) => setter(e.target.value)}
-            onBlur={() => value !== original && save({ [key]: value || null })}
+            onBlur={() => value !== original && save({ [key]: value || (key === 'label_name' || key === 'territories' ? '' : null) })}
           />
         </label>
       ))}

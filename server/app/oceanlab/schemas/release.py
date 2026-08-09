@@ -27,7 +27,7 @@ class ReleaseCreate(ReleaseBase):
     # services/defaults.apply_release_defaults). The column is NOT NULL and
     # the route 422s when neither the payload nor the defaults provide one.
     primary_artist_id: uuid.UUID | None = None
-    # Same reason: "" / omitted means "use the label default", whereas
+    # Same reason: omitted means "use the label default", whereas
     # ReleaseBase's "WW" would mask the setting entirely.
     territories: str | None = None
 
@@ -47,7 +47,14 @@ class ReleaseUpdate(BaseModel):
     catalog_number: str | None = None
     notes: str | None = None
 
-    @field_validator("title", "release_type", "territories", "label_name", "primary_artist_id", mode="before")
+    @field_validator(
+        "title",
+        "release_type",
+        "territories",
+        "label_name",
+        "primary_artist_id",
+        mode="before",
+    )
     @classmethod
     def _not_explicit_null(cls, v, info):
         if v is None:

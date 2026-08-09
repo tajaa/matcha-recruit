@@ -12,14 +12,15 @@ hard error that would otherwise block packaging until a $95 usisrc.org prefix
 and $30 GS1 GTINs are bought. Flip to 'own' once those exist — no code change.
 
 Revision ID: oceanlab_app_02
-Revises: oceanlab_app_01
+Revises: tellus_app_16
 Create Date: 2026-08-09
 """
+
 from alembic import op
 
 
 revision = "oceanlab_app_02"
-down_revision = "oceanlab_app_01"
+down_revision = "tellus_app_16"
 branch_labels = None
 depends_on = None
 
