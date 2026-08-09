@@ -24,6 +24,7 @@ Concurrency invariants:
     SAVEPOINT aborted (see points_service.py's adjust_points docstring for
     the same rule).
 """
+import json
 import re
 import secrets
 from datetime import datetime, timezone
@@ -102,6 +103,8 @@ def claim_reason(campaign: dict, now: Optional[datetime] = None) -> str:
     now = now or datetime.now(timezone.utc)
     if campaign["status"] == "cancelled":
         return "cancelled"
+    if campaign.get("plan_status", "active") != "active":
+        return "brand_inactive"
     if campaign["status"] == "paused":
         return "paused"
     starts_at = campaign.get("starts_at")
@@ -263,7 +266,16 @@ async def get_campaign_design(conn, brand_id: UUID, campaign_id: UUID) -> Option
     )
     if row is None:
         raise PromoError(404, "not_found", "Campaign not found.")
-    return row["design_json"]
+    raw = row["design_json"]
+    # No asyncpg JSON codec is registered on this pool — asyncpg hands back
+    # the raw JSONB text (same trap tellus_admin_audit.detail has; see
+    # routes/admin/_shared.py:decode_audit_rows). isinstance guard keeps this
+    # correct if a codec is ever added later.
+    return json.loads(raw) if isinstance(raw, str) else raw
+
+
+_PATCH_COLUMNS = ("title", "reward_text", "description", "ends_at", "status")
+_NULLABLE_PATCH_COLUMNS = {"description", "ends_at"}  # the rest are NOT NULL
 
 
 async def update_campaign(conn, brand_id: UUID, campaign_id: UUID, patch) -> dict:
@@ -273,22 +285,43 @@ async def update_campaign(conn, brand_id: UUID, campaign_id: UUID, patch) -> dic
     )
     if current is None:
         raise PromoError(404, "not_found", "Campaign not found.")
+    if current["status"] == "cancelled":
+        raise PromoError(409, "already_cancelled", "This campaign is cancelled and can no longer be edited.")
     if patch.status is not None and not can_campaign_transition(current["status"], patch.status):
         raise PromoError(409, "bad_transition", f"Can't move campaign from {current['status']} to {patch.status}.")
 
+    # model_fields_set-driven SET clause so an explicit null on a nullable
+    # field actually clears it (COALESCE previously made that impossible),
+    # while an unsent field is left untouched. Column names come from the
+    # _PATCH_COLUMNS whitelist above, never from request text.
+    sets: list[str] = []
+    values: list = []
+    for col in _PATCH_COLUMNS:
+        if col not in patch.model_fields_set:
+            continue
+        val = getattr(patch, col)
+        if val is None and col not in _NULLABLE_PATCH_COLUMNS:
+            continue
+        values.append(val)
+        sets.append(f"{col} = ${len(values) + 2}")  # $1 = id, $2 = brand_id
+
+    if not sets:
+        row = await conn.fetchrow(
+            f"SELECT {_CAMPAIGN_COLUMNS} FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+            campaign_id, brand_id,
+        )
+        return _serialize_campaign(dict(row))
+
     row = await conn.fetchrow(
-        f"""UPDATE tellus_promo_campaigns
-            SET title = COALESCE($3, title),
-                reward_text = COALESCE($4, reward_text),
-                description = COALESCE($5, description),
-                ends_at = COALESCE($6, ends_at),
-                status = COALESCE($7, status),
-                updated_at = NOW()
-            WHERE id = $1 AND brand_id = $2
+        f"""UPDATE tellus_promo_campaigns SET {', '.join(sets)}, updated_at = NOW()
+            WHERE id = $1 AND brand_id = $2 AND status <> 'cancelled'
             RETURNING {_CAMPAIGN_COLUMNS}""",
-        campaign_id, brand_id, patch.title, patch.reward_text, patch.description,
-        patch.ends_at, patch.status,
+        campaign_id, brand_id, *values,
     )
+    if row is None:
+        # Closes the window where a concurrent cancel lands between the
+        # pre-check above and this UPDATE.
+        raise PromoError(409, "already_cancelled", "This campaign is cancelled and can no longer be edited.")
     return _serialize_campaign(dict(row))
 
 
@@ -319,13 +352,27 @@ async def cancel_campaign(conn, brand_id: UUID, campaign_id: UUID) -> int:
         return invalidated
 
 
-async def save_design(conn, brand_id: UUID, campaign_id: UUID, design_json: dict) -> None:
+async def save_design(conn, brand_id: UUID, campaign_id: UUID, design_json_text: str) -> None:
+    """design_json_text is a pre-serialized JSON string (see routes/promo.py:
+    put_campaign_design) — no asyncpg JSON codec is registered on this pool,
+    so a raw dict here fails as 'invalid input for query argument $3'."""
     row = await conn.fetchrow(
-        "UPDATE tellus_promo_campaigns SET design_json = $3, updated_at = NOW() "
+        "UPDATE tellus_promo_campaigns SET design_json = $3::jsonb, updated_at = NOW() "
         "WHERE id = $1 AND brand_id = $2 RETURNING id",
-        campaign_id, brand_id, design_json,
+        campaign_id, brand_id, design_json_text,
     )
     if row is None:
+        raise PromoError(404, "not_found", "Campaign not found.")
+
+
+async def assert_campaign_owned(conn, brand_id: UUID, campaign_id: UUID) -> None:
+    """Cheap ownership check for callsites that don't need the row itself —
+    e.g. upload_flyer, which must verify ownership BEFORE writing to S3."""
+    owned = await conn.fetchval(
+        "SELECT 1 FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+        campaign_id, brand_id,
+    )
+    if not owned:
         raise PromoError(404, "not_found", "Campaign not found.")
 
 
@@ -353,7 +400,7 @@ async def resolve_claim_preview(conn, claim_token: str, viewer_account_id: Optio
     campaign = await conn.fetchrow(
         """SELECT c.id, c.brand_id, c.title, c.description, c.reward_text, c.status,
                   c.starts_at, c.ends_at, c.claim_count, c.max_claims, c.flyer_image_url,
-                  b.name AS brand_name, b.logo_url AS brand_logo_url
+                  b.name AS brand_name, b.logo_url AS brand_logo_url, b.plan_status
            FROM tellus_promo_campaigns c
            JOIN tellus_brands b ON b.id = c.brand_id
            WHERE c.claim_token = $1""",
@@ -392,9 +439,13 @@ async def claim_card(conn, claim_token: str, account_id: UUID) -> tuple[dict, bo
     """Returns (CardOut-shaped dict, created). created=False means an
     idempotent replay of an existing claim (200, not 201)."""
     async with conn.transaction():
+        # FOR UPDATE OF c only — locking tellus_brands here would serialize
+        # every campaign belonging to the same brand on one row.
         campaign = await conn.fetchrow(
-            """SELECT id, status, starts_at, ends_at, claim_count, max_claims, card_expiry_days
-               FROM tellus_promo_campaigns WHERE claim_token = $1 FOR UPDATE""",
+            """SELECT c.id, c.status, c.starts_at, c.ends_at, c.claim_count, c.max_claims,
+                      c.card_expiry_days, b.plan_status
+               FROM tellus_promo_campaigns c JOIN tellus_brands b ON b.id = c.brand_id
+               WHERE c.claim_token = $1 FOR UPDATE OF c""",
             claim_token,
         )
         if campaign is None:
@@ -453,6 +504,7 @@ async def claim_card(conn, claim_token: str, account_id: UUID) -> tuple[dict, bo
 
 _CLAIM_UNAVAILABLE_MESSAGES = {
     "cancelled": "This promo was cancelled.",
+    "brand_inactive": "This brand's account is no longer active.",
     "paused": "This promo isn't currently active.",
     "not_started": "This promo hasn't started yet.",
     "ended": "This promo has ended.",
@@ -492,14 +544,13 @@ async def redeem_card(conn, scanner: dict, raw_card_token: str) -> dict:
         token, scanner.get("store_id"), scanner.get("id"), scanner["brand_id"],
     )
     if row is not None:
-        store_name = None
-        if scanner.get("store_id") is not None:
-            store_name = await conn.fetchval("SELECT name FROM tellus_stores WHERE id = $1", scanner["store_id"])
+        # resolve_scanner already fetched this — None on the brand-app path
+        # (store_id is None there), the real name on a device-token scanner.
         return {
             "campaign_title": row["campaign_title"],
             "reward_text": row["reward_text"],
             "redeemed_at": row["redeemed_at"],
-            "store_name": store_name,
+            "store_name": scanner.get("store_name"),
         }
 
     diagnostic = await conn.fetchrow(
@@ -509,8 +560,10 @@ async def redeem_card(conn, scanner: dict, raw_card_token: str) -> dict:
     raise map_redeem_failure(dict(diagnostic) if diagnostic is not None else None)
 
 
-async def create_scanner(conn, brand_id: UUID, store_id: UUID, label: Optional[str]) -> dict:
-    """Caller MUST have already verified store ownership (get_owned_store)."""
+async def create_scanner(conn, brand_id: UUID, store_id: UUID, label: Optional[str], store_name: str) -> dict:
+    """Caller MUST have already verified store ownership (get_owned_store) and
+    pass its name through — the caller's SELECT * already has it, no need
+    for a second round-trip here."""
     token = secrets.token_urlsafe(16)
     row = await conn.fetchrow(
         """INSERT INTO tellus_scanner_devices (brand_id, store_id, token, label)
@@ -518,7 +571,6 @@ async def create_scanner(conn, brand_id: UUID, store_id: UUID, label: Optional[s
            RETURNING id, store_id, label, token, is_active, created_at""",
         brand_id, store_id, token, label,
     )
-    store_name = await conn.fetchval("SELECT name FROM tellus_stores WHERE id = $1", store_id)
     d = dict(row)
     d["store_name"] = store_name
     return _serialize_scanner(d)

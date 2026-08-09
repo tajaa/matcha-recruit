@@ -70,13 +70,17 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
 function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChanged: () => void }) {
   const [showQr, setShowQr] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [result, setResult] = useState('')
   const claimUrl = absoluteUrl(campaign.claim_url)
 
   async function togglePause() {
-    setBusy(true)
+    setBusy(true); setErr('')
     try {
       await promoApi.patchCampaign(campaign.id, { status: campaign.status === 'active' ? 'paused' : 'active' })
       onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not update campaign')
     } finally {
       setBusy(false)
     }
@@ -84,11 +88,13 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
 
   async function cancel() {
     if (!confirm('Cancel this campaign? Every unredeemed card is invalidated immediately.')) return
-    setBusy(true)
+    setBusy(true); setErr(''); setResult('')
     try {
       const { invalidated_count } = await promoApi.cancelCampaign(campaign.id)
-      alert(`Campaign cancelled. ${invalidated_count} outstanding card(s) invalidated.`)
+      setResult(`Campaign cancelled. ${invalidated_count} outstanding card(s) invalidated.`)
       onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not cancel campaign')
     } finally {
       setBusy(false)
     }
@@ -123,6 +129,8 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
           )}
         </div>
       </div>
+      <ErrorText>{err}</ErrorText>
+      {result && <p className="mt-2 text-xs text-tu-good">{result}</p>}
       {showQr && (
         <div className="mt-4 flex flex-col items-center gap-2 border-t border-tu-border pt-4">
           <div className="rounded-xl bg-white p-3"><QRCodeCanvas value={claimUrl} size={160} /></div>
@@ -137,6 +145,7 @@ function ScannersSection() {
   const [stores, setStores] = useState<Store[]>([])
   const [scanners, setScanners] = useState<ScannerDevice[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
   const [storeId, setStoreId] = useState('')
   const [label, setLabel] = useState('')
   const [creating, setCreating] = useState(false)
@@ -144,12 +153,18 @@ function ScannersSection() {
   const [qrToken, setQrToken] = useState<string | null>(null)
 
   async function load() {
-    setLoading(true)
-    const [s, sc] = await Promise.all([
-      tellusApi.get<Store[]>('/stores'),
-      promoApi.listScanners(),
-    ])
-    setStores(s); setScanners(sc); setLoading(false)
+    setLoading(true); setLoadErr('')
+    try {
+      const [s, sc] = await Promise.all([
+        tellusApi.get<Store[]>('/stores'),
+        promoApi.listScanners(),
+      ])
+      setStores(s); setScanners(sc)
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : 'Could not load scanners')
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { void load() }, [])
 
@@ -167,10 +182,23 @@ function ScannersSection() {
 
   async function revoke(id: string) {
     if (!confirm('Revoke this scanner? The device will stop being able to redeem cards.')) return
-    await promoApi.revokeScanner(id); await load()
+    try {
+      await promoApi.revokeScanner(id); await load()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not revoke scanner')
+    }
   }
 
   if (loading) return <Spinner />
+  if (loadErr) {
+    return (
+      <section className="space-y-4">
+        <h2 className="text-lg font-bold">Counter scanners</h2>
+        <ErrorText>{loadErr}</ErrorText>
+        <Button variant="soft" onClick={() => void load()}>Retry</Button>
+      </section>
+    )
+  }
 
   return (
     <section className="space-y-4">
@@ -228,12 +256,18 @@ function ScannersSection() {
 export default function BrandCampaigns() {
   const [campaigns, setCampaigns] = useState<PromoCampaign[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadErr, setLoadErr] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
 
   async function load() {
-    setLoading(true)
-    setCampaigns(await promoApi.listCampaigns())
-    setLoading(false)
+    setLoading(true); setLoadErr('')
+    try {
+      setCampaigns(await promoApi.listCampaigns())
+    } catch (e) {
+      setLoadErr(e instanceof Error ? e.message : 'Could not load campaigns')
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { void load() }, [])
 
@@ -245,7 +279,12 @@ export default function BrandCampaigns() {
           <Button onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> New campaign</Button>
         </div>
 
-        {loading ? <Spinner /> : campaigns.length === 0 ? (
+        {loading ? <Spinner /> : loadErr ? (
+          <div className="space-y-3">
+            <ErrorText>{loadErr}</ErrorText>
+            <Button variant="soft" onClick={() => void load()}>Retry</Button>
+          </div>
+        ) : campaigns.length === 0 ? (
           <Empty>No campaigns yet. Create one to generate a claimable QR flyer.</Empty>
         ) : (
           <div className="space-y-3">

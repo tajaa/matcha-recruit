@@ -1,9 +1,7 @@
 """Tell-Us promo campaigns — brand CRUD, scanner device mgmt, consumer card
 reads. Public claim + scan-redeem endpoints live in promo_public.py (token
 auth, no bearer)."""
-import contextlib
 import json
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -26,7 +24,7 @@ from ..models.promo import (
 from ..models.tellus import TellusAccount
 from ..services import promo_service
 from ..services.promo_service import PromoError
-from ._shared import get_owned_store
+from ._shared import delete_managed_object, get_owned_store, is_managed_object
 
 router = APIRouter()
 
@@ -93,22 +91,17 @@ async def cancel_campaign(campaign_id: UUID, account: TellusAccount = Depends(re
 
 @router.put("/promo/campaigns/{campaign_id}/design", status_code=status.HTTP_204_NO_CONTENT)
 async def put_campaign_design(campaign_id: UUID, body: DesignPut, account: TellusAccount = Depends(require_paid_brand)):
-    if len(json.dumps(body.design_json)) > _DESIGN_MAX_BYTES:
+    payload = json.dumps(body.design_json)
+    if len(payload.encode()) > _DESIGN_MAX_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Design is too large.")
     async with get_connection() as conn:
         try:
-            await promo_service.save_design(conn, account.brand_id, campaign_id, body.design_json)
+            await promo_service.save_design(conn, account.brand_id, campaign_id, payload)
         except PromoError as e:
             _raise(e)
 
 
-def _is_managed_flyer(url: Optional[str]) -> bool:
-    return bool(url) and "/tellus/promo/" in url
-
-
-async def _delete_flyer_object(url: str) -> None:
-    with contextlib.suppress(Exception):
-        await get_storage().delete_file(url)
+_FLYER_PREFIX = "/tellus/promo/"
 
 
 @router.post("/promo/campaigns/{campaign_id}/flyer")
@@ -133,6 +126,16 @@ async def upload_flyer(
     if not (storage.s3_client and storage.bucket):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail="Image uploads are not configured.")
+
+    # Verify ownership BEFORE writing to S3 — otherwise a 404 on a foreign/
+    # nonexistent campaign_id leaves an orphaned object in the public bucket
+    # with nothing ever deleting it.
+    async with get_connection() as conn:
+        try:
+            await promo_service.assert_campaign_owned(conn, account.brand_id, campaign_id)
+        except PromoError as e:
+            _raise(e)
+
     url = await storage.upload_file(
         data, f"flyer.{ext}", prefix=f"tellus/promo/{account.brand_id}/{campaign_id}",
         content_type=file.content_type,
@@ -142,9 +145,12 @@ async def upload_flyer(
         try:
             old = await promo_service.set_flyer_url(conn, account.brand_id, campaign_id, url)
         except PromoError as e:
+            # Campaign vanished between the ownership check and here — don't
+            # leave the object we just uploaded behind.
+            await delete_managed_object(url)
             _raise(e)
-    if old and old != url and _is_managed_flyer(old):
-        await _delete_flyer_object(old)
+    if old and old != url and is_managed_object(old, _FLYER_PREFIX):
+        await delete_managed_object(old)
     return {"flyer_image_url": url}
 
 
@@ -153,8 +159,8 @@ async def upload_flyer(
 @router.post("/promo/scanners", response_model=ScannerOut, status_code=status.HTTP_201_CREATED)
 async def create_scanner(body: ScannerCreate, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
-        await get_owned_store(conn, body.store_id, account.brand_id)
-        return await promo_service.create_scanner(conn, account.brand_id, body.store_id, body.label)
+        store = await get_owned_store(conn, body.store_id, account.brand_id)
+        return await promo_service.create_scanner(conn, account.brand_id, body.store_id, body.label, store["name"])
 
 
 @router.get("/promo/scanners", response_model=list[ScannerOut])

@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 
 CampaignStatus = Literal["active", "paused", "cancelled"]
 EffectiveCardStatus = Literal["issued", "redeemed", "cancelled", "expired"]
-ClaimUnavailableReason = Literal["ok", "cap_reached", "cancelled", "paused", "not_started", "ended"]
+ClaimUnavailableReason = Literal[
+    "ok", "cap_reached", "cancelled", "brand_inactive", "paused", "not_started", "ended",
+]
 
 
 class CampaignCreate(BaseModel):

@@ -1,4 +1,5 @@
 """Shared helpers for Tell-Us routes — ownership checks + media URL minting."""
+import contextlib
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -11,6 +12,17 @@ from ..models.tellus import TellusReport, TellusReportAnswer, TellusReportMedia
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
 _SLUG_MAX_LEN = 60
+
+
+def is_managed_object(url: Optional[str], prefix: str) -> bool:
+    """Only ever delete objects a route uploaded itself — a legacy free-text
+    URL (e.g. old logo_url values) may point somewhere we don't own."""
+    return bool(url) and prefix in url
+
+
+async def delete_managed_object(url: str) -> None:
+    with contextlib.suppress(Exception):  # best-effort; never blocks the request
+        await get_storage().delete_file(url)
 
 
 def slugify(name: str) -> str:

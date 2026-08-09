@@ -42,9 +42,14 @@ async def claim(
     account: TellusAccount = Depends(require_consumer),
 ):
     ip = client_ip(request)
+    # max_claims (up to 10,000) + the one-card-per-account unique index are
+    # the real ceilings on a campaign — these limits only need to stop a
+    # stampede, not approximate the cap. A raised per-IP limit is deliberate:
+    # the flyer's whole point is a shared-WiFi/CGNAT crowd (a cafe, an event)
+    # claiming from the same egress IP.
     await check_rate_limit(ip, "tellus_promo_claim_burst", 5, 60)
-    await check_rate_limit(ip, "tellus_promo_claim", 20, 3600)
-    await check_rate_limit(claim_token, "tellus_promo_claim_token", 120, 3600)
+    await check_rate_limit(ip, "tellus_promo_claim", 100, 3600)
+    await check_rate_limit(claim_token, "tellus_promo_claim_token_burst", 60, 60)
 
     async with get_connection() as conn:
         try:

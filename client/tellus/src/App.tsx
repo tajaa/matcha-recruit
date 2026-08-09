@@ -10,6 +10,9 @@ import Verify from './pages/Verify'
 import Intake from './pages/Intake'
 import PublicBrand from './pages/PublicBrand'
 import Places from './pages/Places'
+import Claim from './pages/Claim'
+import Scan from './pages/Scan'
+import CardView from './pages/consumer/CardView'
 
 import Rewards from './pages/consumer/Rewards'
 import Marketplace from './pages/consumer/Marketplace'
@@ -47,7 +50,7 @@ function brandHome(planStatus: string | null | undefined) {
 }
 
 function Protected({
-  children, requireType, allowUnpaid, allowConsumerModerator,
+  children, requireType, allowUnpaid, allowConsumerModerator, bare,
 }: {
   children: React.ReactNode
   requireType?: 'consumer' | 'brand'
@@ -58,6 +61,9 @@ function Protected({
   // the board it moderates — so the plan_status/unpaid check below only
   // applies to true brand accounts.
   allowConsumerModerator?: boolean
+  // Skip the <Layout> nav/sidebar chrome — for full-screen views like the
+  // reward-card QR display, meant to be read at a glance on a counter/phone.
+  bare?: boolean
 }) {
   const { account, loading } = useAccount()
   const location = useLocation()
@@ -70,7 +76,7 @@ function Protected({
   if (requireType === 'brand' && !isConsumerModerator && !allowUnpaid && account.plan_status !== 'active') {
     return <Navigate to="/brand/billing" replace />
   }
-  return <Layout>{children}</Layout>
+  return bare ? <>{children}</> : <Layout>{children}</Layout>
 }
 
 function AdminOnly({ children }: { children: React.ReactNode }) {
@@ -113,6 +119,8 @@ export default function App() {
       <Route path="/i/:token" element={<Intake />} />
       <Route path="/b/:slug" element={<PublicBrand />} />
       <Route path="/places" element={<PlacesRoute />} />
+      <Route path="/p/:token" element={<Claim />} />
+      <Route path="/scan/:deviceToken" element={<Scan />} />
 
       {/* Consumer */}
       <Route path="/" element={<Home />} />
@@ -124,6 +132,7 @@ export default function App() {
       <Route path="/messages" element={<Protected requireType="consumer"><Messages /></Protected>} />
       <Route path="/leaderboard" element={<Protected requireType="consumer"><Leaderboard /></Protected>} />
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
+      <Route path="/card/:cardToken" element={<Protected requireType="consumer" bare><CardView /></Protected>} />
 
       {/* Brand */}
       <Route path="/brand/billing" element={<Protected requireType="brand" allowUnpaid><BrandBilling /></Protected>} />

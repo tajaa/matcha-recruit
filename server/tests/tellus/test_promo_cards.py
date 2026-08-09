@@ -85,6 +85,20 @@ class TestClaimReason:
         c = self._campaign(status="cancelled", claim_count=50, max_claims=50)
         assert claim_reason(c, now=NOW) == "cancelled"
 
+    def test_brand_inactive(self):
+        c = self._campaign(plan_status="past_due")
+        assert claim_reason(c, now=NOW) == "brand_inactive"
+
+    def test_cancelled_takes_precedence_over_brand_inactive(self):
+        c = self._campaign(status="cancelled", plan_status="past_due")
+        assert claim_reason(c, now=NOW) == "cancelled"
+
+    def test_missing_plan_status_key_defaults_active(self):
+        # Callers that never joined tellus_brands (none currently do, but
+        # this keeps claim_reason from exploding if one is added) must not
+        # be forced into brand_inactive by a missing key.
+        assert claim_reason(self._campaign(), now=NOW) == "ok"
+
 
 class TestExtractCardToken:
     def test_bare_token(self):
@@ -227,3 +241,99 @@ class TestPublicRouterShape:
         claim_route = next(r for r in router.routes if r.path == "/p/{claim_token}/claim")
         deps = [d.call for d in claim_route.dependant.dependencies]
         assert require_consumer in deps
+
+
+class TestDesignJsonSourceGuards:
+    """Pins the fix for the asyncpg-has-no-JSON-codec trap (see
+    routes/admin/_shared.py:decode_audit_rows for the sibling bug this
+    mirrors) — a raw dict bound to a jsonb param 500s, and an un-decoded
+    jsonb read hands the frontend a string instead of an object."""
+
+    def test_save_design_casts_to_jsonb_and_never_binds_a_dict(self):
+        src = inspect.getsource(promo_service.save_design)
+        assert "$3::jsonb" in src
+        assert "design_json_text" in src
+
+    def test_get_campaign_design_decodes_json(self):
+        src = inspect.getsource(promo_service.get_campaign_design)
+        assert "json.loads" in src
+
+    def test_route_serializes_before_calling_save_design(self):
+        from app.tellus.routes import promo as promo_routes
+
+        src = inspect.getsource(promo_routes.put_campaign_design)
+        assert "json.dumps(body.design_json)" in src
+        assert ".encode()" in src  # byte-length check, not char-length
+
+
+class TestUpdateCampaignPatchGuards:
+    def test_no_coalesce_left(self):
+        src = inspect.getsource(promo_service.update_campaign)
+        assert "COALESCE($" not in src
+
+    def test_uses_model_fields_set(self):
+        src = inspect.getsource(promo_service.update_campaign)
+        assert "model_fields_set" in src
+
+    def test_update_excludes_cancelled_campaigns(self):
+        src = inspect.getsource(promo_service.update_campaign)
+        assert "status <> 'cancelled'" in src
+
+    def test_patch_columns_subset_of_model_fields(self):
+        from app.tellus.models.promo import CampaignPatch
+
+        assert set(promo_service._PATCH_COLUMNS) <= set(CampaignPatch.model_fields)
+
+
+class TestRedeemCardNoExtraStoreQuery:
+    def test_redeem_card_reuses_scanner_store_name(self):
+        src = inspect.getsource(promo_service.redeem_card)
+        assert "FROM tellus_stores" not in src
+        assert 'scanner.get("store_name")' in src
+
+
+class TestFlyerUploadOrdering:
+    """Ownership must be verified before the S3 write — otherwise a 404 on a
+    foreign campaign_id leaves an orphaned object in the public bucket."""
+
+    def test_ownership_check_precedes_upload(self):
+        from app.tellus.routes import promo as promo_routes
+
+        src = inspect.getsource(promo_routes.upload_flyer)
+        assert src.index("assert_campaign_owned") < src.index("storage.upload_file")
+
+    def test_cleans_up_on_late_failure(self):
+        from app.tellus.routes import promo as promo_routes
+
+        src = inspect.getsource(promo_routes.upload_flyer)
+        assert "delete_managed_object(url)" in src
+
+
+class TestManagedObjectHelpersHoisted:
+    def test_promo_route_has_no_private_managed_helpers(self):
+        from app.tellus.routes import promo as promo_routes
+
+        src = inspect.getsource(promo_routes)
+        assert "_is_managed_flyer" not in src
+        assert "_delete_flyer_object" not in src
+
+    def test_links_route_has_no_private_managed_helpers(self):
+        from app.tellus.routes import links as links_routes
+
+        src = inspect.getsource(links_routes)
+        assert "_is_managed_logo" not in src
+        assert "_delete_logo_object" not in src
+
+
+class TestClaimRateLimits:
+    def test_per_campaign_hourly_cap_removed(self):
+        from app.tellus.routes import promo_public
+
+        src = inspect.getsource(promo_public.claim)
+        assert '"tellus_promo_claim_token", 120' not in src
+
+    def test_per_ip_limit_raised(self):
+        from app.tellus.routes import promo_public
+
+        src = inspect.getsource(promo_public.claim)
+        assert '"tellus_promo_claim", 100, 3600' in src

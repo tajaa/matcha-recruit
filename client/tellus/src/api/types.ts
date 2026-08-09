@@ -780,7 +780,8 @@ export interface AdminBoardReplyRow {
 
 export type PromoCampaignStatus = 'active' | 'paused' | 'cancelled'
 export type EffectiveCardStatus = 'issued' | 'redeemed' | 'cancelled' | 'expired'
-export type ClaimUnavailableReason = 'ok' | 'cap_reached' | 'cancelled' | 'paused' | 'not_started' | 'ended'
+export type ClaimUnavailableReason =
+  'ok' | 'cap_reached' | 'cancelled' | 'brand_inactive' | 'paused' | 'not_started' | 'ended'
 
 export interface PromoCampaignStats {
   claimed: number

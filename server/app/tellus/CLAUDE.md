@@ -10,10 +10,11 @@ Rewards-for-feedback app. Own product, mirrors Cappe's shape — not a matcha te
 
 ## Layout
 
-- `routes/` — `auth.py`, `billing.py`, `board.py` (Regulars board — see "Regulars board" below), `community.py` (public brand review page, `/b/{slug}`), `dms.py` (brand↔reporter DMs, any identified feedback — not review-scoped), `feedback.py`, `gamification.py`, `grants.py`, `links.py`, `marketplace.py`, `my_reviews.py` (consumer "My Reviews"), `public_intake.py`, `rewards.py`, `_shared.py`
+- `routes/` — `auth.py`, `billing.py`, `board.py` (Regulars board — see "Regulars board" below), `community.py` (public brand review page, `/b/{slug}`), `dms.py` (brand↔reporter DMs, any identified feedback — not review-scoped), `feedback.py`, `gamification.py`, `grants.py`, `likes.py`, `links.py`, `marketplace.py`, `my_reviews.py` (consumer "My Reviews"), `places.py`, `promo.py` (brand campaign/scanner CRUD + consumer card reads — see "Promo campaigns" below), `promo_public.py` (token-auth claim + scanner redeem, no bearer), `public_intake.py`, `rewards.py`, `_shared.py`
 - `routes/admin/` — internal admin package (see "Internal admin management" below), gated by `require_tellus_admin` at the router level in every sub-router
-- `services/` — `auth.py`, `board_service.py` (Regulars board shared logic), `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `google_places.py` (Google Places API (New) client — autocomplete + place details, server-proxied), `marketplace_service.py`, `points_service.py`, `admin_audit.py`
-- `models/tellus.py` — Pydantic shapes; `models/admin.py` — internal admin request/response shapes
+- `services/` — `auth.py`, `board_service.py` (Regulars board shared logic), `email.py`, `feedback_service.py`, `geo.py` (the matcha import lives here), `google_places.py` (Google Places API (New) client — autocomplete + place details, server-proxied), `likes_service.py`, `marketplace_service.py`, `points_service.py`, `promo_service.py` (promo campaigns / QR reward cards), `admin_audit.py`
+- `models/tellus.py` — Pydantic shapes; `models/admin.py` — internal admin request/response shapes; `models/promo.py` — promo campaign/card/scanner shapes
+- **Managed S3 objects**: `_shared.py:is_managed_object(url, prefix)` / `delete_managed_object(url)` are the shared "only delete what we uploaded" pair (a legacy free-text URL may point somewhere we don't own). Used by `links.py` (`/tellus/logos/`) and `promo.py` (`/tellus/promo/`) — add the prefix constant next to your route, don't re-privatize the helpers.
 
 ## Internal admin management
 
@@ -173,9 +174,74 @@ Pure counter on four targets — `tellus_board_posts`, `tellus_board_replies`, `
   uses it). On the web the page fetches via `tellusMaybeAuthGet`, **not** `tellusPublicGet` —
   the latter never attaches the bearer, so `liked_by_me` would always read false.
 
+## Promo campaigns / QR reward cards
+
+A brand mints a campaign with a global claim cap (`tellus_promo_campaigns`), a consumer scanning
+the flyer QR claims exactly one single-use card (`tellus_promo_cards`), and staff redeem it at the
+counter through a per-store device token (`tellus_scanner_devices`). Migration `tellus_app_16`.
+Routers: `promo.py` (brand CRUD + `/me/promo-cards`), `promo_public.py` (`/p/{claim_token}`,
+`/scan/{device_token}`). Web surfaces: `pages/Claim.tsx`, `pages/Scan.tsx`,
+`pages/consumer/CardView.tsx`. The Konva flyer designer (`design_json`) is authored but has no UI
+yet — `TELLUS_PROMO_CAMPAIGNS_PLAN.md` §6 is the spec.
+
+- **Deliberately separate from the points economy.** Free cards never touch
+  `tellus_points_ledger`/`tellus_points_balances`. `claim_count` is a monotone *issuance* counter —
+  expiry and cancellation never decrement it (unlike `reclaim_expired_redemptions`' quantity
+  restore, which would be wrong here: a claimed-then-expired card still consumed a print run).
+- **Claim ordering is load-bearing.** In `claim_card` the card INSERT (`ON CONFLICT DO NOTHING`)
+  happens *before* the cap UPDATE, and the cap UPDATE's WHERE re-checks status/window/`claim_count`
+  under the campaign row's lock — so a raced dedup never double-counts the cap, and a cap miss
+  rolls the card insert back through the enclosing transaction. The lock is `FOR UPDATE OF c`, not
+  bare `FOR UPDATE`: the query joins `tellus_brands` for `plan_status`, and locking that row would
+  serialize every campaign belonging to the same brand.
+- **Redeem is one UPDATE carrying every predicate** (issued, unexpired, right brand, campaign not
+  cancelled). The second scanner to reach an already-redeemed card blocks on the row lock, then
+  fails the predicate — double-redeem is structurally impossible, not merely unlikely. The
+  diagnostic re-query that follows is scoped to the scanner's own `brand_id` and returns the same
+  404 as an unknown token, so a scanner can't probe for another brand's card tokens.
+- **Idempotency is a pre-check (SELECT before INSERT), never a caught `UniqueViolationError`** —
+  same rule as `points_service.adjust_points`; these run inside an already-open transaction where a
+  caught error leaves the enclosing SAVEPOINT aborted.
+- **`plan_status='active'` is checked on BOTH claim and redeem.** It originally guarded only
+  `resolve_scanner`, so a lapsed brand kept issuing cards that 410'd at the counter — every card
+  issued after the lapse was dead paper. `claim_reason` now returns `brand_inactive` (ordered right
+  after `cancelled`, which is the more specific fact) and both `resolve_claim_preview` and
+  `claim_card` join `tellus_brands` for it. An *already-claimed* card still replays fine — that
+  early return sits above the `claim_reason` call on purpose.
+- **`design_json` is `json.dumps`/`json.loads`'d at the callsite.** No asyncpg JSON codec is
+  registered on this pool, so binding a dict to the JSONB param raises `DataError` and reading the
+  column back yields a *string*, not an object. `save_design` takes pre-serialized text and binds
+  `$3::jsonb`; `get_campaign_design` decodes. Exactly the trap `tellus_admin_audit.detail` has —
+  see `routes/admin/_shared.py:decode_audit_rows`. Don't "fix" this by registering a pool-level
+  codec: every existing JSONB reader in this app assumes the raw-string behaviour and would
+  double-decode.
+- **`update_campaign` builds its SET clause from `model_fields_set`**, not `COALESCE` — under
+  COALESCE an explicit `{"ends_at": null}` was silently ignored, so a date could never be cleared
+  once set. Column names come from the module-level `_PATCH_COLUMNS` whitelist, never request text
+  (same guard shape as `likes_service`'s `_TARGET_COLUMNS`); `_NULLABLE_PATCH_COLUMNS` is what
+  distinguishes "clear it" from "no-op" for the NOT NULL columns. A cancelled campaign is
+  un-editable (pre-check *and* `status <> 'cancelled'` in the WHERE) — otherwise its already-
+  invalidated cards would render freshly-edited `reward_text`, which `_CARD_SELECT_SQL` reads live
+  off the campaign row.
+- **`upload_flyer` verifies ownership BEFORE writing to S3.** It used to upload first, so a 404 on
+  a foreign `campaign_id` left an orphaned object in the *public* bucket with nothing ever deleting
+  it — loopable. The ownership pre-check gets its own short connection (never hold a pool
+  connection across the S3 round-trip), and a late `set_flyer_url` failure deletes the object it
+  just uploaded.
+- **Claim rate limits are deliberately loose.** `max_claims` (up to 10,000) plus the
+  `ux_tellus_promo_cards_one_per_account` unique index are the real ceilings; the limiter only
+  stops a stampede. The per-IP hourly cap is 100, not 20, because the flyer's whole point is a
+  shared-WiFi/CGNAT crowd — a cafe, an event — claiming from one egress IP.
+
 ## Frontend pairing
 
 Paired frontend is a separate Vite app at `client/tellus/` (React 19), served by the same nginx at `/tellus/`. No dedicated CLAUDE.md there yet — see root CLAUDE.md's repo-layout table.
+
+`ApiError` (`client/tellus/src/api/tellusClient.ts`) carries `.status`, `.code?` and `.detail?`,
+populated from the backend's structured `{detail: {code, message, ...extra}}` body — the public
+helpers (`tellusPublicGet`/`Post`, `tellusMaybeAuthGet`/`Post`) throw it too, not a bare `Error`.
+`Scan.tsx` depends on this to tell `already_redeemed` (and its `redeemed_at`/`redeemed_store_name`
+extras) apart from `expired`/`cancelled`/`not_found`; a `.message` string can't be pattern-matched.
 
 ## Cross-cutting rules
 

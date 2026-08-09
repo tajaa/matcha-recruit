@@ -61,10 +61,33 @@ function _headers(init?: RequestInit, token?: string | null): HeadersInit {
 
 export class ApiError extends Error {
   status: number
-  constructor(message: string, status: number) {
+  // Backend error shape is {detail: {code, message, ...extra}} for structured
+  // errors (see PromoError in server/app/tellus/services/promo_service.py)
+  // or {detail: "plain string"} for FastAPI's default. code/detail are only
+  // populated for the structured form — callers that need to branch on the
+  // specific failure (e.g. Scan.tsx distinguishing already_redeemed from
+  // expired) need these; a bare .message can't be pattern-matched safely.
+  code?: string
+  detail?: Record<string, unknown>
+  constructor(message: string, status: number, code?: string, detail?: Record<string, unknown>) {
     super(message)
     this.status = status
+    this.code = code
+    this.detail = detail
   }
+}
+
+async function _apiError(res: Response): Promise<ApiError> {
+  const body = await res.json().catch(() => null)
+  const d = body?.detail
+  if (d && typeof d === 'object') {
+    const message = typeof d.message === 'string' ? d.message : JSON.stringify(d)
+    const code = typeof d.code === 'string' ? d.code : undefined
+    return new ApiError(message, res.status, code, d as Record<string, unknown>)
+  }
+  if (typeof d === 'string') return new ApiError(d, res.status)
+  if (res.status >= 500) return new ApiError('Server error — try again in a moment.', res.status)
+  return new ApiError(`${res.status} ${res.statusText || 'Request failed'}`, res.status)
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -81,7 +104,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const retry = await fetch(`${BASE}${path}`, { ...init, headers: _headers(init, newToken) })
       if (!retry.ok) {
         if (retry.status === 401) { _logout(); throw new ApiError('Session expired', 401) }
-        throw new ApiError(await _errMsg(retry), retry.status)
+        throw await _apiError(retry)
       }
       if (retry.status === 204) return null as T
       return retry.json()
@@ -90,25 +113,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError('Session expired', 401)
   }
 
-  if (!res.ok) throw new ApiError(await _errMsg(res), res.status)
+  if (!res.ok) throw await _apiError(res)
   if (res.status === 204) return null as T
   return res.json()
-}
-
-async function _errMsg(res: Response): Promise<string> {
-  const body = await res.json().catch(() => null)
-  if (body?.detail) {
-    const d = body.detail
-    return typeof d === 'string' ? d : (d?.message || JSON.stringify(d))
-  }
-  if (res.status >= 500) return 'Server error — try again in a moment.'
-  return `${res.status} ${res.statusText || 'Request failed'}`
 }
 
 // Unauthenticated GET (public token-resolved resources, e.g. the intake config).
 export async function tellusPublicGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) throw new Error(await _errMsg(res))
+  if (!res.ok) throw await _apiError(res)
   return res.json()
 }
 
@@ -119,7 +132,7 @@ export async function tellusPublicPost<T>(path: string, body: unknown): Promise<
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await _errMsg(res))
+  if (!res.ok) throw await _apiError(res)
   if (res.status === 204) return null as T
   return res.json()
 }
@@ -133,7 +146,7 @@ export async function tellusMaybeAuthGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
-  if (!res.ok) throw new Error(await _errMsg(res))
+  if (!res.ok) throw await _apiError(res)
   return res.json()
 }
 
@@ -149,7 +162,7 @@ export async function tellusMaybeAuthPost<T>(path: string, body: unknown): Promi
     },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await _errMsg(res))
+  if (!res.ok) throw await _apiError(res)
   return res.json()
 }
 
