@@ -116,7 +116,7 @@ final class PlacesViewModel {
 
     private func handleCreated(_ resp: PlaceCreateResponse) {
         if let token = resp.intake_token {
-            navigateToken = ScannedToken(token: token)
+            navigateToken = ScannedToken(target: .intake(token))
         } else {
             // Claimed place — no native brand page yet; open the web one.
             SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(resp.slug)"))

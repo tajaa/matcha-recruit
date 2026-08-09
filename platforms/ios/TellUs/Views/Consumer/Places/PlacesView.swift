@@ -111,7 +111,7 @@ private struct PlaceResultRow: View {
                     SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(place.slug)"))
                 }
                 if !place.claimed, let token = place.intake_token {
-                    Button("Leave feedback") { vm.navigateToken = ScannedToken(token: token) }
+                    Button("Leave feedback") { vm.navigateToken = ScannedToken(target: .intake(token)) }
                 }
             }
             .font(.caption.bold())

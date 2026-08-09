@@ -45,7 +45,7 @@ targets:
         # here or upload fails with "Missing Info.plist value ... CFBundleIconName".
         CFBundleIconName: AppIcon
         LSRequiresIPhoneOS: true
-        NSCameraUsageDescription: "Beetlejuse uses the camera to scan feedback QR codes and take photos for your feedback."
+        NSCameraUsageDescription: "Beetlejuse uses the camera to scan feedback and reward QR codes, and to take photos for your feedback."
         GIDClientID: "62787429179-qskffndotvi3hqpnu12oeigjaojd3402.apps.googleusercontent.com"
         CFBundleURLTypes:
           - CFBundleURLSchemes:

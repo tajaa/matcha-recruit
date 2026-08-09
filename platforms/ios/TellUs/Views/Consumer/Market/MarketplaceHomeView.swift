@@ -7,13 +7,19 @@ struct MarketplaceHomeView: View {
         VStack(spacing: 0) {
             Picker("", selection: $tab) {
                 Text("Marketplace").tag(0)
-                Text("My Redemptions").tag(1)
+                Text("Redemptions").tag(1)
+                Text("Cards").tag(2)
             }
             .pickerStyle(.segmented)
             .padding()
 
-            if tab == 0 { MarketplaceView() } else { RedemptionsView() }
+            switch tab {
+            case 0: MarketplaceView()
+            case 1: RedemptionsView()
+            default: CardWalletView()
+            }
         }
         .navigationTitle("Market")
+        .navigationDestination(for: PromoCard.self) { CardDetailView(card: $0) }
     }
 }

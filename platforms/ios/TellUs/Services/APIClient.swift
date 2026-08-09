@@ -2,6 +2,13 @@ import Foundation
 
 enum APIError: Error, LocalizedError {
     case httpError(Int, String)
+    /// A failure whose `detail` was an OBJECT rather than a string — the shape
+    /// tellus uses for anything a client needs to branch on rather than merely
+    /// display (`{"code": "already_redeemed", "message": ..., ...extra}`, see
+    /// PromoError in services/promo_service.py). The raw detail JSON rides
+    /// along so each caller decodes only the extras it cares about instead of
+    /// this enum growing a field per feature.
+    case httpDetail(Int, String, Data)
     case serviceUnavailable(Int)
     case paymentRequired(String)
     case decodingError(Error)
@@ -27,6 +34,8 @@ enum APIError: Error, LocalizedError {
                 return "Server is updating. Try again in 30 seconds."
             }
             return "Server error (\(code)). Try again in a moment."
+        case .httpDetail(_, let message, _):
+            return message
         case .paymentRequired(let message):
             return message.isEmpty ? "This feature requires an active plan." : message
         case .decodingError(let error):
@@ -85,7 +94,25 @@ private func _isIdempotentMethod(_ method: String) -> Bool {
 private func _isAuthRejection(_ error: Error) -> Bool {
     if case APIError.unauthorized = error { return true }
     if case APIError.httpError(let code, _) = error { return code == 401 || code == 403 }
+    if case APIError.httpDetail(let code, _, _) = error { return code == 401 || code == 403 }
     return false
+}
+
+extension APIError {
+    var statusCode: Int? {
+        switch self {
+        case .httpError(let code, _), .httpDetail(let code, _, _), .serviceUnavailable(let code):
+            return code
+        case .unauthorized: return 401
+        default: return nil
+        }
+    }
+
+    /// Decode the structured `detail` body, when there was one.
+    func detail<T: Decodable>(as type: T.Type) -> T? {
+        guard case .httpDetail(_, _, let data) = self else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
 }
 
 class APIClient {
@@ -303,6 +330,9 @@ class APIClient {
                 }
                 throw APIError.serviceUnavailable(httpResponse.statusCode)
             }
+            if let structured = _structuredDetail(from: data) {
+                throw APIError.httpDetail(httpResponse.statusCode, structured.message, structured.detail)
+            }
             let message = _extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
@@ -344,11 +374,27 @@ class APIClient {
             throw APIError.paymentRequired(_extractErrorMessage(from: responseData) ?? "")
         }
         guard (200...299).contains(httpResponse.statusCode) else {
+            if let structured = _structuredDetail(from: responseData) {
+                throw APIError.httpDetail(httpResponse.statusCode, structured.message, structured.detail)
+            }
             throw APIError.httpError(httpResponse.statusCode, _extractErrorMessage(from: responseData) ?? "HTTP \(httpResponse.statusCode)")
         }
         return try await Task.detached(priority: .userInitiated) {
             try JSONDecoder().decode(T.self, from: responseData)
         }.value
+    }
+
+    /// The structured `{"detail": {...}}` body, re-serialized, when the server
+    /// sent an object rather than a plain string. Returns the caller-facing
+    /// message alongside it — without this, an object detail fell through to
+    /// the raw-body branch below and surfaced the whole JSON blob as the user's
+    /// error message, with the `code` unreachable.
+    func _structuredDetail(from data: Data) -> (message: String, detail: Data)? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = json["detail"] as? [String: Any] else { return nil }
+        let message = (detail["message"] as? String) ?? "Request failed"
+        let encoded = (try? JSONSerialization.data(withJSONObject: detail)) ?? Data()
+        return (message, encoded)
     }
 
     /// Extract a human-readable error from a typical FastAPI error response
@@ -357,6 +403,9 @@ class APIClient {
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let detail = json["detail"] as? String {
             return detail
+        }
+        if let structured = _structuredDetail(from: data) {
+            return structured.message
         }
         guard let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty else { return nil }
