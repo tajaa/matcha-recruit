@@ -54,6 +54,8 @@ celery_app = Celery(
         "app.workers.tasks.benefit_enrollment_notifications",
         "app.workers.tasks.cappe_booking_reminders",
         "app.workers.tasks.cappe_campaign_send",
+        "app.workers.tasks.cappe_collab_auto_approve",
+        "app.workers.tasks.cappe_domain_finalize",
         "app.workers.tasks.cba_clause_extraction",
         "app.workers.tasks.grievance_deadline_alerts",
         "app.workers.tasks.ir_deadline_alerts",
@@ -183,6 +185,8 @@ _SCHEDULED_TASKS = [
     ("cappe_booking_reminders", "app.workers.tasks.cappe_booking_reminders", "run_cappe_booking_reminders"),
     ("cappe_domain_renewals", "app.workers.tasks.cappe_domain_renewals", "run_cappe_domain_renewals"),
     ("cappe_comp_expiry", "app.workers.tasks.cappe_comp_expiry", "run_cappe_comp_expiry"),
+    ("cappe_collab_auto_approve", "app.workers.tasks.cappe_collab_auto_approve", "run_cappe_collab_auto_approve"),
+    ("cappe_domain_finalize", "app.workers.tasks.cappe_domain_finalize", "run_cappe_domain_finalize"),
 ]
 
 

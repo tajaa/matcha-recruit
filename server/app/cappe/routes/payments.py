@@ -25,7 +25,11 @@ from app.core.services.stripe_events import (
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
-from ..services.email import dashboard_url, send_cappe_collab_completed_email, send_cappe_collab_paid_email
+from ..services.email import (
+    dashboard_url,
+    send_cappe_collab_completed_email,
+    send_cappe_collab_paid_email,
+)
 from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
@@ -76,11 +80,14 @@ async def connect_account(
         try:
             acct_id = await cs.create_connected_account(account.email)
         except CappeStripeError as exc:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+            )
         async with get_connection() as conn:
             await conn.execute(
                 "UPDATE cappe_accounts SET stripe_account_id = $1, updated_at = NOW() WHERE id = $2",
-                acct_id, account.id,
+                acct_id,
+                account.id,
             )
 
     return_url = body.return_url or dashboard_url("/sites")
@@ -102,7 +109,11 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
             "SELECT stripe_account_id FROM cappe_accounts WHERE id = $1", account.id
         )
     if not acct_id:
-        return {"connected": False, "charges_enabled": False, "details_submitted": False}
+        return {
+            "connected": False,
+            "charges_enabled": False,
+            "details_submitted": False,
+        }
     # Connection released before the Stripe round-trip — see connect_account.
     try:
         acct = await cs.retrieve_account(acct_id)
@@ -114,7 +125,9 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
         await conn.execute(
             "UPDATE cappe_accounts SET stripe_charges_enabled = $1, stripe_details_submitted = $2, "
             "updated_at = NOW() WHERE id = $3",
-            charges, details, account.id,
+            charges,
+            details,
+            account.id,
         )
     return {"connected": True, "charges_enabled": charges, "details_submitted": details}
 
@@ -183,7 +196,9 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
             ship = extract_shipping_details(obj)
             if ship is None and obj.get("shipping_cost") and obj.get("id"):
                 try:
-                    sess = await get_cappe_stripe().retrieve_checkout_session(event_account_id, obj["id"])
+                    sess = await get_cappe_stripe().retrieve_checkout_session(
+                        event_account_id, obj["id"]
+                    )
                     ship = extract_shipping_details(sess)
                 except CappeStripeError:
                     ship = None  # best-effort; never block marking the order paid
@@ -200,19 +215,45 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                           AND s.id = o.site_id AND a.id = s.account_id
                           AND a.stripe_account_id = $4
                         RETURNING o.id, o.site_id, o.customer_email, o.customer_name""",
-                    oid, payment_intent, fee, event_account_id,
+                    oid,
+                    payment_intent,
+                    fee,
+                    event_account_id,
                     json.dumps(dict(ship)) if ship else None,
                 )
             if row is not None:
                 # Issue the receipt (assign number → render PDF → email) after
                 # the 200 so Stripe isn't kept waiting on render/SMTP.
-                background.add_task(issue_receipt_for_paid_order, row["id"], row["site_id"])
+                background.add_task(
+                    issue_receipt_for_paid_order, row["id"], row["site_id"]
+                )
                 logger.info("cappe order %s marked paid via Stripe", order_id)
             else:
-                logger.warning(
-                    "cappe webhook: order %s not matched to event account %s (ignored)",
-                    order_id, event_account_id,
+                async with get_connection() as conn:
+                    already = await conn.fetchval(
+                        """SELECT o.status FROM cappe_orders o
+                             JOIN cappe_sites s ON s.id = o.site_id
+                             JOIN cappe_accounts a ON a.id = s.account_id
+                            WHERE o.id = $1 AND a.stripe_account_id = $2""",
+                        oid,
+                        event_account_id,
+                    )
+                if already is None:
+                    logger.error(
+                        "cappe webhook: order %s not matched; releasing claim for retry",
+                        order_id,
+                    )
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Order not matched; releasing event for retry",
+                    )
+                logger.info(
+                    "cappe webhook: order %s already %s; idempotent skip",
+                    order_id,
+                    already,
                 )
+        elif oid is not None:
+            logger.warning("cappe webhook: order %s has no event account", order_id)
 
         collab_payment_id = meta.get("collab_payment_id")
         if collab_payment_id and event_account_id:
@@ -232,8 +273,8 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                     # in a stale tab, matching on session id would find zero
                     # rows and the real charge would never get recorded. The
                     # payment id (trusted: comes from this event's own
-                    # metadata) plus amount + connected-account ownership is
-                    # sufficient — session id is stored for audit only.
+                    # metadata) plus connected-account ownership is sufficient;
+                    # session id is stored for audit only.
                     crow = await conn.fetchrow(
                         """UPDATE cappe_collab_payments cp
                               SET status = 'paid', paid_at = NOW(),
@@ -241,23 +282,44 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                                   updated_at = NOW()
                              FROM cappe_collab_offers o, cappe_creator_profiles p, cappe_accounts ca
                             WHERE cp.id = $1 AND cp.status IN ('due', 'processing')
-                              AND cp.amount_cents = $5
                               AND o.id = cp.offer_id AND p.id = o.creator_profile_id
                               AND ca.id = p.account_id AND ca.stripe_account_id = $3
                         RETURNING cp.offer_id, cp.trigger, cp.label, cp.amount_cents""",
-                        cpid, obj.get("payment_intent"), event_account_id, session_id, amount_total,
+                        cpid,
+                        obj.get("payment_intent"),
+                        event_account_id,
+                        session_id,
                     )
+                    if (
+                        crow is not None
+                        and amount_total is not None
+                        and int(amount_total) != int(crow["amount_cents"])
+                    ):
+                        logger.warning(
+                            "cappe collab webhook: payment %s matched with Stripe total %s != stored %s",
+                            collab_payment_id,
+                            amount_total,
+                            crow["amount_cents"],
+                        )
                     completed = False
                     if crow is not None:
                         if crow["trigger"] == "on_accept":
                             await conn.execute(
                                 "UPDATE cappe_collab_offers SET status = 'active', "
                                 "last_action_at = NOW(), updated_at = NOW() "
-                                "WHERE id = $1 AND status = 'accepted'", crow["offer_id"])
+                                "WHERE id = $1 AND status = 'accepted'",
+                                crow["offer_id"],
+                            )
                         from ..services.collab import check_completion
+
                         completed = await check_completion(conn, crow["offer_id"])
                 if crow is not None:
-                    background.add_task(_notify_collab_paid, crow["offer_id"], crow["label"], crow["amount_cents"])
+                    background.add_task(
+                        _notify_collab_paid,
+                        crow["offer_id"],
+                        crow["label"],
+                        crow["amount_cents"],
+                    )
                     if completed:
                         background.add_task(_notify_collab_completed, crow["offer_id"])
                 else:
@@ -272,7 +334,9 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                     logger.error(
                         "cappe collab webhook: payment %s (session %s, account %s) charged but not "
                         "matched to a due/processing row — needs manual reconciliation in Stripe",
-                        collab_payment_id, session_id, event_account_id,
+                        collab_payment_id,
+                        session_id,
+                        event_account_id,
                     )
 
     elif etype == "account.updated":
@@ -282,7 +346,9 @@ async def _handle_connect_event(etype, obj, event, background) -> dict:
                 await conn.execute(
                     "UPDATE cappe_accounts SET stripe_charges_enabled = $1, "
                     "stripe_details_submitted = $2, updated_at = NOW() WHERE stripe_account_id = $3",
-                    bool(obj.get("charges_enabled")), bool(obj.get("details_submitted")), acct_id,
+                    bool(obj.get("charges_enabled")),
+                    bool(obj.get("details_submitted")),
+                    acct_id,
                 )
 
     return {"received": True}
@@ -302,7 +368,11 @@ async def _notify_collab_paid(offer_id: UUID, label: str, amount_cents: int) -> 
     if row is None:
         return
     await send_cappe_collab_paid_email(
-        row["email"], row["name"], row["offer_title"], label, amount_cents,
+        row["email"],
+        row["name"],
+        row["offer_title"],
+        label,
+        amount_cents,
         dashboard_url(f"/creator/deals/{offer_id}"),
     )
 
@@ -326,8 +396,14 @@ async def _notify_collab_completed(offer_id: UUID) -> None:
     if row is None:
         return
     await send_cappe_collab_completed_email(
-        row["brand_email"], row["brand_name"], row["offer_title"], dashboard_url(f"/collabs/{offer_id}"),
+        row["brand_email"],
+        row["brand_name"],
+        row["offer_title"],
+        dashboard_url(f"/collabs/{offer_id}"),
     )
     await send_cappe_collab_completed_email(
-        row["creator_email"], row["creator_name"], row["offer_title"], dashboard_url(f"/creator/deals/{offer_id}"),
+        row["creator_email"],
+        row["creator_name"],
+        row["offer_title"],
+        dashboard_url(f"/creator/deals/{offer_id}"),
     )

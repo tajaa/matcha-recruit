@@ -1,5 +1,5 @@
 """Shared helpers for the Cappe routers."""
-from typing import Any, Optional, Sequence
+from typing import Any, Collection, Optional, Sequence
 from uuid import UUID
 
 from fastapi import HTTPException, UploadFile, status
@@ -102,7 +102,7 @@ def page_row_to_dict(row) -> dict:
     return d
 
 
-def build_patch(body, cols: Sequence[str], start: int = 0) -> tuple[list[str], list[Any]]:
+def build_patch(body, cols: Sequence[str], start: int = 0, *, nullable: Optional[Collection[str]] = None) -> tuple[list[str], list[Any]]:
     """Build `col = $n` SET clauses from a partial-update Pydantic model.
 
     Driven by `model_fields_set` rather than `is not None` — a field the
@@ -114,9 +114,17 @@ def build_patch(body, cols: Sequence[str], start: int = 0) -> tuple[list[str], l
     """
     sets: list[str] = []
     args: list[Any] = []
+    bad: list[str] = []
     fields = body.model_fields_set
     for col in cols:
         if col in fields:
-            args.append(getattr(body, col))
+            value = getattr(body, col)
+            if value is None and nullable is not None and col not in nullable:
+                bad.append(col)
+                continue
+            args.append(value)
             sets.append(f"{col} = ${start + len(args)}")
+    if bad:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail=f"These fields cannot be null: {', '.join(bad)}")
     return sets, args

@@ -64,7 +64,8 @@ async def update_post(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        sets, args = build_patch(body, ("title", "excerpt", "body", "cover_image_url", "status"))
+        sets, args = build_patch(body, ("title", "excerpt", "body", "cover_image_url", "status"),
+                                  nullable={"excerpt", "body", "cover_image_url"})
         if body.slug is not None:
             args.append(slugify(body.slug))
             sets.append(f"slug = ${len(args)}")

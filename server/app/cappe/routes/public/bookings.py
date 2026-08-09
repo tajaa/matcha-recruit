@@ -161,6 +161,8 @@ async def public_booking_slots(
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
         _, tz = await _location_ctx(conn, site, location_id)
+        # Keep this NULL-narrowing availability query aligned with
+        # services.commerce.resolve_booking_slot's availability check.
         avail = await conn.fetch(
             "SELECT weekday, start_time, end_time, booking_type_id, staff_id "
             "FROM cappe_availability WHERE site_id = $1 AND (location_id IS NULL OR location_id = $2)",
@@ -176,9 +178,9 @@ async def public_booking_slots(
         booked = await conn.fetch(
             "SELECT starts_at, ends_at, staff_id FROM cappe_bookings "
             "WHERE site_id = $1 AND status IN ('pending', 'confirmed') "
-            "AND (location_id IS NULL OR location_id = $3) "
             "AND (staff_id = ANY($4::uuid[]) "
-            "     OR (staff_id IS NULL AND booking_type_id = $2))",
+            "     OR (staff_id IS NULL AND booking_type_id = $2 "
+            "         AND location_id IS NOT DISTINCT FROM $3))",
             site["id"], type_id, location_id, list(offering_staff),
         )
         rules = await fetch_rate_rules(conn, site["id"], type_id, location_id)

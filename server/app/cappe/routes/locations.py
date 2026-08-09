@@ -146,7 +146,8 @@ async def update_location(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         sets, args = build_patch(body, ("name", "address", "lat", "lng", "timezone", "contact_phone",
-                    "contact_email", "is_default", "active", "sort_order"))
+                    "contact_email", "is_default", "active", "sort_order"),
+                    nullable={"address", "lat", "lng", "timezone", "contact_phone", "contact_email"})
         if body.hours is not None:
             args.append(json.dumps([h.model_dump() for h in body.hours]))
             sets.append(f"hours = ${len(args)}::jsonb")

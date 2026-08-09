@@ -20,7 +20,7 @@ from ..models.cappe import (
     CappeImageGenRequest,
     CappeUploadResponse,
 )
-from ..services import cappe_assets, image_quota
+from ..services import cappe_assets, image_quota, upload_guard
 from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
 from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
@@ -42,26 +42,13 @@ _IMG_GEN_DAILY_PAID = image_quota.DAILY_PAID
 # NB: no image/svg+xml — SVGs can carry <script>/onload and are served from the
 # tenant origin (*.gummfit.com / <sub>.hey-matcha.com) as product/cover images,
 # so an uploaded SVG is a stored-XSS vector. Raster formats only.
-_ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
 # Deliverables (digital products / service results) — larger, more types.
 _MAX_DELIVERABLE_BYTES = 25 * 1024 * 1024  # 25 MB
-_ALLOWED_DELIVERABLE = _ALLOWED | {
-    "application/pdf",
-    "application/zip",
-    "application/x-zip-compressed",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/plain",
-    "text/csv",
-}
 
 # Hero background video — premium-only, short loops. Read fully into memory like
 # the other uploads, so keep the cap modest (compressed hero loops are small).
 _MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50 MB
-_ALLOWED_VIDEO = {"video/mp4", "video/webm", "video/quicktime"}
 
 
 @router.post("/sites/{site_id}/upload", response_model=CappeUploadResponse)
@@ -74,18 +61,19 @@ async def upload_image(
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
 
-    if file.content_type not in _ALLOWED:
+    if file.content_type not in upload_guard.ALLOWED_IMAGE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
 
     data = await read_capped(file, _MAX_BYTES, "Image too large (max 5 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
+    content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_IMAGE)
     url = await get_storage().upload_file(
         file_bytes=data,
         filename=file.filename or "upload",
         prefix="cappe",
-        content_type=file.content_type,
+        content_type=content_type,
     )
     try:
         async with get_connection() as conn:
@@ -170,18 +158,19 @@ async def upload_deliverable(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
 
-    if file.content_type not in _ALLOWED_DELIVERABLE:
+    if file.content_type not in upload_guard.ALLOWED_DELIVERABLE:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
 
     data = await read_capped(file, _MAX_DELIVERABLE_BYTES, "File too large (max 25 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
+    content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_DELIVERABLE)
     url = await get_storage().upload_file(
         file_bytes=data,
         filename=file.filename or "deliverable",
         prefix="cappe",
-        content_type=file.content_type,
+        content_type=content_type,
     )
     return CappeUploadResponse(url=url)
 
@@ -206,18 +195,19 @@ async def upload_video(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
 
-    if file.content_type not in _ALLOWED_VIDEO:
+    if file.content_type not in upload_guard.ALLOWED_VIDEO:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported video type (use MP4, WebM, or MOV)")
 
     data = await read_capped(file, _MAX_VIDEO_BYTES, "Video too large (max 50 MB)")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
+    content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_VIDEO)
     url = await get_storage().upload_file(
         file_bytes=data,
         filename=file.filename or "hero-video",
         prefix="cappe",
-        content_type=file.content_type,
+        content_type=content_type,
     )
     return CappeUploadResponse(url=url)
 

@@ -19,8 +19,29 @@ from fastapi import HTTPException, status
 
 from ..models.collab import CollabTerms, DealCheckItem
 from ...config import get_settings
+from .email import dashboard_url, send_cappe_collab_completed_email, send_cappe_collab_payment_due_email, send_cappe_deliverable_decision_email
 
 logger = logging.getLogger("cappe.collab")
+
+async def resolve_contact(conn, offer_row, side: str) -> tuple[str, Optional[str]]:
+    if side == "brand":
+        row = await conn.fetchrow("SELECT ca.email, ca.name FROM cappe_creator_profiles p JOIN cappe_accounts ca ON ca.id = p.account_id WHERE p.id = $1", offer_row["creator_profile_id"])
+        return row["email"], row["name"]
+    row = await conn.fetchrow("SELECT email, name FROM cappe_accounts WHERE id = $1", offer_row["brand_account_id"])
+    return row["email"], row["name"] or offer_row["brand_name"]
+
+async def notify_auto_approve(conn, offer_id: UUID, offer_row, result: dict) -> None:
+    if not result["deliverables"] and not result["fired_payments"]:
+        return
+    creator_email, creator_name = await resolve_contact(conn, offer_row, "brand")
+    brand_email, brand_name = await resolve_contact(conn, offer_row, "creator")
+    for d in result["deliverables"]:
+        await send_cappe_deliverable_decision_email(creator_email, creator_name, offer_row["title"], d["label"], True, None, dashboard_url(f"/creator/deals/{offer_id}"))
+    for p in result["fired_payments"]:
+        await send_cappe_collab_payment_due_email(brand_email, brand_name, offer_row["title"], p["label"], p["amount_cents"], dashboard_url(f"/collabs/{offer_id}"))
+    if result["completed"]:
+        await send_cappe_collab_completed_email(brand_email, brand_name, offer_row["title"], dashboard_url(f"/collabs/{offer_id}"))
+        await send_cappe_collab_completed_email(creator_email, creator_name, offer_row["title"], dashboard_url(f"/creator/deals/{offer_id}"))
 
 TERMINAL_STATUSES = {"completed", "declined", "withdrawn", "cancelled"}
 PRE_ACCEPT_STATUSES = {"sent", "negotiating"}

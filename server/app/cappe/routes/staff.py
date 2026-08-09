@@ -97,7 +97,8 @@ async def update_staff(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_location(conn, site_id, body.location_id)
-        sets, args = build_patch(body, ("name", "bio", "image_url", "active", "sort_order", "location_id"))
+        sets, args = build_patch(body, ("name", "bio", "image_url", "active", "sort_order", "location_id"),
+                                  nullable={"bio", "image_url", "location_id"})
         if not sets:
             row = await conn.fetchrow(
                 f"SELECT {_STAFF_COLS} FROM cappe_staff WHERE id = $1 AND site_id = $2", staff_id, site_id

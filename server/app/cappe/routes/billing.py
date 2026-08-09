@@ -3,6 +3,7 @@
 Charges land on OUR platform Stripe account (this is our revenue), never on the
 tenant's connected account — that one is only for their own storefront sales.
 """
+
 import logging
 from uuid import UUID
 
@@ -62,9 +63,7 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
         )
         intro_ok = await billing_svc.intro_eligible(conn, account.id)
 
-    intro_by_code = {
-        r["product_code"]: r for r in prices if r["role"] == "intro"
-    }
+    intro_by_code = {r["product_code"]: r for r in prices if r["role"] == "intro"}
     plans, addons = [], []
     for p in products:
         if p["kind"] == "plan":
@@ -78,24 +77,35 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
             # they clicked.
             intro_row = intro_by_code.get(p["code"])
             intro = intro_row if intro_row and intro_row["stripe_price_id"] else None
-            plans.append(CappePlan(
-                code=p["code"], name=p["name"], description=p["description"],
-                status=p["status"], sort_order=p["sort_order"],
-                can_sell=p["can_sell"], platform_fee_bps=p["platform_fee_bps"],
-                allowed_fulfillment=list(p["allowed_fulfillment"] or []),
-                site_limit=p["site_limit"],
-                mailbox_quota_included=p["mailbox_quota_included"],
-                features=decode_features(p["features"]),
-                prices=_prices_for(prices, p["code"]),
-                intro_price_cents=intro["unit_amount_cents"] if intro else None,
-                intro_days=intro["intro_days"] if intro else None,
-            ))
+            plans.append(
+                CappePlan(
+                    code=p["code"],
+                    name=p["name"],
+                    description=p["description"],
+                    status=p["status"],
+                    sort_order=p["sort_order"],
+                    can_sell=p["can_sell"],
+                    platform_fee_bps=p["platform_fee_bps"],
+                    allowed_fulfillment=list(p["allowed_fulfillment"] or []),
+                    site_limit=p["site_limit"],
+                    mailbox_quota_included=p["mailbox_quota_included"],
+                    features=decode_features(p["features"]),
+                    prices=_prices_for(prices, p["code"]),
+                    intro_price_cents=intro["unit_amount_cents"] if intro else None,
+                    intro_days=intro["intro_days"] if intro else None,
+                )
+            )
         else:
-            addons.append(CappeAddon(
-                code=p["code"], name=p["name"], description=p["description"],
-                unit_label=p["unit_label"], max_quantity=p["max_quantity"],
-                prices=_prices_for(prices, p["code"]),
-            ))
+            addons.append(
+                CappeAddon(
+                    code=p["code"],
+                    name=p["name"],
+                    description=p["description"],
+                    unit_label=p["unit_label"],
+                    max_quantity=p["max_quantity"],
+                    prices=_prices_for(prices, p["code"]),
+                )
+            )
     return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
 
 
@@ -109,16 +119,22 @@ async def _subscription_response(account_id) -> CappeSubscription | None:
         addons = await billing_svc.subscription_addons(conn, sub["id"])
         quota = await mailbox_quota(account_id, conn=conn)
     return CappeSubscription(
-        plan_code=sub["plan_code"], plan_name=sub.get("plan_name"),
-        interval=sub["interval"], status=sub["status"], source=sub["source"],
-        current_period_end=sub["current_period_end"], trial_end=sub["trial_end"],
+        plan_code=sub["plan_code"],
+        plan_name=sub.get("plan_name"),
+        interval=sub["interval"],
+        status=sub["status"],
+        source=sub["source"],
+        current_period_end=sub["current_period_end"],
+        trial_end=sub["trial_end"],
         cancel_at_period_end=sub["cancel_at_period_end"],
         comped_until=sub["comped_until"],
         mailbox_quota=quota,
         addons=[
             CappeSubscriptionAddon(
-                code=a["product_code"], name=a["name"],
-                unit_label=a["unit_label"], quantity=a["quantity"],
+                code=a["product_code"],
+                name=a["name"],
+                unit_label=a["unit_label"],
+                quantity=a["quantity"],
             )
             for a in addons
         ],
@@ -166,7 +182,9 @@ async def start_checkout(
             body.plan_code,
         )
         if product is None or product["kind"] != "plan":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan"
+            )
         if product["status"] != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -257,14 +275,16 @@ async def open_portal(
         )
     except CappeStripeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not open billing portal"
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not open billing portal",
         ) from exc
     return CappePortalResponse(portal_url=session["url"])
 
 
 @router.post("/billing/addons", response_model=CappeSubscription)
 async def set_addon_quantity(
-    body: CappeAddonQuantityRequest, account: CappeAccount = Depends(require_cappe_account)
+    body: CappeAddonQuantityRequest,
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     """Set how many units of an add-on (e.g. private-email mailboxes) to carry.
 
@@ -279,13 +299,20 @@ async def set_addon_quantity(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail="Add-ons require an active paid subscription.",
             )
+        if not sub["stripe_subscription_id"]:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Subscription is still syncing — try again in a moment.",
+            )
         addon = await conn.fetchrow(
             "SELECT code, name, max_quantity FROM cappe_billing_products "
             "WHERE code = $1 AND kind = 'addon' AND status = 'active'",
             body.addon_code,
         )
         if addon is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown add-on")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Unknown add-on"
+            )
         if body.quantity > addon["max_quantity"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -295,7 +322,8 @@ async def set_addon_quantity(
         item = await conn.fetchrow(
             "SELECT stripe_item_id, quantity FROM cappe_subscription_items "
             "WHERE subscription_id = $1 AND product_code = $2",
-            sub["id"], body.addon_code,
+            sub["id"],
+            body.addon_code,
         )
         price = await billing_svc.resolve_price(conn, body.addon_code, sub["interval"])
         if price is None or not price["stripe_price_id"]:
@@ -362,7 +390,9 @@ async def change_plan(
             body.plan_code,
         )
         if product is None or product["kind"] != "plan":
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan"
+            )
         if product["status"] != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -181,23 +181,30 @@ async def create_site_from_template(
                 template["id"],
                 json.dumps(theme),
             )
+            inserted = 0
             for i, page in enumerate(pages):
                 if not isinstance(page, dict):
                     continue
                 p_title = str(page.get("title") or f"Page {i + 1}")[:255]
                 p_slug = slugify(page.get("slug") or p_title)
-                await conn.execute(
+                page_id = await conn.fetchval(
                     """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
                        VALUES ($1, $2, $3, $4, $5, 'draft')
-                       ON CONFLICT (site_id, slug) DO NOTHING""",
+                       ON CONFLICT (site_id, slug) DO NOTHING RETURNING id""",
                     site["id"],
                     p_title,
                     p_slug,
                     json.dumps(page.get("content") or {}),
                     int(page.get("sort_order", i)),
                 )
+                inserted += page_id is not None
+            if not inserted:
+                await conn.execute(
+                    """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
+                       VALUES ($1, 'Home', 'home', '{}', 0, 'draft')""", site["id"])
+                inserted = 1
 
-    return site_row_to_dict(site, page_count=len(pages))
+    return site_row_to_dict(site, page_count=inserted)
 
 
 @router.post("/sites/{site_id}/preview", response_class=HTMLResponse)
@@ -300,7 +307,7 @@ async def update_site(
             add("shipping_free_threshold_cents", body.shipping_free_threshold_cents)
         if body.shipping_label is not None:
             add("shipping_label", body.shipping_label.strip() or "Shipping")
-        if body.receipt_prefix is not None:
+        if "receipt_prefix" in body.model_fields_set:
             add("receipt_prefix", body.receipt_prefix or None)
         if body.status is not None:
             if body.status == "published":

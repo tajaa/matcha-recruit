@@ -165,7 +165,7 @@ async def update_booking_type(
             sets, args = build_patch(body, (
                 "name", "description", "duration_minutes", "price_cents", "status",
                 "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id",
-            ))
+            ), nullable={"description", "price_cents", "category", "location_id"})
             if sets:
                 sets.append("updated_at = NOW()")
                 args.extend([type_id, site_id])

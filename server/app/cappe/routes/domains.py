@@ -52,6 +52,7 @@ from ..models.cappe import (
 from ..services.email import dashboard_url
 from ..services.porkbun import PorkbunError, get_porkbun
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
+from ..services.domain_register import finalize_domain_registration
 from .render import invalidate_render_cache
 
 logger = logging.getLogger("cappe.domains")
@@ -585,60 +586,3 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
         # transient failure would permanently strand a paid customer.
         await release_stripe_event(event_id, consumer=CONSUMER_CAPPE_PLATFORM)
         raise
-
-
-# ── Registration finalizer (background; runs after the webhook 200) ────────
-async def finalize_domain_registration(domain_id: UUID) -> None:
-    """Register the domain at Porkbun and point its DNS at the app. On success,
-    set it active + as the site's custom_domain. On failure, mark failed and
-    refund the customer's platform charge."""
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, site_id, domain, wholesale_cents, stripe_payment_intent "
-            "FROM cappe_domains WHERE id = $1 AND status = 'registering'",
-            domain_id,
-        )
-    if row is None:
-        return
-
-    pb = get_porkbun()
-    try:
-        await pb.register(
-            row["domain"], cost_cents=int(row["wholesale_cents"] or 0), idempotency_key=str(domain_id)
-        )
-        # Best-effort DNS — a record failure shouldn't fail the registration we
-        # already paid for; the owner can re-point in the registrar later.
-        try:
-            await pb.point_at_app(row["domain"])
-        except PorkbunError as exc:
-            logger.warning("cappe domain %s registered but DNS pointing failed: %s", domain_id, exc)
-    except PorkbunError as exc:
-        logger.error("cappe domain %s registration failed: %s", domain_id, exc)
-        async with get_connection() as conn:
-            await conn.execute(
-                "UPDATE cappe_domains SET status = 'failed', failure_reason = $2, updated_at = NOW() "
-                "WHERE id = $1",
-                domain_id, str(exc)[:500],
-            )
-        pi = row["stripe_payment_intent"]
-        if pi:
-            try:
-                await get_cappe_stripe().refund(pi)
-                logger.info("cappe domain %s charge refunded", domain_id)
-            except CappeStripeError as rexc:
-                logger.error("cappe domain %s refund failed: %s", domain_id, rexc)
-        return
-
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE cappe_domains SET status = 'active', "
-                "expires_at = NOW() + INTERVAL '1 year', updated_at = NOW() WHERE id = $1",
-                domain_id,
-            )
-            await conn.execute(
-                "UPDATE cappe_sites SET custom_domain = $1, updated_at = NOW() WHERE id = $2",
-                row["domain"], row["site_id"],
-            )
-    await invalidate_render_cache(row["site_id"])
-    logger.info("cappe domain %s active → %s", domain_id, row["domain"])

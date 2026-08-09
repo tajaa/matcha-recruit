@@ -91,12 +91,20 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
     # option omits inventory (None), inherit the prior value matched by
     # (group name, option name) so an unrelated product edit can't wipe stock.
     prior = await conn.fetch(
-        "SELECT g.name AS gname, o.name AS oname, o.inventory "
+        "SELECT g.name AS gname, o.name AS oname, o.inventory, o.id AS oid "
         "FROM cappe_product_options o JOIN cappe_product_option_groups g ON g.id = o.group_id "
         "WHERE g.product_id = $1",
         product_id,
     )
     prior_inv = {(r["gname"], r["oname"]): r["inventory"] for r in prior}
+    prior_oid = {(r["gname"], r["oname"]): r["oid"] for r in prior}
+    ledger: dict = {}
+    old_ids = [r["oid"] for r in prior]
+    if old_ids:
+        for r in await conn.fetch(
+            "SELECT id, option_id FROM cappe_inventory_adjustments WHERE option_id = ANY($1)", old_ids
+        ):
+            ledger.setdefault(r["option_id"], []).append(r["id"])
     await conn.execute(
         "DELETE FROM cappe_product_option_groups WHERE product_id = $1 AND site_id = $2",
         product_id, site_id,
@@ -111,13 +119,19 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
         )
         for oi, o in enumerate(g.options or []):
             inv = o.inventory if o.inventory is not None else prior_inv.get((g.name, o.name))
-            await conn.execute(
+            new_oid = await conn.fetchval(
                 """INSERT INTO cappe_product_options
                        (site_id, group_id, name, price_delta_cents, sort_order, inventory)
-                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                   VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
                 site_id, gid, o.name, o.price_delta_cents,
                 o.sort_order if o.sort_order is not None else oi, inv,
             )
+            move = ledger.get(prior_oid.get((g.name, o.name)))
+            if move:
+                await conn.execute(
+                    "UPDATE cappe_inventory_adjustments SET option_id = $1 WHERE id = ANY($2)",
+                    new_oid, move,
+                )
 
 
 def _order_row(row, items=None) -> dict:
@@ -225,7 +239,8 @@ async def update_product(
                 "sku", "inventory", "low_stock_threshold", "status", "sort_order",
                 "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
                 "category",
-            ))
+            ), nullable={"description", "image_url", "sku", "inventory", "low_stock_threshold",
+                         "digital_file_url", "booking_type_id", "category"})
             # intake_fields is JSONB NOT NULL DEFAULT '[]' — a `null` PATCH value
             # has no sensible SQL NULL to clear to, so this stays on the plain
             # `is not None` idiom rather than build_patch's model_fields_set.
@@ -279,24 +294,26 @@ async def adjust_stock(
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
             if body.option_id is not None:
-                cur = await conn.fetchval(
-                    "SELECT o.inventory FROM cappe_product_options o "
+                vrow = await conn.fetchrow(
+                    "SELECT o.id, o.inventory FROM cappe_product_options o "
                     "JOIN cappe_product_option_groups g ON g.id = o.group_id "
                     "WHERE o.id = $1 AND g.product_id = $2 AND o.site_id = $3 FOR UPDATE",
                     body.option_id, product_id, site_id,
                 )
-                if cur is None:
+                if vrow is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
+                if vrow["inventory"] is None:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="That variant isn't tracking stock — set a stock number on it first.",
                     )
-                new_bal = max(0, cur + body.delta)
+                new_bal = max(0, vrow["inventory"] + body.delta)
                 await conn.execute(
                     "UPDATE cappe_product_options SET inventory = $1 WHERE id = $2", new_bal, body.option_id
                 )
                 await log_adjustment(
                     conn, site_id=site_id, product_id=product_id, option_id=body.option_id,
-                    delta=new_bal - cur, balance_after=new_bal, reason=body.reason, note=body.note,
+                    delta=new_bal - vrow["inventory"], balance_after=new_bal, reason=body.reason, note=body.note,
                 )
             else:
                 prow = await conn.fetchrow(
@@ -422,7 +439,8 @@ async def update_order_status(
             )
             if current is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-            sets, args = build_patch(body, ("status", "carrier", "tracking_number"))
+            sets, args = build_patch(body, ("status", "carrier", "tracking_number"),
+                                     nullable={"carrier", "tracking_number"})
             sets.append("updated_at = NOW()")
             args.extend([order_id, site_id])
             order = await conn.fetchrow(

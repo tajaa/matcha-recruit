@@ -43,6 +43,20 @@ def test_build_patch_explicit_null_clears():
     assert args == [None]
 
 
+def test_build_patch_nullable_allowlist_accepts_null():
+    body = CappeStaffUpdate(bio=None)
+    sets, args = build_patch(body, ("name", "bio"), nullable={"bio"})
+    assert sets == ["bio = $1"] and args == [None]
+
+
+def test_build_patch_nullable_rejects_not_null_field():
+    body = CappeStaffUpdate(name=None)
+    with pytest.raises(HTTPException) as exc:
+        build_patch(body, ("name", "bio"), nullable={"bio"})
+    assert exc.value.status_code == 422
+    assert "name" in exc.value.detail
+
+
 def test_build_patch_no_fields_set_is_empty():
     body = CappeStaffUpdate()
     sets, args = build_patch(body, ("name", "bio", "location_id"))

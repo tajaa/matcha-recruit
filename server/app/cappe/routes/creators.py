@@ -26,6 +26,7 @@ from ..models.creators import (
     CreatorSocialUpsert,
 )
 from ..models.collab import EarningsRow
+from ..services import upload_guard
 from ._shared import build_patch, read_capped
 from ..services.common import loads
 
@@ -35,8 +36,6 @@ router = APIRouter()
 
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
 _MAX_VIDEO_BYTES = 50 * 1024 * 1024
-_ALLOWED_IMAGE = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-_ALLOWED_VIDEO = {"video/mp4", "video/webm", "video/quicktime"}
 
 
 def _require_creator(account: CappeAccount) -> None:
@@ -143,6 +142,7 @@ async def update_my_profile(
             body,
             ["display_name", "avatar_url", "cover_url", "bio", "location",
              "niches", "languages", "open_to_offers"],
+            nullable={"avatar_url", "cover_url", "bio", "location"},
         )
         if sets:
             sets.append("updated_at = NOW()")
@@ -301,16 +301,19 @@ async def upload_creator_media(
     # site to cap by) — a per-account request rate limit is the only backstop
     # against unbounded upload volume/cost.
     await check_rate_limit(str(account.id), "cappe_creator_upload", 30, 3600)
-    if file.content_type in _ALLOWED_IMAGE:
+    if file.content_type in upload_guard.ALLOWED_IMAGE:
+        allowed = upload_guard.ALLOWED_IMAGE
         data = await read_capped(file, _MAX_IMAGE_BYTES, "Image too large (max 5 MB)")
-    elif file.content_type in _ALLOWED_VIDEO:
+    elif file.content_type in upload_guard.ALLOWED_VIDEO:
+        allowed = upload_guard.ALLOWED_VIDEO
         data = await read_capped(file, _MAX_VIDEO_BYTES, "Video too large (max 50 MB)")
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    content_type = upload_guard.verify_upload(data, file.content_type, allowed)
     url = await get_storage().upload_file(
-        file_bytes=data, filename=file.filename or "upload", prefix="cappe", content_type=file.content_type,
+        file_bytes=data, filename=file.filename or "upload", prefix="cappe", content_type=content_type,
     )
     return CappeUploadResponse(url=url)
 
