@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAccount } from './hooks/useAccount'
 import { Layout } from './components/Layout'
@@ -31,6 +32,11 @@ import BrandCampaigns from './pages/brand/Campaigns'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 import BrandBoard from './pages/brand/Board'
+
+// Konva + the designer tree are ~200KB of the bundle and only a brand that is
+// actually laying out a flyer ever needs them — keep them out of first paint
+// for every other surface (including the consumer app).
+const CampaignDesigner = lazy(() => import('./pages/brand/CampaignDesigner'))
 
 import TellusAdminUpdates from './pages/admin/Updates'
 import AdminAccounts from './pages/admin/Accounts'
@@ -141,6 +147,14 @@ export default function App() {
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
       <Route path="/brand/campaigns" element={<Protected requireType="brand"><BrandCampaigns /></Protected>} />
+      {/* bare: the designer is a full-screen editor with its own chrome. */}
+      <Route path="/brand/campaigns/:id/design" element={
+        <Protected requireType="brand" bare>
+          <Suspense fallback={<div className="min-h-screen bg-tu-bg"><Spinner /></div>}>
+            <CampaignDesigner />
+          </Suspense>
+        </Protected>
+      } />
       <Route path="/brand/board" element={<Protected requireType="brand" allowConsumerModerator><BrandBoard /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
 

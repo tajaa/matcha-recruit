@@ -1,0 +1,10 @@
+[
+  { "id": "star-burst", "file": "star-burst.svg", "thumb": "star-burst.svg", "w": 200, "h": 200 },
+  { "id": "star", "file": "star.svg", "thumb": "star.svg", "w": 200, "h": 200 },
+  { "id": "sparkle", "file": "sparkle.svg", "thumb": "sparkle.svg", "w": 200, "h": 200 },
+  { "id": "ribbon", "file": "ribbon.svg", "thumb": "ribbon.svg", "w": 200, "h": 200 },
+  { "id": "tag", "file": "tag.svg", "thumb": "tag.svg", "w": 200, "h": 200 },
+  { "id": "coffee-cup", "file": "coffee-cup.svg", "thumb": "coffee-cup.svg", "w": 200, "h": 200 },
+  { "id": "heart", "file": "heart.svg", "thumb": "heart.svg", "w": 200, "h": 200 },
+  { "id": "arrow-down", "file": "arrow-down.svg", "thumb": "arrow-down.svg", "w": 200, "h": 200 }
+]

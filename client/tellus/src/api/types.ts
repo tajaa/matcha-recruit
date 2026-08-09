@@ -916,7 +916,11 @@ export type DesignLayer =
 
 export interface FontManifestEntry {
   family: string
-  file: string
+  // null = rely on the platform having the family installed (the shipped
+  // manifest is system stacks). Dropping a woff2 into public/designer/fonts/
+  // and filling this in upgrades a family to self-hosted with no code change —
+  // useDesignerFonts registers a FontFace for every entry that has a file.
+  file: string | null
   weight: number
   preview: string
 }
@@ -934,5 +938,7 @@ export interface TemplateManifestEntry {
   name: string
   preset: ArtboardPreset
   file: string
-  thumb: string
+  // null = the picker renders a live miniature of the template document
+  // instead of a baked thumbnail, so a template edit can never go stale.
+  thumb: string | null
 }

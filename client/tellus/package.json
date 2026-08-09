@@ -11,10 +11,12 @@
   "dependencies": {
     "framer-motion": "^12.42.2",
     "jsqr": "^1.4.0",
+    "konva": "^9.3.22",
     "lucide-react": "^0.562.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-konva": "^19.2.5",
     "react-router-dom": "^7.11.0"
   },
   "devDependencies": {

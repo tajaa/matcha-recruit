@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "artboard": { "preset": "flyer_letter", "w": 1275, "h": 1650 },
+  "background": { "kind": "color", "color": "#17140f" },
+  "layers": [
+    { "id": "t1-band", "type": "shape", "shape": "rect", "x": 0, "y": 0, "width": 1275, "height": 420, "rotation": 0, "opacity": 1, "fill": "#f97316", "cornerRadius": 0 },
+    { "id": "t1-logo", "type": "image", "src": "", "slot": "logo", "x": 508, "y": 60, "width": 260, "height": 260, "rotation": 0, "opacity": 1 },
+    { "id": "t1-title", "type": "text", "text": "TODAY ONLY", "x": 88, "y": 500, "width": 1100, "rotation": 0, "opacity": 1, "fontFamily": "Arial Black", "fontSize": 132, "fontStyle": "bold", "fill": "#f3ede0", "align": "center", "lineHeight": 1.05, "letterSpacing": 6 },
+    { "id": "t1-reward", "type": "text", "text": "One free coffee", "x": 138, "y": 690, "width": 1000, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 64, "fontStyle": "normal", "fill": "#fb923c", "align": "center", "lineHeight": 1.2, "letterSpacing": 0 },
+    { "id": "t1-rule", "type": "shape", "shape": "line", "x": 488, "y": 810, "width": 300, "height": 6, "rotation": 0, "opacity": 1, "fill": "#f3ede0" },
+    { "id": "t1-scan", "type": "text", "text": "Scan to claim yours", "x": 238, "y": 870, "width": 800, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 40, "fontStyle": "normal", "fill": "#a1a1aa", "align": "center", "lineHeight": 1.2, "letterSpacing": 2 },
+    { "id": "t1-qrpad", "type": "shape", "shape": "rect", "x": 407, "y": 980, "width": 460, "height": 460, "rotation": 0, "opacity": 1, "fill": "#ffffff", "cornerRadius": 28 },
+    { "id": "t1-qr", "type": "qr", "x": 437, "y": 1010, "size": 400, "rotation": 0, "opacity": 1, "fg": "#17140f", "bg": "#ffffff" },
+    { "id": "t1-fine", "type": "text", "text": "One card per person. While supplies last.", "x": 238, "y": 1500, "width": 800, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 26, "fontStyle": "normal", "fill": "#71717a", "align": "center", "lineHeight": 1.3, "letterSpacing": 0 }
+  ]
+}

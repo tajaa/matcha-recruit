@@ -1,0 +1,6 @@
+[
+  { "id": "bold-offer", "name": "Bold offer", "preset": "flyer_letter", "file": "bold-offer.json", "thumb": null },
+  { "id": "paper-ticket", "name": "Paper ticket", "preset": "flyer_letter", "file": "paper-ticket.json", "thumb": null },
+  { "id": "counter-card", "name": "Counter card", "preset": "reward_card", "file": "counter-card.json", "thumb": null },
+  { "id": "social-drop", "name": "Social drop", "preset": "social_square", "file": "social-drop.json", "thumb": null }
+]

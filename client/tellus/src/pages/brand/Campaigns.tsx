@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
-import { Ban, Copy, Pause, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
+import { Ban, Copy, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { promoApi } from '../../api/promo'
 import { Button, Card, Chip, Empty, ErrorText, Input, Modal, Select, Spinner, Textarea } from '../../components/ui'
@@ -16,7 +17,7 @@ function campaignTone(status: PromoCampaign['status']): string | undefined {
   return undefined
 }
 
-function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (created: PromoCampaign) => void }) {
   const [title, setTitle] = useState('')
   const [rewardText, setRewardText] = useState('')
   const [description, setDescription] = useState('')
@@ -33,12 +34,12 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setErr(''); setSaving(true)
     try {
-      await promoApi.createCampaign({
+      const created = await promoApi.createCampaign({
         title, reward_text: rewardText, description: description || null,
         max_claims: maxClaims, card_expiry_days: expiryDays,
         ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       })
-      reset(); onClose(); onCreated()
+      reset(); onClose(); onCreated(created)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create campaign')
     } finally {
@@ -68,6 +69,7 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
 }
 
 function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChanged: () => void }) {
+  const navigate = useNavigate()
   const [showQr, setShowQr] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -104,7 +106,11 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
   return (
     <Card className={campaign.status === 'cancelled' ? 'opacity-60' : ''}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="flex min-w-0 gap-3">
+          {campaign.flyer_image_url && (
+            <img src={campaign.flyer_image_url} alt="" className="h-20 w-16 shrink-0 rounded border border-tu-border object-cover" />
+          )}
+          <div>
           <div className="flex items-center gap-2">
             <h3 className="font-semibold">{campaign.title}</h3>
             <Chip tone={campaignTone(campaign.status)}>{campaign.status}</Chip>
@@ -115,8 +121,14 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
             {stats ? ` · ${stats.redeemed} redeemed · ${stats.outstanding} outstanding` : ''}
             {campaign.ends_at ? ` · ends ${new Date(campaign.ends_at).toLocaleString()}` : ''}
           </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
+          {campaign.status !== 'cancelled' && (
+            <Button variant="soft" onClick={() => navigate(`/brand/campaigns/${campaign.id}/design`)}>
+              <Palette className="h-4 w-4" /> {campaign.has_design ? 'Edit flyer' : 'Design flyer'}
+            </Button>
+          )}
           <Button variant="soft" onClick={() => setShowQr((v) => !v)}><QrCode className="h-4 w-4" /> QR</Button>
           <Button variant="soft" onClick={() => navigator.clipboard.writeText(claimUrl)}><Copy className="h-4 w-4" /></Button>
           {campaign.status !== 'cancelled' && (
@@ -254,6 +266,7 @@ function ScannersSection() {
 }
 
 export default function BrandCampaigns() {
+  const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<PromoCampaign[]>([])
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
@@ -295,7 +308,13 @@ export default function BrandCampaigns() {
 
       <ScannersSection />
 
-      <CreateCampaignModal open={modalOpen} onClose={() => setModalOpen(false)} onCreated={load} />
+      {/* Straight into the designer after create — a campaign with no flyer is
+          a QR nobody can see, so laying one out is the real next step. */}
+      <CreateCampaignModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreated={(created) => navigate(`/brand/campaigns/${created.id}/design`)}
+      />
     </div>
   )
 }
