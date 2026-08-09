@@ -10,9 +10,8 @@ import type { ReactNode } from 'react'
 import { Layer, Line, Rect, Stage, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import type { DesignLayer, FlyerDesign } from '../../api/types'
-import { applyScaleToSize } from '../../utils/designer'
+import { applyScaleToSize, layerBox } from '../../utils/designer'
 import { BackgroundNode, LayerNode } from './LayerRenderer'
-import { useQrCanvases } from './useQrCanvases'
 
 const SNAP_THRESHOLD = 8 // artboard px
 
@@ -23,7 +22,10 @@ export interface DesignerCanvasProps {
   /** commit=false while a gesture is in flight, true on its end (one undo step). */
   onLayerChange: (id: string, patch: Partial<DesignLayer>, commit: boolean) => void
   onBeginTextEdit: (layer: Extract<DesignLayer, { type: 'text' }>, node: Konva.Text) => void
-  claimUrl: string
+  /** QR rasters come from the page (useQrCanvases), which also owns the export gate. */
+  qrCanvasFor: (size: number, fg: string, bg: string) => HTMLCanvasElement | undefined
+  /** Hidden QRCodeCanvas hosts — must mount as a DOM sibling of the Stage. */
+  qrHidden: ReactNode
   stickerSrc: (assetId: string) => string
   stageRef: React.RefObject<Konva.Stage | null>
   editingLayerId: string | null
@@ -33,14 +35,13 @@ export interface DesignerCanvasProps {
 
 export function DesignerCanvas({
   design, selectedId, onSelect, onLayerChange, onBeginTextEdit,
-  claimUrl, stickerSrc, stageRef, editingLayerId, overlay,
+  qrCanvasFor, qrHidden, stickerSrc, stageRef, editingLayerId, overlay,
 }: DesignerCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const trRef = useRef<Konva.Transformer>(null)
   const contentRef = useRef<Konva.Layer>(null)
   const [scale, setScale] = useState(0.2)
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] })
-  const { canvasFor, hidden } = useQrCanvases(design, claimUrl)
 
   // Fit-to-container. ResizeObserver rather than a window listener so the
   // stage also reacts to the inspector panel collapsing beside it.
@@ -61,33 +62,34 @@ export function DesignerCanvas({
     return () => ro.disconnect()
   }, [design.artboard.w, design.artboard.h])
 
+  const selected = design.layers.find((l) => l.id === selectedId) ?? null
+
   // Attach the transformer to whatever is selected. Konva finds the node by
   // id inside the content layer; a selection that no longer exists (deleted
-  // layer) detaches instead of throwing.
+  // layer) detaches instead of throwing. A LOCKED layer attaches nothing:
+  // LayerNode already refuses to drag it, and leaving resize/rotate handles
+  // live made the lock a half-promise on the one layer (the QR) it exists to
+  // protect.
   useEffect(() => {
     const tr = trRef.current
     const layer = contentRef.current
     if (!tr || !layer) return
-    const node = selectedId && selectedId !== editingLayerId
+    const node = selectedId && selectedId !== editingLayerId && !selected?.locked
       ? layer.findOne<Konva.Node>(`#${selectedId}`)
       : null
     tr.nodes(node ? [node] : [])
     tr.getLayer()?.batchDraw()
-  }, [selectedId, editingLayerId, design.layers])
-
-  const selected = design.layers.find((l) => l.id === selectedId) ?? null
+  }, [selectedId, editingLayerId, selected?.locked, design.layers])
 
   // Snap targets: artboard edges + centre, plus the edges/centres of every
   // other layer. Returns the adjusted position and the guide lines to draw.
   function snap(layer: DesignLayer, x: number, y: number) {
-    const w = layer.type === 'qr' ? layer.size : layer.type === 'text' ? layer.width : layer.width
-    const h = layer.type === 'qr' ? layer.size : layer.type === 'text' ? layer.fontSize * layer.lineHeight : layer.height
+    const { w, h } = layerBox(layer)
     const vx: number[] = [0, design.artboard.w / 2, design.artboard.w]
     const hy: number[] = [0, design.artboard.h / 2, design.artboard.h]
     for (const other of design.layers) {
       if (other.id === layer.id) continue
-      const ow = other.type === 'qr' ? other.size : other.width
-      const oh = other.type === 'qr' ? other.size : other.type === 'text' ? other.fontSize * other.lineHeight : other.height
+      const { w: ow, h: oh } = layerBox(other)
       vx.push(other.x, other.x + ow / 2, other.x + ow)
       hy.push(other.y, other.y + oh / 2, other.y + oh)
     }
@@ -138,7 +140,7 @@ export function DesignerCanvas({
 
   return (
     <div ref={wrapRef} className="relative flex h-full w-full items-center justify-center overflow-hidden bg-tu-bg">
-      {hidden}
+      {qrHidden}
       <div className="relative shadow-2xl" style={{ width: design.artboard.w * scale, height: design.artboard.h * scale }}>
         <Stage
           ref={stageRef}
@@ -156,7 +158,7 @@ export function DesignerCanvas({
                 key={layer.id}
                 layer={layer}
                 stickerSrc={stickerSrc}
-                qrCanvas={canvasFor}
+                qrCanvas={qrCanvasFor}
                 draggable
                 listening
                 visible={layer.id !== editingLayerId}

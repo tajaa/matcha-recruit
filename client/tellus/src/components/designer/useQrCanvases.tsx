@@ -9,7 +9,7 @@
 //
 // QR layers deliberately store no URL: the campaign's claim URL is injected at
 // render time, so a design saved before the campaign existed still resolves.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import type { FlyerDesign } from '../../api/types'
 
@@ -19,6 +19,10 @@ import type { FlyerDesign } from '../../api/types'
 function rasterPx(size: number) {
   return Math.min(2048, Math.max(512, Math.round(size * 2)))
 }
+
+// ~2s at 60fps. Bounded so a QR that never paints (colour the encoder rejects,
+// a backgrounded tab) can't spin a rAF loop or block an export forever.
+const MAX_FRAMES = 120
 
 interface QrSpec {
   key: string
@@ -47,9 +51,15 @@ export function useQrCanvases(design: FlyerDesign, claimUrl: string) {
 
   useEffect(() => {
     let cancelled = false
-    // One frame of slack: qrcode.react paints in its own layout effect, and
-    // reading the bitmap in the same tick can catch a blank canvas.
-    const raf = requestAnimationFrame(() => {
+    let raf = 0
+    let frames = 0
+    // qrcode.react paints in its own layout effect, so the bitmap is at least
+    // one frame behind. RETRYING until every spec has painted is the point:
+    // the earlier version captured exactly once and silently dropped any
+    // canvas still at width 0, which left that layer rendering its
+    // placeholder forever — including in the exported PNG and in the image
+    // uploaded as the campaign flyer.
+    function capture() {
       if (cancelled) return
       const next: Record<string, HTMLCanvasElement> = {}
       for (const spec of specs) {
@@ -61,18 +71,36 @@ export function useQrCanvases(design: FlyerDesign, claimUrl: string) {
         copy.getContext('2d')?.drawImage(src, 0, 0)
         next[spec.key] = copy
       }
+      if (Object.keys(next).length < specs.length && frames++ < MAX_FRAMES) {
+        raf = requestAnimationFrame(capture)
+        return
+      }
       setCanvases((prev) => {
         const same = Object.keys(next).length === Object.keys(prev).length
           && Object.keys(next).every((k) => k in prev)
         return same ? prev : next
       })
-    })
+    }
+    raf = requestAnimationFrame(capture)
     return () => { cancelled = true; cancelAnimationFrame(raf) }
   }, [specs])
 
   function canvasFor(size: number, fg: string, bg: string): HTMLCanvasElement | undefined {
     return canvases[`${claimUrl}|${rasterPx(size)}|${fg}|${bg}`]
   }
+
+  const ready = specs.every((spec) => canvases[spec.key] !== undefined)
+  const readyRef = useRef(ready)
+  readyRef.current = ready
+
+  // Export gate. Without it a PNG (or the flyer pushed to the campaign) can
+  // capture the placeholder where the only scannable element belongs — the
+  // same class of bug the fonts gate in exportPng already guards against.
+  const ensureQrReady = useCallback(async () => {
+    for (let i = 0; i < MAX_FRAMES && !readyRef.current; i++) {
+      await new Promise<void>((resolve) => { requestAnimationFrame(() => resolve()) })
+    }
+  }, [])
 
   // Rendered by the caller as a DOM sibling of the Stage. Off-screen rather
   // than display:none — a hidden canvas still rasterises, but keeping it in
@@ -94,5 +122,5 @@ export function useQrCanvases(design: FlyerDesign, claimUrl: string) {
     </div>
   )
 
-  return { canvasFor, hidden }
+  return { canvasFor, hidden, ready, ensureQrReady }
 }

@@ -111,6 +111,11 @@ export function Layout({ children }: { children: ReactNode }) {
   // moderator, who needs to land on /brand/board, not /boards.
   const BOARD_KINDS = new Set(['board_post', 'board_reply_approved', 'membership_approved'])
   const MOD_KINDS = new Set(['board_join_request', 'board_reply_pending', 'board_team_added'])
+  // Promo reward cards are listed on /redemptions alongside marketplace
+  // redemptions. Without a set of its own, 'promo_card' matched no surface: the
+  // bell routed to /my-reviews, marked nothing read, and left the badge
+  // permanently +1 per claimed card with no UI path to clear it.
+  const CARD_KINDS = new Set(['promo_card'])
 
   async function openNotifications() {
     // Pending (unpaid) brands can't reach /brand/feedback — it 402s. Send
@@ -148,6 +153,9 @@ export function Layout({ children }: { children: ReactNode }) {
     } else if (!isBrand && notes.some((n) => BOARD_KINDS.has(n.kind))) {
       dest = '/boards'
       surfaced = BOARD_KINDS
+    } else if (!isBrand && notes.some((n) => CARD_KINDS.has(n.kind))) {
+      dest = '/redemptions'
+      surfaced = CARD_KINDS
     } else {
       dest = isBrand ? '/brand/feedback' : '/my-reviews'
       surfaced = REVIEW_KINDS

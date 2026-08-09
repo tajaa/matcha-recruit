@@ -13,10 +13,13 @@ import { Button, ErrorText } from '../ui'
 // come out at preview resolution.
 export async function exportPng(
   stage: Konva.Stage,
-  ensureFonts: () => Promise<void>,
+  ensureReady: () => Promise<void>,
   dpi: 150 | 300,
 ): Promise<Blob> {
-  await ensureFonts()
+  // Fonts AND the QR rasters — an unresolved font bakes fallback metrics into
+  // the layout, and an unresolved QR bakes the placeholder in where the only
+  // scannable element belongs.
+  await ensureReady()
   const overlay = stage.findOne<Konva.Layer>('.designer-overlay')
   const wasVisible = overlay?.visible() ?? false
   overlay?.visible(false)
@@ -34,12 +37,13 @@ export async function exportPng(
 }
 
 export function ExportMenu({
-  stageRef, campaignId, design, ensureFonts, onFlyerSaved,
+  stageRef, campaignId, design, ensureReady, onFlyerSaved,
 }: {
   stageRef: React.RefObject<Konva.Stage | null>
   campaignId: string
   design: FlyerDesign
-  ensureFonts: () => Promise<void>
+  /** Awaits everything the capture depends on: fonts + QR rasters. */
+  ensureReady: () => Promise<void>
   onFlyerSaved: (url: string) => void
 }) {
   const [busy, setBusy] = useState<'' | 'png150' | 'png300' | 'flyer'>('')
@@ -50,7 +54,7 @@ export function ExportMenu({
     if (!stage) return
     setBusy(kind); setErr('')
     try {
-      const blob = await exportPng(stage, ensureFonts, kind === 'png300' ? 300 : 150)
+      const blob = await exportPng(stage, ensureReady, kind === 'png300' ? 300 : 150)
       if (kind === 'flyer') {
         const form = new FormData()
         form.append('file', blob, 'flyer.png')
@@ -58,12 +62,22 @@ export function ExportMenu({
         onFlyerSaved(flyer_image_url)
         return
       }
+      // The anchor must be attached to the document before .click() — an
+      // untethered anchor's click doesn't reliably register as a real download
+      // gesture in Chrome, which then shows a phantom "Unconfirmed" entry and
+      // can save a second, truncated copy instead of the real file. Same
+      // reason the object URL is revoked on a later task, not this one: the
+      // browser may not have started reading the blob yet. (See the identical
+      // note on _saveBlobResponse in the matcha client's api/client.ts.)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
       a.download = `flyer-${design.artboard.preset}-${kind === 'png300' ? '300dpi' : '150dpi'}.png`
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
     } catch (e) {
       // The realistic failure is a tainted canvas from a cross-origin logo the
       // bucket won't CORS — say so rather than leaking "SecurityError".

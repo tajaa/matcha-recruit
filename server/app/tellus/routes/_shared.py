@@ -3,6 +3,7 @@ import contextlib
 import re
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -16,8 +17,17 @@ _SLUG_MAX_LEN = 60
 
 def is_managed_object(url: Optional[str], prefix: str) -> bool:
     """Only ever delete objects a route uploaded itself — a legacy free-text
-    URL (e.g. old logo_url values) may point somewhere we don't own."""
-    return bool(url) and prefix in url
+    URL (e.g. old logo_url values) may point somewhere we don't own.
+
+    Matches the URL's PATH prefix, never substring containment: a third-party
+    URL that merely mentions our prefix in a query string
+    (https://elsewhere.example/proxy?src=/tellus/promo/x.png) is not ours."""
+    if not url:
+        return False
+    path = urlparse(url).path
+    if not path.startswith("/"):
+        path = "/" + path  # local-storage fallback / relative legacy values
+    return path.startswith(prefix)
 
 
 async def delete_managed_object(url: str) -> None:

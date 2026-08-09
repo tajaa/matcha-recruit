@@ -85,10 +85,26 @@ export function LayerNode({
       return <KonvaImage {...common} image={img} width={layer.width} height={layer.height} />
     case 'qr': {
       const canvas = qrCanvas(layer.size, layer.fg, layer.bg)
-      // Placeholder block rather than nothing while the raster is a frame
-      // behind — and it is what template thumbnails render, since those have
-      // no campaign (and therefore no claim URL) to encode.
-      if (!canvas) return <Rect {...common} width={layer.size} height={layer.size} fill={layer.fg} />
+      // Placeholder rather than nothing while the raster is a frame behind —
+      // and it is what template thumbnails render, since those have no
+      // campaign (and therefore no claim URL) to encode. Deliberately drawn as
+      // a dashed outline, NOT a solid fg-coloured block: a solid block is
+      // indistinguishable from a dark QR, so an export that caught this frame
+      // looked like a finished flyer. (ExportMenu also awaits the raster now —
+      // this is the visual backstop.)
+      if (!canvas) {
+        return (
+          <Rect
+            {...common}
+            width={layer.size}
+            height={layer.size}
+            fill={layer.bg}
+            stroke={layer.fg}
+            strokeWidth={Math.max(2, layer.size * 0.02)}
+            dash={[layer.size * 0.08, layer.size * 0.06]}
+          />
+        )
+      }
       return <KonvaImage {...common} image={canvas} width={layer.size} height={layer.size} />
     }
     case 'shape':

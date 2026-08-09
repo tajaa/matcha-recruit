@@ -21,22 +21,34 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
   const [title, setTitle] = useState('')
   const [rewardText, setRewardText] = useState('')
   const [description, setDescription] = useState('')
-  const [maxClaims, setMaxClaims] = useState(50)
-  const [expiryDays, setExpiryDays] = useState(30)
+  // Kept as strings, not numbers: Number('') is 0, so clearing the field to
+  // retype it used to POST max_claims: 0, fail the backend's ge=1, and surface
+  // FastAPI's raw validation array. Parsed and range-checked on submit.
+  const [maxClaims, setMaxClaims] = useState('50')
+  const [expiryDays, setExpiryDays] = useState('30')
   const [endsAt, setEndsAt] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   function reset() {
-    setTitle(''); setRewardText(''); setDescription(''); setMaxClaims(50); setExpiryDays(30); setEndsAt(''); setErr('')
+    setTitle(''); setRewardText(''); setDescription(''); setMaxClaims('50'); setExpiryDays('30'); setEndsAt(''); setErr('')
   }
 
   async function submit(e: React.FormEvent) {
-    e.preventDefault(); setErr(''); setSaving(true)
+    e.preventDefault(); setErr('')
+    const claims = Number(maxClaims)
+    const days = Number(expiryDays)
+    if (!Number.isInteger(claims) || claims < 1 || claims > 10000) {
+      setErr('Claim limit must be a whole number between 1 and 10,000.'); return
+    }
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      setErr('Card validity must be a whole number of days between 1 and 365.'); return
+    }
+    setSaving(true)
     try {
       const created = await promoApi.createCampaign({
         title, reward_text: rewardText, description: description || null,
-        max_claims: maxClaims, card_expiry_days: expiryDays,
+        max_claims: claims, card_expiry_days: days,
         ends_at: endsAt ? new Date(endsAt).toISOString() : null,
       })
       reset(); onClose(); onCreated(created)
@@ -56,9 +68,9 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
         <Textarea label="Description (optional)" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
         <div className="grid grid-cols-2 gap-3">
           <Input label="Claim limit" type="number" min={1} max={10000} value={maxClaims}
-            onChange={(e) => setMaxClaims(Number(e.target.value))} />
+            onChange={(e) => setMaxClaims(e.target.value)} />
           <Input label="Card valid for (days)" type="number" min={1} max={365} value={expiryDays}
-            onChange={(e) => setExpiryDays(Number(e.target.value))} />
+            onChange={(e) => setExpiryDays(e.target.value)} />
         </div>
         <Input label="Ends (optional)" type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
         <ErrorText>{err}</ErrorText>

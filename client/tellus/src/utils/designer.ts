@@ -170,3 +170,57 @@ export function applyScaleToSize(layer: DesignLayer, scaleX: number, scaleY: num
     height: Math.max(8, Math.round(layer.height * scaleY)),
   } as Partial<DesignLayer>
 }
+
+// The layer's occupied box in artboard units. One definition for snapping,
+// clamping and bounds tests — a text layer's height is derived (fontSize *
+// lineHeight) rather than stored, which is the only case worth a branch.
+export function layerBox(layer: DesignLayer): { w: number; h: number } {
+  if (layer.type === 'qr') return { w: layer.size, h: layer.size }
+  if (layer.type === 'text') return { w: layer.width, h: layer.fontSize * layer.lineHeight }
+  return { w: layer.width, h: layer.height }
+}
+
+function clampIntoArtboard(layer: DesignLayer, w: number, h: number): DesignLayer {
+  const box = layerBox(layer)
+  return {
+    ...layer,
+    x: Math.round(Math.min(Math.max(layer.x, 0), Math.max(0, w - box.w))),
+    y: Math.round(Math.min(Math.max(layer.y, 0), Math.max(0, h - box.h))),
+  } as DesignLayer
+}
+
+// Switching artboard preset has to carry the layers with it. Rewriting w/h
+// alone leaves every layer at its old coordinates, and the Stage clips to the
+// artboard — so going flyer_letter (1275x1650) -> reward_card (1050x600) put
+// the claim QR at y~1110, entirely off-canvas, while the document still
+// contained a QR layer. The result was a finished-looking flyer with nothing
+// scannable on it. Positions scale per axis, sizes by the smaller factor (a QR
+// stays square, nothing outgrows the new artboard), then everything is clamped
+// back inside.
+export function retargetArtboard(design: FlyerDesign, preset: ArtboardPreset): FlyerDesign {
+  const { w, h } = ARTBOARD_PRESETS[preset]
+  const { w: ow, h: oh } = design.artboard
+  if (ow === w && oh === h) return { ...design, artboard: { preset, w, h } }
+
+  const sx = w / ow
+  const sy = h / oh
+  const s = Math.min(sx, sy)
+  const layers = design.layers.map((layer) => {
+    const moved = { ...layer, x: Math.round(layer.x * sx), y: Math.round(layer.y * sy) } as DesignLayer
+    const resized = { ...moved, ...applyScaleToSize(moved, s, s) } as DesignLayer
+    return clampIntoArtboard(resized, w, h)
+  })
+  return { ...design, artboard: { preset, w, h }, layers }
+}
+
+// "Does this document have a USABLE claim QR" — a layer parked outside the
+// artboard is clipped away at render and export, so counting it would leave
+// the toolbar refusing to add the replacement the flyer actually needs.
+export function hasQrInBounds(design: FlyerDesign): boolean {
+  return design.layers.some((layer) => {
+    if (layer.type !== 'qr') return false
+    const { w, h } = layerBox(layer)
+    return layer.x + w > 0 && layer.y + h > 0
+      && layer.x < design.artboard.w && layer.y < design.artboard.h
+  })
+}

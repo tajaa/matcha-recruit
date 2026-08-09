@@ -181,8 +181,18 @@ the flyer QR claims exactly one single-use card (`tellus_promo_cards`), and staf
 counter through a per-store device token (`tellus_scanner_devices`). Migration `tellus_app_16`.
 Routers: `promo.py` (brand CRUD + `/me/promo-cards`), `promo_public.py` (`/p/{claim_token}`,
 `/scan/{device_token}`). Web surfaces: `pages/Claim.tsx`, `pages/Scan.tsx`,
-`pages/consumer/CardView.tsx`. The Konva flyer designer (`design_json`) is authored but has no UI
-yet — `TELLUS_PROMO_CAMPAIGNS_PLAN.md` §6 is the spec.
+`pages/consumer/CardView.tsx`, `pages/brand/Campaigns.tsx`, `pages/brand/CampaignDesigner.tsx`.
+
+The Konva flyer designer (`design_json`) **is built** — `pages/brand/CampaignDesigner.tsx` is the
+composition root (owns the document, history, fonts gate, autosave, keyboard map) at
+`/brand/campaigns/:id/design`, over `components/designer/*` (`DesignerCanvas`, `LayerRenderer`,
+`AssetPanel`, `InspectorPanel`, `Toolbar`, `ExportMenu`, `useQrCanvases`),
+`hooks/useDesignHistory|useDesignerFonts|useTextEditOverlay`, `utils/designer.ts`, and the asset
+pack under `client/tellus/public/designer/`. `TELLUS_PROMO_CAMPAIGNS_PLAN.md` §6 is the original
+spec. Two invariants the code encodes: the document is authored in **artboard (print) pixels** so a
+150dpi export is a 1:1 stage capture and 300dpi is `pixelRatio` 2; and QR layers store **no URL** —
+the campaign's claim URL is injected at render time, so a design saved before the campaign existed
+still resolves.
 
 - **Deliberately separate from the points economy.** Free cards never touch
   `tellus_points_ledger`/`tellus_points_balances`. `claim_count` is a monotone *issuance* counter —

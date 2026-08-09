@@ -80,6 +80,17 @@ export class ApiError extends Error {
 async function _apiError(res: Response): Promise<ApiError> {
   const body = await res.json().catch(() => null)
   const d = body?.detail
+  // FastAPI's own request-validation shape is an ARRAY of error objects, and it
+  // is `typeof 'object'` — so this must come first, or the branch below
+  // JSON.stringify's a raw [{"type":"greater_than_equal","loc":[...]}] blob
+  // into the UI. Surface the offending field's message instead.
+  if (Array.isArray(d)) {
+    const first = d[0] as { msg?: unknown; loc?: unknown[] } | undefined
+    const msg = typeof first?.msg === 'string' ? first.msg : 'Some fields need fixing.'
+    const loc = Array.isArray(first?.loc) ? first.loc : []
+    const field = loc.length ? String(loc[loc.length - 1]) : ''
+    return new ApiError(field ? `${field}: ${msg}` : msg, res.status)
+  }
   if (d && typeof d === 'object') {
     const message = typeof d.message === 'string' ? d.message : JSON.stringify(d)
     const code = typeof d.code === 'string' ? d.code : undefined

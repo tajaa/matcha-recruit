@@ -5,6 +5,7 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.encoders import jsonable_encoder
 
 from ...core.services.storage import get_storage
 from ...database import get_connection
@@ -34,7 +35,12 @@ _FLYER_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 
 
 def _raise(e: PromoError):
-    raise HTTPException(status_code=e.http_status, detail={"code": e.code, "message": e.message, **e.extra})
+    # jsonable_encoder because Starlette serializes detail with json.dumps, not
+    # jsonable_encoder — see PromoError's docstring on .extra being primitives.
+    raise HTTPException(
+        status_code=e.http_status,
+        detail=jsonable_encoder({"code": e.code, "message": e.message, **e.extra}),
+    )
 
 
 # ── brand: campaigns ─────────────────────────────────────────────────────────

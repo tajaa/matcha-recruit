@@ -5,6 +5,7 @@ public_intake.py's layering."""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
@@ -18,14 +19,25 @@ router = APIRouter()
 
 
 def _raise(e: PromoError):
-    raise HTTPException(status_code=e.http_status, detail={"code": e.code, "message": e.message, **e.extra})
+    # jsonable_encoder because Starlette serializes detail with json.dumps, not
+    # jsonable_encoder — see PromoError's docstring on .extra being primitives.
+    raise HTTPException(
+        status_code=e.http_status,
+        detail=jsonable_encoder({"code": e.code, "message": e.message, **e.extra}),
+    )
 
 
 # ── claim ─────────────────────────────────────────────────────────────────────
 
 @router.get("/p/{claim_token}", response_model=ClaimPreviewOut)
 async def claim_preview(claim_token: str, request: Request, authorization: Optional[str] = Header(default=None)):
-    await check_rate_limit(client_ip(request), "tellus_promo_preview", 60, 3600)
+    # Must stay >= the claim POST's per-IP budget below: one claim costs 2-3
+    # previews (first load, the post-login bounce-back to ?claim=1, the 410
+    # re-fetch), and the whole point of a flyer is a shared-WiFi/CGNAT crowd
+    # on one egress IP. A token-scoped burst catches per-campaign hammering
+    # without punishing the crowd.
+    await check_rate_limit(client_ip(request), "tellus_promo_preview", 300, 3600)
+    await check_rate_limit(claim_token, "tellus_promo_preview_token_burst", 120, 60)
     viewer = await optional_consumer_account_id(authorization)
     async with get_connection() as conn:
         try:

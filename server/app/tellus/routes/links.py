@@ -5,7 +5,6 @@ All endpoints require a brand account; everything scopes by the caller's
 drive the public intake flow.
 """
 import secrets
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status

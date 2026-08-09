@@ -41,7 +41,17 @@ export default function Claim() {
     let live = true
     promoApi.claimPreview(token)
       .then((p) => { if (live) setPreview(p) })
-      .catch(() => { if (live) setLoadErr("This promo link isn't available.") })
+      .catch((e: unknown) => {
+        if (!live) return
+        // A throttled load is NOT a dead promo — telling a customer the link
+        // isn't available sends them away from a working campaign. (The preview
+        // budget is also >= the claim budget now; see promo_public.py.)
+        setLoadErr(
+          e instanceof ApiError && e.status === 429
+            ? 'Lots of people are claiming right now — refresh in a moment.'
+            : "This promo link isn't available.",
+        )
+      })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [token])

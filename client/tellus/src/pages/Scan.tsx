@@ -25,6 +25,13 @@ function str(v: unknown): string | null {
 
 function toFailure(e: unknown): Failure {
   if (e instanceof ApiError) {
+    // Rate limits come back as FastAPI's plain-string detail, so there is no
+    // .code to switch on and this must be checked FIRST. Without it a busy
+    // counter that trips the burst limiter was told "Not a valid reward card."
+    // — i.e. told to turn a paying customer away.
+    if (e.status === 429) {
+      return { tone: 'warn', title: 'Too many scans', message: 'Scanning too fast — wait a moment, then scan again.' }
+    }
     switch (e.code) {
       case 'already_redeemed': {
         const at = str(e.detail?.redeemed_at)

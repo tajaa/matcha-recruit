@@ -2,11 +2,13 @@
 cards. No DB, no HTTP — see TELLUS_PROMO_CAMPAIGNS_PLAN.md at the repo root.
 """
 import inspect
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app.tellus.dependencies import require_consumer, require_paid_brand
+from app.tellus.routes._shared import is_managed_object
 from app.tellus.services import promo_service
 from app.tellus.services.promo_service import (
     PromoError,
@@ -136,7 +138,9 @@ class TestMapRedeemFailure:
         }
         err = map_redeem_failure(card, now=NOW)
         assert err.http_status == 409
-        assert err.extra["redeemed_at"] == PAST
+        # ISO string, not a datetime — .extra feeds HTTPException(detail=...)
+        # which Starlette serializes with json.dumps.
+        assert err.extra["redeemed_at"] == PAST.isoformat()
         assert err.extra["redeemed_store_name"] == "Downtown"
 
     def test_cancelled_card_410(self):
@@ -150,6 +154,47 @@ class TestMapRedeemFailure:
     def test_expired_410(self):
         card = {"status": "issued", "campaign_status": "active", "expires_at": PAST}
         assert map_redeem_failure(card, now=NOW).http_status == 410
+
+    def test_extra_is_json_serializable(self):
+        """The routes splat .extra into HTTPException(detail=...) and Starlette
+        serializes that with json.dumps, NOT jsonable_encoder — so a raw
+        datetime in here turns a 409 into a 500."""
+        card = {
+            "status": "redeemed", "campaign_status": "active",
+            "redeemed_at": PAST, "redeemed_store_name": "Downtown", "expires_at": FUTURE,
+        }
+        err = map_redeem_failure(card, now=NOW)
+        json.dumps({"code": err.code, "message": err.message, **err.extra})
+
+    def test_redeemed_without_timestamp_is_none(self):
+        card = {
+            "status": "redeemed", "campaign_status": "active",
+            "redeemed_at": None, "redeemed_store_name": None, "expires_at": FUTURE,
+        }
+        assert map_redeem_failure(card, now=NOW).extra["redeemed_at"] is None
+
+
+class TestIsManagedObject:
+    """is_managed_object gates every storage delete_file call in the tellus
+    routes — a substring match would hand third-party URLs to the deleter."""
+
+    def test_cloudfront_url_under_prefix(self):
+        assert is_managed_object("https://cdn.example.net/tellus/promo/b/c/flyer.png", "/tellus/promo/")
+
+    def test_relative_legacy_path(self):
+        assert is_managed_object("tellus/promo/b/c/flyer.png", "/tellus/promo/")
+
+    def test_third_party_url_mentioning_prefix_is_not_ours(self):
+        assert not is_managed_object(
+            "https://elsewhere.example/proxy?src=/tellus/promo/b/c/flyer.png", "/tellus/promo/"
+        )
+
+    def test_wrong_prefix(self):
+        assert not is_managed_object("https://cdn.example.net/tellus/logos/b/logo.png", "/tellus/promo/")
+
+    def test_none_and_empty(self):
+        assert not is_managed_object(None, "/tellus/promo/")
+        assert not is_managed_object("", "/tellus/promo/")
 
 
 def _all_function_source(module) -> str:

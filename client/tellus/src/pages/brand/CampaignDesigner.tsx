@@ -16,12 +16,13 @@ import { DesignerCanvas } from '../../components/designer/DesignerCanvas'
 import { ExportMenu } from '../../components/designer/ExportMenu'
 import { InspectorPanel } from '../../components/designer/InspectorPanel'
 import { Toolbar } from '../../components/designer/Toolbar'
+import { useQrCanvases } from '../../components/designer/useQrCanvases'
 import { useDesignHistory } from '../../hooks/useDesignHistory'
 import { useDesignerFonts } from '../../hooks/useDesignerFonts'
 import { useTextEditOverlay } from '../../hooks/useTextEditOverlay'
 import {
-  ARTBOARD_PRESETS, ASSET_BASE, blankDesign, instantiateTemplate, makeImageLayer, makeQrLayer,
-  makeShapeLayer, makeStickerLayer, makeTextLayer, newLayerId,
+  ASSET_BASE, blankDesign, hasQrInBounds, instantiateTemplate, makeImageLayer, makeQrLayer,
+  makeShapeLayer, makeStickerLayer, makeTextLayer, newLayerId, retargetArtboard,
 } from '../../utils/designer'
 
 const AUTOSAVE_MS = 2000
@@ -48,7 +49,14 @@ export default function CampaignDesigner() {
   const editor = useTextEditOverlay()
 
   const claimUrl = campaign ? `${window.location.origin}${campaign.claim_url}` : ''
-  const hasQr = design.layers.some((l) => l.type === 'qr')
+  // Bounds-aware: a QR parked outside the artboard is clipped at render AND at
+  // export, so counting it would leave the toolbar refusing to add the
+  // replacement the flyer needs.
+  const hasQr = hasQrInBounds(design)
+
+  // QR rasters live here rather than inside the canvas so the export path can
+  // await them (`ensureQrReady`) the same way it awaits fonts.
+  const { canvasFor, hidden: qrHidden, ensureQrReady } = useQrCanvases(design, claimUrl)
 
   // Fonts must be resolved BEFORE the stage first draws, or Konva bakes
   // fallback metrics into the text layout and the export wraps differently
@@ -85,25 +93,48 @@ export default function CampaignDesigner() {
     return () => { alive = false }
   }, [id, reset])
 
+  // One PUT in flight at a time, so two saves can't land out of order and
+  // persist the older document.
+  const savingRef = useRef(false)
+  // The document a save last FAILED on. Autosave re-arms whenever a PUT lands
+  // (see the effect below), which without this would turn one 403 into a retry
+  // every 2s forever. A failed document is retried only when the brand edits
+  // again or clicks Save.
+  const failedRef = useRef<FlyerDesign | null>(null)
+
   const save = useCallback(async () => {
+    if (savingRef.current) return // the autosave effect re-arms when this lands
+    savingRef.current = true
+    const attempted = design
     setSaving(true); setSaveErr('')
     try {
-      await promoApi.saveDesign(id, design)
-      markSaved()
+      await promoApi.saveDesign(id, attempted)
+      failedRef.current = null
+      // Generation-checked: markSaved only clears the dirty flag if `attempted`
+      // is still the live document. An edit made while the PUT was in flight
+      // must stay dirty — clearing it unconditionally cancelled that edit's
+      // pending autosave, flipped the toolbar to "All changes saved", disabled
+      // the Save button and dropped the beforeunload guard, so the edit was
+      // lost with no warning.
+      markSaved(attempted)
     } catch (e) {
+      failedRef.current = attempted
       setSaveErr(e instanceof Error ? e.message : 'Could not save the design')
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }, [id, design, markSaved])
 
-  // Debounced autosave. Keyed on `design` so a burst of edits collapses into
-  // one PUT; the manual Save button shares the same path.
+  // Debounced autosave. Keyed on `design` (through `save`) so a burst of edits
+  // collapses into one PUT; the manual Save button shares the same path.
+  // `saving` is a dependency so the effect re-arms when a PUT lands still
+  // dirty — that is what actually flushes an edit made mid-flight.
   useEffect(() => {
-    if (!dirty || loading) return
+    if (!dirty || loading || saving || failedRef.current === design) return
     const t = setTimeout(() => { void save() }, AUTOSAVE_MS)
     return () => clearTimeout(t)
-  }, [dirty, loading, save])
+  }, [dirty, loading, saving, design, save])
 
   useEffect(() => {
     if (!dirty) return
@@ -148,8 +179,9 @@ export default function CampaignDesigner() {
   }
 
   function applyPreset(preset: ArtboardPreset) {
-    const { w, h } = ARTBOARD_PRESETS[preset]
-    set({ ...design, artboard: { preset, w, h } }, { commit: true })
+    // retargetArtboard carries the layers across: rewriting w/h alone left
+    // them at their old coordinates, where the Stage clips them away.
+    set(retargetArtboard(design, preset), { commit: true })
   }
 
   function commitTextEdit() {
@@ -164,38 +196,51 @@ export default function CampaignDesigner() {
   // Suppressed entirely while the text overlay is open (Escape/Enter are
   // handled by the textarea) and whenever focus is in a panel input, or typing
   // a font size would delete the selected layer.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (editor.editing) return
-      const el = e.target as HTMLElement | null
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
-      const mod = e.metaKey || e.ctrlKey
-      if (mod && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) redo(); else undo()
-        return
-      }
-      if (mod && e.key.toLowerCase() === 'd') {
-        e.preventDefault()
-        if (selectedId) duplicateLayer(selectedId)
-        return
-      }
-      if (!selectedId) return
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteLayer(selectedId); return }
-      const step = e.shiftKey ? 10 : 1
-      const nudge: Record<string, [number, number]> = {
-        ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
-      }
-      const delta = nudge[e.key]
-      if (!delta) return
+  function onKey(e: KeyboardEvent) {
+    if (editor.editing) return
+    const el = e.target as HTMLElement | null
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+    const mod = e.metaKey || e.ctrlKey
+    if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault()
-      const layer = design.layers.find((l) => l.id === selectedId)
-      if (!layer) return
-      patchLayer(selectedId, { x: layer.x + delta[0], y: layer.y + delta[1] } as Partial<DesignLayer>, true)
+      if (e.shiftKey) redo(); else undo()
+      return
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
+    if (mod && e.key.toLowerCase() === 'd') {
+      e.preventDefault()
+      if (selectedId) duplicateLayer(selectedId)
+      return
+    }
+    if (!selectedId) return
+    const layer = design.layers.find((l) => l.id === selectedId)
+    // A locked layer takes no keyboard mutation. The inspector's explicit
+    // Delete still works (with the lock toggle right beside it) — it is the
+    // stray Backspace and the arrow nudge that made the lock a false promise
+    // on the one layer, the claim QR, it exists to protect.
+    if (!layer || layer.locked) return
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteLayer(selectedId); return }
+    const step = e.shiftKey ? 10 : 1
+    const nudge: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step],
+    }
+    const delta = nudge[e.key]
+    if (!delta) return
+    e.preventDefault()
+    patchLayer(selectedId, { x: layer.x + delta[0], y: layer.y + delta[1] } as Partial<DesignLayer>, true)
+  }
+
+  // The handler closes over selectedId/design/editor, so it is re-created every
+  // render — including dozens per second during a drag. Kept behind a ref so
+  // the window listener is registered ONCE instead of being detached and
+  // reattached on every one of those renders (the pattern useQrScanner.ts uses
+  // for `stop`).
+  const keyHandler = useRef(onKey)
+  useEffect(() => { keyHandler.current = onKey })
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => keyHandler.current(e)
+    window.addEventListener('keydown', handle)
+    return () => window.removeEventListener('keydown', handle)
+  }, [])
 
   if (loading || !fontsReady) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
   if (loadErr || !campaign) {
@@ -220,7 +265,7 @@ export default function CampaignDesigner() {
             stageRef={stageRef}
             campaignId={id}
             design={design}
-            ensureFonts={() => ensureLoaded(families)}
+            ensureReady={async () => { await ensureLoaded(families); await ensureQrReady() }}
             onFlyerSaved={(url) => setCampaign((c) => (c ? { ...c, flyer_image_url: url } : c))}
           />
         </div>
@@ -262,7 +307,8 @@ export default function CampaignDesigner() {
           onSelect={(sid) => { commitTextEdit(); setSelectedId(sid) }}
           onLayerChange={patchLayer}
           onBeginTextEdit={(layer, node) => { setSelectedId(layer.id); editor.begin(layer, node) }}
-          claimUrl={claimUrl}
+          qrCanvasFor={canvasFor}
+          qrHidden={qrHidden}
           stickerSrc={stickerSrc}
           stageRef={stageRef}
           editingLayerId={editor.editing?.layerId ?? null}

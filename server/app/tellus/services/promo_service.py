@@ -56,7 +56,11 @@ _CARD_SELECT_SQL = """
 
 class PromoError(Exception):
     """Route maps .http_status/.code/.message; .extra is merged into the
-    response detail body (e.g. already_redeemed context)."""
+    response detail body (e.g. already_redeemed context).
+
+    .extra values MUST be JSON primitives (str/int/bool/None) — the routes
+    splat them into HTTPException(detail=...) and Starlette serializes that
+    with json.dumps, so a datetime/UUID/Decimal in here is a 500."""
 
     def __init__(self, http_status: int, code: str, message: str, extra: Optional[dict] = None):
         super().__init__(message)
@@ -126,9 +130,17 @@ def map_redeem_failure(card: Optional[dict], now: Optional[datetime] = None) -> 
         return PromoError(404, "not_found", "That reward card wasn't found.")
     now = now or datetime.now(timezone.utc)
     if card["status"] == "redeemed":
+        redeemed_at = card["redeemed_at"]
         return PromoError(
             409, "already_redeemed", "This card was already redeemed.",
-            extra={"redeemed_at": card["redeemed_at"], "redeemed_store_name": card.get("redeemed_store_name")},
+            # .isoformat() is load-bearing: the routes splat .extra straight
+            # into HTTPException(detail=...), and Starlette's JSONResponse uses
+            # json.dumps (not jsonable_encoder) — a raw datetime here turns the
+            # single most common scan failure into a 500.
+            extra={
+                "redeemed_at": redeemed_at.isoformat() if redeemed_at is not None else None,
+                "redeemed_store_name": card.get("redeemed_store_name"),
+            },
         )
     if card["status"] == "cancelled" or card["campaign_status"] == "cancelled":
         return PromoError(410, "cancelled", "This promo was cancelled.")
@@ -497,7 +509,10 @@ async def claim_card(conn, claim_token: str, account_id: UUID) -> tuple[dict, bo
         card = await conn.fetchrow(_CARD_SELECT_SQL + " WHERE pc.id = $1", inserted["id"])
         await notify_account(
             conn, account_id, "promo_card", "Your reward card is ready",
-            card["reward_text"], "promo_card", str(inserted["id"]),
+            # reference_id is card_token, not the row id: every consumer surface
+            # addresses a card by token (/card/:cardToken, GET /me/promo-cards/
+            # {card_token}), so the UUID could not build the deep link.
+            card["reward_text"], "promo_card", card["card_token"],
         )
         return _serialize_card(dict(card)), True
 
