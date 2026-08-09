@@ -20,6 +20,7 @@ from app.oceanlab.schemas.release import (
     ReleaseUpdate,
 )
 from app.oceanlab.services import upc as upc_service
+from app.oceanlab.services.defaults import apply_release_defaults
 
 router = APIRouter(route_class=OceanlabRoute, prefix="/releases", tags=["releases"], dependencies=[AuthDep])
 
@@ -47,9 +48,14 @@ def list_releases(
 
 @router.post("", response_model=ReleaseRead, status_code=201)
 def create_release(payload: ReleaseCreate, db: Session = Depends(get_db)):
-    data = payload.model_dump()
-    if data.get("label_name") is None:
-        data.pop("label_name")
+    # Blank fields are filled from label settings (c-line, p-line, territories,
+    # genre, label). An explicit value from the caller always wins.
+    data = apply_release_defaults(db, payload.model_dump())
+    if data.get("primary_artist_id") is None:
+        raise HTTPException(
+            status_code=422,
+            detail="primary_artist_id is required (or set a default artist in label settings)",
+        )
     release = Release(**data)
     db.add(release)
     db.commit()

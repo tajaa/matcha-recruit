@@ -46,11 +46,42 @@ consistent so `_errors.py`'s `_UNIQUE_CONSTRAINT_MESSAGES` lookup keeps working.
 Oceanlab's own alembic setup (`alembic.ini`, standalone `alembic/`) did **not**
 carry over — matcha has one alembic chain with hand-SQL per-guest-app
 migrations (see `server/alembic/versions/tellus_app_01_standalone.py` for the
-pattern). The full oceanlab schema is one migration:
-`server/alembic/versions/oceanlab_app_01_standalone.py`. Future oceanlab
-schema changes are new hand-SQL `oceanlab_app_NN_*` files chained off the
-previous one — run `./scripts/migrate-dev.sh` / `migrate-prod.sh` like any
-other matcha migration, not a separate alembic invocation.
+pattern). Future oceanlab schema changes are new hand-SQL `oceanlab_app_NN_*`
+files chained off the previous one — run `./scripts/migrate-dev.sh` /
+`migrate-prod.sh` like any other matcha migration, not a separate alembic
+invocation.
+
+Chain so far:
+
+| Revision | File | What |
+|---|---|---|
+| `oceanlab_app_01` | `oceanlab_app_01_standalone.py` | the 20 `oceanlab_*` tables |
+| `oceanlab_app_02` | `oceanlab_app_02_label_defaults.py` | `oceanlab_label_settings` singleton |
+
+**`tests/conftest.py` builds the test schema by executing these migration
+modules directly** (not `Base.metadata.create_all`), so model/migration drift
+fails tests. Every new migration must be appended to `_MIGRATION_MODULES`
+there, and any new seeded-singleton row re-inserted in the `db_real` teardown
+next to the `oceanlab_isrc_config` / `oceanlab_label_settings` inserts —
+`TRUNCATE` drops them.
+
+## Label defaults (single-owner prefill)
+
+`oceanlab_label_settings` (id=1 singleton) + `services/defaults.py` answer, once,
+the questions every release and recording would otherwise repeat: c-line/p-line
+templates, territories, genre, default artist, and the default contributor who
+owns 100% of master and publishing.
+
+They are applied **at create time as real rows, never as a read-time overlay** —
+the packaging manifest, the registration exporters and the validator all read
+the tables directly, so an overlay would have to be reimplemented in each of
+them, and editing a split down from 100% when a collaborator appears would need
+a special "un-default" path. An explicit value in the request always wins.
+
+`isrc_source` / `upc_source` (`own | distributor`) additionally drive **validator
+severity**: with distributor-issued codes a missing ISRC/UPC at packaging time
+is a warning; with label-owned codes it is a hard error. That is what lets the
+first release ship before the $95 usisrc.org prefix and $30 GS1 GTINs exist.
 
 ## Auth
 

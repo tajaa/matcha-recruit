@@ -22,6 +22,7 @@ from app.oceanlab.schemas.recording import (
     WorkLinksIn,
 )
 from app.oceanlab.services import isrc as isrc_service
+from app.oceanlab.services.defaults import seed_recording_ownership
 
 router = APIRouter(route_class=OceanlabRoute, prefix="/recordings", tags=["recordings"], dependencies=[AuthDep])
 
@@ -45,6 +46,10 @@ def list_recordings(
 def create_recording(payload: RecordingCreate, db: Session = Depends(get_db)):
     recording = Recording(**payload.model_dump())
     db.add(recording)
+    db.flush()
+    # Single-owner label: give it its 100% master split and matching work now,
+    # as real editable rows. No-op when no default contributor is configured.
+    seed_recording_ownership(db, recording)
     db.commit()
     db.refresh(recording)
     return recording

@@ -31,16 +31,23 @@ def _ensure_test_token():
 # Load and run it directly against the test engine rather than shelling out
 # through matcha's full multi-head chain, so drift between models and the
 # shipped migration still surfaces as a failing test.
-_MIGRATION_PATH = (
-    Path(__file__).resolve().parents[3] / "alembic" / "versions" / "oceanlab_app_01_standalone.py"
+_VERSIONS_DIR = Path(__file__).resolve().parents[3] / "alembic" / "versions"
+# In chain order. Append each new oceanlab_app_NN file here so the test schema
+# keeps matching what migrate-dev/migrate-prod actually apply.
+_MIGRATION_MODULES = (
+    "oceanlab_app_01_standalone",
+    "oceanlab_app_02_label_defaults",
 )
 
 
-def _load_migration():
-    spec = importlib.util.spec_from_file_location("oceanlab_app_01_standalone", _MIGRATION_PATH)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _load_migrations():
+    modules = []
+    for name in _MIGRATION_MODULES:
+        spec = importlib.util.spec_from_file_location(name, _VERSIONS_DIR / f"{name}.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    return modules
 
 
 @pytest.fixture(scope="session")
@@ -49,11 +56,11 @@ def engine():
     Base.metadata.drop_all(eng)
     with eng.begin() as conn:
         conn.execute(sa.text("DROP TABLE IF EXISTS alembic_version"))
-    migration = _load_migration()
     with eng.begin() as conn:
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):
-            migration.upgrade()
+            for migration in _load_migrations():
+                migration.upgrade()
     yield eng
     eng.dispose()
 
@@ -104,7 +111,7 @@ _TRUNCATE_TABLES = (
     "oceanlab_royalty_statements, oceanlab_tracks, oceanlab_upc_codes, oceanlab_recording_works, "
     "oceanlab_master_splits, oceanlab_credits, oceanlab_work_writers, oceanlab_release_artists, "
     "oceanlab_releases, oceanlab_recordings, oceanlab_works, oceanlab_isrc_config, oceanlab_files, "
-    "oceanlab_artists, oceanlab_contributors, oceanlab_jobs"
+    "oceanlab_label_settings, oceanlab_artists, oceanlab_contributors, oceanlab_jobs"
 )
 
 
@@ -117,11 +124,15 @@ def db_real(engine) -> Generator[Session, None, None]:
         session.close()
         with engine.begin() as conn:
             conn.execute(sa.text(f"TRUNCATE {_TRUNCATE_TABLES} RESTART IDENTITY CASCADE"))
-            # Truncating isrc_config drops the migration-seeded id=1 row; restore it
-            # so every test starts from the same invariant as a freshly migrated DB.
+            # Truncating isrc_config / label_settings drops their migration-seeded
+            # id=1 rows; restore both so every test starts from the same invariant
+            # as a freshly migrated DB.
             conn.execute(sa.text(
                 "INSERT INTO oceanlab_isrc_config (id, registrant_prefix, year_digits, next_designation) "
                 "VALUES (1, '', '', 1) ON CONFLICT (id) DO NOTHING"
+            ))
+            conn.execute(sa.text(
+                "INSERT INTO oceanlab_label_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING"
             ))
 
 
