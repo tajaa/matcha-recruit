@@ -23,7 +23,13 @@ class ReleaseBase(BaseModel):
 
 
 class ReleaseCreate(ReleaseBase):
-    pass
+    # Optional on create ONLY so label settings can supply it (see
+    # services/defaults.apply_release_defaults). The column is NOT NULL and
+    # the route 422s when neither the payload nor the defaults provide one.
+    primary_artist_id: uuid.UUID | None = None
+    # Same reason: "" / omitted means "use the label default", whereas
+    # ReleaseBase's "WW" would mask the setting entirely.
+    territories: str | None = None
 
 
 class ReleaseUpdate(BaseModel):

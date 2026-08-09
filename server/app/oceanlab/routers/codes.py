@@ -8,11 +8,15 @@ from sqlalchemy.orm import Session
 from app.oceanlab.routers._errors import OceanlabRoute
 from app.oceanlab.db import get_db
 from app.oceanlab.deps import AuthDep
+from app.oceanlab.models.artist import Artist
 from app.oceanlab.models.codes import IsrcConfig, UpcCode
+from app.oceanlab.models.contributor import Contributor
 from app.oceanlab.models.enums import UpcStatus
 from app.oceanlab.models.release import Release
 from app.oceanlab.schemas.codes import IsrcConfigRead, IsrcConfigUpdate, UpcAddIn, UpcAddResult, UpcListResponse
+from app.oceanlab.schemas.settings import LabelSettingsRead, LabelSettingsUpdate
 from app.oceanlab.services import upc as upc_service
+from app.oceanlab.services.defaults import get_label_settings
 
 router = APIRouter(route_class=OceanlabRoute, tags=["codes"], dependencies=[AuthDep])
 
@@ -44,6 +48,35 @@ def update_isrc_config(payload: IsrcConfigUpdate, db: Session = Depends(get_db))
     db.execute(stmt)
     db.commit()
     return db.get(IsrcConfig, 1)
+
+
+@router.get("/settings/label", response_model=LabelSettingsRead)
+def get_label_settings_route(db: Session = Depends(get_db)):
+    settings_row = get_label_settings(db)
+    db.commit()  # get_label_settings upserts the singleton if it's missing
+    return settings_row
+
+
+@router.put("/settings/label", response_model=LabelSettingsRead)
+def update_label_settings(payload: LabelSettingsUpdate, db: Session = Depends(get_db)):
+    settings_row = get_label_settings(db)
+
+    changes = payload.model_dump(exclude_unset=True)
+    # Pre-validate the two FKs so an unknown id reads as "Artist not found"
+    # rather than a constraint name.
+    if changes.get("default_artist_id") is not None and db.get(Artist, changes["default_artist_id"]) is None:
+        raise HTTPException(status_code=422, detail=f"Artist not found: {changes['default_artist_id']}")
+    if (
+        changes.get("default_contributor_id") is not None
+        and db.get(Contributor, changes["default_contributor_id"]) is None
+    ):
+        raise HTTPException(status_code=422, detail=f"Contributor not found: {changes['default_contributor_id']}")
+
+    for key, value in changes.items():
+        setattr(settings_row, key, value)
+    db.commit()
+    db.refresh(settings_row)
+    return settings_row
 
 
 @router.get("/upcs", response_model=UpcListResponse)
