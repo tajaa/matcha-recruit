@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y \
     libgirepository1.0-dev \
     gir1.2-pango-1.0 \
     fonts-dejavu-core \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Headless Chromium for Merlin's agent loop — it renders the page it is editing

@@ -19,19 +19,16 @@ def test_health_open_no_auth(db):
         app.dependency_overrides.pop(get_db, None)
 
 
-def test_health_reports_degraded_when_storage_unreachable(db, monkeypatch):
-    # The probe is a read against the configured store, so "unhealthy" means
-    # the store raised — a dead S3 client or bad credentials — not a missing
-    # local directory (LocalDiskStore creates its own root).
-    from app.oceanlab.routers import health as health_module
+def test_health_reports_degraded_when_storage_root_missing(db, tmp_path, monkeypatch):
+    # Calls the endpoint function directly (rather than round-tripping through
+    # TestClient) so the app lifespan's `storage_root.mkdir(...)` doesn't
+    # recreate the very directory we're testing the absence of.
+    from app.oceanlab.config import settings
+    from app.oceanlab.routers.health import health
 
-    class _DeadStore:
-        def exists(self, key):
-            raise RuntimeError("S3 unreachable")
+    monkeypatch.setattr(settings, "storage_root", tmp_path / "does-not-exist")
 
-    monkeypatch.setattr(health_module, "get_store", lambda: _DeadStore())
-
-    body = health_module.health(db)
+    body = health(db)
     assert body["storage"] is False
     assert body["status"] == "degraded"
 

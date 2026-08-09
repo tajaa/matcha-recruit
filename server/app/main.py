@@ -219,6 +219,16 @@ async def lifespan(app: FastAPI):
     start_usage_flusher()
     print("[Matcha] Usage-event flusher started")
 
+    # Oceanlab's health check reports storage_ok off this dir; the monolith
+    # mounts oceanlab_router directly (no standalone-app lifespan runs it).
+    # Non-fatal: an unwritable path should degrade oceanlab's health check,
+    # not block the whole monolith from starting.
+    try:
+        from .oceanlab.config import ensure_storage_root
+        ensure_storage_root()
+    except Exception as e:
+        print(f"[Matcha] WARNING: oceanlab storage_root setup failed: {e}")
+
     yield
 
     # Cancel background tasks

@@ -45,9 +45,3 @@ openpyxl>=3.1
 # chat-image path imports it directly to downscale attachments before they go
 # into a prompt. Code degrades to sending the original if it's ever missing.
 Pillow>=10.0
-# Oceanlab label pipeline. mutagen is the audio-metadata fallback for when
-# ffprobe is missing or can't parse a container; the google-* pair is the
-# YouTube Data API delivery adapter (resumable video upload + playlists).
-mutagen>=1.47
-google-api-python-client>=2.100
-google-auth-oauthlib>=1.2

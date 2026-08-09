@@ -9,7 +9,6 @@ from app.oceanlab.models.recording import Credit, MasterSplit, Recording
 from app.oceanlab.models.registration import RegistrationTask
 from app.oceanlab.models.release import Release, ReleaseArtist
 from app.oceanlab.models.royalty import RoyaltyLine, RoyaltyStatement
-from app.oceanlab.models.settings import LabelSettings
 from app.oceanlab.models.track import Track
 from app.oceanlab.models.work import RecordingWork, Work, WorkWriter
 
@@ -23,7 +22,6 @@ __all__ = [
     "File",
     "IsrcConfig",
     "Job",
-    "LabelSettings",
     "MasterSplit",
     "Recording",
     "RecordingWork",

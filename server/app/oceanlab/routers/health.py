@@ -1,10 +1,12 @@
+import os
+
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.oceanlab.db import get_db
 from app.oceanlab.routers._errors import OceanlabRoute
-from app.oceanlab.services.storage import get_store
+from app.oceanlab.config import settings
+from app.oceanlab.db import get_db
 
 router = APIRouter(route_class=OceanlabRoute, tags=["health"])
 
@@ -16,13 +18,5 @@ def health(db: Session = Depends(get_db)) -> dict:
         db_ok = True
     except Exception:
         db_ok = False
-
-    # Probing a key that is never written: a reachable store answers "no", an
-    # unreachable one raises. Either way we never create anything to find out.
-    try:
-        get_store().exists("__healthcheck__")
-        storage_ok = True
-    except Exception:
-        storage_ok = False
-
+    storage_ok = settings.storage_root.is_dir() and os.access(settings.storage_root, os.W_OK)
     return {"status": "ok" if db_ok and storage_ok else "degraded", "db": db_ok, "storage": storage_ok}

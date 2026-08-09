@@ -101,12 +101,3 @@ class MatchMethod(StrEnum):
 class UpcStatus(StrEnum):
     available = "available"
     assigned = "assigned"
-
-
-class CodeSource(StrEnum):
-    """Who issues our ISRCs/UPCs. Drives validator severity, not just display:
-    distributor-issued codes arrive after delivery, so their absence at
-    packaging time is a warning; label-owned codes must be present up front."""
-
-    own = "own"
-    distributor = "distributor"
