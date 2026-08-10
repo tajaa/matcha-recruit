@@ -10,7 +10,7 @@ import Observation
 @MainActor @Observable final class OffersViewModel: LoadableVM { var offers: [OfferListItem] = []; var isLoading = false; var error: String?; func load() async { await withLoad { offers = try await CollabService.shared.offers().offers } } }
 
 struct CreatorProfileView: View {
-    @State private var vm = CreatorViewModel(); @State private var handle = ""; @State private var displayName = ""; @State private var editing = false
+    @State private var vm = CreatorViewModel(); @State private var handle = ""; @State private var displayName = ""; @State private var editing = false; @State private var editor: CreatorCollection?
     var body: some View {
         NavigationStack {
             Group {
@@ -19,8 +19,9 @@ struct CreatorProfileView: View {
                     List {
                         Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text(p.status.replacingOccurrences(of: "_", with: " ")).badge(p.status); Button("Edit profile") { editing = true } }
                         if let bio = p.bio { Section("About") { Text(bio) } }
-                        Section("Portfolio") { ForEach(p.portfolio) { Text($0.title) } }
-                        Section("Rates") { ForEach(p.rates) { Text("\($0.deliverable_type.capitalized) · \(Formatters.cents($0.price_cents))") } }
+                        Section("Socials") { ForEach(p.socials) { Text("\($0.platform.capitalized) · @\($0.handle)") }; Button("Add social", systemImage: "plus") { editor = .socials } }
+                        Section("Portfolio") { ForEach(p.portfolio) { Text($0.title) }; Button("Add portfolio item", systemImage: "plus") { editor = .portfolio } }
+                        Section("Rates") { ForEach(p.rates) { Text("\($0.deliverable_type.capitalized) · \(Formatters.cents($0.price_cents))") }; Button("Add rate", systemImage: "plus") { editor = .rates } }
                         if p.status == "draft" || p.status == "rejected" { Button("Submit for review") { Task { await vm.submit() } } }
                     }
                 } else {
@@ -30,8 +31,40 @@ struct CreatorProfileView: View {
             .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
             .navigationTitle("Profile").task { await vm.loadProfile() }.refreshable { await vm.loadProfile() }
             .sheet(isPresented: $editing) { if let profile = vm.profile { CreatorProfileEditSheet(profile: profile) { await vm.loadProfile() } } }
+            .sheet(item: $editor) { collection in if let profile = vm.profile { CreatorCollectionSheet(collection: collection, profile: profile) { await vm.loadProfile() } } }
         }
     }
+}
+private enum CreatorCollection: String, Identifiable { case socials, portfolio, rates; var id: String { rawValue } }
+private struct CreatorCollectionSheet: View {
+    let collection: CreatorCollection; let profile: CreatorProfileMe; let reload: () async -> Void; @Environment(\.dismiss) private var dismiss; @State private var first = ""; @State private var second = ""; @State private var third = ""; @State private var error: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                ErrorBanner(message: error)
+                switch collection {
+                case .socials:
+                    TextField("Platform", text: $first)
+                    TextField("Handle", text: $second)
+                    TextField("https:// URL", text: $third).textInputAutocapitalization(.never)
+                case .portfolio:
+                    TextField("Title", text: $first)
+                    TextField("Description", text: $second, axis: .vertical)
+                    TextField("External URL", text: $third).textInputAutocapitalization(.never)
+                case .rates:
+                    TextField("Deliverable type", text: $first)
+                    TextField("Platform", text: $second)
+                    TextField("Price in cents", text: $third).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Add \(collection.rawValue.dropLast())")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(first.isEmpty || second.isEmpty || third.isEmpty) }
+            }
+        }
+    }
+    private func save() async { do { switch collection { case .socials: let inputs = profile.socials.map { CreatorSocialInput(platform: $0.platform, handle: $0.handle, url: $0.url, follower_count: $0.follower_count, engagement_rate: $0.engagement_rate, sort_order: $0.sort_order) } + [CreatorSocialInput(platform: first, handle: second, url: third, follower_count: nil, engagement_rate: nil, sort_order: profile.socials.count)]; _ = try await CreatorService.shared.replaceSocials(inputs); case .portfolio: let inputs = profile.portfolio.map { CreatorPortfolioInput(title: $0.title, description: $0.description, media_url: $0.media_url, media_type: $0.media_type, external_url: $0.external_url, brand_name: $0.brand_name, metrics: $0.metrics, sort_order: $0.sort_order) } + [CreatorPortfolioInput(title: first, description: second.isEmpty ? nil : second, media_url: nil, media_type: nil, external_url: third.isEmpty ? nil : third, brand_name: nil, metrics: [:], sort_order: profile.portfolio.count)]; _ = try await CreatorService.shared.replacePortfolio(inputs); case .rates: guard let cents = Int(third) else { error = "Price must be a whole number of cents"; return }; let inputs = profile.rates.map { CreatorRateInput(deliverable_type: $0.deliverable_type, platform: $0.platform, price_cents: $0.price_cents, negotiable: $0.negotiable, notes: $0.notes, sort_order: $0.sort_order) } + [CreatorRateInput(deliverable_type: first, platform: second, price_cents: cents, negotiable: true, notes: nil, sort_order: profile.rates.count)]; _ = try await CreatorService.shared.replaceRates(inputs) }; await reload(); dismiss() } catch { self.error = error.localizedDescription } }
 }
 
 private struct CreatorProfileEditSheet: View {
@@ -54,11 +87,37 @@ struct EarningsView: View {
 }
 
 struct OfferDetailView: View {
-    let offerId: String; @State private var detail: OfferDetail?; @State private var error: String?; @State private var message = ""; @State private var cancelReason = ""; @State private var showCancel = false; @State private var submitting: Deliverable?
-    var body: some View { List { if let d = detail { Section { Text(d.title).font(.headline); Text(d.status).badge(d.status); if let cents = d.total_cents { Text(Formatters.cents(cents)) } }; actionSection(d); Section("Deliverables") { ForEach(d.deliverables) { item in HStack { Text("\(item.type.capitalized) #\(item.idx + 1)"); Spacer(); Text(item.status).font(.caption) }.swipeActions { if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) { Button("Submit") { submitting = item } }; if d.side == "brand" && item.status == "submitted" { Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } } } } } }; Section("Payments") { ForEach(d.payments) { Text("\($0.label) · \(Formatters.cents($0.amount_cents))") } }; Section("Messages") { ForEach(d.messages) { message in VStack(alignment: .leading) { Text(message.sender.capitalized).font(.caption.bold()); Text(message.body) } }; HStack { TextField("Message", text: $message); Button("Send") { Task { await sendMessage() } }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }.overlay(alignment: .top) { ErrorBanner(message: error) }.navigationTitle("Deal").task { await load() }.refreshable { await load() }.alert("Cancel deal", isPresented: $showCancel) { TextField("Reason", text: $cancelReason); Button("Cancel deal", role: .destructive) { Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } } }; Button("Keep deal", role: .cancel) {} }.sheet(item: $submitting) { item in DeliverableSubmitSheet(deliverable: item) { body in do { _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body); await load() } catch { error = error.localizedDescription } } } }
+    let offerId: String; @State private var detail: OfferDetail?; @State private var error: String?; @State private var message = ""; @State private var cancelReason = ""; @State private var showCancel = false; @State private var submitting: Deliverable?; @State private var reviewing: Deliverable?
+    var body: some View { List { if let d = detail { Section { Text(d.title).font(.headline); Text(d.status).badge(d.status); if let cents = d.total_cents { Text(Formatters.cents(cents)) } }; actionSection(d); Section("Deliverables") { ForEach(d.deliverables) { item in HStack { Text("\(item.type.capitalized) #\(item.idx + 1)"); Spacer(); Text(item.status).font(.caption) }.swipeActions { if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) { Button("Submit") { submitting = item } }; if d.side == "brand" && item.status == "submitted" { Button("Revise") { reviewing = item }; Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } } } } } }; Section("Payments") { ForEach(d.payments) { payment in HStack { Text("\(payment.label) · \(Formatters.cents(payment.amount_cents))"); Spacer(); if d.side == "creator" && ["due", "processing"].contains(payment.status) { Button("Nudge") { Task { try? await CollabService.shared.nudgePayment(offerId, paymentId: payment.id) } } } } } }; Section("Messages") { ForEach(d.messages) { message in VStack(alignment: .leading) { Text(message.sender.capitalized).font(.caption.bold()); Text(message.body) } }; HStack { TextField("Message", text: $message); Button("Send") { Task { await sendMessage() } }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }.overlay(alignment: .top) { ErrorBanner(message: error) }.navigationTitle("Deal").task { await load() }.refreshable { await load() }.alert("Cancel deal", isPresented: $showCancel) { TextField("Reason", text: $cancelReason); Button("Cancel deal", role: .destructive) { Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } } }; Button("Keep deal", role: .cancel) {} }.sheet(item: $submitting) { item in DeliverableSubmitSheet(deliverable: item) { body in do { _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body); await load() } catch { error = error.localizedDescription } } }.alert("Request revision", isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) { TextField("Review note", text: $message); Button("Request revision") { if let reviewing { Task { await perform { try await CollabService.shared.requestRevision(offerId, deliverableId: reviewing.id, note: message) }; message = "" } } }; Button("Cancel", role: .cancel) {} } }
     @ViewBuilder private func actionSection(_ d: OfferDetail) -> some View { if ["sent", "negotiating"].contains(d.status) { Section("Offer") { if d.side == "creator" { Button("Accept") { Task { await perform { try await CollabService.shared.accept(offerId) } } }; Button("Decline", role: .destructive) { Task { await perform { try await CollabService.shared.decline(offerId, reason: nil) } } } } else { Button("Withdraw", role: .destructive) { Task { await perform { try await CollabService.shared.withdraw(offerId) } } } } } } else if ["accepted", "active"].contains(d.status) { Section { Button("Cancel deal", role: .destructive) { showCancel = true } } } }
     private func load() async { do { detail = try await CollabService.shared.offer(offerId) } catch { self.error = error.localizedDescription } }
     private func sendMessage() async { do { _ = try await CollabService.shared.message(offerId, message); message = ""; await load() } catch { self.error = error.localizedDescription } }
     private func perform(_ action: () async throws -> OfferDetail) async { do { detail = try await action() } catch { self.error = error.localizedDescription } }
 }
-private struct DeliverableSubmitSheet: View { let deliverable: Deliverable; let submit: (DeliverableSubmit) async -> Void; @Environment(\.dismiss) private var dismiss; @State private var url = ""; @State private var note = ""; var body: some View { NavigationStack { Form { TextField("Submission URL", text: $url).textInputAutocapitalization(.never); TextField("Note", text: $note, axis: .vertical) }.navigationTitle("Submit \(deliverable.type)").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Submit") { Task { await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: nil)); dismiss() } }.disabled(url.count < 8) } } } }
+private struct DeliverableSubmitSheet: View {
+    let deliverable: Deliverable
+    let submit: (DeliverableSubmit) async -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var url = ""
+    @State private var note = ""
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Submission URL", text: $url).textInputAutocapitalization(.never)
+                TextField("Note", text: $note, axis: .vertical)
+            }
+            .navigationTitle("Submit \(deliverable.type)")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Submit") {
+                        Task {
+                            await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: nil))
+                            dismiss()
+                        }
+                    }.disabled(url.count < 8)
+                }
+            }
+        }
+    }
+}
