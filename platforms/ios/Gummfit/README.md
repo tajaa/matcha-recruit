@@ -16,6 +16,18 @@ Set `CAPPE_API_URL` to point a debug build at a compatible Cappe API. The
 default debug URL is `http://127.0.0.1:8001/api/cappe`; release builds use
 `https://gummfit.com/api/cappe`.
 
+## App Store release
+
+```sh
+make release-dry   # bump, archive, and validate signing; no upload
+make release       # bump, archive, and upload to App Store Connect/TestFlight
+```
+
+`release-appstore.sh` requires `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and
+`APPLE_API_KEY_PATH` for uploads. Use `--status`, `--no-bump`, or `--set-build N`
+for release bookkeeping. The registered App Store Connect bundle ID is
+`com.gummcap.app` (tests: `com.gummcap.app.tests`).
+
 ## Manual smoke paths
 
 - Owner: create site → configure settings → add product → publish → review order.

@@ -13,7 +13,7 @@ PROJECT="$PROJECT_DIR/Gummfit.xcodeproj"
 SCHEME="Gummfit"
 CONFIG="Debug"
 SIM="${SIM:-iPhone 17 Pro}"
-BUNDLE_ID="com.beetlejuse.gummfit"
+BUNDLE_ID="com.gummcap.app"
 
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 

@@ -1,6 +1,6 @@
 name: Gummfit
 options:
-  bundleIdPrefix: com.beetlejuse
+  bundleIdPrefix: com.gummcap
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: en
@@ -61,7 +61,7 @@ targets:
               NSIncludesSubdomains: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.beetlejuse.gummfit
+        PRODUCT_BUNDLE_IDENTIFIER: com.gummcap.app
         INFOPLIST_FILE: Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
@@ -74,7 +74,7 @@ targets:
         Release:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution"
-          PROVISIONING_PROFILE_SPECIFIER: "Gummfit App Store"
+          PROVISIONING_PROFILE_SPECIFIER: "Gummcap App Store"
     entitlements:
       path: Gummfit.entitlements
   GummfitTests:
@@ -87,7 +87,7 @@ targets:
       - target: Gummfit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.beetlejuse.gummfit.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.gummcap.app.tests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
