@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -16,6 +17,8 @@ import httpx
 from app.database import connection_or_direct
 from app.matcha.services.matcha_work import element_repo_service
 from app.matcha.services.matcha_work.github_service import GITHUB_API, GitHubError, _headers, _token
+
+logger = logging.getLogger(__name__)
 
 
 async def mark_run(run_id: UUID, *, status: str, **values: Any) -> None:
@@ -65,22 +68,56 @@ async def read_ticket(project_id: UUID, task_id: UUID) -> dict | None:
     return {**dict(task), "id": str(task["id"]), "subtasks": [dict(row) for row in subtasks]}
 
 
-async def move_ticket_silently(project_id: UUID, task_id: UUID, column: str, actor_id: UUID) -> None:
+def _task_event_payload(row) -> dict:
+    payload = dict(row)
+    for key in ("id", "project_id", "created_by", "assigned_to"):
+        if payload.get(key) is not None:
+            payload[key] = str(payload[key])
+    for key in ("due_date", "completed_at", "created_at", "updated_at"):
+        if payload.get(key) is not None:
+            payload[key] = payload[key].isoformat()
+    return payload
+
+
+async def move_ticket_silently(project_id: UUID, task_id: UUID, column: str, actor_id: UUID) -> dict | None:
     """Move a bot-selected ticket without collaborator email fan-out.
 
     The normal project service is intentionally not called: it emails every
-    collaborator on a column transition. We retain the board/history signal.
+    collaborator on a column transition. We retain the board/history signal
+    and the normal project-WS update so open boards converge without a reload.
     """
     async with connection_or_direct() as conn:
-        previous = await conn.fetchval("SELECT board_column FROM mw_tasks WHERE id=$1 AND project_id=$2", task_id, project_id)
-        if previous is None or previous == column:
-            return
-        await conn.execute("UPDATE mw_tasks SET board_column=$1, status='pending', updated_at=NOW() WHERE id=$2 AND project_id=$3", column, task_id, project_id)
+        previous = await conn.fetchrow(
+            "SELECT board_column FROM mw_tasks WHERE id=$1 AND project_id=$2", task_id, project_id,
+        )
+        if previous is None or previous["board_column"] == column:
+            return None
+        row = await conn.fetchrow(
+            """UPDATE mw_tasks
+               SET board_column=$1, status='pending',
+                   completed_at=CASE WHEN board_column='done' THEN NULL ELSE completed_at END,
+                   updated_at=NOW()
+               WHERE id=$2 AND project_id=$3
+               RETURNING id, project_id, created_by, title, description, board_column,
+                         priority, status, assigned_to, due_date, completed_at, created_at,
+                         updated_at, progress_note, category, element_id, review_note""",
+            column, task_id, project_id,
+        )
+        if row is None:
+            return None
         await conn.execute(
             """INSERT INTO mw_task_history (task_id, task_id_text, project_id, actor_user_id, event_type, from_value, to_value, metadata)
                VALUES ($1,$2,$3,$4,'column_change',$5,$6,'{}'::jsonb)""",
-            task_id, str(task_id), project_id, actor_id, previous, column,
+            task_id, str(task_id), project_id, actor_id, previous["board_column"], column,
         )
+    payload = _task_event_payload(row)
+    payload["actor_id"] = str(actor_id)
+    try:
+        from app.matcha.services.matcha_work.task_events import broadcast_task_event
+        await broadcast_task_event(project_id, "task.updated", payload)
+    except Exception:
+        logger.warning("Failed to broadcast Huume board move task=%s", task_id, exc_info=True)
+    return payload
 
 
 async def grounding(project_id: UUID, element_id: str | None) -> str:

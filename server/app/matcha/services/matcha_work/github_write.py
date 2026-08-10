@@ -46,8 +46,9 @@ async def _json(client: httpx.AsyncClient, method: str, url: str, **kwargs) -> d
 async def ensure_branch(repo: str, base_branch: str, new_branch: str) -> str:
     """Create ``new_branch`` from ``base_branch`` unless it already exists.
 
-    Returns the base commit SHA. Existing branches are deliberately reused and
-    never force-updated.
+    Returns the branch-head commit SHA. Existing branches are deliberately
+    reused and never force-updated, so a retry commits on top of prior Huume
+    work instead of attempting a non-fast-forward ref update.
     """
     repo = assert_write_allowed(repo)
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -56,8 +57,11 @@ async def ensure_branch(repo: str, base_branch: str, new_branch: str) -> str:
         existing = await client.get(f"{GITHUB_API}/repos/{repo}/git/ref/heads/{new_branch}", headers=_headers())
         if existing.status_code == 404:
             await _json(client, "POST", f"{GITHUB_API}/repos/{repo}/git/refs", json={"ref": f"refs/heads/{new_branch}", "sha": base_sha})
+            return base_sha
         elif existing.status_code >= 400:
             await _json(client, "GET", f"{GITHUB_API}/repos/{repo}/git/ref/heads/{new_branch}")
+        else:
+            return existing.json()["object"]["sha"]
     return base_sha
 
 
@@ -89,6 +93,36 @@ async def commit_files(
 async def open_draft_pr(repo: str, head: str, base: str, title: str, body: str) -> dict:
     repo = assert_write_allowed(repo)
     async with httpx.AsyncClient(timeout=30.0) as client:
-        return await _json(client, "POST", f"{GITHUB_API}/repos/{repo}/pulls", json={
+        response = await client.post(f"{GITHUB_API}/repos/{repo}/pulls", headers=_headers(), json={
             "title": title, "head": head, "base": base, "body": body, "draft": True,
         })
+        if response.status_code != 422:
+            if response.status_code == 401:
+                raise GitHubError("GitHub token invalid or missing (GITHUB_TOKEN).")
+            if response.status_code == 403:
+                raise GitHubError("GitHub refused this write. The server token needs contents:write and pull_requests:write.")
+            if response.status_code == 404:
+                raise GitHubError("GitHub repository, branch, or object was not found.")
+            if response.status_code >= 400:
+                detail = response.json().get("message") if response.headers.get("content-type", "").startswith("application/json") else response.text
+                raise GitHubError(f"GitHub write failed ({response.status_code}): {detail}")
+            return response.json()
+
+        # A retry or changes-requested pass reuses its deterministic Huume
+        # branch. GitHub rejects a second PR for that branch; return the
+        # existing draft so the new commit remains reviewable in the same PR.
+        owner = repo.split("/", 1)[0]
+        existing = await client.get(
+            f"{GITHUB_API}/repos/{repo}/pulls",
+            params={"head": f"{owner}:{head}", "base": base, "state": "open"},
+            headers=_headers(),
+        )
+        if existing.status_code >= 400:
+            raise GitHubError(f"Unable to look up an existing Huume draft PR ({existing.status_code}).")
+        pulls = existing.json()
+        if pulls and pulls[0].get("draft"):
+            return pulls[0]
+        if pulls:
+            raise GitHubError("A non-draft pull request already exists for this Huume branch; Huume will not modify it.")
+        detail = response.json().get("message") if response.headers.get("content-type", "").startswith("application/json") else response.text
+        raise GitHubError(f"GitHub write failed (422): {detail}")

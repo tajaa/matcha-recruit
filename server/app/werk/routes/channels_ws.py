@@ -138,12 +138,18 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
         logger.warning("channel->project Files sync failed", exc_info=True)
 
 
-async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str, trigger_message_id) -> None:
-    """Queue one eligible collab-chat code run, entirely off the WS hot path."""
+async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str, trigger_message_id) -> bool:
+    """Queue one collab-chat code run and report whether it claimed the mention.
+
+    A linked collab discussion channel belongs to Huume Code even when it must
+    refuse the request (flag off, missing repo, or insufficient access). Other
+    channels fall through to the existing EMS mention dispatcher.
+    """
+    claimed = False
     try:
         from app.core.feature_flags import merge_company_features
-        from app.matcha.routes.matcha_work._shared import _can_edit_project
         from app.matcha.services.huume_code.chat import post_as_huume
+        from app.matcha.services.huume_code.guards import can_dispatch_huume_code
         from app.core.services.redis_cache import check_rate_limit
         from app.workers.tasks.huume_code import run_huume_code
 
@@ -157,17 +163,18 @@ async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str,
                 channel_id_str,
             )
             if not project:
-                return
+                return False
+            claimed = True
             company_id = project["company_id"]
             channel_id = UUID(channel_id_str)
             features = merge_company_features(project["enabled_features"], project["signup_source"])
             if project["is_personal"] or not (features.get("matcha_work") and features.get("huume_code")):
                 await post_as_huume(company_id, channel_id, "Huume code isn't enabled for this workspace.")
-                return
+                return True
             sender_role = (getattr(user, "role", "") or "").lower()
             if sender_role not in ("client", "admin"):
                 await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
-                return
+                return True
             # Channel membership can cross company boundaries. Re-check both
             # company ownership and the project collaborator role here; a
             # client who happens to sit in another company's channel must not
@@ -177,27 +184,30 @@ async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str,
                    WHERE project_id=$1 AND user_id=$2 AND status='active'""",
                 project["id"], user.id,
             )
+            sender_company_id = None
             if sender_role == "client":
                 sender_company_id = await conn.fetchval(
                     "SELECT company_id FROM clients WHERE user_id=$1", user.id,
                 )
-                if sender_company_id != company_id:
-                    await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
-                    return
                 # A same-company business user is the project owner unless
                 # explicitly added as a collaborator; match _verify_project_access.
                 collaborator_role = collaborator_role or "owner"
-            if collaborator_role is not None and not _can_edit_project(collaborator_role):
+            if not can_dispatch_huume_code(
+                sender_role=sender_role,
+                sender_company_id=sender_company_id,
+                project_company_id=company_id,
+                collaborator_role=collaborator_role,
+            ):
                 await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
-                return
+                return True
             if not project["github_repo"]:
                 await post_as_huume(company_id, channel_id, "Connect a GitHub repo in Elements first.")
-                return
+                return True
             try:
                 await check_rate_limit(str(company_id), "huume_code_run", 10, 3600)
             except HTTPException:
                 await post_as_huume(company_id, channel_id, "Huume has reached this company's hourly code-run limit. Please try again later.")
-                return
+                return True
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", str(project["id"]))
                 live = await conn.fetchval(
@@ -208,7 +218,7 @@ async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str,
                 )
                 if live:
                     await post_as_huume(company_id, channel_id, "Huume is already working on this project. I'll post the draft PR here when it's ready.")
-                    return
+                    return True
                 run_id = await conn.fetchval(
                     """INSERT INTO huume_code_runs
                        (company_id, project_id, channel_id, requested_by, trigger_message_id, status)
@@ -217,8 +227,36 @@ async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str,
                 )
             run_huume_code.delay(str(run_id))
         await post_as_huume(company_id, channel_id, "Got it — I'll review the board and repository, then open a draft PR for review.")
+        return True
     except Exception:
         logger.warning("Huume code dispatch failed", exc_info=True)
+        return claimed
+
+
+async def _bg_dispatch_huume_mention(
+    channel_id_str: str,
+    message_id_str: str,
+    reply_to_system_id_str: Optional[str],
+    user,
+    content: str,
+) -> None:
+    """Send an @huume mention to exactly one of code or EMS.
+
+    A reply to an EMS system message preserves EMS's clarify-first behavior.
+    Otherwise a linked collab discussion channel claims the mention for Huume
+    Code; all other channels retain the established EMS behavior.
+    """
+    if reply_to_system_id_str is not None:
+        await _bg_ems_dispatch(
+            channel_id_str, message_id_str, reply_to_system_id_str, str(user.id), content,
+            has_huume_mention=True,
+        )
+        return
+    if await _bg_maybe_dispatch_huume_code(channel_id_str, user, content, UUID(message_id_str)):
+        return
+    await _bg_ems_dispatch(
+        channel_id_str, message_id_str, None, str(user.id), content, has_huume_mention=True,
+    )
 
 
 def _system_message_payload(channel_id_str: str, sys_row) -> dict:
@@ -3275,15 +3313,6 @@ async def channel_websocket(
                             except Exception:
                                 logger.warning("[Channel WS] mention resolve failed", exc_info=True)
 
-                            # Huume's coding mode is independent of the EMS
-                            # mention flow below. It only runs in collab projects
-                            # and never resolves the inactive bot as a channel
-                            # member, so normal mention notifications stay quiet.
-                            if is_new_message and "huume" in mention_handles:
-                                _spawn_bg(_bg_maybe_dispatch_huume_code(
-                                    str(ch_uuid), user, row["content"], row["id"],
-                                ))
-
                             # EMS: ONE dispatch task, routed by
                             # _ems_dispatch_decision. Gated on is_new_message
                             # — an ON CONFLICT cmid-retry replay must not
@@ -3303,7 +3332,18 @@ async def channel_websocket(
                                 reply_target_type=reply_target_type if row["reply_to_id"] else None,
                                 has_huume_mention="huume" in mention_handles,
                             )
-                            if is_new_message and spawn_ems:
+                            # A coding-capable collab discussion channel claims an
+                            # @huume mention before EMS sees it. This preserves the
+                            # existing clarify-first path for replies to EMS system
+                            # messages, while preventing two Huume workflows from
+                            # responding to one code request.
+                            if is_new_message and "huume" in mention_handles:
+                                _spawn_bg(_bg_dispatch_huume_mention(
+                                    str(ch_uuid), str(row["id"]),
+                                    str(row["reply_to_id"]) if reply_to_system else None,
+                                    user, row["content"],
+                                ))
+                            elif is_new_message and spawn_ems:
                                 _spawn_bg(_bg_ems_dispatch(
                                     str(ch_uuid), str(row["id"]),
                                     str(row["reply_to_id"]) if reply_to_system else None,

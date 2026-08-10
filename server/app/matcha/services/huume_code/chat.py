@@ -15,8 +15,8 @@ async def post_as_huume(company_id: UUID, channel_id: UUID, content: str) -> Non
                VALUES ($1, $2, $3) RETURNING id, created_at""",
             channel_id, bot_id, content[:4000],
         )
-    from app.werk.routes.channels_ws import manager
-    await manager.broadcast_message(str(channel_id), {
+    from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_message
+    await broadcast_channel_message(channel_id, {
         "id": str(row["id"]), "channel_id": str(channel_id), "sender_id": str(bot_id),
         "sender_name": "Huume", "sender_avatar_url": None, "content": content[:4000],
         "attachments": [], "reply_to_id": None, "reply_preview": None, "reactions": [],

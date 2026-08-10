@@ -14,6 +14,8 @@ falling through to intake only on a claim miss.
 """
 
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -113,6 +115,35 @@ class TestBgEmsDispatch:
 
         clarify_mock.assert_not_awaited()
         intake_mock.assert_awaited_once()
+
+
+class TestHuumeMentionRouting:
+    @pytest.mark.asyncio
+    async def test_collab_code_claim_prevents_ems_dispatch(self, monkeypatch):
+        code_mock = AsyncMock(return_value=True)
+        ems_mock = AsyncMock()
+        monkeypatch.setattr(channels_ws, "_bg_maybe_dispatch_huume_code", code_mock)
+        monkeypatch.setattr(channels_ws, "_bg_ems_dispatch", ems_mock)
+
+        await channels_ws._bg_dispatch_huume_mention(
+            "channel-1", str(uuid4()), None, SimpleNamespace(id=uuid4()), "@huume fix login",
+        )
+
+        code_mock.assert_awaited_once()
+        ems_mock.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_non_collab_mention_falls_back_to_ems(self, monkeypatch):
+        code_mock = AsyncMock(return_value=False)
+        ems_mock = AsyncMock()
+        monkeypatch.setattr(channels_ws, "_bg_maybe_dispatch_huume_code", code_mock)
+        monkeypatch.setattr(channels_ws, "_bg_ems_dispatch", ems_mock)
+
+        await channels_ws._bg_dispatch_huume_mention(
+            "channel-1", str(uuid4()), None, SimpleNamespace(id=uuid4()), "@huume help",
+        )
+
+        ems_mock.assert_awaited_once()
 
 
 class TestIntakeDisposition:

@@ -11,7 +11,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from ....database import get_connection
+from ....database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ async def replace_element_snapshot(project_id: UUID, element_id: str, files: lis
         accepted.append((path, content, h, size))
         total += size
 
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         async with conn.transaction():
             await conn.execute(
                 "DELETE FROM mw_element_repo_files WHERE element_id = $1", element_id
@@ -70,7 +70,7 @@ async def replace_element_snapshot(project_id: UUID, element_id: str, files: lis
 
 
 async def get_snapshot_stats(element_id: str) -> dict:
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         row = await conn.fetchrow(
             """
             SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes, MAX(updated_at) AS updated_at
@@ -96,7 +96,7 @@ async def fetch_convention_docs(project_id: UUID, char_budget: int = 20_000) -> 
     breaks work down the way THIS codebase is organized. Returns "" when none are
     synced (graceful no-op). Basename-filtered in SQL so we never pull the whole
     5MB snapshot just to find a few docs."""
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         rows = await conn.fetch(
             """
             SELECT path, content FROM mw_element_repo_files
@@ -125,7 +125,7 @@ async def build_grounding_context(
     {included, truncated, omitted} path lists so the chat can admit what it didn't
     see. Scopes to one element, or (if element_id is None) the whole project's
     synced files."""
-    async with get_connection() as conn:
+    async with connection_or_direct() as conn:
         if element_id:
             rows = await conn.fetch(
                 "SELECT path, content, size FROM mw_element_repo_files WHERE element_id = $1 ORDER BY path",

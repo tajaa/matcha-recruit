@@ -77,7 +77,7 @@ async def run_huume_code(*, run_id: UUID, company_id: UUID, project_id: UUID, ch
                 await store.mark_run(run_id, status="running", task_id=UUID(ticket["id"]), branch=branch)
                 await store.move_ticket_silently(project_id, UUID(ticket["id"]), "in_progress", bot_id)
                 if posted_updates < 1:
-                    await chat.post_as_huume(company_id, channel_id, f'Picked **{ticket["title"]}** — reading the relevant code and preparing a draft PR.')
+                    await chat.post_as_huume(company_id, channel_id, f'Picked **{ticket["title"]}** and moved it to **In progress** — reading the relevant code and preparing a draft PR.')
                     posted_updates += 1
                 result = {"ticket": candidate, "branch": branch, "grounding": context}
                 return await step(name, "read", f'Read ticket: {ticket["title"]}', args, result), "ok"
@@ -124,7 +124,7 @@ async def run_huume_code(*, run_id: UUID, company_id: UUID, project_id: UUID, ch
                 await store.move_ticket_silently(project_id, UUID(ticket["id"]), "review", bot_id)
                 await store.mark_run(run_id, status="running", pr_url=opened_pr.get("html_url"), files_changed=len(working.files) + len(working.deletes))
                 if posted_updates < 3:
-                    await chat.post_as_huume(company_id, channel_id, f"Draft PR ready: [{opened_pr.get('html_url')}]({opened_pr.get('html_url')})")
+                    await chat.post_as_huume(company_id, channel_id, f"Draft PR ready: [{opened_pr.get('html_url')}]({opened_pr.get('html_url')}) — moved the ticket to **Review**.")
                     posted_updates += 1
                 return await step(name, "write", "Opened draft pull request", args, {"url": opened_pr.get("html_url"), "number": opened_pr.get("number")}), "ok"
             if name == "finish":

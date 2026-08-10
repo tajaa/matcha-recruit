@@ -14,14 +14,31 @@ def is_denied_path(path: str) -> bool:
     path = (path or "").strip().lstrip("/")
     if not path or ".." in path.split("/"):
         return True
-    lowered = path.lower()
     parts = path.split("/")
     return (
         parts[0] in {".github", "secrets", "deploy"}
         or any(part in EXCLUDED_DIRS for part in parts[:-1])
-        or lowered.startswith(".env")
-        or lowered.endswith(".pem")
+        or any(part.lower().startswith(".env") for part in parts)
+        or path.lower().endswith(".pem")
     )
+
+
+def can_dispatch_huume_code(
+    *,
+    sender_role: str,
+    sender_company_id,
+    project_company_id,
+    collaborator_role: str | None,
+) -> bool:
+    """Return whether this sender may start a code run for this project.
+
+    Platform admins follow the normal project-access rule: unlike a same-company
+    business client, they must be an active project collaborator. This prevents
+    channel membership from becoming a path to the process-global GitHub token.
+    """
+    if sender_role == "client":
+        return sender_company_id == project_company_id and collaborator_role not in ("viewer", "commenter")
+    return sender_role == "admin" and collaborator_role not in (None, "viewer", "commenter")
 
 
 def branch_name(task_id: str, title: str) -> str:

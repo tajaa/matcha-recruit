@@ -34,6 +34,17 @@ _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 
+async def broadcast_channel_message(channel_id: UUID, payload: dict) -> None:
+    """Fan out a persisted channel message through the established bridge.
+
+    This module is one of the two intentional matcha→werk manager import sites.
+    Keeping Huume on this bridge avoids growing that cross-app boundary.
+    """
+    from app.werk.routes.channels_ws import manager
+
+    await manager.broadcast_message(str(channel_id), payload)
+
+
 async def _notify_task_assigned(
     *,
     assigned_to: UUID,
@@ -171,8 +182,7 @@ async def _post_kanban_move_to_chat(
         return
 
     try:
-        from app.werk.routes.channels_ws import manager as _ch_manager
-        await _ch_manager.broadcast_message(str(channel_id), {
+        await broadcast_channel_message(channel_id, {
             "id": str(row["id"]),
             "channel_id": str(channel_id),
             "sender_id": str(actor_user_id),
