@@ -47,8 +47,19 @@ shared_basenames = %w[
   APIClient.swift AuthService.swift KeychainHelper.swift ChannelsService.swift
   InboxService.swift ChannelsWebSocket.swift CallService.swift
   BroadcastService.swift WorkDetailVMStore.swift
-  ServiceCache.swift MultipartUploadBuilder.swift SafeURL.swift
+  ServiceCache.swift MultipartUploadBuilder.swift SafeURL.swift UsageBeaconService.swift
   ChannelChatViewModel.swift
+  CommonModels.swift DashboardModels.swift ProjectModels.swift ProjectTaskModels.swift
+  ProjectBizModels.swift ProjectElementModels.swift ReplayModels.swift ThreadModels.swift
+  JournalModels.swift WorkNotifications.swift
+  MatchaWorkService.swift MatchaWorkService+Projects.swift MatchaWorkService+Tasks.swift
+  MatchaWorkService+Files.swift MatchaWorkService+Collaborators.swift MatchaWorkService+Threads.swift
+  MatchaWorkService+Elements.swift JournalService.swift ProjectWebSocket.swift TicketUpdatesStore.swift
+  ProjectDetailViewModel.swift ProjectDetailViewModel+Core.swift ProjectDetailViewModel+Tasks.swift
+  ProjectDetailViewModel+Files.swift ProjectDetailViewModel+Elements.swift ProjectPresenceViewModel.swift
+  ThreadDetailViewModel.swift ThreadListViewModel.swift
+  KanbanColumns.swift KanbanSearch.swift KanbanReplay.swift TaskProgressBar.swift
+  TaskHistoryTimeline.swift MarkdownPreviewView.swift PresencePillContent.swift WorkToastCenter.swift
 ]
 
 all_files = project.files

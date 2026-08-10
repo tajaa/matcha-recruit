@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "DDB398464846E88CD25795A7"
+               BlueprintIdentifier = "A7AF3855F2F02087F5687D48"
                BuildableName = "WerkiOS.app"
                BlueprintName = "WerkiOS"
                ReferencedContainer = "container:Matcha.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "DDB398464846E88CD25795A7"
+            BlueprintIdentifier = "A7AF3855F2F02087F5687D48"
             BuildableName = "WerkiOS.app"
             BlueprintName = "WerkiOS"
             ReferencedContainer = "container:Matcha.xcodeproj">
@@ -53,7 +53,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "DDB398464846E88CD25795A7"
+            BlueprintIdentifier = "A7AF3855F2F02087F5687D48"
             BuildableName = "WerkiOS.app"
             BlueprintName = "WerkiOS"
             ReferencedContainer = "container:Matcha.xcodeproj">
@@ -70,7 +70,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "DDB398464846E88CD25795A7"
+            BlueprintIdentifier = "A7AF3855F2F02087F5687D48"
             BuildableName = "WerkiOS.app"
             BlueprintName = "WerkiOS"
             ReferencedContainer = "container:Matcha.xcodeproj">

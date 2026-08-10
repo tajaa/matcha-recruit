@@ -8,18 +8,22 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            ChannelListView()
+            ProjectsListView()
                 .tag(0)
+                .tabItem { Label("Projects", systemImage: "square.grid.2x2") }
+            ChannelListView()
+                .tag(1)
                 .tabItem { Label("Channels", systemImage: "number") }
             InboxListView()
-                .tag(1)
+                .tag(2)
                 .tabItem { Label("Messages", systemImage: "bubble.left.and.bubble.right") }
         }
         .onChange(of: appState.pendingChannelId) { _, value in
-            if value != nil { tab = 0 }
-        }
-        .onChange(of: appState.pendingConversationId) { _, value in
             if value != nil { tab = 1 }
         }
+        .onChange(of: appState.pendingConversationId) { _, value in
+            if value != nil { tab = 2 }
+        }
+        .onChange(of: appState.pendingProjectId) { _, value in if value != nil { tab = 0 } }
     }
 }

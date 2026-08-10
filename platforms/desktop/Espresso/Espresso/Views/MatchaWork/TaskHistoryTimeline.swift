@@ -22,7 +22,7 @@ struct TaskHistoryTimeline: View {
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Color.zinc800)
+                    .background(Color.secondary.opacity(0.18))
                     .cornerRadius(4)
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -49,7 +49,7 @@ struct TaskHistoryTimeline: View {
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.zinc800.opacity(0.4))
+            .background(Color.secondary.opacity(0.12))
             .cornerRadius(6)
         }
     }
@@ -70,11 +70,11 @@ struct TaskHistoryTimeline: View {
 
     private static func tint(for event: String) -> Color {
         switch event {
-        case "created": return .matcha500
-        case "column_change": return .matcha500
+        case "created": return .accentColor
+        case "column_change": return .accentColor
         case "assignee_change": return .blue
-        case "description_change": return .matcha500
-        case "progress_note_change": return .matcha500
+        case "description_change": return .accentColor
+        case "progress_note_change": return .accentColor
         case "review_rejected": return .orange
         case "activity": return .blue
         case "deleted": return .red

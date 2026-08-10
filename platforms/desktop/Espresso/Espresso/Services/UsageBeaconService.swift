@@ -1,5 +1,9 @@
 import Foundation
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 /// Reports desktop usage to the same `/usage/beacon` endpoint the web app uses,
 /// so Werk sessions show up alongside web activity in /admin/usage.
@@ -38,7 +42,11 @@ final class UsageBeaconService {
 
         let timer = Timer.scheduledTimer(withTimeInterval: heartbeatInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
+                #if os(macOS)
                 guard NSApplication.shared.isActive else { return }
+                #else
+                guard UIApplication.shared.applicationState == .active else { return }
+                #endif
                 self?.send(event: "heartbeat")
             }
         }

@@ -6,7 +6,19 @@ import SwiftUI
 /// client_message_id, append it, schedule the failure timeout, then send over
 /// the socket — the VM swaps in the server echo when it arrives.
 struct ChannelChatView: View {
-    let channel: ChannelSummary
+    let channelId: String
+    let channelName: String
+    var isEmbedded = false
+
+    init(channel: ChannelSummary) {
+        self.init(channelId: channel.id, channelName: channel.name)
+    }
+
+    init(channelId: String, channelName: String, isEmbedded: Bool = false) {
+        self.channelId = channelId
+        self.channelName = channelName
+        self.isEmbedded = isEmbedded
+    }
     @Environment(AppState.self) private var appState
     @Environment(CallService.self) private var call
     @Environment(BroadcastService.self) private var broadcast
@@ -40,7 +52,7 @@ struct ChannelChatView: View {
                 isUploading: isUploading, onSend: send, onTyping: handleTyping
             )
         }
-        .navigationTitle(channel.name)
+        .navigationTitle(isEmbedded ? "" : channelName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -49,28 +61,28 @@ struct ChannelChatView: View {
                 presence
             }
         }
-        .task { await vm.resume(channelId: channel.id) }
+        .task { await vm.resume(channelId: channelId) }
         .task {
-            await call.fetchCallStatus(channelId: channel.id)
-            await broadcast.fetchBroadcastStatus(channelId: channel.id)
+            await call.fetchCallStatus(channelId: channelId)
+            await broadcast.fetchBroadcastStatus(channelId: channelId)
         }
-        .onAppear { appState.selectedChannelId = channel.id }
+        .onAppear { appState.selectedChannelId = channelId }
         .onDisappear {
             appState.selectedChannelId = nil
-            vm.stop(channelId: channel.id)
+            vm.stop(channelId: channelId)
         }
         .onChange(of: call.isConnected) { _, connected in
-            showCall = connected && call.channelId == channel.id
+            showCall = connected && call.channelId == channelId
         }
         .onChange(of: broadcast.isConnected) { _, connected in
-            showBroadcast = connected && broadcast.channelId == channel.id
+            showBroadcast = connected && broadcast.channelId == channelId
         }
         .fullScreenCover(isPresented: $showCall) {
-            CallView(channelName: channel.name, members: vm.channel?.members ?? [])
+            CallView(channelName: channelName, members: vm.channel?.members ?? [])
                 .environment(call)
         }
         .fullScreenCover(isPresented: $showBroadcast) {
-            BroadcastView(channelName: channel.name, members: vm.channel?.members ?? [])
+            BroadcastView(channelName: channelName, members: vm.channel?.members ?? [])
                 .environment(broadcast)
         }
         .alert("Edit message", isPresented: editingPresented) {
@@ -161,7 +173,7 @@ struct ChannelChatView: View {
         if toSend.isEmpty {
             let cmid = UUID().uuidString
             appendOptimistic(cmid: cmid, content: trimmed, attachments: [], replyId: replyId, replyPreview: replyPreview)
-            ws.sendMessage(channelId: channel.id, content: trimmed, replyToId: replyId, clientMessageId: cmid)
+            ws.sendMessage(channelId: channelId, content: trimmed, replyToId: replyId, clientMessageId: cmid)
             resetComposer()
             return
         }
@@ -170,11 +182,11 @@ struct ChannelChatView: View {
         Task {
             do {
                 let files = toSend.map { (data: $0.data, filename: $0.filename, mimeType: $0.mimeType) }
-                let uploaded = try await service.uploadAttachments(channelId: channel.id, files: files)
+                let uploaded = try await service.uploadAttachments(channelId: channelId, files: files)
                 await MainActor.run {
                     let cmid = UUID().uuidString
                     appendOptimistic(cmid: cmid, content: trimmed, attachments: uploaded, replyId: replyId, replyPreview: replyPreview)
-                    ws.sendMessage(channelId: channel.id, content: trimmed, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
+                    ws.sendMessage(channelId: channelId, content: trimmed, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
                     isUploading = false
                     resetComposer()
                 }
@@ -191,7 +203,7 @@ struct ChannelChatView: View {
                                   replyId: String?, replyPreview: ReplyPreview?) {
         guard let me = appState.currentUser else { return }
         let pending = ChannelMessage(
-            id: cmid, channelId: channel.id, senderId: me.id,
+            id: cmid, channelId: channelId, senderId: me.id,
             senderName: me.name ?? me.email, senderAvatarUrl: me.avatarUrl,
             content: content, attachments: attachments,
             replyToId: replyId, replyPreview: replyPreview, reactions: [],
@@ -212,12 +224,12 @@ struct ChannelChatView: View {
 
     private func toggleReaction(_ msg: ChannelMessage, _ emoji: String) {
         guard !msg.pending, !msg.failed else { return }
-        Task { try? await service.toggleReaction(channelId: channel.id, messageId: msg.id, emoji: emoji) }
+        Task { try? await service.toggleReaction(channelId: channelId, messageId: msg.id, emoji: emoji) }
     }
 
     private func deleteMessage(_ msg: ChannelMessage) {
         guard !msg.pending else { return }
-        Task { try? await service.deleteMessage(channelId: channel.id, messageId: msg.id) }
+        Task { try? await service.deleteMessage(channelId: channelId, messageId: msg.id) }
     }
 
     private func startEdit(_ msg: ChannelMessage) {
@@ -238,7 +250,7 @@ struct ChannelChatView: View {
             vm.messages[i].failed = false
             vm.messages[i].pending = true
         }
-        ws.sendMessage(channelId: channel.id, content: msg.content, attachments: msg.attachments,
+        ws.sendMessage(channelId: channelId, content: msg.content, attachments: msg.attachments,
                        replyToId: msg.replyToId, clientMessageId: cmid)
         vm.schedulePendingTimeout(clientMessageId: cmid)
     }
@@ -247,7 +259,7 @@ struct ChannelChatView: View {
         let now = Date()
         guard now.timeIntervalSince(lastTypingSent) > 2 else { return }
         lastTypingSent = now
-        ws.sendTyping(channelId: channel.id)
+        ws.sendTyping(channelId: channelId)
     }
 
     private var editingPresented: Binding<Bool> {
@@ -260,8 +272,8 @@ struct ChannelChatView: View {
     /// this channel and we're not already in it.
     @ViewBuilder
     private var liveBar: some View {
-        if call.activeCalls[channel.id] != nil, !(call.isConnected && call.channelId == channel.id) {
-            Button { Task { await call.joinCall(channelId: channel.id) } } label: {
+        if call.activeCalls[channelId] != nil, !(call.isConnected && call.channelId == channelId) {
+            Button { Task { await call.joinCall(channelId: channelId) } } label: {
                 Label("Call in progress · Tap to join", systemImage: "phone.fill")
                     .font(.caption.weight(.medium))
                     .frame(maxWidth: .infinity).padding(8)
@@ -269,9 +281,9 @@ struct ChannelChatView: View {
             .tint(.green)
             .background(.green.opacity(0.12))
         }
-        if broadcast.activeBroadcasts[channel.id] != nil,
-           !(broadcast.isConnected && broadcast.channelId == channel.id) {
-            Button { Task { await broadcast.joinAsViewer(channelId: channel.id) } } label: {
+        if broadcast.activeBroadcasts[channelId] != nil,
+           !(broadcast.isConnected && broadcast.channelId == channelId) {
+            Button { Task { await broadcast.joinAsViewer(channelId: channelId) } } label: {
                 Label("Live now · Watch", systemImage: "dot.radiowaves.left.and.right")
                     .font(.caption.weight(.medium))
                     .frame(maxWidth: .infinity).padding(8)
@@ -283,12 +295,12 @@ struct ChannelChatView: View {
 
     @ViewBuilder
     private var callButton: some View {
-        if call.activeCalls[channel.id] != nil {
-            Button { Task { await call.joinCall(channelId: channel.id) } } label: {
+        if call.activeCalls[channelId] != nil {
+            Button { Task { await call.joinCall(channelId: channelId) } } label: {
                 Image(systemName: "phone.fill").foregroundStyle(.green)
             }
         } else if appState.isPlusActive {
-            Button { Task { await call.startCall(channelId: channel.id, mode: .members) } } label: {
+            Button { Task { await call.startCall(channelId: channelId, mode: .members) } } label: {
                 Image(systemName: "phone")
             }
         }
@@ -296,12 +308,12 @@ struct ChannelChatView: View {
 
     @ViewBuilder
     private var broadcastButton: some View {
-        if broadcast.activeBroadcasts[channel.id] != nil {
-            Button { Task { await broadcast.joinAsViewer(channelId: channel.id) } } label: {
+        if broadcast.activeBroadcasts[channelId] != nil {
+            Button { Task { await broadcast.joinAsViewer(channelId: channelId) } } label: {
                 Image(systemName: "dot.radiowaves.left.and.right").foregroundStyle(.red)
             }
         } else if appState.isPlusActive {
-            Button { Task { await broadcast.startBroadcast(channelId: channel.id) } } label: {
+            Button { Task { await broadcast.startBroadcast(channelId: channelId) } } label: {
                 Image(systemName: "video")
             }
         }

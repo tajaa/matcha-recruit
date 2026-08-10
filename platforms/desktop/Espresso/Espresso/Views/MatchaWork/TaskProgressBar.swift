@@ -25,9 +25,9 @@ struct TaskProgressBar: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.zinc800)
+                        .fill(Color.secondary.opacity(0.22))
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.matcha500)
+                        .fill(Color.accentColor)
                         .frame(width: max(0, geo.size.width * fraction))
                         .animation(.easeOut(duration: 0.25), value: fraction)
                 }

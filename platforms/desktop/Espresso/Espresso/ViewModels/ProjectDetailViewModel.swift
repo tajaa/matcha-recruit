@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import UniformTypeIdentifiers
 
 struct CollabActivityItem: Identifiable, Hashable {

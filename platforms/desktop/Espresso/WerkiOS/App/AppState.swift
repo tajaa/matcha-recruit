@@ -35,6 +35,8 @@ final class AppState {
     // tab/list views.
     var pendingChannelId: String?
     var pendingConversationId: String?
+    var pendingProjectId: String?
+    var pendingTaskId: String?
     private var deepLinkObserver: NSObjectProtocol?
 
     init() {
@@ -74,6 +76,7 @@ final class AppState {
         currentUser = user
         isAuthenticated = true
         CallService.shared.currentUserId = user.id
+        MatchaWorkService.shared.updateCacheScope(user.id)
         wireRealtime()
         // Open the realtime channel socket. Background room joins + per-view
         // subscriptions are wired by the channel surface (Phase 2).
@@ -104,6 +107,9 @@ final class AppState {
         ws.onBroadcastStarted = nil; ws.onBroadcastEnded = nil
         ws.onBroadcastPublisherChanged = nil; ws.onBroadcastTokenGrant = nil
         ws.disconnect()
+        MatchaWorkService.shared.updateCacheScope(nil)
+        WorkDetailVMStore.shared.clearAll()
+        ProjectWebSocket.shared.disconnect()
     }
 
     // MARK: - Realtime call/broadcast wiring
@@ -171,5 +177,7 @@ final class AppState {
         }
         if let cid = meta["channel_id"] as? String { pendingChannelId = cid }
         if let conv = meta["conversation_id"] as? String { pendingConversationId = conv }
+        if let project = meta["project_id"] as? String { pendingProjectId = project }
+        if let task = meta["task_id"] as? String { pendingTaskId = task }
     }
 }

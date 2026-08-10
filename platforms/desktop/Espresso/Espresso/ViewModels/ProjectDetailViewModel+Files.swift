@@ -1,5 +1,7 @@
 import Foundation
+#if os(macOS)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 
 extension ProjectDetailViewModel {
@@ -209,6 +211,7 @@ extension ProjectDetailViewModel {
 
 // MARK: - Export save panel (free function so ProjectDetailView.swift stays short)
 
+#if os(macOS)
 @MainActor
 func presentExportSavePanel(data: Data, format: String, title: String) {
     let panel = NSSavePanel()
@@ -248,3 +251,4 @@ func presentExportSavePanel(data: Data, format: String, title: String) {
         }
     }
 }
+#endif

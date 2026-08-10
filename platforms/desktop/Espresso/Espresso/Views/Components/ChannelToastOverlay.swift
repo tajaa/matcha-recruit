@@ -181,53 +181,6 @@ private struct ChannelToastView: View {
 // ProjectDetailViewModel's task.* WS handlers for non-self actors.
 // ---------------------------------------------------------------------------
 
-@Observable
-final class WorkToastCenter {
-    static let shared = WorkToastCenter()
-
-    struct Toast: Identifiable, Equatable {
-        let id = UUID()
-        let projectId: String
-        let projectTitle: String
-        let message: String        // e.g. "Haley moved 'Fix login' to In Review"
-        let systemImage: String    // SF Symbol for the leading icon
-    }
-
-    private(set) var toasts: [Toast] = []
-    private var hoveredIds: Set<UUID> = []
-
-    @MainActor
-    func push(_ t: Toast) {
-        toasts.insert(t, at: 0)
-        if toasts.count > 3 {
-            toasts = Array(toasts.prefix(3))
-        }
-        let id = t.id
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(5))
-            if !hoveredIds.contains(id) { dismiss(id: id) }
-        }
-    }
-
-    @MainActor
-    func setHover(_ id: UUID, _ hovering: Bool) {
-        if hovering {
-            hoveredIds.insert(id)
-        } else {
-            hoveredIds.remove(id)
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                if !hoveredIds.contains(id) { dismiss(id: id) }
-            }
-        }
-    }
-
-    @MainActor func dismiss(id: UUID) { toasts.removeAll { $0.id == id } }
-    @MainActor func dismissAll() { toasts.removeAll() }
-
-    private init() {}
-}
-
 struct WorkToastOverlay: View {
     @Environment(AppState.self) private var appState
     @State private var center = WorkToastCenter.shared

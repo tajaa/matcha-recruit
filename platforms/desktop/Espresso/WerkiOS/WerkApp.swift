@@ -23,7 +23,10 @@ struct WerkApp: App {
             case .active:
                 appState.isSceneActive = true
                 // iOS suspends the socket in the background; re-open on return.
-                if appState.isAuthenticated { ChannelsWebSocket.shared.connect() }
+                if appState.isAuthenticated {
+                    ChannelsWebSocket.shared.connect()
+                    ProjectWebSocket.shared.connect()
+                }
             case .background, .inactive:
                 appState.isSceneActive = false
             @unknown default:

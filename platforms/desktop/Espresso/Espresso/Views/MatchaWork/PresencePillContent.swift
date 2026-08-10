@@ -24,8 +24,8 @@ struct PresencePillContent: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.white.opacity(0.7))
                     .frame(width: dot, height: dot)
-                    .background(Circle().fill(Color.zinc800))
-                    .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
+                    .background(Circle().fill(Color.secondary.opacity(0.35)))
+                    .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1.5))
             }
         }
         .padding(.horizontal, 4)
@@ -42,7 +42,7 @@ struct PresencePillContent: View {
                 .foregroundColor(.white)
         }
         .frame(width: dot, height: dot)
-        .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
+        .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1.5))
         .help(member.name)
     }
 }
