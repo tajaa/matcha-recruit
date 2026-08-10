@@ -38,20 +38,22 @@ extension ProjectDetailView {
 
     var collabTabStrip: some View {
         GeometryReader { proxy in
-            // Nine full labels fit comfortably in a normal project pane. When
-            // the pane is split or resized smaller, switch every tab to its
-            // icon rather than wrapping just the last few labels.
-            let useCompactTabs = proxy.size.width < 880
+            // Keep the row compact at normal widths. In a narrow split pane,
+            // use icons rather than letting only the last labels wrap.
+            let useCompactTabs = proxy.size.width < 760
             HStack(spacing: 4) {
-                collabTabButtons(iconOnly: useCompactTabs, fillsWidth: true)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    collabTabButtons(iconOnly: useCompactTabs)
+                        .padding(.horizontal, 10)
+                }
+                .scrollIndicators(.hidden)
                 collabStatusPill
             }
-            .padding(.horizontal, 10)
         }
         .frame(height: 44)
     }
 
-    func collabTabButtons(iconOnly: Bool, fillsWidth: Bool = false) -> some View {
+    func collabTabButtons(iconOnly: Bool) -> some View {
         HStack(spacing: 4) {
             // Threads muted in projects for now (kept in the enum so nothing
             // referencing .threads breaks; just not offered as a tab).
@@ -81,7 +83,6 @@ extension ProjectDetailView {
                         RoundedRectangle(cornerRadius: 5)
                             .stroke(collabPanel == panel ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
                     )
-                    .frame(maxWidth: fillsWidth ? .infinity : nil)
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(panel.shortcutKey, modifiers: .command)

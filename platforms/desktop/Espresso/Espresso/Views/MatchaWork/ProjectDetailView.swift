@@ -177,17 +177,10 @@ struct ProjectDetailView: View {
                         showRenameAlert = true
                     } label: {
                         HStack(spacing: 4) {
-                            // Lowercased eyebrow + title in one line replaces
-                            // the loud all-caps "COLLAB" + bold title stack.
-                            // Click anywhere on the row to rename.
-                            if let type = project.projectType, !type.isEmpty {
-                                Text(type.lowercased())
-                                    .font(.system(size: 12))
-                                    .foregroundColor(appState.themeText.opacity(0.45))
-                                Text("·")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(appState.themeText.opacity(0.3))
-                            }
+                            // The project type is already evident from the
+                            // workspace surface. Showing it here consumed most
+                            // of the toolbar capsule and made short titles look
+                            // like they were spilling into the edit glyph.
                             Text(project.title)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(appState.themeText)
@@ -201,7 +194,7 @@ struct ProjectDetailView: View {
                         // The native toolbar wraps this control in a capsule.
                         // A fixed intrinsic width let long project names spill
                         // through that capsule instead of truncating cleanly.
-                        .frame(maxWidth: 220, alignment: .leading)
+                        .frame(width: 170, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Click to rename")
