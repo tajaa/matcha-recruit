@@ -78,10 +78,9 @@ async def get_thread_access(conn, thread_id: UUID, account: TellusAccount):
         row["brand_id"], account.id,
     )
     if membership and membership["can_manage_inbox"]:
-        if row["brand_id"] != account.brand_id and row["brand_id"]:
-            plan = await conn.fetchval("SELECT plan_status FROM tellus_brands WHERE id = $1", row["brand_id"])
-            if plan != "active":
-                raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="This business inbox is unavailable while the plan is inactive.")
+        plan = await conn.fetchval("SELECT plan_status FROM tellus_brands WHERE id = $1", row["brand_id"])
+        if plan != "active":
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="This business inbox is unavailable while the plan is inactive.")
         return dict(row), "brand"
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
