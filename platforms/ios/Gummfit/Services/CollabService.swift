@@ -3,6 +3,7 @@ final class CollabService { static let shared = CollabService(); private init() 
     func offers() async throws -> OfferPage { try await APIClient.shared.request(method: "GET", path: "/collab/offers") }
     func offer(_ id: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "GET", path: "/collab/offers/\(id)") }
     func accept(_ id: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/accept") }
+    func counter(_ id: String, terms: CollabTerms, message: String?) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/counter", body: OfferCounter(terms: terms, message: message)) }
     func decline(_ id: String, reason: String?) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/decline", body: OfferDecline(reason: reason)) }
     func withdraw(_ id: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/withdraw") }
     func cancel(_ id: String, reason: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/cancel", body: OfferCancel(reason: reason)) }

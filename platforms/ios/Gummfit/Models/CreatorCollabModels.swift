@@ -17,6 +17,11 @@ struct Deliverable: Codable, Identifiable, Equatable { let id: String; let idx: 
 struct CollabPayment: Codable, Identifiable, Equatable { let id: String; let idx: Int; let label: String; let amount_cents: Int; let currency, trigger, status: String; let deliverable_id: String?; let fee_cents: Int?; let due_at, paid_at: String? }
 struct OfferDetail: Codable, Identifiable, Equatable { let id, title, status: String; let payment_schedule: String?; let total_cents: Int?; let currency: String; let campaign_id, brand_name: String?; let creator_handle, creator_display_name: String; let creator_avatar_url, last_action_at, created_at: String?; let side: String; let messages: [OfferMessage]; let deliverables: [Deliverable]; let payments: [CollabPayment]; let creator_payouts_ready: Bool; let auto_approve_days: Int }
 struct OfferMessageCreate: Encodable { var body: String }
+struct TermsDeliverable: Codable, Encodable { var type, platform: String; var quantity: Int; var spec, due_date: String? }
+struct TermsUsageRights: Codable, Encodable { var scope: String; var duration_months: Int?; var whitelisting: Bool }
+struct TermsExclusivity: Codable, Encodable { var category: String; var duration_months: Int }
+struct CollabTerms: Codable, Encodable { var compensation_cents: Int; var payment_schedule: String; var deliverables: [TermsDeliverable]; var usage_rights: TermsUsageRights; var exclusivity: TermsExclusivity?; var revision_rounds: Int; var approval_required: Bool; var ftc_disclosure: Bool; var start_date, end_date, notes: String? }
+struct OfferCounter: Encodable { var terms: CollabTerms; var message: String? }
 struct OfferDecline: Encodable { var reason: String? }
 struct OfferCancel: Encodable { var reason: String }
 struct DeliverableSubmit: Encodable { var submission_url: String; var submission_note, proof_media_url: String? }
