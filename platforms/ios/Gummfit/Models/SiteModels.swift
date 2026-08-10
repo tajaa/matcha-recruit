@@ -39,6 +39,7 @@ struct CappeSiteCreate: Encodable {
     let source_type: String = "blank"
     let is_multi_location: Bool = false
 }
+struct CappeSiteUpdate: Encodable { var name, subdomain, timezone, tax_label, shipping_label, receipt_prefix: String?; var status: String?; var tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents: Int?; var is_multi_location: Bool? }
 
 /// Mirrors CappeReadinessItem/CappeReadiness (types.ts:35-47).
 struct CappeReadinessItem: Codable, Identifiable, Equatable {

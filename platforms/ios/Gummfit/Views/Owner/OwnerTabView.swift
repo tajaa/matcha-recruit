@@ -62,6 +62,7 @@ struct OwnerTabView: View {
                         NavigationLink("Clients") { ClientsView(site: site) }
                         NavigationLink("Reviews") { ReviewsView(site: site) }
                         NavigationLink("Marketing") { MarketingView(site: site) }
+                        NavigationLink("Site settings") { SiteSettingsView(site: site) }
                         if appState.account?.account_type == .business {
                             NavigationLink("Collabs") { OwnerCollabsView() }
                         }

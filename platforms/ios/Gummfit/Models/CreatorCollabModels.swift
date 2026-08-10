@@ -22,6 +22,9 @@ struct TermsUsageRights: Codable, Encodable { var scope: String; var duration_mo
 struct TermsExclusivity: Codable, Encodable { var category: String; var duration_months: Int }
 struct CollabTerms: Codable, Encodable { var compensation_cents: Int; var payment_schedule: String; var deliverables: [TermsDeliverable]; var usage_rights: TermsUsageRights; var exclusivity: TermsExclusivity?; var revision_rounds: Int; var approval_required: Bool; var ftc_disclosure: Bool; var start_date, end_date, notes: String? }
 struct OfferCounter: Encodable { var terms: CollabTerms; var message: String? }
+struct CollabCampaign: Codable, Identifiable { let id, title: String; let description: String?; let budget_min_cents, budget_max_cents: Int?; let deliverable_notes: String?; let status: String; let offer_count: Int; let created_at: String }
+struct CollabCampaignCreate: Encodable { var title: String; var description, deliverable_notes: String?; var budget_min_cents, budget_max_cents: Int?; var status: String? }
+struct OfferCreate: Encodable { var creator_profile_id: String; var campaign_id: String?; var title: String; var terms: CollabTerms; var message: String? }
 struct OfferDecline: Encodable { var reason: String? }
 struct OfferCancel: Encodable { var reason: String }
 struct DeliverableSubmit: Encodable { var submission_url: String; var submission_note, proof_media_url: String? }

@@ -32,6 +32,9 @@ struct CreatorTabView: View {
                 Section {
                     Button("Sign out", role: .destructive) { appState.didLogout() }
                 }
+                Section("Payouts") {
+                    Link("Set up payouts on web", destination: URL(string: "\(APIClient.shared.webOrigin)/creator/payouts")!)
+                }
             }
             .navigationTitle("Account")
         }

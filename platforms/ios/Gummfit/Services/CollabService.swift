@@ -1,5 +1,8 @@
 import Foundation
 final class CollabService { static let shared = CollabService(); private init() {}
+    func campaigns() async throws -> [CollabCampaign] { try await APIClient.shared.request(method: "GET", path: "/collab/campaigns") }
+    func createCampaign(_ body: CollabCampaignCreate) async throws -> CollabCampaign { try await APIClient.shared.request(method: "POST", path: "/collab/campaigns", body: body) }
+    func createOffer(_ body: OfferCreate) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers", body: body) }
     func offers() async throws -> OfferPage { try await APIClient.shared.request(method: "GET", path: "/collab/offers") }
     func offer(_ id: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "GET", path: "/collab/offers/\(id)") }
     func accept(_ id: String) async throws -> OfferDetail { try await APIClient.shared.request(method: "POST", path: "/collab/offers/\(id)/accept") }
