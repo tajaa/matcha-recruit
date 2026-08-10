@@ -11,12 +11,17 @@ import Observation
 struct MarketingView: View {
     let site: CappeSite; @State private var vm = MarketingViewModel(); @State private var adding: String?
     var body: some View { List {
-        Section("Subscribers") { ForEach(vm.subscribers) { Text($0.name ?? $0.email).badge($0.status) }; Button("Add subscriber", systemImage: "plus") { adding = "subscriber" } }
-        Section("Campaigns") { ForEach(vm.campaigns) { campaign in HStack { VStack(alignment: .leading) { Text(campaign.subject); Text("\(campaign.recipient_count) recipients").font(.caption).foregroundStyle(.secondary) }; Spacer(); if campaign.status == "draft" { Button("Send") { Task { await vm.send(site.id, campaign: campaign) } } }; Text(campaign.status).font(.caption) } }; Button("New campaign", systemImage: "plus") { adding = "campaign" } }
-        Section("Forms") { ForEach(vm.forms) { Text($0.name).badge($0.status) }; Button("New form", systemImage: "plus") { adding = "form" } }
-        Section("Blog") { ForEach(vm.posts) { Text($0.title).badge($0.status) }; Button("New post", systemImage: "plus") { adding = "post" } }
+        Section("Subscribers") { ForEach(vm.subscribers) { subscriber in Text(subscriber.name ?? subscriber.email).badge(subscriber.status).swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteSubscriber(site.id, subscriber.id); await vm.load(site.id) } } } }; Button("Add subscriber", systemImage: "plus") { adding = "subscriber" } }
+        Section("Campaigns") { ForEach(vm.campaigns) { campaign in HStack { VStack(alignment: .leading) { Text(campaign.subject); Text("\(campaign.recipient_count) recipients").font(.caption).foregroundStyle(.secondary) }; Spacer(); if campaign.status == "draft" { Button("Send") { Task { await vm.send(site.id, campaign: campaign) } } }; Text(campaign.status).font(.caption) }.swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteCampaign(site.id, campaign.id); await vm.load(site.id) } } } }; Button("New campaign", systemImage: "plus") { adding = "campaign" } }
+        Section("Forms") { ForEach(vm.forms) { form in NavigationLink { FormSubmissionsView(siteId: site.id, form: form) } label: { Text(form.name).badge(form.status) }.swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteForm(site.id, form.id); await vm.load(site.id) } } } }; Button("New form", systemImage: "plus") { adding = "form" } }
+        Section("Blog") { ForEach(vm.posts) { post in Text(post.title).badge(post.status).swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deletePost(site.id, post.id); await vm.load(site.id) } } } }; Button("New post", systemImage: "plus") { adding = "post" } }
     }.navigationTitle("Marketing").overlay(alignment: .top) { ErrorBanner(message: vm.error) }.task { await vm.load(site.id) }.refreshable { await vm.load(site.id) }.sheet(item: $adding) { kind in MarketingCreateSheet(siteId: site.id, kind: kind) { await vm.load(site.id) } }
     }
+}
+private struct FormSubmissionsView: View {
+    let siteId: String; let form: CappeForm; @State private var submissions: [CappeFormSubmission] = []; @State private var error: String?
+    var body: some View { List(submissions) { submission in VStack(alignment: .leading) { Text(submission.submitter_email ?? "Anonymous").font(.headline); Text(submission.created_at).font(.caption).foregroundStyle(.secondary); ForEach(submission.data.keys.sorted(), id: \.self) { Text("\($0): \(String(describing: submission.data[$0]!))").font(.caption) } }.swipeActions { if !submission.is_read { Button("Read") { Task { _ = try? await MarketingService.shared.markRead(siteId, form.id, submission.id); await load() } }; Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteSubmission(siteId, form.id, submission.id); await load() } } } } }.navigationTitle(form.name).overlay(alignment: .top) { ErrorBanner(message: error) }.task { await load() } }
+    private func load() async { do { submissions = try await MarketingService.shared.submissions(siteId, form.id) } catch { self.error = error.localizedDescription } }
 }
 
 private struct MarketingCreateSheet: View {

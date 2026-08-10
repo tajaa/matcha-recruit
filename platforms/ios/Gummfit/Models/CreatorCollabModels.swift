@@ -6,6 +6,9 @@ struct CreatorRate: Codable, Identifiable, Equatable { let id, deliverable_type,
 struct CreatorProfileMe: Codable, Identifiable, Equatable { let id, handle, display_name: String; let avatar_url, cover_url, bio, location: String?; let niches, languages: [String]; let open_to_offers: Bool; let status, review_note, submitted_at, published_at: String?; let reach_verified: Bool; let reach_audited_at: String?; let socials: [CreatorSocial]; let portfolio: [CreatorPortfolioItem]; let rates: [CreatorRate] }
 struct CreatorProfileCreate: Encodable { var handle, display_name: String }
 struct CreatorProfileUpdate: Encodable { var display_name, avatar_url, cover_url, bio, location: String?; var niches, languages: [String]?; var open_to_offers: Bool? }
+struct CreatorSocialInput: Encodable { var platform, handle, url: String; var follower_count: Int?; var engagement_rate: Double?; var sort_order: Int }
+struct CreatorPortfolioInput: Encodable { var title: String; var description, media_url, media_type, external_url, brand_name: String?; var metrics: [String: JSONValue]; var sort_order: Int }
+struct CreatorRateInput: Encodable { var deliverable_type, platform: String; var price_cents: Int; var negotiable: Bool; var notes: String?; var sort_order: Int }
 struct EarningsRow: Codable, Identifiable, Equatable { var id: String { "\(offer_id)-\(label)" }; let offer_id, offer_title: String; let brand_name: String?; let label: String; let amount_cents: Int; let fee_cents: Int?; let status: String; let paid_at: String? }
 struct OfferListItem: Codable, Identifiable, Equatable { let id, title, status: String; let payment_schedule: String?; let total_cents: Int?; let currency: String; let campaign_id, brand_name: String?; let creator_handle, creator_display_name: String; let creator_avatar_url: String?; let last_action_at, created_at: String }
 struct OfferPage: Codable { let offers: [OfferListItem]; let total: Int }
@@ -14,5 +17,7 @@ struct Deliverable: Codable, Identifiable, Equatable { let id: String; let idx: 
 struct CollabPayment: Codable, Identifiable, Equatable { let id: String; let idx: Int; let label: String; let amount_cents: Int; let currency, trigger, status: String; let deliverable_id: String?; let fee_cents: Int?; let due_at, paid_at: String? }
 struct OfferDetail: Codable, Identifiable, Equatable { let id, title, status: String; let payment_schedule: String?; let total_cents: Int?; let currency: String; let campaign_id, brand_name: String?; let creator_handle, creator_display_name: String; let creator_avatar_url, last_action_at, created_at: String?; let side: String; let messages: [OfferMessage]; let deliverables: [Deliverable]; let payments: [CollabPayment]; let creator_payouts_ready: Bool; let auto_approve_days: Int }
 struct OfferMessageCreate: Encodable { var body: String }
+struct OfferDecline: Encodable { var reason: String? }
+struct OfferCancel: Encodable { var reason: String }
 struct DeliverableSubmit: Encodable { var submission_url: String; var submission_note, proof_media_url: String? }
 struct DeliverableRevision: Encodable { var review_note: String }
