@@ -9,13 +9,18 @@ final class SiteModelDecodeTests: XCTestCase {
         {
           "id": "site-1", "account_id": "acct-1", "name": "Cara's Bakery",
           "slug": "caras-bakery", "subdomain": "caras-bakery", "custom_domain": null,
-          "source_type": "blank", "status": "draft", "is_multi_location": false,
+          "source_type": "blank", "status": "draft", "timezone": "America/Los_Angeles",
+          "tax_rate_bps": 825, "tax_label": "Sales tax", "shipping_flat_cents": 500,
+          "shipping_free_threshold_cents": 5000, "shipping_label": "Delivery",
+          "receipt_prefix": "CB-", "is_multi_location": false,
           "published_at": null, "created_at": "2026-08-01T00:00:00Z",
           "updated_at": "2026-08-01T00:00:00Z", "page_count": 1
         }
         """
         let site = try JSONDecoder().decode(CappeSite.self, from: Data(json.utf8))
         XCTAssertEqual(site.status, .draft)
+        XCTAssertEqual(site.timezone, "America/Los_Angeles")
+        XCTAssertEqual(site.shipping_free_threshold_cents, 5000)
         XCTAssertNil(site.custom_domain)
         XCTAssertEqual(site.publicURLString, "https://caras-bakery.gummfit.com")
     }
@@ -79,5 +84,19 @@ final class DirectoryUpdateEncodeTests: XCTestCase {
         XCTAssertNil(json["tags"])
         XCTAssertNil(json["blurb"])
         XCTAssertEqual(json.count, 1)
+    }
+}
+
+final class SiteUpdateEncodeTests: XCTestCase {
+    func testClearableSettingsEncodeExplicitNulls() throws {
+        let update = CappeSiteUpdate(
+            name: "Bakery", subdomain: nil, timezone: "UTC", tax_label: nil,
+            shipping_label: nil, receipt_prefix: nil, status: nil,
+            tax_rate_bps: nil, shipping_flat_cents: nil,
+            shipping_free_threshold_cents: nil, is_multi_location: nil
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(update)) as? [String: Any])
+        XCTAssertTrue(object["receipt_prefix"] is NSNull)
+        XCTAssertTrue(object["shipping_free_threshold_cents"] is NSNull)
     }
 }

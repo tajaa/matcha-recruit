@@ -20,6 +20,7 @@ final class SitesService {
     func readiness(siteId: String) async throws -> CappeReadiness {
         try await APIClient.shared.request(method: "GET", path: "/sites/\(siteId)/readiness")
     }
+    func update(siteId: String, _ body: CappeSiteUpdate) async throws -> CappeSite { try await APIClient.shared.request(method: "PUT", path: "/sites/\(siteId)", body: body) }
 
     /// Throws `APIError.publishBlocked(message:missing:)` on a 422 — caller
     /// renders the checklist instead of a generic error string

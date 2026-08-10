@@ -14,4 +14,17 @@ final class UploadService {
             filename: prepared.filename
         )
     }
+
+    func uploadCreatorMedia(prepared: ImagePrep.Prepared) async throws -> CappeUploadResponse {
+        try await APIClient.shared.uploadMultipart(
+            path: "/creators/me/upload",
+            data: prepared.data,
+            mimeType: prepared.mimeType,
+            filename: prepared.filename
+        )
+    }
+
+    func uploadCreatorFile(data: Data, mimeType: String, filename: String) async throws -> CappeUploadResponse {
+        try await APIClient.shared.uploadMultipart(path: "/creators/me/upload", data: data, mimeType: mimeType, filename: filename)
+    }
 }
