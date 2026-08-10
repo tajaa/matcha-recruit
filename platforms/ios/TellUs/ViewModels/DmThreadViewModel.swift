@@ -87,7 +87,13 @@ final class DmThreadViewModel: LoadableVM {
     func close() async {
         await withLoad {
             thread = try await DmService.shared.close(threadId: threadId)
+            stopPolling()
         }
+    }
+
+    var canCompose: Bool {
+        guard let thread else { return false }
+        return !thread.blocked && thread.status != .closed
     }
 
     func startPolling() {
@@ -96,6 +102,11 @@ final class DmThreadViewModel: LoadableVM {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled, let self else { return }
+                // Self-cancel when the thread is closed — no new messages expected.
+                if self.thread?.status == .closed {
+                    self.stopPolling()
+                    return
+                }
                 await self.pollDelta()
             }
         }
@@ -127,5 +138,6 @@ final class DmThreadViewModel: LoadableVM {
         }
     }
 
-    deinit { pollingTask?.cancel() }
+    // Polling is cancelled explicitly by the view (onDisappear); deinit
+    // is nonisolated and cannot touch MainActor-isolated properties.
 }

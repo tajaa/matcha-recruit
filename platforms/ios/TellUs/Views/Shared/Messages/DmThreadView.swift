@@ -29,8 +29,10 @@ struct DmThreadView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if vm.thread?.blocked == true {
-                Text("This conversation has ended.")
+            if !vm.canCompose {
+                Text(vm.thread?.status == .closed
+                     ? "This conversation is closed."
+                     : "This conversation has ended.")
                     .font(.footnote).foregroundStyle(.secondary)
                     .padding()
                     .frame(maxWidth: .infinity)

@@ -28,10 +28,11 @@ final class ParityModelDecodeTests: XCTestCase {
     func testBrandDecodes() throws {
         let json = """
         {"id":"b1","owner_account_id":"a1","name":"Acme","logo_url":null,
-         "reward_mode":"manual","created_at":"2026-01-01T00:00:00Z"}
+         "reward_mode":"manual","created_at":"2026-01-01T00:00:00Z","messaging_enabled":true}
         """
         let brand = try JSONDecoder().decode(Brand.self, from: Data(json.utf8))
         XCTAssertEqual(brand.reward_mode, .manual)
+        XCTAssertTrue(brand.messaging_enabled)
     }
 
     func testStoreDecodes() throws {
@@ -80,10 +81,11 @@ final class ParityModelDecodeTests: XCTestCase {
     func testBrandTeamMemberDecodes() throws {
         let json = """
         {"id":"tm1","account_display_name":"Jane","email":"jane@example.com",
-         "role":"moderator","created_at":"2026-01-01T00:00:00Z"}
+         "role":"moderator","created_at":"2026-01-01T00:00:00Z","can_manage_inbox":true}
         """
         let member = try JSONDecoder().decode(BrandTeamMember.self, from: Data(json.utf8))
         XCTAssertEqual(member.role, "moderator")
+        XCTAssertTrue(member.can_manage_inbox)
     }
 
     func testListingCreateOmitsNilKeys() throws {

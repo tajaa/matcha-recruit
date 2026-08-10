@@ -11,6 +11,11 @@ enum InboxScope: Hashable {
 final class DmThreadsViewModel: LoadableVM {
     let scope: InboxScope
     var threads: [DmThread] = []
+    var inboxBrands: [InboxBrand] = []
+    var selectedBrandID: String?
+    var kindFilter: DmKind?
+    var statusFilter: DmStatus?
+    var assignedFilter: String?
     var isLoading = false
     var error: String?
     var isPolling = false
@@ -27,7 +32,24 @@ final class DmThreadsViewModel: LoadableVM {
             case .consumer: brandID = nil
             case .business(let value): brandID = value
             }
-            threads = try await DmService.shared.threads(brandID: brandID)
+            threads = try await DmService.shared.threads(
+                brandID: brandID,
+                kind: kindFilter,
+                status: statusFilter,
+                assigned: assignedFilter
+            )
+        }
+    }
+
+    func loadInboxBrands() async {
+        do {
+            inboxBrands = try await DmService.shared.inboxBrands()
+            // Auto-select when exactly one active inbox exists.
+            if inboxBrands.count == 1, selectedBrandID == nil {
+                selectedBrandID = inboxBrands.first?.brand_id
+            }
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
         }
     }
 
@@ -49,5 +71,6 @@ final class DmThreadsViewModel: LoadableVM {
         isPolling = false
     }
 
-    deinit { pollingTask?.cancel() }
+    // Polling is cancelled explicitly by the view (onDisappear); deinit
+    // is nonisolated and cannot touch MainActor-isolated properties.
 }

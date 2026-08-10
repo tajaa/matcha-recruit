@@ -2,7 +2,12 @@ import SwiftUI
 
 struct TeamView: View {
     @Bindable var vm: BoardManageViewModel
+    @Environment(AppState.self) private var appState
     @State private var newEmail = ""
+
+    private var isOwner: Bool {
+        appState.account?.account_type == .brand
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,7 +38,7 @@ struct TeamView: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: 6) {
                             StatusChip(text: member.role)
-                            if member.role != "owner" {
+                            if isOwner, member.role != "owner" {
                                 Toggle("Inbox", isOn: Binding(
                                     get: { member.can_manage_inbox },
                                     set: { enabled in Task { await vm.setInboxAccess(memberID: member.id, enabled: enabled) } }

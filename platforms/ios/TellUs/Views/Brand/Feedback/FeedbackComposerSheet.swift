@@ -4,7 +4,7 @@ struct FeedbackComposerSheet: View {
     let reportId: String
     let onStarted: (DmThread) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var body = ""
+    @State private var draft = ""
     @State private var isSending = false
     @State private var error: String?
 
@@ -12,7 +12,7 @@ struct FeedbackComposerSheet: View {
         NavigationStack {
             Form {
                 Section("Message reporter") {
-                    TextEditor(text: $body).frame(minHeight: 140)
+                    TextEditor(text: $draft).frame(minHeight: 140)
                 }
                 if let error { Text(error).foregroundStyle(.red) }
             }
@@ -26,14 +26,14 @@ struct FeedbackComposerSheet: View {
                     } label: {
                         if isSending { ProgressView() } else { Text("Send") }
                     }
-                    .disabled(body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
                 }
             }
         }
     }
 
     private func send() async {
-        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         isSending = true
         defer { isSending = false }
