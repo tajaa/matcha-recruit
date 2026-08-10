@@ -65,13 +65,18 @@ private struct ProductRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: product.image_url.flatMap(URL.init(string:))) { image in
+            AsyncImage(url: SafeURL.assetURL(product.image_url)) { image in
                 image.resizable().aspectRatio(contentMode: .fill)
             } placeholder: {
-                Rectangle().fill(Color.gray.opacity(0.2))
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(GummfitTheme.surfaceRaised)
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(GummfitTheme.textDim)
+                    }
             }
             .frame(width: 44, height: 44)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(product.name).font(.subheadline.bold()).foregroundStyle(GummfitTheme.textPrimary)

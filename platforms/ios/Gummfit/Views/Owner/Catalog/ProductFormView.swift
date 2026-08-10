@@ -153,7 +153,7 @@ struct ProductFormView: View {
     private var photoPicker: some View {
         PhotosPicker(selection: $photoItem, matching: .images) {
             HStack {
-                if let imageUrl = vm.imageUrl, let url = URL(string: imageUrl) {
+                if let url = SafeURL.assetURL(vm.imageUrl) {
                     AsyncImage(url: url) { $0.resizable().aspectRatio(contentMode: .fill) } placeholder: { Color.gray.opacity(0.2) }
                         .frame(width: 60, height: 60)
                         .clipShape(RoundedRectangle(cornerRadius: 8))

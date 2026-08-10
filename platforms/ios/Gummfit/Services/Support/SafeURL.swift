@@ -38,4 +38,25 @@ enum SafeURL {
         guard let raw, let url = URL(string: raw), isSafe(url) else { return nil }
         return url
     }
+
+    /// Resolves a public asset URL from the API. Local storage returns paths
+    /// such as `/uploads/resumes/photo.jpg`; a browser resolves those against
+    /// the current host automatically, but `AsyncImage` needs an absolute URL.
+    /// Absolute URLs are still limited to http(s), and arbitrary schemes or
+    /// unrecognised relative paths are rejected.
+    static func assetURL(_ raw: String?) -> URL? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if let url = URL(string: raw), isSafe(url) {
+            return url
+        }
+        guard raw.hasPrefix("/"),
+              let origin = URL(string: APIClient.shared.assetOrigin),
+              let resolved = URL(string: raw, relativeTo: origin)?.absoluteURL,
+              isSafe(resolved) else {
+            return nil
+        }
+        return resolved
+    }
 }

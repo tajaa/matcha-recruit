@@ -148,6 +148,11 @@ class APIClient {
         return "https://gummfit.com"
     }
 
+    /// Origin used for files returned by the API. Unlike `webOrigin`, this
+    /// deliberately keeps a local debug host so `/uploads/...` references
+    /// returned by the development backend resolve to that backend.
+    var assetOrigin: String { apiOrigin }
+
     /// Bearer token. Read on every request from background executors and
     /// written from @MainActor (login / logout / refresh). Guard the
     /// non-atomic `Optional<String>` behind a lock — an unsynchronized
