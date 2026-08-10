@@ -96,7 +96,7 @@ struct EarningsView: View {
 
 struct OfferDetailView: View {
     let offerId: String; @State private var detail: OfferDetail?; @State private var error: String?; @State private var message = ""; @State private var cancelReason = ""; @State private var showCancel = false; @State private var submitting: Deliverable?; @State private var reviewing: Deliverable?; @State private var showCounter = false
-    var body: some View { List { if let d = detail { Section { Text(d.title).font(.headline); Text(d.status).badge(d.status); if let cents = d.total_cents { Text(Formatters.cents(cents)) } }; actionSection(d); Section("Deliverables") { ForEach(d.deliverables) { item in HStack { Text("\(item.type.capitalized) #\(item.idx + 1)"); Spacer(); Text(item.status).font(.caption) }.swipeActions { if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) { Button("Submit") { submitting = item } }; if d.side == "brand" && item.status == "submitted" { Button("Revise") { reviewing = item }; Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } } } } } }; Section("Payments") { ForEach(d.payments) { payment in HStack { Text("\(payment.label) · \(Formatters.cents(payment.amount_cents))"); Spacer(); if d.side == "brand" && ["due", "processing"].contains(payment.status) { Link("Pay on web", destination: URL(string: "\(APIClient.shared.webOrigin)/collabs/\(offerId)/payments/\(payment.id)")!) } else if d.side == "creator" && ["due", "processing"].contains(payment.status) { Button("Nudge") { Task { try? await CollabService.shared.nudgePayment(offerId, paymentId: payment.id) } } } } } }; Section("Messages") { ForEach(d.messages) { message in VStack(alignment: .leading) { Text(message.sender.capitalized).font(.caption.bold()); Text(message.body) } }; HStack { TextField("Message", text: $message); Button("Send") { Task { await sendMessage() } }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }.overlay(alignment: .top) { ErrorBanner(message: error) }.navigationTitle("Deal").task { await load() }.refreshable { await load() }.alert("Cancel deal", isPresented: $showCancel) { TextField("Reason", text: $cancelReason); Button("Cancel deal", role: .destructive) { Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } } }; Button("Keep deal", role: .cancel) {} }.sheet(item: $submitting) { item in DeliverableSubmitSheet(deliverable: item) { body in do { _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body); await load(); return true } catch { error = error.localizedDescription; return false } } }.sheet(isPresented: $showCounter) { CounterOfferSheet { terms, note in await perform { try await CollabService.shared.counter(offerId, terms: terms, message: note) } } }.alert("Request revision", isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) { TextField("Review note", text: $message); Button("Request revision") { if let reviewing { Task { await perform { try await CollabService.shared.requestRevision(offerId, deliverableId: reviewing.id, note: message) }; message = "" } } }; Button("Cancel", role: .cancel) {} } }
+    var body: some View { List { if let d = detail { Section { Text(d.title).font(.headline); Text(d.status).badge(d.status); if let cents = d.total_cents { Text(Formatters.cents(cents)) } }; actionSection(d); Section("Deliverables") { ForEach(d.deliverables) { item in HStack { Text("\(item.type.capitalized) #\(item.idx + 1)"); Spacer(); Text(item.status).font(.caption) }.swipeActions { if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) { Button("Submit") { submitting = item } }; if d.side == "brand" && item.status == "submitted" { Button("Revise") { reviewing = item }; Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } } } } } }; Section("Payments") { ForEach(d.payments) { payment in HStack { Text("\(payment.label) · \(Formatters.cents(payment.amount_cents))"); Spacer(); if d.side == "brand" && ["due", "processing"].contains(payment.status) { Link("Pay on web", destination: URL(string: "\(APIClient.shared.webOrigin)/collabs/\(offerId)/payments/\(payment.id)")!) } else if d.side == "creator" && ["due", "processing"].contains(payment.status) { Button("Nudge") { Task { try? await CollabService.shared.nudgePayment(offerId, paymentId: payment.id) } } } } } }; Section("Messages") { ForEach(d.messages) { message in VStack(alignment: .leading) { Text(message.sender.capitalized).font(.caption.bold()); Text(message.body) } }; HStack { TextField("Message", text: $message); Button("Send") { Task { await sendMessage() } }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }.overlay(alignment: .top) { ErrorBanner(message: error) }.navigationTitle("Deal").task { await load() }.refreshable { await load() }.alert("Cancel deal", isPresented: $showCancel) { TextField("Reason", text: $cancelReason); Button("Cancel deal", role: .destructive) { Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } } }; Button("Keep deal", role: .cancel) {} }.sheet(item: $submitting) { item in DeliverableSubmitSheet(deliverable: item) { body in _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body); await load() } }.sheet(isPresented: $showCounter) { CounterOfferSheet { terms, note in await perform { try await CollabService.shared.counter(offerId, terms: terms, message: note) } } }.alert("Request revision", isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) { TextField("Review note", text: $message); Button("Request revision") { if let reviewing { Task { await perform { try await CollabService.shared.requestRevision(offerId, deliverableId: reviewing.id, note: message) }; message = "" } } }; Button("Cancel", role: .cancel) {} } }
     @ViewBuilder private func actionSection(_ d: OfferDetail) -> some View { if ["sent", "negotiating"].contains(d.status) { Section("Offer") { Button("Counter offer") { showCounter = true }; if d.side == "creator" { Button("Accept") { Task { await perform { try await CollabService.shared.accept(offerId) } } }; Button("Decline", role: .destructive) { Task { await perform { try await CollabService.shared.decline(offerId, reason: nil) } } } } else { Button("Withdraw", role: .destructive) { Task { await perform { try await CollabService.shared.withdraw(offerId) } } } } } } else if ["accepted", "active"].contains(d.status) { Section { Button("Cancel deal", role: .destructive) { showCancel = true } } } }
     private func load() async { do { detail = try await CollabService.shared.offer(offerId) } catch { self.error = error.localizedDescription } }
     private func sendMessage() async { do { _ = try await CollabService.shared.message(offerId, message); message = ""; await load() } catch { self.error = error.localizedDescription } }
@@ -104,7 +104,7 @@ struct OfferDetailView: View {
 }
 private struct DeliverableSubmitSheet: View {
     let deliverable: Deliverable
-    let submit: (DeliverableSubmit) async -> Bool
+    let submit: (DeliverableSubmit) async throws -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var url = ""
     @State private var note = ""
@@ -131,7 +131,34 @@ private struct DeliverableSubmitSheet: View {
             }
         }
     }
-    private func submitBody() async -> Bool { var proofURL: String?; if let picker = proofPicker, let data = try? await picker.loadTransferable(type: Data.self) { do { let mime = picker.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"; if mime.hasPrefix("image/") { let prepared = try ImagePrep.prepare(data: data, mimeType: mime, filename: "proof.jpg"); proofURL = try await UploadService.shared.uploadCreatorMedia(prepared: prepared).url } else { proofURL = try await UploadService.shared.uploadCreatorFile(data: data, mimeType: mime, filename: "proof.mov").url } } catch { self.error = error.localizedDescription; return false } }; return await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: proofURL)) }
+    private func submitBody() async -> Bool {
+        var proofURL: String?
+        if let picker = proofPicker {
+            guard let data = try? await picker.loadTransferable(type: Data.self) else {
+                error = "Could not read the selected proof file."
+                return false
+            }
+            do {
+                let mime = picker.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+                if mime.hasPrefix("image/") {
+                    let prepared = try ImagePrep.prepare(data: data, mimeType: mime, filename: "proof.jpg")
+                    proofURL = try await UploadService.shared.uploadCreatorMedia(prepared: prepared).url
+                } else {
+                    proofURL = try await UploadService.shared.uploadCreatorFile(data: data, mimeType: mime, filename: "proof.mov").url
+                }
+            } catch {
+                self.error = error.localizedDescription
+                return false
+            }
+        }
+        do {
+            try await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: proofURL))
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
+    }
 }
 
 private struct CounterOfferSheet: View {

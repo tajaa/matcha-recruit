@@ -10,7 +10,7 @@ struct AccountView: View {
         List {
             Section("Account") { Text(appState.account?.email ?? ""); Text(appState.account?.plan.capitalized ?? "").foregroundStyle(.secondary) }
             Section("Plan") {
-                if let subscription { Text(subscription.plan_name ?? subscription.plan_code).font(.headline); Text(subscription.status.capitalized).badge(subscription.status); if let end = subscription.current_period_end { Text("Renews \(end)").font(.caption).foregroundStyle(.secondary) }; if !subscription.addons.isEmpty { ForEach(subscription.addons) { Text("\($0.name) × \($0.quantity)") } } }
+                if let subscription { Text(subscription.plan_name ?? subscription.plan_code ?? "Unknown plan").font(.headline); Text(subscription.status?.capitalized ?? "Unknown status").badge(subscription.status ?? "unknown"); if let end = subscription.current_period_end { Text("Renews \(end)").font(.caption).foregroundStyle(.secondary) }; if !subscription.addons.isEmpty { ForEach(subscription.addons) { Text("\($0.name) × \($0.quantity)") } } }
                 else { Text("No active subscription").foregroundStyle(.secondary) }
                 Link("Manage on web", destination: URL(string: "\(APIClient.shared.webOrigin)/cappe/billing")!)
             }
