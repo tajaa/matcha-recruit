@@ -61,13 +61,17 @@ struct OwnerTabView: View {
                     Section {
                         NavigationLink("Clients") { ClientsView(site: site) }
                         NavigationLink("Reviews") { ReviewsView(site: site) }
+                        NavigationLink("Marketing") { MarketingView(site: site) }
+                        if appState.account?.account_type == .business {
+                            NavigationLink("Collabs") { OwnerCollabsView() }
+                        }
                         if site.is_multi_location {
                             NavigationLink("Locations & Staff") { LocationsStaffView(site: site) }
                         }
                     }
                 }
                 Section {
-                    Button("Sign out", role: .destructive) { appState.didLogout() }
+                    NavigationLink("Account") { AccountView() }
                 }
             }
             .navigationTitle("More")

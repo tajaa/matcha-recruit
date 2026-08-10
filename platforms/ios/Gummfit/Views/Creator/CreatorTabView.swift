@@ -8,13 +8,13 @@ struct CreatorTabView: View {
 
     var body: some View {
         TabView {
-            PlaceholderTab(title: "Profile")
+            CreatorProfileView()
                 .tabItem { Label("Profile", systemImage: "person.crop.circle") }
 
-            PlaceholderTab(title: "Deals")
+            CreatorDealsView()
                 .tabItem { Label("Deals", systemImage: "star.bubble") }
 
-            PlaceholderTab(title: "Earnings")
+            EarningsView()
                 .tabItem { Label("Earnings", systemImage: "dollarsign.circle") }
 
             accountTab
