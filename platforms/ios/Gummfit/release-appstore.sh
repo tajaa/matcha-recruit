@@ -11,6 +11,7 @@
 # Usage:
 #   ./release-appstore.sh                 bump, archive, upload
 #   ./release-appstore.sh --no-upload     bump + archive only
+#   ./release-appstore.sh --no-push       upload without pushing the build commit
 #   ./release-appstore.sh --no-bump       re-upload the current build number
 #   ./release-appstore.sh --status        show build number and release history
 #   ./release-appstore.sh --set-build N   recover from App Store Connect drift
@@ -36,12 +37,14 @@ RELEASE_LOG="$PROJECT_DIR/release.log"
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 
 NO_UPLOAD=false
+NO_PUSH=false
 NO_BUMP=false
 SHOW_STATUS=false
 SET_BUILD=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-upload) NO_UPLOAD=true; shift ;;
+        --no-push)   NO_PUSH=true; shift ;;
         --no-bump)   NO_BUMP=true; shift ;;
         --status)    SHOW_STATUS=true; shift ;;
         --set-build)
@@ -108,6 +111,44 @@ BUMP_DONE=false
 PROJECT_YML_BACKUP=""
 OLD_VERSION=""
 NEW_VERSION=""
+RELEASE_COMMIT=""
+PRE_RELEASE_HEAD=""
+PRE_RELEASE_UPSTREAM=""
+
+capture_git_state() {
+    if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        return 0
+    fi
+    PRE_RELEASE_HEAD="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
+    local upstream
+    upstream="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+    if [[ -n "$upstream" ]]; then
+        PRE_RELEASE_UPSTREAM="$(git -C "$PROJECT_DIR" rev-parse "$upstream")"
+    fi
+}
+
+verify_signing_prerequisites() {
+    if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq 'Apple Distribution:'; then
+        echo "${RED}error:${NC} no valid Apple Distribution signing identity is installed"
+        echo "  Install the Apple Distribution certificate for team ${APPLE_TEAM_ID} in Keychain Access."
+        return 1
+    fi
+
+    local profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+    local profile name
+    if [[ -d "$profile_dir" ]]; then
+        while IFS= read -r -d '' profile; do
+            name="$(security cms -D -i "$profile" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || true)"
+            if [[ "$name" == "$PROFILE_NAME" ]]; then
+                return 0
+            fi
+        done < <(find "$profile_dir" -maxdepth 1 -type f -name '*.mobileprovision' -print0)
+    fi
+
+    echo "${RED}error:${NC} App Store provisioning profile \"${PROFILE_NAME}\" is not installed"
+    echo "  Download it for ${BUNDLE_ID_OVERRIDE} from Apple Developer, then open the .mobileprovision file."
+    return 1
+}
 
 bump_build_number() {
     OLD_VERSION="$(build_number)"
@@ -124,7 +165,7 @@ bump_build_number() {
 }
 
 bump_marketing_version() {
-    [[ -n "${MARKETING_VERSION:-}" ]] || return
+    [[ -n "${MARKETING_VERSION:-}" ]] || return 0
     local old
     old=$(grep -oE 'MARKETING_VERSION: "[^"]+"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([^"]+)"/\1/')
     sed -i '' "s/MARKETING_VERSION: \"${old}\"/MARKETING_VERSION: \"${MARKETING_VERSION}\"/g" "$PROJECT_YML"
@@ -206,6 +247,8 @@ do_upload() {
 }
 
 trap rollback_bump ERR
+verify_signing_prerequisites
+capture_git_state
 if ! $NO_BUMP; then
     bump_build_number
     bump_marketing_version
@@ -226,6 +269,7 @@ if ! $NO_BUMP && [[ -n "$NEW_VERSION" ]] && git -C "$PROJECT_DIR" rev-parse --is
     if ! git -C "$PROJECT_DIR" diff --cached --quiet -- "$PROJECT_YML" "$PROJECT_DIR/Gummfit.xcodeproj/project.pbxproj"; then
         git -C "$PROJECT_DIR" commit -m "chore(gummfit-ios): bump build to ${NEW_VERSION}" \
             -- "$PROJECT_YML" "$PROJECT_DIR/Gummfit.xcodeproj/project.pbxproj" >/dev/null
+        RELEASE_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
         echo "${GREEN}committed:${NC} build ${NEW_VERSION} project.yml bump"
     fi
 fi
@@ -240,6 +284,32 @@ fi
 if ! do_upload; then
     log_attempt "$NEW_VERSION" OK FAIL "upload failed — build number kept; retry with --no-bump"
     exit 1
+fi
+
+if ! $NO_PUSH && [[ -n "$RELEASE_COMMIT" ]]; then
+    current_branch="$(git -C "$PROJECT_DIR" branch --show-current)"
+    upstream_ref="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+    if [[ -z "$current_branch" || -z "$upstream_ref" ]]; then
+        log_attempt "$NEW_VERSION" OK OK "upload succeeded; push skipped — branch has no upstream"
+        echo "${YELLOW}upload succeeded, but the release commit was not pushed${NC}"
+        echo "  push manually: git push"
+        exit 1
+    fi
+    if [[ "$PRE_RELEASE_HEAD" != "$PRE_RELEASE_UPSTREAM" ]]; then
+        log_attempt "$NEW_VERSION" OK OK "upload succeeded; push skipped — branch had unpublished commits before release"
+        echo "${YELLOW}upload succeeded, but the release commit was not pushed${NC}"
+        echo "  push manually after review: git push"
+        exit 1
+    fi
+    upstream_remote="${upstream_ref%%/*}"
+    upstream_branch="${upstream_ref#*/}"
+    if ! git -C "$PROJECT_DIR" push "$upstream_remote" "HEAD:$upstream_branch"; then
+        log_attempt "$NEW_VERSION" OK OK "upload succeeded; push failed — push manually"
+        echo "${YELLOW}upload succeeded, but pushing the release commit failed${NC}"
+        echo "  retry manually: git push"
+        exit 1
+    fi
+    echo "${GREEN}pushed:${NC} build ${NEW_VERSION} commit"
 fi
 
 log_attempt "$NEW_VERSION" OK OK "uploaded to ASC; processing 5–15 min before TestFlight"

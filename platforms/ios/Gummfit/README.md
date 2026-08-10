@@ -21,6 +21,7 @@ default debug URL is `http://127.0.0.1:8001/api/cappe`; release builds use
 ```sh
 make release-dry   # bump, archive, and validate signing; no upload
 make release       # bump, archive, and upload to App Store Connect/TestFlight
+./release-appstore.sh --no-push  # upload without pushing the generated build commit
 ```
 
 `release-appstore.sh` requires `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and
