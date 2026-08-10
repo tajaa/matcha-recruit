@@ -39,12 +39,12 @@ PROJECT="$PROJECT_DIR/Matcha.xcodeproj"
 SCHEME="Matcha"
 CONFIG="Release"
 BUILD_DIR="$PROJECT_DIR/build/release"
-ARCHIVE_PATH="$BUILD_DIR/Matcha.xcarchive"
+ARCHIVE_PATH="$BUILD_DIR/Espresso.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
-APP_PATH="$EXPORT_PATH/Matcha.app"
-ZIP_PATH="$BUILD_DIR/Matcha.zip"
-DMG_PATH="$BUILD_DIR/Matcha.dmg"
+APP_PATH="$EXPORT_PATH/Espresso.app"
+ZIP_PATH="$BUILD_DIR/Espresso.zip"
+DMG_PATH="$BUILD_DIR/Espresso.dmg"
 
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 

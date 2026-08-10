@@ -140,7 +140,7 @@ if [[ "$CMD" == "build" ]]; then
 fi
 
 APP_PATH=$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" -showBuildSettings 2>/dev/null \
-    | awk '/ BUILT_PRODUCTS_DIR = /{print $3}' | head -1)/Matcha.app
+    | awk '/ BUILT_PRODUCTS_DIR = /{print $3}' | head -1)/Espresso.app
 
 if [[ ! -d "$APP_PATH" ]]; then
     echo "${RED}app not found at $APP_PATH${NC}"
@@ -149,14 +149,14 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 # Kill any prior instance
-pkill -x Matcha 2>/dev/null || true
+pkill -x Espresso 2>/dev/null || true
 sleep 0.2
 
 # Launch with MATCHA_API_URL pointing at the tunneled EC2 backend.
 # Must launch the binary directly — `open` doesn't pass env vars to the app.
 echo "${DIM}launching against prod backend (localhost:$LOCAL_API_PORT)${NC}"
 export MATCHA_API_URL="http://localhost:$LOCAL_API_PORT/api"
-"$APP_PATH/Contents/MacOS/Matcha" &
+"$APP_PATH/Contents/MacOS/Espresso" &
 APP_PID=$!
 
 echo "${GREEN}running (pid $APP_PID)${NC} — tunnels stay up until you run: $0 stop"

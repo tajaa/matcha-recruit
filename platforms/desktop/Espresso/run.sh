@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and launch the Matcha macOS Swift app.
+# Build and launch the Espresso macOS Swift app.
 # Usage:
 #   ./run.sh          build + launch (default)
 #   ./run.sh build    build only
@@ -55,7 +55,7 @@ if [[ "$CMD" == "build" ]]; then
 fi
 
 APP_PATH=$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" -showBuildSettings 2>/dev/null \
-    | awk '/ BUILT_PRODUCTS_DIR = /{print $3}' | head -1)/Matcha.app
+    | awk '/ BUILT_PRODUCTS_DIR = /{print $3}' | head -1)/Espresso.app
 
 if [[ ! -d "$APP_PATH" ]]; then
     echo "${RED}app not found at $APP_PATH${NC}"
@@ -63,7 +63,7 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 # Kill any prior instance so launch is clean.
-pkill -x Matcha 2>/dev/null || true
+pkill -x Espresso 2>/dev/null || true
 sleep 0.2
 echo "${DIM}launching $APP_PATH${NC}"
 open "$APP_PATH"
