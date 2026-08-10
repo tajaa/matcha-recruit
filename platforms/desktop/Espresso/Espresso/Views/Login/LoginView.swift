@@ -41,7 +41,7 @@ struct LoginView: View {
 
                 // Brand — MW monogram + wordmark
                 VStack(spacing: 14) {
-                    MWMonogram(size: 68)
+                    EspressoMark(size: 68)
 
                     VStack(spacing: 4) {
                         Text("Espresso")

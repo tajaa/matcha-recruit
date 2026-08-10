@@ -28,9 +28,12 @@ extension AppState {
     var isSidebarDark: Bool { isLightFamily }
 
     var themeSidebar: Color {
-        isSidebarDark
-            ? Color(red: 0.075, green: 0.078, blue: 0.086)
-            : Color(red: 0.775, green: 0.770, blue: 0.750)
+        if isSidebarDark {
+            return appTheme == "platinum"
+                ? Color.platinumSidebar
+                : Color(red: 0.075, green: 0.078, blue: 0.086)
+        }
+        return Color(red: 0.775, green: 0.770, blue: 0.750)
     }
 
     var themeSidebarCard: Color {

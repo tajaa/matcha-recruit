@@ -638,7 +638,7 @@ struct SidebarFooterButton: View {
                     .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarText.opacity(0.85))
+                    .foregroundColor(appState.themeSidebarText.opacity(isActive ? 1.0 : 0.85))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {

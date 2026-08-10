@@ -130,7 +130,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Button {
                             showNotifications.toggle()
                         } label: {
@@ -151,6 +151,9 @@ struct ContentView: View {
                                 .font(.system(size: 12))
                                 .foregroundColor(appState.themeText.opacity(0.55))
                                 .underline(false)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: 170)
                         }
                         .buttonStyle(.plain)
                         .help("Edit profile")
@@ -161,7 +164,7 @@ struct ContentView: View {
                         } label: {
                             Text(appState.plan == .free ? "upgrade" : appState.plan.displayName.lowercased())
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(Color.matcha500)
+                                .foregroundColor(appState.themeText.opacity(0.68))
                         }
                         .buttonStyle(.plain)
                         .help(appState.plan == .free ? "Upgrade Werk" : "Werk \(appState.plan.displayName) — view plans")
@@ -175,6 +178,10 @@ struct ContentView: View {
                         .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.5))
                     }
+                    // Keep the native toolbar capsule self-contained when the
+                    // window narrows: the account label yields first instead
+                    // of pushing the plan/logout text outside its boundary.
+                    .frame(maxWidth: 350)
                 }
             }
         }
@@ -206,7 +213,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             // Brand header — MW monogram + wordmark, pinned above the scroll.
             HStack(spacing: 9) {
-                MWMonogram(size: 26)
+                EspressoMark(size: 26)
                 Text("Espresso")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(appState.themeSidebarText)
@@ -422,7 +429,7 @@ struct ContentView: View {
                 Text(title.uppercased())
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.5)
-                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
+                    .foregroundColor(appState.themeSidebarText)
                 if lockedFeature != nil {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 8))
@@ -587,7 +594,7 @@ struct ContentView: View {
                     .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarText.opacity(0.85))
+                    .foregroundColor(appState.themeSidebarText.opacity(isActive ? 1.0 : 0.85))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {

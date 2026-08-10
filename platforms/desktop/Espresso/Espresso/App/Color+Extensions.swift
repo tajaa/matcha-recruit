@@ -146,17 +146,16 @@ extension Color {
     static let graphiteRadialCenter = Color(red: 0.176, green: 0.176, blue: 0.188) // #2D2D30 medium-gray spotlight
     static let graphiteRadialEdge   = Color(red: 0.086, green: 0.086, blue: 0.094) // #161618 darker edge
 
-    // Platinum theme — the signature MW look (default). A cool light-gray base
-    // with a soft light-gray radial gradient and a dark cool-charcoal accent
-    // (the MW monogram color). Grayscale, faintly blue-cool, premium-light.
-    static let platinumBg          = Color(red: 0.925, green: 0.929, blue: 0.941) // #ECEDF0 cool light gray
-    static let platinumCard        = Color(red: 0.984, green: 0.988, blue: 0.996) // #FBFCFE near-white card
-    static let platinumSidebar     = Color(red: 0.871, green: 0.878, blue: 0.902) // #DEE0E6 darker than body (rail contrast)
-    static let platinumBorder      = Color(red: 0.835, green: 0.847, blue: 0.875) // #D5D8DF hairline
+    // Platinum theme — a cooler, more dimensional silver finish. Blue-silver
+    // surfaces and graphite rail evoke machined metal without reading sterile.
+    static let platinumBg          = Color(red: 0.847, green: 0.867, blue: 0.898) // #D8DDE5 blue-silver body
+    static let platinumCard        = Color(red: 0.957, green: 0.965, blue: 0.973) // #F4F6F8 pearl surface
+    static let platinumSidebar     = Color(red: 0.149, green: 0.173, blue: 0.204) // #262C34 graphite-silver rail
+    static let platinumBorder      = Color(red: 0.718, green: 0.745, blue: 0.784) // #B7BEC8 steel hairline
     static let platinumAccent      = Color(red: 0.169, green: 0.180, blue: 0.208) // #2B2E35 dark cool charcoal (MW mark)
     static let platinumAccentDark  = Color(red: 0.106, green: 0.114, blue: 0.133) // #1B1D22
     static let platinumText        = Color(red: 0.106, green: 0.114, blue: 0.133) // #1B1D22
     static let platinumSecondary   = Color(red: 0.416, green: 0.431, blue: 0.471) // #6A6E78 cool gray text
-    static let platinumRadialCenter = Color(red: 0.969, green: 0.973, blue: 0.984) // #F7F8FB bright spotlight
-    static let platinumRadialEdge   = Color(red: 0.863, green: 0.871, blue: 0.898) // #DCDEE5 darker edge
+    static let platinumRadialCenter = Color(red: 0.973, green: 0.976, blue: 0.984) // #F8F9FB pearl highlight
+    static let platinumRadialEdge   = Color(red: 0.729, green: 0.761, blue: 0.804) // #BAC2CD brushed-silver edge
 }

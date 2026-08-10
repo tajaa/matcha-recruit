@@ -37,24 +37,22 @@ extension ProjectDetailView {
     }
 
     var collabTabStrip: some View {
-        HStack(spacing: 2) {
-            // Full icon+label row needs ~680pt; in a split pane the project can
-            // get ~360pt, which used to compress every label into a one-letter-
-            // per-line vertical smear. Fall back to icon-only tabs (tooltips
-            // carry the labels) when the labeled row doesn't fit.
-            ViewThatFits(in: .horizontal) {
-                collabTabButtons(iconOnly: false)
-                collabTabButtons(iconOnly: true)
+        GeometryReader { proxy in
+            // Nine full labels fit comfortably in a normal project pane. When
+            // the pane is split or resized smaller, switch every tab to its
+            // icon rather than wrapping just the last few labels.
+            let useCompactTabs = proxy.size.width < 880
+            HStack(spacing: 4) {
+                collabTabButtons(iconOnly: useCompactTabs, fillsWidth: true)
+                collabStatusPill
             }
-            Spacer(minLength: 4)
-            collabStatusPill
+            .padding(.horizontal, 10)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .frame(height: 44)
     }
 
-    func collabTabButtons(iconOnly: Bool) -> some View {
-        HStack(spacing: 6) {
+    func collabTabButtons(iconOnly: Bool, fillsWidth: Bool = false) -> some View {
+        HStack(spacing: 4) {
             // Threads muted in projects for now (kept in the enum so nothing
             // referencing .threads breaks; just not offered as a tab).
             ForEach(CollabRightPanel.allCases.filter { $0 != .threads }) { panel in
@@ -68,20 +66,22 @@ extension ProjectDetailView {
                             Text(panel.label)
                                 .font(.system(size: 11, weight: .medium))
                                 .lineLimit(1)
-                                .fixedSize()
+                                .minimumScaleFactor(0.85)
                         }
                     }
-                    .padding(.horizontal, iconOnly ? 7 : 10)
-                    .padding(.vertical, 5)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, iconOnly ? 7 : 9)
+                    .padding(.vertical, 6)
                     .foregroundColor(collabPanel == panel ? appState.themeText : appState.themeText.opacity(0.55))
                     .background(
                         RoundedRectangle(cornerRadius: 5)
-                            .fill(collabPanel == panel ? appState.themeAccent.opacity(0.25) : Color.clear)
+                            .fill(collabPanel == panel ? appState.themeAccent.opacity(0.12) : Color.clear)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 5)
                             .stroke(collabPanel == panel ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
                     )
+                    .frame(maxWidth: fillsWidth ? .infinity : nil)
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(panel.shortcutKey, modifiers: .command)

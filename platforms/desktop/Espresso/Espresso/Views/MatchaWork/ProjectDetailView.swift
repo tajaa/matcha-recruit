@@ -191,10 +191,17 @@ struct ProjectDetailView: View {
                             Text(project.title)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(appState.themeText)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .layoutPriority(1)
                             Image(systemName: "pencil")
                                 .font(.system(size: 9))
                                 .foregroundColor(appState.themeText.opacity(0.4))
                         }
+                        // The native toolbar wraps this control in a capsule.
+                        // A fixed intrinsic width let long project names spill
+                        // through that capsule instead of truncating cleanly.
+                        .frame(maxWidth: 220, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Click to rename")
@@ -293,10 +300,10 @@ struct ProjectDetailView: View {
                             Text("Completed")
                                 .font(.system(size: 10, weight: .medium))
                         }
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(appState.themeText)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 4)
-                        .background(Color.matcha500.opacity(0.12))
+                        .background(appState.themeAccent.opacity(0.10))
                         .cornerRadius(6)
                     } else {
                         Button { showCompleteConfirm = true } label: {

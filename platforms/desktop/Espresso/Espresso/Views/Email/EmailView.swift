@@ -59,12 +59,13 @@ struct EmailSidebarView: View {
                 } else {
                     Image(systemName: "envelope.badge")
                         .font(.system(size: 12))
+                        .foregroundColor(appState.themeSidebarAccent)
                     Text("Connect Gmail")
                 }
                 Spacer()
             }
             .font(.system(size: 12, weight: .medium))
-            .foregroundColor(appState.themeSidebarAccent)
+            .foregroundColor(appState.themeSidebarText)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .contentShape(Rectangle())

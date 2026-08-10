@@ -105,22 +105,18 @@ struct ThemeRadialBackground: View {
     }
 }
 
-// MARK: - MW monogram (brand mark)
+// MARK: - Espresso brand mark
 
-/// The Matcha-Work "MW" monogram — the signature brand mark for the platinum
-/// identity. Typographic (SF Rounded Bold), dark cool-charcoal letters on a
-/// soft light-gray gradient tile. Used on the login screen and at the top of
-/// the sidebar. Sizes scale off `size` so it stays crisp at 22pt or 72pt.
-struct MWMonogram: View {
-    /// Edge length of the rounded tile (the glyph scales from this).
+/// Espresso's coffee-cup mark on the shared platinum tile. It is used on the
+/// login screen and at the top of the sidebar, scaling cleanly from 22pt to
+/// 72pt without needing a separate bitmap asset.
+struct EspressoMark: View {
     var size: CGFloat = 64
-    /// Draw the gradient tile + border, or just the bare letters.
     var showTile: Bool = true
 
     var body: some View {
-        let letters = Text("MW")
-            .font(.system(size: size * 0.40, weight: .bold, design: .rounded))
-            .tracking(-size * 0.018)
+        let mark = Image(systemName: "cup.and.saucer.fill")
+            .font(.system(size: size * 0.44, weight: .semibold))
             .foregroundStyle(
                 LinearGradient(
                     colors: [Color.platinumAccent, Color.platinumAccentDark],
@@ -129,7 +125,7 @@ struct MWMonogram: View {
             )
 
         if showTile {
-            letters
+            mark
                 .frame(width: size, height: size)
                 .background(
                     RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
@@ -147,7 +143,7 @@ struct MWMonogram: View {
                 .shadow(color: .black.opacity(0.10), radius: size * 0.14, y: size * 0.05)
                 .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
         } else {
-            letters
+            mark
         }
     }
 }
