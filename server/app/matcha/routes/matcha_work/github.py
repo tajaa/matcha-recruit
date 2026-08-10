@@ -138,13 +138,14 @@ async def put_github_connection(
 ):
     """Connect (or change) this project's GitHub repo. Empty repo disconnects.
     Validates the repo is readable with the server token before saving."""
-    _project, role = await _verify_project_access(project_id, current_user)
+    project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     from app.matcha.services.matcha_work import github_service as gh_svc
     repo = ((body or {}).get("repo") or "").strip().strip("/")
     branch = ((body or {}).get("branch") or "").strip() or None
     if not repo:
+        await gh_svc.clear_repository_snapshot(project_id, delete_element=True)
         async with get_connection() as conn:
             await conn.execute(
                 "UPDATE mw_projects SET github_repo = NULL, github_branch = NULL WHERE id = $1",
@@ -156,6 +157,8 @@ async def put_github_connection(
     except gh_svc.GitHubError as e:
         raise HTTPException(status_code=400, detail=str(e))
     branch = branch or info.get("default_branch")
+    if repo != project.get("github_repo") or branch != project.get("github_branch"):
+        await gh_svc.clear_repository_snapshot(project_id)
     async with get_connection() as conn:
         await conn.execute(
             "UPDATE mw_projects SET github_repo = $1, github_branch = $2 WHERE id = $3",
@@ -170,8 +173,7 @@ async def github_sync_endpoint(
     body: dict = Body(default={}),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Fetch every bound element's globbed files from the project's connected
-    GitHub repo (read-only token, server-side) and refresh its snapshot."""
+    """Index the connected GitHub repo, then refresh any custom element scopes."""
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
@@ -180,24 +182,42 @@ async def github_sync_endpoint(
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
 
+    # Always keep one complete, hidden project snapshot. Custom element globs
+    # are optional refinements for component-scoped Props and commit matching;
+    # they must not be a prerequisite for understanding a connected repo.
+    repository_element_id = await gh_svc.ensure_repository_snapshot_element(
+        project_id, repo, ref,
+    )
+    try:
+        repository_summary = await gh_svc.sync_element(
+            project_id, repository_element_id, gh_svc.REPOSITORY_SNAPSHOT_GLOBS,
+            repo=repo, ref=ref,
+        )
+    except gh_svc.GitHubError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     elements = await _list_project_elements(project_id)
     bound = [el for el in elements if (el.get("repo_paths") or [])]
-    if not bound:
-        raise HTTPException(status_code=400, detail="No element has repo path globs bound yet.")
-
-    results = []
-    total = 0
+    results = [{
+        "element_id": repository_element_id,
+        "name": repo,
+        "scope": "repository",
+        **repository_summary,
+    }]
     for el in bound:
         try:
             summary = await gh_svc.sync_element(
                 project_id, el["id"], el.get("repo_paths") or [],
                 repo=repo, ref=ref or el.get("repo_branch"),
             )
-            total += summary.get("stored", 0)
             results.append({"element_id": el["id"], "name": el.get("name"), **summary})
         except gh_svc.GitHubError as e:
             results.append({"element_id": el["id"], "name": el.get("name"), "error": str(e)})
-    return {"repo": repo, "total_stored": total, "elements": results}
+    return {
+        "repo": repo,
+        "total_stored": repository_summary.get("stored", 0),
+        "elements": results,
+    }
 
 @router.post("/projects/{project_id}/github/scan-commits")
 async def github_scan_commits_endpoint(

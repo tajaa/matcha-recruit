@@ -35,6 +35,7 @@ async def _list_project_elements(project_id: UUID) -> list[dict]:
             LEFT JOIN employees emp ON emp.user_id::text = e.assigned_to
             LEFT JOIN admins a ON a.user_id::text = e.assigned_to
             WHERE e.project_id = $1
+              AND e.kind IS DISTINCT FROM '_repository_snapshot'
             ORDER BY e."order" ASC, e.created_at ASC
             """,
             str(project_id),

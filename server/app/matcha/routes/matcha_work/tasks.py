@@ -345,7 +345,9 @@ async def ai_draft_task_endpoint(
     collaborators = await proj_svc.list_collaborators(project_id)
     async with get_connection() as conn:
         element_rows = await conn.fetch(
-            "SELECT id, name, description FROM mw_project_elements WHERE project_id = $1 ORDER BY \"order\" ASC, created_at ASC",
+            """SELECT id, name, description FROM mw_project_elements
+               WHERE project_id = $1 AND kind IS DISTINCT FROM '_repository_snapshot'
+               ORDER BY \"order\" ASC, created_at ASC""",
             str(project_id),
         )
         # Element context notes (one query, grouped client-side).
@@ -392,6 +394,13 @@ async def ai_draft_task_endpoint(
         conventions = ""
 
     try:
+        repository_context, _manifest = await repo_svc.build_relevant_grounding_context(
+            project_id, prompt, char_budget=100_000,
+        )
+    except Exception:  # noqa: BLE001 — advisory context, never block a draft
+        repository_context = ""
+
+    try:
         draft = await matcha_work_ai.generate_task_draft(
             prompt=prompt,
             project_title=project.get("title"),
@@ -402,6 +411,7 @@ async def ai_draft_task_endpoint(
             company_id=str(project.get("company_id")) if project.get("company_id") else None,
             user_id=str(current_user.id),
             conventions=conventions or None,
+            repository_context=repository_context or None,
         )
     except Exception as e:
         logger.warning("AI task draft failed project=%s: %s", project_id, e)

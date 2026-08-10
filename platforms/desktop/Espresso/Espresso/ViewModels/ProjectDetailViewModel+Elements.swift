@@ -115,6 +115,9 @@ extension ProjectDetailViewModel {
                 project?.githubRepo = conn.repo
                 project?.githubBranch = conn.branch
             }
+            // Prime repository knowledge immediately. Component Elements and
+            // path globs are optional refinements, not an indexing prerequisite.
+            if conn.connected { await syncFromGitHub() }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -254,14 +257,11 @@ extension ProjectDetailViewModel {
     /// Auto-sync on Props-tab open, gated so it can't spam GitHub:
     ///  1. skip if a sync is already running (no concurrent calls)
     ///  2. skip if synced within the cooldown window (per project)
-    ///  3. skip if no element has globs bound (nothing to fetch)
     /// Silent on failure (no error banner) — the manual button surfaces errors
     /// and bypasses the cooldown.
     func autoSyncFromGitHubIfStale() async {
         guard let pid = project?.id, !isSyncingRepo, isGitHubConnected else { return }
         if let last = lastGitHubSyncAt[pid], Date().timeIntervalSince(last) < githubSyncCooldown { return }
-        if elements.isEmpty { await loadElements() }
-        guard elements.contains(where: { !($0.repoPaths ?? []).isEmpty }) else { return }
         // Stamp BEFORE the await so a rapid second .task firing can't double-fire.
         lastGitHubSyncAt[pid] = Date()
         await MainActor.run { isSyncingRepo = true }

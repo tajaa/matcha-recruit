@@ -209,7 +209,7 @@ struct ElementsView: View {
                     .font(.system(size: 10)).foregroundColor(.matcha500)
                 }
                 .buttonStyle(.plain).disabled(viewModel.isSyncingRepo)
-                .help("Pull each bound element's code from GitHub (for Prop chats)")
+                .help("Index the connected repository for AI tickets and Prop chats")
                 Menu {
                     Button("Enable push auto-scan") { Task { await viewModel.installGitHubWebhook() } }
                     Button("Change repo…") { showConnectSheet = true }

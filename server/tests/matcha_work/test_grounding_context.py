@@ -3,7 +3,11 @@
     cd server && ./venv/bin/python -m pytest tests/matcha_work/test_grounding_context.py -q
 """
 
-from app.matcha.services.matcha_work.element_repo_service import assemble_context
+from app.matcha.services.matcha_work.element_repo_service import (
+    assemble_context,
+    query_terms,
+    rank_relevant_files,
+)
 
 
 def test_includes_small_files_whole():
@@ -38,3 +42,20 @@ def test_empty():
     text, manifest = assemble_context([], char_budget=1000)
     assert text == ""
     assert manifest == {"included": [], "truncated": [], "omitted": []}
+
+
+def test_query_terms_removes_filler_and_adds_singulars():
+    terms = query_terms("Add capability for sellers to edit existing products")
+    assert "seller" in terms
+    assert "product" in terms
+    assert "existing" not in terms
+
+
+def test_repo_retrieval_prioritizes_matching_paths():
+    files = [
+        ("docs/product-notes.md", "general notes"),
+        ("server/app/products/routes.py", "def update_product(): pass"),
+        ("server/app/users/routes.py", "a product appears once"),
+    ]
+    ranked = rank_relevant_files(files, "let sellers edit products")
+    assert ranked[0][0] == "server/app/products/routes.py"

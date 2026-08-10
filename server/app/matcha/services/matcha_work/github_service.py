@@ -20,6 +20,7 @@ import httpx
 
 from . import element_repo_service
 from .commit_scan_service import path_matches_glob
+from ....database import connection_or_direct
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,13 @@ MAX_FILES_PER_ELEMENT = 600
 MAX_DIFF_CHARS = 60_000          # per-commit diff cap fed to the matcher
 DEFAULT_COMMIT_LIMIT = 15        # how far back a *forced* (full) scan looks; watermark scans only do new commits
 _BLOB_CONCURRENCY = 10
+
+# A connected repository needs one project-wide snapshot even when the user has
+# not created component Elements or bound path globs yet. This backing element
+# is deliberately hidden from the Elements UI; user Elements remain the source
+# of truth for component ownership and commit matching.
+REPOSITORY_SNAPSHOT_KIND = "_repository_snapshot"
+REPOSITORY_SNAPSHOT_GLOBS = ["**/*"]
 
 EXCLUDED_DIRS = {
     ".git", "node_modules", "dist", "build", ".build", "Pods", "DerivedData",
@@ -43,6 +51,66 @@ EXCLUDED_NAMES = {
 
 class GitHubError(Exception):
     pass
+
+
+async def ensure_repository_snapshot_element(
+    project_id: UUID, repo: str, ref: Optional[str],
+) -> str:
+    """Return the hidden element used to store the project-wide repo index.
+
+    The transaction-scoped advisory lock makes creation idempotent when two
+    collaborators press Sync at the same time without requiring a schema
+    migration solely for a partial unique index.
+    """
+    async with connection_or_direct() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                f"mw-repository-snapshot:{project_id}",
+            )
+            row = await conn.fetchrow(
+                """SELECT id FROM mw_project_elements
+                   WHERE project_id = $1 AND kind = $2
+                   ORDER BY created_at ASC LIMIT 1""",
+                str(project_id), REPOSITORY_SNAPSHOT_KIND,
+            )
+            if row:
+                await conn.execute(
+                    """UPDATE mw_project_elements
+                       SET name = $1, repo_paths = $2, repo_branch = $3, updated_at = now()
+                       WHERE id = $4""",
+                    repo, REPOSITORY_SNAPSHOT_GLOBS, ref, row["id"],
+                )
+                return str(row["id"])
+            row = await conn.fetchrow(
+                """INSERT INTO mw_project_elements
+                       (project_id, name, kind, description, repo_paths, repo_branch)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   RETURNING id""",
+                str(project_id), repo, REPOSITORY_SNAPSHOT_KIND,
+                "Project-wide connected repository index",
+                REPOSITORY_SNAPSHOT_GLOBS, ref,
+            )
+            return str(row["id"])
+
+
+async def clear_repository_snapshot(project_id: UUID, *, delete_element: bool = False) -> None:
+    """Discard stale code knowledge after changing or disconnecting a repo."""
+    async with connection_or_direct() as conn:
+        if delete_element:
+            await conn.execute(
+                "DELETE FROM mw_project_elements WHERE project_id = $1 AND kind = $2",
+                str(project_id), REPOSITORY_SNAPSHOT_KIND,
+            )
+        else:
+            await conn.execute(
+                """DELETE FROM mw_element_repo_files
+                   WHERE project_id = $1 AND element_id IN (
+                       SELECT id FROM mw_project_elements
+                       WHERE project_id = $1 AND kind = $2
+                   )""",
+                str(project_id), REPOSITORY_SNAPSHOT_KIND,
+            )
 
 
 def default_repo() -> Optional[str]:

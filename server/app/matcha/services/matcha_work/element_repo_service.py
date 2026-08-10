@@ -8,6 +8,7 @@ grounds a Prop's repo chat. Capped-snapshot now; RAG/embeddings later.
 
 import hashlib
 import logging
+import re
 from typing import Optional
 from uuid import UUID
 
@@ -22,6 +23,13 @@ MAX_TOTAL_BYTES = 5_000_000  # per element
 
 # How much snapshot text to stuff into one Gemini prompt (chars ≈ bytes here).
 DEFAULT_CONTEXT_BUDGET = 300_000
+
+_QUERY_STOP_WORDS = {
+    "about", "after", "again", "also", "and", "are", "been", "before",
+    "build", "can", "could", "create", "does", "existing", "for", "from",
+    "have", "into", "make", "need", "our", "should", "that", "the", "their",
+    "then", "this", "through", "ticket", "update", "use", "want", "with",
+}
 
 
 async def replace_element_snapshot(project_id: UUID, element_id: str, files: list[dict]) -> dict:
@@ -99,9 +107,10 @@ async def fetch_convention_docs(project_id: UUID, char_budget: int = 20_000) -> 
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             """
-            SELECT path, content FROM mw_element_repo_files
+            SELECT DISTINCT ON (path) path, content FROM mw_element_repo_files
             WHERE project_id = $1
               AND regexp_replace(path, '^.*/', '') = ANY($2::text[])
+            ORDER BY path, updated_at DESC
             """,
             str(project_id), list(CONVENTION_BASENAMES),
         )
@@ -133,13 +142,81 @@ async def build_grounding_context(
             )
         elif project_id is not None:
             rows = await conn.fetch(
-                "SELECT path, content, size FROM mw_element_repo_files WHERE project_id = $1 ORDER BY path",
+                """SELECT DISTINCT ON (path) path, content, size
+                   FROM mw_element_repo_files WHERE project_id = $1
+                   ORDER BY path, updated_at DESC""",
                 str(project_id),
             )
         else:
             rows = []
 
     return assemble_context([(r["path"], r["content"]) for r in rows], char_budget)
+
+
+def query_terms(query: str, limit: int = 12) -> list[str]:
+    """Useful retrieval terms from a ticket request, including simple singulars."""
+    words = re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", (query or "").lower())
+    terms: list[str] = []
+    for word in words:
+        if word in _QUERY_STOP_WORDS or word in terms:
+            continue
+        terms.append(word)
+        if word.endswith("ies") and len(word) > 4:
+            singular = word[:-3] + "y"
+        elif word.endswith("s") and not word.endswith("ss") and len(word) > 4:
+            singular = word[:-1]
+        else:
+            singular = ""
+        if singular and singular not in terms:
+            terms.append(singular)
+        if len(terms) >= limit:
+            break
+    return terms[:limit]
+
+
+def rank_relevant_files(files: list[tuple[str, str]], query: str) -> list[tuple[str, str]]:
+    """Rank snapshot files by path/content overlap with the user's request."""
+    terms = query_terms(query)
+    if not terms:
+        return sorted(files, key=lambda item: item[0])
+
+    def score(item: tuple[str, str]) -> tuple[int, str]:
+        path, content = item
+        path_lower = path.lower()
+        content_lower = content.lower()
+        relevance = sum(
+            (12 if term in path_lower else 0) + min(content_lower.count(term), 8)
+            for term in terms
+        )
+        return (-relevance, path)
+
+    return sorted(files, key=score)
+
+
+async def build_relevant_grounding_context(
+    project_id: UUID, query: str, char_budget: int = 100_000,
+) -> tuple[str, dict]:
+    """Retrieve and rank repo files related to a ticket request.
+
+    Snapshot files are untrusted and are fenced by the caller before reaching
+    the model. The SQL prefilter keeps unrelated code out of the prompt, while
+    the ranking puts filename matches ahead of incidental content matches.
+    """
+    terms = query_terms(query)
+    if not terms:
+        return await build_grounding_context(None, project_id, char_budget)
+    patterns = [f"%{term}%" for term in terms]
+    async with connection_or_direct() as conn:
+        rows = await conn.fetch(
+            """SELECT DISTINCT ON (path) path, content
+               FROM mw_element_repo_files
+               WHERE project_id = $1
+                 AND (path ILIKE ANY($2::text[]) OR content ILIKE ANY($2::text[]))
+               ORDER BY path, updated_at DESC""",
+            str(project_id), patterns,
+        )
+    files = [(r["path"], r["content"]) for r in rows]
+    return assemble_context(rank_relevant_files(files, query), char_budget)
 
 
 def assemble_context(files: list[tuple[str, str]], char_budget: int = DEFAULT_CONTEXT_BUDGET) -> tuple[str, dict]:

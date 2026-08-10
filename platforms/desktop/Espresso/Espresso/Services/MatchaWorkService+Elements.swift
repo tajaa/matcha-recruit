@@ -111,8 +111,8 @@ extension MatchaWorkService {
         )
     }
 
-    /// Pull every bound element's code from GitHub (read-only token, server-side)
-    /// into its snapshot. No local clone / bookmark needed.
+    /// Index the connected repo, then refresh any component-scoped snapshots.
+    /// No local clone / bookmark needed.
     func syncFromGitHub(projectId: String) async throws -> GitHubSyncResult {
         struct EmptyBody: Encodable {}
         return try await client.request(
