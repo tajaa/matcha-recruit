@@ -12,11 +12,13 @@ struct HomeView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = HomeViewModel()
     @State private var requestsVM = RequestsQueueViewModel()
+    @State private var dashboard = OwnerDashboardViewModel()
     @State private var showDirectory = false
     @State private var showCreateSite = false
     @State private var declineTarget: CappeRequestSummary?
     @State private var declineReason = ""
     @State private var showDecline = false
+    @State private var showSetupProgress = false
 
     var body: some View {
         ScrollView {
@@ -24,8 +26,13 @@ struct HomeView: View {
                 ErrorBanner(message: vm.error)
                 siteCard
                 pendingRequestsSection
-                readinessSection
-                publishButton
+                if site.status == .published {
+                    operatingDashboard
+                    publishedReadinessSection
+                } else {
+                    readinessSection
+                    publishButton
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -54,16 +61,210 @@ struct HomeView: View {
         }
         .task(id: site.id) {
             vm.reset()
+            dashboard.reset()
             async let readiness: Void = vm.loadReadiness(siteId: site.id)
             async let requests: Void = requestsVM.load(siteId: site.id)
-            _ = await (readiness, requests)
+            async let operations: Void = dashboard.load(siteId: site.id)
+            _ = await (readiness, requests, operations)
         }
         .refreshable {
             async let sites: Void = appState.loadSites()
             async let readiness: Void = vm.loadReadiness(siteId: site.id)
             async let requests: Void = requestsVM.load(siteId: site.id)
-            _ = await (sites, readiness, requests)
+            async let operations: Void = dashboard.load(siteId: site.id)
+            _ = await (sites, readiness, requests, operations)
         }
+    }
+
+    @ViewBuilder
+    private var operatingDashboard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(appState.account?.account_type == .business ? "Run your business" : "Your site today")
+                    .font(.headline)
+                    .foregroundStyle(GummfitTheme.textPrimary)
+                Text("A live view of the work that keeps your site moving.")
+                    .font(.subheadline)
+                    .foregroundStyle(GummfitTheme.textDim)
+            }
+
+            if dashboard.isLoading && dashboard.orders.isEmpty {
+                ProgressView()
+                    .tint(GummfitTheme.accent)
+                    .frame(maxWidth: .infinity, minHeight: 104)
+            } else {
+                attentionItems
+                operationalMetrics
+                quickActions
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var attentionItems: some View {
+        if !dashboard.openOrders.isEmpty || !dashboard.upcomingBookings.isEmpty || dashboard.unreadMessages > 0 || !dashboard.lowStockProducts.isEmpty || dashboard.pendingReviews > 0 {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Needs your attention", systemImage: "exclamationmark.circle.fill")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(GummfitTheme.warning)
+
+                if !dashboard.openOrders.isEmpty {
+                    dashboardAction(
+                        "Fulfill (dashboard.openOrders.count) order\(dashboard.openOrders.count == 1 ? "" : "s")",
+                        detail: "Paid or awaiting your approval",
+                        icon: "bag.badge.plus",
+                        destination: { OrderListView(site: site) }
+                    )
+                }
+                if !dashboard.upcomingBookings.isEmpty {
+                    dashboardAction(
+                        "Check (dashboard.upcomingBookings.count) upcoming booking\(dashboard.upcomingBookings.count == 1 ? "" : "s")",
+                        detail: "Confirm details and keep your schedule current",
+                        icon: "calendar.badge.clock",
+                        destination: { BookingListView(site: site) }
+                    )
+                }
+                if dashboard.unreadMessages > 0 {
+                    dashboardAction(
+                        "Reply to (dashboard.unreadMessages) message\(dashboard.unreadMessages == 1 ? "" : "s")",
+                        detail: "Customers are waiting to hear from you",
+                        icon: "envelope.badge.fill",
+                        destination: { ThreadListView(site: site) }
+                    )
+                }
+                if !dashboard.lowStockProducts.isEmpty {
+                    dashboardAction(
+                        "Restock (dashboard.lowStockProducts.count) item\(dashboard.lowStockProducts.count == 1 ? "" : "s")",
+                        detail: "At or below your stock threshold",
+                        icon: "shippingbox.fill",
+                        destination: { ProductListView(site: site) }
+                    )
+                }
+                if dashboard.pendingReviews > 0 {
+                    dashboardAction(
+                        "Moderate (dashboard.pendingReviews) review\(dashboard.pendingReviews == 1 ? "" : "s")",
+                        detail: "Keep new feedback visible and current",
+                        icon: "star.bubble.fill",
+                        destination: { ReviewsView(site: site) }
+                    )
+                }
+            }
+            .gummfitCard()
+        }
+    }
+
+    private var operationalMetrics: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("At a glance")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(GummfitTheme.textPrimary)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                NavigationLink { OrderListView(site: site) } label: {
+                    dashboardMetric("Orders", value: "\(dashboard.openOrders.count)", detail: "to review or fulfill", icon: "bag")
+                }
+                NavigationLink { BookingListView(site: site) } label: {
+                    dashboardMetric("Bookings", value: "\(dashboard.upcomingBookings.count)", detail: "upcoming", icon: "calendar")
+                }
+                NavigationLink { ThreadListView(site: site) } label: {
+                    dashboardMetric("Inbox", value: "\(dashboard.unreadMessages)", detail: "unread messages", icon: "envelope")
+                }
+                NavigationLink { ProductListView(site: site) } label: {
+                    dashboardMetric("Catalog", value: "\(dashboard.products.count)", detail: dashboard.lowStockProducts.isEmpty ? "items live" : "\(dashboard.lowStockProducts.count) low in stock", icon: "square.grid.2x2")
+                }
+            }
+        }
+        .gummfitCard()
+    }
+
+    private var quickActions: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Keep building")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(GummfitTheme.textPrimary)
+            HStack(spacing: 10) {
+                dashboardShortcut("Add product", icon: "plus.circle.fill", destination: { ProductListView(site: site) })
+                dashboardShortcut("View sales", icon: "chart.line.uptrend.xyaxis", destination: { OrderListView(site: site) })
+                if site.is_multi_location {
+                    dashboardShortcut("Locations", icon: "mappin.and.ellipse", destination: { LocationsStaffView(site: site) })
+                }
+            }
+        }
+        .gummfitCard()
+    }
+
+    @ViewBuilder
+    private var publishedReadinessSection: some View {
+        if !readinessIsComplete {
+            DisclosureGroup(isExpanded: $showSetupProgress) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let readiness = vm.readiness {
+                        readinessProgress(readiness)
+                        ForEach(Array(readiness.items.enumerated()), id: \.element.id) { index, item in
+                            readinessRow(item)
+                            if index < readiness.items.count - 1 {
+                                Divider().overlay(GummfitTheme.border)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 12)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Finish setting up")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(GummfitTheme.textPrimary)
+                    Text(readinessSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(GummfitTheme.textDim)
+                }
+            }
+            .tint(GummfitTheme.accent)
+            .gummfitCard()
+        }
+    }
+
+    private func dashboardAction<Destination: View>(_ title: String, detail: String, icon: String, @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(GummfitTheme.accent)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(GummfitTheme.textPrimary)
+                    Text(detail).font(.caption).foregroundStyle(GummfitTheme.textDim)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(GummfitTheme.textDim)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dashboardMetric(_ title: String, value: String, detail: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Image(systemName: icon).foregroundStyle(GummfitTheme.accent)
+            Text(value).font(.title3.bold()).foregroundStyle(GummfitTheme.textPrimary)
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(GummfitTheme.textPrimary)
+            Text(detail).font(.caption2).foregroundStyle(GummfitTheme.textDim).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 106, alignment: .leading)
+        .padding(14)
+        .background(GummfitTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func dashboardShortcut<Destination: View>(_ title: String, icon: String, @ViewBuilder destination: @escaping () -> Destination) -> some View {
+        NavigationLink(destination: destination) {
+            VStack(spacing: 7) {
+                Image(systemName: icon).font(.title3).foregroundStyle(GummfitTheme.accent)
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(GummfitTheme.textPrimary).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 62)
+            .background(GummfitTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     /// Empty state renders nothing — no "no requests" clutter on a fresh site.
