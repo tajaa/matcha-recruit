@@ -138,6 +138,89 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
         logger.warning("channel->project Files sync failed", exc_info=True)
 
 
+async def _bg_maybe_dispatch_huume_code(channel_id_str: str, user, content: str, trigger_message_id) -> None:
+    """Queue one eligible collab-chat code run, entirely off the WS hot path."""
+    try:
+        from app.core.feature_flags import merge_company_features
+        from app.matcha.routes.matcha_work._shared import _can_edit_project
+        from app.matcha.services.huume_code.chat import post_as_huume
+        from app.core.services.redis_cache import check_rate_limit
+        from app.workers.tasks.huume_code import run_huume_code
+
+        async with get_connection() as conn:
+            project = await conn.fetchrow(
+                """SELECT p.id, p.company_id, p.github_repo, p.github_branch,
+                          c.is_personal, c.enabled_features, c.signup_source
+                   FROM mw_projects p JOIN companies c ON c.id=p.company_id
+                   WHERE p.project_type='collab'
+                     AND p.project_data->>'discussion_channel_id'=$1""",
+                channel_id_str,
+            )
+            if not project:
+                return
+            company_id = project["company_id"]
+            channel_id = UUID(channel_id_str)
+            features = merge_company_features(project["enabled_features"], project["signup_source"])
+            if project["is_personal"] or not (features.get("matcha_work") and features.get("huume_code")):
+                await post_as_huume(company_id, channel_id, "Huume code isn't enabled for this workspace.")
+                return
+            sender_role = (getattr(user, "role", "") or "").lower()
+            if sender_role not in ("client", "admin"):
+                await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
+                return
+            # Channel membership can cross company boundaries. Re-check both
+            # company ownership and the project collaborator role here; a
+            # client who happens to sit in another company's channel must not
+            # gain its repo write capability through the global GitHub token.
+            collaborator_role = await conn.fetchval(
+                """SELECT role FROM mw_project_collaborators
+                   WHERE project_id=$1 AND user_id=$2 AND status='active'""",
+                project["id"], user.id,
+            )
+            if sender_role == "client":
+                sender_company_id = await conn.fetchval(
+                    "SELECT company_id FROM clients WHERE user_id=$1", user.id,
+                )
+                if sender_company_id != company_id:
+                    await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
+                    return
+                # A same-company business user is the project owner unless
+                # explicitly added as a collaborator; match _verify_project_access.
+                collaborator_role = collaborator_role or "owner"
+            if collaborator_role is not None and not _can_edit_project(collaborator_role):
+                await post_as_huume(company_id, channel_id, "Only a project editor who is a business admin can ask Huume to write code.")
+                return
+            if not project["github_repo"]:
+                await post_as_huume(company_id, channel_id, "Connect a GitHub repo in Elements first.")
+                return
+            try:
+                await check_rate_limit(str(company_id), "huume_code_run", 10, 3600)
+            except HTTPException:
+                await post_as_huume(company_id, channel_id, "Huume has reached this company's hourly code-run limit. Please try again later.")
+                return
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", str(project["id"]))
+                live = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM huume_code_runs
+                       WHERE project_id=$1 AND status IN ('queued','running')
+                         AND COALESCE(started_at, created_at) > NOW() - INTERVAL '15 minutes')""",
+                    project["id"],
+                )
+                if live:
+                    await post_as_huume(company_id, channel_id, "Huume is already working on this project. I'll post the draft PR here when it's ready.")
+                    return
+                run_id = await conn.fetchval(
+                    """INSERT INTO huume_code_runs
+                       (company_id, project_id, channel_id, requested_by, trigger_message_id, status)
+                       VALUES ($1,$2,$3,$4,$5,'queued') RETURNING id""",
+                    company_id, project["id"], channel_id, user.id, trigger_message_id,
+                )
+            run_huume_code.delay(str(run_id))
+        await post_as_huume(company_id, channel_id, "Got it — I'll review the board and repository, then open a draft PR for review.")
+    except Exception:
+        logger.warning("Huume code dispatch failed", exc_info=True)
+
+
 def _system_message_payload(channel_id_str: str, sys_row) -> dict:
     """Broadcast payload for a persisted EMS/Huume system message — shared by
     _bg_ems_intake and _bg_ems_clarify so the 17-key WS message shape (every
@@ -3191,6 +3274,15 @@ async def channel_websocket(
                                 mentioned_user_ids = [str(m["id"]) for m in mentioned_users]
                             except Exception:
                                 logger.warning("[Channel WS] mention resolve failed", exc_info=True)
+
+                            # Huume's coding mode is independent of the EMS
+                            # mention flow below. It only runs in collab projects
+                            # and never resolves the inactive bot as a channel
+                            # member, so normal mention notifications stay quiet.
+                            if is_new_message and "huume" in mention_handles:
+                                _spawn_bg(_bg_maybe_dispatch_huume_code(
+                                    str(ch_uuid), user, row["content"], row["id"],
+                                ))
 
                             # EMS: ONE dispatch task, routed by
                             # _ems_dispatch_decision. Gated on is_new_message

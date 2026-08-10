@@ -252,6 +252,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `hr_pilot` | ❌ | HR Pilot — supervisor thread mode grounded on handbook/policy/legal-floor; deterministic hard-stop gate before any AI call. NOT bundled. → `server/app/matcha/services/pilots/CLAUDE.md` |
 | `ask_hr` | ❌ | Employee Ask-HR — portal counterpart of `hr_pilot`, same corpus redacted of coworker-naming data; surface-split hard-stop classifier. Sold separately. → `server/app/matcha/services/pilots/CLAUDE.md` |
 | `huume` | ❌ | Huume — bounded Gemini tool-calling agent in matcha-work threads; everything staged/confirm-first. Skills: onboarding, HR-ops, pilot bridges, incident-discipline. Needs `matcha_work`. → `server/app/matcha/services/huume/CLAUDE.md` |
+| `huume_code` | ❌ | Huume in a business collab chat can open one draft PR; no code execution or default-branch writes. GitHub writes require the server-side `GITHUB_WRITE_ALLOWED_REPOS` allowlist because the PAT is global—internal/dogfood only until GitHub App tokens replace it. Needs `matcha_work`. |
 | `ems` | ❌ | EMS — "@huume <what happened>" in any channel logs a structured event; admin promotes to a real IR incident (AI never auto-creates). Branded **"Ops"** in the sidebar/pill copy (Events tab lives under the Ops group with Protocol + Inventory) — flag name, tables, and URL paths unchanged. A channel bound to a `business_locations` row scopes intake to that store (`channels.location_id`). Needs `matcha_work`. → `server/app/matcha/services/ems/CLAUDE.md` |
 | `analysis_pilot` | ❌ | Analysis Pilot — bring-your-own-data chat analysis (CSV/XLSX/PDF), deterministic analyzer packs + citation-gated narration. NOT bundled. → `server/app/matcha/services/pilots/CLAUDE.md` |
 | `osha_logs` | ✅ | Interactive OSHA 300/301/300A recordkeeping. Default ON (off for no-roster `matcha_lite_essentials`). → `server/app/matcha/routes/ir_incidents/CLAUDE.md` |
@@ -288,6 +289,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
 - **Interviews** (`matcha/services/`) — voice interviews via Gemini Live API.
 - **Inventory** (`matcha/services/inventory/` + `matcha/routes/inventory.py`) — channel-driven stock tracking via `@huume` (auto-created items, append-only movement ledger, internal order queue with in-channel confirm). WS dispatch in `werk/routes/channels_ws.py:_bg_inventory_request`/`_bg_inventory_reply`, intent classification in `services/ems/intent.py`'s `INVENTORY` case. → full spec: `server/app/matcha/services/inventory/CLAUDE.md`
+- **Huume code** (`matcha/services/huume_code/` + `workers/tasks/huume_code.py`) — `@huume` in an eligible business collab chat runs a bounded repo-grounded agent that stages files only in memory and opens a single draft PR through the GitHub REST API.
 
 ## Background Workers (Celery)
 

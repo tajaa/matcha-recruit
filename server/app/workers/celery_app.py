@@ -63,6 +63,7 @@ celery_app = Celery(
         "app.workers.tasks.scope_registry",
         "app.workers.tasks.source_snapshots",
         "app.workers.tasks.debug_error",
+        "app.workers.tasks.huume_code",
     ],
 )
 
@@ -206,6 +207,14 @@ def on_worker_ready(**kwargs):
     # a previous worker death stranded in 'processing'. Gating it behind a
     # default-disabled scheduler_settings row would defeat its purpose.
     reset_stale_er_documents.delay()
+    # A killed worker is not redelivered (acks_late without reject-on-lost), so
+    # leave a clear terminal audit row rather than permanently blocking a
+    # project from another @huume attempt.
+    try:
+        from app.workers.tasks.huume_code import reconcile_stale_runs
+        reconcile_stale_runs.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue Huume-code reconciliation")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)

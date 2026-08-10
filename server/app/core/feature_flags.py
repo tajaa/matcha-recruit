@@ -228,6 +228,11 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # huume thread-mode toggle (column mw_threads.huume_mode) + the plan
     # approve/execute routes. Default off; admin-toggle; NOT bundled.
     "huume": False,
+    # Collab-chat coding agent.  It can only open draft PRs to repositories in
+    # the server-side GITHUB_WRITE_ALLOWED_REPOS allowlist because GITHUB_TOKEN
+    # is process-global; this is intentionally internal-only until writes use
+    # per-installation GitHub App tokens. Default off; never tier-bundled.
+    "huume_code": False,
     # EMS (Event Management System) — "@huume <what happened>" in any werk
     # channel logs a structured "event" (behavioral/safety/operational/
     # equipment/property/guest_experience — deliberately wider than IR:
@@ -750,6 +755,7 @@ def assert_feature_allowed(
 # `incidents` key at all).
 FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
+    "huume_code": ("matcha_work",),
     "werk_lite": ("matcha_work",),
     "ems": ("matcha_work",),
     "inventory": ("matcha_work",),
