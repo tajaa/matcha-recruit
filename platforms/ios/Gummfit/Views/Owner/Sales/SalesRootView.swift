@@ -16,6 +16,7 @@ struct SalesRootView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding()
+                .background(GummfitTheme.surface)
 
                 if segment == 0 {
                     OrderListView(site: site)
@@ -23,8 +24,8 @@ struct SalesRootView: View {
                     BookingListView(site: site)
                 }
             }
-            .background(Color(GummfitTheme.background).ignoresSafeArea())
             .navigationTitle("Sales")
+            .gummfitScreenChrome()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink("Setup") { BookingSetupView(site: site) }

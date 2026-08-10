@@ -18,8 +18,10 @@ struct OrderListView: View {
                     } label: {
                         OrderRow(order: order)
                     }
+                    .gummfitListRow()
                 }
                 .listStyle(.plain)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
@@ -34,7 +36,9 @@ private struct OrderRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(order.customer_name ?? order.customer_email ?? "Order").font(.subheadline.bold())
+                Text(order.customer_name ?? order.customer_email ?? "Order")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(GummfitTheme.textPrimary)
                 Text(Formatters.cents(order.total_cents ?? order.subtotal_cents, currency: order.currency))
                     .font(.caption)
                     .foregroundStyle(GummfitTheme.textDim)

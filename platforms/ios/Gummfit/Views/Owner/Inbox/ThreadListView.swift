@@ -25,12 +25,15 @@ struct ThreadListView: View {
                     } label: {
                         ThreadRow(thread: thread)
                     }
+                    .gummfitListRow()
                 }
                 .listStyle(.plain)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
         .navigationTitle("Inbox")
+        .gummfitScreenChrome()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("New", systemImage: "square.and.pencil") { showNewThread = true }
@@ -62,7 +65,9 @@ private struct ThreadRow: View {
                 Circle().fill(Color.clear).frame(width: 8, height: 8)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(thread.client_name ?? thread.client_email).font(.subheadline.bold())
+                Text(thread.client_name ?? thread.client_email)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(GummfitTheme.textPrimary)
                 if let snippet = thread.last_snippet {
                     Text(snippet).font(.caption).foregroundStyle(GummfitTheme.textDim).lineLimit(1)
                 }

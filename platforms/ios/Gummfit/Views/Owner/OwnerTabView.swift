@@ -43,6 +43,8 @@ struct OwnerTabView: View {
             moreTab
                 .tabItem { Label("More", systemImage: "ellipsis") }
         }
+        .tint(GummfitTheme.accent)
+        .preferredColorScheme(.dark)
         // The poll itself lives on AppState (plan §5) so it survives tab
         // switches and pauses while backgrounded — scenePhase is only
         // readable from a View, so it's threaded through here.
@@ -58,24 +60,27 @@ struct OwnerTabView: View {
         NavigationStack {
             List {
                 if let site = appState.activeSite {
-                    Section {
-                        NavigationLink("Clients") { ClientsView(site: site) }
-                        NavigationLink("Reviews") { ReviewsView(site: site) }
-                        NavigationLink("Marketing") { MarketingView(site: site) }
-                        NavigationLink("Site settings") { SiteSettingsView(site: site) }
+                    Section("Manage") {
+                        NavigationLink { ClientsView(site: site) } label: { Label("Clients", systemImage: "person.2") }
+                        NavigationLink { ReviewsView(site: site) } label: { Label("Reviews", systemImage: "star.bubble") }
+                        NavigationLink { MarketingView(site: site) } label: { Label("Marketing", systemImage: "megaphone") }
+                        NavigationLink { SiteSettingsView(site: site) } label: { Label("Site settings", systemImage: "slider.horizontal.3") }
                         if appState.account?.account_type == .business {
-                            NavigationLink("Collabs") { OwnerCollabsView() }
+                            NavigationLink { OwnerCollabsView() } label: { Label("Collabs", systemImage: "person.2.badge.plus") }
                         }
                         if site.is_multi_location {
-                            NavigationLink("Locations & Staff") { LocationsStaffView(site: site) }
+                            NavigationLink { LocationsStaffView(site: site) } label: { Label("Locations & Staff", systemImage: "mappin.and.ellipse") }
                         }
                     }
                 }
-                Section {
-                    NavigationLink("Account") { AccountView() }
+                Section("Account") {
+                    NavigationLink { AccountView() } label: { Label("Account", systemImage: "person.crop.circle") }
                 }
             }
             .navigationTitle("More")
+            .listStyle(.insetGrouped)
+            .gummfitListBackground()
+            .gummfitScreenChrome()
         }
     }
 }

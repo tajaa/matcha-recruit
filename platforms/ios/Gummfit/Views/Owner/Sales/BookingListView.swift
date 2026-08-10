@@ -17,6 +17,7 @@ struct BookingListView: View {
             } else {
                 List(vm.bookings) { booking in
                     BookingRow(booking: booking)
+                        .gummfitListRow()
                         .swipeActions {
                             if booking.requires_approval && booking.status == .pending {
                                 Button("Accept") { Task { await vm.accept(siteId: site.id, bookingId: booking.id) } }
@@ -30,6 +31,7 @@ struct BookingListView: View {
                         }
                 }
                 .listStyle(.plain)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
@@ -51,7 +53,9 @@ private struct BookingRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(booking.customer_name ?? booking.customer_email ?? "Booking").font(.subheadline.bold())
+                Text(booking.customer_name ?? booking.customer_email ?? "Booking")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(GummfitTheme.textPrimary)
                 Text(booking.starts_at).font(.caption).foregroundStyle(GummfitTheme.textDim)
                 if let staffName = booking.staff_name {
                     Text(staffName).font(.caption2).foregroundStyle(GummfitTheme.textDim)

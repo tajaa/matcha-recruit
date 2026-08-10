@@ -28,6 +28,7 @@ struct ClientsView: View {
                             ClientRow(client: client)
                         }
                         .buttonStyle(.plain)
+                        .gummfitListRow()
                     }
                     .onDelete { offsets in
                         for index in offsets {
@@ -38,10 +39,12 @@ struct ClientsView: View {
                 }
                 .listStyle(.plain)
                 .searchable(text: $search)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
         .navigationTitle("Clients")
+        .gummfitScreenChrome()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Add", systemImage: "plus") { editing = CappeClient(email: "", name: nil, phone: nil, orders_count: 0, bookings_count: 0, is_subscriber: false, has_thread: false, is_imported: false, total_spent_cents: 0, last_activity: nil, location_id: nil, location_name: nil) }
@@ -63,7 +66,9 @@ private struct ClientRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(client.name ?? client.email).font(.subheadline.bold())
+                Text(client.name ?? client.email)
+                    .font(.subheadline.bold())
+                    .foregroundStyle(GummfitTheme.textPrimary)
                 if client.name != nil { Text(client.email).font(.caption).foregroundStyle(GummfitTheme.textDim) }
             }
             Spacer()

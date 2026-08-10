@@ -17,6 +17,7 @@ struct ReviewsView: View {
                         ReviewRow(review: review, onModerate: { status in
                             Task { await vm.setStatus(siteId: site.id, reviewId: review.id, status: status) }
                         })
+                        .gummfitListRow()
                     }
                     .onDelete { offsets in
                         for index in offsets {
@@ -26,10 +27,12 @@ struct ReviewsView: View {
                     }
                 }
                 .listStyle(.plain)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
         .navigationTitle("Reviews")
+        .gummfitScreenChrome()
         .task { await vm.load(siteId: site.id) }
         .refreshable { await vm.load(siteId: site.id) }
     }
@@ -42,7 +45,7 @@ private struct ReviewRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(review.author_name).font(.subheadline.bold())
+                Text(review.author_name).font(.subheadline.bold()).foregroundStyle(GummfitTheme.textPrimary)
                 if let rating = review.rating {
                     HStack(spacing: 1) {
                         ForEach(0..<5, id: \.self) { i in
@@ -55,7 +58,7 @@ private struct ReviewRow: View {
                 Spacer()
                 Text(review.status.capitalized).font(.caption2).foregroundStyle(GummfitTheme.textDim)
             }
-            Text(review.body).font(.caption)
+            Text(review.body).font(.caption).foregroundStyle(GummfitTheme.textDim)
             Picker("Moderate", selection: Binding(get: { review.status }, set: onModerate)) {
                 Text("Approve").tag("approved")
                 Text("Hide").tag("hidden")

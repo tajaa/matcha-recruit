@@ -18,6 +18,9 @@ struct MarketingView: View {
             postsSection
         }
         .navigationTitle("Marketing")
+        .listStyle(.insetGrouped)
+        .gummfitListBackground()
+        .gummfitScreenChrome()
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
         .task { await vm.load(site.id) }
         .refreshable { await vm.load(site.id) }

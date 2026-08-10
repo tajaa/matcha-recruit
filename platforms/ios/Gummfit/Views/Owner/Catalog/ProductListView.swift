@@ -21,6 +21,7 @@ struct ProductListView: View {
                         } label: {
                             ProductRow(product: product)
                         }
+                        .gummfitListRow()
                     }
                     .onDelete { offsets in
                         for index in offsets {
@@ -30,11 +31,12 @@ struct ProductListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .gummfitListBackground()
             }
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
-        .background(Color(GummfitTheme.background).ignoresSafeArea())
         .navigationTitle("Catalog")
+        .gummfitScreenChrome()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -72,7 +74,7 @@ private struct ProductRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(product.name).font(.subheadline.bold())
+                Text(product.name).font(.subheadline.bold()).foregroundStyle(GummfitTheme.textPrimary)
                 Text(Formatters.cents(product.price_cents, currency: product.currency))
                     .font(.caption)
                     .foregroundStyle(GummfitTheme.textDim)

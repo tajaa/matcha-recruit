@@ -46,6 +46,9 @@ struct LocationsStaffView: View {
         }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
         .navigationTitle("Locations & Staff")
+        .listStyle(.insetGrouped)
+        .gummfitListBackground()
+        .gummfitScreenChrome()
         .alert("New location", isPresented: $showNewLocation) {
             TextField("Name", text: $newLocationName)
             Button("Add") {

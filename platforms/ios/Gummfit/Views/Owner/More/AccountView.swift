@@ -15,7 +15,13 @@ struct AccountView: View {
                 Link("Manage on web", destination: URL(string: "\(APIClient.shared.webOrigin)/cappe/billing")!)
             }
             Section { Button("Sign out", role: .destructive) { appState.didLogout() } }
-        }.navigationTitle("Account").overlay(alignment: .top) { ErrorBanner(message: error) }.task { do { subscription = try await BillingService.shared.subscription() } catch { self.error = error.localizedDescription } }
+        }
+        .navigationTitle("Account")
+        .listStyle(.insetGrouped)
+        .gummfitListBackground()
+        .gummfitScreenChrome()
+        .overlay(alignment: .top) { ErrorBanner(message: error) }
+        .task { do { subscription = try await BillingService.shared.subscription() } catch { self.error = error.localizedDescription } }
     }
 }
 
