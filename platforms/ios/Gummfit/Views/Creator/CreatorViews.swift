@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import PhotosUI
 
 @MainActor @Observable final class CreatorViewModel: LoadableVM {
     var profile: CreatorProfileMe?; var earnings: [EarningsRow] = []; var isLoading = false; var error: String?
@@ -10,18 +11,18 @@ import Observation
 @MainActor @Observable final class OffersViewModel: LoadableVM { var offers: [OfferListItem] = []; var isLoading = false; var error: String?; func load() async { await withLoad { offers = try await CollabService.shared.offers().offers } } }
 
 struct CreatorProfileView: View {
-    @State private var vm = CreatorViewModel(); @State private var handle = ""; @State private var displayName = ""; @State private var editing = false; @State private var editor: CreatorCollection?
+    @State private var vm = CreatorViewModel(); @State private var handle = ""; @State private var displayName = ""; @State private var editing = false; @State private var editor: CreatorCollection?; @State private var avatarPicker: PhotosPickerItem?; @State private var coverPicker: PhotosPickerItem?
     var body: some View {
         NavigationStack {
             Group {
                 if vm.isLoading { ProgressView() }
                 else if let p = vm.profile {
                     List {
-                        Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text(p.status.replacingOccurrences(of: "_", with: " ")).badge(p.status); Button("Edit profile") { editing = true } }
+                        Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text(p.status.replacingOccurrences(of: "_", with: " ")).badge(p.status); HStack { PhotosPicker(selection: $avatarPicker, matching: .images) { Label("Avatar", systemImage: "person.crop.circle") }; PhotosPicker(selection: $coverPicker, matching: .images) { Label("Cover", systemImage: "photo") } }; Button("Edit profile") { editing = true } }
                         if let bio = p.bio { Section("About") { Text(bio) } }
-                        Section("Socials") { ForEach(p.socials) { Text("\($0.platform.capitalized) · @\($0.handle)") }; Button("Add social", systemImage: "plus") { editor = .socials } }
-                        Section("Portfolio") { ForEach(p.portfolio) { Text($0.title) }; Button("Add portfolio item", systemImage: "plus") { editor = .portfolio } }
-                        Section("Rates") { ForEach(p.rates) { Text("\($0.deliverable_type.capitalized) · \(Formatters.cents($0.price_cents))") }; Button("Add rate", systemImage: "plus") { editor = .rates } }
+                        Section("Socials") { ForEach(p.socials) { social in Text("\(social.platform.capitalized) · @\(social.handle)").swipeActions { Button("Delete", role: .destructive) { Task { await deleteSocial(social, profile: p) } } } }; Button("Add social", systemImage: "plus") { editor = .socials } }
+                        Section("Portfolio") { ForEach(p.portfolio) { item in Text(item.title).swipeActions { Button("Delete", role: .destructive) { Task { await deletePortfolio(item, profile: p) } } } }; Button("Add portfolio item", systemImage: "plus") { editor = .portfolio } }
+                        Section("Rates") { ForEach(p.rates) { rate in Text("\(rate.deliverable_type.capitalized) · \(Formatters.cents(rate.price_cents))").swipeActions { Button("Delete", role: .destructive) { Task { await deleteRate(rate, profile: p) } } } }; Button("Add rate", systemImage: "plus") { editor = .rates } }
                         if p.status == "draft" || p.status == "rejected" { Button("Submit for review") { Task { await vm.submit() } } }
                     }
                 } else {
@@ -32,8 +33,14 @@ struct CreatorProfileView: View {
             .navigationTitle("Profile").task { await vm.loadProfile() }.refreshable { await vm.loadProfile() }
             .sheet(isPresented: $editing) { if let profile = vm.profile { CreatorProfileEditSheet(profile: profile) { await vm.loadProfile() } } }
             .sheet(item: $editor) { collection in if let profile = vm.profile { CreatorCollectionSheet(collection: collection, profile: profile) { await vm.loadProfile() } } }
+            .onChange(of: avatarPicker) { _, item in Task { await upload(item, cover: false) } }
+            .onChange(of: coverPicker) { _, item in Task { await upload(item, cover: true) } }
         }
     }
+    private func upload(_ item: PhotosPickerItem?, cover: Bool) async { guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }; do { let prepared = try ImagePrep.prepare(data: data, mimeType: "image/jpeg", filename: cover ? "cover.jpg" : "avatar.jpg"); let result = try await UploadService.shared.uploadCreatorMedia(prepared: prepared); let p = vm.profile; _ = try await CreatorService.shared.update(CreatorProfileUpdate(display_name: nil, avatar_url: cover ? nil : result.url, cover_url: cover ? result.url : nil, bio: nil, location: nil, niches: nil, languages: nil, open_to_offers: nil)); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
+    private func deleteSocial(_ item: CreatorSocial, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replaceSocials(profile.socials.filter { $0.id != item.id }.map { CreatorSocialInput(platform: $0.platform, handle: $0.handle, url: $0.url, follower_count: $0.follower_count, engagement_rate: $0.engagement_rate, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
+    private func deletePortfolio(_ item: CreatorPortfolioItem, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replacePortfolio(profile.portfolio.filter { $0.id != item.id }.map { CreatorPortfolioInput(title: $0.title, description: $0.description, media_url: $0.media_url, media_type: $0.media_type, external_url: $0.external_url, brand_name: $0.brand_name, metrics: $0.metrics, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
+    private func deleteRate(_ item: CreatorRate, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replaceRates(profile.rates.filter { $0.id != item.id }.map { CreatorRateInput(deliverable_type: $0.deliverable_type, platform: $0.platform, price_cents: $0.price_cents, negotiable: $0.negotiable, notes: $0.notes, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
 }
 private enum CreatorCollection: String, Identifiable { case socials, portfolio, rates; var id: String { rawValue } }
 private struct CreatorCollectionSheet: View {
