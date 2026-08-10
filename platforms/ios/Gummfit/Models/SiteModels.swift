@@ -1,10 +1,8 @@
 import Foundation
 
 /// Mirrors server/app/cappe/models/sites.py + client/src/cappe/types.ts:51-80.
-/// Deliberately a subset — only fields Phase 1/2 (list/create/switch/readiness/
-/// publish) touch; theme_config/meta_config/tax/shipping land with Catalog
-/// (Phase 3) if a screen needs them. Extra wire fields are ignored by
-/// JSONDecoder, so this narrows safely.
+/// Extra wire fields are ignored by JSONDecoder, so this remains compatible
+/// with older site payloads while exposing the settings needed by iOS.
 struct CappeSite: Codable, Identifiable, Equatable {
     let id: String
     let account_id: String
@@ -14,7 +12,14 @@ struct CappeSite: Codable, Identifiable, Equatable {
     let custom_domain: String?
     let source_type: String
     let status: SiteStatus
+    let timezone: String?
     let is_multi_location: Bool
+    let tax_rate_bps: Int?
+    let tax_label: String?
+    let shipping_flat_cents: Int?
+    let shipping_free_threshold_cents: Int?
+    let shipping_label: String?
+    let receipt_prefix: String?
     let published_at: String?
     let created_at: String
     let updated_at: String
