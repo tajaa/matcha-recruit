@@ -11,10 +11,9 @@ extension Array where Element == ChannelSummary {
     /// `lastMessageAt` is an ISO8601 string, so the lexical compare is
     /// chronological; a channel that has never been posted in sorts last.
     ///
-    /// Deliberately NOT `@MainActor`: the call sites (a `View`'s async `load()`
-    /// and its synchronous computed properties) reach `ChannelStarStore.shared`
-    /// exactly this way today, and annotating it would make every one of them
-    /// need an `await` they can't give.
+    /// Channel stars are UI state, so this ordering must run on the main actor
+    /// alongside `ChannelStarStore`.
+    @MainActor
     func sortedStarredFirst() -> [ChannelSummary] {
         let stars = ChannelStarStore.shared
         return sorted { a, b in

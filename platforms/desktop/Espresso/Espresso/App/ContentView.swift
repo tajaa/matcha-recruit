@@ -207,7 +207,7 @@ struct ContentView: View {
             // Brand header — MW monogram + wordmark, pinned above the scroll.
             HStack(spacing: 9) {
                 MWMonogram(size: 26)
-                Text("Matcha Work")
+                Text("Espresso")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(appState.themeText)
                 Spacer(minLength: 0)

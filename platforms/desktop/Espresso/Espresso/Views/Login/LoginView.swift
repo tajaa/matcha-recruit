@@ -44,7 +44,7 @@ struct LoginView: View {
                     MWMonogram(size: 68)
 
                     VStack(spacing: 4) {
-                        Text("Matcha Work")
+                        Text("Espresso")
                             .font(.system(size: 30, weight: .bold, design: .rounded))
                             .foregroundColor(Color.platinumText)
                         Text("Your AI workspace for teams and creators.")

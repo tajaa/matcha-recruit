@@ -42,7 +42,7 @@ struct ThreadListView: View {
             if showHeader {
                 // Header
                 HStack {
-                    Text("Matcha Work")
+                    Text("Espresso")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(appState.themeTextSecondary)
 

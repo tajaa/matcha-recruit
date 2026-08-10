@@ -1,5 +1,22 @@
 import Foundation
 
+struct PlanRequirement: Equatable {
+    let requiredPlan: String
+    let currentPlan: String
+    let feature: String
+
+    var message: String {
+        switch feature {
+        case "projects_collab":
+            return "Collaborative workspaces require Espresso Pro. Your Lite plan includes solo workspaces—choose General or Presentation."
+        case "projects_solo":
+            return "Creating workspaces requires Espresso Lite or Pro."
+        default:
+            return "This feature requires Espresso \(requiredPlan.capitalized)."
+        }
+    }
+}
+
 enum APIError: Error, LocalizedError {
     case httpError(Int, String)
     case serviceUnavailable(Int)
@@ -9,9 +26,26 @@ enum APIError: Error, LocalizedError {
     case noData
     case networkUnavailable(URLError)
 
+    var planRequirement: PlanRequirement? {
+        guard case let .httpError(code, message) = self, code == 403,
+              let data = message.data(using: .utf8),
+              let response = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = response["detail"] as? [String: Any],
+              detail["code"] as? String == "plan_required",
+              let requiredPlan = detail["required_plan"] as? String,
+              let currentPlan = detail["current_plan"] as? String,
+              let feature = detail["feature"] as? String else {
+            return nil
+        }
+        return PlanRequirement(requiredPlan: requiredPlan, currentPlan: currentPlan, feature: feature)
+    }
+
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let message):
+            if let requirement = planRequirement {
+                return requirement.message
+            }
             // Belt-and-suspenders: if a 5xx slipped through with an HTML body
             // and we didn't catch it via Content-Type, still collapse here.
             if (500...599).contains(code) {

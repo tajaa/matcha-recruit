@@ -20,6 +20,7 @@ struct ProjectsLibraryView: View {
     @State private var selectMode = false
     @State private var selectedIds: Set<String> = []
     @State private var confirmBulkDelete = false
+    @State private var createError: String?
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", pinned = "Pinned"
@@ -35,8 +36,8 @@ struct ProjectsLibraryView: View {
     private let types: [(type: String, label: String, icon: String)] = [
         ("general", "General", "square.grid.2x2"),
         ("presentation", "Presentation", "rectangle.on.rectangle.angled"),
-        ("recruiting", "Recruiting", "person.2"),
-        ("collab", "Collab", "person.3.sequence"),
+        ("recruiting", "Recruiting (Pro)", "person.2"),
+        ("collab", "Collaborative (Pro)", "person.3.sequence"),
     ]
 
     var body: some View {
@@ -77,6 +78,14 @@ struct ProjectsLibraryView: View {
                 appState.projectsListGeneration &+= 1
                 open(proj)
             }
+        }
+        .alert("Couldn’t create workspace", isPresented: Binding(
+            get: { createError != nil },
+            set: { if !$0 { createError = nil } }
+        )) {
+            Button("OK", role: .cancel) { createError = nil }
+        } message: {
+            Text(createError ?? "")
         }
     }
 
@@ -323,8 +332,11 @@ struct ProjectsLibraryView: View {
             return
         }
         Task {
-            if let proj = try? await MatchaWorkService.shared.createProject(title: "New Workspace", projectType: type) {
+            do {
+                let proj = try await MatchaWorkService.shared.createProject(title: "New Workspace", projectType: type)
                 await MainActor.run { appState.projectsListGeneration &+= 1; open(proj) }
+            } catch {
+                await MainActor.run { createError = error.localizedDescription }
             }
         }
     }
