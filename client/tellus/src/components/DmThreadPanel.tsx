@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Send, ShieldOff } from 'lucide-react'
 import { tellusApi } from '../api/tellusClient'
+import { useAccount } from '../hooks/useAccount'
 import { Button, Spinner } from './ui'
-import type { DmMessage, DmThread } from '../api/types'
+import type { BrandTeamMember, DmMessage, DmThread } from '../api/types'
 
 // Shared brand+consumer DM widget — a brand opens the one thread for a
 // report (POST /feedback/{id}/dm, first message included); after that both
@@ -16,12 +17,15 @@ export function DmThreadPanel({
   initialThread?: DmThread
   isBrand: boolean
 }) {
+  const { account } = useAccount()
   const [thread, setThread] = useState<DmThread | null>(initialThread ?? null)
   const [messages, setMessages] = useState<DmMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [body, setBody] = useState('')
+  const [clientMessageId, setClientMessageId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [team, setTeam] = useState<BrandTeamMember[]>([])
   const comms = initialThread?.kind === 'general'
 
   async function loadThread() {
@@ -47,7 +51,12 @@ export function DmThreadPanel({
   useEffect(() => { void loadThread() }, [reportId, initialThread?.id])
 
   useEffect(() => {
-    if (!thread || thread.kind !== 'general') return
+    if (!thread || thread.kind !== 'general' || account?.account_type !== 'brand') return
+    tellusApi.get<BrandTeamMember[]>('/board/team').then(setTeam).catch(() => setTeam([]))
+  }, [thread?.id, thread?.kind, account?.account_type])
+
+  useEffect(() => {
+    if (!thread || thread.kind !== 'general' || thread.status === 'closed') return
     let stopped = false
     async function poll() {
       if (stopped || document.visibilityState !== 'visible') return
@@ -75,9 +84,12 @@ export function DmThreadPanel({
         const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${opened.id}/messages`)
         setMessages(msgs)
       } else if (thread) {
-        const msg = await tellusApi.post<DmMessage>(`${thread.kind === 'general' ? '/comms' : '/dm'}/threads/${thread.id}/messages`, { body, client_message_id: crypto.randomUUID() })
+        const id = clientMessageId ?? crypto.randomUUID()
+        if (!clientMessageId) setClientMessageId(id)
+        const msg = await tellusApi.post<DmMessage>(`${thread.kind === 'general' ? '/comms' : '/dm'}/threads/${thread.id}/messages`, { body, client_message_id: id })
         setMessages((m) => [...m, msg])
         setBody('')
+        setClientMessageId(null)
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Message failed to send')
@@ -116,6 +128,14 @@ export function DmThreadPanel({
     setBusy(true); setErr('')
     try { setThread(await tellusApi.post<DmThread>(`/comms/threads/${thread.id}/close`)) }
     catch (e) { setErr(e instanceof Error ? e.message : 'Could not close conversation') }
+    finally { setBusy(false) }
+  }
+
+  async function assign(memberId: string) {
+    if (!thread) return
+    setBusy(true); setErr('')
+    try { setThread(await tellusApi.patch<DmThread>(`/comms/threads/${thread.id}/assignment`, { member_id: memberId || null })) }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not assign conversation') }
     finally { setBusy(false) }
   }
 
@@ -167,13 +187,14 @@ export function DmThreadPanel({
         <div className="mb-2 flex items-center gap-2 text-xs text-tu-faint">
           {!thread.assigned_member_id && <Button size="sm" variant="soft" loading={busy} onClick={() => void takeThread()}>Take</Button>}
           {thread.status !== 'closed' && <Button size="sm" variant="ghost" loading={busy} onClick={() => void closeThread()}>Close</Button>}
+          {account?.account_type === 'brand' && team.length > 0 && <select value={thread.assigned_member_id ?? ''} disabled={busy || thread.status === 'closed'} onChange={e => void assign(e.target.value)} className="ml-auto rounded-md border border-tu-border bg-tu-panel px-2 py-1 text-xs"><option value="">Unassigned</option>{team.filter(m => m.can_manage_inbox).map(m => <option key={m.id} value={m.id}>{m.account_display_name}</option>)}</select>}
         </div>
       )}
 
       {canCompose && (
         <div className="flex items-end gap-2">
           <textarea
-            value={body} onChange={(e) => setBody(e.target.value)} rows={2}
+            value={body} onChange={(e) => { setBody(e.target.value); setClientMessageId(null) }} rows={2}
             placeholder="Write a message…"
             className="flex-1 rounded-lg border border-tu-border bg-tu-panel px-2.5 py-1.5 text-sm text-tu-text placeholder:text-tu-faint focus:border-tu-accent focus:outline-none"
           />

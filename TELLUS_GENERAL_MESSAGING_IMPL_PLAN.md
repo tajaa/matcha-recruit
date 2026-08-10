@@ -1,7 +1,7 @@
 # Tellus General Business Messaging — Technical Implementation Plan
 
-Status: planning only. This document does not implement any application or
-database changes.
+Status: implementation checkpoint. The schema, backend, frontend, tests, and
+rollout notes below are the implementation contract for Comms.
 
 ## 1. Objective
 
@@ -12,6 +12,9 @@ team member can answer.
 This extends the existing feedback DM system; it does not create a second chat
 stack. Existing report-linked conversations continue to work unchanged from a
 user's perspective.
+
+Implementation note: the new public surface is namespaced under `/comms/*`;
+legacy report-linked `/dm/*` routes remain backward-compatible.
 
 Examples:
 

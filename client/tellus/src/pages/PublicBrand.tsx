@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Heart, ImageIcon, Star, Video } from 'lucide-react'
 import { tellusApi, tellusMaybeAuthGet } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
@@ -76,6 +76,7 @@ function ReviewCard({ review, loggedIn }: { review: PublicReview; loggedIn: bool
 
 export default function PublicBrand() {
   const { slug = '' } = useParams()
+  const [searchParams] = useSearchParams()
   const { account } = useAccount()
   const [page, setPage] = useState<PublicBrandPage | null>(null)
   const [reviews, setReviews] = useState<PublicReview[]>([])
@@ -94,6 +95,9 @@ export default function PublicBrand() {
   const [olderTotal, setOlderTotal] = useState(0)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [feedErr, setFeedErr] = useState('')
+  const [messageOpen, setMessageOpen] = useState(false)
+
+  useEffect(() => { if (searchParams.get('message') === '1') setMessageOpen(true) }, [searchParams])
 
   useEffect(() => {
     if (!account) { setMyClaim(null); return }
@@ -245,11 +249,13 @@ export default function PublicBrand() {
 
         {page.messaging_enabled && page.claimed && (
           account?.account_type === 'consumer' ? (
-            <BusinessMessageComposer slug={slug} stores={page.stores} />
+            messageOpen ? <BusinessMessageComposer slug={slug} stores={page.stores} /> : <div className="mt-3"><Button variant="soft" onClick={() => setMessageOpen(true)}>Message this business</Button></div>
           ) : !account ? (
-            <div className="mt-3"><Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug)} className="inline-flex items-center gap-1.5 rounded-lg border border-tu-accent px-4 py-2 text-sm font-semibold text-tu-accent hover:bg-tu-accent/10">Message this business</Link></div>
+            <div className="mt-3"><Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug + '?message=1')} className="inline-flex items-center gap-1.5 rounded-lg border border-tu-accent px-4 py-2 text-sm font-semibold text-tu-accent hover:bg-tu-accent/10">Message this business</Link></div>
           ) : null
         )}
+        {page.claimed && !page.messaging_enabled && <p className="mt-3 text-xs text-tu-faint">This business isn’t accepting Comms messages on Tell-Us.</p>}
+        {!page.claimed && <p className="mt-3 text-xs text-tu-faint">Messaging will be available when this business claims its page.</p>}
 
         {page.has_board && (
           <div className="mt-3">

@@ -605,13 +605,18 @@ export interface AdminDmMessage {
 
 export interface AdminDmThreadSummary {
   id: string
-  report_id: string
+  report_id: string | null
   brand_name: string
   consumer_email: string
   blocked: boolean
   message_count: number
   last_message_at: string | null
   created_at: string
+  kind: 'feedback' | 'general'
+  topic: string | null
+  status: 'waiting_brand' | 'waiting_consumer' | 'closed'
+  store_name: string | null
+  assigned_member_name: string | null
 }
 
 export interface AdminEarningRule {

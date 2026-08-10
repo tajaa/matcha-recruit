@@ -96,7 +96,8 @@ def thread_to_model(row: dict, role: Literal["brand", "consumer"]) -> TellusDmTh
         last_message_at=row["last_message_at"], created_at=row["created_at"],
         kind=row.get("kind", "feedback"), topic=row.get("topic"), status=row.get("status", "waiting_consumer"),
         store_id=row.get("store_id"), store_name=row.get("store_name"), store_city=row.get("store_city"),
-        assigned_member_id=row.get("assigned_member_id"), assigned_member_name=row.get("assigned_member_name"),
+        assigned_member_id=row.get("assigned_member_id") if role == "brand" else None,
+        assigned_member_name=row.get("assigned_member_name") if role == "brand" else None,
         viewer_role=role, first_brand_response_at=row.get("first_brand_response_at"), closed_at=row.get("closed_at"),
     )
 

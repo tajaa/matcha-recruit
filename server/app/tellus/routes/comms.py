@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from ..dependencies import require_consumer, require_tellus_account
+from ..dependencies import require_tellus_account, require_verified_consumer
 from ..models.tellus import (
     TellusAccount, TellusCommsStart, TellusDmAssign, TellusDmMessage,
     TellusDmSend, TellusDmThread, TellusInboxToggle,
@@ -35,6 +35,7 @@ async def _notify_recipients(conn, thread, sender_role: str, body: str):
         owner_id = await conn.fetchval("SELECT owner_account_id FROM tellus_brands WHERE id = $1", thread["brand_id"])
         if owner_id:
             recipient_ids.add(owner_id)
+        recipient_ids.discard(thread["consumer_account_id"])
         title, text = "New Comms question", "A customer sent a new question."
     else:
         recipient_ids = {thread["consumer_account_id"]}
@@ -86,7 +87,7 @@ async def list_inbox_brands(account: TellusAccount = Depends(require_tellus_acco
 @router.post("/comms/brands/{slug}/threads", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def start_comms(
     slug: str, body: TellusCommsStart, background: BackgroundTasks,
-    account: TellusAccount = Depends(require_consumer),
+    account: TellusAccount = Depends(require_verified_consumer),
 ):
     await check_rate_limit(str(account.id), "tellus_comms_new_thread_day", 10, 86400)
     await check_rate_limit(str(account.id), "tellus_comms_send", 30, 3600)
@@ -100,8 +101,17 @@ async def start_comms(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
             if brand["owner_account_id"] == account.id:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot message your own business as a customer")
+            manages = await conn.fetchval(
+                "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2 AND can_manage_inbox = TRUE",
+                brand["id"], account.id,
+            )
+            if manages:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot message a business inbox you manage")
             if not brand["owner_account_id"] or not brand["messaging_enabled"]:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"code": "messaging_unavailable", "message": "This business is not accepting Comms messages."})
+            await check_rate_limit(
+                f"{account.id}:{brand['id']}", "tellus_comms_new_thread_brand_day", 3, 86400,
+            )
             stores = await conn.fetch(
                 "SELECT id FROM tellus_stores WHERE brand_id = $1 ORDER BY created_at", brand["id"]
             )
@@ -155,6 +165,8 @@ async def start_comms(
                     "SELECT * FROM tellus_dm_messages WHERE thread_id = $1 AND sender_account_id = $2 AND client_message_id = $3",
                     thread["id"], account.id, message_id,
                 )
+                if message is None:
+                    raise HTTPException(status_code=409, detail="client_message_id was already used")
         model, row, _ = await _thread_response(conn, thread["id"], account)
     for email, name, from_label, path in email_jobs:
         background.add_task(send_tellus_dm_email, email, name, from_label, path)
@@ -248,6 +260,10 @@ async def send_comms_message(
     async with get_connection() as conn:
         async with conn.transaction():
             thread, role = await get_thread_access(conn, thread_id, account)
+            if role == "consumer" and not await conn.fetchval(
+                "SELECT 1 FROM tellus_accounts WHERE id = $1 AND email_verified_at IS NOT NULL", account.id,
+            ):
+                raise HTTPException(status_code=403, detail="Verify your email before using Comms.")
             locked = await conn.fetchrow("SELECT * FROM tellus_dm_threads WHERE id = $1 FOR UPDATE", thread_id)
             if locked["blocked_at"] is not None:
                 raise HTTPException(status_code=403, detail="This conversation has been ended.")
@@ -267,13 +283,15 @@ async def send_comms_message(
                 email_jobs = await _notify_recipients(conn, thread, role, body.body)
             else:
                 row = await conn.fetchrow("SELECT * FROM tellus_dm_messages WHERE thread_id = $1 AND sender_account_id = $2 AND client_message_id = $3", thread_id, account.id, client_id)
+                if row is None:
+                    raise HTTPException(status_code=409, detail="client_message_id was already used")
     for email, name, from_label, path in email_jobs:
         background.add_task(send_tellus_dm_email, email, name, from_label, path)
     return TellusDmMessage(**{**dict(row), "is_mine": True})
 
 
 @router.post("/comms/threads/{thread_id}/take", response_model=TellusDmThread)
-async def take_comms_thread(thread_id: UUID, account: TellusAccount = Depends(require_tellus_account)):
+async def take_comms_thread(thread_id: UUID, background: BackgroundTasks, account: TellusAccount = Depends(require_tellus_account)):
     async with get_connection() as conn:
         thread, role = await get_thread_access(conn, thread_id, account)
         if role != "brand": raise HTTPException(status_code=403, detail="Inbox access required")
@@ -282,13 +300,18 @@ async def take_comms_thread(thread_id: UUID, account: TellusAccount = Depends(re
         if member_id is None: raise HTTPException(status_code=409, detail="Inbox membership is incomplete")
         row = await conn.fetchrow("UPDATE tellus_dm_threads SET assigned_member_id = $2 WHERE id = $1 AND status <> 'closed' AND (assigned_member_id IS NULL OR assigned_member_id = $2) RETURNING id", thread_id, member_id)
         if row is None: raise HTTPException(status_code=409, detail="Conversation is assigned to another agent")
+        if thread.get("assigned_member_id") is None:
+            await notify_account(
+                conn, account.id, "dm_assignment", "Comms conversation assigned",
+                "You took a conversation.", reference_type="dm_thread", reference_id=str(thread_id),
+            )
         model, _, _ = await _thread_response(conn, thread_id, account)
     return model
 
 
 @router.patch("/comms/threads/{thread_id}/assignment", response_model=TellusDmThread)
 async def assign_comms_thread(
-    thread_id: UUID, body: TellusDmAssign,
+    thread_id: UUID, body: TellusDmAssign, background: BackgroundTasks,
     account: TellusAccount = Depends(require_tellus_account),
 ):
     async with get_connection() as conn:
@@ -297,7 +320,7 @@ async def assign_comms_thread(
             raise HTTPException(status_code=403, detail="Only the business owner can assign conversations")
         if account.brand_id != thread["brand_id"]:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        if body.member_id is not None:
+        if body.member_id is not None and body.member_id != thread.get("assigned_member_id"):
             ok = await conn.fetchval(
                 "SELECT 1 FROM tellus_brand_members WHERE id = $1 AND brand_id = $2 AND can_manage_inbox = TRUE",
                 body.member_id, thread["brand_id"],
@@ -310,6 +333,19 @@ async def assign_comms_thread(
         )
         if row is None:
             raise HTTPException(status_code=409, detail="Conversation is closed")
+        if body.member_id is not None:
+            recipient = await conn.fetchrow(
+                "SELECT m.account_id, a.email, a.display_name FROM tellus_brand_members m JOIN tellus_accounts a ON a.id = m.account_id WHERE m.id = $1",
+                body.member_id,
+            )
+            if recipient:
+                await notify_account(
+                    conn, recipient["account_id"], "dm_assignment", "Comms conversation assigned",
+                    "A conversation was assigned to you.", reference_type="dm_thread", reference_id=str(thread_id),
+                )
+                if recipient["email"]:
+                    brand_name = await conn.fetchval("SELECT name FROM tellus_brands WHERE id = $1", thread["brand_id"])
+                    background.add_task(send_tellus_dm_email, recipient["email"], recipient["display_name"], brand_name or "A business", "/brand/messages")
         model, _, _ = await _thread_response(conn, thread_id, account)
     return model
 
@@ -364,7 +400,7 @@ async def close_comms_thread(thread_id: UUID, account: TellusAccount = Depends(r
 
 
 @router.post("/comms/threads/{thread_id}/block", status_code=status.HTTP_204_NO_CONTENT)
-async def block_comms_thread(thread_id: UUID, account: TellusAccount = Depends(require_consumer)):
+async def block_comms_thread(thread_id: UUID, account: TellusAccount = Depends(require_verified_consumer)):
     async with get_connection() as conn:
         thread, role = await get_thread_access(conn, thread_id, account)
         if role != "consumer": raise HTTPException(status_code=403, detail="Consumer access required")
@@ -373,7 +409,7 @@ async def block_comms_thread(thread_id: UUID, account: TellusAccount = Depends(r
 
 
 @router.delete("/comms/threads/{thread_id}/block", status_code=status.HTTP_204_NO_CONTENT)
-async def unblock_comms_thread(thread_id: UUID, account: TellusAccount = Depends(require_consumer)):
+async def unblock_comms_thread(thread_id: UUID, account: TellusAccount = Depends(require_verified_consumer)):
     async with get_connection() as conn:
         result = await conn.execute("UPDATE tellus_dm_threads SET blocked_at = NULL WHERE id = $1 AND consumer_account_id = $2", thread_id, account.id)
         if result == "UPDATE 0": raise HTTPException(status_code=404, detail="Conversation not found")

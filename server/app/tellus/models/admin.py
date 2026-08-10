@@ -151,6 +151,11 @@ class TellusAdminDmThreadSummary(BaseModel):
     message_count: int
     last_message_at: Optional[datetime] = None
     created_at: datetime
+    kind: Literal["feedback", "general"] = "feedback"
+    topic: Optional[str] = None
+    status: Literal["waiting_brand", "waiting_consumer", "closed"] = "waiting_consumer"
+    store_name: Optional[str] = None
+    assigned_member_name: Optional[str] = None
 
 
 class TellusAdminEarningRule(BaseModel):

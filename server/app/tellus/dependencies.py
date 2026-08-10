@@ -130,6 +130,20 @@ async def require_consumer(
     return account
 
 
+async def require_verified_consumer(
+    account: TellusAccount = Depends(require_consumer),
+) -> TellusAccount:
+    """Require a consumer who has verified control of their email address."""
+    async with get_connection() as conn:
+        verified = await conn.fetchval(
+            "SELECT 1 FROM tellus_accounts WHERE id = $1 AND email_verified_at IS NOT NULL",
+            account.id,
+        )
+    if not verified:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verify your email before using Comms.")
+    return account
+
+
 async def require_brand(
     account: TellusAccount = Depends(require_tellus_account),
 ) -> TellusAccount:

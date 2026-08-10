@@ -190,12 +190,17 @@ function DmsTab() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Record<string, AdminDmMessage[]>>({})
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [kind, setKind] = useState('')
+  const [threadStatus, setThreadStatus] = useState('')
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const res = await tellusApi.get<{ items: AdminDmThreadSummary[]; total: number }>(`/admin/dm-threads?limit=${limit}&offset=${offset}`)
+      const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (kind) query.set('kind', kind)
+      if (threadStatus) query.set('status', threadStatus)
+      const res = await tellusApi.get<{ items: AdminDmThreadSummary[]; total: number }>(`/admin/dm-threads?${query}`)
       setItems(res.items)
       setTotal(res.total)
     } catch (e) {
@@ -205,7 +210,7 @@ function DmsTab() {
     }
   }
 
-  useEffect(() => { void load() }, [offset])
+  useEffect(() => { void load() }, [offset, kind, threadStatus])
 
   async function toggleOpen(t: AdminDmThreadSummary) {
     if (openId === t.id) { setOpenId(null); return }
@@ -240,6 +245,10 @@ function DmsTab() {
 
   return (
     <div>
+      <div className="flex flex-wrap gap-2 border-b border-tu-border px-4 py-3">
+        <select value={kind} onChange={e => { setKind(e.target.value); setOffset(0) }} className="rounded-md border border-tu-border bg-tu-panel2 px-2 py-1.5 text-xs"><option value="">All types</option><option value="general">General Comms</option><option value="feedback">Feedback DM</option></select>
+        <select value={threadStatus} onChange={e => { setThreadStatus(e.target.value); setOffset(0) }} className="rounded-md border border-tu-border bg-tu-panel2 px-2 py-1.5 text-xs"><option value="">All statuses</option><option value="waiting_brand">Waiting business</option><option value="waiting_consumer">Waiting consumer</option><option value="closed">Closed</option></select>
+      </div>
       {error && <div className="px-4 pt-3"><ErrorText>{error}</ErrorText></div>}
       {loading && items.length === 0 && <Loader2 className="m-4 h-5 w-5 animate-spin text-tu-faint" />}
       {items.map((t) => (
@@ -253,10 +262,12 @@ function DmsTab() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate text-sm font-medium text-tu-text">{t.brand_name} ↔ {t.consumer_email}</span>
+                  <Chip>{t.kind === 'general' ? 'Comms' : 'Feedback'}</Chip>
+                  {t.status === 'closed' && <Chip>closed</Chip>}
                   {t.blocked && <Chip tone="negative">blocked</Chip>}
                 </div>
                 <div className="mt-0.5 text-xs text-tu-faint">
-                  {t.message_count} messages{t.last_message_at ? ` · last ${fmtDateTime(t.last_message_at)}` : ''}
+                  {t.message_count} messages{t.store_name ? ` · ${t.store_name}` : ''}{t.assigned_member_name ? ` · assigned to ${t.assigned_member_name}` : ''}{t.last_message_at ? ` · last ${fmtDateTime(t.last_message_at)}` : ''}
                 </div>
               </div>
             </button>

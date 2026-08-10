@@ -114,7 +114,7 @@ export function Layout({ children }: { children: ReactNode }) {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
-  const DM_KINDS = new Set(['dm_message'])
+  const DM_KINDS = new Set(['dm_message', 'dm_assignment'])
   const REVIEW_KINDS = new Set(['review_moderated', 'review_hearted', 'review_reply', 'review_published'])
   // Consumer-side board notifications vs. the brand-side moderation queue —
   // different destination surface, so kept as two sets. board_team_added

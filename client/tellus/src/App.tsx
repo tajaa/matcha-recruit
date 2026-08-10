@@ -94,7 +94,7 @@ function CommsProtected({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!account) { setAllowed(false); return }
     if (account.account_type === 'brand') { setAllowed(true); return }
-    tellusApi.get<InboxBrand[]>('/comms/inbox-brands').then(rows => setAllowed(rows.length > 0)).catch(() => setAllowed(false))
+    tellusApi.get<InboxBrand[]>('/comms/inbox-brands').then(rows => setAllowed(rows.some(row => row.plan_status === 'active'))).catch(() => setAllowed(false))
   }, [account?.id, account?.account_type, account?.plan_status])
   if (loading || allowed === null) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
   if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname + location.search)} replace />

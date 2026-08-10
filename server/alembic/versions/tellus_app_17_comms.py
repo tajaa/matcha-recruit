@@ -4,6 +4,9 @@ Extends the existing report-linked DM tables in place. Existing feedback
 threads remain ``kind='feedback'``; new public conversations use
 ``kind='general'`` and may omit ``report_id``.
 
+Downgrade intentionally deletes general conversation rows because the legacy
+schema requires every thread to reference a report.
+
 Revision ID: tellus_app_17
 Revises: oceanlab_app_03
 """

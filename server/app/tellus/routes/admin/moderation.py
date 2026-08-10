@@ -107,6 +107,8 @@ async def moderate_report(
 async def list_dm_threads(
     brand_id: Optional[UUID] = None,
     blocked: Optional[bool] = None,
+    kind: Optional[Literal["feedback", "general"]] = None,
+    thread_status: Optional[Literal["waiting_brand", "waiting_consumer", "closed"]] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
@@ -119,17 +121,26 @@ async def list_dm_threads(
         i += 1
     if blocked is not None:
         clauses.append("t.blocked_at IS NOT NULL" if blocked else "t.blocked_at IS NULL")
+    if kind:
+        clauses.append(f"t.kind = ${i}"); params.append(kind); i += 1
+    if thread_status:
+        clauses.append(f"t.status = ${i}"); params.append(thread_status); i += 1
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            f"""SELECT t.id, t.report_id, b.name AS brand_name, a.email AS consumer_email,
+            f"""SELECT t.id, t.report_id, t.kind, t.topic, t.status,
+                       b.name AS brand_name, a.email AS consumer_email,
+                       s.name AS store_name, aa.display_name AS assigned_member_name,
                        (t.blocked_at IS NOT NULL) AS blocked,
                        (SELECT COUNT(*) FROM tellus_dm_messages m WHERE m.thread_id = t.id) AS message_count,
                        t.last_message_at, t.created_at
                 FROM tellus_dm_threads t
                 JOIN tellus_brands b ON b.id = t.brand_id
                 JOIN tellus_accounts a ON a.id = t.consumer_account_id
+                LEFT JOIN tellus_stores s ON s.id = t.store_id
+                LEFT JOIN tellus_brand_members am ON am.id = t.assigned_member_id
+                LEFT JOIN tellus_accounts aa ON aa.id = am.account_id
                 {where}
                 ORDER BY t.last_message_at DESC NULLS LAST LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
             *params, limit, offset,

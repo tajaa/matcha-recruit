@@ -111,8 +111,8 @@ export default function Places() {
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
       <div className="mb-6 text-center">
-        <h1 className="text-xl font-bold">Find a place to review</h1>
-        <p className="mt-1 text-sm text-tu-dim">Search any store or brand — leave feedback even if they haven't joined Tell-Us yet.</p>
+        <h1 className="text-xl font-bold">Find a business</h1>
+        <p className="mt-1 text-sm text-tu-dim">Find a business to review or message with a question.</p>
       </div>
 
       <Card>
@@ -147,7 +147,7 @@ export default function Places() {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <Link to={`/b/${r.slug}`} className="text-xs font-semibold text-tu-accent hover:underline">See reviews</Link>
-                    {r.messaging_enabled && <Link to={`/b/${r.slug}#comms`} className="text-xs font-semibold text-tu-accent hover:underline">Message</Link>}
+                    {r.messaging_enabled && <Link to={`/b/${r.slug}?message=1`} className="text-xs font-semibold text-tu-accent hover:underline">Message</Link>}
                     {!r.claimed && r.intake_token && (
                       <Link to={`/i/${r.intake_token}`} className="text-xs font-semibold text-tu-accent hover:underline">Leave feedback</Link>
                     )}
