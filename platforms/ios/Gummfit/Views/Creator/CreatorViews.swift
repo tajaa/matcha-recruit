@@ -18,7 +18,7 @@ struct CreatorProfileView: View {
                 if vm.isLoading { ProgressView() }
                 else if let p = vm.profile {
                     List {
-                        Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text(p.status.replacingOccurrences(of: "_", with: " ")).badge(p.status); HStack { PhotosPicker(selection: $avatarPicker, matching: .images) { Label("Avatar", systemImage: "person.crop.circle") }; PhotosPicker(selection: $coverPicker, matching: .images) { Label("Cover", systemImage: "photo") } }; Button("Edit profile") { editing = true } }
+                        Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text((p.status ?? "draft").replacingOccurrences(of: "_", with: " ")).badge(p.status ?? "unknown"); HStack { PhotosPicker(selection: $avatarPicker, matching: .images) { Label("Avatar", systemImage: "person.crop.circle") }; PhotosPicker(selection: $coverPicker, matching: .images) { Label("Cover", systemImage: "photo") } }; Button("Edit profile") { editing = true } }
                         if let bio = p.bio { Section("About") { Text(bio) } }
                         Section("Socials") { ForEach(p.socials) { social in Text("\(social.platform.capitalized) · @\(social.handle)").swipeActions { Button("Delete", role: .destructive) { Task { await deleteSocial(social, profile: p) } } } }; Button("Add social", systemImage: "plus") { editor = .socials } }
                         Section("Portfolio") { ForEach(p.portfolio) { item in Text(item.title).swipeActions { Button("Delete", role: .destructive) { Task { await deletePortfolio(item, profile: p) } } } }; Button("Add portfolio item", systemImage: "plus") { editor = .portfolio } }
@@ -37,7 +37,7 @@ struct CreatorProfileView: View {
             .onChange(of: coverPicker) { _, item in Task { await upload(item, cover: true) } }
         }
     }
-    private func upload(_ item: PhotosPickerItem?, cover: Bool) async { guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }; do { let prepared = try ImagePrep.prepare(data: data, mimeType: "image/jpeg", filename: cover ? "cover.jpg" : "avatar.jpg"); let result = try await UploadService.shared.uploadCreatorMedia(prepared: prepared); let p = vm.profile; _ = try await CreatorService.shared.update(CreatorProfileUpdate(display_name: nil, avatar_url: cover ? nil : result.url, cover_url: cover ? result.url : nil, bio: nil, location: nil, niches: nil, languages: nil, open_to_offers: nil)); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
+    private func upload(_ item: PhotosPickerItem?, cover: Bool) async { guard let item, let data = try? await item.loadTransferable(type: Data.self) else { return }; do { let prepared = try ImagePrep.prepare(data: data, mimeType: "image/jpeg", filename: cover ? "cover.jpg" : "avatar.jpg"); let result = try await UploadService.shared.uploadCreatorMedia(prepared: prepared); _ = try await CreatorService.shared.update(CreatorProfileUpdate(display_name: nil, avatar_url: cover ? nil : result.url, cover_url: cover ? result.url : nil, bio: nil, location: nil, niches: nil, languages: nil, open_to_offers: nil)); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
     private func deleteSocial(_ item: CreatorSocial, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replaceSocials(profile.socials.filter { $0.id != item.id }.map { CreatorSocialInput(platform: $0.platform, handle: $0.handle, url: $0.url, follower_count: $0.follower_count, engagement_rate: $0.engagement_rate, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
     private func deletePortfolio(_ item: CreatorPortfolioItem, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replacePortfolio(profile.portfolio.filter { $0.id != item.id }.map { CreatorPortfolioInput(title: $0.title, description: $0.description, media_url: $0.media_url, media_type: $0.media_type, external_url: $0.external_url, brand_name: $0.brand_name, metrics: $0.metrics, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
     private func deleteRate(_ item: CreatorRate, profile: CreatorProfileMe) async { do { _ = try await CreatorService.shared.replaceRates(profile.rates.filter { $0.id != item.id }.map { CreatorRateInput(deliverable_type: $0.deliverable_type, platform: $0.platform, price_cents: $0.price_cents, negotiable: $0.negotiable, notes: $0.notes, sort_order: $0.sort_order) }); await vm.loadProfile() } catch { vm.error = error.localizedDescription } }
@@ -95,9 +95,144 @@ struct EarningsView: View {
 }
 
 struct OfferDetailView: View {
-    let offerId: String; @State private var detail: OfferDetail?; @State private var error: String?; @State private var message = ""; @State private var cancelReason = ""; @State private var showCancel = false; @State private var submitting: Deliverable?; @State private var reviewing: Deliverable?; @State private var showCounter = false
-    var body: some View { List { if let d = detail { Section { Text(d.title).font(.headline); Text(d.status).badge(d.status); if let cents = d.total_cents { Text(Formatters.cents(cents)) } }; actionSection(d); Section("Deliverables") { ForEach(d.deliverables) { item in HStack { Text("\(item.type.capitalized) #\(item.idx + 1)"); Spacer(); Text(item.status).font(.caption) }.swipeActions { if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) { Button("Submit") { submitting = item } }; if d.side == "brand" && item.status == "submitted" { Button("Revise") { reviewing = item }; Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } } } } } }; Section("Payments") { ForEach(d.payments) { payment in HStack { Text("\(payment.label) · \(Formatters.cents(payment.amount_cents))"); Spacer(); if d.side == "brand" && ["due", "processing"].contains(payment.status) { Link("Pay on web", destination: URL(string: "\(APIClient.shared.webOrigin)/collabs/\(offerId)/payments/\(payment.id)")!) } else if d.side == "creator" && ["due", "processing"].contains(payment.status) { Button("Nudge") { Task { try? await CollabService.shared.nudgePayment(offerId, paymentId: payment.id) } } } } } }; Section("Messages") { ForEach(d.messages) { message in VStack(alignment: .leading) { Text(message.sender.capitalized).font(.caption.bold()); Text(message.body) } }; HStack { TextField("Message", text: $message); Button("Send") { Task { await sendMessage() } }.disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) } } } }.overlay(alignment: .top) { ErrorBanner(message: error) }.navigationTitle("Deal").task { await load() }.refreshable { await load() }.alert("Cancel deal", isPresented: $showCancel) { TextField("Reason", text: $cancelReason); Button("Cancel deal", role: .destructive) { Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } } }; Button("Keep deal", role: .cancel) {} }.sheet(item: $submitting) { item in DeliverableSubmitSheet(deliverable: item) { body in _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body); await load() } }.sheet(isPresented: $showCounter) { CounterOfferSheet { terms, note in await perform { try await CollabService.shared.counter(offerId, terms: terms, message: note) } } }.alert("Request revision", isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) { TextField("Review note", text: $message); Button("Request revision") { if let reviewing { Task { await perform { try await CollabService.shared.requestRevision(offerId, deliverableId: reviewing.id, note: message) }; message = "" } } }; Button("Cancel", role: .cancel) {} } }
-    @ViewBuilder private func actionSection(_ d: OfferDetail) -> some View { if ["sent", "negotiating"].contains(d.status) { Section("Offer") { Button("Counter offer") { showCounter = true }; if d.side == "creator" { Button("Accept") { Task { await perform { try await CollabService.shared.accept(offerId) } } }; Button("Decline", role: .destructive) { Task { await perform { try await CollabService.shared.decline(offerId, reason: nil) } } } } else { Button("Withdraw", role: .destructive) { Task { await perform { try await CollabService.shared.withdraw(offerId) } } } } } } else if ["accepted", "active"].contains(d.status) { Section { Button("Cancel deal", role: .destructive) { showCancel = true } } } }
+    let offerId: String
+    @State private var detail: OfferDetail?
+    @State private var error: String?
+    @State private var message = ""
+    @State private var cancelReason = ""
+    @State private var showCancel = false
+    @State private var submitting: Deliverable?
+    @State private var reviewing: Deliverable?
+    @State private var showCounter = false
+
+    var body: some View {
+        List {
+            if let d = detail {
+                headerSection(d)
+                actionSection(d)
+                deliverablesSection(d)
+                paymentsSection(d)
+                messagesSection(d)
+            }
+        }
+        .overlay(alignment: .top) { ErrorBanner(message: error) }
+        .navigationTitle("Deal")
+        .task { await load() }
+        .refreshable { await load() }
+        .alert("Cancel deal", isPresented: $showCancel) {
+            TextField("Reason", text: $cancelReason)
+            Button("Cancel deal", role: .destructive) {
+                Task { await perform { try await CollabService.shared.cancel(offerId, reason: cancelReason) } }
+            }
+            Button("Keep deal", role: .cancel) {}
+        }
+        .sheet(item: $submitting) { item in
+            DeliverableSubmitSheet(deliverable: item) { body in
+                _ = try await CollabService.shared.submit(offerId, deliverableId: item.id, body: body)
+                await load()
+            }
+        }
+        .sheet(isPresented: $showCounter) {
+            CounterOfferSheet { terms, note in
+                await perform { try await CollabService.shared.counter(offerId, terms: terms, message: note) }
+            }
+        }
+        .alert("Request revision", isPresented: Binding(get: { reviewing != nil }, set: { if !$0 { reviewing = nil } })) {
+            TextField("Review note", text: $message)
+            Button("Request revision") {
+                if let reviewing {
+                    Task {
+                        do {
+                            _ = try await CollabService.shared.requestRevision(offerId, deliverableId: reviewing.id, note: message)
+                            await load()
+                        } catch {
+                            self.error = error.localizedDescription
+                        }
+                        message = ""
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    @ViewBuilder private func headerSection(_ d: OfferDetail) -> some View {
+        Section {
+            Text(d.title).font(.headline)
+            Text(d.status).badge(d.status)
+            if let cents = d.total_cents { Text(Formatters.cents(cents)) }
+        }
+    }
+
+    @ViewBuilder private func actionSection(_ d: OfferDetail) -> some View {
+        if ["sent", "negotiating"].contains(d.status) {
+            Section("Offer") {
+                Button("Counter offer") { showCounter = true }
+                if d.side == "creator" {
+                    Button("Accept") { Task { await perform { try await CollabService.shared.accept(offerId) } } }
+                    Button("Decline", role: .destructive) { Task { await perform { try await CollabService.shared.decline(offerId, reason: nil) } } }
+                } else {
+                    Button("Withdraw", role: .destructive) { Task { await perform { try await CollabService.shared.withdraw(offerId) } } }
+                }
+            }
+        } else if ["accepted", "active"].contains(d.status) {
+            Section { Button("Cancel deal", role: .destructive) { showCancel = true } }
+        }
+    }
+
+    @ViewBuilder private func deliverablesSection(_ d: OfferDetail) -> some View {
+        Section("Deliverables") {
+            ForEach(d.deliverables) { item in
+                HStack {
+                    Text("\(item.type.capitalized) #\(item.idx + 1)")
+                    Spacer()
+                    Text(item.status ?? "unknown").font(.caption)
+                }
+                .swipeActions {
+                    if d.side == "creator" && ["pending", "revision_requested"].contains(item.status) {
+                        Button("Submit") { submitting = item }
+                    }
+                    if d.side == "brand" && item.status == "submitted" {
+                        Button("Revise") { reviewing = item }
+                        Button("Approve") { Task { await perform { try await CollabService.shared.approve(offerId, deliverableId: item.id) } } }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func paymentsSection(_ d: OfferDetail) -> some View {
+        Section("Payments") {
+            ForEach(d.payments) { payment in
+                HStack {
+                    Text("\(payment.label) · \(Formatters.cents(payment.amount_cents))")
+                    Spacer()
+                    if d.side == "brand" && ["due", "processing"].contains(payment.status) {
+                        Link("Pay on web", destination: URL(string: "\(APIClient.shared.webOrigin)/collabs/\(offerId)/payments/\(payment.id)")!)
+                    } else if d.side == "creator" && ["due", "processing"].contains(payment.status) {
+                        Button("Nudge") { Task { try? await CollabService.shared.nudgePayment(offerId, paymentId: payment.id) } }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func messagesSection(_ d: OfferDetail) -> some View {
+        Section("Messages") {
+            ForEach(d.messages) { entry in
+                VStack(alignment: .leading) {
+                    Text(entry.sender.capitalized).font(.caption.bold())
+                    Text(entry.body)
+                }
+            }
+            HStack {
+                TextField("Message", text: $message)
+                Button("Send") { Task { await sendMessage() } }
+                    .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
     private func load() async { do { detail = try await CollabService.shared.offer(offerId) } catch { self.error = error.localizedDescription } }
     private func sendMessage() async { do { _ = try await CollabService.shared.message(offerId, message); message = ""; await load() } catch { self.error = error.localizedDescription } }
     private func perform(_ action: () async throws -> OfferDetail) async { do { detail = try await action() } catch { self.error = error.localizedDescription } }

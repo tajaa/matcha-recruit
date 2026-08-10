@@ -10,18 +10,109 @@ import Observation
 
 struct MarketingView: View {
     let site: CappeSite; @State private var vm = MarketingViewModel(); @State private var adding: String?; @State private var editing: MarketingEditTarget?; @State private var confirmCampaign: CappeCampaign?
-    var body: some View { List {
-        Section("Subscribers") { ForEach(vm.subscribers) { subscriber in Text(subscriber.name ?? subscriber.email).badge(subscriber.status).swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteSubscriber(site.id, subscriber.id); await vm.load(site.id) } } } }; Button("Add subscriber", systemImage: "plus") { adding = "subscriber" } }
-        Section("Campaigns") { ForEach(vm.campaigns) { campaign in HStack { VStack(alignment: .leading) { Text(campaign.subject); Text("\(campaign.recipient_count) recipients").font(.caption).foregroundStyle(.secondary) }; Spacer(); if campaign.status == "draft" { Button("Send") { confirmCampaign = campaign } }; Text(campaign.status).font(.caption) }.contentShape(Rectangle()).onTapGesture { if ["draft", "scheduled"].contains(campaign.status) { editing = .campaign(campaign) } }.swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteCampaign(site.id, campaign.id); await vm.load(site.id) } } } }; Button("New campaign", systemImage: "plus") { adding = "campaign" } }
-        Section("Forms") { ForEach(vm.forms) { form in NavigationLink { FormBuilderView(siteId: site.id, form: form) { await vm.load(site.id) } } label: { Text(form.name).badge(form.status) }.swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deleteForm(site.id, form.id); await vm.load(site.id) } } } }; Button("New form", systemImage: "plus") { adding = "form" } }
-        Section("Blog") { ForEach(vm.posts) { post in Text(post.title).badge(post.status).contentShape(Rectangle()).onTapGesture { editing = .post(post) }.swipeActions { Button("Delete", role: .destructive) { Task { try? await MarketingService.shared.deletePost(site.id, post.id); await vm.load(site.id) } } } }; Button("New post", systemImage: "plus") { adding = "post" } }
-    }.navigationTitle("Marketing").overlay(alignment: .top) { ErrorBanner(message: vm.error) }.task { await vm.load(site.id) }.refreshable { await vm.load(site.id) }.sheet(item: $adding) { kind in MarketingCreateSheet(siteId: site.id, kind: kind) { await vm.load(site.id) } }.sheet(item: $editing) { target in MarketingEditSheet(siteId: site.id, target: target) { await vm.load(site.id) } }.alert("Send campaign?", isPresented: Binding(get: { confirmCampaign != nil }, set: { if !$0 { confirmCampaign = nil } })) { Button("Send", role: .destructive) { if let campaign = confirmCampaign { Task { await vm.send(site.id, campaign: campaign) } } }; Button("Cancel", role: .cancel) {} } message: { Text("This will send \(confirmCampaign?.subject ?? "the campaign") to subscribed recipients.") }
+    var body: some View {
+        List {
+            subscribersSection
+            campaignsSection
+            formsSection
+            postsSection
+        }
+        .navigationTitle("Marketing")
+        .overlay(alignment: .top) { ErrorBanner(message: vm.error) }
+        .task { await vm.load(site.id) }
+        .refreshable { await vm.load(site.id) }
+        .sheet(isPresented: Binding(get: { adding != nil }, set: { if !$0 { adding = nil } })) {
+            if let kind = adding {
+                MarketingCreateSheet(siteId: site.id, kind: kind) { await vm.load(site.id) }
+            }
+        }
+        .sheet(item: $editing) { target in
+            MarketingEditSheet(siteId: site.id, target: target) { await vm.load(site.id) }
+        }
+        .alert("Send campaign?", isPresented: Binding(get: { confirmCampaign != nil }, set: { if !$0 { confirmCampaign = nil } })) {
+            Button("Send", role: .destructive) {
+                if let campaign = confirmCampaign { Task { await vm.send(site.id, campaign: campaign) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will send \(confirmCampaign?.subject ?? "the campaign") to subscribed recipients.")
+        }
+    }
+
+    @ViewBuilder private var subscribersSection: some View {
+        Section("Subscribers") {
+            ForEach(vm.subscribers) { subscriber in
+                Text(subscriber.name ?? subscriber.email)
+                    .badge(subscriber.status)
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            Task { try? await MarketingService.shared.deleteSubscriber(site.id, subscriber.id); await vm.load(site.id) }
+                        }
+                    }
+            }
+            Button("Add subscriber", systemImage: "plus") { adding = "subscriber" }
+        }
+    }
+
+    @ViewBuilder private var campaignsSection: some View {
+        Section("Campaigns") {
+            ForEach(vm.campaigns) { campaign in
+                let status = campaign.status ?? "unknown"
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(campaign.subject)
+                        Text("\(campaign.recipient_count) recipients").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if status == "draft" { Button("Send") { confirmCampaign = campaign } }
+                    Text(status).font(.caption)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { if ["draft", "scheduled"].contains(status) { editing = .campaign(campaign) } }
+                .swipeActions {
+                    Button("Delete", role: .destructive) {
+                        Task { try? await MarketingService.shared.deleteCampaign(site.id, campaign.id); await vm.load(site.id) }
+                    }
+                }
+            }
+            Button("New campaign", systemImage: "plus") { adding = "campaign" }
+        }
+    }
+
+    @ViewBuilder private var formsSection: some View {
+        Section("Forms") {
+            ForEach(vm.forms) { form in
+                NavigationLink { FormBuilderView(siteId: site.id, form: form) { await vm.load(site.id) } } label: { Text(form.name).badge(form.status) }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            Task { try? await MarketingService.shared.deleteForm(site.id, form.id); await vm.load(site.id) }
+                        }
+                    }
+            }
+            Button("New form", systemImage: "plus") { adding = "form" }
+        }
+    }
+
+    @ViewBuilder private var postsSection: some View {
+        Section("Blog") {
+            ForEach(vm.posts) { post in
+                Text(post.title).badge(post.status)
+                    .contentShape(Rectangle())
+                    .onTapGesture { editing = .post(post) }
+                    .swipeActions {
+                        Button("Delete", role: .destructive) {
+                            Task { try? await MarketingService.shared.deletePost(site.id, post.id); await vm.load(site.id) }
+                        }
+                    }
+            }
+            Button("New post", systemImage: "plus") { adding = "post" }
+        }
     }
 }
 private enum MarketingEditTarget: Identifiable { case campaign(CappeCampaign), post(CappePost); var id: String { switch self { case .campaign(let item): return "campaign-\(item.id)"; case .post(let item): return "post-\(item.id)" } } }
 private struct MarketingEditSheet: View {
     let siteId: String; let target: MarketingEditTarget; let reload: () async -> Void; @Environment(\.dismiss) private var dismiss; @State private var title: String; @State private var bodyText: String; @State private var status: String; @State private var error: String?
-    init(siteId: String, target: MarketingEditTarget, reload: @escaping () async -> Void) { self.siteId = siteId; self.target = target; self.reload = reload; switch target { case .campaign(let value): _title = State(initialValue: value.subject); _bodyText = State(initialValue: value.body_html ?? ""); _status = State(initialValue: value.status); case .post(let value): _title = State(initialValue: value.title); _bodyText = State(initialValue: value.body ?? ""); _status = State(initialValue: value.status) } }
+    init(siteId: String, target: MarketingEditTarget, reload: @escaping () async -> Void) { self.siteId = siteId; self.target = target; self.reload = reload; switch target { case .campaign(let value): _title = State(initialValue: value.subject); _bodyText = State(initialValue: value.body_html ?? ""); _status = State(initialValue: value.status ?? "draft"); case .post(let value): _title = State(initialValue: value.title); _bodyText = State(initialValue: value.body ?? ""); _status = State(initialValue: value.status) } }
     var body: some View { NavigationStack { Form { ErrorBanner(message: error); TextField("Title", text: $title); TextField("Body", text: $bodyText, axis: .vertical); statusPicker }.navigationTitle("Edit").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(title.isEmpty) } } } }
     @ViewBuilder private var statusPicker: some View { switch target { case .campaign: Picker("Status", selection: $status) { Text("Draft").tag("draft"); Text("Scheduled").tag("scheduled"); Text("Cancelled").tag("cancelled") }; case .post: Picker("Status", selection: $status) { Text("Draft").tag("draft"); Text("Published").tag("published"); Text("Archived").tag("archived") } } }
     private func save() async { do { switch target { case .campaign(let item): _ = try await MarketingService.shared.updateCampaign(siteId, item.id, CappeCampaignUpdate(subject: title, body_html: bodyText, from_name: item.from_name, scheduled_at: item.scheduled_at, status: status)); case .post(let item): _ = try await MarketingService.shared.updatePost(siteId, item.id, CappePostUpdate(title: title, slug: item.slug, excerpt: item.excerpt, body: bodyText, cover_image_url: item.cover_image_url, status: status)) }; await reload(); dismiss() } catch { self.error = error.localizedDescription } }

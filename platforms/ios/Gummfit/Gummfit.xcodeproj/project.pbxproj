@@ -38,6 +38,7 @@
 		3B12DBDF95C57A62C3EC912C /* BookingsListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79BF7E95BEB5D02836F0ECFA /* BookingsListViewModel.swift */; };
 		3DD8D8A03814EFE745A9D691 /* InboxRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 163BFC7A0EBB1546A3D25EAE /* InboxRootView.swift */; };
 		3E72D74284A73D81F45D0A3A /* VenueService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A357E1355113CE1882D49BF /* VenueService.swift */; };
+		3E934510ADF20E76A7FC7581 /* SiteSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59C8905DF66D390DCD37061C /* SiteSettingsView.swift */; };
 		3EDC2C66CA510D1711D2637D /* ClientsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76FE0FB77A1974696D891A8 /* ClientsView.swift */; };
 		4011ED696D170847B15D5E11 /* SignupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76671A4471C145348A4C7FA /* SignupView.swift */; };
 		4378216DC91D1EC73885DBE0 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 806BE31C99A7267B309B4E45 /* AuthModels.swift */; };
@@ -208,6 +209,7 @@
 		A4C93680F33A24A47ABDCF98 /* SiteModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiteModels.swift; sourceTree = "<group>"; };
 		A6F6138F551A6A565CFF0019 /* Gummfit.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Gummfit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ADC85AC611EAEEA3B43A0A65 /* MarketingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketingView.swift; sourceTree = "<group>"; };
+		59C8905DF66D390DCD37061C /* SiteSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiteSettingsView.swift; sourceTree = "<group>"; };
 		AEC54C727EE328AEC4BB3CD6 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		AEF0CDC93B96BF49082C1F50 /* DiscountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscountsView.swift; sourceTree = "<group>"; };
 		B151ADA77FF9C3D496C77095 /* CrmModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrmModelDecodeTests.swift; sourceTree = "<group>"; };
@@ -464,6 +466,7 @@
 				E36918CB195C7D0A3268DD44 /* LocationsStaffView.swift */,
 				ADC85AC611EAEEA3B43A0A65 /* MarketingView.swift */,
 				0EBCCDB1D9CE3721A86ACCEB /* ReviewsView.swift */,
+				59C8905DF66D390DCD37061C /* SiteSettingsView.swift */,
 			);
 			path = More;
 			sourceTree = "<group>";
@@ -686,6 +689,7 @@
 				4EFC26A49CA7DB26D9B55A2C /* ShopModels.swift in Sources */,
 				4011ED696D170847B15D5E11 /* SignupView.swift in Sources */,
 				A49FA63DCEDA30B361D41F52 /* SiteModels.swift in Sources */,
+				3E934510ADF20E76A7FC7581 /* SiteSettingsView.swift in Sources */,
 				1BECEEDCD3A171D6A87F1AB0 /* SitesService.swift in Sources */,
 				B226DCA5B6028EF9649880DB /* SitesViewModel.swift in Sources */,
 				E96650A278709D992BF13395 /* StockAdjustSheet.swift in Sources */,
