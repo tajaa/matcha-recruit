@@ -108,11 +108,13 @@ private struct DeliverableSubmitSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var url = ""
     @State private var note = ""
+    @State private var proofPicker: PhotosPickerItem?
     var body: some View {
         NavigationStack {
             Form {
                 TextField("Submission URL", text: $url).textInputAutocapitalization(.never)
                 TextField("Note", text: $note, axis: .vertical)
+                PhotosPicker(selection: $proofPicker, matching: .any(of: [.images, .videos])) { Label("Attach proof media", systemImage: "paperclip") }
             }
             .navigationTitle("Submit \(deliverable.type)")
             .toolbar {
@@ -120,7 +122,7 @@ private struct DeliverableSubmitSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Submit") {
                         Task {
-                            await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: nil))
+                            await submitBody()
                             dismiss()
                         }
                     }.disabled(url.count < 8)
@@ -128,6 +130,7 @@ private struct DeliverableSubmitSheet: View {
             }
         }
     }
+    private func submitBody() async { var proofURL: String?; if let picker = proofPicker, let data = try? await picker.loadTransferable(type: Data.self) { do { let mime = picker.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"; if mime.hasPrefix("image/") { let prepared = try ImagePrep.prepare(data: data, mimeType: mime, filename: "proof.jpg"); proofURL = try await UploadService.shared.uploadCreatorMedia(prepared: prepared).url } else { proofURL = try await UploadService.shared.uploadCreatorFile(data: data, mimeType: mime, filename: "proof.mov").url } } catch { return } }; await submit(DeliverableSubmit(submission_url: url, submission_note: note.isEmpty ? nil : note, proof_media_url: proofURL)) }
 }
 
 private struct CounterOfferSheet: View {
@@ -136,6 +139,14 @@ private struct CounterOfferSheet: View {
     @State private var compensation = ""
     @State private var type = "post"
     @State private var platform = "instagram"
+    @State private var schedule = "upfront"
+    @State private var quantity = "1"
+    @State private var spec = ""
+    @State private var usageScope = "organic"
+    @State private var usageMonths = ""
+    @State private var exclusivityCategory = ""
+    @State private var exclusivityMonths = ""
+    @State private var revisions = "1"
     @State private var note = ""
     @State private var error: String?
     var body: some View {
@@ -145,6 +156,14 @@ private struct CounterOfferSheet: View {
                 TextField("Compensation (cents)", text: $compensation).keyboardType(.numberPad)
                 TextField("Deliverable type", text: $type)
                 TextField("Platform", text: $platform)
+                Picker("Payment schedule", selection: $schedule) { Text("Upfront").tag("upfront"); Text("50 / 50").tag("split_50_50"); Text("Per deliverable").tag("per_deliverable") }
+                TextField("Quantity", text: $quantity).keyboardType(.numberPad)
+                TextField("Deliverable spec", text: $spec, axis: .vertical)
+                Picker("Usage rights", selection: $usageScope) { Text("Organic").tag("organic"); Text("Paid").tag("paid") }
+                TextField("Usage duration (months)", text: $usageMonths).keyboardType(.numberPad)
+                TextField("Exclusivity category (optional)", text: $exclusivityCategory)
+                TextField("Exclusivity months", text: $exclusivityMonths).keyboardType(.numberPad)
+                TextField("Revision rounds", text: $revisions).keyboardType(.numberPad)
                 TextField("Message", text: $note, axis: .vertical)
             }
             .navigationTitle("Counter offer")
@@ -156,7 +175,9 @@ private struct CounterOfferSheet: View {
     }
     private func save() async {
         guard let cents = Int(compensation), cents >= 0 else { error = "Enter a valid amount"; return }
-        let terms = CollabTerms(compensation_cents: cents, payment_schedule: "upfront", deliverables: [TermsDeliverable(type: type, platform: platform, quantity: 1, spec: nil, due_date: nil)], usage_rights: TermsUsageRights(scope: "organic", duration_months: nil, whitelisting: false), exclusivity: nil, revision_rounds: 1, approval_required: true, ftc_disclosure: true, start_date: nil, end_date: nil, notes: note.isEmpty ? nil : note)
+        let deliverable = TermsDeliverable(type: type, platform: platform, quantity: max(1, Int(quantity) ?? 1), spec: spec.isEmpty ? nil : spec, due_date: nil)
+        let exclusivity = exclusivityCategory.isEmpty ? nil : TermsExclusivity(category: exclusivityCategory, duration_months: max(1, Int(exclusivityMonths) ?? 1))
+        let terms = CollabTerms(compensation_cents: cents, payment_schedule: schedule, deliverables: [deliverable], usage_rights: TermsUsageRights(scope: usageScope, duration_months: Int(usageMonths), whitelisting: false), exclusivity: exclusivity, revision_rounds: max(0, Int(revisions) ?? 1), approval_required: true, ftc_disclosure: true, start_date: nil, end_date: nil, notes: note.isEmpty ? nil : note)
         await submit(terms, note.isEmpty ? nil : note)
         dismiss()
     }

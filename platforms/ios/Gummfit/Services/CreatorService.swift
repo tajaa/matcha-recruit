@@ -8,4 +8,6 @@ final class CreatorService { static let shared = CreatorService(); private init(
     func replacePortfolio(_ body: [CreatorPortfolioInput]) async throws -> [CreatorPortfolioItem] { try await APIClient.shared.request(method: "PUT", path: "/creators/me/portfolio", body: body) }
     func replaceRates(_ body: [CreatorRateInput]) async throws -> [CreatorRate] { try await APIClient.shared.request(method: "PUT", path: "/creators/me/rates", body: body) }
     func earnings() async throws -> [EarningsRow] { try await APIClient.shared.request(method: "GET", path: "/creators/me/earnings") }
+    func directory(query: String? = nil) async throws -> PublicCreatorPage { let suffix = query?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed).map { "?q=\($0)" } ?? ""; return try await APIClient.shared.request(method: "GET", path: "/public/creators\(suffix)") }
+    func publicProfile(handle: String) async throws -> PublicCreatorProfile { try await APIClient.shared.request(method: "GET", path: "/public/creators/\(handle)") }
 }
