@@ -44,7 +44,33 @@ struct CappeSiteCreate: Encodable {
     let source_type: String = "blank"
     let is_multi_location: Bool = false
 }
-struct CappeSiteUpdate: Encodable { var name, subdomain, timezone, tax_label, shipping_label, receipt_prefix: String?; var status: String?; var tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents: Int?; var is_multi_location: Bool? }
+struct CappeSiteUpdate: Encodable {
+    var name, subdomain, timezone, tax_label, shipping_label, receipt_prefix: String?
+    var status: String?
+    var tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents: Int?
+    var is_multi_location: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, subdomain, timezone, tax_label, shipping_label, receipt_prefix, status
+        case tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents, is_multi_location
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(subdomain, forKey: .subdomain)
+        try container.encodeIfPresent(timezone, forKey: .timezone)
+        try container.encodeIfPresent(tax_label, forKey: .tax_label)
+        try container.encodeIfPresent(shipping_label, forKey: .shipping_label)
+        try container.encode(receipt_prefix, forKey: .receipt_prefix)
+        try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(tax_rate_bps, forKey: .tax_rate_bps)
+        try container.encodeIfPresent(shipping_flat_cents, forKey: .shipping_flat_cents)
+        // The API uses an explicit null to clear these optional settings.
+        try container.encode(shipping_free_threshold_cents, forKey: .shipping_free_threshold_cents)
+        try container.encodeIfPresent(is_multi_location, forKey: .is_multi_location)
+    }
+}
 
 /// Mirrors CappeReadinessItem/CappeReadiness (types.ts:35-47).
 struct CappeReadinessItem: Codable, Identifiable, Equatable {
