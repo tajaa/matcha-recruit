@@ -27,7 +27,18 @@ final class WorkToastCenter {
     }
 
     @MainActor func setHover(_ id: UUID, _ hovering: Bool) {
-        if hovering { hoveredIds.insert(id) } else { hoveredIds.remove(id) }
+        if hovering {
+            hoveredIds.insert(id)
+        } else {
+            hoveredIds.remove(id)
+            // The five-second task intentionally leaves a hovered toast alone.
+            // Once the pointer leaves, schedule the same short grace period the
+            // original inline implementation provided so it cannot stick forever.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                if !hoveredIds.contains(id) { dismiss(id: id) }
+            }
+        }
     }
     @MainActor func dismiss(id: UUID) { toasts.removeAll { $0.id == id } }
     @MainActor func dismissAll() { toasts.removeAll() }
