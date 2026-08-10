@@ -71,6 +71,27 @@ struct ProfileSheet: View {
                 .controlSize(.small)
             }
 
+            Divider().opacity(0.2)
+
+            Button {
+                Task {
+                    try? await AuthService.shared.logout()
+                    await MainActor.run {
+                        appState.didLogout()
+                        dismiss()
+                    }
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 11))
+                    Text("log out")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.red.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+
             HStack {
                 Button { dismiss() } label: {
                     Text("cancel")

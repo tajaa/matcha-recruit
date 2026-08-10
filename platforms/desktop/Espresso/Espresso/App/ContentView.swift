@@ -153,7 +153,7 @@ struct ContentView: View {
                                 .underline(false)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                                .frame(maxWidth: 170)
+                                .frame(maxWidth: 145)
                         }
                         .buttonStyle(.plain)
                         .help("Edit profile")
@@ -168,20 +168,10 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .help(appState.plan == .free ? "Upgrade Werk" : "Werk \(appState.plan.displayName) — view plans")
-                        Button("logout") {
-                            Task {
-                                try? await AuthService.shared.logout()
-                                await MainActor.run { appState.didLogout() }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.5))
                     }
-                    // Keep the native toolbar capsule self-contained when the
-                    // window narrows: the account label yields first instead
-                    // of pushing the plan/logout text outside its boundary.
-                    .frame(maxWidth: 350)
+                    // The account label yields first when the window narrows,
+                    // keeping the logout control readable.
+                    .frame(maxWidth: 310)
                 }
             }
         }

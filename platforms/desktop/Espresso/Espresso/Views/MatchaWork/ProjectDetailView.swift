@@ -194,7 +194,7 @@ struct ProjectDetailView: View {
                         // The native toolbar wraps this control in a capsule.
                         // A fixed intrinsic width let long project names spill
                         // through that capsule instead of truncating cleanly.
-                        .frame(width: 170, alignment: .leading)
+                        .frame(maxWidth: 135, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .help("Click to rename")
@@ -237,10 +237,6 @@ struct ProjectDetailView: View {
                         Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(appState.themeCard)
-                    .cornerRadius(6)
                     .foregroundColor(.secondary)
                 }
                 .menuStyle(.borderlessButton)
