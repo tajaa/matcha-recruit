@@ -7,6 +7,7 @@ scoped-auth revocation comparator during the xhigh review fix pass:
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_route_helpers.py -q
 """
+
 import os
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -24,6 +25,7 @@ from app.core.services.scoped_auth import is_token_revoked  # noqa: E402
 
 
 # --- build_patch --------------------------------------------------------------
+
 
 def test_build_patch_absent_field_untouched():
     body = CappeStaffUpdate(name="Jamie")
@@ -66,7 +68,9 @@ def test_build_patch_no_fields_set_is_empty():
 
 def test_build_patch_multiple_fields_number_in_declared_order():
     body = CappeStaffUpdate(name="Jamie", active=False)
-    sets, args = build_patch(body, ("name", "bio", "image_url", "active", "sort_order", "location_id"))
+    sets, args = build_patch(
+        body, ("name", "bio", "image_url", "active", "sort_order", "location_id")
+    )
     assert sets == ["name = $1", "active = $2"]
     assert args == ["Jamie", False]
 
@@ -80,7 +84,30 @@ def test_build_patch_start_offsets_placeholder_numbering():
     assert args == ["Jamie"]
 
 
+def test_build_patch_nullable_allowlist_accepts_null():
+    body = CappeStaffUpdate(bio=None)
+    sets, args = build_patch(body, ("name", "bio"), nullable={"bio"})
+    assert sets == ["bio = $1"]
+    assert args == [None]
+
+
+def test_build_patch_nullable_rejects_non_nullable_null():
+    body = CappeStaffUpdate(name=None)
+    with pytest.raises(HTTPException) as exc_info:
+        build_patch(body, ("name", "bio"), nullable={"bio"})
+    assert exc_info.value.status_code == 422
+    assert "name" in exc_info.value.detail
+
+
+def test_build_patch_nullable_none_preserves_legacy_behavior():
+    body = CappeStaffUpdate(name=None)
+    sets, args = build_patch(body, ("name", "bio"))
+    assert sets == ["name = $1"]
+    assert args == [None]
+
+
 # --- read_capped ---------------------------------------------------------------
+
 
 class _FakeUploadFile:
     """Minimal stand-in for fastapi.UploadFile — read_capped only calls
@@ -95,7 +122,7 @@ class _FakeUploadFile:
     async def read(self, n: int = -1) -> bytes:
         self.read_calls += 1
         size = n if n and n > 0 else self._chunk_size
-        chunk = self._data[self._pos:self._pos + size]
+        chunk = self._data[self._pos : self._pos + size]
         self._pos += len(chunk)
         return chunk
 
@@ -132,12 +159,17 @@ async def test_read_capped_stops_reading_past_the_cap():
 
 # --- is_token_revoked: same-second logout/login -------------------------------
 
+
 def test_token_from_truncated_second_of_watermark_not_revoked():
     """A login in the same wall-clock second as a logout mints a token whose
     whole-second `iat` must NOT read as predating a microsecond-precision
     watermark from that same second."""
-    watermark = datetime(2026, 1, 1, 12, 0, 0, 900_000, tzinfo=timezone.utc)  # :00.900000
-    iat = int(datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp())  # :00 (floor)
+    watermark = datetime(
+        2026, 1, 1, 12, 0, 0, 900_000, tzinfo=timezone.utc
+    )  # :00.900000
+    iat = int(
+        datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc).timestamp()
+    )  # :00 (floor)
     assert is_token_revoked(iat, watermark) is False
 
 
