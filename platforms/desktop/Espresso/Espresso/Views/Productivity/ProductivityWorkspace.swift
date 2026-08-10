@@ -31,17 +31,17 @@ struct ProductivityWorkspace: View {
             HStack {
                 Text("Boards")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
+                    .foregroundColor(appState.themeSidebarTextSecondary)
                 Spacer()
                 Button { railCollapsed = true } label: {
                     Image(systemName: "sidebar.left").font(.system(size: 12))
                 }
-                .buttonStyle(.plain).foregroundColor(appState.themeTextSecondary)
+                .buttonStyle(.plain).foregroundColor(appState.themeSidebarTextSecondary)
                 .help("Hide sidebar")
                 Button { Task { await vm.createBoard() } } label: {
                     Image(systemName: "plus").font(.system(size: 12))
                 }
-                .buttonStyle(.plain).foregroundColor(appState.themeTextSecondary)
+                .buttonStyle(.plain).foregroundColor(appState.themeSidebarTextSecondary)
                 .help("New board")
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
@@ -54,7 +54,7 @@ struct ProductivityWorkspace: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(appState.themeSidebar.opacity(0.5))
+        .background(appState.themeSidebar)
     }
 
     private func boardRow(_ board: ProductivityBoard) -> some View {
@@ -63,21 +63,21 @@ struct ProductivityWorkspace: View {
             HStack(spacing: 7) {
                 Image(systemName: "checklist")
                     .font(.system(size: 11))
-                    .foregroundColor(selected ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 15)
                 Text(board.title)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundColor(appState.themeText.opacity(0.92))
+                    .foregroundColor(appState.themeSidebarText.opacity(0.92))
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if board.cardCount > 0 {
                     Text("\(board.cardCount)")
                         .font(.system(size: 10))
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeAccent.opacity(0.14) : .clear))
+            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeSidebarAccent.opacity(0.10) : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

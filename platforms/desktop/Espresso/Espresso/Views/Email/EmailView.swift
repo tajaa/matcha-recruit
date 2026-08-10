@@ -64,7 +64,7 @@ struct EmailSidebarView: View {
                 Spacer()
             }
             .font(.system(size: 12, weight: .medium))
-            .foregroundColor(appState.themeAccent)
+            .foregroundColor(appState.themeSidebarAccent)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
@@ -81,11 +81,11 @@ struct EmailSidebarView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(msg.subject.isEmpty ? "(no subject)" : msg.subject)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(appState.themeText)
+                    .foregroundColor(appState.themeSidebarText)
                     .lineLimit(1)
                 Text(msg.fromAddress)
                     .font(.system(size: 10))
-                    .foregroundColor(appState.themeTextSecondary)
+                    .foregroundColor(appState.themeSidebarTextSecondary)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -93,7 +93,7 @@ struct EmailSidebarView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(isSelected ? appState.themeAccent.opacity(0.14) : Color.clear)
+                    .fill(isSelected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -107,7 +107,7 @@ struct EmailSidebarView: View {
             Text(text).font(.system(size: 11))
             Spacer()
         }
-        .foregroundColor(appState.themeTextSecondary)
+        .foregroundColor(appState.themeSidebarTextSecondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
@@ -116,10 +116,10 @@ struct EmailSidebarView: View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.seal")
                 .font(.system(size: 9))
-                .foregroundColor(appState.themeAccent)
+                .foregroundColor(appState.themeSidebarAccent)
             Text(vm.email ?? "Connected")
                 .font(.system(size: 10))
-                .foregroundColor(appState.themeTextSecondary)
+                .foregroundColor(appState.themeSidebarTextSecondary)
                 .lineLimit(1)
             Spacer()
             Menu {
@@ -129,7 +129,7 @@ struct EmailSidebarView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeSidebarTextSecondary)
                     .frame(width: 18, height: 18)
             }
             .menuStyle(.borderlessButton)

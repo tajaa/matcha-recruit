@@ -228,12 +228,12 @@ struct SidebarStarredView: View {
                     Text("STARRED")
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
                         .padding(.bottom, 3)
                     ForEach(pins) { pin in row(pin) }
-                    Divider().background(appState.themeBorder).padding(.top, 6)
+                    Divider().background(appState.themeSidebarBorder).padding(.top, 6)
                 }
             }
         }
@@ -255,11 +255,11 @@ struct SidebarStarredView: View {
             HStack(spacing: 8) {
                 Image(systemName: pin.icon)
                     .font(.system(size: 11))
-                    .foregroundColor(pin.kind == .channel ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(pin.kind == .channel ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
                 Text(pin.name)
                     .font(.system(size: 12, weight: active ? .semibold : .regular))
-                    .foregroundColor(appState.themeText.opacity(0.9))
+                    .foregroundColor(appState.themeSidebarText.opacity(0.9))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
@@ -267,7 +267,7 @@ struct SidebarStarredView: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(active ? appState.themeAccent.opacity(0.12) : Color.clear)
+                    .fill(active ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
             )
             .contentShape(Rectangle())
         }

@@ -635,10 +635,10 @@ struct SidebarFooterButton: View {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeText.opacity(0.85))
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarText.opacity(0.85))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {
@@ -647,7 +647,7 @@ struct SidebarFooterButton: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(appState.themeAccent)
+                        .background(appState.themeSidebarAccent)
                         .clipShape(Capsule())
                 }
                 Spacer()
@@ -656,7 +656,7 @@ struct SidebarFooterButton: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? appState.themeAccent.opacity(0.14) : Color.clear)
+                    .fill(isActive ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
             )
         }
         .buttonStyle(.plain)

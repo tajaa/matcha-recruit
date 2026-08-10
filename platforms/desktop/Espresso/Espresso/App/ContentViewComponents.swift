@@ -202,12 +202,12 @@ struct WorkTabsSidebarSection: View {
                     Text("TABS")
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.5)
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                     Spacer(minLength: 0)
                     Button { appState.pinActiveTab() } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(appState.themeTextSecondary)
+                            .foregroundColor(appState.themeSidebarTextSecondary)
                             .frame(width: 18, height: 18)
                             .contentShape(Rectangle())
                     }
@@ -242,11 +242,11 @@ struct WorkTabsSidebarSection: View {
             HStack(spacing: 8) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 11))
-                    .foregroundColor(active ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(active ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
                 Text(tab.title)
                     .font(.system(size: 12, weight: active ? .semibold : .regular))
-                    .foregroundColor(active ? appState.themeText : appState.themeText.opacity(0.7))
+                    .foregroundColor(active ? appState.themeSidebarText : appState.themeSidebarText.opacity(0.7))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
@@ -256,13 +256,13 @@ struct WorkTabsSidebarSection: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(appState.themeAccent))
+                        .background(Capsule().fill(appState.themeSidebarAccent))
                 }
                 if hovered {
                     Button { appState.closeTab(tab) } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(appState.themeText.opacity(0.5))
+                            .foregroundColor(appState.themeSidebarText.opacity(0.5))
                             .frame(width: 16, height: 16)
                             .contentShape(Rectangle())
                     }
@@ -274,7 +274,7 @@ struct WorkTabsSidebarSection: View {
             .padding(.vertical, 5)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(active ? appState.themeAccent.opacity(0.12) : Color.clear)
+                    .fill(active ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
             )
             .contentShape(Rectangle())
         }
@@ -302,7 +302,7 @@ struct SidebarShowMoreButton: View {
                 Text("Show \(min(pageSize, remaining)) more").font(.system(size: 10, weight: .medium))
                 Spacer()
             }
-            .foregroundColor(appState.themeTextSecondary)
+            .foregroundColor(appState.themeSidebarTextSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
@@ -318,13 +318,13 @@ struct SidebarRowModifier: ViewModifier {
     @State private var isHovered = false
 
     func body(content: Content) -> some View {
-        let isLight = appState.isLightFamily
+        let isSidebarDark = appState.isSidebarDark
         content
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected
-                          ? appState.themeAccent.opacity(isLight ? 0.25 : 0.15)
-                          : (isHovered ? (isLight ? Color.black.opacity(0.04) : Color.white.opacity(0.04)) : Color.clear))
+                          ? appState.themeSidebarAccent.opacity(0.10)
+                          : (isHovered ? (isSidebarDark ? Color.white.opacity(0.08) : Color.black.opacity(0.05)) : Color.clear))
                     .padding(.horizontal, 6)
             )
             .onHover { hovering in

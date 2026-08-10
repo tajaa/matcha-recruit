@@ -409,7 +409,7 @@ struct JournalsWorkspace: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(appState.themeSidebar.opacity(0.5))
+        .background(appState.themeSidebar)
     }
 
     private func fixedRow(title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -417,15 +417,15 @@ struct JournalsWorkspace: View {
             HStack(spacing: 7) {
                 Image(systemName: icon)
                     .font(.system(size: 11))
-                    .foregroundColor(selected ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 15)
                 Text(title)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundColor(appState.themeText.opacity(0.92))
+                    .foregroundColor(appState.themeSidebarText.opacity(0.92))
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeAccent.opacity(0.14) : Color.clear))
+            .background(RoundedRectangle(cornerRadius: 6).fill(selected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -456,7 +456,7 @@ struct JournalsWorkspace: View {
                 Button { toggle(folder.id) } label: {
                     Image(systemName: collapsed.contains(folder.id) ? "chevron.right" : "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                         .frame(width: 10)
                 }
                 .buttonStyle(.plain)
@@ -467,7 +467,7 @@ struct JournalsWorkspace: View {
                 TextField("Folder", text: $renameText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundColor(appState.themeText)
+                    .foregroundColor(appState.themeSidebarText)
                     .focused($renameFocused)
                     .onSubmit { Task { await commitFolderRename(folder.id) } }
                     .onChange(of: renameFocused) { _, f in
@@ -479,16 +479,16 @@ struct JournalsWorkspace: View {
                     HStack(spacing: 7) {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 11))
-                            .foregroundColor(iconColor(folder.color, fallback: appState.themeTextSecondary))
+                            .foregroundColor(iconColor(folder.color, fallback: appState.themeSidebarTextSecondary))
                             .frame(width: 15)
                         Text(folder.name)
                             .font(.system(size: 12, weight: isSel ? .semibold : .regular))
-                            .foregroundColor(appState.themeText.opacity(0.92))
+                            .foregroundColor(appState.themeSidebarText.opacity(0.92))
                             .lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 8).padding(.vertical, 5)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(isSel ? appState.themeAccent.opacity(0.14) : Color.clear))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(isSel ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

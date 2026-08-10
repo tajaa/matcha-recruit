@@ -23,18 +23,38 @@ extension AppState {
         }
     }
 
-    /// Sidebar background — deliberately CONTRASTS the body (`themeBg`): lighter
-    /// than the near-black dark bg, lighter than the espresso cappuchin bg, and
-    /// DARKER than the light-mode body, so the nav rail always separates from the
-    /// main content.
+    /// The navigation rail always uses the opposite color mode of the body:
+    /// dark for light-family themes and light for dark-family themes.
+    var isSidebarDark: Bool { isLightFamily }
+
     var themeSidebar: Color {
-        switch appTheme {
-        case "light": return Color.graySidebar
-        case "platinum": return Color.platinumSidebar
-        case "cappuchin": return Color.cappuchinCard
-        case "graphite": return Color.graphiteSidebar
-        default: return Color.zinc900
-        }
+        isSidebarDark
+            ? Color(red: 0.075, green: 0.078, blue: 0.086)
+            : Color(red: 0.775, green: 0.770, blue: 0.750)
+    }
+
+    var themeSidebarCard: Color {
+        isSidebarDark ? Color.white.opacity(0.08) : Color.black.opacity(0.055)
+    }
+
+    var themeSidebarBorder: Color {
+        isSidebarDark ? Color.white.opacity(0.12) : Color.black.opacity(0.10)
+    }
+
+    var themeSidebarText: Color {
+        isSidebarDark ? Color.white.opacity(0.96) : Color(red: 0.095, green: 0.098, blue: 0.108)
+    }
+
+    var themeSidebarTextSecondary: Color {
+        isSidebarDark ? Color.white.opacity(0.68) : Color(red: 0.245, green: 0.245, blue: 0.255)
+    }
+
+    var themeSidebarAccent: Color {
+        isSidebarDark ? Color.matcha500 : Color.matcha600
+    }
+
+    var themeSidebarOnAccent: Color {
+        isSidebarDark ? Color.zinc900 : Color.white
     }
 
     var themeBorder: Color {
@@ -49,20 +69,15 @@ extension AppState {
 
     var themeAccent: Color {
         switch appTheme {
-        case "light": return Color.grayAccent
-        case "platinum": return Color.platinumAccent
-        case "cappuchin": return Color.cappuchinAccent
-        case "graphite": return Color.graphiteAccent
+        case "light", "platinum": return Color.matcha600
+        case "cappuchin", "graphite": return Color.matcha500
         default: return Color.matcha500
         }
     }
 
     var themeAccentDark: Color {
         switch appTheme {
-        case "light": return Color.grayAccentDark
-        case "platinum": return Color.platinumAccentDark
-        case "cappuchin": return Color.cappuchinAccentDark
-        case "graphite": return Color.graphiteAccentDark
+        case "light", "platinum", "cappuchin", "graphite": return Color.matcha600
         default: return Color.matcha600
         }
     }
@@ -78,8 +93,7 @@ extension AppState {
     }
 
     /// Foreground for content sitting ON the accent color (e.g. button labels).
-    /// Caramel cappuchin accent is light, so it needs dark text; charcoal and
-    /// matcha green accents need white.
+    /// Amber sits on dark surfaces; filled actions use white labels.
     var themeOnAccent: Color {
         switch appTheme {
         case "cappuchin": return Color.cappuchinDark

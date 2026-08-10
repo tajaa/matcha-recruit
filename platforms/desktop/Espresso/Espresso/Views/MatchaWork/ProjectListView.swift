@@ -403,7 +403,7 @@ struct MWHubRail<Header: View, Rows: View>: View {
             }
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(appState.themeSidebar.opacity(0.5))
+        .background(appState.themeSidebar)
     }
 }
 
@@ -419,7 +419,7 @@ struct MWHubRailStrip: View {
             Button(action: expand) {
                 Image(systemName: "sidebar.left")
                     .font(.system(size: 13))
-                    .foregroundColor(appState.themeTextSecondary)
+                    .foregroundColor(appState.themeSidebarTextSecondary)
                     .frame(width: 36, height: 40)
                     .contentShape(Rectangle())
             }
@@ -429,7 +429,7 @@ struct MWHubRailStrip: View {
         }
         .frame(width: 36)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(appState.themeSidebar.opacity(0.5))
+        .background(appState.themeSidebar)
     }
 }
 
@@ -448,22 +448,22 @@ struct MWHubRailRow: View {
             HStack(spacing: 7) {
                 Image(systemName: icon)
                     .font(.system(size: 11))
-                    .foregroundColor(accent || selected ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(accent || selected ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 15)
                 Text(title)
                     .font(.system(size: 12, weight: selected ? .semibold : .regular))
-                    .foregroundColor(appState.themeText.opacity(0.92))
+                    .foregroundColor(appState.themeSidebarText.opacity(0.92))
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if let trailing {
                     Text(trailing)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                 }
             }
             .padding(.horizontal, 8).padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? appState.themeAccent.opacity(0.14) : Color.clear))
+                .fill(selected ? appState.themeSidebarAccent.opacity(0.10) : Color.clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -479,7 +479,7 @@ struct MWHubRailIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 12))
-                .foregroundColor(appState.themeTextSecondary)
+                .foregroundColor(appState.themeSidebarTextSecondary)
         }
         .buttonStyle(.plain)
         .help(help)

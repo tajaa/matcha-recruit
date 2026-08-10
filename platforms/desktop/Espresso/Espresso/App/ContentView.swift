@@ -209,7 +209,7 @@ struct ContentView: View {
                 MWMonogram(size: 26)
                 Text("Espresso")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(appState.themeText)
+                    .foregroundColor(appState.themeSidebarText)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)
@@ -226,7 +226,7 @@ struct ContentView: View {
                 }
             }
 
-            Divider().background(appState.themeBorder)
+            Divider().background(appState.themeSidebarBorder)
 
             // Footer — Inbox + People always-visible buttons with live badges
             HStack(spacing: 6) {
@@ -259,6 +259,7 @@ struct ContentView: View {
             .padding(.vertical, 8)
         }
         .background(sidebarBackground)
+        .preferredColorScheme(appState.isSidebarDark ? .dark : .light)
         .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
         .task {
             await refreshPendingConnections()
@@ -292,18 +293,23 @@ struct ContentView: View {
     private var sidebarSearchBar: some View {
         HStack {
             Image(systemName: "magnifyingglass")
-                .foregroundColor(appState.themeTextSecondary)
+                .foregroundColor(appState.themeSidebarTextSecondary)
                 .font(.system(size: 11))
-            TextField("Filter sidebar...", text: $searchText)
+            TextField(
+                "",
+                text: $searchText,
+                prompt: Text("Filter sidebar...")
+                    .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.72))
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundColor(appState.themeText)
+                .foregroundColor(appState.themeSidebarText)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(appState.themeTextSecondary)
+                        .foregroundColor(appState.themeSidebarTextSecondary)
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
@@ -313,11 +319,11 @@ struct ContentView: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(appState.themeCard.opacity(appState.isLightFamily ? 0.8 : 0.4))
+                .fill(appState.themeSidebarCard)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(appState.themeBorder, lineWidth: 1)
+                .stroke(appState.themeSidebarBorder, lineWidth: 1)
         )
         .padding(.horizontal, 8)
         .padding(.bottom, 8)
@@ -356,7 +362,7 @@ struct ContentView: View {
                     }
                 }
             if idx < visibleSections.count - 1 {
-                Divider().background(appState.themeBorder)
+                Divider().background(appState.themeSidebarBorder)
             }
         }
     }
@@ -411,16 +417,16 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                     .frame(width: 16)
                 Text(title.uppercased())
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(0.5)
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 if lockedFeature != nil {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 8))
-                        .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+                        .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
             }
@@ -431,7 +437,7 @@ struct ContentView: View {
         .padding(.vertical, 9)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? appState.themeAccent.opacity(0.12) : Color.clear)
+                .fill(isActive ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
         )
     }
 
@@ -540,14 +546,14 @@ struct ContentView: View {
                     HStack(spacing: 6) {
                         Image(systemName: isOpen.wrappedValue ? "chevron.down" : "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeSidebarTextSecondary)
                             .frame(width: 10)
                         Image(systemName: icon)
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeSidebarTextSecondary)
                         Text(title.uppercased())
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeSidebarTextSecondary)
                             .tracking(0.5)
                         Spacer()
                     }
@@ -578,10 +584,10 @@ struct ContentView: View {
             HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? appState.themeAccent : appState.themeText.opacity(0.85))
+                    .foregroundColor(isActive ? appState.themeSidebarAccent : appState.themeSidebarText.opacity(0.85))
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {
@@ -590,7 +596,7 @@ struct ContentView: View {
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(appState.themeAccent)
+                        .background(appState.themeSidebarAccent)
                         .clipShape(Capsule())
                 }
                 Spacer()
@@ -599,7 +605,7 @@ struct ContentView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? appState.themeAccent.opacity(0.14) : Color.clear)
+                    .fill(isActive ? appState.themeSidebarAccent.opacity(0.10) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -618,30 +624,15 @@ struct ContentView: View {
 
     // MARK: - Starred section & theme background helpers
 
-    /// Tint strength layered over the sidebar vibrancy. Cappuchin needs the
-    /// most (neutral frost → warm espresso); dark the least (let vibrancy read).
-    private var sidebarTintOpacity: Double {
-        switch appState.appTheme {
-        case "cappuchin": return 0.72
-        case "light": return 0.55
-        case "platinum": return 0.55
-        default: return 0.40
-        }
-    }
-
     @ViewBuilder
     private var sidebarBackground: some View {
         if #available(macOS 26.0, *) {
-            // Liquid Glass: system glass, tinted to the (contrasting) sidebar color.
+            // Keep a solid inverse-mode foundation for legibility, then layer
+            // the system glass over a strong tint for depth without washout.
             Rectangle()
-                .fill(appState.themeSidebar.opacity(sidebarTintOpacity * 0.5))
-                .glassEffect(.regular.tint(appState.themeSidebar.opacity(0.28)), in: Rectangle())
+                .fill(appState.themeSidebar.opacity(0.68))
+                .glassEffect(.regular.tint(appState.themeSidebar.opacity(0.52)), in: Rectangle())
         } else {
-            // macOS 14/15 can't render Liquid Glass and `.behindWindow` vibrancy
-            // samples the desktop wallpaper — at partial tint opacity that washed
-            // the intended contrast out. Render the SOLID contrasting color so the
-            // rail always separates from the opaque body: lighter than the
-            // dark/cappuchin bg, darker than the light bg.
             appState.themeSidebar
         }
     }
