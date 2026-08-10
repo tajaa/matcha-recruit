@@ -10,6 +10,7 @@ export default function BrandSettings() {
   const [brand, setBrand] = useState<Brand | null>(null)
   const [name, setName] = useState('')
   const [rewardMode, setRewardMode] = useState<'auto' | 'manual'>('auto')
+  const [messagingEnabled, setMessagingEnabled] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,7 +24,7 @@ export default function BrandSettings() {
 
   useEffect(() => {
     tellusApi.get<Brand>('/brand').then((b) => {
-      setBrand(b); setName(b.name); setRewardMode(b.reward_mode)
+      setBrand(b); setName(b.name); setRewardMode(b.reward_mode); setMessagingEnabled(b.messaging_enabled ?? false)
     })
     tellusApi.get<BrandPrompt[]>('/brand/prompts').then((ps) => setQuestions(ps.map((p) => p.prompt))).catch(() => {})
   }, [])
@@ -89,6 +90,15 @@ export default function BrandSettings() {
     } catch (e) { setErr(e instanceof Error ? e.message : 'Save failed') } finally { setBusy(false) }
   }
 
+  async function toggleMessaging(enabled: boolean) {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await tellusApi.patch('/comms/brand/messaging', { enabled })
+      setMessagingEnabled(enabled); setMsg(enabled ? 'Comms is now visible on your public page.' : 'Comms turned off.')
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not update Comms') }
+    finally { setBusy(false) }
+  }
+
   if (!brand) return <Spinner />
 
   return (
@@ -124,6 +134,12 @@ export default function BrandSettings() {
         <Button onClick={save} loading={busy} variant="soft">Save</Button>
         {msg && <p className="text-sm text-tu-good">{msg}</p>}
         <ErrorText>{err}</ErrorText>
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="text-sm font-semibold">Comms</h2>
+        <p className="text-xs text-tu-faint">Let customers ask your team questions that your website may not answer, such as holiday hours, reservations, or in-store inventory.</p>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={messagingEnabled} disabled={busy} onChange={e => void toggleMessaging(e.target.checked)} /> Accept Comms messages on my public page</label>
       </Card>
 
       <Card className="space-y-3">

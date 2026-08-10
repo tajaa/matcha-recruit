@@ -13,7 +13,7 @@ from ...database import get_connection
 from ..dependencies import optional_consumer_account_id, require_tellus_account
 from ..models.tellus import (
     TellusAccount, TellusClaimResponse, TellusMyClaim, TellusPublicBrandPage,
-    TellusPublicReview, TellusReportMedia,
+    TellusPublicReview, TellusReportMedia, TellusMessagingStore,
 )
 from ..services.admin_audit import record_admin_action
 from ..services.likes_service import hydrate_likes
@@ -36,7 +36,7 @@ async def public_brand_page(
 
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url, owner_account_id, plan_status FROM tellus_brands WHERE slug = $1", slug
+            "SELECT id, name, slug, logo_url, owner_account_id, plan_status, messaging_enabled FROM tellus_brands WHERE slug = $1", slug
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -58,6 +58,10 @@ async def public_brand_page(
         store = await conn.fetchrow(
             "SELECT address, city, state FROM tellus_stores WHERE brand_id = $1 "
             "ORDER BY created_at LIMIT 1",
+            brand["id"],
+        )
+        stores = await conn.fetch(
+            "SELECT id, name, address, city, state FROM tellus_stores WHERE brand_id = $1 ORDER BY created_at",
             brand["id"],
         )
 
@@ -166,6 +170,8 @@ async def public_brand_page(
         state=store["state"] if store else None,
         older_count=older_count,
         has_board=has_board,
+        messaging_enabled=bool(claimed and brand["messaging_enabled"]),
+        stores=[TellusMessagingStore(**dict(s)) for s in stores],
     )
 
 

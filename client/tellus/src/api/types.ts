@@ -67,6 +67,7 @@ export interface Brand {
   logo_url: string | null
   reward_mode: 'auto' | 'manual'
   created_at: string
+  messaging_enabled?: boolean
 }
 
 export interface BrandPrompt {
@@ -362,6 +363,8 @@ export interface PublicBrandPage {
   state: string | null
   older_count: number
   has_board: boolean
+  messaging_enabled: boolean
+  stores: MessagingStore[]
 }
 
 export interface ClaimResponse {
@@ -394,6 +397,7 @@ export interface PlaceSearchResult {
   city: string | null; state: string | null
   claimed: boolean; intake_token: string | null; review_count: number
   google_place_id: string | null
+  messaging_enabled: boolean
 }
 export interface PlaceCreateResponse {
   slug: string; name: string; claimed: boolean; intake_token: string | null; existing: boolean
@@ -404,7 +408,7 @@ export interface PlaceAutocompleteResult {
 
 export interface DmThread {
   id: string
-  report_id: string
+  report_id: string | null
   counterparty_name: string
   report_title: string | null
   report_number: string | null
@@ -414,6 +418,17 @@ export interface DmThread {
   unread_count: number
   last_message_at: string
   created_at: string
+  kind?: 'feedback' | 'general'
+  topic?: string | null
+  status?: 'waiting_brand' | 'waiting_consumer' | 'closed'
+  store_id?: string | null
+  store_name?: string | null
+  store_city?: string | null
+  assigned_member_id?: string | null
+  assigned_member_name?: string | null
+  viewer_role?: 'consumer' | 'brand'
+  first_brand_response_at?: string | null
+  closed_at?: string | null
 }
 
 export interface DmMessage {
@@ -423,6 +438,25 @@ export interface DmMessage {
   body: string
   created_at: string
   is_mine: boolean
+}
+
+export interface MessagingStore {
+  id: string
+  name: string
+  address: string | null
+  city: string | null
+  state: string | null
+}
+
+export interface CommsStartResponse { thread: DmThread; message: DmMessage }
+
+export interface InboxBrand {
+  brand_id: string
+  name: string
+  slug: string
+  plan_status: BrandPlanStatus | null
+  role: 'owner' | 'member'
+  can_manage_inbox: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -715,6 +749,7 @@ export interface BrandTeamMember {
   email: string
   role: 'owner' | 'moderator'
   created_at: string
+  can_manage_inbox: boolean
 }
 
 // GET /me/moderated-brands — bootstrap list for consumer moderators (and any

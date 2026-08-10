@@ -1,8 +1,10 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAccount } from './hooks/useAccount'
 import { Layout } from './components/Layout'
 import { Spinner } from './components/ui'
+import { tellusApi } from './api/tellusClient'
+import type { InboxBrand } from './api/types'
 
 import Landing from './pages/Landing'
 import Login from './pages/Login'
@@ -85,6 +87,21 @@ function Protected({
   return bare ? <>{children}</> : <Layout>{children}</Layout>
 }
 
+function CommsProtected({ children }: { children: React.ReactNode }) {
+  const { account, loading } = useAccount()
+  const location = useLocation()
+  const [allowed, setAllowed] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!account) { setAllowed(false); return }
+    if (account.account_type === 'brand') { setAllowed(true); return }
+    tellusApi.get<InboxBrand[]>('/comms/inbox-brands').then(rows => setAllowed(rows.length > 0)).catch(() => setAllowed(false))
+  }, [account?.id, account?.account_type, account?.plan_status])
+  if (loading || allowed === null) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
+  if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname + location.search)} replace />
+  if (!allowed) return <Navigate to={account.account_type === 'brand' ? brandHome(account.plan_status) : '/messages'} replace />
+  return <Layout>{children}</Layout>
+}
+
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const { account, loading } = useAccount()
   const location = useLocation()
@@ -143,7 +160,7 @@ export default function App() {
       {/* Brand */}
       <Route path="/brand/billing" element={<Protected requireType="brand" allowUnpaid><BrandBilling /></Protected>} />
       <Route path="/brand/feedback" element={<Protected requireType="brand"><BrandFeedback /></Protected>} />
-      <Route path="/brand/messages" element={<Protected requireType="brand"><Messages /></Protected>} />
+      <Route path="/brand/messages" element={<CommsProtected><Messages /></CommsProtected>} />
       <Route path="/brand/stores" element={<Protected requireType="brand"><BrandStores /></Protected>} />
       <Route path="/brand/listings" element={<Protected requireType="brand"><BrandListings /></Protected>} />
       <Route path="/brand/campaigns" element={<Protected requireType="brand"><BrandCampaigns /></Protected>} />

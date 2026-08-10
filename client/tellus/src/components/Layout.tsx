@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Award, Bell, Building2, Coins, CreditCard, Gift, LogOut, MapPin, Megaphone, MessageCircle, MessageSquare, ScrollText, ShieldAlert, ShieldCheck, Sparkles, Star, Store, Tag, Ticket, Trophy, Settings, ListChecks, Users } from 'lucide-react'
 import { useAccount } from '../hooks/useAccount'
 import { tellusApi } from '../api/tellusClient'
-import type { ModeratedBrand, TellusNotification } from '../api/types'
+import type { InboxBrand, ModeratedBrand, TellusNotification } from '../api/types'
 
 interface NavItem {
   to: string
@@ -19,7 +19,7 @@ const CONSUMER_NAV: NavItem[] = [
   { to: '/redemptions', label: 'Redemptions', icon: Tag },
   { to: '/my-reviews', label: 'My reviews', icon: Star },
   { to: '/places', label: 'Places', icon: MapPin },
-  { to: '/messages', label: 'Messages', icon: MessageCircle },
+  { to: '/messages', label: 'Comms', icon: MessageCircle },
   { to: '/boards', label: 'Boards', icon: Megaphone },
   { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { to: '/settings', label: 'Settings', icon: Settings },
@@ -27,7 +27,7 @@ const CONSUMER_NAV: NavItem[] = [
 
 const BRAND_NAV: NavItem[] = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
-  { to: '/brand/messages', label: 'Messages', icon: MessageCircle },
+  { to: '/brand/messages', label: 'Comms', icon: MessageCircle },
   { to: '/brand/board', label: 'Regulars', icon: Users },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
@@ -37,6 +37,7 @@ const BRAND_NAV: NavItem[] = [
 ]
 
 const BRAND_PENDING_NAV: NavItem[] = [
+  { to: '/brand/messages', label: 'Comms', icon: MessageCircle },
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
 ]
 
@@ -65,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const isPendingBrand = isBrand && account?.plan_status !== 'active'
   const [unread, setUnread] = useState(0)
   const [moderatesBoard, setModeratesBoard] = useState(false)
+  const [commsBrands, setCommsBrands] = useState<InboxBrand[]>([])
 
   useEffect(() => {
     if (!account || isBrand) { setModeratesBoard(false); return }
@@ -72,6 +74,15 @@ export function Layout({ children }: { children: ReactNode }) {
     tellusApi.get<ModeratedBrand[]>('/me/moderated-brands')
       .then((brands) => { if (!cancelled) setModeratesBoard(brands.length > 0) })
       .catch(() => { if (!cancelled) setModeratesBoard(false) })
+    return () => { cancelled = true }
+  }, [account?.id, isBrand])
+
+  useEffect(() => {
+    if (!account || isBrand) { setCommsBrands([]); return }
+    let cancelled = false
+    tellusApi.get<InboxBrand[]>('/comms/inbox-brands')
+      .then((brands) => { if (!cancelled) setCommsBrands(brands) })
+      .catch(() => { if (!cancelled) setCommsBrands([]) })
     return () => { cancelled = true }
   }, [account?.id, isBrand])
 
@@ -85,7 +96,7 @@ export function Layout({ children }: { children: ReactNode }) {
         ...CONSUMER_NAV.slice(7),
       ]
     : CONSUMER_NAV
-  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : consumerNav
+  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : (commsBrands.length ? [...consumerNav.slice(0, 7), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(7)] : consumerNav)
   const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
 
   useEffect(() => {
@@ -141,11 +152,11 @@ export function Layout({ children }: { children: ReactNode }) {
     // only applies to non-moderator consumers (no /brand/board access).
     let dest: string
     let surfaced: Set<string>
-    if (isPendingBrand) {
+    if (isPendingBrand && !notes.some((n) => DM_KINDS.has(n.kind))) {
       dest = '/brand/billing'
       surfaced = new Set()
     } else if (notes.some((n) => DM_KINDS.has(n.kind))) {
-      dest = isBrand ? '/brand/messages' : '/messages'
+      dest = isBrand || commsBrands.length ? '/brand/messages' : '/messages'
       surfaced = DM_KINDS
     } else if (notes.some((n) => MOD_KINDS.has(n.kind))) {
       dest = '/brand/board'

@@ -85,11 +85,11 @@ async def open_thread(
             # about the same report reuses the existing thread instead of
             # erroring on the UNIQUE(report_id).
             thread = await conn.fetchrow(
-                """INSERT INTO tellus_dm_threads (report_id, brand_id, consumer_account_id)
-                       VALUES ($1, $2, $3)
-                   ON CONFLICT (report_id) DO UPDATE SET last_message_at = tellus_dm_threads.last_message_at
+                """INSERT INTO tellus_dm_threads (report_id, brand_id, consumer_account_id, kind, store_id, status)
+                       VALUES ($1, $2, $3, 'feedback', $4, 'waiting_consumer')
+                   ON CONFLICT (report_id) DO UPDATE SET status = 'waiting_consumer', closed_at = NULL, closed_by_account_id = NULL, last_message_at = tellus_dm_threads.last_message_at
                    RETURNING *""",
-                report_id, account.brand_id, report["reporter_account_id"],
+                report_id, account.brand_id, report["reporter_account_id"], report["store_id"],
             )
             if thread["blocked_at"] is not None:
                 raise HTTPException(
@@ -103,7 +103,7 @@ async def open_thread(
                 thread["id"], account.id, body.body,
             )
             await conn.execute(
-                "UPDATE tellus_dm_threads SET last_message_at = NOW() WHERE id = $1", thread["id"],
+                "UPDATE tellus_dm_threads SET status = 'waiting_consumer', last_message_at = NOW() WHERE id = $1", thread["id"],
             )
             await notify_account(
                 conn, report["reporter_account_id"], "dm_message", "New message about your feedback",
@@ -219,7 +219,7 @@ async def send_message(
                 thread_id, my_role, account.id, body.body,
             )
             await conn.execute(
-                "UPDATE tellus_dm_threads SET last_message_at = NOW() WHERE id = $1", thread_id,
+                "UPDATE tellus_dm_threads SET status = $2, last_message_at = NOW(), first_brand_response_at = CASE WHEN $3 = 'brand' THEN COALESCE(first_brand_response_at, NOW()) ELSE first_brand_response_at END WHERE id = $1", thread_id, "waiting_brand" if my_role == "consumer" else "waiting_consumer", my_role,
             )
 
             # Notifications key off tellus_accounts: the consumer side is

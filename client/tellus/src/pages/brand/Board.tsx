@@ -257,6 +257,12 @@ function TeamSection({
     catch (e) { setErr(toErrorMessage(e, 'Could not remove team member')) }
   }
 
+  async function toggleInbox(id: string, enabled: boolean) {
+    setErr('')
+    try { await tellusApi.patch(`/comms/team/${id}/inbox`, { enabled }); onChanged() }
+    catch (e) { setErr(toErrorMessage(e, 'Could not update Comms access')) }
+  }
+
   return (
     <Card>
       <h2 className="text-sm font-semibold">Moderator team</h2>
@@ -273,6 +279,7 @@ function TeamSection({
             <span>{m.account_display_name} <span className="text-xs text-tu-faint">({m.email})</span></span>
             <div className="flex items-center gap-2">
               <Chip>{m.role}</Chip>
+              {isOwner && m.role !== 'owner' && <label className="flex items-center gap-1 text-xs text-tu-dim"><input type="checkbox" checked={m.can_manage_inbox} onChange={e => void toggleInbox(m.id, e.target.checked)} /> Comms</label>}
               {isOwner && m.role !== 'owner' && <button onClick={() => void remove(m.id)} className="text-xs text-tu-bad hover:underline">Remove</button>}
             </div>
           </div>

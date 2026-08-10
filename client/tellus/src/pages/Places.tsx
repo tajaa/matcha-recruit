@@ -147,6 +147,7 @@ export default function Places() {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <Link to={`/b/${r.slug}`} className="text-xs font-semibold text-tu-accent hover:underline">See reviews</Link>
+                    {r.messaging_enabled && <Link to={`/b/${r.slug}#comms`} className="text-xs font-semibold text-tu-accent hover:underline">Message</Link>}
                     {!r.claimed && r.intake_token && (
                       <Link to={`/i/${r.intake_token}`} className="text-xs font-semibold text-tu-accent hover:underline">Leave feedback</Link>
                     )}

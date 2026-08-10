@@ -12,6 +12,7 @@ from .auth import router as auth_router
 from .billing import router as billing_router
 from .board import router as board_router
 from .community import router as community_router
+from .comms import router as comms_router
 from .dms import router as dms_router
 from .feedback import router as feedback_router
 from .flyer_ai import router as flyer_ai_router
@@ -60,6 +61,7 @@ tellus_router.include_router(flyer_ai_router)
 
 # Mixed-role (per-endpoint dependency — brand opens, either side replies).
 tellus_router.include_router(dms_router)
+tellus_router.include_router(comms_router)
 tellus_router.include_router(board_router)
 tellus_router.include_router(likes_router)
 # Mixed-role: brand campaign/scanner CRUD (require_paid_brand) + consumer

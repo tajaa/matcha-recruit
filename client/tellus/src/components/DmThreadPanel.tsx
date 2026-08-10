@@ -22,18 +22,19 @@ export function DmThreadPanel({
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const comms = initialThread?.kind === 'general'
 
   async function loadThread() {
     setLoading(true); setErr('')
     try {
       let found = initialThread ?? null
       if (!found) {
-        const threads = await tellusApi.get<DmThread[]>('/dm/threads')
+        const threads = await tellusApi.get<DmThread[]>(comms ? '/comms/threads' : '/dm/threads')
         found = threads.find((t) => t.report_id === reportId) ?? null
       }
       setThread(found)
       if (found) {
-        const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${found.id}/messages`)
+        const msgs = await tellusApi.get<DmMessage[]>(`${comms ? '/comms' : '/dm'}/threads/${found.id}/messages`)
         setMessages(msgs)
       }
     } catch (e) {
@@ -44,6 +45,23 @@ export function DmThreadPanel({
   }
 
   useEffect(() => { void loadThread() }, [reportId, initialThread?.id])
+
+  useEffect(() => {
+    if (!thread || thread.kind !== 'general') return
+    let stopped = false
+    async function poll() {
+      if (stopped || document.visibilityState !== 'visible') return
+      const last = messages[messages.length - 1]
+      try {
+        const delta = await tellusApi.get<DmMessage[]>(`/comms/threads/${thread!.id}/messages${last ? `?after=${last.id}` : ''}`)
+        if (delta.length) setMessages((cur) => {
+          const seen = new Set(cur.map(m => m.id)); return [...cur, ...delta.filter(m => !seen.has(m.id))]
+        })
+      } catch { /* transient poll failures are silent */ }
+    }
+    const id = window.setInterval(() => void poll(), 5000)
+    return () => { stopped = true; window.clearInterval(id) }
+  }, [thread?.id, thread?.kind, messages.length])
 
   async function send() {
     if (!body.trim()) return
@@ -57,7 +75,7 @@ export function DmThreadPanel({
         const msgs = await tellusApi.get<DmMessage[]>(`/dm/threads/${opened.id}/messages`)
         setMessages(msgs)
       } else if (thread) {
-        const msg = await tellusApi.post<DmMessage>(`/dm/threads/${thread.id}/messages`, { body })
+        const msg = await tellusApi.post<DmMessage>(`${thread.kind === 'general' ? '/comms' : '/dm'}/threads/${thread.id}/messages`, { body, client_message_id: crypto.randomUUID() })
         setMessages((m) => [...m, msg])
         setBody('')
       }
@@ -72,7 +90,10 @@ export function DmThreadPanel({
     if (!thread) return
     setBusy(true); setErr('')
     try {
-      if (thread.blocked) await tellusApi.delete(`/dm/threads/${thread.id}/block`)
+      if (thread.kind === 'general') {
+        if (thread.blocked) await tellusApi.delete(`/comms/threads/${thread.id}/block`)
+        else await tellusApi.post(`/comms/threads/${thread.id}/block`)
+      } else if (thread.blocked) await tellusApi.delete(`/dm/threads/${thread.id}/block`)
       else await tellusApi.post(`/dm/threads/${thread.id}/block`)
       setThread({ ...thread, blocked: !thread.blocked })
     } catch (e) {
@@ -80,6 +101,22 @@ export function DmThreadPanel({
     } finally {
       setBusy(false)
     }
+  }
+
+  async function takeThread() {
+    if (!thread || thread.kind !== 'general') return
+    setBusy(true); setErr('')
+    try { setThread(await tellusApi.post<DmThread>(`/comms/threads/${thread.id}/take`)) }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not take conversation') }
+    finally { setBusy(false) }
+  }
+
+  async function closeThread() {
+    if (!thread || thread.kind !== 'general') return
+    setBusy(true); setErr('')
+    try { setThread(await tellusApi.post<DmThread>(`/comms/threads/${thread.id}/close`)) }
+    catch (e) { setErr(e instanceof Error ? e.message : 'Could not close conversation') }
+    finally { setBusy(false) }
   }
 
   if (loading) return <div className="py-4"><Spinner /></div>
@@ -93,7 +130,7 @@ export function DmThreadPanel({
   }
 
   const blocked = thread?.blocked ?? false
-  const canCompose = isBrand ? !blocked : !!thread && !blocked
+  const canCompose = isBrand ? !blocked && thread?.status !== 'closed' : !!thread && !blocked && thread.status !== 'closed'
 
   return (
     <div className="rounded-lg border border-tu-border bg-tu-panel2 p-3">
@@ -124,6 +161,13 @@ export function DmThreadPanel({
       )}
       {blocked && isBrand && (
         <p className="mb-2 text-xs text-tu-bad">This reviewer has ended the conversation.</p>
+      )}
+
+      {isBrand && thread?.kind === 'general' && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-tu-faint">
+          {!thread.assigned_member_id && <Button size="sm" variant="soft" loading={busy} onClick={() => void takeThread()}>Take</Button>}
+          {thread.status !== 'closed' && <Button size="sm" variant="ghost" loading={busy} onClick={() => void closeThread()}>Close</Button>}
+        </div>
       )}
 
       {canCompose && (

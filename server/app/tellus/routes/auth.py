@@ -144,9 +144,9 @@ async def signup(body: TellusSignup, request: Request, background: BackgroundTas
                         account_id, brand_name, slug, body.location_count,
                     )
                 await conn.execute(
-                    """INSERT INTO tellus_brand_members (brand_id, account_id, role)
-                           VALUES ($1, $2, 'owner')
-                           ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner'""",
+                    """INSERT INTO tellus_brand_members (brand_id, account_id, role, can_manage_inbox)
+                           VALUES ($1, $2, 'owner', TRUE)
+                           ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner', can_manage_inbox = TRUE""",
                     brand_row["id"], account_id,
                 )
             else:

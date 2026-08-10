@@ -16,6 +16,9 @@ RedemptionStatus = Literal["pending", "issued", "redeemed", "expired", "cancelle
 # publish_at <= NOW()) and never stored; see tellus_app_05.
 ReviewState = Literal["held", "published", "withdrawn"]
 DmSenderRole = Literal["brand", "consumer"]
+DmKind = Literal["feedback", "general"]
+DmTopic = Literal["hours", "availability", "inventory", "order", "service", "accessibility", "other"]
+DmStatus = Literal["waiting_brand", "waiting_consumer", "closed"]
 BoardPostKind = Literal["update", "deal", "event", "question"]
 BoardReplyStatus = Literal["held", "approved", "rejected", "removed"]
 BoardModerationStatus = Literal["visible", "flagged", "removed"]
@@ -129,6 +132,7 @@ class TellusBrand(BaseModel):
     # approves/rejects each submission before points credit.
     reward_mode: Literal["auto", "manual"] = "auto"
     created_at: datetime
+    messaging_enabled: bool = False
 
 
 class TellusBrandUpdate(BaseModel):
@@ -163,6 +167,7 @@ class TellusPlaceSearchResult(BaseModel):
     intake_token: Optional[str] = None   # only ever set for unclaimed places
     review_count: int = 0
     google_place_id: Optional[str] = None   # lets the client dedupe vs live Google suggestions
+    messaging_enabled: bool = False
 
 
 class TellusPlaceCreate(BaseModel):
@@ -634,6 +639,8 @@ class TellusPublicBrandPage(BaseModel):
     # a "Show older reviews" toggle from this; they never count toward avg_rating.
     older_count: int = 0
     has_board: bool = False
+    messaging_enabled: bool = False
+    stores: list["TellusMessagingStore"] = Field(default_factory=list)
 
 
 class TellusClaimResponse(BaseModel):
@@ -670,8 +677,31 @@ class TellusClaimDecision(BaseModel):
 
 # ── DMs (brand <-> reviewer) ────────────────────────────────────────────────────
 
+class TellusMessagingStore(BaseModel):
+    id: UUID
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
 class TellusDmSend(BaseModel):
     body: str = Field(min_length=1, max_length=4000)
+    client_message_id: Optional[UUID] = None
+
+
+class TellusCommsStart(BaseModel):
+    store_id: Optional[UUID] = None
+    topic: DmTopic = "other"
+    body: str = Field(min_length=1, max_length=4000)
+    client_message_id: UUID
+
+
+class TellusDmAssign(BaseModel):
+    member_id: Optional[UUID] = None
+
+
+class TellusInboxToggle(BaseModel):
+    enabled: bool
 
 
 class TellusDmMessage(BaseModel):
@@ -685,7 +715,7 @@ class TellusDmMessage(BaseModel):
 
 class TellusDmThread(BaseModel):
     id: UUID
-    report_id: UUID
+    report_id: Optional[UUID] = None
     # Brand view: reviewer's display_name (or 'Reviewer') — never email.
     # Consumer view: the brand's name.
     counterparty_name: str
@@ -699,6 +729,17 @@ class TellusDmThread(BaseModel):
     unread_count: int = 0
     last_message_at: datetime
     created_at: datetime
+    kind: DmKind = "feedback"
+    topic: Optional[DmTopic] = None
+    status: DmStatus = "waiting_consumer"
+    store_id: Optional[UUID] = None
+    store_name: Optional[str] = None
+    store_city: Optional[str] = None
+    assigned_member_id: Optional[UUID] = None
+    assigned_member_name: Optional[str] = None
+    viewer_role: DmSenderRole = "consumer"
+    first_brand_response_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
 
 
 # ── Notifications ──────────────────────────────────────────────────────────────
@@ -841,6 +882,7 @@ class TellusBrandTeamMember(BaseModel):
     email: str                                  # team page is brand-internal; email OK here
     role: Literal["owner", "moderator"]
     created_at: datetime
+    can_manage_inbox: bool = False
 
 
 class TellusTeamMemberAdd(BaseModel):

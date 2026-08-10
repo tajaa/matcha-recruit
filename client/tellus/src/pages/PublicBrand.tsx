@@ -5,6 +5,7 @@ import { tellusApi, tellusMaybeAuthGet } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Button, Card, Empty, ErrorText, Spinner } from '../components/ui'
 import { LikeButton } from '../components/LikeButton'
+import { BusinessMessageComposer } from '../components/BusinessMessageComposer'
 import type { BoardMembership, ClaimResponse, MyClaim, PublicBrandPage, PublicReview } from '../api/types'
 
 const PAGE_SIZE = 20
@@ -240,6 +241,14 @@ export default function PublicBrand() {
             </div>
             <span className="text-sm text-tu-dim">{page.avg_rating.toFixed(1)} · {page.review_count} review{page.review_count === 1 ? '' : 's'}</span>
           </div>
+        )}
+
+        {page.messaging_enabled && page.claimed && (
+          account?.account_type === 'consumer' ? (
+            <BusinessMessageComposer slug={slug} stores={page.stores} />
+          ) : !account ? (
+            <div className="mt-3"><Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug)} className="inline-flex items-center gap-1.5 rounded-lg border border-tu-accent px-4 py-2 text-sm font-semibold text-tu-accent hover:bg-tu-accent/10">Message this business</Link></div>
+          ) : null
         )}
 
         {page.has_board && (

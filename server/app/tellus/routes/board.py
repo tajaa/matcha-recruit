@@ -772,7 +772,7 @@ async def list_team(
     async with get_connection() as conn:
         brand, _role = await bs.resolve_moderated_brand(conn, account, brand_id)
         rows = await conn.fetch(
-            """SELECT m.id, a.display_name AS account_display_name, a.email, m.role, m.created_at
+            """SELECT m.id, a.display_name AS account_display_name, a.email, m.role, m.created_at, m.can_manage_inbox
                FROM tellus_brand_members m JOIN tellus_accounts a ON a.id = m.account_id
                WHERE m.brand_id = $1 ORDER BY (m.role = 'owner') DESC, m.created_at ASC""",
             brand["id"],
@@ -780,7 +780,7 @@ async def list_team(
     return [
         TellusBrandTeamMember(
             id=r["id"], account_display_name=r["account_display_name"] or "Tell-Us member",
-            email=r["email"], role=r["role"], created_at=r["created_at"],
+            email=r["email"], role=r["role"], created_at=r["created_at"], can_manage_inbox=bool(r["can_manage_inbox"]),
         )
         for r in rows
     ]
@@ -845,7 +845,7 @@ async def add_team_member(
 
     return TellusBrandTeamMember(
         id=row["id"], account_display_name=target["display_name"] or "Tell-Us member",
-        email=target["email"], role=row["role"], created_at=row["created_at"],
+        email=target["email"], role=row["role"], created_at=row["created_at"], can_manage_inbox=bool(row["can_manage_inbox"]),
     )
 
 

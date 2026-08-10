@@ -82,6 +82,7 @@ async def search_places(
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT b.slug, b.name, b.logo_url, b.owner_account_id, b.google_place_id,
+                      b.messaging_enabled,
                       s.city, s.state,
                       (SELECT COUNT(*) FROM tellus_reports r
                         WHERE r.brand_id = b.id AND r.review_state = 'held'
@@ -112,6 +113,7 @@ async def search_places(
             claimed=r["owner_account_id"] is not None,
             intake_token=r["intake_token"], review_count=r["review_count"],
             google_place_id=r["google_place_id"],
+            messaging_enabled=bool(r["owner_account_id"] and r["messaging_enabled"]),
         )
         for r in rows
     ]

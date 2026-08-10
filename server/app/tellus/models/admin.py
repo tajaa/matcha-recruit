@@ -144,7 +144,7 @@ class TellusAdminModerationUpdate(BaseModel):
 
 class TellusAdminDmThreadSummary(BaseModel):
     id: UUID
-    report_id: UUID
+    report_id: Optional[UUID] = None
     brand_name: str
     consumer_email: str
     blocked: bool
