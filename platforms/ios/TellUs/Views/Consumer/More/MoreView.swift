@@ -13,7 +13,10 @@ struct MoreView: View {
             Section {
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
-                NavigationLink("Messages") { MessagesListView() }
+                NavigationLink("Comms") { MessagesListView() }
+                if !appState.inboxBrands.isEmpty {
+                    NavigationLink("Business inbox") { BusinessInboxView(brands: appState.inboxBrands) }
+                }
                 NavigationLink("Leaderboard") { LeaderboardView() }
                 NavigationLink("Places") { PlacesView() }
             }

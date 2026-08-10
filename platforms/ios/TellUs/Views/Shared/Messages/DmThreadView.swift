@@ -2,11 +2,17 @@ import SwiftUI
 
 struct DmThreadView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var vm: DmThreadViewModel
     @State private var draft = ""
     @State private var showBlockConfirm = false
+    @State private var showCloseConfirm = false
+    @State private var team: [BrandTeamMember] = []
 
-    private var isConsumer: Bool { appState.account?.account_type == .consumer }
+    private var isConsumer: Bool {
+        vm.thread?.viewer_role == .consumer ||
+        (vm.thread?.viewer_role == nil && appState.account?.account_type == .consumer)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -59,11 +65,47 @@ struct DmThreadView: View {
                     }
                 }
             }
+            if !isConsumer, vm.thread?.status != .closed {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        if vm.thread?.assigned_member_id == nil {
+                            Button("Take conversation") { Task { await vm.take() } }
+                        }
+                        if !team.isEmpty {
+                            Divider()
+                            ForEach(team.filter(\.can_manage_inbox)) { member in
+                                Button("Assign to (member.account_display_name)") {
+                                    Task { await vm.assign(to: member.id) }
+                                }
+                            }
+                            if vm.thread?.assigned_member_id != nil {
+                                Button("Unassign") { Task { await vm.assign(to: nil) } }
+                            }
+                        }
+                        Button("Close conversation", role: .destructive) { showCloseConfirm = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
+            }
         }
         .confirmationDialog("Block this conversation?", isPresented: $showBlockConfirm, titleVisibility: .visible) {
             Button("Block", role: .destructive) { Task { await vm.block() } }
         }
-        .task { await vm.load() }
+        .confirmationDialog("Close this conversation?", isPresented: $showCloseConfirm, titleVisibility: .visible) {
+            Button("Close", role: .destructive) { Task { await vm.close() } }
+        }
+        .task {
+            await vm.load()
+            if appState.account?.account_type == .brand {
+                team = (try? await BoardManageService.shared.team(brandId: nil)) ?? []
+            }
+            vm.startPolling()
+        }
+        .onDisappear { vm.stopPolling() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { vm.startPolling() } else { vm.stopPolling() }
+        }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
     }
 }

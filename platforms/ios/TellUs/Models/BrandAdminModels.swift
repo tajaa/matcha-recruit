@@ -13,6 +13,22 @@ struct Brand: Codable, Identifiable {
     let logo_url: String?
     let reward_mode: RewardMode
     let created_at: String
+    var messaging_enabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, owner_account_id, name, logo_url, reward_mode, created_at, messaging_enabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        owner_account_id = try c.decodeIfPresent(String.self, forKey: .owner_account_id)
+        name = try c.decode(String.self, forKey: .name)
+        logo_url = try c.decodeIfPresent(String.self, forKey: .logo_url)
+        reward_mode = try c.decode(RewardMode.self, forKey: .reward_mode)
+        created_at = try c.decode(String.self, forKey: .created_at)
+        messaging_enabled = try c.decodeIfPresent(Bool.self, forKey: .messaging_enabled) ?? false
+    }
 }
 
 struct BrandUpdate: Encodable {
@@ -126,6 +142,31 @@ struct BrandTeamMember: Codable, Identifiable {
     let email: String
     let role: String   // "owner" | "moderator"
     let created_at: String
+    var can_manage_inbox: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, account_display_name, email, role, created_at, can_manage_inbox
+    }
+
+    init(id: String, account_display_name: String, email: String, role: String,
+         created_at: String = "", can_manage_inbox: Bool = false) {
+        self.id = id
+        self.account_display_name = account_display_name
+        self.email = email
+        self.role = role
+        self.created_at = created_at
+        self.can_manage_inbox = can_manage_inbox
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        account_display_name = try c.decode(String.self, forKey: .account_display_name)
+        email = try c.decode(String.self, forKey: .email)
+        role = try c.decode(String.self, forKey: .role)
+        created_at = try c.decode(String.self, forKey: .created_at)
+        can_manage_inbox = try c.decodeIfPresent(Bool.self, forKey: .can_manage_inbox) ?? false
+    }
 }
 
 struct TeamMemberAdd: Encodable { let email: String }

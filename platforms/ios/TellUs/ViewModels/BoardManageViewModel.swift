@@ -63,6 +63,21 @@ final class BoardManageViewModel: LoadableVM {
         }
     }
 
+    func setInboxAccess(memberID: String, enabled: Bool) async {
+        do {
+            try await DmService.shared.setTeamInboxAccess(memberID: memberID, enabled: enabled)
+            if let index = team.firstIndex(where: { $0.id == memberID }) {
+                let member = team[index]
+                team[index] = BrandTeamMember(
+                    id: member.id, account_display_name: member.account_display_name,
+                    email: member.email, role: member.role, can_manage_inbox: enabled
+                )
+            }
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
+        }
+    }
+
     func load() async {
         await withLoad {
             async let s = BoardManageService.shared.summary(brandId: brandId)

@@ -5,6 +5,7 @@ struct BillingWallView: View {
     @State private var isRefreshing = false
     @State private var showLogoutConfirm = false
     @State private var showBilling = false
+    @State private var showComms = false
 
     var body: some View {
         VStack(spacing: 20) {
@@ -32,6 +33,12 @@ struct BillingWallView: View {
             .padding(.horizontal, 32)
 
             Button {
+                showComms = true
+            } label: {
+                Label("Open Comms inbox", systemImage: "message")
+            }
+
+            Button {
                 Task {
                     isRefreshing = true
                     await appState.refreshWall()
@@ -56,5 +63,6 @@ struct BillingWallView: View {
             Text("Beetlejuse has one shared session — this signs you out everywhere.")
         }
         .sheet(isPresented: $showBilling) { NavigationStack { BillingView() } }
+        .sheet(isPresented: $showComms) { NavigationStack { MessagesListView(scope: .business(brandID: nil)) } }
     }
 }

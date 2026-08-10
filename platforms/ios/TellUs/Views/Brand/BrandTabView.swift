@@ -17,8 +17,8 @@ struct BrandTabView: View {
             NavigationStack { BrandScanView() }
                 .tabItem { Label("Redeem", systemImage: "qrcode.viewfinder") }
 
-            NavigationStack { MessagesListView() }
-                .tabItem { Label("Messages", systemImage: "message") }
+            NavigationStack { MessagesListView(scope: .business(brandID: nil)) }
+                .tabItem { Label("Comms", systemImage: "message") }
 
             NavigationStack { BrandMoreView() }
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }

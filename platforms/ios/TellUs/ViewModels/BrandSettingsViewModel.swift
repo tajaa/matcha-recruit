@@ -30,6 +30,15 @@ final class BrandSettingsViewModel: LoadableVM {
         }
     }
 
+    func setMessagingEnabled(_ enabled: Bool) async {
+        do {
+            try await DmService.shared.setMessagingEnabled(enabled)
+            brand?.messaging_enabled = enabled
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
+        }
+    }
+
     /// ≤2MB, png/jpeg/webp — matches the server's accepted content types.
     func uploadLogo(item: PhotosPickerItem) async {
         do {

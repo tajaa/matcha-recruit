@@ -2,6 +2,8 @@ import SwiftUI
 
 struct PlacesView: View {
     @State private var vm = PlacesViewModel()
+    @State private var messageTarget: MessageTarget?
+    @State private var openedThread: DmThread?
 
     var body: some View {
         List {
@@ -14,7 +16,9 @@ struct PlacesView: View {
             if !vm.dbResults.isEmpty {
                 Section("On Tell-Us") {
                     ForEach(vm.dbResults) { place in
-                        PlaceResultRow(place: place, vm: vm)
+                        PlaceResultRow(place: place, vm: vm) { slug in
+                            messageTarget = MessageTarget(slug: slug)
+                        }
                     }
                 }
             }
@@ -62,15 +66,29 @@ struct PlacesView: View {
         .navigationDestination(item: $vm.navigateToken) { scanned in
             IntakeLoaderView(token: scanned.token)
         }
+        .navigationDestination(item: $openedThread) { thread in
+            DmThreadView(vm: DmThreadViewModel(thread: thread))
+        }
+        .sheet(item: $messageTarget) { target in
+            CommsComposerSheet(slug: target.slug) { thread in
+                openedThread = thread
+            }
+        }
         .overlay(alignment: .top) {
             ErrorBanner(message: vm.searching ? nil : vm.searchError).padding(.top, 8)
         }
     }
 }
 
+private struct MessageTarget: Identifiable {
+    let slug: String
+    var id: String { slug }
+}
+
 private struct PlaceResultRow: View {
     let place: PlaceSearchResult
     let vm: PlacesViewModel
+    let onMessage: (String) -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -107,6 +125,9 @@ private struct PlaceResultRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 6) {
+                if place.messaging_enabled {
+                    Button("Message") { onMessage(place.slug) }
+                }
                 Button("See reviews") {
                     SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(place.slug)"))
                 }

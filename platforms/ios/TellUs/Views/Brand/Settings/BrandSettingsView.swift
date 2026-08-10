@@ -5,6 +5,7 @@ struct BrandSettingsView: View {
     @State private var vm = BrandSettingsViewModel()
     @State private var name = ""
     @State private var rewardMode: RewardMode = .auto
+    @State private var messagingEnabled = false
     @State private var logoItem: PhotosPickerItem?
 
     var body: some View {
@@ -17,6 +18,7 @@ struct BrandSettingsView: View {
         .task { await vm.load() }
         .onChange(of: vm.brand?.name) { _, newName in name = newName ?? name }
         .onChange(of: vm.brand?.reward_mode) { _, newMode in if let newMode { rewardMode = newMode } }
+        .onChange(of: vm.brand?.messaging_enabled) { _, enabled in messagingEnabled = enabled ?? false }
         .onChange(of: logoItem) { _, item in
             guard let item else { return }
             Task { await vm.uploadLogo(item: item); logoItem = nil }
@@ -30,6 +32,15 @@ struct BrandSettingsView: View {
             removeLogoButton
             TextField("Brand name", text: $name)
             rewardModePicker
+            Toggle("Allow customer messages", isOn: Binding(
+                get: { messagingEnabled },
+                set: { newValue in
+                    messagingEnabled = newValue
+                    Task { await vm.setMessagingEnabled(newValue) }
+                }
+            ))
+            Text("Customers can ask questions from your TellUs profile when this is on.")
+                .font(.footnote).foregroundStyle(.secondary)
             Button("Save") { Task { await vm.saveBrand(name: name, rewardMode: rewardMode) } }
             if vm.savedBrand { Text("Saved.").font(.footnote).foregroundStyle(.green) }
         }

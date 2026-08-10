@@ -1,7 +1,14 @@
 import SwiftUI
 
 struct MessagesListView: View {
-    @State private var vm = DmThreadsViewModel()
+    let scope: InboxScope
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var vm: DmThreadsViewModel
+
+    init(scope: InboxScope = .consumer) {
+        self.scope = scope
+        _vm = State(initialValue: DmThreadsViewModel(scope: scope))
+    }
 
     var body: some View {
         Group {
@@ -15,9 +22,11 @@ struct MessagesListView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(thread.counterparty_name).font(.headline)
-                                if let title = thread.report_title {
-                                    Text(title).font(.caption).foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text(thread.kind == .feedback ? "Feedback" : (thread.topic?.label ?? "Question"))
+                                    if let store = thread.store_name { Text("· \(store)") }
                                 }
+                                .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 4) {
@@ -37,8 +46,15 @@ struct MessagesListView: View {
                 .listStyle(.plain)
             }
         }
-        .navigationTitle("Messages")
-        .task { await vm.load() }
+        .navigationTitle(scope == .consumer ? "Comms" : "Business inbox")
+        .task {
+            await vm.load()
+            vm.startPolling()
+        }
+        .onDisappear { vm.stopPolling() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { vm.startPolling() } else { vm.stopPolling() }
+        }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
     }

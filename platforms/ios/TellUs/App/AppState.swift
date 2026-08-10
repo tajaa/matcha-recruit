@@ -20,6 +20,9 @@ final class AppState {
     /// Non-empty ⇒ this consumer moderates at least one brand's board
     /// (tellus_brand_members row) — drives the conditional Moderate tab.
     var moderatedBrands: [ModeratedBrand] = []
+    /// Brands where this account can answer Comms conversations. Consumers
+    /// may have more than one business inbox through team membership.
+    var inboxBrands: [InboxBrand] = []
     var unreadCount = 0
 
     private var pollTask: Task<Void, Never>?
@@ -49,10 +52,12 @@ final class AppState {
         if account.account_type == .brand {
             phase = account.plan_status == .active ? .brand : .brandWall
             moderatedBrands = []
+            inboxBrands = []
         } else {
             phase = .consumer
             Task { [weak self] in
                 self?.moderatedBrands = (try? await BoardManageService.shared.moderatedBrands()) ?? []
+                self?.inboxBrands = (try? await DmService.shared.inboxBrands()) ?? []
             }
         }
         startPolling()
@@ -75,6 +80,7 @@ final class AppState {
         }
         account = nil
         moderatedBrands = []
+        inboxBrands = []
         unreadCount = 0
         phase = .loggedOut
         // Cross-account media leak: a shared device relaunching into a

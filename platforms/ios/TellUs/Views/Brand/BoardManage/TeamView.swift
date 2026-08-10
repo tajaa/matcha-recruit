@@ -31,7 +31,18 @@ struct TeamView: View {
                             Text(member.email).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        StatusChip(text: member.role)
+                        VStack(alignment: .trailing, spacing: 6) {
+                            StatusChip(text: member.role)
+                            if member.role != "owner" {
+                                Toggle("Inbox", isOn: Binding(
+                                    get: { member.can_manage_inbox },
+                                    set: { enabled in Task { await vm.setInboxAccess(memberID: member.id, enabled: enabled) } }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .scaleEffect(0.8)
+                            }
+                        }
                     }
                     .swipeActions {
                         if member.role != "owner" {

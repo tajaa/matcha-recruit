@@ -10,6 +10,8 @@ final class DmThreadViewModel: LoadableVM {
     var isLoading = false
     var error: String?
     var isSending = false
+    private var pendingClientMessageID: String?
+    private var pollingTask: Task<Void, Never>?
 
     init(thread: DmThread) {
         self.threadId = thread.id
@@ -40,8 +42,11 @@ final class DmThreadViewModel: LoadableVM {
         guard !trimmed.isEmpty else { return }
         isSending = true; defer { isSending = false }
         do {
-            let sent = try await DmService.shared.send(threadId: threadId, body: trimmed)
+            let clientMessageID = pendingClientMessageID ?? UUID().uuidString
+            pendingClientMessageID = clientMessageID
+            let sent = try await DmService.shared.send(threadId: threadId, body: trimmed, clientMessageId: clientMessageID)
             messages.append(sent)
+            pendingClientMessageID = nil
             error = nil
         } catch {
             if error.isCancellation { return }
@@ -53,11 +58,7 @@ final class DmThreadViewModel: LoadableVM {
         await withLoad {
             try await DmService.shared.block(threadId: threadId)
             thread = thread.map {
-                DmThread(id: $0.id, report_id: $0.report_id, counterparty_name: $0.counterparty_name,
-                         report_title: $0.report_title, report_number: $0.report_number,
-                         review_state: $0.review_state, publish_at: $0.publish_at,
-                         blocked: true, unread_count: $0.unread_count,
-                         last_message_at: $0.last_message_at, created_at: $0.created_at)
+                $0.with(blocked: true)
             }
         }
     }
@@ -66,12 +67,53 @@ final class DmThreadViewModel: LoadableVM {
         await withLoad {
             try await DmService.shared.unblock(threadId: threadId)
             thread = thread.map {
-                DmThread(id: $0.id, report_id: $0.report_id, counterparty_name: $0.counterparty_name,
-                         report_title: $0.report_title, report_number: $0.report_number,
-                         review_state: $0.review_state, publish_at: $0.publish_at,
-                         blocked: false, unread_count: $0.unread_count,
-                         last_message_at: $0.last_message_at, created_at: $0.created_at)
+                $0.with(blocked: false)
             }
+        }
+    }
+
+    func take() async {
+        await withLoad {
+            thread = try await DmService.shared.take(threadId: threadId)
+        }
+    }
+
+    func assign(to memberID: String?) async {
+        await withLoad {
+            thread = try await DmService.shared.assign(threadId: threadId, memberID: memberID)
+        }
+    }
+
+    func close() async {
+        await withLoad {
+            thread = try await DmService.shared.close(threadId: threadId)
+        }
+    }
+
+    func startPolling() {
+        guard pollingTask == nil else { return }
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, let self else { return }
+                await self.pollDelta()
+            }
+        }
+    }
+
+    func stopPolling() {
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
+    private func pollDelta() async {
+        do {
+            let incoming = try await DmService.shared.messages(threadId: threadId, after: messages.last?.id)
+            let known = Set(messages.map(\.id))
+            messages.append(contentsOf: incoming.filter { !known.contains($0.id) })
+            error = nil
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
         }
     }
 
@@ -80,8 +122,10 @@ final class DmThreadViewModel: LoadableVM {
     /// conversation the user is actively looking at.
     private func markRelatedNotificationsRead() async {
         guard let items = try? await NotificationsService.shared.list(unreadOnly: true, limit: 100) else { return }
-        for item in items where item.kind == "dm_message" && item.reference_id == threadId {
+        for item in items where ["dm_message", "dm_assignment"].contains(item.kind) && item.reference_id == threadId {
             try? await NotificationsService.shared.markRead(id: item.id)
         }
     }
+
+    deinit { pollingTask?.cancel() }
 }

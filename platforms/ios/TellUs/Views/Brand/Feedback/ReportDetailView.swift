@@ -36,8 +36,7 @@ private struct ReportDetailForm: View {
     @State private var replyText = ""
     @State private var showPublishConfirm = false
     @State private var messageThread: DmThread?
-    @State private var messageError: String?
-    @State private var isOpeningThread = false
+    @State private var showMessageComposer = false
 
     var body: some View {
         Form {
@@ -67,25 +66,19 @@ private struct ReportDetailForm: View {
         .navigationDestination(item: $messageThread) { thread in
             DmThreadView(vm: DmThreadViewModel(thread: thread))
         }
+        .sheet(isPresented: $showMessageComposer) {
+            FeedbackComposerSheet(reportId: report.id) { thread in
+                messageThread = thread
+            }
+        }
     }
 
     private var messageSection: some View {
         Section {
             Button {
-                Task {
-                    isOpeningThread = true; defer { isOpeningThread = false }
-                    do {
-                        messageThread = try await DmService.shared.openFromReport(reportId: report.id)
-                    } catch {
-                        if !error.isCancellation { messageError = error.localizedDescription }
-                    }
-                }
+                showMessageComposer = true
             } label: {
-                if isOpeningThread { ProgressView() } else { Text("Message reporter") }
-            }
-            .disabled(isOpeningThread)
-            if let messageError {
-                Text(messageError).foregroundStyle(.red).font(.footnote)
+                Text("Message reporter")
             }
         }
     }
