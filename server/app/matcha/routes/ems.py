@@ -12,16 +12,37 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from app.core.dependencies import get_current_user
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.ems import (
-    EmsEventListResponse, EmsEventOut, EmsEventUpdate, EmsProtocolOut, EmsProtocolUpdate,
-    PromoteRequest, PromoteResponse,
+    EmsEventDraftOut, EmsEventDraftRejectRequest, EmsEventListResponse,
+    EmsEventOut, EmsEventResolveRequest, EmsEventUpdate, EmsProtocolOut,
+    EmsProtocolUpdate, PromoteRequest, PromoteResponse,
 )
 from app.matcha.services.ems import categories
+from app.matcha.services.ems.event_drafts import (
+    EventDraftConflict,
+    EventDraftForbidden,
+    EventDraftNotFound,
+    confirm_event_draft,
+    get_event_draft,
+    may_decide_event_draft,
+    reject_event_draft,
+)
 from app.matcha.services.ems.event_intake import coerce_doc
 from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, promote_event
 from app.matcha.services.ems.queries import EVENT_SELECT as _EVENT_SELECT
+from app.matcha.services.ems.resolution import (
+    EventResolutionConflict,
+    EventResolutionError,
+    EventResolutionNotFound,
+    resolve_event,
+)
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkPermissionDenied,
+    resolve_work_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +54,146 @@ def _row_to_event(row) -> EmsEventOut:
     if isinstance(doc, str):
         doc = json.loads(doc) if doc else {}
     return EmsEventOut(**{**dict(row), "doc": doc or {}})
+
+
+def _row_to_draft(row) -> EmsEventDraftOut:
+    data = dict(row)
+    data["classified"] = data.get("classified") or {}
+    if isinstance(data["classified"], str):
+        try:
+            data["classified"] = json.loads(data["classified"])
+        except (TypeError, ValueError):
+            data["classified"] = {}
+    return EmsEventDraftOut(**data)
+
+
+async def _draft_access(conn, draft_id: UUID, current_user):
+    row = await conn.fetchrow(
+        "SELECT company_id, reporter_user_id FROM ems_event_drafts WHERE id = $1",
+        draft_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Event draft not found")
+    access = await resolve_work_access(
+        conn, user=current_user, company_id=row["company_id"]
+    )
+    if not may_decide_event_draft(
+        reporter_user_id=row["reporter_user_id"],
+        actor_user_id=current_user.id,
+        access=access,
+    ):
+        raise HTTPException(status_code=403, detail="Event draft access denied")
+    return row["company_id"], access
+
+
+@router.get("/event-drafts/{draft_id}", response_model=EmsEventDraftOut)
+async def get_event_draft_route(
+    draft_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        company_id, _access = await _draft_access(conn, draft_id, current_user)
+        row = await get_event_draft(conn, draft_id=draft_id, company_id=company_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Event draft not found")
+    return _row_to_draft(row)
+
+
+@router.post("/event-drafts/{draft_id}/confirm", response_model=EmsEventOut)
+async def confirm_event_draft_route(
+    draft_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        company_id, access = await _draft_access(conn, draft_id, current_user)
+        try:
+            async with conn.transaction():
+                result = await confirm_event_draft(
+                    conn,
+                    draft_id=draft_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                )
+        except EventDraftNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventDraftForbidden as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventDraftConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not result.event:
+        raise HTTPException(status_code=409, detail="Event draft has no event")
+    return _row_to_event(result.event)
+
+
+@router.post("/event-drafts/{draft_id}/reject", response_model=EmsEventDraftOut)
+async def reject_event_draft_route(
+    draft_id: UUID,
+    body: EmsEventDraftRejectRequest,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        _company_id, access = await _draft_access(conn, draft_id, current_user)
+        try:
+            async with conn.transaction():
+                result = await reject_event_draft(
+                    conn,
+                    draft_id=draft_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                    reason=body.reason,
+                )
+        except EventDraftNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventDraftForbidden as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventDraftConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _row_to_draft(result.draft)
+
+
+@router.post("/events/{event_id}/resolve", response_model=EmsEventOut)
+async def resolve_event_route(
+    event_id: UUID,
+    body: EmsEventResolveRequest,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT company_id FROM ems_events WHERE id = $1", event_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Event not found")
+        company_id = row["company_id"]
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=company_id
+        )
+        try:
+            async with conn.transaction():
+                await resolve_event(
+                    conn,
+                    company_id=company_id,
+                    event_id=event_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                    resolution=body.resolution,
+                    note=body.note,
+                    resolution_code=body.resolution_code,
+                    duplicate_of_event_id=body.duplicate_of_event_id,
+                )
+                updated = await conn.fetchrow(
+                    f"{_EVENT_SELECT} WHERE ev.id = $1 AND ev.company_id = $2",
+                    event_id,
+                    company_id,
+                )
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventResolutionNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventResolutionConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EventResolutionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _row_to_event(updated)
 
 
 @router.get("/events", response_model=EmsEventListResponse)
@@ -47,7 +208,7 @@ async def list_events(
 ):
     if not company_id:
         raise HTTPException(status_code=400, detail="No company associated with this account")
-    if status is not None and status not in ("logged", "promoted", "dismissed"):
+    if status is not None and status not in ("logged", "completed", "promoted", "dismissed"):
         raise HTTPException(status_code=400, detail="Invalid status")
     if category is not None and category not in categories.ALL_KEYS:
         raise HTTPException(status_code=400, detail="Invalid category")

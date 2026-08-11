@@ -92,6 +92,15 @@ export interface ChannelMessage {
   // 'system' = a Huume-posted confirmation (EMS). Absent/undefined on
   // messages fetched before this field shipped — treat as 'user'.
   message_type?: 'user' | 'system'
+  /** Structured pointer to an actionable domain record, when present. */
+  metadata?: {
+    action?: {
+      kind: 'event_draft' | 'event' | 'project_task' | 'schedule_proposal' | 'inventory_order'
+      id: string
+      status?: string
+    }
+    [key: string]: unknown
+  }
   attachments?: ChannelAttachment[]
   reactions?: ChannelReaction[]
   created_at: string

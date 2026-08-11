@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ...core.services.auth import decode_token
 from ...core.services.redis_cache import get_redis_cache, check_rate_limit
+from ...core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
 
@@ -280,19 +281,27 @@ def _system_message_payload(channel_id_str: str, sys_row) -> dict:
         "mentioned_user_ids": [],
         "client_message_id": None,
         "message_type": sys_row["message_type"],
+        "metadata": dict(sys_row).get("metadata") or {},
     }
 
 
-async def _insert_system_message(conn, channel_id_str: str, content: str):
+async def _insert_system_message(
+    conn,
+    channel_id_str: str,
+    content: str,
+    *,
+    metadata: Optional[dict] = None,
+):
     """INSERT one message_type='system' channel_messages row. Shared by
     _bg_ems_intake and _bg_ems_clarify."""
     return await conn.fetchrow(
         """
-        INSERT INTO channel_messages (channel_id, sender_id, content, message_type)
-        VALUES ($1, NULL, $2, 'system')
-        RETURNING id, channel_id, content, message_type, created_at
+        INSERT INTO channel_messages
+            (channel_id, sender_id, content, message_type, metadata)
+        VALUES ($1, NULL, $2, 'system', $3::jsonb)
+        RETURNING id, channel_id, content, message_type, metadata, created_at
         """,
-        UUID(channel_id_str), content,
+        UUID(channel_id_str), content, json.dumps(metadata or {}),
     )
 
 
@@ -1880,6 +1889,48 @@ async def _bg_ems_intake(
             return
 
         async with get_connection() as conn:
+            # Non-urgent reports are drafts until the reporter or a reviewer
+            # explicitly confirms them. Urgent reports retain the immediate
+            # logging path below so OSHA/severe documentation is never lost.
+            if classified.get("urgency") not in ("osha", "severe"):
+                from app.matcha.services.ems.event_drafts import create_event_draft, set_confirmation_message
+
+                draft = await create_event_draft(
+                    conn,
+                    company_id=company_id,
+                    channel_id=UUID(channel_id_str),
+                    source_message_id=UUID(message_id_str),
+                    reporter_user_id=UUID(reporter_user_id_str),
+                    narrative=content,
+                    classified=classified,
+                    location_id=location_id,
+                )
+                if draft is None:
+                    return
+                message_text = _event_draft_confirmation_text(classified)
+                sys_row = await _insert_system_message(
+                    conn,
+                    channel_id_str,
+                    message_text,
+                    metadata={
+                        "action": {
+                            "kind": "event_draft",
+                            "id": str(draft["id"]),
+                            "status": "pending",
+                        }
+                    },
+                )
+                await set_confirmation_message(
+                    conn,
+                    draft_id=draft["id"],
+                    company_id=company_id,
+                    confirmation_message_id=sys_row["id"],
+                )
+                await broadcast_system_message(
+                    channel_id_str, _system_message_payload(channel_id_str, sys_row)
+                )
+                return
+
             event_row, confirmation = await persist_event(
                 conn,
                 company_id=company_id,
@@ -2123,6 +2174,151 @@ def _intake_disposition(classified: dict) -> str:
     return "reroute_ask" if classified.get("not_an_event") else "persist"
 
 
+def _event_draft_confirmation_text(classified: dict) -> str:
+    """Render a stable, reply-compatible confirmation prompt."""
+
+    category = str(classified.get("category") or "uncategorized").replace("_", " ")
+    title = str(classified.get("title") or "this report").strip()
+    return (
+        f"Huume thinks this may be a {category} event: **{title}**. "
+        "Add it to Events? Reply **confirm** or **not an event**."
+    )
+
+
+def _draft_reply_decision(content: str) -> Optional[str]:
+    """Parse only unambiguous confirmation replies."""
+
+    normalized = re.sub(r"[^a-z0-9 ]+", " ", content.lower()).strip()
+    if normalized in {"confirm", "confirmed", "yes", "add", "add it", "log", "log it"}:
+        return "confirm"
+    if normalized in {
+        "no", "nope", "cancel", "cancel it", "skip", "not an event",
+        "dont add", "do not add", "don't add", "don t add",
+    }:
+        return "reject"
+    return None
+
+
+async def _bg_ems_draft_reply(
+    channel_id_str: str,
+    reply_to_id_str: str,
+    actor_user_id_str: str,
+    content: str,
+) -> bool:
+    """Resolve a reply to an event-draft confirmation system message."""
+
+    decision = _draft_reply_decision(content)
+    # Preserve the existing mention dispatch fallback for a stale system
+    # reply such as "@huume new thing". It is a new intake, not an ambiguous
+    # answer to an event-draft card.
+    if decision is None and "@huume" in content.lower():
+        return False
+    try:
+        from app.matcha.services.ems.event_drafts import (
+            confirm_event_draft,
+            may_decide_event_draft,
+            reject_event_draft,
+        )
+
+        async with get_connection() as conn:
+            draft_row = await conn.fetchrow(
+                """
+                SELECT id, company_id
+                  FROM ems_event_drafts
+                 WHERE confirmation_message_id = $1
+                   AND channel_id = $2
+                   AND status = 'pending'
+                """,
+                UUID(reply_to_id_str),
+                UUID(channel_id_str),
+            )
+            if not draft_row:
+                return False
+            user_row = await conn.fetchrow(
+                "SELECT id, email, role FROM users WHERE id = $1",
+                UUID(actor_user_id_str),
+            )
+            if not user_row:
+                return True
+            actor = CurrentUser(
+                id=user_row["id"],
+                email=user_row["email"],
+                role=user_row["role"],
+            )
+            from app.matcha.services.matcha_work.work_permissions import resolve_work_access
+
+            access = await resolve_work_access(
+                conn, user=actor, company_id=draft_row["company_id"]
+            )
+            draft = await conn.fetchrow(
+                "SELECT reporter_user_id FROM ems_event_drafts WHERE id = $1",
+                draft_row["id"],
+            )
+            if not draft or not may_decide_event_draft(
+                reporter_user_id=draft["reporter_user_id"],
+                actor_user_id=actor.id,
+                access=access,
+            ):
+                return True
+            if decision is None:
+                sys_row = await _insert_system_message(
+                    conn,
+                    channel_id_str,
+                    "Please reply **confirm** to add this to Events or **not an event** to leave it out.",
+                    metadata={
+                        "action": {
+                            "kind": "event_draft",
+                            "id": str(draft_row["id"]),
+                            "status": "pending",
+                        }
+                    },
+                )
+                await broadcast_system_message(
+                    channel_id_str, _system_message_payload(channel_id_str, sys_row)
+                )
+                return True
+            async with conn.transaction():
+                if decision == "confirm":
+                    result = await confirm_event_draft(
+                        conn,
+                        draft_id=draft_row["id"],
+                        actor_user_id=actor.id,
+                        access=access,
+                    )
+                    text = "Added to Events. A reviewer can now complete it or mark it no action."
+                    status = "confirmed"
+                else:
+                    result = await reject_event_draft(
+                        conn,
+                        draft_id=draft_row["id"],
+                        actor_user_id=actor.id,
+                        access=access,
+                        reason="Rejected in channel",
+                    )
+                    text = "Okay — I left it out of Events."
+                    status = "rejected"
+                sys_row = await _insert_system_message(
+                    conn,
+                    channel_id_str,
+                    text,
+                    metadata={
+                        "action": {
+                            "kind": "event_draft",
+                            "id": str(draft_row["id"]),
+                            "status": status,
+                        }
+                    },
+                )
+        await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        return True
+    except Exception:
+        logger.exception("EMS event-draft reply failed for channel %s", channel_id_str)
+        # A probe failure must not swallow the existing clarify/schedule
+        # reply dispatch paths. The source message is already durable; a
+        # later retry can resolve the draft once the database is available.
+        return False
+
+
 def _ems_dispatch_decision(
     *, reply_target_type: Optional[str], has_huume_mention: bool,
 ) -> tuple[bool, bool]:
@@ -2170,6 +2366,11 @@ async def _bg_ems_dispatch(
     reply onto a stale schedule pill isn't swallowed, same reasoning as
     EMS."""
     if reply_to_system_id_str is not None:
+        claimed = await _bg_ems_draft_reply(
+            channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
+        )
+        if claimed:
+            return
         claimed = await _bg_ems_clarify(
             channel_id_str, reply_to_system_id_str, sender_user_id_str, content,
         )
@@ -3386,6 +3587,7 @@ async def channel_websocket(
                                 "mentioned_user_ids": mentioned_user_ids,
                                 "client_message_id": client_message_id,
                                 "message_type": row["message_type"],
+                                "metadata": {},
                             })
 
                             # Off-load offline-email check to Celery so the WS

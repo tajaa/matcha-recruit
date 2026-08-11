@@ -69,7 +69,7 @@ export default function MatchaWorkList() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search workspaces, channels, threads…"
+              placeholder="Search workspaces and channels…"
               className="w-full h-11 pl-10 pr-3 rounded-xl bg-w-surface border border-w-line text-sm text-w-text placeholder:text-w-faint focus:outline-none focus:border-w-accent/60 transition-colors"
             />
           </div>
@@ -170,9 +170,9 @@ export default function MatchaWorkList() {
         </Card>
       )}
 
-      {/* Threads — the tab filter now lives inside the card, not over the page */}
+      {/* Huume Workspaces — the tab filter now lives inside the card, not over the page */}
       <Card
-        title="Threads"
+        title="Huume Workspaces"
         action={
           <div className="flex gap-1 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {tabs.map((t) => (
@@ -203,7 +203,7 @@ export default function MatchaWorkList() {
         </div>
       ) : matchedThreads.length === 0 ? (
         <div className="text-center py-12 text-sm text-w-faint">
-          {searching ? 'No matches' : tab === 'pinned' ? 'No pinned threads' : 'No threads yet. Start a new chat.'}
+          {searching ? 'No matches' : tab === 'pinned' ? 'No pinned workspaces' : 'No workspaces yet. Start a new workspace.'}
         </div>
       ) : (
         <div className="space-y-1">

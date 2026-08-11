@@ -380,4 +380,8 @@ export interface MeResponse {
   profile: MeClientProfile | null
   onboarding_needed: Record<string, boolean>
   visible_features: Record<string, boolean>
+  work_access?: {
+    level: 'guest' | 'member' | 'reviewer' | 'operator' | 'admin'
+    capabilities: string[]
+  }
 }

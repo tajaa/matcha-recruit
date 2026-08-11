@@ -67,6 +67,19 @@ struct ReplyPreview: Codable, Hashable {
     }
 }
 
+/// Optional domain pointer carried by Huume/system messages. The desktop
+/// decoder keeps this additive so older messages without metadata continue to
+/// decode unchanged; action execution remains server-authorized.
+struct ChannelActionReference: Codable, Hashable {
+    let kind: String
+    let id: String
+    let status: String?
+}
+
+struct ChannelMessageMetadata: Codable, Hashable {
+    let action: ChannelActionReference?
+}
+
 struct ChannelMessage: Codable, Identifiable, Hashable {
     let id: String
     let channelId: String
@@ -90,6 +103,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     /// Client-generated correlation ID used to reconcile optimistic-pending
     /// entries with their server echo. Round-trips through the WS payload.
     let clientMessageId: String?
+    let metadata: ChannelMessageMetadata?
     /// Local-only flag: true while a sent message is awaiting server echo.
     /// Not encoded; the custom decoder always sets this to false. Mutable
     /// so the failure-timeout in ChannelChatViewModel can flip it off when
@@ -115,6 +129,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         case deletedBy = "deleted_by"
         case mentionedUserIds = "mentioned_user_ids"
         case clientMessageId = "client_message_id"
+        case metadata
     }
 
     init(id: String, channelId: String, senderId: String, senderName: String,
@@ -124,6 +139,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
          createdAt: String, editedAt: String?,
          mentionedUserIds: [String]? = nil,
          clientMessageId: String? = nil,
+         metadata: ChannelMessageMetadata? = nil,
          pending: Bool = false,
          failed: Bool = false) {
         self.id = id
@@ -140,6 +156,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.editedAt = editedAt
         self.mentionedUserIds = mentionedUserIds
         self.clientMessageId = clientMessageId
+        self.metadata = metadata
         self.pending = pending
         self.failed = failed
     }
@@ -160,6 +177,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.editedAt = try c.decodeIfPresent(String.self, forKey: .editedAt)
         self.mentionedUserIds = try? c.decodeIfPresent([String].self, forKey: .mentionedUserIds)
         self.clientMessageId = try? c.decodeIfPresent(String.self, forKey: .clientMessageId)
+        self.metadata = try? c.decodeIfPresent(ChannelMessageMetadata.self, forKey: .metadata)
         self.pending = false
         self.failed = false
     }

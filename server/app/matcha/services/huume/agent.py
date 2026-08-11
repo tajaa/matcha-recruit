@@ -45,6 +45,7 @@ from google.genai import types
 from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
+from app.matcha.services.matcha_work.work_permissions import WorkAccess
 
 from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
@@ -507,6 +508,7 @@ async def run_huume_turn(
     company_id: UUID,
     user_id: Optional[UUID],
     user_role: Optional[str],
+    work_access: WorkAccess | None = None,
     history: list[dict[str, Any]],
     current_state: dict[str, Any],
     company_name: str,
@@ -551,6 +553,11 @@ async def run_huume_turn(
 
     if features is None or integrations is None:
         features, integrations = await store.get_thread_features_and_integrations(company_id)
+
+    # Production callers provide target-company access. Direct skill-engine
+    # tests and legacy callers may omit it temporarily and retain the old role
+    # compatibility path inside actions.evaluate_*.
+    work_capabilities = work_access.capabilities if work_access is not None else None
 
     # Frozen at turn start — the two-turn confirm check for `send_offer`
     # compares against THIS snapshot, never against state a tool call in
@@ -678,7 +685,7 @@ async def run_huume_turn(
                 # still INSERTs a real offer_letters row and opens the side
                 # panel's OfferLetterViewer, which then 403s forever against
                 # the /offer-letters mount's own require_feature("offer_letters").
-                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, capabilities=work_capabilities, features=features)
                 if refusal:
                     step = recorder.record(tool=name, kind="write", label="Offer letter drafting unavailable", status="rejected", detail=refusal)
                     return {"status": "refused", "message": refusal}, step
@@ -703,7 +710,7 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "check_offer_status":
-                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, capabilities=work_capabilities, features=features)
                 if refusal:
                     step = recorder.record(tool=name, kind="read", label="Offer status unavailable", status="rejected", detail=refusal)
                     return {"status": "refused", "message": refusal}, step
@@ -753,7 +760,7 @@ async def run_huume_turn(
                     }
 
                 verdict = actions.evaluate_huume_action(
-                    staged_action=staged, features=features, role=user_role,
+                    staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
                 )
                 if verdict.kind == "stage":
@@ -845,7 +852,7 @@ async def run_huume_turn(
                         except Exception:
                             logger.warning("huume: draft_disciplinary_action stage_enrichment failed", exc_info=True)
                 verdict = actions.evaluate_huume_action(
-                    staged_action=staged, features=features, role=user_role,
+                    staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
                 )
                 if verdict.kind == "stage":
@@ -895,7 +902,7 @@ async def run_huume_turn(
                         "description": args.get("description"), "expected_improvement": args.get("expected_improvement"),
                     }
                 verdict = actions.evaluate_huume_action(
-                    staged_action=staged, features=features, role=user_role,
+                    staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
                 )
                 if verdict.kind == "stage":
@@ -1001,7 +1008,7 @@ async def run_huume_turn(
                         return {"status": "refused", "message": proposed["error"]}, step
                     staged.update({k: v for k, v in proposed.items() if k != "error"})
                 verdict = actions.evaluate_huume_action(
-                    staged_action=staged, features=features, role=user_role,
+                    staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
                 )
                 if verdict.kind == "stage":
@@ -1070,7 +1077,7 @@ async def run_huume_turn(
                 return _json_safe(result), step
 
             if name == "execute_approved_steps":
-                reason = actions.evaluate_plan_execution(role=user_role, features=features)
+                reason = actions.evaluate_plan_execution(role=user_role, capabilities=work_capabilities, features=features)
                 if reason:
                     step = recorder.record(tool=name, kind="staged", label="Execute refused", status="rejected", detail=reason)
                     return {"status": "refused", "message": reason}, step
@@ -1139,7 +1146,7 @@ async def run_huume_turn(
                 # Legal Pilot / Handbook Pilot skills — the routes' mount gates
                 # (require_admin_or_client + require_feature) re-asserted here,
                 # since the loop itself never decides authorization.
-                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, features=features)
+                refusal = actions.evaluate_pilot_tool(tool=name, role=user_role, capabilities=work_capabilities, features=features)
                 if refusal:
                     kind = TOOLS_BY_NAME[name].kind
                     step = recorder.record(tool=name, kind=kind, label=f"{name.replace('_', ' ')} unavailable", status="rejected", detail=refusal)
@@ -1324,7 +1331,7 @@ async def run_huume_turn(
                         "handbook_title": args.get("handbook_title"),
                     }
                     verdict = actions.evaluate_huume_action(
-                        staged_action=staged, features=features, role=user_role,
+                        staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                         thread_huume_mode=True, this_turn_staged_new=not confirming,
                     )
                     if verdict.kind == "stage":

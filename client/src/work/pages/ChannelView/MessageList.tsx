@@ -1,6 +1,7 @@
 import { FileText, Reply, Trash2 } from 'lucide-react'
 import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
+import ChannelActionCard from '../../components/channels/actions/ChannelActionCard'
 import { renderMessageContent } from './mentions'
 import { isUrgentSystemContent, renderSystemContent, stripEmphasis } from './systemContent'
 
@@ -112,6 +113,7 @@ export default function MessageList({
                     </button>
                   )}
                 </div>
+                {msg.metadata?.action && <ChannelActionCard action={msg.metadata.action} />}
               </div>
             </div>
           )

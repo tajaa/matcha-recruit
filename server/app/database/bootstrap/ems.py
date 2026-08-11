@@ -28,12 +28,18 @@ async def create_ems(conn):
             protocol_qualifies BOOLEAN,
             protocol_reasoning TEXT,
             status VARCHAR(20) NOT NULL DEFAULT 'logged'
-                CHECK (status IN ('logged', 'promoted', 'dismissed')),
+                CHECK (status IN ('logged', 'completed', 'promoted', 'dismissed')),
             incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL,
             promoted_by UUID REFERENCES users(id),
             promoted_at TIMESTAMPTZ,
             dismissed_by UUID REFERENCES users(id),
             dismissed_at TIMESTAMPTZ,
+            resolved_by UUID REFERENCES users(id),
+            resolved_at TIMESTAMPTZ,
+            resolution_note TEXT,
+            resolution_code VARCHAR(20)
+                CHECK (resolution_code IN ('handled', 'not_event', 'duplicate', 'informational')),
+            duplicate_of_event_id UUID REFERENCES ems_events(id) ON DELETE SET NULL,
             token_usage JSONB,
             clarify_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
             clarification_rounds SMALLINT NOT NULL DEFAULT 0,
@@ -89,4 +95,31 @@ async def create_ems(conn):
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS ems_event_drafts (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+            source_message_id UUID NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+            confirmation_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
+            reporter_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+            location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
+            narrative TEXT NOT NULL,
+            classified JSONB NOT NULL DEFAULT '{}'::jsonb,
+            urgency VARCHAR(10) CHECK (urgency IN ('osha', 'severe')),
+            status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'confirmed', 'rejected', 'expired')),
+            event_id UUID REFERENCES ems_events(id) ON DELETE SET NULL,
+            decided_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            decided_at TIMESTAMPTZ,
+            expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (source_message_id)
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_ems_event_drafts_company_status
+        ON ems_event_drafts(company_id, status, created_at DESC)
     """)

@@ -51,13 +51,13 @@ export default function ChatsSection({
       >
         <span className="flex items-center gap-1.5">
           <MessageSquare size={12} />
-          Chats
+          Huume Workspaces
         </span>
         <div className="flex items-center gap-1">
           <span
             onClick={(e) => { e.stopPropagation(); onNewChat() }}
             className="hover:text-w-accent cursor-pointer"
-            title="New chat"
+            title="New workspace"
           >
             <Plus size={12} />
           </span>
@@ -68,7 +68,7 @@ export default function ChatsSection({
         const filtered = threads.filter((t) => t.title.toLowerCase().includes(filter.toLowerCase()))
 
         if (filtered.length === 0) {
-          return <p className="px-2.5 py-1 text-[11px] text-w-faint">No chats</p>
+          return <p className="px-2.5 py-1 text-[11px] text-w-faint">No workspaces</p>
         }
 
         // Filtering implies the admin is searching for something specific —

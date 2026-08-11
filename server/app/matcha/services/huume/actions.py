@@ -29,11 +29,28 @@ from datetime import date, datetime
 from typing import Any, Optional
 from uuid import UUID
 
+from app.matcha.services.matcha_work.work_permissions import WorkCapability
+
 logger = logging.getLogger(__name__)
 
 # Only a business admin / platform admin may execute a Huume action or plan
 # step. Employees/creators/etc. reaching a thread must never trigger a write.
 _ALLOWED_ROLES = {"client", "admin"}
+
+
+def _effective_capabilities(
+    *,
+    role: Optional[str],
+    capabilities: Optional[set[WorkCapability] | frozenset[WorkCapability]],
+) -> frozenset[WorkCapability]:
+    """Use explicit Work access in production; retain role compatibility for
+    direct skill-engine callers and existing pure tests during migration."""
+
+    if capabilities is not None:
+        return frozenset(capabilities)
+    if (role or "").strip().lower() in _ALLOWED_ROLES:
+        return frozenset(WorkCapability)
+    return frozenset()
 
 # Every plan step Huume can propose, and the company feature flag (beyond
 # `huume` + `matcha_work`) each one re-checks before executing. `None` means
@@ -185,7 +202,8 @@ def evaluate_huume_action(
     *,
     staged_action: Any,
     features: dict[str, Any],
-    role: Optional[str],
+    role: Optional[str] = None,
+    capabilities: Optional[set[WorkCapability] | frozenset[WorkCapability]] = None,
     thread_huume_mode: bool,
     this_turn_staged_new: bool,
 ) -> HuumeVerdict:
@@ -216,8 +234,22 @@ def evaluate_huume_action(
             kind="refuse",
             message=f"This action needs the {required_feature} feature, which isn't enabled for this company.",
         )
-    if (role or "").strip().lower() not in _ALLOWED_ROLES:
-        return HuumeVerdict(kind="refuse", message="Only a business admin can do this.")
+    effective_capabilities = _effective_capabilities(role=role, capabilities=capabilities)
+    required_capability = (
+        WorkCapability.ACTION_PROPOSE
+        if this_turn_staged_new
+        else WorkCapability.ACTION_EXECUTE
+    )
+    if required_capability not in effective_capabilities:
+        return HuumeVerdict(
+            kind="refuse",
+            message=(
+                "You can draft this action, but an authorized Work Operator "
+                "must confirm it."
+                if this_turn_staged_new
+                else "Only an authorized Work Operator can execute this action."
+            ),
+        )
 
     if this_turn_staged_new:
         return HuumeVerdict(
@@ -817,15 +849,22 @@ def _validate_discipline_decision(staged: dict[str, Any]) -> HuumeVerdict:
     })
 
 
-def evaluate_plan_execution(*, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
+def evaluate_plan_execution(
+    *,
+    role: Optional[str] = None,
+    capabilities: Optional[set[WorkCapability] | frozenset[WorkCapability]] = None,
+    features: dict[str, Any],
+) -> Optional[str]:
     """Pure. None if the caller may execute plan steps at all (independent of
     which plan/offer), else a refusal reason. Re-asserted on the chat tool
     path (`agent.py`'s execute_approved_steps handler) since the skill engine
     gates nothing itself — the REST route already has this via
     `require_admin_or_client`, so this mirrors that check for parity."""
     features = features or {}
-    if (role or "").strip().lower() not in _ALLOWED_ROLES:
-        return "Only a business admin can run onboarding plan steps."
+    if WorkCapability.ACTION_EXECUTE not in _effective_capabilities(
+        role=role, capabilities=capabilities
+    ):
+        return "Only a business admin or authorized Work Operator can run onboarding plan steps."
     if not features.get("huume"):
         return "Huume isn't enabled for this company."
     if not features.get("matcha_work"):
@@ -869,7 +908,13 @@ _PILOT_FEATURE_LABEL = {
 }
 
 
-def evaluate_pilot_tool(*, tool: str, role: Optional[str], features: dict[str, Any]) -> Optional[str]:
+def evaluate_pilot_tool(
+    *,
+    tool: str,
+    role: Optional[str] = None,
+    capabilities: Optional[set[WorkCapability] | frozenset[WorkCapability]] = None,
+    features: dict[str, Any],
+) -> Optional[str]:
     """Pure. None if this pilot-backed tool may run, else a refusal reason.
 
     Same envelope order as evaluate_plan_execution — the skill engine gates
@@ -881,8 +926,10 @@ def evaluate_pilot_tool(*, tool: str, role: Optional[str], features: dict[str, A
     required = PILOT_TOOL_REQUIRED_FEATURE.get(tool)
     if required is None:
         return f"Unknown pilot tool '{tool}'."
-    if (role or "").strip().lower() not in _ALLOWED_ROLES:
-        return "Only a business admin can use the pilot tools."
+    if WorkCapability.SENSITIVE_RECORD_READ not in _effective_capabilities(
+        role=role, capabilities=capabilities
+    ):
+        return "Only a business admin or authorized Work Reviewer can use this sensitive Huume tool."
     if not features.get("huume"):
         return "Huume isn't enabled for this company."
     if not features.get("matcha_work"):

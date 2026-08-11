@@ -47,6 +47,10 @@ from app.matcha.services.matcha_work.matcha_work_ai import (
     _infer_skill_from_state,
     compact_conversation,
 )
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkAccess,
+    resolve_work_access,
+)
 from app.matcha.services.billing.model_pricing import calculate_call_cost
 
 logger = logging.getLogger(__name__)
@@ -490,6 +494,7 @@ class TurnContext:
     current_user: CurrentUser
     thread: dict
     company_id: UUID
+    work_access: WorkAccess | None = None
 
     # Prompt inputs
     profile: dict | None = None
@@ -909,13 +914,22 @@ async def _run_huume_dispatch(tc: TurnContext):
     # a Huume turn no longer queries `companies` for feature flags twice.
     integrations = await huume_store.get_thread_integrations(company_id)
 
+    # Resolve against the thread's owning company. A shared thread may be
+    # opened by a collaborator whose home company is different; that home
+    # role must not grant target-company execution privileges.
+    async with get_connection() as conn:
+        tc.work_access = await resolve_work_access(
+            conn, user=current_user, company_id=company_id
+        )
+
     current_state = thread.get("current_state") or {}
     final_result: dict | None = None
     run_failed = False
     try:
         async for frame in huume_agent.run_huume_turn(
             thread_id=thread_id, company_id=company_id, user_id=current_user.id,
-            user_role=current_user.role, history=tc.msg_dicts, current_state=current_state,
+            user_role=current_user.role, work_access=tc.work_access,
+            history=tc.msg_dicts, current_state=current_state,
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
             features=features, integrations=integrations, run_id=run_id,
@@ -1472,5 +1486,4 @@ async def _audit_and_persist(tc: TurnContext) -> None:
     except asyncio.CancelledError:
         _schedule_cancel_finalizer(tc)
         raise
-
 

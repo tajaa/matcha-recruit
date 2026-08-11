@@ -1,0 +1,155 @@
+"""Read-only aggregation of actionable records linked to a channel."""
+
+from __future__ import annotations
+
+from typing import Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+
+from app.core.dependencies import get_current_user
+from app.core.models.auth import CurrentUser
+from app.database import get_connection
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkCapability,
+    resolve_work_access,
+)
+
+router = APIRouter()
+
+
+ActionKind = Literal["event_draft", "event"]
+
+
+class ChannelActionOut(BaseModel):
+    id: UUID
+    kind: ActionKind
+    title: str
+    summary: str
+    status: str
+    source_message_id: UUID | None = None
+    allowed_actions: list[str]
+    href: str | None = None
+    created_at: str
+
+
+class ChannelActionListResponse(BaseModel):
+    actions: list[ChannelActionOut]
+    total: int
+
+
+@router.get("/{channel_id}/actions", response_model=ChannelActionListResponse)
+async def list_channel_actions(
+    channel_id: UUID,
+    status: str = Query(default="open"),
+    limit: int = Query(default=100, ge=1, le=200),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        channel = await conn.fetchrow(
+            """
+            SELECT company_id,
+                   EXISTS(
+                       SELECT 1 FROM channel_members cm
+                        WHERE cm.channel_id = channels.id
+                          AND cm.user_id = $2
+                          AND cm.removed_for_inactivity IS NOT TRUE
+                   ) AS is_member
+              FROM channels
+             WHERE id = $1
+            """,
+            channel_id,
+            current_user.id,
+        )
+        if not channel:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if not channel["is_member"] and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Channel membership required")
+
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=channel["company_id"]
+        )
+        rows: list[dict] = []
+
+        draft_status = "pending" if status == "open" else status
+        drafts = await conn.fetch(
+            """
+            SELECT id, source_message_id, reporter_user_id, narrative,
+                   classified, status, created_at
+              FROM ems_event_drafts
+             WHERE channel_id = $1 AND status = $2
+               AND (
+                   reporter_user_id = $3
+                   OR $4 = true
+               )
+             ORDER BY created_at DESC
+             LIMIT $5
+            """,
+            channel_id,
+            draft_status,
+            current_user.id,
+            access.allows(WorkCapability.EVENT_REVIEW),
+            limit,
+        )
+        if status in ("open", "pending"):
+            for row in drafts:
+                rows.append(
+                    {
+                        "id": row["id"],
+                        "kind": "event_draft",
+                        "title": "Confirm event draft",
+                        "summary": row["narrative"][:240],
+                        "status": row["status"],
+                        "source_message_id": row["source_message_id"],
+                        "allowed_actions": (
+                            ["confirm", "reject"]
+                            if row["reporter_user_id"] == current_user.id
+                            and access.allows(WorkCapability.EVENT_CONFIRM_OWN)
+                            else ["confirm", "reject"]
+                            if access.allows(WorkCapability.EVENT_REVIEW)
+                            else []
+                        ),
+                        "href": f"/work/events/drafts/{row['id']}",
+                        "created_at": row["created_at"].isoformat(),
+                    }
+                )
+
+        if status in ("open", "logged", "completed", "dismissed", "promoted"):
+            event_status = "logged" if status == "open" else status
+            events = await conn.fetch(
+                """
+                SELECT id, message_id, title, narrative, status, created_at
+                  FROM ems_events
+                 WHERE channel_id = $1 AND status = $2
+                 ORDER BY created_at DESC
+                 LIMIT $3
+                """,
+                channel_id,
+                event_status,
+                limit,
+            )
+            if access.allows(WorkCapability.EVENT_REVIEW):
+                for row in events:
+                    allowed = []
+                    if row["status"] == "logged" and access.allows(WorkCapability.EVENT_RESOLVE):
+                        allowed.extend(["complete", "no_action"])
+                    if row["status"] == "logged" and access.allows(WorkCapability.EVENT_PROMOTE):
+                        allowed.append("promote")
+                    rows.append(
+                        {
+                            "id": row["id"],
+                            "kind": "event",
+                            "title": row["title"] or "Event",
+                            "summary": row["narrative"][:240],
+                            "status": row["status"],
+                            "source_message_id": row["message_id"],
+                            "allowed_actions": allowed,
+                            "href": f"/work/events/{row['id']}",
+                            "created_at": row["created_at"].isoformat(),
+                        }
+                    )
+
+    rows.sort(key=lambda item: item["created_at"], reverse=True)
+    rows = rows[:limit]
+    return {"actions": rows, "total": len(rows)}

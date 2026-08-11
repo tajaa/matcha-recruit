@@ -3,6 +3,26 @@
 
 
 async def create_matcha_work(conn):
+        # Company-scoped Work permission overrides. Defaults for owners,
+        # clients, employees, and external collaborators are resolved by
+        # services.matcha_work.work_permissions at request time.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_work_permissions (
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                level VARCHAR(20) NOT NULL
+                    CHECK (level IN ('member', 'reviewer', 'operator', 'admin')),
+                granted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (company_id, user_id)
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_work_permissions_user "
+            "ON mw_work_permissions(user_id)"
+        )
+
         # Matcha Work tables (chat-driven offer letter generation)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_threads (
@@ -769,4 +789,3 @@ async def create_matcha_work(conn):
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_cards_board ON mw_productivity_cards(board_id, board_column, position)")
         await conn.execute("ALTER TABLE mw_productivity_cards ADD COLUMN IF NOT EXISTS due_date DATE")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_cards_due ON mw_productivity_cards(board_id, due_date)")
-

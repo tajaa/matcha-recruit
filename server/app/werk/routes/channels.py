@@ -10,7 +10,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from ...database import get_connection
 from ...core.dependencies import get_current_user
@@ -85,6 +85,7 @@ class ChannelMessage(BaseModel):
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[UUID] = None
     message_type: str = "user"
+    metadata: dict = Field(default_factory=dict)
     # Sender's optimistic-UI correlation id — REST now returns it so a
     # reconnect refetch can reconcile a still-pending local row against the
     # persisted copy (the WS echo already carried it).
@@ -145,6 +146,7 @@ def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
         deleted_at=m["deleted_at"],
         deleted_by=m["deleted_by"],
         message_type=m["message_type"],
+        metadata=(json.loads(m["metadata"]) if isinstance(m.get("metadata"), str) else (m.get("metadata") or {})),
         client_message_id=m.get("client_message_id"),
     )
 
@@ -205,7 +207,7 @@ def _name_subquery(user_id_expr: str) -> str:
 _MSG_SELECT = f"""
     SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
            m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
-           m.message_type, m.client_message_id,
+           m.message_type, m.metadata, m.client_message_id,
            COALESCE({_name_subquery("m.sender_id")}, 'Huume') AS sender_name,
            u.avatar_url AS sender_avatar_url,
            rm.content AS reply_content, rm.attachments AS reply_attachments,

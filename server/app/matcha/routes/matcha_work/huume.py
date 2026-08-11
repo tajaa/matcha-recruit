@@ -32,11 +32,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from app.core.dependencies import get_current_user
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, require_feature
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
 from app.matcha.services.huume import actions as huume_actions, record_view, store as huume_store
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkCapability,
+    WorkPermissionDenied,
+    assert_work_capability,
+    resolve_work_access,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_feature("huume"))])
@@ -73,6 +80,23 @@ async def _get_owned_thread(thread_id: UUID, current_user: CurrentUser) -> tuple
     return thread, caller_company_id
 
 
+async def _get_authorized_thread(
+    thread_id: UUID,
+    current_user: CurrentUser,
+    capability: WorkCapability,
+) -> tuple[dict, object]:
+    thread, _caller_company_id = await _get_owned_thread(thread_id, current_user)
+    async with get_connection() as conn:
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=thread["company_id"]
+        )
+    try:
+        assert_work_capability(access, capability)
+    except WorkPermissionDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return thread, access
+
+
 def _resolve_offer_id(current_state: dict, requested: Optional[str]) -> str:
     """Plans are keyed by offer_id (a thread may be onboarding several
     candidates at once) — resolve which one this call means, the same rule
@@ -88,11 +112,13 @@ def _resolve_offer_id(current_state: dict, requested: Optional[str]) -> str:
 async def approve_huume_plan(
     thread_id: UUID,
     payload: ApprovePlanRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Flip named (or all proposed) plan steps to `approved`. Does not
     execute anything — see /plan/execute."""
-    thread, _ = await _get_owned_thread(thread_id, current_user)
+    thread, _access = await _get_authorized_thread(
+        thread_id, current_user, WorkCapability.ACTION_APPROVE
+    )
     offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 
     def mutator(current_plan):
@@ -111,7 +137,7 @@ async def approve_huume_plan(
 async def execute_huume_plan(
     thread_id: UUID,
     payload: ExecutePlanRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """Run every `approved` step in the staged plan. Steps missing a
     required feature/integration are skipped and reported, not executed —
@@ -122,7 +148,9 @@ async def execute_huume_plan(
     execute_approved_steps handler uses, under a per-(thread, offer)
     advisory lock, so a chat-driven execute and a UI-button execute for the
     same candidate can never race and clobber each other's results."""
-    thread, _ = await _get_owned_thread(thread_id, current_user)
+    thread, _access = await _get_authorized_thread(
+        thread_id, current_user, WorkCapability.ACTION_EXECUTE
+    )
     company_id = thread["company_id"]
     offer_id = _resolve_offer_id(thread.get("current_state") or {}, payload.offer_id)
 

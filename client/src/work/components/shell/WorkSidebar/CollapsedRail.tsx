@@ -128,7 +128,7 @@ export default function CollapsedRail({
       <button
         onClick={() => { onToggle(); openChats() }}
         className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(pathname) && !pathname.includes('/channels/') && !pathname.includes('/projects/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
-        title="Chats"
+        title="Huume Workspaces"
       >
         <MessageSquare size={16} />
       </button>

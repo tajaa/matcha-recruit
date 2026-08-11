@@ -106,4 +106,8 @@ from .huume import router as _huume_router
 
 router.include_router(_huume_router)
 
+from .permissions import router as _permissions_router
+
+router.include_router(_permissions_router)
+
 __all__ = ["router", "public_router", "presence_router"]

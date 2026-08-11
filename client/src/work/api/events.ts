@@ -11,7 +11,7 @@ export type EmsEventCategory =
   | 'guest_experience'
   | 'uncategorized'
 
-export type EmsEventStatus = 'logged' | 'promoted' | 'dismissed'
+export type EmsEventStatus = 'logged' | 'completed' | 'promoted' | 'dismissed'
 
 export interface EmsEvent {
   id: string
@@ -36,6 +36,11 @@ export interface EmsEvent {
   protocol_qualifies: boolean | null
   protocol_reasoning: string | null
   status: EmsEventStatus
+  resolved_by?: string | null
+  resolved_at?: string | null
+  resolution_note?: string | null
+  resolution_code?: 'handled' | 'not_event' | 'duplicate' | 'informational' | null
+  duplicate_of_event_id?: string | null
   incident_id: string | null
   // True while Huume has posted a follow-up question in-channel that hasn't
   // been answered yet (ems_events.clarify_message_id IS NOT NULL server-side).
@@ -63,6 +68,37 @@ export interface EmsEventUpdate {
   category?: string
   doc?: Record<string, string>
   dismissed?: boolean
+}
+
+export interface EmsEventDraft {
+  id: string
+  company_id: string
+  channel_id: string
+  source_message_id: string
+  confirmation_message_id: string | null
+  reporter_user_id: string | null
+  location_id: string | null
+  narrative: string
+  classified: Record<string, unknown>
+  urgency: 'osha' | 'severe' | null
+  status: 'pending' | 'confirmed' | 'rejected' | 'expired'
+  event_id: string | null
+  decided_by: string | null
+  decided_at: string | null
+  expires_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface EmsEventDraftRejectRequest {
+  reason?: string
+}
+
+export interface EmsEventResolveRequest {
+  resolution: 'completed' | 'no_action'
+  note?: string
+  resolution_code?: 'handled' | 'not_event' | 'duplicate' | 'informational'
+  duplicate_of_event_id?: string
 }
 
 export interface EmsPromoteRequest {
@@ -110,4 +146,20 @@ export function updateEvent(id: string, body: EmsEventUpdate) {
 
 export function promoteEvent(id: string, overrides: EmsPromoteRequest = {}) {
   return api.post<EmsPromoteResponse>(`/ems/events/${id}/promote`, overrides)
+}
+
+export function getEventDraft(id: string) {
+  return api.get<EmsEventDraft>(`/ems/event-drafts/${id}`)
+}
+
+export function confirmEventDraft(id: string) {
+  return api.post<EmsEvent>(`/ems/event-drafts/${id}/confirm`, {})
+}
+
+export function rejectEventDraft(id: string, body: EmsEventDraftRejectRequest = {}) {
+  return api.post<EmsEventDraft>(`/ems/event-drafts/${id}/reject`, body)
+}
+
+export function resolveEvent(id: string, body: EmsEventResolveRequest) {
+  return api.post<EmsEvent>(`/ems/events/${id}/resolve`, body)
 }

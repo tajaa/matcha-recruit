@@ -29,7 +29,12 @@ class EmsEventOut(BaseModel):
     urgency: Optional[Literal["osha", "severe"]] = None
     protocol_qualifies: Optional[bool] = None
     protocol_reasoning: Optional[str] = None
-    status: Literal["logged", "promoted", "dismissed"]
+    status: Literal["logged", "completed", "promoted", "dismissed"]
+    resolved_by: Optional[UUID] = None
+    resolved_at: Optional[datetime] = None
+    resolution_note: Optional[str] = None
+    resolution_code: Optional[str] = None
+    duplicate_of_event_id: Optional[UUID] = None
     incident_id: Optional[UUID] = None
     awaiting_reply: bool = False
     clarification_rounds: int = 0
@@ -40,6 +45,37 @@ class EmsEventOut(BaseModel):
 class EmsEventListResponse(BaseModel):
     events: list[EmsEventOut]
     total: int
+
+
+class EmsEventDraftOut(BaseModel):
+    id: UUID
+    company_id: UUID
+    channel_id: UUID
+    source_message_id: UUID
+    confirmation_message_id: Optional[UUID] = None
+    reporter_user_id: Optional[UUID] = None
+    location_id: Optional[UUID] = None
+    narrative: str
+    classified: dict[str, Any] = Field(default_factory=dict)
+    urgency: Optional[Literal["osha", "severe"]] = None
+    status: Literal["pending", "confirmed", "rejected", "expired"]
+    event_id: Optional[UUID] = None
+    decided_by: Optional[UUID] = None
+    decided_at: Optional[datetime] = None
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class EmsEventDraftRejectRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class EmsEventResolveRequest(BaseModel):
+    resolution: Literal["completed", "no_action"]
+    note: Optional[str] = Field(default=None, max_length=2000)
+    resolution_code: Optional[Literal["handled", "not_event", "duplicate", "informational"]] = None
+    duplicate_of_event_id: Optional[UUID] = None
 
 
 class EmsEventUpdate(BaseModel):

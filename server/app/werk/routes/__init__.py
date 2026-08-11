@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from .inbox import router as inbox_router
 from .channels import router as channels_router
+from .channel_actions import router as channel_actions_router
 from .channels_ws import router as channels_ws_router
 from .channel_job_postings import router as channel_job_postings_router
 from .channel_broadcasts import router as channel_broadcasts_router, webhook_router as livekit_webhook_router
@@ -18,6 +19,7 @@ werk_router = APIRouter()
 
 werk_router.include_router(inbox_router, prefix="/inbox", tags=["inbox"])
 werk_router.include_router(channels_router, prefix="/channels", tags=["channels"])
+werk_router.include_router(channel_actions_router, prefix="/channels", tags=["channel-actions"])
 werk_router.include_router(channel_job_postings_router, prefix="/channels", tags=["channel-job-postings"])
 werk_router.include_router(channel_broadcasts_router, prefix="/channels", tags=["channel-broadcasts"])
 werk_router.include_router(channel_calls_router, prefix="/channels", tags=["channel-calls"])
@@ -28,6 +30,7 @@ __all__ = [
     "channels_ws_router",
     "inbox_router",
     "channels_router",
+    "channel_actions_router",
     "channel_job_postings_router",
     "channel_broadcasts_router",
     "channel_calls_router",

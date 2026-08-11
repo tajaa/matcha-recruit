@@ -76,7 +76,8 @@ async def create_misc_tail(conn):
                 reply_to_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 edited_at TIMESTAMPTZ,
-                message_type VARCHAR(20) NOT NULL DEFAULT 'user'
+                message_type VARCHAR(20) NOT NULL DEFAULT 'user',
+                metadata JSONB NOT NULL DEFAULT '{}'::jsonb
             )
         """)
         # sender_id is nullable (EMS system/Huume messages have no human
@@ -103,6 +104,9 @@ async def create_misc_tail(conn):
         # migration; this mirrors the schema for fresh init_db bootstraps.
         await conn.execute("""
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS client_message_id UUID
+        """)
+        await conn.execute("""
+            ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb
         """)
         await conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS uniq_channel_messages_sender_cmid

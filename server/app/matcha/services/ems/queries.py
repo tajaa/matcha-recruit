@@ -23,6 +23,8 @@ EVENT_SELECT = f"""
            ev.suggested_incident_type, ev.suggested_severity,
            ev.urgency, ev.protocol_qualifies, ev.protocol_reasoning,
            ev.status, ev.incident_id,
+           ev.resolved_by, ev.resolved_at, ev.resolution_note,
+           ev.resolution_code, ev.duplicate_of_event_id,
            (ev.clarify_message_id IS NOT NULL AND ev.status = 'logged') AS awaiting_reply,
            ev.clarification_rounds,
            ev.created_at, ev.updated_at

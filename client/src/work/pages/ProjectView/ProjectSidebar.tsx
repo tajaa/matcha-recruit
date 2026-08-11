@@ -42,7 +42,7 @@ export function ProjectSidebar({ vm, project, isRecruiting }: Props) {
         {!isRecruiting && (
           <button
             onClick={handleNewChat}
-            title="New chat"
+            title="New workspace"
             className="p-1 rounded transition-colors text-[var(--color-w-dim)] hover:text-[var(--color-w-accent)]"
           >
             <Plus size={14} />
