@@ -9,6 +9,7 @@ struct BrandMoreView: View {
             Section {
                 NavigationLink("Stores & QR codes") { StoresView() }
                 NavigationLink("Reward listings") { BrandListingsView() }
+                NavigationLink("Scan customer card") { BrandScanView() }
                 NavigationLink("Settings & prompts") { BrandSettingsView() }
                 NavigationLink("Billing") { BillingView() }
             }

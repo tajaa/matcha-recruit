@@ -24,7 +24,7 @@ struct BrandScanView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(TU.ink)
-        .navigationTitle("Redeem a card")
+        .navigationTitle("Scan customer card")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -52,7 +52,7 @@ struct BrandScanView: View {
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-            Button("Redeem") {
+            Button("Accept card") {
                 Task {
                     await vm.redeem(cardToken: typed.trimmingCharacters(in: .whitespacesAndNewlines))
                     typed = ""

@@ -97,6 +97,51 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.get("/test-accounts", dependencies=[Depends(require_admin)])
+async def list_test_accounts():
+    """List every tenant designated safe for demo/beta use and dev/prod sync."""
+    async with get_connection() as conn:
+        if not await is_test_column_exists(conn):
+            return {"test_accounts": []}
+        rows = await conn.fetch(
+            """
+            SELECT comp.id, comp.name AS company_name, comp.industry, comp.size,
+                   comp.status, comp.created_at, comp.signup_source,
+                   COALESCE(owner.email, client_owner.email) AS owner_email,
+                   COALESCE(client.name, client_owner.name) AS owner_name
+            FROM companies comp
+            LEFT JOIN users owner ON owner.id = comp.owner_id
+            LEFT JOIN clients client ON client.company_id = comp.id AND client.user_id = comp.owner_id
+            LEFT JOIN LATERAL (
+                SELECT u.email, c.name
+                FROM clients c
+                JOIN users u ON u.id = c.user_id
+                WHERE c.company_id = comp.id
+                ORDER BY c.created_at NULLS LAST, c.id
+                LIMIT 1
+            ) AS client_owner ON true
+            WHERE comp.is_test = true AND comp.deleted_at IS NULL
+            ORDER BY comp.created_at DESC, comp.name
+            """
+        )
+    return {
+        "test_accounts": [
+            {
+                "id": str(row["id"]),
+                "company_name": row["company_name"],
+                "industry": row["industry"],
+                "company_size": row["size"],
+                "status": row["status"] or "approved",
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "signup_source": row["signup_source"],
+                "owner_email": row["owner_email"],
+                "owner_name": row["owner_name"],
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.get("/company-features", dependencies=[Depends(require_admin)])
 async def list_company_features():
     """List all companies with their EFFECTIVE (not just stored) features.

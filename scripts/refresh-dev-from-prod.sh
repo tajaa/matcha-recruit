@@ -135,9 +135,10 @@ read -r -p "Type 'refresh-dev' to proceed: " CONFIRM
 # paths (lock held, dev PG unreachable, tunnel failed) into hard failures —
 # a silent skip here would read as "nothing to push" and let the refresh
 # proceed to destroy dev-only edits that were never actually synced.
+# --progress keeps the slow remote FK walk visible with a 10-second heartbeat.
 if [[ "$DRY_RUN" != true ]]; then
     echo "==> Pushing test tenants dev -> prod first (refresh would otherwise destroy dev-only edits)..."
-    if ! "$REPO_ROOT/scripts/sync-test-tenants.sh" --auto --require-push; then
+    if ! "$REPO_ROOT/scripts/sync-test-tenants.sh" --auto --require-push --progress; then
         echo "${RED}Test-tenant sync failed — aborting refresh. Dev-only test-tenant edits" \
              "would be destroyed by continuing. Run ./scripts/sync-test-tenants.sh by hand," \
              "fix whatever failed, then retry.${NC}"

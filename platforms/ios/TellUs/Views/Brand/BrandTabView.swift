@@ -14,9 +14,6 @@ struct BrandTabView: View {
             NavigationStack { BoardManageView(brandId: nil, slug: appState.account?.brand_slug) }
                 .tabItem { Label("Board", systemImage: "person.3") }
 
-            NavigationStack { BrandScanView() }
-                .tabItem { Label("Redeem", systemImage: "qrcode.viewfinder") }
-
             NavigationStack { MessagesListView(scope: .business(brandID: nil)) }
                 .tabItem { Label("Comms", systemImage: "message") }
 

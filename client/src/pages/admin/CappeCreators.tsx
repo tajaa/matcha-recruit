@@ -30,8 +30,6 @@ type CreatorRow = {
   submitted_at: string | null
   published_at: string | null
   created_at: string
-  account_id: string
-  account_status: string
   email: string
   account_name: string | null
   socials: CreatorSocial[]
@@ -93,7 +91,7 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-export default function CappeCreators({ embedded = false }: { embedded?: boolean }) {
+export default function CappeCreators() {
   const { toast } = useToast()
   const [tab, setTab] = useState<Tab>('queue')
   const [creators, setCreators] = useState<CreatorRow[]>([])
@@ -230,34 +228,6 @@ export default function CappeCreators({ embedded = false }: { embedded?: boolean
     }
   }
 
-  async function suspendAccount(row: CreatorRow) {
-    const note = window.prompt(`Disable login for ${row.email} — note (optional):`)
-    if (note === null) return
-    setBusyId(row.account_id)
-    try {
-      await api.post(`/admin/cappe/accounts/${row.account_id}/suspend`, { note: note || null })
-      toast(`${row.email} suspended`, 'success')
-      setCreators((prev) => prev.map((c) => (c.account_id === row.account_id ? { ...c, account_status: 'suspended' } : c)))
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Account suspension failed', 'error')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  async function restoreAccount(row: CreatorRow) {
-    setBusyId(row.account_id)
-    try {
-      await api.post(`/admin/cappe/accounts/${row.account_id}/restore`)
-      toast(`${row.email} restored`, 'success')
-      setCreators((prev) => prev.map((c) => (c.account_id === row.account_id ? { ...c, account_status: 'active' } : c)))
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Account restore failed', 'error')
-    } finally {
-      setBusyId(null)
-    }
-  }
-
   function openAudit(profileId: string, social: CreatorSocial) {
     setAuditTarget({ profileId, social })
     setAuditStatus(social.audit_status)
@@ -361,17 +331,6 @@ export default function CappeCreators({ embedded = false }: { embedded?: boolean
                   {isOpen && (
                     <tr className="bg-zinc-950/40">
                       <td colSpan={6} className="px-4 py-3">
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/30 px-3 py-2">
-                          <div>
-                            <p className="text-xs font-medium text-zinc-300">{row.email}</p>
-                            <p className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">Account {row.account_status}</p>
-                          </div>
-                          {row.account_status === 'active' ? (
-                            <Button size="sm" variant="ghost" disabled={busyId === row.account_id} onClick={() => suspendAccount(row)}>Disable login</Button>
-                          ) : row.account_status === 'suspended' ? (
-                            <Button size="sm" variant="secondary" disabled={busyId === row.account_id} onClick={() => restoreAccount(row)}>Restore login</Button>
-                          ) : null}
-                        </div>
                         {row.review_note && (
                           <p className="mb-2 text-xs text-zinc-500">Note: {row.review_note}</p>
                         )}
@@ -409,14 +368,12 @@ export default function CappeCreators({ embedded = false }: { embedded?: boolean
 
   return (
     <div>
-      {!embedded && (
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Cappe Creators</h1>
-          <p className="mt-2 text-sm text-zinc-500">Creator marketplace review queue, roster, social audits, and collab settings.</p>
-        </div>
-      )}
+      <div>
+        <h1 className="text-2xl font-semibold text-zinc-100">Gummfit Creators</h1>
+        <p className="mt-2 text-sm text-zinc-500">Creator marketplace review queue, roster, social audits, and collab settings.</p>
+      </div>
 
-      <div className={embedded ? '' : 'mt-6'}>
+      <div className="mt-6">
         <PillTabs
           options={[
             { value: 'queue', label: `Review queue${queue.length ? ` (${queue.length})` : ''}` },

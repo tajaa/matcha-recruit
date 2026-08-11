@@ -18,8 +18,10 @@ const nav: NavGroup[] = [
     items: [
       { to: '/admin/customers', icon: Users, label: 'Customers' },
       { to: '/admin/companies', icon: Building2, label: 'Companies' },
+      { to: '/admin/test-accounts', icon: ShieldCheck, label: 'Test Accounts' },
       { to: '/admin/matcha-work', icon: Sparkles, label: 'Matcha-Work' },
-      { to: '/admin/cappe', icon: LayoutTemplate, label: 'Gummfit' },
+      { to: '/admin/cappe', icon: LayoutTemplate, label: 'Cappe' },
+      { to: '/admin/cappe-creators', icon: Users, label: 'Gummfit Creators' },
       { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
       { to: '/admin/fractional-hr', icon: HeartHandshake, label: 'Fractional HR' },
     ],

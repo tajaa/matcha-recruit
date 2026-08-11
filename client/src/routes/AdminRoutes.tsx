@@ -3,6 +3,7 @@ import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import AdminSidebar from '../components/sidebars/AdminSidebar'
 import Companies from '../pages/admin/Companies'
+import TestAccounts from '../pages/admin/TestAccounts'
 import AdminCompanyDetail from '../pages/admin/company-detail'
 import Features from '../pages/admin/Features'
 import Settings from '../pages/admin/Settings'
@@ -22,6 +23,7 @@ import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
 import Updates from '../pages/admin/Updates'
 import Cappe from '../pages/admin/Cappe'
+import CappeCreators from '../pages/admin/CappeCreators'
 import GapAnalysisHome from '../pages/admin/GapAnalysisHome'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
 import GapDashboard from '../pages/admin/GapDashboard'
@@ -63,10 +65,11 @@ export default function AdminRoutes() {
         <Route path="onboarding" element={<Navigate to="/admin/gap-analysis" replace />} />
         <Route path="onboarding/*" element={<Navigate to="/admin/gap-analysis" replace />} />
         <Route path="companies" element={<Companies />} />
+        <Route path="test-accounts" element={<TestAccounts />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="matcha-work" element={<MatchaWork />} />
         <Route path="cappe" element={<Cappe />} />
-        <Route path="cappe-creators" element={<Navigate to="/admin/cappe?view=creators" replace />} />
+        <Route path="cappe-creators" element={<CappeCreators />} />
         <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />
         <Route path="client-errors" element={<ClientErrors />} />
         <Route path="server-errors" element={<ServerErrors />} />

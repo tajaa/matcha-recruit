@@ -211,7 +211,7 @@ export default function Cappe() {
       </div>
 
       {view === 'creators' ? (
-        <div className="mt-7"><CappeCreators embedded /></div>
+        <div className="mt-7"><CappeCreators /></div>
       ) : loading ? (
         <p className="mt-7 text-sm text-zinc-500">Loading…</p>
       ) : view === 'brands' ? (

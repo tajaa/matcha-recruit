@@ -882,14 +882,23 @@ async def register_test_account(
 
     async with get_connection() as conn:
         async with conn.transaction():
+            # A seeded account is specifically a demo/test tenant. Creating it
+            # without this flag would leave it out of the admin test-account
+            # registry, make beta feature behavior inconsistent, and risk it
+            # being anonymized on the next prod -> dev refresh.
+            if not await _column_exists(conn, "companies", "is_test"):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Test accounts require the testacct01 database migration (companies.is_test).",
+                )
             existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
             if existing:
                 raise HTTPException(status_code=400, detail="Email already registered")
 
             company = await conn.fetchrow(
                 """
-                INSERT INTO companies (name, industry, size, status, approved_at, enabled_features)
-                VALUES ($1, $2, $3, 'approved', NOW(), $4::jsonb)
+                INSERT INTO companies (name, industry, size, status, approved_at, enabled_features, is_test)
+                VALUES ($1, $2, $3, 'approved', NOW(), $4::jsonb, true)
                 RETURNING id
                 """,
                 company_name,
@@ -958,4 +967,3 @@ async def register_test_account(
             seeded_employee_email=seeded_data.get("seeded_employee_email"),
             seeded_portal_password=seeded_data.get("seeded_portal_password"),
         )
-

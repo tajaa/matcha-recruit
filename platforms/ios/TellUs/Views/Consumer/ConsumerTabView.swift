@@ -15,8 +15,8 @@ struct ConsumerTabView: View {
             NavigationStack { ScanView() }
                 .tabItem { Label("Scan", systemImage: "qrcode.viewfinder") }
 
-            NavigationStack { BoardsListView() }
-                .tabItem { Label("Boards", systemImage: "person.3") }
+            NavigationStack { CommsHubView() }
+                .tabItem { Label("Comms", systemImage: "message") }
 
             NavigationStack { MoreView() }
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }

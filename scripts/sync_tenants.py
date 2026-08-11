@@ -45,6 +45,7 @@ import importlib.util
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -125,6 +126,28 @@ class DriftReport:
     @property
     def drifted_tables(self) -> set:
         return set(self.missing_on_dev) | set(self.missing_on_prod) | set(self.column_drift)
+
+
+def _format_elapsed(seconds: float) -> str:
+    total = max(0, int(seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def snapshot_progress(side: str, collector, elapsed: float, *, complete: bool = False) -> str:
+    """Human-readable heartbeat for the otherwise silent recursive FK walk."""
+    row_count = sum(len(rows) for rows in collector.rows.values())
+    table_count = sum(bool(rows) for rows in collector.rows.values())
+    state = "complete" if complete else "working"
+    current = collector.last_table or "starting"
+    return (
+        f"   [{_format_elapsed(elapsed)}] {side} FK walk {state}: "
+        f"{row_count:,} unique rows / {table_count} tables; "
+        f"{collector.collect_calls:,} traversal calls; current table: {current}"
+    )
 
 
 def table_drift(dev_cols: list, prod_cols: list) -> tuple:
@@ -328,7 +351,9 @@ async def load_test_tenant_ids(dev_conn, prod_conn, dev_cols: dict, prod_cols: d
     return sorted(ids), warnings
 
 
-async def snapshot_side(conn, export_mod, cols, pks, fks, tenant_ids: list) -> tuple:
+async def snapshot_side(conn, export_mod, cols, pks, fks, tenant_ids: list,
+                        side: str = "database", progress_log=None,
+                        heartbeat_seconds: float = 10.0) -> tuple:
     """Walk the FK graph from each tenant's companies row on this connection
     and return (snapshot, collector, dropped).
 
@@ -339,45 +364,78 @@ async def snapshot_side(conn, export_mod, cols, pks, fks, tenant_ids: list) -> t
         are silently absent from `snapshot` and therefore never sync in
         either direction unless the caller surfaces this count."""
     collector = export_mod.Collector(conn, cols, pks, fks, export_mod.DEFAULT_EXCLUDE)
-    for tid in tenant_ids:
-        row = await conn.fetchrow("SELECT * FROM companies WHERE id = $1", tid)
-        if row is None:
-            continue  # tenant exists on the other side only; nothing to ascend/descend here
-        await collector.collect("companies", dict(row), descend=True)
+    started = time.monotonic()
 
-    snapshot: dict = {}
-    dropped: dict = {}
-    for table, rows in collector.rows.items():
-        if not rows:
-            continue
-        pk = pks.get(table)
-        if not pk:
-            continue  # no-PK tables can't be idempotently synced either direction
-        table_cols = cols[table]
-        keys = list(rows.keys())
-        text_rows = await export_mod.fetch_as_text(conn, table, table_cols, pk, keys)
-        by_key = {tuple(str(r[c]) for c in pk): r for r in text_rows}
-        present = {
-            key: RowSnap(row=by_key[tuple(str(v) for v in key)], descend=descend)
-            for key, (_, descend) in rows.items()
-            if tuple(str(v) for v in key) in by_key
-        }
-        miss = len(rows) - len(present)
-        if miss:
-            dropped[table] = miss
-        snapshot[table] = present
-    return snapshot, collector, dropped
+    async def heartbeat():
+        while True:
+            await asyncio.sleep(heartbeat_seconds)
+            progress_log(snapshot_progress(side, collector, time.monotonic() - started))
+
+    heartbeat_task = asyncio.create_task(heartbeat()) if progress_log else None
+    try:
+        for tid in tenant_ids:
+            row = await conn.fetchrow("SELECT * FROM companies WHERE id = $1", tid)
+            if row is None:
+                continue  # tenant exists on the other side only; nothing to ascend/descend here
+            await collector.collect("companies", dict(row), descend=True)
+
+        snapshot: dict = {}
+        dropped: dict = {}
+        for table, rows in collector.rows.items():
+            if not rows:
+                continue
+            pk = pks.get(table)
+            if not pk:
+                continue  # no-PK tables can't be idempotently synced either direction
+            table_cols = cols[table]
+            keys = list(rows.keys())
+            text_rows = await export_mod.fetch_as_text(conn, table, table_cols, pk, keys)
+            by_key = {tuple(str(r[c]) for c in pk): r for r in text_rows}
+            present = {
+                key: RowSnap(row=by_key[tuple(str(v) for v in key)], descend=descend)
+                for key, (_, descend) in rows.items()
+                if tuple(str(v) for v in key) in by_key
+            }
+            miss = len(rows) - len(present)
+            if miss:
+                dropped[table] = miss
+            snapshot[table] = present
+        return snapshot, collector, dropped
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        if progress_log:
+            progress_log(snapshot_progress(
+                side, collector, time.monotonic() - started, complete=True,
+            ))
 
 
-async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = False) -> int:
+async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = False,
+                   progress: bool = False) -> int:
     export_mod = _load_export_dev_data()
     log = (lambda *a: None) if quiet else (lambda *a: print(*a, file=sys.stderr))
+    progress_log = (lambda *a: print(*a, file=sys.stderr)) if (progress or not quiet) else None
+    run_started = time.monotonic()
 
+    def report(message: str):
+        if progress_log:
+            progress_log(f"[{_format_elapsed(time.monotonic() - run_started)}] {message}")
+
+    report("Connecting to dev and prod databases...")
     dev_conn = await asyncpg.connect(dev_dsn)
     prod_conn = await asyncpg.connect(prod_dsn)
     try:
+        report("Connected. Loading schemas...")
         dev_cols, dev_pks, dev_fks, _ = await export_mod.load_schema(dev_conn)
         prod_cols, prod_pks, prod_fks, _ = await export_mod.load_schema(prod_conn)
+        report(
+            f"Schemas loaded: dev {len(dev_cols)} tables / {len(dev_fks)} FKs; "
+            f"prod {len(prod_cols)} tables / {len(prod_fks)} FKs."
+        )
 
         drift = compute_drift(dev_cols, prod_cols)
         if drift.drifted_tables:
@@ -406,6 +464,7 @@ async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = Fal
             return 2
 
         tenant_ids, tenant_warnings = await load_test_tenant_ids(dev_conn, prod_conn, dev_cols, prod_cols)
+        report(f"Found {len(tenant_ids)} test tenant(s) across dev and prod.")
         for w in tenant_warnings:
             log(f"WARN: {w}")
         if not tenant_ids:
@@ -413,8 +472,16 @@ async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = Fal
             _write_outputs(out_dir, [], [], [], [])
             return 0 if not drift.drifted_tables else 2
 
-        dev_snap, dev_collector, dev_dropped = await snapshot_side(dev_conn, export_mod, dev_cols, dev_pks, dev_fks, tenant_ids)
-        prod_snap, prod_collector, prod_dropped = await snapshot_side(prod_conn, export_mod, prod_cols, prod_pks, prod_fks, tenant_ids)
+        report("Walking dev tenant FK graph...")
+        dev_snap, dev_collector, dev_dropped = await snapshot_side(
+            dev_conn, export_mod, dev_cols, dev_pks, dev_fks, tenant_ids,
+            side="dev", progress_log=progress_log,
+        )
+        report("Walking prod tenant FK graph (remote round-trips make this the slow phase)...")
+        prod_snap, prod_collector, prod_dropped = await snapshot_side(
+            prod_conn, export_mod, prod_cols, prod_pks, prod_fks, tenant_ids,
+            side="prod", progress_log=progress_log,
+        )
         dropped_total = 0
         for side, dmap in (("dev", dev_dropped), ("prod", prod_dropped)):
             for t, n in sorted(dmap.items()):
@@ -458,6 +525,7 @@ async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = Fal
             log(f"WARN: {len(mapping)} email(s) normalized for comparison (scrubbed to @example.com)")
 
         tables = sorted((set(dev_snap) | set(prod_snap)) - drift.drifted_tables)
+        report(f"Comparing {len(tables)} collected table(s) and building SQL plans...")
         to_prod_lines, to_dev_lines = [], []
         to_prod_undo, to_dev_undo = [], []
         total_stats = MergeStats()
@@ -537,6 +605,13 @@ async def run_sync(dev_dsn: str, prod_dsn: str, out_dir: Path, quiet: bool = Fal
 
     _write_outputs(out_dir, to_prod_lines, to_prod_undo, to_dev_lines, to_dev_undo)
 
+    report(
+        f"Diff complete; wrote sync SQL in {_format_elapsed(time.monotonic() - run_started)}. "
+        f"prod: {total_stats.inserted_to_prod} insert / {total_stats.updated_to_prod} update; "
+        f"dev: {total_stats.inserted_to_dev} insert / {total_stats.updated_to_dev} update; "
+        f"noop: {total_stats.noop}."
+    )
+
     log(
         f"\nsync_to_prod: {total_stats.inserted_to_prod} insert, {total_stats.updated_to_prod} update\n"
         f"sync_to_dev:  {total_stats.inserted_to_dev} insert, {total_stats.updated_to_dev} update\n"
@@ -573,11 +648,16 @@ async def _main():
     ap.add_argument("--prod-dsn", default=os.getenv("PROD_DATABASE_URL"))
     ap.add_argument("--out-dir", default=str(REPO_ROOT / "scripts" / "sql"))
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--progress", action="store_true",
+                    help="show stage updates and a heartbeat during long FK walks, even with --quiet")
     args = ap.parse_args()
     if not args.prod_dsn:
         print("!! --prod-dsn or PROD_DATABASE_URL required", file=sys.stderr)
         return 1
-    return await run_sync(args.dev_dsn, args.prod_dsn, Path(args.out_dir), quiet=args.quiet)
+    return await run_sync(
+        args.dev_dsn, args.prod_dsn, Path(args.out_dir),
+        quiet=args.quiet, progress=args.progress,
+    )
 
 
 if __name__ == "__main__":

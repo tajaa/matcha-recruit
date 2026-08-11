@@ -163,6 +163,35 @@ def test_drift_report_no_drift_when_schemas_match():
     assert report.drifted_tables == set()
 
 
+# ── progress heartbeat ──────────────────────────────────────────────────────
+
+def test_snapshot_progress_reports_side_counts_elapsed_and_current_table():
+    class CollectorStub:
+        rows = {
+            "companies": {("1",): object()},
+            "employees": {("2",): object(), ("3",): object()},
+        }
+        collect_calls = 17
+        last_table = "employees"
+
+    message = st.snapshot_progress("prod", CollectorStub(), 125.8)
+    assert "[02:05] prod FK walk working" in message
+    assert "3 unique rows / 2 tables" in message
+    assert "17 traversal calls" in message
+    assert "current table: employees" in message
+
+
+def test_snapshot_progress_complete_state_and_hour_format():
+    class CollectorStub:
+        rows = {}
+        collect_calls = 0
+        last_table = None
+
+    message = st.snapshot_progress("dev", CollectorStub(), 3661, complete=True)
+    assert "[1:01:01] dev FK walk complete" in message
+    assert "current table: starting" in message
+
+
 # ── merge_plan: ascend gating (the blast-radius safety rule) ────────────────
 
 def test_ascended_row_missing_on_prod_inserts_do_nothing_shape():

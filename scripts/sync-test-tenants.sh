@@ -7,6 +7,9 @@
 #   ./scripts/sync-test-tenants.sh --auto    # do it, unattended, quiet — for the
 #                                             # deploy hook (update-ec2.sh) and
 #                                             # manual re-runs between deploys
+#   --progress    show stages + a 10-second FK-walk heartbeat. Intended for
+#                 interactive callers that still need --auto, such as a dev
+#                 refresh; detailed row warnings remain quiet.
 #   --require-push  (combine with --auto) — turn the quiet skip paths (lock
 #                    held, dev PG unreachable, tunnel failed, and the merge
 #                    engine exiting 2 for drift/warnings — which can mean an
@@ -66,11 +69,13 @@ archive_prod_undo() {
 
 MODE="dry-run"   # dry-run | apply | auto
 REQUIRE_PUSH=0
+PROGRESS=0
 for a in "$@"; do
   case "$a" in
     --apply)         MODE="apply" ;;
     --auto)          MODE="auto" ;;
     --require-push)  REQUIRE_PUSH=1 ;;
+    --progress)      PROGRESS=1 ;;
     -h|--help)       sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)               echo "Unknown flag: $a" >&2; exit 1 ;;
   esac
@@ -169,7 +174,8 @@ PY="$REPO_ROOT/server/venv/bin/python"
 log "==> Computing dev <-> prod diff for is_test tenants"
 set +e
 "$PY" scripts/sync_tenants.py --dev-dsn "$DEV_URL" --prod-dsn "$PROD_URL" --out-dir "$OUT_DIR" \
-  $( [[ "$QUIET" == "1" ]] && echo --quiet )
+  $( [[ "$QUIET" == "1" ]] && echo --quiet ) \
+  $( [[ "$PROGRESS" == "1" ]] && echo --progress )
 ENGINE_EXIT=$?
 set -e
 # Only 0 (clean) and 2 (drift/warnings, still wrote output files) are

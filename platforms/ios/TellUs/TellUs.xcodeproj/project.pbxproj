@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000258F36D21031BBC645D21 /* CommsHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E72F0B3A6FAED8C75E3385 /* CommsHubView.swift */; };
 		00179CD2F4A6C201A2D728D5 /* IntakeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1A9D21D8778D2CB64E83ED /* IntakeModels.swift */; };
 		0503F142C7850643261E632C /* FeedbackListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADB255B08E8CDAEDA5A3B70 /* FeedbackListViewModel.swift */; };
 		06FDF491FFDF7ECD2A3EF20F /* BrandListingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28366F8AB2B42570CDF5D57 /* BrandListingsView.swift */; };
@@ -316,6 +317,7 @@
 		C0C908F67BEF84C21B72B389 /* BoardManageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageView.swift; sourceTree = "<group>"; };
 		C12A6DF92066D903F3F352B0 /* PostRepliesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRepliesView.swift; sourceTree = "<group>"; };
 		C1CAF2D56D1FD4447E2A19BD /* CardWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardWalletView.swift; sourceTree = "<group>"; };
+		C1E72F0B3A6FAED8C75E3385 /* CommsHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsHubView.swift; sourceTree = "<group>"; };
 		C6DED366EC3A21D6021D6A45 /* BillingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillingViewModel.swift; sourceTree = "<group>"; };
 		C7043EEB1E2B785717EA5264 /* IntakeLoaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeLoaderView.swift; sourceTree = "<group>"; };
 		C7E34D0FA687C97E2048DC01 /* ConsumerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsumerSettingsView.swift; sourceTree = "<group>"; };
@@ -434,6 +436,7 @@
 			children = (
 				CA85C8AA6DD1149D6884D9FA /* BusinessInboxView.swift */,
 				D5B12CBD23DCDD3D049765C2 /* CommsComposerSheet.swift */,
+				C1E72F0B3A6FAED8C75E3385 /* CommsHubView.swift */,
 				B95F376EAF82528BCF97E8B1 /* DmThreadView.swift */,
 				79E904B35F99279EA6917CA6 /* MessagesListView.swift */,
 			);
@@ -978,6 +981,7 @@
 				D4E63B00BC8F45A70CC3B342 /* ClaimSheet.swift in Sources */,
 				6E641333A36CCCA3BB190A84 /* CommsComposerSheet.swift in Sources */,
 				CD78C79E4632F508A0C67503 /* CommsComposerViewModel.swift in Sources */,
+				000258F36D21031BBC645D21 /* CommsHubView.swift in Sources */,
 				C24F7DCBF94E2092873C04B5 /* Components.swift in Sources */,
 				9FF00E15A18FC7048963C075 /* ComposePostSheet.swift in Sources */,
 				738CB8DF736A105F970F80F5 /* ConsumerSettingsView.swift in Sources */,

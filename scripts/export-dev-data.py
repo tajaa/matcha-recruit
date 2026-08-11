@@ -277,6 +277,11 @@ class Collector:
             self.parents[fk["child"]].append(fk)
         self.skipped_global = defaultdict(set)
         self.skipped_excluded = defaultdict(int)
+        # Lightweight traversal counters used by sync_tenants.py's progress
+        # heartbeat. They do not affect collection behavior and stay useful to
+        # other callers that want to explain a long FK walk to an operator.
+        self.collect_calls = 0
+        self.last_table = None
 
     def _key(self, table, row):
         pk = self.pks.get(table)
@@ -287,6 +292,8 @@ class Collector:
         return tuple(row[c] for c in pk)
 
     async def collect(self, table, row, descend):
+        self.collect_calls += 1
+        self.last_table = table
         key = self._key(table, row)
         seen = self.rows[table]
         if key in seen:
