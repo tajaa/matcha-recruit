@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
-import { cappePublicPost, setCappeTokens } from '../api'
+import { cappePublicPost, clearCappeTokens, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
+import { creatorPaths } from '../creators/creatorPaths'
 import type { CappeTokenResponse } from '../types'
 
-const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
+const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
 export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: boolean }) {
   const navigate = useNavigate()
@@ -25,7 +26,12 @@ export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: bool
       const res = await cappePublicPost<CappeTokenResponse>('/auth/login', { email, password })
       setCappeTokens(res.access_token, res.refresh_token)
       invalidateCappeMeCache()
-      navigate(postAuthHome(res.account?.account_type), { replace: true })
+      if (creatorOnly && res.account?.account_type !== 'creator') {
+        clearCappeTokens()
+        setError('This sign-in is for Gummfit Creator accounts. Use your creator account, or create a creator profile first.')
+        return
+      }
+      navigate(creatorOnly ? creatorPaths.home : postAuthHome(res.account?.account_type), { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong.'
       // Backend's unverified-account 403 carries "confirm your email".

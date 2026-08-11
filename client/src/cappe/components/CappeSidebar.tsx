@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
+import { creatorPaths } from '../creators/creatorPaths'
 import type { CappeAccount, CappeThread } from '../types'
 
 const linkBase = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
@@ -68,7 +69,7 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
     await cappeApi.post('/auth/logout').catch(() => {})
     clearCappeTokens()
     invalidateCappeMeCache()
-    navigate('/cappe/login')
+    navigate(account?.account_type === 'creator' ? creatorPaths.login : '/cappe/login')
   }
 
   return (
@@ -77,7 +78,9 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-lime-300 to-lime-500 text-sm font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
           G
         </span>
-        <span className="text-lg font-semibold tracking-tight text-zinc-50">Gummfit</span>
+        <span className="text-lg font-semibold tracking-tight text-zinc-50">
+          {account?.account_type === 'creator' ? 'Gummfit Creators' : 'Gummfit'}
+        </span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
@@ -99,10 +102,10 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
           </>
         ) : account?.account_type === 'creator' ? (
           <>
-            <Item to="/cappe/creator" icon={UserCircle} label="My Profile" end />
-            <Item to="/cappe/creator/deals" icon={Handshake} label="Deals" />
-            <Item to="/cappe/creator/earnings" icon={Wallet} label="Earnings" />
-            <Item to="/cappe/creators" icon={Compass} label="Directory" />
+            <Item to={creatorPaths.home} icon={UserCircle} label="My Profile" end />
+            <Item to={creatorPaths.deals} icon={Handshake} label="Deals" />
+            <Item to={creatorPaths.earnings} icon={Wallet} label="Earnings" />
+            <Item to={creatorPaths.directory} icon={Compass} label="Directory" />
           </>
         ) : (
           <>
@@ -111,7 +114,7 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
             {account?.account_type === 'business' && (
               <>
                 <div className="mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Creators</div>
-                <Item to="/cappe/creators" icon={Compass} label="Find creators" />
+                <Item to={creatorPaths.directory} icon={Compass} label="Find creators" />
                 <Item to="/cappe/collabs" icon={Handshake} label="Collabs" />
               </>
             )}

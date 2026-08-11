@@ -5,6 +5,7 @@ import { cappeApi } from '../api'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type Campaign, type OfferListItem } from '../types'
+import { creatorPaths } from './creatorPaths'
 
 const STATUS_CHIPS = ['all', 'sent', 'negotiating', 'accepted', 'active', 'completed', 'closed'] as const
 type StatusChip = (typeof STATUS_CHIPS)[number]
@@ -52,7 +53,7 @@ function OffersTab() {
       ) : offers.length === 0 ? (
         <div className="py-12 text-center">
           <p className="text-sm text-zinc-500">No offers yet.</p>
-          <Link to="/cappe/creators" className={`${ui.btnPrimary} mt-4 inline-flex`}>Find creators to work with</Link>
+          <Link to={creatorPaths.directory} className={`${ui.btnPrimary} mt-4 inline-flex`}>Find creators to work with</Link>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-zinc-800">

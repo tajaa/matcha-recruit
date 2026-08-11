@@ -94,6 +94,12 @@ export default function CappeRoutes() {
           <Route path="creator/deals" element={<CreatorDeals />} />
           <Route path="creator/deals/:offerId" element={<OfferDetailPage />} />
           <Route path="creator/earnings" element={<CreatorEarnings />} />
+          {/* Canonical Gummfit Creators dashboard URLs. The singular
+              /creator routes above remain as legacy deep-link aliases. */}
+          <Route path="creators/dashboard" element={<CreatorHome />} />
+          <Route path="creators/dashboard/deals" element={<CreatorDeals />} />
+          <Route path="creators/dashboard/deals/:offerId" element={<OfferDetailPage />} />
+          <Route path="creators/dashboard/earnings" element={<CreatorEarnings />} />
           <Route path="collabs" element={<BrandCollabs />} />
           <Route path="collabs/:offerId" element={<OfferDetailPage />} />
         </Route>

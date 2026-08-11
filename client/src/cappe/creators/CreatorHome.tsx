@@ -8,6 +8,7 @@ import {
   CREATOR_NICHES, DELIVERABLE_TYPES, SOCIAL_PLATFORMS, fmtCents,
   type CreatorPortfolioItem, type CreatorProfileMe, type CreatorRate, type CreatorSocial,
 } from '../types'
+import { creatorProfilePath } from './creatorPaths'
 
 type EditableSocial = { platform: string; handle: string; url: string; follower_count: number | null; engagement_rate: number | null; sort_order: number; _audit?: CreatorSocial['audit_status'] }
 type EditablePortfolio = { title: string; description: string | null; media_url: string | null; media_type: 'image' | 'video' | null; external_url: string | null; brand_name: string | null; metrics: Record<string, unknown>; sort_order: number }
@@ -93,7 +94,7 @@ function StatusBanner({ profile, onSubmit, onTogglePublic }: {
   return (
     <div className="mb-6 flex items-center justify-between rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-4 py-3 text-sm">
       <span className="text-emerald-300">
-        Live on Gummfit — <Link to={`/cappe/creators/${profile.handle}`} className="underline">view your public profile</Link>
+        Live on Gummfit — <Link to={creatorProfilePath(profile.handle)} className="underline">view your public profile</Link>
       </span>
       <label className="flex items-center gap-1.5 text-zinc-300">
         <input type="checkbox" checked={profile.open_to_offers} onChange={(e) => onTogglePublic(e.target.checked)} /> Open to offers

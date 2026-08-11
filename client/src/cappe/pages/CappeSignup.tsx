@@ -3,9 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Store, User, Sparkles, MailCheck } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
+import { creatorPaths } from '../creators/creatorPaths'
 import type { CappeAccountType, CappeSignupResponse } from '../types'
 
-const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
+const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
 const ACCOUNT_TYPES: {
   value: CappeAccountType
@@ -72,7 +73,7 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
       if (res.access_token && res.refresh_token) {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
-        navigate(postAuthHome(res.account?.account_type), { replace: true })
+        navigate(creatorOnly ? creatorPaths.home : postAuthHome(res.account?.account_type), { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -110,7 +111,7 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
             </button>
             .
           </div>
-          <Link to={creatorOnly ? '/gummfit/creators/login' : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -205,7 +206,7 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link to={creatorOnly ? '/gummfit/creators/login' : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
+          <Link to={creatorOnly ? creatorPaths.login : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
             Sign in
           </Link>
         </p>

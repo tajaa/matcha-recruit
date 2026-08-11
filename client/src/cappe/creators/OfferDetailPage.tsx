@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { cappeApi, CappeApiError } from '../api'
 import { ui, badgeFor } from '../components/ui'
+import { creatorPaths, creatorProfilePath } from './creatorPaths'
 import StripeConnectCard from '../components/StripeConnectCard'
 import TermSheet from './TermSheet'
 import CounterSheet from './CounterSheet'
@@ -185,7 +186,7 @@ export default function OfferDetailPage() {
             {side === 'creator' ? (
               <>with {offer.brand_name || 'a brand'}</>
             ) : (
-              <>with <Link to={`/cappe/creators/${offer.creator_handle}`} className={ui.accentText}>@{offer.creator_handle}</Link></>
+              <>with <Link to={creatorProfilePath(offer.creator_handle)} className={ui.accentText}>@{offer.creator_handle}</Link></>
             )}
             {offer.total_cents != null && <> · {fmtCents(offer.total_cents)}</>}
           </p>
@@ -403,7 +404,7 @@ export default function OfferDetailPage() {
       )}
 
       <div className="mt-6 text-center">
-        <button onClick={() => navigate(side === 'creator' ? '/cappe/creator/deals' : '/cappe/collabs')} className="text-xs text-zinc-600 hover:text-zinc-400">
+        <button onClick={() => navigate(side === 'creator' ? creatorPaths.deals : '/cappe/collabs')} className="text-xs text-zinc-600 hover:text-zinc-400">
           &larr; Back to {side === 'creator' ? 'deals' : 'collabs'}
         </button>
       </div>

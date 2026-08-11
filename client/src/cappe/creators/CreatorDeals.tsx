@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { cappeApi } from '../api'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type OfferListItem } from '../types'
+import { creatorDealPath, creatorPaths } from './creatorPaths'
 
 const STATUS_CHIPS = ['all', 'sent', 'negotiating', 'accepted', 'active', 'completed', 'declined', 'closed'] as const
 type StatusChip = (typeof STATUS_CHIPS)[number]
@@ -53,7 +54,7 @@ export default function CreatorDeals() {
       ) : offers.length === 0 ? (
         <div className="py-12 text-center">
           <p className="text-sm text-zinc-500">No deals yet.</p>
-          <Link to="/cappe/creator" className={`${ui.btnPrimary} mt-4 inline-flex`}>Finish your profile to get offers</Link>
+          <Link to={creatorPaths.home} className={`${ui.btnPrimary} mt-4 inline-flex`}>Finish your profile to get offers</Link>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-zinc-800">
@@ -69,7 +70,7 @@ export default function CreatorDeals() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {offers.map((o) => (
-                <tr key={o.id} className="cursor-pointer hover:bg-zinc-900/60" onClick={() => (window.location.href = `/cappe/creator/deals/${o.id}`)}>
+                <tr key={o.id} className="cursor-pointer hover:bg-zinc-900/60" onClick={() => (window.location.href = creatorDealPath(o.id))}>
                   <td className="px-3 py-2.5 text-zinc-200">{o.brand_name || 'A brand'}</td>
                   <td className="px-3 py-2.5 text-zinc-300">{o.title}</td>
                   <td className="px-3 py-2.5 text-zinc-300">{o.total_cents != null ? fmtCents(o.total_cents, o.currency) : '—'}</td>

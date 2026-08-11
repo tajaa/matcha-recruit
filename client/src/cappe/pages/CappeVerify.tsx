@@ -3,9 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
+import { creatorPaths } from '../creators/creatorPaths'
 import type { CappeTokenResponse } from '../types'
 
-const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
+const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
 // Landing for the emailed confirmation link (/cappe/verify?token=…). Exchanges
 // the token for a session and drops the user straight into their dashboard.

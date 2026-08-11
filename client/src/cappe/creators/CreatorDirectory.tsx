@@ -5,6 +5,7 @@ import { fetchPublicCreators } from '../api'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { ui } from '../components/ui'
 import { CREATOR_NICHES, type PublicCreatorCard } from '../types'
+import { creatorProfilePath } from './creatorPaths'
 
 const MIN_FOLLOWERS_OPTIONS = [
   { value: '', label: 'Any followers' },
@@ -30,7 +31,7 @@ const compactFollowers = (n: number) => Intl.NumberFormat('en-US', { notation: '
 
 function CreatorCard({ c }: { c: PublicCreatorCard }) {
   return (
-    <Link to={`/cappe/creators/${c.handle}`} className={`${ui.cardHover} block overflow-hidden`}>
+    <Link to={creatorProfilePath(c.handle)} className={`${ui.cardHover} block overflow-hidden`}>
       <div className="h-24 bg-zinc-800" style={c.cover_url ? { backgroundImage: `url(${c.cover_url})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined} />
       <div className="px-4 pb-4">
         <div className="-mt-8 mb-2 h-16 w-16 overflow-hidden rounded-full border-4 border-zinc-900 bg-zinc-800">

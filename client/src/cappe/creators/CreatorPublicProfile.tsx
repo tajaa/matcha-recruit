@@ -6,6 +6,7 @@ import { useCappeMe } from '../hooks/useCappeMe'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type PublicCreatorProfile } from '../types'
 import SendOfferSheet from './SendOfferSheet'
+import { creatorPaths } from './creatorPaths'
 
 export default function CreatorPublicProfile() {
   const { handle } = useParams<{ handle: string }>()
@@ -150,7 +151,7 @@ export default function CreatorPublicProfile() {
       )}
 
       <div className="pb-8 text-center">
-        <Link to="/cappe/creators" className="text-xs text-zinc-600 hover:text-zinc-400">&larr; Back to directory</Link>
+        <Link to={creatorPaths.directory} className="text-xs text-zinc-600 hover:text-zinc-400">&larr; Back to directory</Link>
       </div>
     </div>
   )

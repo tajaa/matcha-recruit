@@ -1,25 +1,29 @@
 import { useEffect } from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { getCappeToken } from '../api'
 import CappeSidebar from '../components/CappeSidebar'
+import { creatorPaths } from '../creators/creatorPaths'
 
 // Authenticated Cappe shell. Independent of TenantSidebar — Cappe is its own
 // product. Redirects to /cappe/login when there is no live Cappe session.
 export default function CappeLayout() {
   const { account, loading } = useCappeMe()
   const navigate = useNavigate()
+  const location = useLocation()
+  const isCreatorDashboard = location.pathname.includes('/creators/dashboard') || location.pathname.includes('/creator')
+  const loginPath = isCreatorDashboard ? creatorPaths.login : '/cappe/login'
 
   useEffect(() => {
     if (!getCappeToken()) {
-      navigate('/cappe/login', { replace: true })
+      navigate(loginPath, { replace: true })
       return
     }
     if (!loading && !account) {
-      navigate('/cappe/login', { replace: true })
+      navigate(loginPath, { replace: true })
     }
-  }, [loading, account, navigate])
+  }, [loading, account, navigate, loginPath])
 
   if (loading || (!account && getCappeToken())) {
     return (
