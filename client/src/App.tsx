@@ -250,6 +250,9 @@ export default function App() {
           element={<SignEmployeeDocument />}
         />
         <Route path="/cappe/*" element={<CappeRoutes />} />
+        {/* Gummfit's public creator funnel has its own human-readable URL
+            space, while sharing the Cappe implementation and auth stack. */}
+        <Route path="/gummfit/*" element={<CappeRoutes />} />
         {/* Dedicated Cappe domain: bare apex serves the Cappe tree at root.
             /cappe/* links inside the pages still resolve via the mount above,
             so both URL spaces work on this host. */}

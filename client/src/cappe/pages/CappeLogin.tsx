@@ -7,7 +7,7 @@ import type { CappeTokenResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? '/cappe/creator' : '/cappe/sites')
 
-export default function CappeLogin() {
+export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: boolean }) {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -52,7 +52,9 @@ export default function CappeLogin() {
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-lime-300 to-lime-500 text-lg font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
             G
           </span>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Sign in to Gummfit</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
+            Sign in to {creatorOnly ? 'Gummfit Creators' : 'Gummfit'}
+          </h1>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
@@ -101,9 +103,9 @@ export default function CappeLogin() {
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          New to Gummfit?{' '}
-          <Link to="/cappe/website-setup" className="font-medium text-lime-400 hover:text-lime-300">
-            Create an account
+          {creatorOnly ? 'New to Gummfit Creators?' : 'New to Gummfit?'}{' '}
+          <Link to={creatorOnly ? '/gummfit/creators/signup' : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
+            {creatorOnly ? 'Create your creator profile' : 'Create an account'}
           </Link>
         </p>
       </div>

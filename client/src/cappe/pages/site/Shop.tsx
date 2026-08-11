@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle } from 'lucide-react'
+import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle, Pencil } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
@@ -50,6 +50,7 @@ export default function Shop() {
   const [intake, setIntake] = useState<IntakeRow[]>([])
   const [optionGroups, setOptionGroups] = useState<OptGroupRow[]>([])
   const [adjustProduct, setAdjustProduct] = useState<CappeProduct | null>(null)
+  const [editing, setEditing] = useState<CappeProduct | null>(null)
 
   const isLowStock = (p: CappeProduct) =>
     p.fulfillment === 'physical' && p.inventory != null && p.low_stock_threshold != null && p.inventory <= p.low_stock_threshold
@@ -68,13 +69,51 @@ export default function Shop() {
 
   const wantsIntake = fulfillment === 'service' || fulfillment === 'booking'
 
-  async function addProduct(e: React.FormEvent) {
+  function resetForm() {
+    setForm(EMPTY)
+    setIntake([])
+    setOptionGroups([])
+    setFulfillment('physical')
+    setRequireApproval(false)
+    setEditing(null)
+  }
+
+  function editProduct(product: CappeProduct) {
+    setEditing(product)
+    setForm({
+      name: product.name,
+      description: product.description || '',
+      price: String(product.price_cents / 100),
+      inventory: product.inventory == null ? '' : String(product.inventory),
+      low_stock_threshold: product.low_stock_threshold == null ? '' : String(product.low_stock_threshold),
+      image_url: product.image_url || '',
+      digital_file_url: product.digital_file_url || '',
+      booking_type_id: product.booking_type_id || '',
+      category: product.category || '',
+    })
+    setFulfillment(product.fulfillment)
+    setRequireApproval(product.requires_approval)
+    setIntake(product.intake_fields.map((field) => ({ label: field.label, type: field.type, required: field.required })))
+    setOptionGroups(product.option_groups.map((group) => ({
+      name: group.name,
+      select_type: group.select_type,
+      required: group.required,
+      options: group.options.map((option) => ({
+        name: option.name,
+        price: String(option.price_delta_cents / 100),
+        stock: option.inventory == null ? '' : String(option.inventory),
+      })),
+    })))
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  async function saveProduct(e: React.FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
     setAdding(true)
     setError(null)
     try {
-      const created = await cappeApi.post<CappeProduct>(`/sites/${siteId}/products`, {
+      const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
         price_cents: Math.round(parseFloat(form.price || '0') * 100),
@@ -101,11 +140,24 @@ export default function Shop() {
               inventory: fulfillment === 'physical' && o.stock !== '' ? parseInt(o.stock, 10) : null,
             })),
           })),
-      })
-      setProducts((p) => [...(p || []), created])
-      setForm(EMPTY); setIntake([]); setOptionGroups([]); setFulfillment('physical'); setRequireApproval(false)
+      }
+      if (editing) {
+        // The API applies plan entitlement checks only when fulfillment is in
+        // the request. Leave an unchanged legacy fulfillment alone so a price
+        // or copy edit is always allowed.
+        const { fulfillment: requestedFulfillment, ...unchangedSafePayload } = payload
+        const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${editing.id}`, {
+          ...unchangedSafePayload,
+          ...(requestedFulfillment !== editing.fulfillment ? { fulfillment: requestedFulfillment } : {}),
+        })
+        setProducts((products) => (products || []).map((product) => product.id === updated.id ? updated : product))
+      } else {
+        const created = await cappeApi.post<CappeProduct>(`/sites/${siteId}/products`, { ...payload, status: 'active' })
+        setProducts((products) => [...(products || []), created])
+      }
+      resetForm()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to add product')
+      setError(e instanceof Error ? e.message : `Failed to ${editing ? 'save' : 'add'} product`)
     } finally {
       setAdding(false)
     }
@@ -134,7 +186,11 @@ export default function Shop() {
       <TaxSettingsCard siteId={siteId || ''} />
       <ShippingSettingsCard siteId={siteId || ''} />
 
-      <form onSubmit={addProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+      <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-zinc-100">{editing ? `Edit ${editing.name}` : 'Add product'}</h2>
+          {editing && <button type="button" onClick={resetForm} className="text-xs font-medium text-zinc-400 hover:text-zinc-200">Cancel edit</button>}
+        </div>
         <div className="grid gap-3 sm:grid-cols-3">
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className={`sm:col-span-2 ${input}`} />
           <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Price (USD)" type="number" step="0.01" min="0" className={input} />
@@ -257,7 +313,7 @@ export default function Shop() {
         </label>
 
         <button type="submit" disabled={adding} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">
-          {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add product
+          {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : editing ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />} {editing ? 'Save changes' : 'Add product'}
         </button>
       </form>
 
@@ -290,6 +346,7 @@ export default function Shop() {
               {p.fulfillment === 'physical' && (
                 <button onClick={() => setAdjustProduct(p)} title="Adjust stock" className="text-zinc-400 hover:text-emerald-400"><SlidersHorizontal className="h-4 w-4" /></button>
               )}
+              <button onClick={() => editProduct(p)} title={`Edit ${p.name}`} className="text-zinc-400 hover:text-emerald-400"><Pencil className="h-4 w-4" /></button>
               <select value={p.status} onChange={(e) => setStatus(p, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>

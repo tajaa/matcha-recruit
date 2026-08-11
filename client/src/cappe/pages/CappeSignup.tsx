@@ -34,11 +34,11 @@ const ACCOUNT_TYPES: {
 ]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
-export default function CappeSignup() {
+export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boolean }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [accountType, setAccountType] = useState<CappeAccountType>(
-    params.get('type') === 'creator' ? 'creator' : 'business',
+    creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
   )
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -110,7 +110,7 @@ export default function CappeSignup() {
             </button>
             .
           </div>
-          <Link to="/cappe/login" className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? '/gummfit/creators/login' : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -125,12 +125,16 @@ export default function CappeSignup() {
           <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-lime-300 to-lime-500 text-lg font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
             G
           </span>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Create your Gummfit account</h1>
-          <p className="mt-1 text-sm text-zinc-400">Build and launch your website in minutes.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
+            Create your {creatorOnly ? 'Gummfit Creators' : 'Gummfit'} account
+          </h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            {creatorOnly ? 'Build your creator profile and connect with brands.' : 'Build and launch your website in minutes.'}
+          </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
-          <div>
+          {!creatorOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
             <div className="grid grid-cols-3 gap-2">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
@@ -153,7 +157,7 @@ export default function CappeSignup() {
                 )
               })}
             </div>
-          </div>
+          </div>}
           <div>
             <label className="mb-1 block text-sm font-medium text-zinc-300">Name</label>
             <input
@@ -195,13 +199,13 @@ export default function CappeSignup() {
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create account
+            {creatorOnly ? 'Create creator profile' : 'Create account'}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link to="/cappe/login" className="font-medium text-emerald-400 hover:text-emerald-300">
+          <Link to={creatorOnly ? '/gummfit/creators/login' : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
             Sign in
           </Link>
         </p>

@@ -56,9 +56,13 @@ export default function CappeRoutes() {
             CappeLayout gate: it is browsed by visitors with no account, and its
             data comes from the unauthenticated /public/directory endpoints. */}
         <Route path="discover" element={<CappeDiscover />} />
-        {/* Public creator marketplace: landing, directory, profiles. */}
+        {/* Public creator marketplace: the /gummfit mount exposes this as
+            /gummfit/creators, /gummfit/creators/login, and so on. */}
         <Route path="for-creators" element={<CreatorsLanding />} />
-        <Route path="creators" element={<CreatorDirectory />} />
+        <Route path="creators" element={<CreatorsLanding />} />
+        <Route path="creators/login" element={<CappeLogin creatorOnly />} />
+        <Route path="creators/signup" element={<CappeSignup creatorOnly />} />
+        <Route path="creators/directory" element={<CreatorDirectory />} />
         <Route path="creators/:handle" element={<CreatorPublicProfile />} />
         <Route path="website-setup" element={<CappeSignup />} />
         <Route path="login" element={<CappeLogin />} />
