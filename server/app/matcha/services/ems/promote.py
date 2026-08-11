@@ -11,10 +11,11 @@ re-asserted here rather than trusted to the caller.
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, Optional
+from typing import Any, Collection, Literal, Optional
 from uuid import UUID
 
 from app.matcha.services.ir.ir_incident_create import create_incident_core
+from app.matcha.services.matcha_work.work_permissions import WorkCapability
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,19 @@ class PromoteVerdict:
         return self.kind == "proceed"
 
 
-def evaluate_promote(*, role: Optional[str], features: dict, event_status: str) -> PromoteVerdict:
-    if role not in _ALLOWED_ROLES:
+def evaluate_promote(
+    *,
+    role: Optional[str] = None,
+    capabilities: Collection[WorkCapability] | None = None,
+    features: dict,
+    event_status: str,
+) -> PromoteVerdict:
+    if capabilities is not None:
+        allowed = WorkCapability.EVENT_PROMOTE in capabilities
+    else:
+        # Compatibility for callers that have not yet resolved Work access.
+        allowed = role in _ALLOWED_ROLES
+    if not allowed:
         return PromoteVerdict("refuse", "Only a business admin can promote an event.", 403)
     if not features.get("ems"):
         return PromoteVerdict("refuse", "EMS is not enabled for this company.", 403)

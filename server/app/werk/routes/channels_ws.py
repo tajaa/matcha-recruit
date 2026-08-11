@@ -1895,37 +1895,40 @@ async def _bg_ems_intake(
             if classified.get("urgency") not in ("osha", "severe"):
                 from app.matcha.services.ems.event_drafts import create_event_draft, set_confirmation_message
 
-                draft = await create_event_draft(
-                    conn,
-                    company_id=company_id,
-                    channel_id=UUID(channel_id_str),
-                    source_message_id=UUID(message_id_str),
-                    reporter_user_id=UUID(reporter_user_id_str),
-                    narrative=content,
-                    classified=classified,
-                    location_id=location_id,
-                )
-                if draft is None:
-                    return
-                message_text = _event_draft_confirmation_text(classified)
-                sys_row = await _insert_system_message(
-                    conn,
-                    channel_id_str,
-                    message_text,
-                    metadata={
-                        "action": {
-                            "kind": "event_draft",
-                            "id": str(draft["id"]),
-                            "status": "pending",
-                        }
-                    },
-                )
-                await set_confirmation_message(
-                    conn,
-                    draft_id=draft["id"],
-                    company_id=company_id,
-                    confirmation_message_id=sys_row["id"],
-                )
+                async with conn.transaction():
+                    draft = await create_event_draft(
+                        conn,
+                        company_id=company_id,
+                        channel_id=UUID(channel_id_str),
+                        source_message_id=UUID(message_id_str),
+                        reporter_user_id=UUID(reporter_user_id_str),
+                        narrative=content,
+                        classified=classified,
+                        location_id=location_id,
+                    )
+                    if draft is None:
+                        return
+                    message_text = _event_draft_confirmation_text(classified)
+                    sys_row = await _insert_system_message(
+                        conn,
+                        channel_id_str,
+                        message_text,
+                        metadata={
+                            "action": {
+                                "kind": "event_draft",
+                                "id": str(draft["id"]),
+                                "status": "pending",
+                            }
+                        },
+                    )
+                    linked = await set_confirmation_message(
+                        conn,
+                        draft_id=draft["id"],
+                        company_id=company_id,
+                        confirmation_message_id=sys_row["id"],
+                    )
+                    if linked is None:
+                        raise RuntimeError("Could not link event draft confirmation message")
                 await broadcast_system_message(
                     channel_id_str, _system_message_payload(channel_id_str, sys_row)
                 )
@@ -2310,6 +2313,10 @@ async def _bg_ems_draft_reply(
                     },
                 )
         await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
+        await broadcast_channel_action_updated(
+            channel_id_str,
+            {"kind": "event_draft", "id": str(draft_row["id"]), "status": status},
+        )
         return True
     except Exception:
         logger.exception("EMS event-draft reply failed for channel %s", channel_id_str)
@@ -3122,6 +3129,15 @@ async def broadcast_system_message(channel_id: str, message: dict) -> None:
     matches every other message fan-out ({type, room, message}) — the
     client reads `data.message` and silently drops anything else shaped."""
     await manager.broadcast_message(channel_id, message)
+
+
+async def broadcast_channel_action_updated(channel_id: str, action: dict) -> None:
+    """Fan out an authoritative action-state change to channel clients."""
+    await manager._broadcast_to_room(channel_id, {
+        "type": "channel_action_updated",
+        "channel_id": channel_id,
+        "action": action,
+    })
 
 
 # ---------------------------------------------------------------------------

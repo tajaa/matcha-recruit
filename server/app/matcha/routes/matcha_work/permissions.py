@@ -77,34 +77,75 @@ async def set_work_permission(
     target_company_id = await _target_company(current_user, company_id)
     async with get_connection() as conn:
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
-        member = await conn.fetchval(
+        eligible = await conn.fetchval(
             """
             SELECT EXISTS(
                 SELECT 1 FROM clients WHERE user_id = $1 AND company_id = $2
                 UNION ALL
                 SELECT 1 FROM employees WHERE user_id = $1 AND org_id = $2
+                UNION ALL
+                SELECT 1
+                  FROM channel_members cm
+                  JOIN channels ch ON ch.id = cm.channel_id
+                 WHERE cm.user_id = $1
+                   AND ch.company_id = $2
+                   AND cm.removed_for_inactivity IS NOT TRUE
+                UNION ALL
+                SELECT 1
+                  FROM mw_thread_collaborators tc
+                  JOIN mw_threads t ON t.id = tc.thread_id
+                 WHERE tc.user_id = $1 AND t.company_id = $2
+                UNION ALL
+                SELECT 1
+                  FROM mw_project_collaborators pc
+                  JOIN mw_projects p ON p.id = pc.project_id
+                 WHERE pc.user_id = $1
+                   AND p.company_id = $2
+                   AND pc.status = 'active'
             )
             """,
             user_id,
             target_company_id,
         )
-        if not member:
-            raise HTTPException(status_code=400, detail="User is not a member of this company")
-        row = await conn.fetchrow(
-            """
-            INSERT INTO mw_work_permissions (company_id, user_id, level, granted_by)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (company_id, user_id) DO UPDATE
-                SET level = EXCLUDED.level,
-                    granted_by = EXCLUDED.granted_by,
-                    updated_at = NOW()
-            RETURNING company_id, user_id, level, granted_by, created_at, updated_at
-            """,
-            target_company_id,
-            user_id,
-            body.level,
-            current_user.id,
-        )
+        if not eligible:
+            raise HTTPException(
+                status_code=400,
+                detail="User must be a company member or active shared-resource collaborator",
+            )
+        async with conn.transaction():
+            previous_level = await conn.fetchval(
+                "SELECT level FROM mw_work_permissions WHERE company_id = $1 AND user_id = $2",
+                target_company_id,
+                user_id,
+            )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_work_permissions (company_id, user_id, level, granted_by)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (company_id, user_id) DO UPDATE
+                    SET level = EXCLUDED.level,
+                        granted_by = EXCLUDED.granted_by,
+                        updated_at = NOW()
+                RETURNING company_id, user_id, level, granted_by, created_at, updated_at
+                """,
+                target_company_id,
+                user_id,
+                body.level,
+                current_user.id,
+            )
+            await conn.execute(
+                """
+                INSERT INTO mw_work_permission_audit_log
+                    (company_id, user_id, actor_user_id, action, old_level, new_level)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                target_company_id,
+                user_id,
+                current_user.id,
+                "updated" if previous_level else "granted",
+                previous_level,
+                body.level,
+            )
     return dict(row)
 
 
@@ -117,9 +158,26 @@ async def delete_work_permission(
     target_company_id = await _target_company(current_user, company_id)
     async with get_connection() as conn:
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
-        await conn.execute(
-            "DELETE FROM mw_work_permissions WHERE company_id = $1 AND user_id = $2",
-            target_company_id,
-            user_id,
-        )
+        async with conn.transaction():
+            deleted = await conn.fetchval(
+                """
+                DELETE FROM mw_work_permissions
+                 WHERE company_id = $1 AND user_id = $2
+                RETURNING level
+                """,
+                target_company_id,
+                user_id,
+            )
+            if deleted is not None:
+                await conn.execute(
+                    """
+                    INSERT INTO mw_work_permission_audit_log
+                        (company_id, user_id, actor_user_id, action, old_level, new_level)
+                    VALUES ($1, $2, $3, 'revoked', $4, NULL)
+                    """,
+                    target_company_id,
+                    user_id,
+                    current_user.id,
+                    deleted,
+                )
     return {"ok": True}

@@ -1,4 +1,4 @@
-import { Hash, Users, Phone, MoreHorizontal, MapPin } from 'lucide-react'
+import { ClipboardList, Hash, Users, Phone, MoreHorizontal, MapPin } from 'lucide-react'
 import type { ChannelDetail, ChannelPaymentInfo } from '../../api/channels'
 import type { useLiveKitCall } from '../../hooks/useLiveKitCall'
 import type { HeaderAction } from './types'
@@ -17,6 +17,8 @@ interface ChannelHeaderProps {
   secondaryActions: HeaderAction[]
   showMobileActions: boolean
   setShowMobileActions: React.Dispatch<React.SetStateAction<boolean>>
+  actionCount: number
+  onOpenActions: () => void
 }
 
 export default function ChannelHeader({
@@ -30,6 +32,8 @@ export default function ChannelHeader({
   secondaryActions,
   showMobileActions,
   setShowMobileActions,
+  actionCount,
+  onOpenActions,
 }: ChannelHeaderProps) {
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-w-line shrink-0">
@@ -72,6 +76,16 @@ export default function ChannelHeader({
             title="Voice call"
           >
             <Phone size={16} />
+          </button>
+        )}
+        {isMember && (
+          <button
+            onClick={onOpenActions}
+            className="relative p-1.5 rounded hover:bg-w-surface2 text-w-dim hover:text-w-accent"
+            title="Channel actions"
+          >
+            <ClipboardList size={16} />
+            {actionCount > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-w-accent px-1 text-[9px] leading-4 text-black">{actionCount}</span>}
           </button>
         )}
         {/* Secondary actions — inline on desktop */}

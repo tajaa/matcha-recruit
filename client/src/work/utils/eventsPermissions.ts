@@ -1,8 +1,17 @@
-/**
- * Events-tab (EMS) review permissions. Mirrors channelPermissions.ts —
- * a single source of truth instead of a role check duplicated at every
- * EMS callsite (sidebar gate, route gate, promote button).
- */
-export function canReviewEvents(role: string | undefined): boolean {
-  return role === 'client' || role === 'admin'
+type WorkAccess = { capabilities?: string[] } | null | undefined
+
+function allows(access: WorkAccess, capability: string): boolean {
+  return Boolean(access?.capabilities?.includes(capability))
+}
+
+export function canReviewEvents(access: WorkAccess): boolean {
+  return allows(access, 'events.review')
+}
+
+export function canResolveEvents(access: WorkAccess): boolean {
+  return allows(access, 'events.resolve')
+}
+
+export function canPromoteEvents(access: WorkAccess): boolean {
+  return allows(access, 'events.promote')
 }

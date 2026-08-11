@@ -5,19 +5,20 @@ import { useMe } from '../../hooks/useMe'
 import { useToast } from '../../components/ui'
 import { ApiError } from '../../api/client'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { canReviewEvents } from '../utils/eventsPermissions'
-import { EMS_CATEGORY_LABELS, getEvent, listEvents, updateEvent, type EmsEvent } from '../api/events'
+import { canPromoteEvents, canResolveEvents, canReviewEvents } from '../utils/eventsPermissions'
+import { EMS_CATEGORY_LABELS, getEvent, listEvents, resolveEvent, type EmsEvent } from '../api/events'
 import { EventList } from '../components/events/EventList'
 import { EventDetail } from '../components/events/EventDetail'
 import { PromoteModal } from '../components/events/PromoteModal'
 
-type StatusFilter = 'all' | 'logged' | 'promoted' | 'dismissed'
+type StatusFilter = 'all' | 'logged' | 'completed' | 'promoted' | 'dismissed'
 
 const STATUS_TABS: { key: StatusFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'logged', label: 'Logged' },
+  { key: 'completed', label: 'Completed' },
   { key: 'promoted', label: 'Promoted' },
-  { key: 'dismissed', label: 'Dismissed' },
+  { key: 'dismissed', label: 'No action' },
 ]
 
 export default function EventsHub() {
@@ -26,7 +27,9 @@ export default function EventsHub() {
   const base = useWorkBase()
   const { me, loading: meLoading, hasFeature } = useMe()
   const { toast } = useToast()
-  const canReview = canReviewEvents(me?.user?.role)
+  const canReview = canReviewEvents(me?.work_access)
+  const canResolve = canResolveEvents(me?.work_access)
+  const canPromote = canPromoteEvents(me?.work_access)
   const hasIncidents = hasFeature('incidents')
 
   const [events, setEvents] = useState<EmsEvent[]>([])
@@ -102,17 +105,17 @@ export default function EventsHub() {
     setSelectedEvent((prev) => (prev && prev.id === updated.id ? updated : prev))
   }
 
-  async function handleDismiss() {
+  async function handleResolve(resolution: 'completed' | 'no_action') {
     if (!selectedEvent) return
     try {
-      const updated = await updateEvent(selectedEvent.id, { dismissed: true })
+      const updated = await resolveEvent(selectedEvent.id, { resolution })
       applyEventUpdate(updated)
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        toast('This event was already promoted or dismissed.', 'error')
+        toast('This event was already resolved or promoted.', 'error')
         loadEvents()
       } else {
-        toast(err instanceof Error ? err.message : 'Failed to dismiss event', 'error')
+        toast(err instanceof Error ? err.message : 'Failed to resolve event', 'error')
       }
     }
   }
@@ -211,9 +214,9 @@ export default function EventsHub() {
             </div>
             <EventDetail
               event={selectedEvent}
-              canReview={canReview}
-              hasIncidents={hasIncidents}
-              onDismiss={handleDismiss}
+              canResolve={canResolve}
+              canPromote={canPromote && hasIncidents}
+              onResolve={handleResolve}
               onPromote={() => setShowPromote(true)}
             />
           </>

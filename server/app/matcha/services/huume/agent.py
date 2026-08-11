@@ -45,7 +45,7 @@ from google.genai import types
 from app.core.services.ai_usage import feature_scope
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
-from app.matcha.services.matcha_work.work_permissions import WorkAccess
+from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 
 from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
@@ -617,7 +617,11 @@ async def run_huume_turn(
                 # its own (it spans every skill), so the gate here is just
                 # role + huume + matcha_work — no PILOT_TOOL_REQUIRED_FEATURE
                 # entry, unlike every single-domain pilot tool.
-                if (user_role or "").strip().lower() not in ("client", "admin"):
+                if (
+                    WorkCapability.SENSITIVE_RECORD_READ not in work_capabilities
+                    if work_capabilities is not None
+                    else (user_role or "").strip().lower() not in ("client", "admin")
+                ):
                     step = recorder.record(tool=name, kind="read", label="Assets unavailable", status="rejected")
                     return {"status": "refused", "message": "Only a business admin can list assets."}, step
                 if not (features.get("huume") and features.get("matcha_work")):
@@ -637,6 +641,13 @@ async def run_huume_turn(
                 return _json_safe({"status": "ok", "assets": result_assets}), step
 
             if name == "show_record":
+                if (
+                    WorkCapability.SENSITIVE_RECORD_READ not in work_capabilities
+                    if work_capabilities is not None
+                    else (user_role or "").strip().lower() not in ("client", "admin")
+                ):
+                    step = recorder.record(tool=name, kind="read", label="Record unavailable", status="rejected")
+                    return {"status": "refused", "message": "Only an authorized Work Reviewer can view sensitive records."}, step
                 record_type = str(args.get("record_type") or "")
                 raw_ids = args.get("record_ids")
                 if not isinstance(raw_ids, list):

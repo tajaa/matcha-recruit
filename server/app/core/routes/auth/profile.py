@@ -48,6 +48,10 @@ from app.core.services.feature_beta import load_beta_features
 from app.core.services.platform_settings import get_visible_features
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.config import get_settings
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkCapability,
+    resolve_work_access,
+)
 
 
 from app.core.routes.auth._shared import *  # noqa: F401,F403
@@ -92,6 +96,12 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
 
         _avatar = user_row["avatar_url"]
 
+        def _work_access_payload(access) -> dict:
+            return {
+                "level": access.level,
+                "capabilities": sorted(capability.value for capability in access.capabilities),
+            }
+
         if current_user.role == "admin":
             profile = await conn.fetchrow(
                 "SELECT id, user_id, name, created_at FROM admins WHERE user_id = $1",
@@ -107,6 +117,10 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "created_at": profile["created_at"].isoformat()
                 } if profile else None,
                 "visible_features": visible_features,
+                "work_access": {
+                    "level": "admin",
+                    "capabilities": sorted(capability.value for capability in WorkCapability),
+                },
             }
 
         elif current_user.role in ("client", "individual"):
@@ -206,6 +220,14 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     if not has_integrations:
                         onboarding_needed["integrations"] = True
 
+            work_access = (
+                _work_access_payload(
+                    await resolve_work_access(
+                        conn, user=current_user, company_id=profile["company_id"],
+                    )
+                )
+                if profile else None
+            )
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded")), "beta_features": dict(current_user.beta_features)},
                 "profile": {
@@ -247,6 +269,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,
+                "work_access": work_access,
             }
 
         elif current_user.role == "candidate":
@@ -258,6 +281,14 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 current_user.id
             )
             skills_data = json.loads(profile["skills"]) if profile and profile["skills"] else []
+            work_access = (
+                _work_access_payload(
+                    await resolve_work_access(
+                        conn, user=current_user, company_id=profile["org_id"],
+                    )
+                )
+                if profile else None
+            )
             return {
                 "user": {
                     "id": str(current_user.id),
@@ -279,6 +310,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "created_at": profile["created_at"].isoformat()
                 } if profile else None,
                 "visible_features": visible_features,
+                "work_access": work_access,
             }
 
         elif current_user.role == "employee":
@@ -479,4 +511,3 @@ async def mark_work_onboarded(current_user: CurrentUser = Depends(get_current_us
 # ===========================================
 # Admin Beta Access Management
 # ===========================================
-

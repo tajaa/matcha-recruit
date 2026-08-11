@@ -4,9 +4,9 @@ import { EMS_CATEGORY_LABELS, type EmsEvent } from '../../api/events'
 
 interface EventDetailProps {
   event: EmsEvent
-  canReview: boolean
-  hasIncidents: boolean
-  onDismiss: () => Promise<void>
+  canResolve: boolean
+  canPromote: boolean
+  onResolve: (resolution: 'completed' | 'no_action') => Promise<void>
   onPromote: () => void
 }
 
@@ -14,15 +14,15 @@ function humanizeKey(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromote }: EventDetailProps) {
-  const [dismissing, setDismissing] = useState(false)
+export function EventDetail({ event, canResolve, canPromote, onResolve, onPromote }: EventDetailProps) {
+  const [resolving, setResolving] = useState<'completed' | 'no_action' | null>(null)
 
-  async function handleDismiss() {
-    setDismissing(true)
+  async function handleResolve(resolution: 'completed' | 'no_action') {
+    setResolving(resolution)
     try {
-      await onDismiss()
+      await onResolve(resolution)
     } finally {
-      setDismissing(false)
+      setResolving(null)
     }
   }
 
@@ -84,7 +84,13 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
         {event.status === 'dismissed' && (
           <div className="flex items-center gap-2 rounded-lg border border-w-line bg-w-surface2 px-4 py-3 text-sm text-w-dim">
             <XCircle className="w-4 h-4 shrink-0" />
-            Dismissed — no further action.
+            No action — no further follow-up is needed.
+          </div>
+        )}
+        {event.status === 'completed' && (
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            Completed.
           </div>
         )}
         {event.status === 'logged' && event.awaiting_reply && (
@@ -186,9 +192,9 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
         )}
 
         {/* Actions */}
-        {canReview && event.status === 'logged' && (
+        {(canResolve || canPromote) && event.status === 'logged' && (
           <div className="flex items-center gap-3 pt-2 border-t border-w-line">
-            {hasIncidents && (
+            {canPromote && (
               <button
                 onClick={onPromote}
                 className="rounded-lg bg-w-accent px-4 py-2 text-sm font-medium text-white hover:bg-w-accent-hi transition-colors"
@@ -196,14 +202,24 @@ export function EventDetail({ event, canReview, hasIncidents, onDismiss, onPromo
                 Promote to Incident
               </button>
             )}
-            <button
-              onClick={handleDismiss}
-              disabled={dismissing}
-              className="rounded-lg px-4 py-2 text-sm text-w-dim hover:text-w-text hover:bg-w-surface2 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              {dismissing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Dismiss
-            </button>
+            {canResolve && <>
+              <button
+                onClick={() => handleResolve('completed')}
+                disabled={resolving !== null}
+                className="rounded-lg px-4 py-2 text-sm text-emerald-300 hover:text-emerald-200 hover:bg-emerald-500/10 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {resolving === 'completed' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Complete
+              </button>
+              <button
+                onClick={() => handleResolve('no_action')}
+                disabled={resolving !== null}
+                className="rounded-lg px-4 py-2 text-sm text-w-dim hover:text-w-text hover:bg-w-surface2 transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+              >
+                {resolving === 'no_action' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                No action
+              </button>
+            </>}
           </div>
         )}
       </div>

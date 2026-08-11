@@ -33,9 +33,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const surface = useWorkSurface()
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
-  const showEvents = canReviewEvents(me?.user?.role) && hasFeature('ems')
-  const showInventory = canReviewEvents(me?.user?.role) && hasFeature('inventory')
-  const showAssets = canReviewEvents(me?.user?.role) && hasFeature('huume')
+  const showEvents = canReviewEvents(me?.work_access) && hasFeature('ems')
+  const showInventory = canReviewEvents(me?.work_access) && hasFeature('inventory')
+  const showAssets = canReviewEvents(me?.work_access) && hasFeature('huume')
 
   const {
     channels, setChannels,

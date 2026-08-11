@@ -40,7 +40,9 @@ from app.matcha.services.ems.resolution import (
     resolve_event,
 )
 from app.matcha.services.matcha_work.work_permissions import (
+    WorkCapability,
     WorkPermissionDenied,
+    assert_work_capability,
     resolve_work_access,
 )
 
@@ -122,6 +124,16 @@ async def confirm_event_draft_route(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result.event:
         raise HTTPException(status_code=409, detail="Event draft has no event")
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import (
+            broadcast_channel_action_updated,
+        )
+        await broadcast_channel_action_updated(
+            result.draft["channel_id"],
+            {"kind": "event_draft", "id": str(result.draft["id"]), "status": result.draft["status"]},
+        )
+    except Exception:
+        logger.warning("Could not broadcast event draft confirmation %s", draft_id, exc_info=True)
     return _row_to_event(result.event)
 
 
@@ -148,6 +160,16 @@ async def reject_event_draft_route(
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventDraftConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import (
+            broadcast_channel_action_updated,
+        )
+        await broadcast_channel_action_updated(
+            result.draft["channel_id"],
+            {"kind": "event_draft", "id": str(result.draft["id"]), "status": result.draft["status"]},
+        )
+    except Exception:
+        logger.warning("Could not broadcast event draft rejection %s", draft_id, exc_info=True)
     return _row_to_draft(result.draft)
 
 
@@ -203,7 +225,7 @@ async def list_events(
     channel_id: Optional[UUID] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user=Depends(require_admin_or_client),
+    current_user=Depends(get_current_user),
     company_id: UUID = Depends(get_client_company_id),
 ):
     if not company_id:
@@ -226,6 +248,13 @@ async def list_events(
         where.append(f"ev.channel_id = ${len(params)}")
 
     async with get_connection() as conn:
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=company_id,
+        )
+        try:
+            assert_work_capability(access, WorkCapability.EVENT_REVIEW)
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         total = await conn.fetchval(
             f"SELECT COUNT(*) FROM ems_events ev WHERE {' AND '.join(where)}", *params,
         )
@@ -241,13 +270,20 @@ async def list_events(
 @router.get("/events/{event_id}", response_model=EmsEventOut)
 async def get_event(
     event_id: UUID,
-    current_user=Depends(require_admin_or_client),
-    company_id: UUID = Depends(get_client_company_id),
+    current_user=Depends(get_current_user),
 ):
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            f"{_EVENT_SELECT} WHERE ev.id = $1 AND ev.company_id = $2", event_id, company_id,
+            f"{_EVENT_SELECT} WHERE ev.id = $1", event_id,
         )
+        if row:
+            access = await resolve_work_access(
+                conn, user=current_user, company_id=row["company_id"],
+            )
+            try:
+                assert_work_capability(access, WorkCapability.EVENT_REVIEW)
+            except WorkPermissionDenied as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
     return _row_to_event(row)
@@ -257,8 +293,7 @@ async def get_event(
 async def update_event(
     event_id: UUID,
     body: EmsEventUpdate,
-    current_user=Depends(require_admin_or_client),
-    company_id: UUID = Depends(get_client_company_id),
+    current_user=Depends(get_current_user),
 ):
     sent = body.model_fields_set
     if "category" in sent and (
@@ -271,6 +306,18 @@ async def update_event(
     dismiss_requested = "dismissed" in sent and bool(body.dismissed)
 
     async with get_connection() as conn:
+        company_id = await conn.fetchval(
+            "SELECT company_id FROM ems_events WHERE id = $1", event_id,
+        )
+        if not company_id:
+            raise HTTPException(status_code=404, detail="Event not found")
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=company_id,
+        )
+        try:
+            assert_work_capability(access, WorkCapability.EVENT_RESOLVE)
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         if dismiss_requested:
             # A promoted event must not be silently flipped to dismissed
             # (it would leave a "dismissed" event pointing at a live IR
@@ -354,20 +401,31 @@ async def promote(
     event_id: UUID,
     body: PromoteRequest,
     background_tasks: BackgroundTasks,
-    current_user=Depends(require_admin_or_client),
-    company_id: UUID = Depends(get_client_company_id),
+    current_user=Depends(get_current_user),
 ):
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            f"{_EVENT_SELECT} WHERE ev.id = $1 AND ev.company_id = $2", event_id, company_id,
+            f"{_EVENT_SELECT} WHERE ev.id = $1", event_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Event not found")
         event = dict(row)
+        company_id = event["company_id"]
+        access = await resolve_work_access(
+            conn, user=current_user, company_id=company_id,
+        )
+        try:
+            assert_work_capability(access, WorkCapability.EVENT_PROMOTE)
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
         from app.core.feature_flags import get_company_features
         features = await get_company_features(company_id, conn=conn)
-        verdict = evaluate_promote(role=current_user.role, features=features, event_status=event["status"])
+        verdict = evaluate_promote(
+            capabilities=access.capabilities,
+            features=features,
+            event_status=event["status"],
+        )
         if not verdict.ok:
             raise HTTPException(status_code=verdict.http_status, detail=verdict.reason)
 

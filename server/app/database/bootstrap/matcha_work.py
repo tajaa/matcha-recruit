@@ -22,6 +22,18 @@ async def create_matcha_work(conn):
             "CREATE INDEX IF NOT EXISTS idx_mw_work_permissions_user "
             "ON mw_work_permissions(user_id)"
         )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_work_permission_audit_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                action VARCHAR(20) NOT NULL CHECK (action IN ('granted', 'updated', 'revoked')),
+                old_level VARCHAR(20),
+                new_level VARCHAR(20),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
 
         # Matcha Work tables (chat-driven offer letter generation)
         await conn.execute("""

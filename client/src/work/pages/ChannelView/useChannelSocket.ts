@@ -132,6 +132,19 @@ export function useChannelSocket({
       )
     }
 
+    const handleChannelActionUpdated = (data: { channel_id: string; action: { kind: string; id: string; status: string } }) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((message) => {
+          const action = message.metadata?.action
+          return action?.id === data.action.id && action.kind === data.action.kind
+            ? { ...message, metadata: { ...message.metadata, action: { ...action, status: data.action.status } } }
+            : message
+        })
+      )
+    }
+    socket.addChannelActionListener(handleChannelActionUpdated)
+
     // Server rejected a join_room/message send (not a member, bad channel,
     // over the length cap) — surface it instead of leaving a pending
     // optimistic row (or a stuck composer) with no explanation.
@@ -196,6 +209,7 @@ export function useChannelSocket({
       socket.onMessageDeleted = null
       socket.onMessageEdited = null
       socket.onReactionUpdate = null
+      socket.removeChannelActionListener(handleChannelActionUpdated)
       socket.onServerError = null
       // Unsubscribe rather than nulling a shared slot: useChannelNotifications
       // and useLiveKitCall hold the same singleton, and `= null` used to remove

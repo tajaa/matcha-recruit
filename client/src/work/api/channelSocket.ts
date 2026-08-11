@@ -5,6 +5,8 @@ type MessageHandler = (msg: ChannelMessage) => void
 type TypingHandler = (user: { id: string; name: string }) => void
 type OnlineHandler = (users: { id: string; name: string; avatar_url: string | null }[]) => void
 type UserEventHandler = (user: { id: string; name: string }) => void
+type ChannelActionUpdate = { channel_id: string; action: { kind: string; id: string; status: string } }
+type ChannelActionHandler = (update: ChannelActionUpdate) => void
 
 /** Durable outbox for sends attempted while the socket was down. Mirrors
  * Espresso's channels_outbox_v1 (UserDefaults) — safe to blind-replay because
@@ -52,6 +54,7 @@ const OUTBOX_MAX_AGE_MS = 10 * 60 * 1000
 export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
   private messageListeners: Set<MessageHandler> = new Set()
+  private channelActionListeners: Set<ChannelActionHandler> = new Set()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -76,6 +79,20 @@ export class ChannelSocket extends BaseSocket {
     }
   }
 
+  addChannelActionListener(handler: ChannelActionHandler) {
+    this.channelActionListeners.add(handler)
+  }
+
+  removeChannelActionListener(handler: ChannelActionHandler) {
+    this.channelActionListeners.delete(handler)
+  }
+
+  private _dispatchChannelAction(update: ChannelActionUpdate) {
+    for (const fn of this.channelActionListeners) {
+      try { fn(update) } catch { /* one stale view must not break other listeners */ }
+    }
+  }
+
   onTyping: TypingHandler | null = null
   onOnlineUsers: OnlineHandler | null = null
   onUserJoined: UserEventHandler | null = null
@@ -83,6 +100,7 @@ export class ChannelSocket extends BaseSocket {
   onMessageDeleted: ((data: { channel_id: string; message_id: string; deleted_by: string }) => void) | null = null
   onMessageEdited: ((data: { channel_id: string; message_id: string; content: string; edited_at: string | null }) => void) | null = null
   onReactionUpdate: ((data: { channel_id: string; message_id: string; reactions: ChannelReaction[] }) => void) | null = null
+  onChannelActionUpdated: ((data: { channel_id: string; action: { kind: string; id: string; status: string } }) => void) | null = null
   // LiveKit SFU call lifecycle callbacks (werk-lite). The server fans these out
   // over the same /ws/channels socket as the call's roster changes; the
   // useLiveKitCall hook drives the join banner + auto-teardown off them.
@@ -242,6 +260,16 @@ export class ChannelSocket extends BaseSocket {
           message_id: data.message_id as string,
           reactions: data.reactions as ChannelReaction[],
         })
+        break
+      case 'channel_action_updated':
+        {
+          const update = {
+          channel_id: data.channel_id as string,
+          action: data.action as { kind: string; id: string; status: string },
+          }
+          this.onChannelActionUpdated?.(update)
+          this._dispatchChannelAction(update)
+        }
         break
       case 'typing':
         this.onTyping?.(data.user as { id: string; name: string })

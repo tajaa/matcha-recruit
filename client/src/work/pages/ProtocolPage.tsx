@@ -17,7 +17,7 @@ const EMPTY_PROTOCOL: EmsProtocol = {
 export default function ProtocolPage() {
   const { me, loading: meLoading } = useMe()
   const { toast } = useToast()
-  const canReview = canReviewEvents(me?.user?.role)
+  const canReview = canReviewEvents(me?.work_access)
 
   const [protocol, setProtocol] = useState<EmsProtocol>(EMPTY_PROTOCOL)
   const [loading, setLoading] = useState(true)

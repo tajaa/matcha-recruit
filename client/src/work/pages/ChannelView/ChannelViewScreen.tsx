@@ -9,6 +9,9 @@ import MessageList from './MessageList'
 import MessageComposer from './MessageComposer'
 import MembersSidebar from './MembersSidebar'
 import ChannelModals from './ChannelModals'
+import { useState } from 'react'
+import ChannelActionsDrawer from '../../components/channels/actions/ChannelActionsDrawer'
+import { useChannelActions } from '../../components/channels/actions/useChannelActions'
 
 interface ChannelViewScreenProps {
   /** Render this channel instead of the route's `:channelId`. See useChannelView. */
@@ -19,6 +22,7 @@ interface ChannelViewScreenProps {
 }
 
 export default function ChannelViewScreen({ channelId: channelIdOverride, embedded = false }: ChannelViewScreenProps = {}) {
+  const [showActions, setShowActions] = useState(false)
   const {
     channelId,
     navigate,
@@ -83,6 +87,7 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     typingText,
     secondaryActions,
   } = useChannelView(channelIdOverride, embedded)
+  const channelActions = useChannelActions(channelId, isMember)
 
   if (loading) {
     return <ChannelLoading />
@@ -120,6 +125,8 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
         secondaryActions={secondaryActions}
         showMobileActions={showMobileActions}
         setShowMobileActions={setShowMobileActions}
+        actionCount={channelActions.actions.length}
+        onOpenActions={() => setShowActions(true)}
       />
 
       {paymentInfo?.days_until_removal != null && paymentInfo.days_until_removal <= (paymentInfo.inactivity_warning_days ?? 3) && !warningDismissed && (
@@ -249,6 +256,13 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
         showAddMembers={showAddMembers}
         setShowAddMembers={setShowAddMembers}
         setChannel={setChannel}
+      />
+      <ChannelActionsDrawer
+        open={showActions}
+        actions={channelActions.actions}
+        loading={channelActions.loading}
+        onClose={() => setShowActions(false)}
+        onRefresh={channelActions.refresh}
       />
     </div>
   )

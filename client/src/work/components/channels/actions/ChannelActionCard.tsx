@@ -1,5 +1,5 @@
 import { Check, CircleX, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { confirmEventDraft, rejectEventDraft } from '../../../api/events'
 
 interface ChannelActionCardProps {
@@ -10,6 +10,10 @@ export default function ChannelActionCard({ action }: ChannelActionCardProps) {
   const [status, setStatus] = useState(action.status ?? 'pending')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setStatus(action.status ?? 'pending')
+  }, [action.status])
 
   if (action.kind !== 'event_draft') return null
 

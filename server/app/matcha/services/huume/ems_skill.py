@@ -18,6 +18,11 @@ from typing import Any, Optional
 from uuid import UUID
 
 from app.database import get_connection
+from app.core.models.auth import CurrentUser
+from app.matcha.services.matcha_work.work_permissions import (
+    WorkCapability,
+    resolve_work_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +41,15 @@ async def execute_promote(
         return {"status": "error", "message": "That event id isn't valid."}
 
     async with get_connection() as conn:
-        actor = await conn.fetchrow("SELECT role, email FROM users WHERE id = $1", actor_user_id)
-        role = actor["role"] if actor else None
-        actor_email = actor["email"] if actor else None
+        actor = await conn.fetchrow("SELECT id, role, email FROM users WHERE id = $1", actor_user_id)
+        if actor is None:
+            return {"status": "error", "message": "Your account is no longer available."}
+        actor_email = actor["email"]
+        access = await resolve_work_access(
+            conn,
+            user=CurrentUser(id=actor["id"], email=actor["email"], role=actor["role"]),
+            company_id=company_id,
+        )
 
         features = await get_company_features(company_id, conn=conn)
 
@@ -49,7 +60,11 @@ async def execute_promote(
             return {"status": "error", "message": "No logged event with that id exists for this company."}
         event = dict(row)
 
-        verdict = evaluate_promote(role=role, features=features, event_status=event["status"])
+        verdict = evaluate_promote(
+            capabilities=access.capabilities,
+            features=features,
+            event_status=event["status"],
+        )
         if not verdict.ok:
             return {"status": "error", "message": verdict.reason}
 

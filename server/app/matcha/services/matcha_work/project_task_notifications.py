@@ -45,6 +45,17 @@ async def broadcast_channel_message(channel_id: UUID, payload: dict) -> None:
     await manager.broadcast_message(str(channel_id), payload)
 
 
+async def broadcast_channel_action_updated(channel_id: UUID, action: dict) -> None:
+    """Use the established Matcha Work → Werk bridge for action state changes."""
+    from app.werk.routes.channels_ws import manager
+
+    await manager._broadcast_to_room(str(channel_id), {
+        "type": "channel_action_updated",
+        "channel_id": str(channel_id),
+        "action": action,
+    })
+
+
 async def _notify_task_assigned(
     *,
     assigned_to: UUID,
