@@ -11,6 +11,7 @@ import {
   Sparkles,
   Stars,
 } from 'lucide-react'
+import { creatorPaths } from './creatorPaths'
 
 const creatorBenefits = [
   {
@@ -55,7 +56,8 @@ export default function CreatorsLanding() {
           </Link>
           <nav className="flex items-center gap-3 sm:gap-5">
             <Link to="/gummfit/creators/directory" className="hidden text-sm font-medium text-[#c9c9c0] transition hover:text-white sm:block">Explore talent</Link>
-            <Link to="/gummfit/creators/login" className="text-sm font-medium text-[#deded5] transition hover:text-white">Sign in</Link>
+            <Link to={creatorPaths.login} className="text-sm font-medium text-[#deded5] transition hover:text-white">Creator sign in</Link>
+            <Link to={creatorPaths.brandLogin} className="rounded-full border border-white/15 px-3 py-2 text-sm font-medium text-[#deded5] transition hover:border-[#d4ff72]/50 hover:text-white">Brand sign in</Link>
             <Link to="/gummfit/creators/signup" className="rounded-full bg-[#d4ff72] px-4 py-2 text-sm font-semibold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a] sm:px-5">Join creators</Link>
           </nav>
         </div>
@@ -158,7 +160,7 @@ export default function CreatorsLanding() {
         <div className="relative mx-auto max-w-2xl"><HeartHandshake className="mx-auto h-7 w-7 text-[#d4ff72]" /><h2 className="mt-5 text-4xl font-semibold leading-[0.98] tracking-[-0.055em] text-[#f7f5ee] sm:text-5xl">Make work you’re proud to put your name on.</h2><p className="mt-5 text-lg text-[#aeb0a4]">Set up your profile in minutes. The right partnership could start today.</p><Link to="/gummfit/creators/signup" className="mt-9 inline-flex items-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a]">Join Gummfit Creators <ArrowRight className="h-4 w-4" /></Link></div>
       </section>
 
-      <footer className="border-t border-white/10 px-5 py-7 text-xs text-[#85897d] sm:px-8 lg:px-12"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 sm:flex-row"><span>© {new Date().getFullYear()} Gummfit Creators</span><div className="flex gap-5"><Link to="/gummfit/creators/directory" className="hover:text-white">Explore talent</Link><Link to="/gummfit/creators/login" className="hover:text-white">Sign in</Link></div></div></footer>
+      <footer className="border-t border-white/10 px-5 py-7 text-xs text-[#85897d] sm:px-8 lg:px-12"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 sm:flex-row"><span>© {new Date().getFullYear()} Gummfit Creators</span><div className="flex gap-5"><Link to="/gummfit/creators/directory" className="hover:text-white">Explore talent</Link><Link to={creatorPaths.login} className="hover:text-white">Creator sign in</Link><Link to={creatorPaths.brandLogin} className="hover:text-white">Brand sign in</Link></div></div></footer>
     </main>
   )
 }

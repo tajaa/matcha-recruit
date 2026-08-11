@@ -64,7 +64,7 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Sign in to {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'Gummfit Creators for brands' : 'Gummfit'}
+            Sign in to {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'Gummfit for Brands' : 'Gummfit'}
           </h1>
         </div>
 
@@ -114,11 +114,26 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false }: {
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit Creators for brands?' : 'New to Gummfit?'}{' '}
+          {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit for Brands?' : 'New to Gummfit?'}{' '}
           <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
             {creatorOnly ? 'Create your creator profile' : brandOnly ? 'Create a brand profile' : 'Create an account'}
           </Link>
         </p>
+        {(creatorOnly || brandOnly) && (
+          <p className="mt-3 text-center text-sm text-zinc-500">
+            {creatorOnly ? 'Are you a brand?' : 'Are you a creator?'}{' '}
+            <Link to={creatorOnly ? creatorPaths.brandLogin : creatorPaths.login} className="font-medium text-lime-400 hover:text-lime-300">
+              {creatorOnly ? 'Brand sign in' : 'Creator sign in'}
+            </Link>
+          </p>
+        )}
+        {!creatorOnly && !brandOnly && (
+          <div className="mt-5 flex items-center justify-center gap-3 text-xs text-zinc-500">
+            <Link to={creatorPaths.login} className="font-medium text-lime-400 hover:text-lime-300">Creator sign in</Link>
+            <span aria-hidden="true">·</span>
+            <Link to={creatorPaths.brandLogin} className="font-medium text-lime-400 hover:text-lime-300">Brand sign in</Link>
+          </div>
+        )}
       </div>
     </div>
   )

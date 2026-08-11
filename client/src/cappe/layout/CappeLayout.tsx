@@ -37,9 +37,9 @@ export default function CappeLayout() {
   if (!account) return null
 
   return (
-    <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-100">
       <CappeSidebar account={account} />
-      <main className="flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </main>
     </div>
