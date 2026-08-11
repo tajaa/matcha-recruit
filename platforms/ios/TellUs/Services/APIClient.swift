@@ -398,7 +398,8 @@ class APIClient {
     }
 
     /// Extract a human-readable error from a typical FastAPI error response
-    /// (`{"detail": "..."}`) or fall back to the raw body.
+    /// (`{"detail": "..."}`, `{"detail": {...}}`, or `{"detail": [...]}`) or
+    /// fall back to the raw body.
     private func _extractErrorMessage(from data: Data) -> String? {
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let detail = json["detail"] as? String {
@@ -406,6 +407,17 @@ class APIClient {
         }
         if let structured = _structuredDetail(from: data) {
             return structured.message
+        }
+        // FastAPI request-validation shape: {"detail": [{"type":"...","loc":[...],"msg":"..."}]}
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detail = json["detail"] as? [[String: Any]] {
+            if let first = detail.first {
+                let msg = (first["msg"] as? String) ?? "Some fields need fixing."
+                if let loc = first["loc"] as? [Any], let field = loc.last as? String, !field.isEmpty {
+                    return "\(field): \(msg)"
+                }
+                return msg
+            }
         }
         guard let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !raw.isEmpty else { return nil }

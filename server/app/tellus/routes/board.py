@@ -328,41 +328,57 @@ async def list_replies(slug: str, post_id: UUID, account: TellusAccount = Depend
     "/boards/{slug}/posts/{post_id}/replies", response_model=TellusBoardReply, status_code=status.HTTP_201_CREATED,
 )
 async def create_reply(
-    slug: str, post_id: UUID, body: TellusBoardReplyCreate, account: TellusAccount = Depends(require_consumer),
+    slug: str, post_id: UUID, body: TellusBoardReplyCreate, account: TellusAccount = Depends(require_tellus_account),
 ):
     await check_rate_limit(str(account.id), "tellus_board_reply_burst", 5, 60)
     await check_rate_limit(str(account.id), "tellus_board_reply", 30, 3600)
 
     async with get_connection() as conn:
         async with conn.transaction():
-            brand = await conn.fetchrow("SELECT id, name, plan_status FROM tellus_brands WHERE slug = $1", slug)
+            brand = await conn.fetchrow("SELECT id, name, plan_status, owner_account_id FROM tellus_brands WHERE slug = $1", slug)
             if brand is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
             board = await conn.fetchrow("SELECT id, is_active FROM tellus_boards WHERE brand_id = $1", brand["id"])
             if board is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-            membership = await bs.get_approved_membership(conn, board["id"], account.id)
-            if membership is None:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a board member")
-            if brand["plan_status"] != "active" or not board["is_active"]:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=bs.BOARD_PAUSED_DETAIL)
+
+            # Brand team members and owners reply as the brand — auto-approved,
+            # no moderation. Consumer members go through the held→approve flow.
+            is_privileged = await conn.fetchval(
+                "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
+                brand["id"], account.id,
+            ) is not None or brand.get("owner_account_id") == account.id
+            if not is_privileged:
+                membership = await bs.get_approved_membership(conn, board["id"], account.id)
+                if membership is None:
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a board member")
+                if brand["plan_status"] != "active" or not board["is_active"]:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=bs.BOARD_PAUSED_DETAIL)
+            else:
+                if brand["plan_status"] != "active":
+                    raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="This brand account does not have an active subscription.")
+
             post = await conn.fetchrow(
-                "SELECT id FROM tellus_board_posts WHERE id = $1 AND board_id = $2 AND moderation_status = 'visible'",
+                "SELECT id FROM tellus_board_posts WHERE id = $1 AND board_id = $2"
+                + ("" if is_privileged else " AND moderation_status = 'visible'"),
                 post_id, board["id"],
             )
             if post is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+            reply_status = "approved" if is_privileged else "held"
             row = await conn.fetchrow(
-                """INSERT INTO tellus_board_replies (post_id, author_account_id, body)
-                       VALUES ($1, $2, $3) RETURNING *""",
-                post_id, account.id, body.body,
+                """INSERT INTO tellus_board_replies (post_id, author_account_id, body, status)
+                       VALUES ($1, $2, $3, $4) RETURNING *""",
+                post_id, account.id, body.body, reply_status,
             )
-            await bs.notify_board_team(
-                conn, brand["id"], "board_reply_pending", "New reply awaiting approval",
-                f"{account.display_name or 'A member'} replied to a board post.",
-                reference_type="board_post", reference_id=str(post_id),
-            )
+
+            if not is_privileged:
+                await bs.notify_board_team(
+                    conn, brand["id"], "board_reply_pending", "New reply awaiting approval",
+                    f"{account.display_name or 'A member'} replied to a board post.",
+                    reference_type="board_post", reference_id=str(post_id),
+                )
 
     return TellusBoardReply(
         id=row["id"], post_id=row["post_id"], author_name=account.display_name or "Tell-Us member",

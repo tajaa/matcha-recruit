@@ -207,7 +207,8 @@ export function BoardPostCard({
           ))}
           {replies && replies.length === 0 && !loadingReplies && <p className="text-xs text-tu-faint">No replies yet.</p>}
 
-          {viewerRole === 'member' && !paused && (
+          {/* Members can only reply on an active board; mods/owners always can. */}
+          {(viewerRole !== 'member' || !paused) && (
             <form onSubmit={sendReply} className="flex items-end gap-2">
               <div className="flex-1"><Textarea rows={1} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Reply…" /></div>
               <Button size="sm" type="submit" loading={sending}>Send</Button>
