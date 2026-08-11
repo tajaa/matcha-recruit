@@ -398,6 +398,16 @@ export interface PlaceSearchResult {
   claimed: boolean; intake_token: string | null; review_count: number
   google_place_id: string | null
   messaging_enabled: boolean
+  followed: boolean
+}
+
+export interface FollowedBrand {
+  slug: string
+  name: string
+  logo_url: string | null
+  city: string | null
+  state: string | null
+  messaging_enabled: boolean
 }
 export interface PlaceCreateResponse {
   slug: string; name: string; claimed: boolean; intake_token: string | null; existing: boolean

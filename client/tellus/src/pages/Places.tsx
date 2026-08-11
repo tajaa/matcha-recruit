@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { MapPin, Search, Star } from 'lucide-react'
-import { tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
+import { Heart, MapPin, Search, Star } from 'lucide-react'
+import { tellusApi, tellusMaybeAuthGet, tellusPublicGet, tellusPublicPost } from '../api/tellusClient'
 import { Button, Card, ErrorText, Input } from '../components/ui'
 import type { PlaceAutocompleteResult, PlaceCreateResponse, PlaceSearchResult } from '../api/types'
+import { useAccount } from '../hooks/useAccount'
 
 export default function Places() {
   const navigate = useNavigate()
+  const { account } = useAccount()
   const [q, setQ] = useState('')
   const [dbResults, setDbResults] = useState<PlaceSearchResult[]>([])
+  const [signedUp, setSignedUp] = useState<PlaceSearchResult[]>([])
   const [suggestions, setSuggestions] = useState<PlaceAutocompleteResult[]>([])
   const [searching, setSearching] = useState(false)
   const [searchErr, setSearchErr] = useState('')
@@ -20,6 +23,15 @@ export default function Places() {
   const [website, setWebsite] = useState('') // honeypot
   const [adding, setAdding] = useState(false)
   const [addErr, setAddErr] = useState('')
+  const [followingSlug, setFollowingSlug] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    tellusMaybeAuthGet<PlaceSearchResult[]>('/places/signed-up')
+      .then((rows) => { if (!cancelled) setSignedUp(rows) })
+      .catch(() => { if (!cancelled) setSignedUp([]) })
+    return () => { cancelled = true }
+  }, [account?.id])
 
   // Discards a response that resolves after a newer query has already fired
   // (out-of-order network replies) or after the component moved on.
@@ -45,7 +57,7 @@ export default function Places() {
       const dbParams = new URLSearchParams({ q: query })
       const acParams = new URLSearchParams({ q: query, st: sessionRef.current })
       Promise.all([
-        tellusPublicGet<PlaceSearchResult[]>(`/places/search?${dbParams.toString()}`)
+        tellusMaybeAuthGet<PlaceSearchResult[]>(`/places/search?${dbParams.toString()}`)
           .catch((e: unknown) => (e instanceof Error ? e : new Error('Search failed'))),
         tellusPublicGet<PlaceAutocompleteResult[]>(`/places/autocomplete?${acParams.toString()}`).catch(() => []),
       ]).then(([db, ac]) => {
@@ -68,6 +80,26 @@ export default function Places() {
     }, 450)
     return () => clearTimeout(t)
   }, [q])
+
+  async function toggleFollow(result: PlaceSearchResult) {
+    if (!account || account.account_type !== 'consumer') {
+      navigate('/login?returnTo=' + encodeURIComponent('/places'))
+      return
+    }
+    setFollowingSlug(result.slug)
+    try {
+      if (result.followed) await tellusApi.delete(`/places/${result.slug}/follow`)
+      else await tellusApi.post(`/places/${result.slug}/follow`)
+      const followed = !result.followed
+      const update = (rows: PlaceSearchResult[]) => rows.map((row) => row.slug === result.slug ? { ...row, followed } : row)
+      setDbResults(update)
+      setSignedUp(update)
+    } catch (e) {
+      setSearchErr(e instanceof Error ? e.message : 'Could not update follow')
+    } finally {
+      setFollowingSlug(null)
+    }
+  }
 
   async function addFromSuggestion(s: PlaceAutocompleteResult) {
     setAddingPlaceId(s.place_id); setAddErr('')
@@ -108,6 +140,21 @@ export default function Places() {
   const showResults = q.trim().length >= 2
   const noMatches = showResults && !searching && !searchErr && dbResults.length === 0 && suggestions.length === 0
 
+  function FollowButton({ result }: { result: PlaceSearchResult }) {
+    if (!result.claimed) return null
+    const isFollowing = result.followed
+    return (
+      <button
+        type="button" onClick={() => void toggleFollow(result)} disabled={followingSlug === result.slug}
+        className={`rounded-md p-1.5 transition disabled:opacity-50 ${isFollowing ? 'text-tu-accent hover:bg-tu-accent/10' : 'text-tu-faint hover:bg-tu-panel2 hover:text-tu-accent'}`}
+        title={isFollowing ? `Unfollow ${result.name}` : `Follow ${result.name}`}
+        aria-label={isFollowing ? `Unfollow ${result.name}` : `Follow ${result.name}`}
+      >
+        <Heart className={`h-4 w-4 ${isFollowing ? 'fill-current' : ''}`} />
+      </button>
+    )
+  }
+
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
       <div className="mb-6 text-center">
@@ -122,6 +169,27 @@ export default function Places() {
         />
         <ErrorText>{searchErr}</ErrorText>
       </Card>
+
+      {!showResults && signedUp.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <p className="px-1 text-xs font-semibold uppercase tracking-wide text-tu-faint">Businesses on Tell-Us</p>
+          {signedUp.map((r) => (
+            <Card key={r.slug} className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                {r.logo_url && <img src={r.logo_url} alt="" className="h-10 w-10 rounded-lg object-cover" />}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{r.name}</p>
+                  <p className="text-xs text-tu-faint">{[r.city, r.state].filter(Boolean).join(', ')}</p>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <FollowButton result={r} />
+                <Link to={`/b/${r.slug}`} className="text-xs font-semibold text-tu-accent hover:underline">Open</Link>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {showResults && (
         <div className="mt-4 space-y-4">
@@ -146,6 +214,7 @@ export default function Places() {
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-2">
+                    <FollowButton result={r} />
                     <Link to={`/b/${r.slug}`} className="text-xs font-semibold text-tu-accent hover:underline">See reviews</Link>
                     {r.messaging_enabled && <Link to={`/b/${r.slug}?message=1`} className="text-xs font-semibold text-tu-accent hover:underline">Message</Link>}
                     {!r.claimed && r.intake_token && (

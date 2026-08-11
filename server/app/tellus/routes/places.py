@@ -14,16 +14,19 @@ import secrets
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import cache_get, cache_set, check_rate_limit, client_ip, get_redis_cache
 from ...database import get_connection
+from ..dependencies import optional_consumer_account_id, require_verified_consumer
 from ..models.tellus import (
     TellusPlaceAutocompleteResult,
     TellusPlaceCreate,
     TellusPlaceCreateResponse,
+    TellusFollowedBrand,
     TellusPlaceSearchResult,
 )
+from ..models.tellus import TellusAccount
 from ..services import google_places
 from ._shared import escape_like, slugify
 
@@ -73,16 +76,20 @@ async def search_places(
     request: Request,
     q: str = Query(min_length=1, max_length=120),
     city: Optional[str] = Query(default=None, max_length=120),
+    authorization: Optional[str] = Header(default=None),
 ):
     await check_rate_limit(client_ip(request), "tellus_place_search", 240, 3600)
     q = q.strip()
     if not q:
         return []
     city_filter = (city or "").strip() or None
+    viewer_id = await optional_consumer_account_id(authorization)
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT b.slug, b.name, b.logo_url, b.owner_account_id, b.google_place_id,
                       b.messaging_enabled,
+                      EXISTS (SELECT 1 FROM tellus_brand_follows f
+                              WHERE f.brand_id = b.id AND f.consumer_account_id = $3) AS followed,
                       s.city, s.state,
                       (SELECT COUNT(*) FROM tellus_reports r
                         WHERE r.brand_id = b.id AND r.review_state = 'held'
@@ -104,7 +111,7 @@ async def search_places(
                         WHERE st.brand_id = b.id AND st.city ILIKE '%' || $2 || '%'))
                ORDER BY review_count DESC, b.name
                LIMIT 20""",
-            escape_like(q), escape_like(city_filter) if city_filter else None,
+            escape_like(q), escape_like(city_filter) if city_filter else None, viewer_id,
         )
     return [
         TellusPlaceSearchResult(
@@ -114,9 +121,82 @@ async def search_places(
             intake_token=r["intake_token"], review_count=r["review_count"],
             google_place_id=r["google_place_id"],
             messaging_enabled=bool(r["owner_account_id"] and r["messaging_enabled"]),
+            followed=r["followed"],
         )
         for r in rows
     ]
+
+
+@router.get("/places/signed-up", response_model=list[TellusPlaceSearchResult])
+async def list_signed_up_places(
+    request: Request,
+    limit: int = Query(default=12, ge=1, le=50),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Businesses with an owner account, for the initial Places experience."""
+    await check_rate_limit(client_ip(request), "tellus_signed_up_places", 240, 3600)
+    viewer_id = await optional_consumer_account_id(authorization)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT b.slug, b.name, b.logo_url, b.owner_account_id, b.google_place_id,
+                      b.messaging_enabled,
+                      EXISTS (SELECT 1 FROM tellus_brand_follows f
+                              WHERE f.brand_id = b.id AND f.consumer_account_id = $1) AS followed,
+                      s.city, s.state,
+                      (SELECT COUNT(*) FROM tellus_reports r
+                        WHERE r.brand_id = b.id AND r.review_state = 'held'
+                          AND r.publish_at <= NOW() AND r.publish_at >= NOW() - interval '12 months'
+                          AND r.moderation_status = 'visible') AS review_count
+               FROM tellus_brands b
+               LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
+                                  WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
+               WHERE b.owner_account_id IS NOT NULL
+               ORDER BY b.name
+               LIMIT $2""",
+            viewer_id, limit,
+        )
+    return [
+        TellusPlaceSearchResult(
+            slug=r["slug"], name=r["name"], logo_url=r["logo_url"], city=r["city"], state=r["state"],
+            claimed=True, intake_token=None, review_count=r["review_count"],
+            google_place_id=r["google_place_id"],
+            messaging_enabled=bool(r["messaging_enabled"]), followed=r["followed"],
+        )
+        for r in rows
+    ]
+
+
+@router.post("/places/{slug}/follow", response_model=TellusFollowedBrand, status_code=status.HTTP_201_CREATED)
+async def follow_place(slug: str, account: TellusAccount = Depends(require_verified_consumer)):
+    async with get_connection() as conn:
+        brand = await conn.fetchrow(
+            """SELECT b.slug, b.name, b.logo_url, b.messaging_enabled, s.city, s.state
+               FROM tellus_brands b
+               LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
+                                  WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
+               WHERE b.slug = $1 AND b.owner_account_id IS NOT NULL""",
+            slug,
+        )
+        if brand is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
+        await conn.execute(
+            """INSERT INTO tellus_brand_follows (consumer_account_id, brand_id)
+               SELECT $1, id FROM tellus_brands WHERE slug = $2
+               ON CONFLICT DO NOTHING""",
+            account.id, slug,
+        )
+    return TellusFollowedBrand(**dict(brand))
+
+
+@router.delete("/places/{slug}/follow", status_code=status.HTTP_204_NO_CONTENT)
+async def unfollow_place(slug: str, account: TellusAccount = Depends(require_verified_consumer)):
+    async with get_connection() as conn:
+        await conn.execute(
+            """DELETE FROM tellus_brand_follows f
+               USING tellus_brands b
+               WHERE f.brand_id = b.id AND f.consumer_account_id = $1 AND b.slug = $2""",
+            account.id, slug,
+        )
 
 
 @router.get("/places/autocomplete", response_model=list[TellusPlaceAutocompleteResult])

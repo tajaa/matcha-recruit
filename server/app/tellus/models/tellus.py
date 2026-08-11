@@ -168,6 +168,16 @@ class TellusPlaceSearchResult(BaseModel):
     review_count: int = 0
     google_place_id: Optional[str] = None   # lets the client dedupe vs live Google suggestions
     messaging_enabled: bool = False
+    followed: bool = False
+
+
+class TellusFollowedBrand(BaseModel):
+    slug: str
+    name: str
+    logo_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    messaging_enabled: bool = False
 
 
 class TellusPlaceCreate(BaseModel):

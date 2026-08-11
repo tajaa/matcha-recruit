@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { MessageCircle } from 'lucide-react'
 import { tellusApi } from '../api/tellusClient'
 import { useAccount } from '../hooks/useAccount'
 import { Card, Chip, Empty, ErrorText, Spinner } from '../components/ui'
 import { DmThreadPanel } from '../components/DmThreadPanel'
-import type { Brand, DmThread, InboxBrand, TellusNotification } from '../api/types'
+import type { Brand, DmThread, FollowedBrand, InboxBrand, TellusNotification } from '../api/types'
 
 function hoursLeft(publishAt: string): number {
   return Math.max(0, Math.ceil((Date.parse(publishAt) - Date.now()) / 3_600_000))
@@ -39,6 +39,7 @@ export default function Messages() {
   const [err, setErr] = useState('')
   const [messagingEnabled, setMessagingEnabled] = useState<boolean | null>(null)
   const [toggleBusy, setToggleBusy] = useState(false)
+  const [following, setFollowing] = useState<FollowedBrand[]>([])
 
   useEffect(() => {
     if (!inboxView || account?.account_type === 'brand') { setInboxReady(true); return }
@@ -46,6 +47,15 @@ export default function Messages() {
     tellusApi.get<InboxBrand[]>('/comms/inbox-brands')
       .then((rows) => { const active = rows.filter(row => row.plan_status === 'active'); setInboxBrands(active); setSelectedBrandId((current) => current || (active.length === 1 ? active[0].brand_id : '')); setInboxReady(true) })
       .catch((e) => { setErr(e instanceof Error ? e.message : 'Failed to load inboxes'); setInboxReady(true) })
+  }, [inboxView, account?.id, account?.account_type])
+
+  useEffect(() => {
+    if (inboxView || account?.account_type !== 'consumer') { setFollowing([]); return }
+    let stopped = false
+    tellusApi.get<FollowedBrand[]>('/comms/following')
+      .then((rows) => { if (!stopped) setFollowing(rows) })
+      .catch(() => { if (!stopped) setFollowing([]) })
+    return () => { stopped = true }
   }, [inboxView, account?.id, account?.account_type])
 
   useEffect(() => {
@@ -119,8 +129,34 @@ export default function Messages() {
       {inboxView && account?.account_type !== 'brand' && inboxBrands.length > 1 && <select value={selectedBrandId} onChange={e => { setSelectedBrandId(e.target.value); setOpenId(null) }} className="w-full rounded-lg border border-tu-border bg-tu-panel2 px-2 py-1.5 text-xs"><option value="">Choose a business inbox…</option>{inboxBrands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.name}</option>)}</select>}
       {inboxView && account?.account_type === 'brand' && messagingEnabled !== null && <label className="flex items-center gap-2 text-xs text-tu-dim"><input type="checkbox" checked={messagingEnabled} disabled={toggleBusy} onChange={e => void toggleMessaging(e.target.checked)} /> Accept new Comms questions on the public business page</label>}
 
+      {!inboxView && account?.account_type === 'consumer' && following.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-tu-faint">Following</p>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {following.map((brand) => (
+              <Link key={brand.slug} to={`/b/${brand.slug}${brand.messaging_enabled ? '?message=1' : ''}`} className="min-w-40 rounded-lg border border-tu-border bg-tu-panel px-3 py-2 text-left hover:border-tu-accent">
+                <p className="truncate text-sm font-semibold">{brand.name}</p>
+                <p className="text-xs text-tu-faint">{[brand.city, brand.state].filter(Boolean).join(', ') || 'Business page'}</p>
+                <p className="mt-1 text-xs font-medium text-tu-accent">{brand.messaging_enabled ? 'Message' : 'View business'}</p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {threads.length === 0 ? (
-        <Empty>No conversations yet.</Empty>
+        <Empty>
+          {account?.account_type === 'brand' ? (
+            'No customer conversations yet.'
+          ) : (
+            <span className="space-y-2">
+              <span className="block">No conversations yet.</span>
+              <Link to="/places" className="font-semibold text-tu-accent hover:underline">
+                Find a business to message →
+              </Link>
+            </span>
+          )}
+        </Empty>
       ) : (
         <div className="space-y-3">
           {threads.map((t) => (

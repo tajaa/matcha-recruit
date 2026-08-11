@@ -13,7 +13,7 @@ from ...database import get_connection
 from ..dependencies import require_tellus_account, require_verified_consumer
 from ..models.tellus import (
     TellusAccount, TellusCommsStart, TellusDmAssign, TellusDmMessage,
-    TellusDmSend, TellusDmThread, TellusInboxToggle,
+    TellusDmSend, TellusDmThread, TellusFollowedBrand, TellusInboxToggle,
 )
 from ..services.comms_service import (
     get_thread_access, next_status, resolve_inbox_brand, thread_to_model,
@@ -82,6 +82,23 @@ async def list_inbox_brands(account: TellusAccount = Depends(require_tellus_acco
             if owner and not any(r["brand_id"] == owner["brand_id"] for r in rows):
                 rows = list(rows) + [{**dict(owner), "role": "owner", "can_manage_inbox": True}]
     return [dict(r) for r in rows]
+
+
+@router.get("/comms/following", response_model=list[TellusFollowedBrand])
+async def list_followed_brands(account: TellusAccount = Depends(require_verified_consumer)):
+    """Consumer's followed businesses, used as the Comms quick-start list."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT b.slug, b.name, b.logo_url, b.messaging_enabled, s.city, s.state
+               FROM tellus_brand_follows f
+               JOIN tellus_brands b ON b.id = f.brand_id
+               LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
+                                  WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
+               WHERE f.consumer_account_id = $1 AND b.owner_account_id IS NOT NULL
+               ORDER BY f.created_at DESC""",
+            account.id,
+        )
+    return [TellusFollowedBrand(**dict(row)) for row in rows]
 
 
 @router.post("/comms/brands/{slug}/threads", response_model=dict, status_code=status.HTTP_201_CREATED)
