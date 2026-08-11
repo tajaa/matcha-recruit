@@ -1,3 +1,4 @@
+import io
 import os
 
 import pytest
@@ -8,7 +9,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services.upload_guard import (  # noqa: E402
-    ALLOWED_DELIVERABLE, ALLOWED_IMAGE, sniff, verify_upload,
+    ALLOWED_DELIVERABLE, ALLOWED_IMAGE, compress_image_for_storage, sniff, verify_upload,
 )
 
 
@@ -39,3 +40,30 @@ def test_verify_upload_rejects_mismatch(declared, payload):
 def test_text_normalizes_and_sniff_unknown_is_none():
     assert verify_upload(b"hello", "text/csv", ALLOWED_DELIVERABLE) == "text/plain"
     assert sniff(b"") is None
+
+
+def test_small_image_passes_through_unchanged():
+    payload = b"\x89PNG\r\n\x1a\n" + b"small"
+
+    result = compress_image_for_storage(payload, "image/png", "avatar.png", max_bytes=100)
+
+    assert result == (payload, "image/png", "avatar.png")
+
+
+def test_oversized_image_is_resized_and_compressed_to_jpeg():
+    from PIL import Image
+
+    source = Image.effect_noise((1200, 900), 100).convert("RGB")
+    raw = io.BytesIO()
+    source.save(raw, format="PNG")
+
+    data, content_type, filename = compress_image_for_storage(
+        raw.getvalue(), "image/png", "phone-photo.png", max_bytes=300_000, max_edge=640,
+    )
+
+    assert len(data) <= 300_000
+    assert content_type == "image/jpeg"
+    assert filename == "phone-photo.jpg"
+    assert sniff(data) == "image/jpeg"
+    with Image.open(io.BytesIO(data)) as stored:
+        assert max(stored.size) <= 640

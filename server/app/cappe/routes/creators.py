@@ -1,6 +1,7 @@
 """Cappe creator self-service — profile (media kit), socials, portfolio, rates,
 review submission, media upload, earnings. The public directory lives in
 routes/public/creators.py; offers live in routes/collab.py."""
+import asyncio
 import json
 import logging
 from uuid import UUID
@@ -34,7 +35,8 @@ logger = logging.getLogger("cappe.creators")
 
 router = APIRouter()
 
-_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+_MAX_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024
+_MAX_IMAGE_STORED_BYTES = 5 * 1024 * 1024
 _MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
 
@@ -303,7 +305,7 @@ async def upload_creator_media(
     await check_rate_limit(str(account.id), "cappe_creator_upload", 30, 3600)
     if file.content_type in upload_guard.ALLOWED_IMAGE:
         allowed = upload_guard.ALLOWED_IMAGE
-        data = await read_capped(file, _MAX_IMAGE_BYTES, "Image too large (max 5 MB)")
+        data = await read_capped(file, _MAX_IMAGE_SOURCE_BYTES, "Image too large (max 25 MB)")
     elif file.content_type in upload_guard.ALLOWED_VIDEO:
         allowed = upload_guard.ALLOWED_VIDEO
         data = await read_capped(file, _MAX_VIDEO_BYTES, "Video too large (max 50 MB)")
@@ -312,8 +314,17 @@ async def upload_creator_media(
     if not data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
     content_type = upload_guard.verify_upload(data, file.content_type, allowed)
+    filename = file.filename or "upload"
+    if content_type in upload_guard.ALLOWED_IMAGE:
+        data, content_type, filename = await asyncio.to_thread(
+            upload_guard.compress_image_for_storage,
+            data,
+            content_type,
+            filename,
+            max_bytes=_MAX_IMAGE_STORED_BYTES,
+        )
     url = await get_storage().upload_file(
-        file_bytes=data, filename=file.filename or "upload", prefix="cappe", content_type=content_type,
+        file_bytes=data, filename=filename, prefix="cappe", content_type=content_type,
     )
     return CappeUploadResponse(url=url)
 

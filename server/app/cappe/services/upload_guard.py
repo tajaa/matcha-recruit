@@ -1,4 +1,5 @@
-"""Validate uploaded bytes against the client-declared MIME type."""
+"""Validate and normalize uploaded bytes."""
+import io
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -50,3 +51,54 @@ def verify_upload(data: bytes, declared: Optional[str], allowed: set[str]) -> st
     if sniff(data) not in expected:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="File contents don't match the declared type")
     return declared
+
+
+def compress_image_for_storage(
+    data: bytes,
+    content_type: str,
+    filename: str,
+    *,
+    max_bytes: int = 5 * 1024 * 1024,
+    max_edge: int = 2560,
+) -> tuple[bytes, str, str]:
+    """Compress an oversized raster image to a bounded JPEG.
+
+    Images already within the storage cap pass through byte-for-byte. This is
+    intentionally server-side so uploads do not depend on browser codec or
+    canvas support (notably for large phone photos).
+    """
+    if len(data) <= max_bytes:
+        return data, content_type, filename
+
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(data)) as source:
+            source.seek(0)
+            image = ImageOps.exif_transpose(source)
+            image.thumbnail((max_edge, max_edge))
+            if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+                rgba = image.convert("RGBA")
+                flattened = Image.new("RGB", rgba.size, "white")
+                flattened.paste(rgba, mask=rgba.getchannel("A"))
+                image = flattened
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            for quality in (85, 75, 65, 55):
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=quality, optimize=True)
+                compressed = output.getvalue()
+                if len(compressed) <= max_bytes:
+                    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+                    return compressed, "image/jpeg", f"{stem or 'upload'}.jpg"
+    except Exception as exc:  # Pillow raises several format/decode-specific errors
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Image could not be decoded. Try a JPG, PNG, GIF, or WebP image.",
+        ) from exc
+
+    raise HTTPException(
+        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+        detail="Image could not be compressed below 5 MB",
+    )

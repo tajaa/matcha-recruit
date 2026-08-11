@@ -430,9 +430,10 @@ function DeliverableSubmitForm({
       const res = await cappeApi.upload<{ url: string }>('/creators/me/upload', fd)
       setProofMediaUrl(res.url)
       setProofFileName(file.name)
-    } catch {
+    } catch (e) {
       setProofMediaUrl(null)
       setProofFileName(null)
+      window.alert(e instanceof Error ? e.message : 'Could not upload proof')
     } finally {
       setUploading(false)
     }

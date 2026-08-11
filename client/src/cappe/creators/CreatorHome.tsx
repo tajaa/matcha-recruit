@@ -168,6 +168,7 @@ function BasicsSection({ profile, onSaved }: { profile: CreatorProfileMe; onSave
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url)
   const [coverUrl, setCoverUrl] = useState(profile.cover_url)
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState<'avatar' | 'cover' | null>(null)
   const avatarInput = useRef<HTMLInputElement>(null)
   const coverInput = useRef<HTMLInputElement>(null)
 
@@ -176,6 +177,17 @@ function BasicsSection({ profile, onSaved }: { profile: CreatorProfileMe; onSave
     fd.append('file', file)
     const res = await cappeApi.upload<{ url: string }>('/creators/me/upload', fd)
     return res.url
+  }
+
+  async function uploadInto(file: File, kind: 'avatar' | 'cover', setUrl: (url: string) => void) {
+    setUploading(kind)
+    try {
+      setUrl(await upload(file))
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not upload image')
+    } finally {
+      setUploading(null)
+    }
   }
 
   function toggleNiche(n: string) {
@@ -205,18 +217,34 @@ function BasicsSection({ profile, onSaved }: { profile: CreatorProfileMe; onSave
   return (
     <section className={`${ui.card} mb-5 p-5`}>
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Basics</h2>
-      <div className="mb-4 flex items-center gap-4">
-        <div className="h-16 w-16 overflow-hidden rounded-full bg-zinc-800">
-          {avatarUrl && <img src={avatarUrl} alt="" className="h-full w-full object-cover" />}
+      <div className="mb-5 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-950">
+        <div className="relative h-36 bg-gradient-to-br from-zinc-800 to-zinc-900">
+          {coverUrl ? (
+            <img src={coverUrl} alt="Creator profile cover" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-zinc-600">Add a cover image</div>
+          )}
+          <button
+            type="button"
+            onClick={() => coverInput.current?.click()}
+            disabled={uploading !== null}
+            className="absolute right-3 top-3 inline-flex items-center gap-2 rounded-lg border border-white/15 bg-black/65 px-3 py-2 text-xs font-medium text-white backdrop-blur transition hover:bg-black/80 disabled:opacity-60"
+          >
+            {uploading === 'cover' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {coverUrl ? 'Replace cover' : 'Upload cover'}
+          </button>
+          <input ref={coverInput} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadInto(f, 'cover', setCoverUrl); e.currentTarget.value = '' }} />
         </div>
-        <button onClick={() => avatarInput.current?.click()} className={ui.btnGhost}>
-          <Upload className="h-4 w-4" /> Avatar
-        </button>
-        <input ref={avatarInput} type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) setAvatarUrl(await upload(f)) }} />
-        <button onClick={() => coverInput.current?.click()} className={ui.btnGhost}>
-          <Upload className="h-4 w-4" /> Cover
-        </button>
-        <input ref={coverInput} type="file" accept="image/*" hidden onChange={async (e) => { const f = e.target.files?.[0]; if (f) setCoverUrl(await upload(f)) }} />
+        <div className="flex items-center gap-3 p-3">
+          <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full border-2 border-zinc-700 bg-zinc-800">
+            {avatarUrl && <img src={avatarUrl} alt="Creator avatar" className="h-full w-full object-cover" />}
+          </div>
+          <button type="button" onClick={() => avatarInput.current?.click()} disabled={uploading !== null} className={ui.btnGhost}>
+            {uploading === 'avatar' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {avatarUrl ? 'Replace avatar' : 'Upload avatar'}
+          </button>
+          <input ref={avatarInput} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadInto(f, 'avatar', setAvatarUrl); e.currentTarget.value = '' }} />
+        </div>
       </div>
       <div className="space-y-3">
         <div>
@@ -322,10 +350,14 @@ function PortfolioSection({ items, onSaved }: { items: CreatorPortfolioItem[]; o
   }
 
   async function uploadMedia(i: number, file: File) {
-    const fd = new FormData()
-    fd.append('file', file)
-    const res = await cappeApi.upload<{ url: string }>('/creators/me/upload', fd)
-    update(i, { media_url: res.url, media_type: file.type.startsWith('video') ? 'video' : 'image' })
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await cappeApi.upload<{ url: string }>('/creators/me/upload', fd)
+      update(i, { media_url: res.url, media_type: file.type.startsWith('video') ? 'video' : 'image' })
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Could not upload media')
+    }
   }
 
   async function save() {
