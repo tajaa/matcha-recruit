@@ -136,7 +136,10 @@ class TestLikeAuthMatrixSourceGuards:
 
     def test_check_board_post_predicate(self):
         src = inspect.getsource(likes_service._check_board_post)
-        assert "moderation_status = 'visible'" in src
+        # Gated on moderation_status only for non-privileged callers; mods/owners
+        # may preview (and like) their own not-yet-published or removed posts.
+        assert "moderation_status" in src
+        assert "is_privileged" in src
 
     def test_check_board_reply_predicate(self):
         src = inspect.getsource(likes_service._check_board_reply)

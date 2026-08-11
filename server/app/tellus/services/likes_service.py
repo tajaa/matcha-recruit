@@ -55,11 +55,13 @@ async def hydrate_likes(
     return {r["target_id"]: (r["like_count"], r["liked_by_me"]) for r in rows}
 
 
-async def _assert_board_access(conn, account, row: dict) -> None:
+async def _assert_board_access(conn, account, row: dict) -> bool:
     """Approved member OR brand-team moderator OR the brand's own owner.
     Mirrors routes/board.py:get_board's viewer_is_mod resolution — a
     consumer-typed team moderator and the owner (who may have no
-    tellus_brand_members row) must both pass."""
+    tellus_brand_members row) must both pass.
+
+    Returns True when the caller is privileged (mod or owner)."""
     is_mod = await conn.fetchval(
         "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
         row["brand_id"], account.id,
@@ -76,21 +78,27 @@ async def _assert_board_access(conn, account, row: dict) -> None:
     # matching points_service.redeem_points' three-way gate.
     if row["plan_status"] != "active" or (not row["is_active"] and not is_privileged):
         raise HTTPException(status.HTTP_409_CONFLICT, bs.BOARD_PAUSED_DETAIL)
+    return is_privileged
 
 
 async def _check_board_post(conn, account, post_id: UUID) -> None:
     row = await conn.fetchrow(
         """SELECT bo.id AS board_id, bo.is_active, b.id AS brand_id,
-                  b.owner_account_id, b.plan_status
+                  b.owner_account_id, b.plan_status, p.moderation_status
            FROM tellus_board_posts p
            JOIN tellus_boards bo ON bo.id = p.board_id
            JOIN tellus_brands  b ON b.id = bo.brand_id
-           WHERE p.id = $1 AND p.moderation_status = 'visible'""",
+           WHERE p.id = $1""",
         post_id,
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Post not found")
-    await _assert_board_access(conn, account, row)
+    is_privileged = await _assert_board_access(conn, account, row)
+    if not is_privileged and row["moderation_status"] != "visible":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Post not found")
+    # Deliberately drop moderation_status from row so _assert_board_access
+    # (shared with _check_board_reply) never sees a key it didn't ask for.
+    row.pop("moderation_status", None)
 
 
 async def _check_board_reply(conn, account, reply_id: UUID) -> None:
