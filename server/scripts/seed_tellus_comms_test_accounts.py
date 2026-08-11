@@ -61,11 +61,14 @@ async def _ensure_brand_account(conn) -> tuple[str, str]:
     )
     if brand is None:
         slug = BRAND_SLUG
-        slug_owner = await conn.fetchval(
-            "SELECT owner_account_id FROM tellus_brands WHERE slug = $1", slug
+        slug_taken = await conn.fetchval(
+            "SELECT 1 FROM tellus_brands WHERE slug = $1", slug
         )
-        if slug_owner is not None and slug_owner != account_id:
+        while slug_taken:
             slug = f"{BRAND_SLUG}-{secrets.token_hex(3)}"
+            slug_taken = await conn.fetchval(
+                "SELECT 1 FROM tellus_brands WHERE slug = $1", slug
+            )
         brand = await conn.fetchrow(
             """INSERT INTO tellus_brands
                    (owner_account_id, name, slug, location_count, plan_status, activated_at, messaging_enabled)
