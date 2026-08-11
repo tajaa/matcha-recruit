@@ -2101,10 +2101,23 @@ async def admin_list_cappe_accounts():
     async with get_connection() as conn:
         accounts = await conn.fetch(
             """
-            SELECT id, email, name, plan, status, account_type, created_at
-            FROM cappe_accounts
+            SELECT a.id, a.email, a.name, a.plan, a.status, a.account_type,
+                   a.email_verified_at, a.created_at,
+                   (SELECT COUNT(*) FROM cappe_collab_campaigns c
+                     WHERE c.brand_account_id = a.id) AS campaign_count,
+                   (SELECT COUNT(*) FROM cappe_collab_offers o
+                     WHERE o.brand_account_id = a.id) AS offers_sent,
+                   (SELECT COUNT(*) FROM cappe_collab_offers o
+                     WHERE o.brand_account_id = a.id
+                       AND o.status = ANY($1::text[])) AS active_collabs,
+                   (SELECT COALESCE(SUM(p.amount_cents), 0)
+                      FROM cappe_collab_payments p
+                      JOIN cappe_collab_offers o ON o.id = p.offer_id
+                     WHERE o.brand_account_id = a.id AND p.status = 'paid') AS collab_spend_cents
+            FROM cappe_accounts a
             ORDER BY created_at DESC
-            """
+            """,
+            ["sent", "negotiating", "accepted", "active"],
         )
         sites = await conn.fetch(
             """
@@ -2152,7 +2165,12 @@ async def admin_list_cappe_accounts():
             "plan": plan,
             "status": a["status"],
             "account_type": a["account_type"],
+            "email_verified_at": a["email_verified_at"].isoformat() if a["email_verified_at"] else None,
             "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+            "campaign_count": a["campaign_count"],
+            "offers_sent": a["offers_sent"],
+            "active_collabs": a["active_collabs"],
+            "collab_spend_cents": a["collab_spend_cents"],
             "site_count": len(acct_sites),
             "published_count": published,
             "order_count": orders,

@@ -5,7 +5,7 @@ import { cappeApi } from '../api'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { ui, badgeFor } from '../components/ui'
 import { fmtCents, type Campaign, type OfferListItem } from '../types'
-import { creatorPaths } from './creatorPaths'
+import { brandCollabPath, creatorPaths } from './creatorPaths'
 
 const STATUS_CHIPS = ['all', 'sent', 'negotiating', 'accepted', 'active', 'completed', 'closed'] as const
 type StatusChip = (typeof STATUS_CHIPS)[number]
@@ -70,7 +70,7 @@ function OffersTab() {
             </thead>
             <tbody className="divide-y divide-zinc-800">
               {offers.map((o) => (
-                <tr key={o.id} className="cursor-pointer hover:bg-zinc-900/60" onClick={() => (window.location.href = `/cappe/collabs/${o.id}`)}>
+                <tr key={o.id} className="cursor-pointer hover:bg-zinc-900/60" onClick={() => (window.location.href = brandCollabPath(o.id))}>
                   <td className="flex items-center gap-2 px-3 py-2.5">
                     <div className="h-6 w-6 overflow-hidden rounded-full bg-zinc-800">
                       {o.creator_avatar_url && <img src={o.creator_avatar_url} alt="" className="h-full w-full object-cover" />}

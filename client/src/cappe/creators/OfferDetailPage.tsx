@@ -404,7 +404,7 @@ export default function OfferDetailPage() {
       )}
 
       <div className="mt-6 text-center">
-        <button onClick={() => navigate(side === 'creator' ? creatorPaths.deals : '/cappe/collabs')} className="text-xs text-zinc-600 hover:text-zinc-400">
+        <button onClick={() => navigate(side === 'creator' ? creatorPaths.deals : creatorPaths.brandCollabs)} className="text-xs text-zinc-600 hover:text-zinc-400">
           &larr; Back to {side === 'creator' ? 'deals' : 'collabs'}
         </button>
       </div>

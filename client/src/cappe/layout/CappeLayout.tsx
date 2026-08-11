@@ -13,7 +13,8 @@ export default function CappeLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const isCreatorDashboard = location.pathname.includes('/creators/dashboard') || location.pathname.includes('/creator')
-  const loginPath = isCreatorDashboard ? creatorPaths.login : '/cappe/login'
+  const isBrandCreatorDashboard = location.pathname.includes('/creators/brands/dashboard')
+  const loginPath = isBrandCreatorDashboard ? creatorPaths.brandLogin : isCreatorDashboard ? creatorPaths.login : '/cappe/login'
 
   useEffect(() => {
     if (!getCappeToken()) {

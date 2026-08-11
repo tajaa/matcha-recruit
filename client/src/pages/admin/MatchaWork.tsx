@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Search, Zap, Users, User, Building2 } from 'lucide-react'
+import { Loader2, Users, Zap } from 'lucide-react'
 import { api } from '../../api/client'
+import { Button, Input, Modal, PillTabs, useToast } from '../../components/ui'
 import Individuals from './Individuals'
 
 type Tab = 'personal' | 'business'
 
-interface BusinessCompany {
+type BusinessCompany = {
   company_id: string
   company_name: string
   company_status: string
@@ -21,21 +22,32 @@ interface BusinessCompany {
   created_at: string | null
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
-  return String(n)
+function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`
+  return String(value)
 }
 
-function relTime(iso: string | null): string {
-  if (!iso) return '--'
-  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
-  if (d === 0) return 'Today'
-  if (d === 1) return 'Yesterday'
-  return `${d}d ago`
+function fmtDate(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+}
+
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-zinc-100">{value}</p>
+    </div>
+  )
+}
+
+function CompanyStatus({ status }: { status: string }) {
+  const active = status === 'active' || status === 'approved'
+  return <span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] capitalize ${active ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-600 bg-zinc-700/30 text-zinc-400'}`}>{status}</span>
 }
 
 function BusinessWork() {
+  const { toast } = useToast()
   const [rows, setRows] = useState<BusinessCompany[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -44,186 +56,99 @@ function BusinessWork() {
   const [granting, setGranting] = useState(false)
 
   function fetchRows() {
+    setLoading(true)
     api.get<BusinessCompany[]>('/matcha-work/billing/admin/matcha-work/business')
       .then(setRows)
-      .catch(() => {})
+      .catch(() => toast('Could not load Matcha Work businesses', 'error'))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchRows() }, [])
+  useEffect(fetchRows, [])
 
   async function handleGrant() {
     if (!grantTarget || !grantAmount) return
-    const amount = parseInt(grantAmount, 10)
-    if (isNaN(amount) || amount <= 0) return
+    const amount = Number.parseInt(grantAmount, 10)
+    if (!Number.isFinite(amount) || amount <= 0) return
     setGranting(true)
     try {
       await api.post(`/matcha-work/billing/admin/companies/${grantTarget.company_id}/tokens`, {
         tokens: amount,
         description: `Admin grant to business: ${grantTarget.company_name}`,
       })
+      toast(`${formatTokens(amount)} tokens granted to ${grantTarget.company_name}`, 'success')
       setGrantTarget(null)
       setGrantAmount('')
       fetchRows()
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Token grant failed', 'error')
     } finally {
       setGranting(false)
     }
   }
 
-  const filtered = rows.filter((r) =>
-    r.company_name.toLowerCase().includes(search.toLowerCase()),
-  )
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return rows.filter((row) => !query || row.company_name.toLowerCase().includes(query) || (row.signup_source ?? '').toLowerCase().includes(query))
+  }, [rows, search])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-zinc-500">
-        <Loader2 className="animate-spin" size={20} />
-      </div>
-    )
-  }
+  const totals = useMemo(() => ({
+    members: rows.reduce((sum, row) => sum + row.member_count, 0),
+    subscriptions: rows.filter((row) => row.has_active_subscription).length,
+    remaining: rows.reduce((sum, row) => sum + row.free_tokens_remaining + row.subscription_tokens_remaining, 0),
+  }), [rows])
+
+  if (loading) return <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading businesses…</div>
 
   return (
     <div>
-      <div className="relative mb-4 max-w-sm">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search companies..."
-          className="w-full rounded-lg border border-zinc-800 bg-zinc-900 pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-700"
-        />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Businesses" value={rows.length} />
+        <Stat label="Members" value={totals.members} />
+        <Stat label="Subscriptions" value={totals.subscriptions} />
+        <Stat label="Tokens remaining" value={formatTokens(totals.remaining)} />
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="py-16 text-center text-sm text-zinc-500">
-          No companies on a Matcha-Work business plan.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left text-[11px] uppercase tracking-wide text-zinc-500">
-                <th className="px-4 py-2.5 font-medium">Company</th>
-                <th className="px-4 py-2.5 font-medium">Members</th>
-                <th className="px-4 py-2.5 font-medium">Free tokens</th>
-                <th className="px-4 py-2.5 font-medium">Subscription</th>
-                <th className="px-4 py-2.5 font-medium">Created</th>
-                <th className="px-4 py-2.5 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.company_id} className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900/50">
-                  <td className="px-4 py-3">
-                    <Link to={`/admin/companies/${r.company_id}`} className="font-medium text-zinc-100 hover:text-emerald-400">
-                      {r.company_name}
-                    </Link>
-                    <div className="text-[11px] text-zinc-500">{r.company_status}</div>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-300">
-                    <span className="inline-flex items-center gap-1"><Users size={12} className="text-zinc-500" />{r.member_count}</span>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-300">
-                    {formatTokens(r.free_tokens_remaining)} <span className="text-zinc-500">/ {formatTokens(r.free_token_limit)}</span>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-300">
-                    {r.has_active_subscription ? (
-                      <span>{formatTokens(r.subscription_tokens_remaining)} <span className="text-zinc-500">/ {formatTokens(r.subscription_token_limit)}</span></span>
-                    ) : (
-                      <span className="text-zinc-600">--</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-500">{relTime(r.created_at)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => { setGrantTarget(r); setGrantAmount('') }}
-                      className="inline-flex items-center gap-1 rounded-lg bg-zinc-800 px-2.5 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-700"
-                    >
-                      <Zap size={11} /> Grant
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="mt-6 max-w-sm"><Input label="" placeholder="Search company or signup source…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
 
-      {grantTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-            <h3 className="mb-1 text-sm font-semibold text-zinc-100">Grant Tokens</h3>
-            <p className="mb-3 text-xs text-zinc-500">{grantTarget.company_name}</p>
-            <p className="mb-3 text-[11px] text-zinc-500">
-              Current: {formatTokens(grantTarget.free_tokens_remaining)} remaining of {formatTokens(grantTarget.free_token_limit)}
-            </p>
-            <div className="mb-4 flex gap-2">
-              {[100_000, 500_000, 1_000_000, 5_000_000].map((amt) => (
-                <button
-                  key={amt}
-                  onClick={() => setGrantAmount(String(amt))}
-                  className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-                    grantAmount === String(amt) ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-                  }`}
-                >
-                  +{formatTokens(amt)}
-                </button>
-              ))}
-            </div>
-            <input
-              value={grantAmount}
-              onChange={(e) => setGrantAmount(e.target.value.replace(/\D/g, ''))}
-              placeholder="Custom amount..."
-              className="mb-4 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-600"
-            />
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setGrantTarget(null)} className="rounded-lg px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200">
-                Cancel
-              </button>
-              <button
-                onClick={handleGrant}
-                disabled={!grantAmount || granting}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-40"
-              >
-                {granting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-                Grant {grantAmount ? formatTokens(parseInt(grantAmount, 10) || 0) : ''}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
+        <table className="w-full min-w-[850px] text-left text-sm">
+          <thead className="bg-zinc-900/50 text-zinc-400">
+            <tr><th className="px-4 py-3 font-medium">Company</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 text-right font-medium">Members</th><th className="px-4 py-3 font-medium">Free tokens</th><th className="px-4 py-3 font-medium">Subscription tokens</th><th className="px-4 py-3 font-medium">Created</th><th className="px-4 py-3 text-right font-medium">Actions</th></tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {filtered.map((row) => (
+              <tr key={row.company_id} className="text-zinc-300 hover:bg-zinc-900/30">
+                <td className="px-4 py-3"><Link to={`/admin/companies/${row.company_id}`} className="font-medium text-zinc-100 hover:text-emerald-400">{row.company_name}</Link>{row.signup_source && <p className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{row.signup_source.replaceAll('_', ' ')}</p>}</td>
+                <td className="px-4 py-3"><CompanyStatus status={row.company_status} /></td>
+                <td className="px-4 py-3 text-right tabular-nums"><span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-zinc-500" />{row.member_count}</span></td>
+                <td className="px-4 py-3 text-zinc-300"><span className={row.free_tokens_remaining === 0 ? 'text-amber-400' : ''}>{formatTokens(row.free_tokens_remaining)}</span><span className="text-zinc-600"> / {formatTokens(row.free_token_limit)}</span></td>
+                <td className="px-4 py-3 text-zinc-300">{row.has_active_subscription ? <><span>{formatTokens(row.subscription_tokens_remaining)}</span><span className="text-zinc-600"> / {formatTokens(row.subscription_token_limit)}</span></> : <span className="text-zinc-600">—</span>}</td>
+                <td className="px-4 py-3 text-zinc-400">{fmtDate(row.created_at)}</td>
+                <td className="px-4 py-3 text-right"><Button size="sm" variant="ghost" onClick={() => { setGrantTarget(row); setGrantAmount('') }}><Zap className="h-3.5 w-3.5" /> Grant tokens</Button></td>
+              </tr>
+            ))}
+            {filtered.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500">No Matcha Work businesses found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <Modal open={grantTarget != null} onClose={() => setGrantTarget(null)} title={grantTarget ? `Grant tokens — ${grantTarget.company_name}` : ''} width="sm">
+        {grantTarget && <div className="space-y-4"><p className="text-sm text-zinc-400">Current free balance: {formatTokens(grantTarget.free_tokens_remaining)} of {formatTokens(grantTarget.free_token_limit)}</p><div className="flex flex-wrap gap-2">{[100_000, 500_000, 1_000_000, 5_000_000].map((amount) => <button key={amount} onClick={() => setGrantAmount(String(amount))} className={`rounded-lg border px-2.5 py-1.5 text-xs font-medium ${grantAmount === String(amount) ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:text-zinc-200'}`}>+{formatTokens(amount)}</button>)}</div><Input label="Custom token amount" inputMode="numeric" value={grantAmount} onChange={(event) => setGrantAmount(event.target.value.replace(/\D/g, ''))} /><div className="flex justify-end gap-2"><Button variant="ghost" onClick={() => setGrantTarget(null)}>Cancel</Button><Button variant="primary" disabled={!grantAmount || granting} onClick={handleGrant}>{granting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />} Grant tokens</Button></div></div>}
+      </Modal>
     </div>
   )
 }
 
 export default function MatchaWork() {
   const [tab, setTab] = useState<Tab>('personal')
-
   return (
-    <div className="p-6">
-      <h1 className="mb-1 text-lg font-semibold text-zinc-100">Matcha-Work</h1>
-      <p className="mb-4 text-xs text-zinc-500">Personal and business workspace plans.</p>
-
-      <div className="mb-5 flex gap-1 border-b border-zinc-800">
-        <button
-          onClick={() => setTab('personal')}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
-            tab === 'personal' ? 'border-b-2 border-emerald-500 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <User size={14} /> Personal
-        </button>
-        <button
-          onClick={() => setTab('business')}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
-            tab === 'business' ? 'border-b-2 border-emerald-500 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-          }`}
-        >
-          <Building2 size={14} /> Business
-        </button>
+    <div>
+      <div>
+        <h1 className="text-2xl font-semibold text-zinc-100">Matcha Work</h1>
+        <p className="mt-2 text-sm text-zinc-500">Manage personal accounts, business workspaces, subscriptions, access, and token budgets.</p>
       </div>
-
-      {tab === 'personal' ? <Individuals /> : <BusinessWork />}
+      <div className="mt-6"><PillTabs options={[{ value: 'personal', label: 'Personal accounts' }, { value: 'business', label: 'Business workspaces' }]} value={tab} onChange={setTab} /></div>
+      <div className="mt-7">{tab === 'personal' ? <Individuals embedded /> : <BusinessWork />}</div>
     </div>
   )
 }

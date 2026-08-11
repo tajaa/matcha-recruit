@@ -8,7 +8,7 @@ import type { CappeTokenResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
-export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: boolean }) {
+export default function CappeLogin({ creatorOnly = false, brandOnly = false }: { creatorOnly?: boolean; brandOnly?: boolean }) {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -31,7 +31,12 @@ export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: bool
         setError('This sign-in is for Gummfit Creator accounts. Use your creator account, or create a creator profile first.')
         return
       }
-      navigate(creatorOnly ? creatorPaths.home : postAuthHome(res.account?.account_type), { replace: true })
+      if (brandOnly && res.account?.account_type !== 'business') {
+        clearCappeTokens()
+        setError('This sign-in is for brand accounts that collaborate with Gummfit Creators.')
+        return
+      }
+      navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome : postAuthHome(res.account?.account_type), { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Something went wrong.'
       // Backend's unverified-account 403 carries "confirm your email".
@@ -59,7 +64,7 @@ export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: bool
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Sign in to {creatorOnly ? 'Gummfit Creators' : 'Gummfit'}
+            Sign in to {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'Gummfit Creators for brands' : 'Gummfit'}
           </h1>
         </div>
 
@@ -109,9 +114,9 @@ export default function CappeLogin({ creatorOnly = false }: { creatorOnly?: bool
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          {creatorOnly ? 'New to Gummfit Creators?' : 'New to Gummfit?'}{' '}
-          <Link to={creatorOnly ? '/gummfit/creators/signup' : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
-            {creatorOnly ? 'Create your creator profile' : 'Create an account'}
+          {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit Creators for brands?' : 'New to Gummfit?'}{' '}
+          <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
+            {creatorOnly ? 'Create your creator profile' : brandOnly ? 'Create a brand profile' : 'Create an account'}
           </Link>
         </p>
       </div>

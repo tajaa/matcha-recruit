@@ -8,6 +8,7 @@ import {
   type Campaign, type CollabTerms, type OfferDetail, type PaymentSchedule,
   type PublicCreatorProfile, type TermsDeliverable,
 } from '../types'
+import { brandCollabPath } from './creatorPaths'
 
 type DeliverableRow = TermsDeliverable
 
@@ -140,7 +141,7 @@ export default function SendOfferSheet({ profile, onClose, onSent }: {
         message: message.trim() || null,
       })
       onSent(offer.id)
-      navigate(`/cappe/collabs/${offer.id}`)
+      navigate(brandCollabPath(offer.id))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send the offer')
     } finally {

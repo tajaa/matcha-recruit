@@ -47,7 +47,16 @@ function relTime(iso: string | null): string {
   return `${d}d ago`
 }
 
-export default function Individuals() {
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
+      <p className="mt-1 text-xl font-semibold text-zinc-100">{value}</p>
+    </div>
+  )
+}
+
+export default function Individuals({ embedded = false }: { embedded?: boolean }) {
   const [search, setSearch] = useState('')
   const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
   const [grantAmount, setGrantAmount] = useState('')
@@ -162,6 +171,11 @@ export default function Individuals() {
     return u.email.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q)
   })
 
+  const activeSubscriptions = users.filter((user) => user.subscription?.status === 'active').length
+  const comped = users.filter((user) => user.beta_features?.matcha_work_beta_lite || user.beta_features?.matcha_work_beta_full).length
+  const suspended = users.filter((user) => user.is_suspended).length
+  const tokensRemaining = users.reduce((sum, user) => sum + user.free_tokens_remaining + user.subscription_tokens_remaining, 0)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -172,12 +186,34 @@ export default function Individuals() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      {!embedded && (
+        <div className="mb-6">
           <h1 className="text-xl font-semibold text-zinc-100">Individual Users</h1>
           <p className="text-sm text-zinc-500 mt-0.5">
             Personal account users ({users.length} total) — the Lite/Pro checkboxes comp the full Werk tier without Stripe
           </p>
+        </div>
+      )}
+
+      {embedded && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <Stat label="Personal accounts" value={users.length} />
+          <Stat label="Subscriptions" value={activeSubscriptions} />
+          <Stat label="Comped plans" value={comped} />
+          <Stat label="Suspended" value={suspended} />
+          <Stat label="Tokens remaining" value={formatTokens(tokensRemaining)} />
+        </div>
+      )}
+
+      <div className={`${embedded ? 'mt-6' : ''} mb-4 flex flex-wrap items-center justify-between gap-3`}>
+        <div className="relative w-full max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by email or name..."
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-600"
+          />
         </div>
         <button
           onClick={() => setShowInvite(true)}
@@ -186,17 +222,6 @@ export default function Individuals() {
           <UserPlus size={12} />
           Generate Signup URL
         </button>
-      </div>
-
-      {/* Search */}
-      <div className="relative mb-4 max-w-xs">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by email or name..."
-          className="w-full pl-9 pr-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-600"
-        />
       </div>
 
       {/* Table */}

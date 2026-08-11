@@ -88,7 +88,8 @@ async def admin_list_creators(status_filter: Optional[str] = None):
             SELECT p.id, p.handle, p.display_name, p.avatar_url, p.status, p.review_note,
                    p.niches, p.location, p.open_to_offers, p.reach_verified, p.reach_audited_at,
                    p.submitted_at, p.published_at, p.created_at,
-                   a.email, a.name AS account_name,
+                   a.id AS account_id, a.email, a.name AS account_name,
+                   a.status AS account_status,
                    COALESCE(json_agg(json_build_object(
                        'id', s.id, 'platform', s.platform, 'handle', s.handle, 'url', s.url,
                        'follower_count', s.follower_count,
@@ -100,7 +101,7 @@ async def admin_list_creators(status_filter: Optional[str] = None):
               JOIN cappe_accounts a ON a.id = p.account_id
               LEFT JOIN cappe_creator_socials s ON s.profile_id = p.id
              WHERE ($1::text IS NULL OR p.status = $1)
-             GROUP BY p.id, a.email, a.name
+             GROUP BY p.id, a.id, a.email, a.name, a.status
              ORDER BY (p.status = 'pending_review') DESC, p.submitted_at DESC NULLS LAST, p.created_at DESC
             """,
             status_filter,
@@ -172,6 +173,58 @@ async def admin_reject_creator(profile_id: UUID, body: _RejectBody, current_user
 
 class _SuspendBody(BaseModel):
     note: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/accounts/{account_id}/suspend")
+async def admin_suspend_cappe_account(
+    account_id: UUID, body: _SuspendBody, current_user=Depends(require_admin),
+):
+    """Suspend a creator/brand identity and revoke every existing session."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """UPDATE cappe_accounts
+                      SET status='suspended', tokens_valid_after=date_trunc('second', NOW()),
+                          updated_at=NOW()
+                    WHERE id=$1 AND status='active'
+                      AND account_type = ANY($2::text[]) AND is_platform_admin=false
+                RETURNING id, email, name, account_type""",
+                account_id, ["business", "creator"],
+            )
+            if row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Account is not an active brand or creator account",
+                )
+            await _audit(
+                conn, current_user, "accounts.suspend", str(account_id),
+                {"email": row["email"], "account_type": row["account_type"], "note": body.note},
+            )
+    return {"ok": True, "email": row["email"]}
+
+
+@router.post("/accounts/{account_id}/restore")
+async def admin_restore_cappe_account(account_id: UUID, current_user=Depends(require_admin)):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """UPDATE cappe_accounts
+                      SET status='active', updated_at=NOW()
+                    WHERE id=$1 AND status='suspended'
+                      AND account_type = ANY($2::text[]) AND is_platform_admin=false
+                RETURNING id, email, name, account_type""",
+                account_id, ["business", "creator"],
+            )
+            if row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Account is not a suspended brand or creator account",
+                )
+            await _audit(
+                conn, current_user, "accounts.restore", str(account_id),
+                {"email": row["email"], "account_type": row["account_type"]},
+            )
+    return {"ok": True, "email": row["email"]}
 
 
 @router.post("/creators/{profile_id}/suspend")

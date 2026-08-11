@@ -114,8 +114,8 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
             {account?.account_type === 'business' && (
               <>
                 <div className="mt-3 px-3 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">Creators</div>
-                <Item to={creatorPaths.directory} icon={Compass} label="Find creators" />
-                <Item to="/cappe/collabs" icon={Handshake} label="Collabs" />
+                <Item to={creatorPaths.brandHome} icon={Compass} label="Find creators" />
+                <Item to={creatorPaths.brandCollabs} icon={Handshake} label="Collabs" />
               </>
             )}
           </>

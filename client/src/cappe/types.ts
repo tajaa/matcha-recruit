@@ -904,6 +904,7 @@ export type PublicCreatorCard = {
   niches: string[]
   reach_verified: boolean
   max_followers: number
+  max_engagement_rate: number | null
   min_rate_cents: number | null
   platforms: string[]
 }

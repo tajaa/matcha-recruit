@@ -7,7 +7,12 @@ export const creatorPaths = {
   directory: '/gummfit/creators/directory',
   login: '/gummfit/creators/login',
   signup: '/gummfit/creators/signup',
+  brandHome: '/gummfit/creators/brands/dashboard',
+  brandCollabs: '/gummfit/creators/brands/dashboard/collabs',
+  brandLogin: '/gummfit/creators/brands/login',
+  brandSignup: '/gummfit/creators/brands/signup',
 } as const
 
 export const creatorDealPath = (offerId: string) => `${creatorPaths.deals}/${offerId}`
+export const brandCollabPath = (offerId: string) => `${creatorPaths.brandCollabs}/${offerId}`
 export const creatorProfilePath = (handle: string) => `/gummfit/creators/${handle}`

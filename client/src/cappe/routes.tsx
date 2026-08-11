@@ -20,6 +20,7 @@ const CreatorHome = lazy(() => import('./creators/CreatorHome'))
 const CreatorDeals = lazy(() => import('./creators/CreatorDeals'))
 const CreatorEarnings = lazy(() => import('./creators/CreatorEarnings'))
 const BrandCollabs = lazy(() => import('./creators/BrandCollabs'))
+const BrandHome = lazy(() => import('./creators/BrandHome'))
 const OfferDetailPage = lazy(() => import('./creators/OfferDetailPage'))
 
 // The site-builder sub-tree, lazily. PageEditor alone is ~1.5k LOC of canvas
@@ -62,6 +63,8 @@ export default function CappeRoutes() {
         <Route path="creators" element={<CreatorsLanding />} />
         <Route path="creators/login" element={<CappeLogin creatorOnly />} />
         <Route path="creators/signup" element={<CappeSignup creatorOnly />} />
+        <Route path="creators/brands/login" element={<CappeLogin brandOnly />} />
+        <Route path="creators/brands/signup" element={<CappeSignup brandOnly />} />
         <Route path="creators/directory" element={<CreatorDirectory />} />
         <Route path="creators/:handle" element={<CreatorPublicProfile />} />
         <Route path="website-setup" element={<CappeSignup />} />
@@ -100,6 +103,9 @@ export default function CappeRoutes() {
           <Route path="creators/dashboard/deals" element={<CreatorDeals />} />
           <Route path="creators/dashboard/deals/:offerId" element={<OfferDetailPage />} />
           <Route path="creators/dashboard/earnings" element={<CreatorEarnings />} />
+          <Route path="creators/brands/dashboard" element={<BrandHome />} />
+          <Route path="creators/brands/dashboard/collabs" element={<BrandCollabs />} />
+          <Route path="creators/brands/dashboard/collabs/:offerId" element={<OfferDetailPage />} />
           <Route path="collabs" element={<BrandCollabs />} />
           <Route path="collabs/:offerId" element={<OfferDetailPage />} />
         </Route>

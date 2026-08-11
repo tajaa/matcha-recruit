@@ -146,6 +146,7 @@ class PublicCreatorCard(BaseModel):
     niches: list[str]
     reach_verified: bool
     max_followers: int
+    max_engagement_rate: Optional[float] = None
     min_rate_cents: Optional[int] = None
     platforms: list[str]
 

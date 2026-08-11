@@ -40,6 +40,8 @@ async def list_public_creators(
                        COALESCE((SELECT MAX(COALESCE(s.verified_follower_count, s.follower_count))
                                    FROM cappe_creator_socials s
                                   WHERE s.profile_id = p.id AND s.audit_status != 'flagged'), 0) AS max_followers,
+                       (SELECT MAX(s.engagement_rate) FROM cappe_creator_socials s
+                         WHERE s.profile_id = p.id AND s.audit_status != 'flagged') AS max_engagement_rate,
                        (SELECT MIN(r.price_cents) FROM cappe_creator_rate_cards r
                          WHERE r.profile_id = p.id) AS min_rate_cents,
                        ARRAY(SELECT DISTINCT s.platform FROM cappe_creator_socials s

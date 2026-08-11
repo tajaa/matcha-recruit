@@ -35,7 +35,7 @@ const ACCOUNT_TYPES: {
 ]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
-export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boolean }) {
+export default function CappeSignup({ creatorOnly = false, brandOnly = false }: { creatorOnly?: boolean; brandOnly?: boolean }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [accountType, setAccountType] = useState<CappeAccountType>(
@@ -73,7 +73,7 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
       if (res.access_token && res.refresh_token) {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
-        navigate(creatorOnly ? creatorPaths.home : postAuthHome(res.account?.account_type), { replace: true })
+        navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome : postAuthHome(res.account?.account_type), { replace: true })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -111,7 +111,7 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
             </button>
             .
           </div>
-          <Link to={creatorOnly ? creatorPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -127,15 +127,15 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Create your {creatorOnly ? 'Gummfit Creators' : 'Gummfit'} account
+            Create your {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'brand collab' : 'Gummfit'} account
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {creatorOnly ? 'Build your creator profile and connect with brands.' : 'Build and launch your website in minutes.'}
+            {creatorOnly ? 'Build your creator profile and connect with brands.' : brandOnly ? 'Find Gummfit Creators and manage collaborations.' : 'Build and launch your website in minutes.'}
           </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
-          {!creatorOnly && <div>
+          {!creatorOnly && !brandOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
             <div className="grid grid-cols-3 gap-2">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
@@ -200,13 +200,13 @@ export default function CappeSignup({ creatorOnly = false }: { creatorOnly?: boo
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {creatorOnly ? 'Create creator profile' : 'Create account'}
+            {creatorOnly ? 'Create creator profile' : brandOnly ? 'Create brand profile' : 'Create account'}
           </button>
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link to={creatorOnly ? creatorPaths.login : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
             Sign in
           </Link>
         </p>
