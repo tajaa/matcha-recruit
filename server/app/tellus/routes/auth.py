@@ -19,6 +19,7 @@ from ...database import get_connection
 from ..dependencies import _is_tellus_admin, require_tellus_account
 from ._shared import slugify
 from ..models.admin import TellusPasswordResetConfirm
+from ..models.access import TellusBusinessMembership
 from ..models.tellus import (
     TellusAccount,
     TellusGoogleAuth,
@@ -40,6 +41,7 @@ from ..services.auth import (
     is_tellus_token_revoked,
     verify_password_async,
 )
+from ..services.access_service import list_business_memberships
 from ..services.email import send_tellus_verification_email
 from ..services.geo import geocode_location
 
@@ -144,9 +146,11 @@ async def signup(body: TellusSignup, request: Request, background: BackgroundTas
                         account_id, brand_name, slug, body.location_count,
                     )
                 await conn.execute(
-                    """INSERT INTO tellus_brand_members (brand_id, account_id, role, can_manage_inbox)
-                           VALUES ($1, $2, 'owner', TRUE)
-                           ON CONFLICT (brand_id, account_id) DO UPDATE SET role = 'owner', can_manage_inbox = TRUE""",
+                    """INSERT INTO tellus_brand_members
+                               (brand_id, account_id, role, all_stores, can_manage_inbox)
+                           VALUES ($1, $2, 'owner', TRUE, TRUE)
+                           ON CONFLICT (brand_id, account_id) DO UPDATE
+                              SET role = 'owner', all_stores = TRUE, can_manage_inbox = TRUE""",
                     brand_row["id"], account_id,
                 )
             else:
@@ -369,6 +373,13 @@ async def refresh(body: TellusRefreshRequest, request: Request):
 @router.get("/auth/me", response_model=TellusAccount)
 async def me(account: TellusAccount = Depends(require_tellus_account)):
     return account
+
+
+@router.get("/me/businesses", response_model=list[TellusBusinessMembership])
+async def businesses(account: TellusAccount = Depends(require_tellus_account)):
+    """List active/suspended brand memberships for workspace selection."""
+    async with get_connection() as conn:
+        return await list_business_memberships(conn, account.id)
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)

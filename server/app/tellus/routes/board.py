@@ -35,6 +35,7 @@ from ..models.tellus import (
     TellusTeamMemberAdd,
 )
 from ..services import board_service as bs
+from ..services.access_service import find_brand_access
 from ..services.marketplace_service import serialize_listing
 from ..services.points_service import notify_account
 
@@ -186,22 +187,16 @@ async def get_board(
 ):
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url, plan_status, owner_account_id FROM tellus_brands WHERE slug = $1",
+            "SELECT id, name, slug, logo_url, plan_status FROM tellus_brands WHERE slug = $1",
             slug,
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
 
         board = await conn.fetchrow("SELECT * FROM tellus_boards WHERE brand_id = $1", brand["id"])
-        member_row = await conn.fetchrow(
-            "SELECT role FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
-            brand["id"], account.id,
-        )
-        # Falls back to owner rather than 403ing the brand's own owner out of
-        # their own board — same rationale as resolve_moderated_brand's fallback
-        # for a member row that's somehow missing (board_service.py).
-        viewer_is_mod = member_row is not None or brand["owner_account_id"] == account.id
-        viewer_role = member_row["role"] if member_row is not None else ("owner" if viewer_is_mod else None)
+        access = await find_brand_access(conn, account.id, brand["id"])
+        viewer_is_mod = access is not None and "board.manage" in access.capabilities
+        viewer_role = access.role if viewer_is_mod else None
 
         if not viewer_is_mod:
             if board is None:
@@ -275,7 +270,7 @@ async def get_board(
         brand_slug=brand["slug"], logo_url=brand["logo_url"],
         title=board["title"], description=board["description"], is_active=board["is_active"],
         plan_paused=brand["plan_status"] != "active",
-        viewer_role=viewer_role, posts=posts, total=total,
+        viewer_role=viewer_role, can_manage_board=viewer_is_mod, posts=posts, total=total,
     )
 
 
@@ -285,11 +280,8 @@ async def list_replies(slug: str, post_id: UUID, account: TellusAccount = Depend
         brand = await conn.fetchrow("SELECT id FROM tellus_brands WHERE slug = $1", slug)
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-        member_row = await conn.fetchrow(
-            "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
-            brand["id"], account.id,
-        )
-        viewer_is_mod = member_row is not None
+        access = await find_brand_access(conn, account.id, brand["id"])
+        viewer_is_mod = access is not None and "board.manage" in access.capabilities
 
         post = await conn.fetchrow(
             "SELECT p.id, p.board_id FROM tellus_board_posts p JOIN tellus_boards bo ON bo.id = p.board_id "
@@ -335,7 +327,7 @@ async def create_reply(
 
     async with get_connection() as conn:
         async with conn.transaction():
-            brand = await conn.fetchrow("SELECT id, name, plan_status, owner_account_id FROM tellus_brands WHERE slug = $1", slug)
+            brand = await conn.fetchrow("SELECT id, name, plan_status FROM tellus_brands WHERE slug = $1", slug)
             if brand is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
             board = await conn.fetchrow("SELECT id, is_active FROM tellus_boards WHERE brand_id = $1", brand["id"])
@@ -344,10 +336,8 @@ async def create_reply(
 
             # Brand team members and owners reply as the brand — auto-approved,
             # no moderation. Consumer members go through the held→approve flow.
-            is_privileged = await conn.fetchval(
-                "SELECT 1 FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
-                brand["id"], account.id,
-            ) is not None or brand.get("owner_account_id") == account.id
+            access = await find_brand_access(conn, account.id, brand["id"])
+            is_privileged = access is not None and "board.manage" in access.capabilities
             if not is_privileged:
                 membership = await bs.get_approved_membership(conn, board["id"], account.id)
                 if membership is None:
@@ -846,9 +836,16 @@ async def add_team_member(
 
         try:
             row = await conn.fetchrow(
-                """INSERT INTO tellus_brand_members (brand_id, account_id, role, added_by)
-                       VALUES ($1, $2, 'moderator', $3) RETURNING *""",
+                """INSERT INTO tellus_brand_members
+                           (brand_id, account_id, role, all_stores, added_by)
+                       VALUES ($1, $2, 'staff', TRUE, $3) RETURNING *""",
                 brand["id"], target["id"], account.id,
+            )
+            await conn.execute(
+                """INSERT INTO tellus_brand_member_capabilities (member_id, capability, effect)
+                   VALUES ($1, 'board.manage', 'grant')
+                   ON CONFLICT (member_id, capability) DO UPDATE SET effect = 'grant'""",
+                row["id"],
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already on the team")

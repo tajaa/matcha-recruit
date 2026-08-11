@@ -726,7 +726,8 @@ export interface BoardPage {
   description: string | null
   is_active: boolean
   plan_paused: boolean
-  viewer_role: 'member' | 'moderator' | 'owner'
+  viewer_role: 'member' | 'moderator' | 'owner' | 'admin' | 'location_manager' | 'staff'
+  can_manage_board: boolean
   posts: BoardPost[]
   total: number
 }
@@ -762,7 +763,7 @@ export interface BrandTeamMember {
   id: string
   account_display_name: string
   email: string
-  role: 'owner' | 'moderator'
+  role: 'owner' | 'moderator' | 'admin' | 'location_manager' | 'staff'
   created_at: string
   can_manage_inbox: boolean
 }
@@ -773,7 +774,7 @@ export interface ModeratedBrand {
   brand_id: string
   name: string
   slug: string
-  role: 'owner' | 'moderator'
+  role: 'owner' | 'moderator' | 'admin' | 'location_manager' | 'staff'
 }
 
 export interface BoardManageSummary {
@@ -784,7 +785,7 @@ export interface BoardManageSummary {
   pending_requests: number
   held_replies: number
   member_count: number
-  viewer_role: 'owner' | 'moderator'
+  viewer_role: 'owner' | 'moderator' | 'admin' | 'location_manager' | 'staff'
 }
 
 // GET /board/manage/replies — brand moderation queue row (own shape, distinct

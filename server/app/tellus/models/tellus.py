@@ -844,7 +844,8 @@ class TellusBoardPage(BaseModel):               # GET /boards/{slug}
     description: Optional[str] = None
     is_active: bool
     plan_paused: bool                           # plan lapsed → composer disabled client-side
-    viewer_role: Literal["member", "moderator", "owner"]
+    viewer_role: Literal["member", "moderator", "owner", "admin", "location_manager", "staff"]
+    can_manage_board: bool = False
     posts: list[TellusBoardPost]
     total: int
 
@@ -890,7 +891,7 @@ class TellusBrandTeamMember(BaseModel):
     id: UUID                                    # member row id
     account_display_name: str
     email: str                                  # team page is brand-internal; email OK here
-    role: Literal["owner", "moderator"]
+    role: Literal["owner", "moderator", "admin", "location_manager", "staff"]
     created_at: datetime
     can_manage_inbox: bool = False
 
@@ -907,14 +908,14 @@ class TellusBoardManageSummary(BaseModel):
     pending_requests: int
     held_replies: int
     member_count: int
-    viewer_role: Literal["owner", "moderator"]
+    viewer_role: Literal["owner", "moderator", "admin", "location_manager", "staff"]
 
 
 class TellusModeratedBrand(BaseModel):           # GET /me/moderated-brands
     brand_id: UUID
     name: str
     slug: str
-    role: Literal["owner", "moderator"]
+    role: Literal["owner", "moderator", "admin", "location_manager", "staff"]
 
 
 TellusFeedbackSubmit.model_rebuild()

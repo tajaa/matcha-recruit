@@ -10,7 +10,8 @@ Deps:
   - require_brand          — account_type='brand' (brand_id guaranteed populated)
   - require_tellus_admin   — email in TELLUS_ADMIN_EMAILS (internal changelog only)
 """
-from typing import Optional
+from dataclasses import replace
+from typing import Awaitable, Callable, Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
@@ -19,8 +20,17 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.config import get_settings
 
 from ..database import get_connection
+from .models.access import BrandCapability
 from .models.tellus import TellusAccount
 from .services.auth import decode_tellus_token, is_tellus_token_revoked
+from .services.access_service import (
+    BrandAccessContext,
+    StoreAccessContext,
+    assert_capability,
+    assert_paid_brand,
+    resolve_brand_access,
+    resolve_store_access,
+)
 
 security = HTTPBearer()
 
@@ -176,6 +186,42 @@ async def require_paid_brand(
             detail="This brand account does not have an active subscription.",
         )
     return account
+
+
+async def require_brand_context(
+    brand_id: UUID,
+    account: TellusAccount = Depends(require_tellus_account),
+) -> BrandAccessContext:
+    """Resolve a current active membership for an explicit business ID."""
+    async with get_connection() as conn:
+        context = await resolve_brand_access(conn, account.id, brand_id)
+    return replace(context, account=account)
+
+
+def require_brand_capability(
+    capability: BrandCapability,
+    *,
+    paid: bool = True,
+) -> Callable[..., Awaitable[BrandAccessContext]]:
+    """Build a FastAPI dependency for one business capability."""
+    async def dependency(
+        context: BrandAccessContext = Depends(require_brand_context),
+    ) -> BrandAccessContext:
+        assert_capability(context, capability)
+        if paid:
+            assert_paid_brand(context)
+        return context
+
+    return dependency
+
+
+async def require_store_context(
+    store_id: UUID,
+    brand: BrandAccessContext = Depends(require_brand_context),
+) -> StoreAccessContext:
+    """Resolve an active store that the current membership may access."""
+    async with get_connection() as conn:
+        return await resolve_store_access(conn, brand, store_id)
 
 
 async def require_tellus_admin(

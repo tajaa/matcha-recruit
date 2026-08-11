@@ -88,7 +88,7 @@ struct ModeratedBrand: Codable, Identifiable {
     let brand_id: String
     let name: String
     let slug: String
-    let role: String // "owner" | "moderator"
+    let role: String // owner | admin | location_manager | staff | moderator
     var id: String { brand_id }
 }
 

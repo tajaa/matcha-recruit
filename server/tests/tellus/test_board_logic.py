@@ -219,6 +219,23 @@ class TestBoardSourceGuards:
         for fn in (routes.board.approve_reply, routes.board.reject_reply, routes.board.remove_reply):
             assert "can_reply_transition(" in inspect.getsource(fn)
 
+    def test_board_management_requires_active_board_capability(self):
+        from app.tellus.services import board_service
+
+        src = inspect.getsource(board_service.resolve_moderated_brand)
+        assert "status = 'active'" in src
+        assert '"board.manage"' in src
+        assert "account.account_type" not in src
+        assert "account.brand_id" not in src
+
+    def test_board_feed_uses_capability_for_moderator_visibility(self):
+        from app.tellus import routes
+
+        for fn in (routes.board.get_board, routes.board.list_replies, routes.board.create_reply):
+            src = inspect.getsource(fn)
+            assert "find_brand_access" in src
+            assert '"board.manage"' in src
+
     def test_request_join_blocks_declined_and_removed(self):
         from app.tellus import routes
 

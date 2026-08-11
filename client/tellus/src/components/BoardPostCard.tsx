@@ -23,10 +23,11 @@ function fmtRange(start: string | null, end: string | null): string {
 // server's reply_visible_to predicate is the real gate, this is just what
 // the response already contains.
 export function BoardPostCard({
-  post, viewerRole, slug, brandId, onRedeem, onRemove, paused,
+  post, viewerRole, canManageBoard, slug, brandId, onRedeem, onRemove, paused,
 }: {
   post: BoardPost
-  viewerRole: 'member' | 'moderator' | 'owner'
+  viewerRole: 'member' | 'moderator' | 'owner' | 'admin' | 'location_manager' | 'staff'
+  canManageBoard: boolean
   slug: string
   // Only required for moderator actions (approve/reject) — a caller resolving
   // multiple boards must pass it or /board/replies/* 400s "Specify brand_id".
@@ -35,7 +36,7 @@ export function BoardPostCard({
   onRemove?: (postId: string) => void
   paused?: boolean
 }) {
-  const isMod = viewerRole !== 'member'
+  const isMod = canManageBoard
   const [expanded, setExpanded] = useState(false)
   const [replies, setReplies] = useState<BoardReply[] | null>(null)
   const [loadingReplies, setLoadingReplies] = useState(false)

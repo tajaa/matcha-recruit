@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from ..models.tellus import TellusAccount, TellusBoardPost, TellusBoardReply
+from .access_service import assert_capability, find_brand_access
 from .marketplace_service import serialize_listing
 from .points_service import award_points, notify_account
 
@@ -44,50 +45,34 @@ async def get_approved_membership(conn, board_id: UUID, account_id: UUID) -> Opt
 async def resolve_moderated_brand(
     conn, account: TellusAccount, brand_id: Optional[UUID] = None,
 ) -> tuple[dict, str]:
-    """Which brand is this caller moderating?
-
-    - account_type='brand' and no brand_id param (or brand_id == the account's
-      own brand) → account.brand_id (member row must exist — backfill
-      guarantees it for owners; falls back to 'owner' if somehow absent rather
-      than 404ing the brand's own owner out of their own board).
-    - otherwise (consumer, or a brand-typed account moderating a DIFFERENT
-      brand — e.g. a moderator who later claimed their own brand): look up
-      tellus_brand_members by account_id. Exactly one row → it; brand_id
-      param → verify member; several + no param → 400 'Specify brand_id'.
-    - no membership → 404 (existence-hiding, _get_thread_for_account pattern).
-
-    Returns (brand row incl. plan_status, caller's role ('owner'|'moderator')).
-    """
-    if account.account_type == "brand" and account.brand_id and (
-        brand_id is None or brand_id == account.brand_id
-    ):
-        brand = await conn.fetchrow("SELECT * FROM tellus_brands WHERE id = $1", account.brand_id)
-        if brand is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-        member = await conn.fetchrow(
-            "SELECT role FROM tellus_brand_members WHERE brand_id = $1 AND account_id = $2",
-            account.brand_id, account.id,
-        )
-        role = member["role"] if member is not None else "owner"
-        return dict(brand), role
-
-    rows = await conn.fetch(
-        """SELECT bm.role AS _role, b.*
-           FROM tellus_brand_members bm JOIN tellus_brands b ON b.id = bm.brand_id
-           WHERE bm.account_id = $1""",
-        account.id,
-    )
-    if not rows:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a moderator of any board")
+    """Resolve one active membership with the explicit Board capability."""
     if brand_id is not None:
-        match = next((r for r in rows if r["id"] == brand_id), None)
-        if match is None:
+        context = await find_brand_access(conn, account.id, brand_id)
+        if context is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a moderator of that board")
-        return dict(match), match["_role"]
-    if len(rows) > 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Specify brand_id")
-    row = rows[0]
-    return dict(row), row["_role"]
+        assert_capability(context, "board.manage")
+    else:
+        rows = await conn.fetch(
+            """SELECT brand_id
+               FROM tellus_brand_members
+               WHERE account_id = $1 AND status = 'active'""",
+            account.id,
+        )
+        contexts = []
+        for row in rows:
+            candidate = await find_brand_access(conn, account.id, row["brand_id"])
+            if candidate is not None and "board.manage" in candidate.capabilities:
+                contexts.append(candidate)
+        if len(contexts) > 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Specify brand_id")
+        if not contexts:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not a moderator of any board")
+        context = contexts[0]
+
+    brand = await conn.fetchrow("SELECT * FROM tellus_brands WHERE id = $1", context.brand_id)
+    if brand is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    return dict(brand), context.role
 
 
 def require_active_plan(brand_row: dict) -> None:

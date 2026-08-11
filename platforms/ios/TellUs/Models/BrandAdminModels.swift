@@ -140,7 +140,7 @@ struct BrandTeamMember: Codable, Identifiable {
     let id: String
     let account_display_name: String
     let email: String
-    let role: String   // "owner" | "moderator"
+    let role: String   // owner | admin | location_manager | staff | moderator
     let created_at: String
     var can_manage_inbox: Bool
 

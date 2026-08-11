@@ -96,7 +96,7 @@ export default function BoardFeed() {
         <div className="space-y-3">
           {posts.map((p) => (
             <BoardPostCard
-              key={p.id} post={p} viewerRole={page.viewer_role} slug={slug} brandId={page.brand_id} onRedeem={redeem}
+              key={p.id} post={p} viewerRole={page.viewer_role} canManageBoard={page.can_manage_board} slug={slug} brandId={page.brand_id} onRedeem={redeem}
               paused={page.plan_paused || !page.is_active}
             />
           ))}

@@ -75,5 +75,5 @@ enum ListingVisibility: String, Codable {
 }
 
 enum BoardViewerRole: String, Codable, FallbackDecodable {
-    case member, moderator, owner, unknown
+    case member, moderator, owner, admin, location_manager, staff, unknown
 }

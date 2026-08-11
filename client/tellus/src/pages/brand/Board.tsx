@@ -377,7 +377,7 @@ function PostsSection({ page, qs, onChanged }: { page: BoardPage; qs: string; on
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <BoardPostCard post={p} viewerRole={page.viewer_role} slug={page.brand_slug} brandId={page.brand_id} onRemove={remove} />
+                <BoardPostCard post={p} viewerRole={page.viewer_role} canManageBoard={page.can_manage_board} slug={page.brand_slug} brandId={page.brand_id} onRemove={remove} />
               </div>
             )
           ))}
