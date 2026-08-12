@@ -171,7 +171,8 @@ class TestExecuteNoProposal:
 class TestProposeClarify(unittest.TestCase):
     """A build_edit_proposal 'clarify' result (ambiguous shift, e.g. several
     shifts share the target date) has no thread-side round-trip — propose()
-    surfaces it as a refusal instead of staging an unconfirmable proposal.
+    surfaces it as a terminal clarification instead of staging an
+    unconfirmable proposal.
     Previously that refusal kept only the question's first line, dropping
     the numbered candidate list the model needs to relay back to the admin
     — the real failure behind "Assign Elena to one of them" going nowhere."""
@@ -194,12 +195,44 @@ class TestProposeClarify(unittest.TestCase):
                 args={"kind": "assign", "to_employee_name": "Elena", "target_date": "2026-08-07"},
             ))
 
-        assert "error" in result
-        assert "Aisha Kim" in result["error"]  # first option survived
-        assert "unstaffed" in result["error"]  # second option survived
-        assert "target_time_hint" in result["error"]
-        assert "target_staffing_hint" in result["error"]
+        assert result["status"] == "clarify"
+        assert "Aisha Kim" in result["message"]  # first option survived
+        assert "unstaffed" in result["message"]  # second option survived
+        assert "shift time" in result["message"]
+        assert "employee" in result["message"]
+        assert "staffed or unstaffed" in result["message"]
         # Channel-only UX ("reply to the pill") has no meaning in a thread,
-        # and directly contradicts the very next sentence telling the model
-        # to call the tool again.
-        assert "Just reply to this message" not in result["error"]
+        # and directly contradicts terminal handling in the agent loop.
+        assert "Just reply to this message" not in result["message"]
+        assert "Ask the admin" not in result["message"]
+
+    def test_success_returns_ready_result(self):
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="Schedule change pill",
+        )
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "assign", "to_employee_name": "Elena", "target_date": "2026-08-07"},
+            ))
+
+        assert result == {
+            "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
+        }
+
+    def test_builder_exception_returns_refused_result(self):
+        async def failing_build_edit_proposal(*args, **kwargs):
+            raise RuntimeError("database unavailable")
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", failing_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={"kind": "assign", "to_employee_name": "Elena", "target_date": "2026-08-07"},
+            ))
+
+        assert result["status"] == "refused"
+        assert "Schedule page" in result["message"]

@@ -21,15 +21,22 @@ matching `schedule_chat` executor.
 
 A `build_*` call that comes back `kind='clarify'` (ambiguous shift, unknown
 employee, ...) has no home here — threads have no per-pill clarify-answer
-round trip the way channels do — so it's surfaced as a refusal asking the
-admin to be more specific, not staged. That's a deliberate v1 scope cut,
-not an oversight."""
+round trip the way channels do — so it's surfaced as a terminal clarification
+asking the admin to be more specific, not staged. That's a deliberate v1
+scope cut, not an oversight."""
 
 from datetime import date as _date
-from typing import Any, Optional
+from typing import Any, Literal, NotRequired, Optional, TypedDict
 from uuid import UUID
 
 _ALLOWED_ROLES = frozenset({"client", "admin"})
+
+
+class ScheduleProposalResult(TypedDict):
+    status: Literal["ready", "clarify", "refused"]
+    message: NotRequired[str]
+    proposal_id: NotRequired[str]
+    pill_text: NotRequired[str]
 
 
 def _coerce_tool_shift_request(args: dict[str, Any]) -> dict[str, Any]:
@@ -93,10 +100,14 @@ async def find_coverage(
 
 async def propose(
     conn, *, company_id: UUID, actor_user_id: UUID, args: dict[str, Any],
-) -> dict[str, Any]:
-    """STAGE-turn resolution. Returns `{"error": str}` (refuse staging
-    outright — same contract `parse_attachment_for_staging` uses) or
-    `{"proposal_id", "pill_text"}` to merge into the staged dict."""
+) -> ScheduleProposalResult:
+    """Resolve a STAGE-turn request without executing it.
+
+    ``clarify`` and ``refused`` are terminal for the current Huume turn. A
+    thread has no channel pill-reply round trip, so the caller must relay the
+    message and wait for the admin's next turn rather than asking Gemini to
+    retry the same deterministic resolution.
+    """
     from app.matcha.services.scheduling import schedule_chat
 
     kind = str(args.get("kind") or "").strip().lower()
@@ -117,7 +128,11 @@ async def propose(
         else:
             edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
             if edit_req is None:
-                return {"error": "I don't have enough to make that change — who, and which shift?"}
+                return {
+                    "status": "clarify",
+                    "message": "I need the employee and the specific shift before I can make that change. "
+                               "Reply with the shift date and time, or the employee currently assigned.",
+                }
             parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": [edit_req]}
             build = await schedule_chat.build_edit_proposal(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
@@ -125,7 +140,7 @@ async def propose(
                 original_content=f"[huume thread] {kind} request",
             )
     except Exception:
-        return {"error": "That failed just now — try the Schedule page instead."}
+        return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}
 
     if build.kind == "clarify":
         # No threaded clarify round-trip (v1 scope cut) — ask the admin to
@@ -139,14 +154,15 @@ async def propose(
         # instead — leaving both in was a direct contradiction.
         text = build.pill_text.removeprefix("\U0001F4C5 ").strip()
         text = text.removesuffix("Just reply to this message.").strip()
-        return {"error": (
-            f"{text}\nAsk the admin which one they mean, then call "
-            f"propose_schedule_change again adding target_time_hint (e.g. "
-            f"'12:30pm'), target_employee_name, or — if the candidates differ "
-            f"only by who's on them — target_staffing_hint ('staffed' or "
-            f"'unstaffed') to pin down the shift."
+        return {"status": "clarify", "message": (
+            f"{text}\nReply with the shift time, employee, or whether you mean the "
+            "staffed or unstaffed shift."
         )}
-    return {"proposal_id": str(build.proposal_id), "pill_text": build.pill_text}
+    return {
+        "status": "ready",
+        "proposal_id": str(build.proposal_id),
+        "pill_text": build.pill_text,
+    }
 
 
 async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, Any]) -> dict[str, Any]:

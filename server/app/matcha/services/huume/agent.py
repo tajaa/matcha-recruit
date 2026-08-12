@@ -37,7 +37,7 @@ import logging
 import time
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator, Literal, Optional
 from uuid import UUID, uuid4
 
 from google.genai import types
@@ -62,6 +62,24 @@ logger = logging.getLogger(__name__)
 # (confirm-turn) tier runs routing.FLASH_LITE instead (see routing.TIERS).
 _MODEL = routing.FLASH
 _MAX_MODEL_CALLS = 8
+_MAX_SCHEDULE_PROPOSALS_PER_TURN = 1
+_MAX_TURN_PROMPT_TOKENS = 100_000
+
+
+def _turn_bound_reason(
+    *,
+    model_calls: int,
+    elapsed_seconds: float,
+    prompt_tokens: int,
+) -> Optional[Literal["model_call_limit", "wall_clock_limit", "prompt_token_limit"]]:
+    """Return the first outer-loop bound that has been reached."""
+    if model_calls >= _MAX_MODEL_CALLS:
+        return "model_call_limit"
+    if elapsed_seconds >= _WALL_CLOCK_SECONDS:
+        return "wall_clock_limit"
+    if prompt_tokens >= _MAX_TURN_PROMPT_TOKENS:
+        return "prompt_token_limit"
+    return None
 
 
 def _rate_limit_disposition(model_calls: int) -> str:
@@ -159,6 +177,25 @@ def _accumulate_usage(total: dict[str, int], usage: Any) -> None:
         ("cached_tokens", "cached_content_token_count"),
     ):
         total[key] = total.get(key, 0) + (getattr(usage, attr, 0) or 0)
+
+
+def _tool_call_fingerprint(name: str, args: dict[str, Any]) -> str:
+    """Canonical per-turn identity for a tool call, used for retry guards."""
+    canonical = json.dumps(
+        _json_safe(args), sort_keys=True, separators=(",", ":"), default=str,
+    )
+    return f"{name}:{canonical}"
+
+
+def _is_confirming_schedule_call(args: dict[str, Any], pre_turn_action: Any) -> bool:
+    """Return whether a schedule call is the staged action's next-turn confirm."""
+    return (
+        isinstance(pre_turn_action, dict)
+        and pre_turn_action.get("type") == "schedule_change"
+        and pre_turn_action.get("status") == "proposed"
+        and bool(args.get("confirm_id"))
+        and str(args.get("confirm_id")) == str(pre_turn_action.get("confirm_id") or "")
+    )
 
 
 _MAX_IMAGE_PARTS = 6
@@ -547,6 +584,13 @@ async def run_huume_turn(
     started = time.monotonic()
     total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
                    "thinking_tokens": 0, "cached_tokens": 0}
+    schedule_proposal_attempts = 0
+    schedule_proposal_fingerprints: set[str] = set()
+    duplicate_tool_calls_blocked = 0
+    tool_retry_limit_blocks = 0
+    tool_rejections = 0
+    stop_reason: Optional[str] = None
+    terminal_message: Optional[str] = None
 
     def elapsed() -> float:
         return time.monotonic() - started
@@ -1011,13 +1055,18 @@ async def run_huume_turn(
                         proposed = await schedule_skill.propose(
                             _conn, company_id=company_id, actor_user_id=user_id, args=args,
                         )
-                    if proposed.get("error"):
+                    proposal_status = proposed.get("status")
+                    if proposal_status != "ready":
+                        message = str(proposed.get("message") or "That schedule change could not be staged.")
                         step = recorder.record(
                             tool=name, kind="staged", label="Schedule change not staged",
-                            status="rejected", detail=proposed["error"],
+                            status="rejected", detail=message,
                         )
-                        return {"status": "refused", "message": proposed["error"]}, step
-                    staged.update({k: v for k, v in proposed.items() if k != "error"})
+                        return {
+                            "status": proposal_status or "refused",
+                            "message": message,
+                        }, step
+                    staged.update({k: v for k, v in proposed.items() if k != "status"})
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
@@ -1428,9 +1477,23 @@ async def run_huume_turn(
 
     try:
         while True:
-            if model_calls >= _MAX_MODEL_CALLS or elapsed() >= _WALL_CLOCK_SECONDS:
-                logger.info("Huume agent hit its bound (calls=%s, elapsed=%.1fs)", model_calls, elapsed())
+            bound_reason = _turn_bound_reason(
+                model_calls=model_calls,
+                elapsed_seconds=elapsed(),
+                prompt_tokens=total_usage["prompt_tokens"],
+            )
+            if bound_reason:
+                stop_reason = bound_reason
+                logger.info(
+                    "Huume agent hit its bound (reason=%s calls=%s elapsed=%.1fs prompt_tokens=%s)",
+                    bound_reason, model_calls, elapsed(), total_usage["prompt_tokens"],
+                )
                 yield {"type": "status", "message": "Wrapping up…"}
+                if bound_reason == "prompt_token_limit":
+                    final_message = (
+                        "I reached this turn's AI budget, so I stopped before making "
+                        "another request. See the completed steps above."
+                    )
                 break
 
             await rate_limiter.check_limit("huume", "agent")
@@ -1502,6 +1565,47 @@ async def run_huume_turn(
                     recorder.record(tool="finish", kind="finish", label="Done", status="ok", args=args)
                     continue
 
+                if name == "propose_schedule_change" and not _is_confirming_schedule_call(args, pre_turn_action):
+                    fingerprint = _tool_call_fingerprint(name, args)
+                    if fingerprint in schedule_proposal_fingerprints:
+                        duplicate_tool_calls_blocked += 1
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Schedule change retry blocked",
+                            status="rejected", detail="The same schedule proposal was already attempted this turn.",
+                            args=args,
+                        )
+                        payload = {
+                            "status": "refused",
+                            "message": "I already tried that exact schedule change this turn. "
+                                       "Please provide a different shift detail in your next message.",
+                        }
+                        tool_rejections += 1
+                        terminal_message = payload["message"]
+                        stop_reason = "schedule_duplicate_blocked"
+                        yield {"type": "step", "data": step}
+                        response_parts.append(types.Part.from_function_response(name=name, response=payload))
+                        break
+                    if schedule_proposal_attempts >= _MAX_SCHEDULE_PROPOSALS_PER_TURN:
+                        tool_retry_limit_blocks += 1
+                        step = recorder.record(
+                            tool=name, kind="staged", label="Schedule change retry blocked",
+                            status="rejected", detail="Only one schedule proposal is allowed per turn.",
+                            args=args,
+                        )
+                        payload = {
+                            "status": "refused",
+                            "message": "I can only attempt one schedule proposal per turn. "
+                                       "Please provide the missing shift detail in your next message.",
+                        }
+                        tool_rejections += 1
+                        terminal_message = payload["message"]
+                        stop_reason = "schedule_retry_limit"
+                        yield {"type": "step", "data": step}
+                        response_parts.append(types.Part.from_function_response(name=name, response=payload))
+                        break
+                    schedule_proposal_attempts += 1
+                    schedule_proposal_fingerprints.add(fingerprint)
+
                 tool = TOOLS_BY_NAME.get(name)
                 if tool and tool.kind == "staged":
                     yield {"type": "status", "message": f"Proposing: {name.replace('_', ' ')}…"}
@@ -1544,6 +1648,20 @@ async def run_huume_turn(
                     yield {"type": "step", "data": step}
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
+                if name == "propose_schedule_change" and payload.get("status") in {"clarify", "refused"}:
+                    tool_rejections += 1
+                    terminal_message = str(payload.get("message") or "The schedule change could not be completed.")
+                    stop_reason = (
+                        "schedule_clarification"
+                        if payload.get("status") == "clarify"
+                        else "schedule_refused"
+                    )
+                    break
+
+            if terminal_message:
+                final_message = terminal_message
+                break
+
             if finished:
                 final_message = finish_message
                 break
@@ -1585,6 +1703,12 @@ async def run_huume_turn(
     total_usage["model"] = tier.planner_model
     total_usage["tier"] = tier_name
     total_usage["estimated"] = False
+    if stop_reason:
+        total_usage["stop_reason"] = stop_reason
+    total_usage["schedule_proposal_attempts"] = schedule_proposal_attempts
+    total_usage["duplicate_tool_calls_blocked"] = duplicate_tool_calls_blocked
+    total_usage["tool_retry_limit_blocks"] = tool_retry_limit_blocks
+    total_usage["tool_rejections"] = tool_rejections
 
     result_data: dict[str, Any] = {
         "message": final_message,
