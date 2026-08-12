@@ -163,6 +163,15 @@ def replace_credits(
     return rows
 
 
+@router.get("/{recording_id}/credits", response_model=list[CreditRead])
+def list_credits(recording_id: uuid.UUID, db: Session = Depends(get_db)):
+    if db.get(Recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return db.scalars(
+        sa.select(Credit).where(Credit.recording_id == recording_id).order_by(Credit.position, Credit.id)
+    ).all()
+
+
 @router.put("/{recording_id}/works")
 def replace_works(
     recording_id: uuid.UUID, payload: WorkLinksIn, db: Session = Depends(get_db)

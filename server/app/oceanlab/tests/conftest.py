@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from fastapi.testclient import TestClient
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.oceanlab.config import settings
 from app.oceanlab.db import get_db
+from app.core.dependencies import require_admin
 from app.oceanlab.main import app
 from app.oceanlab.models.base import Base
 
@@ -28,6 +31,31 @@ def _ensure_test_token():
     if not settings.token:
         settings.token = "oceanlab-test-token"
     settings.storage_mode = "local"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _test_master_admin_override():
+    """Keep the standalone Oceanlab DB tests independent from Matcha's users DB.
+
+    Production routes use ``require_admin`` and therefore the platform JWT plus
+    master-admin email. The standalone suite only has Oceanlab tables, so this
+    fixture supplies the same request boundary without inventing a production
+    auth mechanism or requiring the monolith's users schema in oceanlab_test.
+    """
+    bearer = HTTPBearer(auto_error=False)
+
+    async def _admin(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)):
+        if not settings.token:
+            raise HTTPException(status_code=503, detail="Oceanlab auth not configured")
+        if credentials is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        if credentials.credentials != settings.token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+        return {"email": "tajatheprince@gmail.com", "role": "admin"}
+
+    app.dependency_overrides[require_admin] = _admin
+    yield
+    app.dependency_overrides.pop(require_admin, None)
 
 
 # The oceanlab schema now ships as a hand-SQL migration in matcha's shared

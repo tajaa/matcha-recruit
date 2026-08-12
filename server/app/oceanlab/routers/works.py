@@ -82,3 +82,10 @@ def replace_writers(work_id: uuid.UUID, payload: list[WorkWriterIn], db: Session
     for row in rows:
         db.refresh(row)
     return rows
+
+
+@router.get("/works/{work_id}/writers", response_model=list[WorkWriterRead])
+def list_writers(work_id: uuid.UUID, db: Session = Depends(get_db)):
+    if db.get(Work, work_id) is None:
+        raise HTTPException(status_code=404, detail="Work not found")
+    return db.scalars(sa.select(WorkWriter).where(WorkWriter.work_id == work_id).order_by(WorkWriter.id)).all()

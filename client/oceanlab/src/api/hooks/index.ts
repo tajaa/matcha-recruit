@@ -59,6 +59,15 @@ export interface Recording {
   version?: string | null
   isrc?: string | null
   primary_artist_id: string
+  explicit?: boolean | null
+  language?: string | null
+  recording_year?: number | null
+  audio_file_id?: string | null
+  duration_seconds?: string | null
+  sample_rate?: number | null
+  bit_depth?: number | null
+  channels?: number | null
+  audio_format?: string | null
 }
 
 // Fields the server's TrackRead schema actually returns.
@@ -96,6 +105,15 @@ export function useCreateArtist() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: async (payload: { name: string }) => (await apiClient.post<Artist>('/artists', payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['artists'] }),
+  })
+}
+
+export function useUpdateArtist(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { name: string; sort_name?: string | null; country?: string | null; notes?: string | null }) =>
+      (await apiClient.patch<Artist>(`/artists/${id}`, payload)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['artists'] }),
   })
 }
@@ -194,6 +212,106 @@ export function useCreateRecording() {
   })
 }
 
+export function useCreateContributor() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { name: string; legal_name?: string; ipi_number?: string; pro_affiliation?: string }) =>
+      (await apiClient.post<Contributor>('/contributors', payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['contributors'] }),
+  })
+}
+
+export function useUpdateContributor(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Partial<Contributor>) =>
+      (await apiClient.patch<Contributor>(`/contributors/${id}`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['contributors'] }),
+  })
+}
+
+export function useCreateWork() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { title: string; language?: string }) =>
+      (await apiClient.post<Work>('/works', payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['works'] }),
+  })
+}
+
+export function useUpdateRecording(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Partial<Recording>) =>
+      (await apiClient.patch<Recording>(`/recordings/${id}`, payload)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recordings'] })
+      qc.invalidateQueries({ queryKey: ['releases'] })
+    },
+  })
+}
+
+export function useUpdateRecordingSplits(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Array<{ contributor_id: string; role?: string | null; share_pct: string }>) =>
+      (await apiClient.put(`/recordings/${id}/splits`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recordings', id, 'splits'] }),
+  })
+}
+
+export function useUpdateRecordingWorks(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (work_ids: string[]) =>
+      (await apiClient.put(`/recordings/${id}/works`, { work_ids })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recordings', id, 'works'] }),
+  })
+}
+
+export interface ValidationIssue {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  field?: string | null
+  track_id?: string | null
+}
+
+export interface ValidationReport {
+  packageable: boolean
+  issues: ValidationIssue[]
+}
+
+export function useValidation(releaseId: string | undefined) {
+  return useQuery({
+    queryKey: ['releases', releaseId, 'validation'],
+    queryFn: async () => (await apiClient.get<ValidationReport>(`/releases/${releaseId}/validation`)).data,
+    enabled: !!releaseId,
+  })
+}
+
+export function useMarkReleaseReady(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => (await apiClient.post<ValidationReport>(`/releases/${id}/ready`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['releases', id] })
+      qc.invalidateQueries({ queryKey: ['releases', id, 'validation'] })
+    },
+  })
+}
+
+export function useStartPackage(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => (await apiClient.post<{ delivery_id: string; job_id: string }>(`/releases/${id}/package`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['releases', id] })
+      qc.invalidateQueries({ queryKey: ['releases', id, 'validation'] })
+    },
+  })
+}
+
 export interface MasterSplit {
   id: string
   recording_id: string
@@ -218,11 +336,74 @@ export function useRecordingSplits(recordingId: string | undefined) {
   })
 }
 
+export interface Credit {
+  id: string
+  recording_id: string
+  contributor_id: string
+  role: string
+  credited_as?: string | null
+  position: number
+}
+
+export function useRecordingCredits(recordingId: string | undefined) {
+  return useQuery({
+    queryKey: ['recordings', recordingId, 'credits'],
+    queryFn: async () => (await apiClient.get<Credit[]>(`/recordings/${recordingId}/credits`)).data,
+    enabled: !!recordingId,
+  })
+}
+
+export function useUpdateRecordingCredits(id: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Array<{ contributor_id: string; role: string; credited_as?: string | null; position: number }>) =>
+      (await apiClient.put(`/recordings/${id}/credits`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['recordings', id, 'credits'] }),
+  })
+}
+
 export function useRecordingWorks(recordingId: string | undefined) {
   return useQuery({
     queryKey: ['recordings', recordingId, 'works'],
     queryFn: async () => (await apiClient.get<Work[]>(`/recordings/${recordingId}/works`)).data,
     enabled: !!recordingId,
+  })
+}
+
+export interface WorkWriter {
+  id: string
+  work_id: string
+  contributor_id: string
+  role: string
+  share_pct: string
+  publisher_name?: string | null
+  publisher_share_pct?: string | null
+  auto_created: boolean
+}
+
+export function useWorkWriters(workId: string | undefined) {
+  return useQuery({
+    queryKey: ['works', workId, 'writers'],
+    queryFn: async () => (await apiClient.get<WorkWriter[]>(`/works/${workId}/writers`)).data,
+    enabled: !!workId,
+  })
+}
+
+export function useUpdateWorkWriters(workId: string | undefined) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Array<{ contributor_id: string; role: string; share_pct: string; publisher_name?: string | null; publisher_share_pct?: string | null }>) =>
+      (await apiClient.put(`/works/${workId}/writers`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['works', workId, 'writers'] }),
+  })
+}
+
+export function useUpdateTrack(trackId: string, releaseId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: { title_override?: string | null }) =>
+      (await apiClient.patch<TrackBase>(`/tracks/${trackId}`, payload)).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['releases', releaseId, 'tracks'] }),
   })
 }
 

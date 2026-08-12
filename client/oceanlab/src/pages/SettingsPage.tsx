@@ -5,6 +5,9 @@ import { MutationError } from '../components/MutationError'
 import {
   useArtists,
   useContributors,
+  useCreateContributor,
+  useUpdateContributor,
+  useUpdateArtist,
   useLabelSettings,
   useUnassignUpc,
   useUpcs,
@@ -61,6 +64,8 @@ export function SettingsPage() {
   const [newPassword, setNewPassword] = useState('')
   const [passwordMessage, setPasswordMessage] = useState('')
   const [labelDraft, setLabelDraft] = useState<LabelSettings | null>(null)
+  const createContributor = useCreateContributor()
+  const [newContributorName, setNewContributorName] = useState('')
 
   useEffect(() => {
     if (labelSettings) setLabelDraft(labelSettings)
@@ -73,6 +78,20 @@ export function SettingsPage() {
   return (
       <div className="p-6 max-w-lg flex flex-col gap-8">
       <h1 className="text-2xl font-semibold">Settings</h1>
+
+      <section>
+        <h2 className="font-medium mb-2">Artists and contributors</h2>
+        <p className="text-xs text-neutral-500 mb-2">Keep names and rights identities reusable across releases.</p>
+        <div className="flex gap-2 mb-3">
+          <input className="border rounded px-2 py-1 text-sm flex-1" placeholder="New contributor name" value={newContributorName} onChange={(e) => setNewContributorName(e.target.value)} />
+          <button className="px-3 py-1.5 rounded bg-black text-white text-sm disabled:opacity-50" disabled={!newContributorName.trim() || createContributor.isPending} onClick={() => createContributor.mutate({ name: newContributorName.trim() }, { onSuccess: () => setNewContributorName('') })}>Add contributor</button>
+        </div>
+        <MutationError error={createContributor.error} />
+        <div className="flex flex-col gap-2">
+          {artists?.items.map((artist) => <ArtistRow key={artist.id} artist={artist} />)}
+          {contributors?.items.map((contributor) => <ContributorRow key={contributor.id} contributor={contributor} />)}
+        </div>
+      </section>
 
       <section>
         <h2 className="font-medium mb-2">Label defaults</h2>
@@ -299,4 +318,16 @@ export function SettingsPage() {
       </section>
     </div>
   )
+}
+
+function ArtistRow({ artist }: { artist: { id: string; name: string; notes?: string | null } }) {
+  const update = useUpdateArtist(artist.id)
+  const [name, setName] = useState(artist.name)
+  return <label className="flex gap-2 items-center text-xs"><span className="w-20 text-neutral-500">Artist</span><input className="border rounded px-2 py-1 flex-1" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== artist.name && update.mutate({ name })} /></label>
+}
+
+function ContributorRow({ contributor }: { contributor: { id: string; name: string } }) {
+  const update = useUpdateContributor(contributor.id)
+  const [name, setName] = useState(contributor.name)
+  return <label className="flex gap-2 items-center text-xs"><span className="w-20 text-neutral-500">Contributor</span><input className="border rounded px-2 py-1 flex-1" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => name !== contributor.name && update.mutate({ name })} /></label>
 }

@@ -1,24 +1,34 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   useAddTrack,
   useAssignIsrc,
   useArtists,
   useCreateRecording,
+  useContributors,
   useDeleteTrack,
   useRecordings,
   useRecordingSplits,
   useRecordingWorks,
+  useRecordingCredits,
+  useUpdateRecordingCredits,
+  useUpdateRecordingSplits,
+  useUpdateWorkWriters,
+  useWorkWriters,
+  useUpdateRecording,
+  useUpdateTrack,
   useReorderTracks,
   useTracks,
   type Track,
 } from '../api/hooks'
 import { displayIsrc } from '../lib/format'
+import { uploadWithProgress } from '../lib/upload'
 import { MutationError } from './MutationError'
 
 export function TracksTab({ releaseId }: { releaseId: string }) {
   const { data: tracks, isLoading, isError } = useTracks(releaseId)
   const { data: recordings } = useRecordings()
   const { data: artists } = useArtists()
+  const { data: contributors } = useContributors()
   const addTrack = useAddTrack(releaseId)
   const reorderTracks = useReorderTracks(releaseId)
   const deleteTrack = useDeleteTrack(releaseId)
@@ -29,8 +39,14 @@ export function TracksTab({ releaseId }: { releaseId: string }) {
   const [discNumber, setDiscNumber] = useState(1)
   const [newRecordingTitle, setNewRecordingTitle] = useState('')
   const [newRecordingArtist, setNewRecordingArtist] = useState('')
+  const [audioProgress, setAudioProgress] = useState(0)
+  const [audioError, setAudioError] = useState('')
   const { data: splits } = useRecordingSplits(selectedRecording)
   const { data: works } = useRecordingWorks(selectedRecording)
+  const { data: credits } = useRecordingCredits(selectedRecording)
+  const updateRecording = useUpdateRecording(selectedRecording)
+  const updateSplits = useUpdateRecordingSplits(selectedRecording)
+  const updateCredits = useUpdateRecordingCredits(selectedRecording)
 
   if (isError) return <div className="text-sm text-red-600">Failed to load tracks.</div>
   if (isLoading) return <div className="text-sm text-neutral-500">Loading tracks...</div>
@@ -67,11 +83,8 @@ export function TracksTab({ releaseId }: { releaseId: string }) {
                 {discTracks.map((track, idx) => (
                   <tr key={track.id} className="border-b">
                     <td className="py-1.5 pr-2 w-16 text-neutral-500">{track.position}.</td>
-                    <td className="py-1.5 pr-2">
-                      {track.recording_title}
-                      {track.title_override && (
-                        <span className="text-neutral-500"> ({track.title_override})</span>
-                      )}
+                     <td className="py-1.5 pr-2">
+                       <TrackTitleEditor track={track} releaseId={releaseId} />
                     </td>
                     <td className="py-1.5 pr-2 text-xs text-neutral-500 whitespace-nowrap">
                       {track.recording_isrc ? (
@@ -221,8 +234,146 @@ export function TracksTab({ releaseId }: { releaseId: string }) {
               {work.auto_created && <span className="rounded border px-1 text-[10px]">auto</span>}
             </div>
           ))}
+          <RecordingMetadataEditor
+            recordingId={selectedRecording}
+            splits={splits ?? []}
+            credits={credits ?? []}
+            works={works ?? []}
+            contributors={contributors?.items ?? []}
+            onSaveSplits={(payload) => updateSplits.mutate(payload)}
+            onSaveCredits={(payload) => updateCredits.mutate(payload)}
+          />
         </div>
       )}
+      {selectedRecording && (
+        <div className="border-t pt-4 text-sm">
+          <h3 className="text-xs font-medium text-neutral-500 mb-2">Master metadata</h3>
+          <div className="flex flex-wrap gap-2 items-center">
+            <label className="border rounded px-2 py-1 text-xs cursor-pointer">
+              Upload WAV/FLAC
+              <input
+                className="hidden"
+                type="file"
+                accept="audio/wav,audio/x-wav,audio/flac,.wav,.flac"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setAudioError('')
+                  setAudioProgress(0)
+                  try {
+                    await uploadWithProgress(`/api/oceanlab/recordings/${selectedRecording}/audio`, file, {}, setAudioProgress)
+                  } catch (error) {
+                    setAudioError(error instanceof Error ? error.message : 'Master upload failed')
+                  }
+                }}
+              />
+            </label>
+            <label className="flex gap-1 items-center text-xs"><input type="checkbox" onChange={(e) => updateRecording.mutate({ explicit: e.target.checked })} /> Explicit</label>
+            <input className="border rounded px-2 py-1 text-xs w-20" placeholder="lang" maxLength={2} onBlur={(e) => e.target.value && updateRecording.mutate({ language: e.target.value })} />
+          </div>
+          {audioProgress > 0 && audioProgress < 100 && <p className="text-xs mt-2">Uploading master: {audioProgress}%</p>}
+          {audioError && <p className="text-xs text-red-600 mt-2">{audioError} The existing master was kept.</p>}
+          <MutationError error={updateRecording.error} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TrackTitleEditor({ track, releaseId }: { track: Track; releaseId: string }) {
+  const [value, setValue] = useState(track.title_override ?? '')
+  const update = useUpdateTrack(track.id, releaseId)
+  return (
+    <input
+      className="border-0 bg-transparent p-0 text-sm w-full focus:ring-1 focus:ring-black"
+      aria-label={`Track ${track.position} title`}
+      value={value}
+      placeholder={track.recording_title}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => value !== (track.title_override ?? '') && update.mutate({ title_override: value || null })}
+    />
+  )
+}
+
+function RecordingMetadataEditor({
+  recordingId: _recordingId,
+  splits,
+  credits,
+  works,
+  contributors,
+  onSaveSplits,
+  onSaveCredits,
+}: {
+  recordingId: string
+  splits: Array<{ contributor_id: string; role: string | null; share_pct: string }>
+  credits: Array<{ contributor_id: string; role: string; credited_as?: string | null; position: number }>
+  works: Array<{ id: string; title: string }>
+  contributors: Array<{ id: string; name: string }>
+  onSaveSplits: (payload: Array<{ contributor_id: string; role?: string | null; share_pct: string }>) => void
+  onSaveCredits: (payload: Array<{ contributor_id: string; role: string; credited_as?: string | null; position: number }>) => void
+}) {
+  const [splitDraft, setSplitDraft] = useState(splits.map((row) => ({ contributor_id: row.contributor_id, role: row.role, share_pct: row.share_pct })))
+  const [creditDraft, setCreditDraft] = useState(credits.map((row) => ({ contributor_id: row.contributor_id, role: row.role, credited_as: row.credited_as ?? '', position: row.position })))
+  return (
+    <div className="mt-4 flex flex-col gap-4">
+      <div>
+        <h4 className="text-xs font-medium text-neutral-500 mb-2">Master ownership splits</h4>
+        {splitDraft.map((row, index) => (
+          <div key={`${row.contributor_id}-${index}`} className="flex gap-2 mb-1">
+            <select className="border rounded px-1 py-1 text-xs flex-1" value={row.contributor_id} onChange={(e) => setSplitDraft((current) => current.map((item, i) => i === index ? { ...item, contributor_id: e.target.value } : item))}>
+              {contributors.map((contributor) => <option key={contributor.id} value={contributor.id}>{contributor.name}</option>)}
+            </select>
+            <input className="border rounded px-1 py-1 text-xs w-20" type="number" min="0" max="100" step="0.001" value={row.share_pct} onChange={(e) => setSplitDraft((current) => current.map((item, i) => i === index ? { ...item, share_pct: e.target.value } : item))} />
+          </div>
+        ))}
+        <button className="border rounded px-2 py-1 text-xs" onClick={() => onSaveSplits(splitDraft)}>Save splits</button>
+      </div>
+      <div>
+        <h4 className="text-xs font-medium text-neutral-500 mb-2">Credits</h4>
+        {creditDraft.map((row, index) => (
+          <div key={`${row.contributor_id}-${index}`} className="flex gap-2 mb-1">
+            <select className="border rounded px-1 py-1 text-xs flex-1" value={row.contributor_id} onChange={(e) => setCreditDraft((current) => current.map((item, i) => i === index ? { ...item, contributor_id: e.target.value } : item))}>
+              {contributors.map((contributor) => <option key={contributor.id} value={contributor.id}>{contributor.name}</option>)}
+            </select>
+            <select className="border rounded px-1 py-1 text-xs" value={row.role} onChange={(e) => setCreditDraft((current) => current.map((item, i) => i === index ? { ...item, role: e.target.value } : item))}>
+              {['producer', 'performer', 'mixer', 'mastering_engineer', 'other'].map((role) => <option key={role} value={role}>{role}</option>)}
+            </select>
+          </div>
+        ))}
+        <button className="border rounded px-2 py-1 text-xs" onClick={() => onSaveCredits(creditDraft)}>Save credits</button>
+      </div>
+      {works.map((work) => (
+        <WriterEditor key={work.id} work={work} contributors={contributors} />
+      ))}
+    </div>
+  )
+}
+
+function WriterEditor({
+  work,
+  contributors,
+}: {
+  work: { id: string; title: string }
+  contributors: Array<{ id: string; name: string }>
+}) {
+  const { data: writers } = useWorkWriters(work.id)
+  const update = useUpdateWorkWriters(work.id)
+  const [draft, setDraft] = useState<Array<{ contributor_id: string; role: string; share_pct: string }>>([])
+  useEffect(() => {
+    if (writers) setDraft(writers.map((writer) => ({ contributor_id: writer.contributor_id, role: writer.role, share_pct: writer.share_pct })))
+  }, [writers])
+  return (
+    <div>
+      <h4 className="text-xs font-medium text-neutral-500 mb-2">Writers: {work.title}</h4>
+      {draft.map((row, index) => (
+        <div key={`${row.contributor_id}-${index}`} className="flex gap-2 mb-1">
+          <select className="border rounded px-1 py-1 text-xs flex-1" value={row.contributor_id} onChange={(e) => setDraft((current) => current.map((item, i) => i === index ? { ...item, contributor_id: e.target.value } : item))}>
+            {contributors.map((contributor) => <option key={contributor.id} value={contributor.id}>{contributor.name}</option>)}
+          </select>
+          <input className="border rounded px-1 py-1 text-xs w-20" type="number" min="0" max="100" step="0.001" value={row.share_pct} onChange={(e) => setDraft((current) => current.map((item, i) => i === index ? { ...item, share_pct: e.target.value } : item))} />
+        </div>
+      ))}
+      <button className="border rounded px-2 py-1 text-xs" onClick={() => update.mutate(draft)}>Save writers</button>
     </div>
   )
 }
