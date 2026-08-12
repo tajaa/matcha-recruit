@@ -1,38 +1,41 @@
 import { useState } from 'react'
 import { Link, Route, Routes } from 'react-router-dom'
-import { getToken, setToken } from './api/client'
+import { getToken, login } from './api/client'
 import { CatalogPage } from './pages/CatalogPage'
 import { ReleaseDetailPage } from './pages/ReleaseDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 function TokenGate({ children }: { children: React.ReactNode }) {
   const [hasToken, setHasToken] = useState(!!getToken())
-  const [input, setInput] = useState('')
+  const [email, setEmail] = useState('tajatheprince@gmail.com')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
 
   if (hasToken) return <>{children}</>
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6">
       <div className="border rounded-lg p-6 w-full max-w-sm">
-        <h1 className="text-lg font-semibold mb-3">oceanlab</h1>
-        <p className="text-sm text-neutral-500 mb-3">Enter your access token.</p>
-        <input
+          <h1 className="text-lg font-semibold mb-3">oceanlab admin</h1>
+          <p className="text-sm text-neutral-500 mb-3">Sign in with your master-admin account.</p>
+          <input className="border rounded px-2 py-1 text-sm w-full mb-3" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
           className="border rounded px-2 py-1 text-sm w-full mb-3"
           type="password"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="OCEANLAB_TOKEN"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
         />
         <button
           className="w-full px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
           onClick={() => {
-            setToken(input)
-            setHasToken(true)
+            void login(email, password).then(() => setHasToken(true)).catch(() => setError('Invalid email or password'))
           }}
-          disabled={!input}
+          disabled={!email || !password}
         >
           Continue
         </button>
+        {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
       </div>
     </div>
   )

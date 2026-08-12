@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../api/client'
-import { clearToken, getToken, setToken } from '../api/client'
 import { MutationError } from '../components/MutationError'
 import {
   useArtists,
@@ -58,7 +57,9 @@ export function SettingsPage() {
   const unassignUpc = useUnassignUpc()
   const [prefix, setPrefix] = useState('')
   const [upcText, setUpcText] = useState('')
-  const [tokenInput, setTokenInput] = useState(getToken() ?? '')
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordMessage, setPasswordMessage] = useState('')
   const [labelDraft, setLabelDraft] = useState<LabelSettings | null>(null)
 
   useEffect(() => {
@@ -283,33 +284,18 @@ export function SettingsPage() {
       </section>
 
       <section>
-        <h2 className="font-medium mb-2">API token</h2>
+        <h2 className="font-medium mb-2">Change password</h2>
         <div className="flex gap-2">
-          <input
-            className="border rounded px-2 py-1 text-sm flex-1"
-            type="password"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-          />
+          <input className="border rounded px-2 py-1 text-sm flex-1" type="password" placeholder="Current password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+          <input className="border rounded px-2 py-1 text-sm flex-1" type="password" placeholder="New password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
           <button
             className="px-3 py-1.5 rounded bg-black text-white dark:bg-white dark:text-black text-sm"
-            onClick={() => {
-              setToken(tokenInput)
-              window.location.reload()
-            }}
+            onClick={async () => { const response = await apiClient.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword }); setPasswordMessage(response.data.status === 'password_changed' ? 'Password changed. Log in again next time.' : 'Unable to change password.') }}
           >
-            Save
-          </button>
-          <button
-            className="px-3 py-1.5 rounded border text-sm"
-            onClick={() => {
-              clearToken()
-              window.location.reload()
-            }}
-          >
-            Clear
+            Change
           </button>
         </div>
+        {passwordMessage && <p className="text-xs text-neutral-500 mt-2">{passwordMessage}</p>}
       </section>
     </div>
   )

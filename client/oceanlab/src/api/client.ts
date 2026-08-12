@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const TOKEN_KEY = 'oceanlab_token'
+const TOKEN_KEY = 'oceanlab_access_token'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -8,6 +8,11 @@ export function getToken(): string | null {
 
 export function setToken(token: string): void {
   localStorage.setItem(TOKEN_KEY, token)
+}
+
+export async function login(email: string, password: string): Promise<void> {
+  const response = await axios.post('/api/oceanlab/auth/login', { email, password })
+  setToken(response.data.access_token)
 }
 
 export function clearToken(): void {
