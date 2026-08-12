@@ -100,7 +100,7 @@ def _row_to_assignment(row, *, current_user, access) -> EmsEventAssignmentOut:
     return EmsEventAssignmentOut(**data)
 
 
-async def _assignment_access(conn, assignment_id: UUID, current_user):
+async def _assignment_access(conn, assignment_id: UUID, current_user, *, allow_assignee=False):
     row = await get_event_assignment(conn, assignment_id=assignment_id)
     if not row:
         raise HTTPException(status_code=404, detail="Event assignment not found")
@@ -116,7 +116,8 @@ async def _assignment_access(conn, assignment_id: UUID, current_user):
         row["channel_id"],
         current_user.id,
     )
-    if not is_member and not access.allows(WorkCapability.EVENT_ASSIGN):
+    is_assignee = row["assignee_user_id"] == current_user.id
+    if not is_member and not access.allows(WorkCapability.EVENT_ASSIGN) and not (allow_assignee and is_assignee):
         raise HTTPException(status_code=404, detail="Event assignment not found")
     return row, access
 
@@ -256,7 +257,9 @@ async def complete_event_assignment_route(
     current_user=Depends(get_current_user),
 ):
     async with get_connection() as conn:
-        _existing, access = await _assignment_access(conn, assignment_id, current_user)
+        _existing, access = await _assignment_access(
+            conn, assignment_id, current_user, allow_assignee=True
+        )
         try:
             async with conn.transaction():
                 updated = await complete_event_assignment(

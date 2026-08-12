@@ -27,9 +27,20 @@ export default function EventAssignmentCard({ action }: EventAssignmentCardProps
   useEffect(() => {
     if (!assignment || !action.status) return
     if (action.status === assignment.status || action.status === assignment.event_status) return
-    if (['completed', 'cancelled', 'promoted', 'dismissed'].includes(action.status)) {
-      setAssignment((current) => current ? { ...current, status: action.status === 'completed' ? 'completed' : action.status === 'cancelled' ? 'cancelled' : current.status, event_status: action.status === 'promoted' ? 'promoted' : action.status === 'dismissed' ? 'dismissed' : current.event_status } : current)
-    }
+    setAssignment((current) => {
+      if (!current) return current
+      switch (action.status) {
+        case 'completed':
+          return { ...current, status: 'completed' }
+        case 'cancelled':
+          return { ...current, status: 'cancelled' }
+        case 'promoted':
+        case 'dismissed':
+          return { ...current, event_status: action.status }
+        default:
+          return current
+      }
+    })
   }, [action.status, assignment])
 
   async function complete() {

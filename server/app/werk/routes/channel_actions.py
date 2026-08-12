@@ -169,12 +169,12 @@ async def list_channel_actions(
                    AND ($3 <> 'open' OR ev.status = 'logged')
                  ORDER BY a.created_at DESC
                  LIMIT $4
-                """,
-                channel_id,
-                status,
-                assignment_status,
-                limit,
-            )
+                 """,
+                 channel_id,
+                 assignment_status,
+                 status,
+                 limit,
+             )
             for row in assignments:
                 allowed: list[str] = []
                 if row["status"] == "assigned" and (

@@ -101,7 +101,7 @@ async def notify_event_assignment(
     company_id: UUID,
     channel_id: UUID,
     channel_name: str,
-    message_id: UUID,
+    message_id: UUID | None,
     assignee_user_id: UUID,
     assigned_by: UUID,
     title: str,
@@ -127,12 +127,15 @@ async def notify_event_assignment(
             type=kind,
             title=notification_title,
             body=body,
-            link=f"/work/channels/{channel_id}?message={message_id}",
+            link=(
+                f"/work/channels/{channel_id}?message={message_id}"
+                if message_id else f"/work/channels/{channel_id}"
+            ),
             metadata={
                 "assignment_id": str(assignment_id),
                 "event_id": str(event_id),
                 "channel_id": str(channel_id),
-                "message_id": str(message_id),
+                "message_id": str(message_id) if message_id else None,
                 "assigned_by": str(assigned_by),
             },
         )

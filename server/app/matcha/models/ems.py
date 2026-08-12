@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EmsEventOut(BaseModel):
@@ -85,6 +85,19 @@ class EmsEventAssignmentCreateRequest(BaseModel):
     instructions: Optional[str] = Field(default=None, max_length=4000)
     due_at: Optional[datetime] = None
     client_request_id: Optional[UUID] = None
+
+    @field_validator("shared_title")
+    @classmethod
+    def reject_blank_title(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Assignment title is required")
+        return value
+
+    @field_validator("instructions")
+    @classmethod
+    def normalize_instructions(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() or None if value is not None else None
 
 
 class EmsEventAssignmentOut(BaseModel):
