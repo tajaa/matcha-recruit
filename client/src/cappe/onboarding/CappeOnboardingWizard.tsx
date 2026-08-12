@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft, Check } from 'lucide-react'
 import { cappeApi } from '../api'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
+import { creatorPaths } from '../creators/creatorPaths'
 import type { CappeSite, CappeLocation } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
@@ -16,7 +17,12 @@ type Mode = 'single' | 'multi'
 export default function CappeOnboardingWizard() {
   const navigate = useNavigate()
   const { account } = useCappeMe()
-  const isCreator = account?.account_type === 'personal'
+
+  useEffect(() => {
+    if (account?.account_type === 'creator') {
+      navigate(creatorPaths.home, { replace: true })
+    }
+  }, [account, navigate])
 
   const [step, setStep] = useState<1 | 2>(1)
   const [mode, setMode] = useState<Mode | null>(null)
@@ -24,6 +30,14 @@ export default function CappeOnboardingWizard() {
   const [branch, setBranch] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  if (account?.account_type === 'creator') {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+        <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
+      </div>
+    )
+  }
 
   const slugPreview =
     name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'your-name'
@@ -62,18 +76,14 @@ export default function CappeOnboardingWizard() {
     {
       value: 'single',
       icon: MapPin,
-      title: isCreator ? 'Just one place' : 'One location',
-      blurb: isCreator
-        ? 'You work from a single spot (or come to clients). Keep it simple.'
-        : 'A single shop, studio or office. One set of hours, one map.',
+      title: 'One location',
+      blurb: 'A single shop, studio or office. One set of hours, one map.',
     },
     {
       value: 'multi',
       icon: MapPinned,
-      title: isCreator ? 'A few places' : 'Multiple locations',
-      blurb: isCreator
-        ? 'You work across several spots, each with its own schedule.'
-        : 'Branches with their own staff, hours, bookings and map info.',
+      title: 'Multiple locations',
+      blurb: 'Branches with their own staff, hours, bookings and map info.',
     },
   ]
 
@@ -142,7 +152,7 @@ export default function CappeOnboardingWizard() {
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={isCreator ? 'e.g. Avery Lane Studio' : 'e.g. Lumière Skincare Spa'}
+                placeholder="e.g. Lumière Skincare Spa"
                 maxLength={255}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
               />
