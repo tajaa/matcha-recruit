@@ -32,7 +32,7 @@ export function CanvasModeView({
             ref={iframeRef}
             title="Canvas"
             srcDoc={preview}
-            sandbox="allow-scripts"
+            sandbox="allow-scripts allow-same-origin"
             className="h-full border-0 bg-white transition-[width] duration-200"
             style={
               canvasBp === 'm' && selBlock != null && isCanvasBlock(blocks[selBlock])

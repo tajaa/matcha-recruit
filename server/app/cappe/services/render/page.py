@@ -205,8 +205,10 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     # Default location (default-first ordered) drives the global hours/tz badge;
     # the booking widget fetches /locations itself for the per-location picker.
     _def_loc = locations[0] if locations else {}
-    # `preview` flags the editor's sandboxed iframe (no same-origin = no live API
-    # fetch). Widgets read it to show a static placeholder instead of failing.
+    # `preview` flags the editor's sandboxed iframe when the site is not yet
+    # published — widgets show a static placeholder instead of failing on the
+    # public API (which 404s for draft sites). Published sites pass preview=False
+    # so widgets fetch real data; the iframe sandbox allows same-origin for that.
     _meta_ctx = site.get("meta_config") if isinstance(site.get("meta_config"), dict) else {}
     _ctx_hours = _def_loc.get("hours") if (isinstance(_def_loc.get("hours"), list) and _def_loc.get("hours")) \
         else (_meta_ctx.get("hours") if isinstance(_meta_ctx.get("hours"), list) else [])

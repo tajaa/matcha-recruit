@@ -22,7 +22,7 @@ export function SettingsSection({
   onSave: () => void
 }) {
   return (
-    <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+    <section id="site-settings" className="scroll-mt-6 mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
       <h2 className="mb-4 text-sm font-semibold text-zinc-100">Site settings</h2>
       <div className="space-y-4">
         <div>

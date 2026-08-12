@@ -61,6 +61,14 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
     }
   }
 
+  function goToAction(action: string | null) {
+    if (action === 'settings') {
+      document.getElementById('site-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    navigate(actionTo(action))
+  }
+
   // Published + ready → collapse to a compact "live" card with the share link.
   if (site.status === 'published') {
     return (
@@ -95,7 +103,89 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
   const recommended = readiness.items.filter((i) => !i.required)
   const requiredDone = required.filter((i) => i.done).length
 
-  const Row = ({ item }: { item: CappeReadiness['items'][number] }) => (
+  return (
+    <section className="mb-6 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.04] p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
+          <Sparkles className="h-4 w-4 text-emerald-400" /> Get your site ready to launch
+        </h2>
+        <span className="text-xs text-zinc-500">{requiredDone} of {required.length} required done</span>
+      </div>
+
+      <ul className="space-y-4">
+        {required.map((i) => (
+          <ReadinessRow
+            key={i.key}
+            item={i}
+            homePageId={homePageId}
+            creatingPage={creatingPage}
+            actionTo={actionTo}
+            goToAction={goToAction}
+            goToPageAction={goToPageAction}
+          />
+        ))}
+      </ul>
+
+      {recommended.length > 0 && (
+        <>
+          <div className="mb-3 mt-6 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Recommended</div>
+          <ul className="space-y-4">
+            {recommended.map((i) => (
+              <ReadinessRow
+                key={i.key}
+                item={i}
+                homePageId={homePageId}
+                creatingPage={creatingPage}
+                actionTo={actionTo}
+                goToAction={goToAction}
+                goToPageAction={goToPageAction}
+              />
+            ))}
+          </ul>
+        </>
+      )}
+
+      <div className="mt-6 flex items-center gap-3 border-t border-zinc-800 pt-4">
+        <button
+          onClick={onPublish}
+          disabled={publishing || !readiness.ready}
+          title={readiness.ready ? 'Publish your site' : 'Finish the required steps first'}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+          Publish site
+        </button>
+        {!readiness.ready && (
+          <span className="inline-flex items-center gap-1 text-xs text-amber-400">
+            <CircleAlert className="h-3.5 w-3.5" /> Finish the required steps to publish
+          </span>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// Module-level component — defining Row inside SetupGuide created a new component
+// type on every render, causing React to unmount/remount all rows (and their
+// <button>/<Link> children) on each re-render. That destroyed click handlers
+// mid-async (goToPageAction's setCreatingPage → re-render → button remount
+// before navigate ran), making "Do this" appear dead.
+function ReadinessRow({
+  item,
+  homePageId,
+  creatingPage,
+  actionTo,
+  goToAction,
+  goToPageAction,
+}: {
+  item: CappeReadiness['items'][number]
+  homePageId: string | undefined
+  creatingPage: boolean
+  actionTo: (action: string | null) => string
+  goToAction: (action: string | null) => void
+  goToPageAction: () => void
+}) {
+  return (
     <li className="flex items-start gap-3">
       <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
         item.done ? 'bg-emerald-500 text-zinc-950' : 'border border-zinc-700 text-zinc-500'
@@ -118,54 +208,17 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
                 Do this {creatingPage ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
               </button>
             ) : (
-              <Link to={actionTo(item.action)} className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20">
+              <button
+                type="button"
+                onClick={() => goToAction(item.action)}
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+              >
                 Do this <ArrowRight className="h-3 w-3" />
-              </Link>
+              </button>
             )}
           </div>
         )}
       </div>
     </li>
-  )
-
-  return (
-    <section className="mb-6 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.04] p-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Sparkles className="h-4 w-4 text-emerald-400" /> Get your site ready to launch
-        </h2>
-        <span className="text-xs text-zinc-500">{requiredDone} of {required.length} required done</span>
-      </div>
-
-      <ul className="space-y-4">
-        {required.map((i) => <Row key={i.key} item={i} />)}
-      </ul>
-
-      {recommended.length > 0 && (
-        <>
-          <div className="mb-3 mt-6 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Recommended</div>
-          <ul className="space-y-4">
-            {recommended.map((i) => <Row key={i.key} item={i} />)}
-          </ul>
-        </>
-      )}
-
-      <div className="mt-6 flex items-center gap-3 border-t border-zinc-800 pt-4">
-        <button
-          onClick={onPublish}
-          disabled={publishing || !readiness.ready}
-          title={readiness.ready ? 'Publish your site' : 'Finish the required steps first'}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-          Publish site
-        </button>
-        {!readiness.ready && (
-          <span className="inline-flex items-center gap-1 text-xs text-amber-400">
-            <CircleAlert className="h-3.5 w-3.5" /> Finish the required steps to publish
-          </span>
-        )}
-      </div>
-    </section>
   )
 }
