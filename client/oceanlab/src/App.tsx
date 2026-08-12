@@ -38,28 +38,23 @@ function TokenGate({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Nav() {
-  return (
-    <nav className="border-b px-6 py-3 flex gap-4 text-sm">
-      <Link className="font-semibold" to="/">
-        oceanlab
-      </Link>
-      <Link to="/">Catalog</Link>
-      <Link to="/settings">Settings</Link>
-    </nav>
-  )
+function LandingPage() {
+  return <main className="landing-page">
+    <nav className="landing-nav"><Link className="wordmark" to="/">oceanlab<span>.</span></Link><a href="#about">About</a><a href="#contact">Contact</a><Link className="nav-button" to="/admin">Label portal</Link></nav>
+    <section className="hero"><div className="hero-copy"><p className="eyebrow">Independent music, carefully released</p><h1>Make room for<br /><em>the next sound.</em></h1><p className="hero-lede">Oceanlab is an independent record label for artists with something singular to say. We build considered releases, long-term careers, and a catalog that stays in rotation.</p><a className="primary-button" href="#about">Explore Oceanlab <span>↗</span></a></div><div className="hero-art"><div className="art-sun" /><div className="art-ring" /><div className="art-line art-line-one" /><div className="art-line art-line-two" /><span className="art-caption">OCEANLAB / 001</span></div></section>
+    <section className="ticker"><span>Artists first</span><b>✦</b><span>Independent forever</span><b>✦</b><span>Sound with intent</span></section>
+    <section className="about-section" id="about"><p className="eyebrow">A small label with a wide horizon</p><div className="about-grid"><h2>Music that<br /><em>finds its people.</em></h2><p>From first demo to final master, Oceanlab gives artists the space, attention, and practical support to make their best work. No conveyor belt. No noise for noise's sake. Just great records, released with care.</p></div></section>
+    <footer id="contact"><span className="wordmark">oceanlab<span>.</span></span><span>For demos, collaborations, and good conversations:<br /><a href="mailto:hello@oceanlab.co">hello@oceanlab.co</a></span><span>© 2026 Oceanlab</span></footer>
+  </main>
+}
+
+function Admin() {
+  return <TokenGate><nav className="admin-nav"><Link className="font-semibold" to="/">oceanlab</Link><Link to="/admin">Catalog</Link><Link to="/admin/settings">Settings</Link></nav><Routes><Route path="/admin" element={<CatalogPage />} /><Route path="/admin/releases/:id" element={<ReleaseDetailPage />} /><Route path="/admin/settings" element={<SettingsPage />} /></Routes></TokenGate>
 }
 
 function App() {
   return (
-    <TokenGate>
-      <Nav />
-      <Routes>
-        <Route path="/" element={<CatalogPage />} />
-        <Route path="/releases/:id" element={<ReleaseDetailPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-      </Routes>
-    </TokenGate>
+    <Routes><Route path="/" element={<LandingPage />} /><Route path="/*" element={<Admin />} /></Routes>
   )
 }
 
