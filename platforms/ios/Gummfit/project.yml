@@ -12,7 +12,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "4"
     DEVELOPMENT_TEAM: 5D6TJVCPBK
     CODE_SIGN_STYLE: Automatic
 
@@ -34,6 +34,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Gummfit
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Required by App Store validation for any app built against the iOS 11+
         # SDK. actool only auto-injects this when Xcode generates the Info.plist
         # itself; XcodeGen writes a fully-specified one, so it has to be stated
