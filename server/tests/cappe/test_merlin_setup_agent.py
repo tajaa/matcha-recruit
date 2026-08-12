@@ -369,9 +369,32 @@ def test_repeated_rejected_stage_stops_the_loop(patched):
     frames, models, store = patched([invalid_page, invalid_page, [("finish", {"message": "ignored"})]])
     data = _result(frames)
 
-    assert models.calls == setup_agent._MAX_REJECTED_STAGE_ATTEMPTS
+    assert models.calls == 2
     assert store["actions"] == []
     assert "title" in data["message"]
+
+
+def test_failed_sibling_does_not_discard_a_successful_stage(patched):
+    frames, models, store = patched([[
+        ("finish", {"message": "I've staged your About page."}),
+        ("stage_action", {"type": "create_page", "payload": '{"title":"About","preset":"about"}'}),
+        ("stage_action", {"type": "create_page", "payload": '{"title":"","preset":"about"}'}),
+    ], [("finish", {"message": "I've staged your About page; the other proposal needs a title."})]])
+    data = _result(frames)
+
+    assert models.calls == 2
+    assert "needs a title" in data["message"]
+    assert len(store["actions"]) == 1
+
+
+def test_successful_stage_resets_the_failure_guard(patched):
+    invalid = [("stage_action", {"type": "create_page", "payload": '{"title":"","preset":"about"}'})]
+    valid = [("stage_action", {"type": "create_page", "payload": '{"title":"About","preset":"about"}'})]
+    frames, models, _ = patched([invalid, valid, invalid, [("finish", {"message": "Done."})]])
+    data = _result(frames)
+
+    assert models.calls == 4
+    assert data["message"] == "Done."
 
 
 def test_a_model_error_still_yields_a_result_frame(patched, monkeypatch):

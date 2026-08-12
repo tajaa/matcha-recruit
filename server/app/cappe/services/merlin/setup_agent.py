@@ -40,6 +40,7 @@ from ..render_cache import invalidate_site_render_cache
 from . import store as merlin_store
 from .agent_stream import _sse
 from .catalog import MODEL_TIERS
+from .loop_control import NoProgressGuard, ToolObservation, TurnTokenBudget, estimate_prompt_tokens
 from .setup_actions import (
     apply_outcome,
     append_entry,
@@ -59,10 +60,8 @@ _MODEL_CALLS = 6
 _WALL_CLOCK = 90.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
-# One correction is useful when Gemini sends a malformed payload. A second
-# rejected proposal of the same action type is not new information; stop rather
-# than spending the rest of this activation loop retrying shapes blindly.
-_MAX_REJECTED_STAGE_ATTEMPTS = 2
+_MAX_PROMPT_TOKENS = 180_000
+_MAX_TOTAL_TOKENS = 225_000
 
 _LINK_TARGETS = frozenset({
     # settings/design/pages all resolve to sections of the SAME dashboard
@@ -77,6 +76,24 @@ _LINK_TARGETS = frozenset({
 
 def _valid_link_target(target: str) -> bool:
     return target in _LINK_TARGETS or (target.startswith("page:") and len(target) > len("page:"))
+
+
+def _setup_observation(*, name: str, args: dict[str, Any], payload: dict[str, Any]) -> ToolObservation:
+    if name == "stage_action":
+        return ToolObservation(
+            tool=name,
+            status="changed" if payload.get("staged") is True else "failed",
+            args=args,
+            reason=payload.get("reason") or payload.get("error"),
+        )
+    if name == "execute_staged_action":
+        return ToolObservation(
+            tool=name,
+            status="changed" if payload.get("executed") is True else "failed",
+            args=args,
+            reason=payload.get("reason") or payload.get("error") or payload.get("message"),
+        )
+    return ToolObservation(tool=name, status="failed", args=args, reason=payload.get("error"))
 
 
 def _tool_declarations() -> list[types.FunctionDeclaration]:
@@ -195,7 +212,8 @@ async def run_setup_agent(
     # SetupGuide/pages list without a REST round trip, the same event the
     # Approve button's own response already provides.
     latest_readiness: Optional[dict[str, Any]] = None
-    rejected_stage_attempts: dict[str, int] = {}
+    no_progress = NoProgressGuard()
+    token_budget = TurnTokenBudget(_MAX_PROMPT_TOKENS, _MAX_TOTAL_TOKENS)
 
     model_calls = 0
     started = time.monotonic()
@@ -281,6 +299,13 @@ async def run_setup_agent(
                 logger.info("Merlin setup agent hit its bound (calls=%s elapsed=%.1f)", model_calls, elapsed())
                 yield {"type": "status", "message": "Wrapping up…"}
                 break
+            budget_reason = token_budget.reason_before_next_call(
+                estimated_next_prompt_tokens=estimate_prompt_tokens(system_instruction, contents)
+            )
+            if budget_reason:
+                logger.info("Merlin setup agent hit token bound (calls=%s)", model_calls)
+                final_message = budget_reason
+                break
 
             await rate_limiter.check_limit("cappe_merlin", "setup")
             model_calls += 1
@@ -295,6 +320,10 @@ async def run_setup_agent(
                     )
             finally:
                 await rate_limiter.record_call("cappe_merlin", "setup")
+            token_budget.record_response(
+                response,
+                fallback_prompt_tokens=estimate_prompt_tokens(system_instruction, contents),
+            )
 
             # See agent.py's identical comment: thought_signature must be
             # echoed back verbatim on a thinking model or later calls 400.
@@ -315,7 +344,7 @@ async def run_setup_agent(
             response_parts: list[types.Part] = []
             finished = False
             finish_message: Optional[str] = None
-            terminal_rejection: Optional[str] = None
+            observations: list[ToolObservation] = []
 
             # Same reasoning as the page agent: run every non-finish call in
             # the batch before honoring finish, so a [finish, stage_action]
@@ -353,14 +382,6 @@ async def run_setup_agent(
                     payload, entry = await do_stage_action(args)
                     if entry is not None:
                         yield {"type": "staged_action", "action": entry}
-                    elif payload.get("staged") is False or payload.get("error"):
-                        action_type = str(args.get("type") or "that action")
-                        rejected_stage_attempts[action_type] = rejected_stage_attempts.get(action_type, 0) + 1
-                        if rejected_stage_attempts[action_type] >= _MAX_REJECTED_STAGE_ATTEMPTS:
-                            terminal_rejection = (
-                                f"I need a detail corrected before I can propose that: "
-                                f"{payload.get('reason') or payload.get('error') or 'the action was rejected.'}"
-                            )
                     yield record_step({"kind": "stage", "label": payload.get("summary") or payload.get("reason") or "Staged"})
                 elif name == "execute_staged_action":
                     yield {"type": "status", "message": "Making that change…"}
@@ -371,14 +392,28 @@ async def run_setup_agent(
                 else:
                     payload = {"error": f"unknown tool '{name}'"}
 
+                observations.append(_setup_observation(name=name, args=args, payload=payload))
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
-            if terminal_rejection:
-                final_message = terminal_rejection
+            decision = no_progress.observe_batch(observations)
+            if decision.stop:
+                final_message = (
+                    "I need a detail corrected before I can propose that: "
+                    f"{decision.reason or 'the action was rejected.'}"
+                )
                 break
-            if finished:
+            if finished and not any(observation.status == "failed" for observation in observations):
                 final_message = finish_message
                 break
+
+            if finished:
+                response_parts.append(types.Part.from_function_response(
+                    name="finish",
+                    response={
+                        "status": "deferred",
+                        "reason": "One or more tool calls failed; review their results before finishing.",
+                    },
+                ))
 
             contents.append(types.Content(role="user", parts=response_parts))
     except RateLimitExceeded:

@@ -41,6 +41,7 @@ from .catalog import (
     MODEL_TIERS,
     SELECT_OPTIONS,
 )
+from .loop_control import TurnTokenBudget
 # Op validation lives in the registry module now; re-exported here so existing
 # importers (routes, tests) keep resolving `merlin.validate_ops`.
 from .ops import MERLIN_OPS, OP_NAMES, validate_ops  # noqa: F401
@@ -66,6 +67,8 @@ _THEME_INTENT_RE = re.compile(
 # value (10) as that constant used to be, this slice was a silent no-op —
 # never trimming anything since the query itself already capped the same way.
 _MAX_HISTORY_MESSAGES = 20
+_MAX_RETRY_PROMPT_TOKENS = 180_000
+_MAX_RETRY_TOTAL_TOKENS = 225_000
 
 _rate_limiter: Optional[GeminiRateLimiter] = None
 
@@ -523,6 +526,7 @@ async def run_merlin_turn(
     final_message = "Sorry, I couldn't process that — try again."
     final_valid: list[dict[str, Any]] = []
     final_rejected: list[dict[str, Any]] = []
+    token_budget = TurnTokenBudget(_MAX_RETRY_PROMPT_TOKENS, _MAX_RETRY_TOTAL_TOKENS)
 
     for attempt in range(2):  # one initial attempt + one validation-feedback retry
         if attempt > 0:
@@ -533,6 +537,13 @@ async def run_merlin_turn(
             business_name=business_name, business_type=business_type, feedback=last_feedback,
             selected_block=selected_block, selection=selection, attachments=attachments,
         )
+        estimated_prompt_tokens = max(1, (len(prompt) + 2) // 3)
+        budget_reason = token_budget.reason_before_next_call(
+            estimated_next_prompt_tokens=estimated_prompt_tokens,
+        )
+        if budget_reason:
+            logger.info("Merlin single-shot retry skipped: %s", budget_reason)
+            break
         # Attached images ride alongside the text as Parts (never fetched from a
         # user-given URL — `attachments` here already carries fetched bytes, see
         # merlin/attachments.py:load_attachments and the route that calls it).
@@ -560,6 +571,7 @@ async def run_merlin_turn(
                 # Record even on timeout — the request was issued and billed, so
                 # skipping it here lets a slow model burn quota invisibly.
                 await rate_limiter.record_call("cappe_merlin", tier)
+            token_budget.record_response(response, fallback_prompt_tokens=estimated_prompt_tokens)
             payload = _parse_json_response(getattr(response, "text", None) or "")
             if not isinstance(payload, dict):
                 # Valid JSON, wrong shape (a bare array or string) — `.get` on it

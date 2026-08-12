@@ -71,9 +71,17 @@ class _FakeModels:
         self.script = list(script)
         self.calls = 0
         self.received: list[Any] = []
+        self.received_image_counts: list[int] = []
 
     async def generate_content(self, **kwargs):
-        self.received.append(kwargs.get("contents"))
+        contents = kwargs.get("contents")
+        self.received.append(contents)
+        self.received_image_counts.append(sum(
+            1
+            for content in contents
+            for part in (content.parts or [])
+            if getattr(part, "inline_data", None) is not None
+        ))
         self.calls += 1
         if not self.script:
             return _FakeResponse([], text="ran out of script")
@@ -235,6 +243,28 @@ def test_only_the_most_recent_screenshot_still_carries_pixels(patched):
     assert len(stale_notes) == 2, "pruned screenshots become a placeholder, not a silent gap"
 
 
+def test_initial_attachments_are_not_resent_after_planning(patched):
+    frames, models = patched([
+        [("inspect_block", {"block_id": "b1"})],
+        [("finish", {"message": "Done."})],
+    ], attachments=[{"data": b"REFERENCE", "mime": "image/png", "url": "https://cdn.example.test/reference.png"}])
+    _result(frames)
+
+    later_request = models.received[1]
+    later_images = [
+        part for content in later_request for part in (content.parts or [])
+        if getattr(part, "inline_data", None) is not None
+    ]
+    later_notes = [
+        part for content in later_request for part in (content.parts or [])
+        if getattr(part, "text", None) == merlin_agent._STALE_ATTACHMENT_NOTE
+    ]
+
+    assert models.received_image_counts[0] == 1
+    assert later_images == []
+    assert later_notes
+
+
 _MANY_BLOCKS = [
     {"id": "b1", "type": "hero", "heading": "Old"},
     {"id": "b2", "type": "features"},
@@ -325,9 +355,32 @@ def test_repeated_rejected_ops_stop_the_loop(patched):
     frames, models = patched([invalid_ops, invalid_ops, [("finish", {"message": "ignored"})]])
     data = _result(frames)
 
-    assert models.calls == merlin_agent._MAX_REJECTED_APPLY_ATTEMPTS
+    assert models.calls == 2
     assert data["ops"] == []
     assert "block id not found" in data["message"]
+
+
+def test_failed_sibling_does_not_discard_a_successful_apply(patched):
+    frames, models = patched([[
+        ("finish", {"message": "Updated the heading."}),
+        ("apply_ops", {"ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]'}),
+        ("apply_ops", {"ops": '[{"op":"set_field","block":"ghost","path":"heading","value":"x"}]'}),
+    ], [("finish", {"message": "Updated the heading; the other edit needs a valid section."})]])
+    data = _result(frames)
+
+    assert models.calls == 2
+    assert "valid section" in data["message"]
+    assert [op["value"] for op in data["ops"]] == ["New"]
+
+
+def test_successful_apply_resets_the_failure_guard(patched):
+    invalid = [("apply_ops", {"ops": '[{"op":"set_field","block":"ghost","path":"heading","value":"x"}]'})]
+    valid = [("apply_ops", {"ops": '[{"op":"set_field","block":"b1","path":"heading","value":"New"}]'})]
+    frames, models = patched([invalid, valid, invalid, [("finish", {"message": "Done."})]])
+    data = _result(frames)
+
+    assert models.calls == 4
+    assert data["message"] == "Done."
 
 
 def test_malformed_ops_json_does_not_kill_the_turn(patched):

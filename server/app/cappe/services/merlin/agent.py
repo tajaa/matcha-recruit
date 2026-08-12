@@ -68,6 +68,7 @@ from .catalog import (
     DEFAULT_AI_IMAGE_SIZE,
     MODEL_TIERS,
 )
+from .loop_control import NoProgressGuard, ToolObservation, TurnTokenBudget, estimate_prompt_tokens
 from .ops import image_field_error, image_fields, validate_ops
 
 logger = logging.getLogger(__name__)
@@ -78,20 +79,29 @@ AGENT_TIERS: frozenset[str] = frozenset({"regular", "max"})
 
 
 class _Bounds:
-    __slots__ = ("model_calls", "screenshots", "wall_clock")
+    __slots__ = ("model_calls", "screenshots", "wall_clock", "prompt_tokens", "total_tokens")
 
-    def __init__(self, model_calls: int, screenshots: int, wall_clock: float):
+    def __init__(
+        self,
+        model_calls: int,
+        screenshots: int,
+        wall_clock: float,
+        prompt_tokens: int,
+        total_tokens: int,
+    ):
         self.model_calls = model_calls
         self.screenshots = screenshots
         self.wall_clock = wall_clock
+        self.prompt_tokens = prompt_tokens
+        self.total_tokens = total_tokens
 
 
 # `max` buys depth, not a different model (see MODEL_TIERS — both are
 # gemini-3.6-flash; max thinks harder). Wall clock is the real ceiling: the user
 # is watching an SSE stream.
 _BOUNDS: dict[str, _Bounds] = {
-    "regular": _Bounds(model_calls=6, screenshots=3, wall_clock=120.0),
-    "max": _Bounds(model_calls=10, screenshots=5, wall_clock=240.0),
+    "regular": _Bounds(model_calls=6, screenshots=3, wall_clock=120.0, prompt_tokens=300_000, total_tokens=375_000),
+    "max": _Bounds(model_calls=10, screenshots=5, wall_clock=240.0, prompt_tokens=500_000, total_tokens=625_000),
 }
 
 # One model call's ceiling. Below the wall-clock bound so a single hung call
@@ -114,17 +124,13 @@ _MAX_HISTORY_MESSAGES = 20
 # still force-finishes instead of handing the client a page-sized diff.
 _MAX_TURN_OPS = 60
 
-# Let the model correct one rejected edit batch. A second all-rejected batch
-# means it has not resolved the target/schema from the available page context;
-# continuing to call it only burns the turn's remaining model-call budget.
-_MAX_REJECTED_APPLY_ATTEMPTS = 2
-
 # Screenshots pile up as image Parts in `contents` and are re-sent whole on
 # EVERY later model call — a `max` turn's 5th shot means the 6th-10th calls
 # each pay for 5 images even though only the newest one is relevant to what
 # the model is judging right now. Keep just the most recent.
 _KEEP_RECENT_SHOTS = 1
 _STALE_SHOT_NOTE = "[an earlier screenshot was here — judge from the most recent one below]"
+_STALE_ATTACHMENT_NOTE = "[the user's reference images were available for planning; use attachment_index to reference them for image generation]"
 
 
 # ---------------------------------------------------------------------------
@@ -393,6 +399,56 @@ def _strip_stale_images(content: types.Content) -> types.Content:
     return types.Content(role=content.role, parts=kept)
 
 
+def _strip_initial_attachments(content: types.Content) -> types.Content:
+    """Drop original user image bytes after the planning call.
+
+    They are useful for the first interpretation of the request, but resending
+    them on every follow-up is wasted input spend. `atts` remains intact for a
+    later `generate_image(attachment_index=...)` call.
+    """
+    parts = list(content.parts or [])
+    kept = [part for part in parts if not _has_inline_image(part)]
+    if len(kept) == len(parts):
+        return content
+    kept.append(types.Part(text=_STALE_ATTACHMENT_NOTE))
+    return types.Content(role=content.role, parts=kept)
+
+
+def _agent_observation(*, name: str, args: dict[str, Any], payload: dict[str, Any]) -> ToolObservation:
+    if name == "apply_ops":
+        return ToolObservation(
+            tool=name,
+            status="changed" if payload.get("applied") else "failed",
+            args=args,
+            reason=payload.get("error") or next(
+                (item.get("reason") for item in payload.get("rejected") or [] if isinstance(item, dict)),
+                None,
+            ),
+        )
+    if name == "inspect_block":
+        return ToolObservation(
+            tool=name,
+            status="informed" if payload.get("block") is not None else "failed",
+            args=args,
+            reason=payload.get("error"),
+        )
+    if name == "render_screenshot":
+        return ToolObservation(
+            tool=name,
+            status="informed" if payload.get("rendered") is True else "failed",
+            args=args,
+            reason=payload.get("error"),
+        )
+    if name == "generate_image":
+        return ToolObservation(
+            tool=name,
+            status="changed" if payload.get("placed") is True else "failed",
+            args=args,
+            reason=payload.get("error"),
+        )
+    return ToolObservation(tool=name, status="failed", args=args, reason=payload.get("error"))
+
+
 async def run_merlin_agent(
     *,
     message: str,
@@ -445,7 +501,8 @@ async def run_merlin_agent(
     # is a prompt-following failure the model can repeat; this can't be forgotten).
     screenshot_ok = False
     screenshot_failed = False
-    rejected_apply_attempts = 0
+    no_progress = NoProgressGuard()
+    token_budget = TurnTokenBudget(bounds.prompt_tokens, bounds.total_tokens)
     started = time.monotonic()
 
     def elapsed() -> float:
@@ -459,13 +516,14 @@ async def run_merlin_agent(
         return {"type": "step", **step}
 
     client = get_genai_client()
+    system_instruction = _build_system_prompt(
+        blocks=blocks, theme=theme, business_name=business_name,
+        selected_block=selected_block, selection=selection, history=history, attachments=atts,
+    )
     config = types.GenerateContentConfig(
         tools=[types.Tool(function_declarations=_tool_declarations())],
         thinking_config=types.ThinkingConfig(thinking_level=tier_cfg.thinking_level),
-        system_instruction=_build_system_prompt(
-            blocks=blocks, theme=theme, business_name=business_name,
-            selected_block=selected_block, selection=selection, history=history, attachments=atts,
-        ),
+        system_instruction=system_instruction,
     )
     first_parts: list[types.Part] = [
         types.Part.from_bytes(data=a["data"], mime_type=a["mime"]) for a in atts
@@ -820,6 +878,13 @@ async def run_merlin_agent(
                 logger.info("Merlin agent hit its %s bound (tier=%s)", reason, tier)
                 yield {"type": "status", "message": "Wrapping up…"}
                 break
+            budget_reason = token_budget.reason_before_next_call(
+                estimated_next_prompt_tokens=estimate_prompt_tokens(system_instruction, contents)
+            )
+            if budget_reason:
+                logger.info("Merlin agent hit token bound (tier=%s calls=%s)", tier, model_calls)
+                final_message = budget_reason
+                break
 
             await rate_limiter.check_limit("cappe_merlin", "agent")
             model_calls += 1
@@ -848,6 +913,12 @@ async def run_merlin_agent(
             finally:
                 # Record even on timeout: the request was issued and billed.
                 await rate_limiter.record_call("cappe_merlin", tier)
+            token_budget.record_response(
+                response,
+                fallback_prompt_tokens=estimate_prompt_tokens(system_instruction, contents),
+            )
+            if model_calls == 1:
+                contents[0] = _strip_initial_attachments(contents[0])
 
             # Keep the ORIGINAL parts, not just their `.function_call` — a
             # thinking model (gemini-3.x) attaches a `thought_signature` to
@@ -882,7 +953,7 @@ async def run_merlin_agent(
             response_parts: list[types.Part] = []
             image_parts: list[types.Part] = []
             finished = False
-            terminal_rejection: Optional[str] = None
+            observations: list[ToolObservation] = []
 
             # Gemini's parallel function calling makes no ordering promise
             # within one batch — `[finish(...), apply_ops(...)]` is a real
@@ -904,17 +975,6 @@ async def run_merlin_agent(
 
                 if name == "apply_ops":
                     payload, step = do_apply_ops(args)
-                    if not payload.get("applied") and (payload.get("rejected") or payload.get("error")):
-                        rejected_apply_attempts += 1
-                        if rejected_apply_attempts >= _MAX_REJECTED_APPLY_ATTEMPTS:
-                            rejected = payload.get("rejected") or []
-                            reason = payload.get("error")
-                            if not reason and rejected:
-                                reason = rejected[0].get("reason")
-                            terminal_rejection = (
-                                f"I need a detail corrected before I can make that change: "
-                                f"{reason or 'the edit was rejected.'}"
-                            )
                 elif name == "inspect_block":
                     payload, step = do_inspect_block(args)
                 elif name == "render_screenshot":
@@ -937,18 +997,32 @@ async def run_merlin_agent(
                 else:
                     payload, step = {"error": f"unknown tool '{name}'"}, {}
 
+                observations.append(_agent_observation(name=name, args=args, payload=payload))
                 if step:
                     yield record_step(step)
                 response_parts.append(
                     types.Part.from_function_response(name=name, response=payload)
                 )
 
-            if terminal_rejection:
-                final_message = terminal_rejection
+            decision = no_progress.observe_batch(observations)
+            if decision.stop:
+                final_message = (
+                    "I need a detail corrected before I can make that change: "
+                    f"{decision.reason or 'the edit was rejected.'}"
+                )
                 break
-            if finished:
+            if finished and not any(observation.status == "failed" for observation in observations):
                 final_message = finish_message
                 break
+
+            if finished:
+                response_parts.append(types.Part.from_function_response(
+                    name="finish",
+                    response={
+                        "status": "deferred",
+                        "reason": "One or more tool calls failed; review their results before finishing.",
+                    },
+                ))
 
             if image_parts:
                 # This batch is about to become the newest image-bearing turn —
