@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { relativeTime as timeAgo } from '../../../utils/format'
-import { Bell, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
+import { Bell, ClipboardCheck, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   getNotifications,
@@ -17,6 +17,8 @@ const TYPE_ICONS: Record<string, typeof Bell> = {
   channel_added: Hash,
   channel_message: Hash,
   inbox_message: Mail,
+  event_assigned: ClipboardCheck,
+  event_assignment_completed: ClipboardCheck,
 }
 
 export default function NotificationBell() {

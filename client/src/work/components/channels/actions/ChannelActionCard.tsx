@@ -1,12 +1,15 @@
 import { Check, CircleX, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { confirmEventDraft, rejectEventDraft } from '../../../api/events'
+import EventAssignmentCard from './EventAssignmentCard'
 
 interface ChannelActionCardProps {
   action: NonNullable<NonNullable<import('../../../api/channels').ChannelMessage['metadata']>['action']>
 }
 
 export default function ChannelActionCard({ action }: ChannelActionCardProps) {
+  if (action.kind === 'event_assignment') return <EventAssignmentCard action={action} />
+
   const [status, setStatus] = useState(action.status ?? 'pending')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

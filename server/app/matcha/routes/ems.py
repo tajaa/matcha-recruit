@@ -10,12 +10,15 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from app.core.dependencies import get_current_user
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.ems import (
+    EmsEventAssignmentCreateRequest, EmsEventAssignmentListResponse,
+    EmsEventAssignmentOut,
     EmsEventDraftOut, EmsEventDraftRejectRequest, EmsEventListResponse,
     EmsEventOut, EmsEventResolveRequest, EmsEventUpdate, EmsProtocolOut,
     EmsProtocolUpdate, PromoteRequest, PromoteResponse,
@@ -31,6 +34,16 @@ from app.matcha.services.ems.event_drafts import (
     reject_event_draft,
 )
 from app.matcha.services.ems.event_intake import coerce_doc
+from app.matcha.services.ems.event_assignments import (
+    EventAssignmentConflict,
+    EventAssignmentForbidden,
+    EventAssignmentNotFound,
+    cancel_event_assignment,
+    complete_event_assignment,
+    create_event_assignment,
+    get_event_assignment,
+    list_event_assignments,
+)
 from app.matcha.services.ems.promote import PromoteRaceError, evaluate_promote, promote_event
 from app.matcha.services.ems.queries import EVENT_SELECT as _EVENT_SELECT
 from app.matcha.services.ems.resolution import (
@@ -69,6 +82,45 @@ def _row_to_draft(row) -> EmsEventDraftOut:
     return EmsEventDraftOut(**data)
 
 
+def _row_to_assignment(row, *, current_user, access) -> EmsEventAssignmentOut:
+    data = dict(row)
+    data["assignee_name"] = data.get("assignee_name") or data.get("assignee_email") or "Teammate"
+    data["can_complete"] = (
+        data["status"] == "assigned"
+        and (
+            data["assignee_user_id"] == current_user.id
+            or access.allows(WorkCapability.EVENT_ASSIGN)
+        )
+    )
+    data["can_cancel"] = (
+        data["status"] == "assigned"
+        and access.allows(WorkCapability.EVENT_ASSIGN)
+    )
+    data["can_view_event"] = access.allows(WorkCapability.EVENT_REVIEW)
+    return EmsEventAssignmentOut(**data)
+
+
+async def _assignment_access(conn, assignment_id: UUID, current_user):
+    row = await get_event_assignment(conn, assignment_id=assignment_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Event assignment not found")
+    access = await resolve_work_access(
+        conn, user=current_user, company_id=row["company_id"]
+    )
+    is_member = await conn.fetchval(
+        """
+        SELECT 1 FROM channel_members
+         WHERE channel_id = $1 AND user_id = $2
+           AND removed_for_inactivity IS NOT TRUE
+        """,
+        row["channel_id"],
+        current_user.id,
+    )
+    if not is_member and not access.allows(WorkCapability.EVENT_ASSIGN):
+        raise HTTPException(status_code=404, detail="Event assignment not found")
+    return row, access
+
+
 async def _draft_access(conn, draft_id: UUID, current_user):
     row = await conn.fetchrow(
         "SELECT company_id, reporter_user_id FROM ems_event_drafts WHERE id = $1",
@@ -86,6 +138,200 @@ async def _draft_access(conn, draft_id: UUID, current_user):
     ):
         raise HTTPException(status_code=403, detail="Event draft access denied")
     return row["company_id"], access
+
+
+@router.get("/events/{event_id}/assignments", response_model=EmsEventAssignmentListResponse)
+async def list_event_assignments_route(
+    event_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        company_id = await conn.fetchval(
+            "SELECT company_id FROM ems_events WHERE id = $1", event_id
+        )
+        if not company_id:
+            raise HTTPException(status_code=404, detail="Event not found")
+        access = await resolve_work_access(conn, user=current_user, company_id=company_id)
+        try:
+            assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        rows = await list_event_assignments(
+            conn, event_id=event_id, company_id=company_id,
+        )
+    return EmsEventAssignmentListResponse(
+        assignments=[_row_to_assignment(r, current_user=current_user, access=access) for r in rows]
+    )
+
+
+@router.post("/events/{event_id}/assignments", response_model=EmsEventAssignmentOut)
+async def create_event_assignment_route(
+    event_id: UUID,
+    body: EmsEventAssignmentCreateRequest,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        company_id = await conn.fetchval(
+            "SELECT company_id FROM ems_events WHERE id = $1", event_id
+        )
+        if not company_id:
+            raise HTTPException(status_code=404, detail="Event not found")
+        access = await resolve_work_access(conn, user=current_user, company_id=company_id)
+        try:
+            async with conn.transaction():
+                result = await create_event_assignment(
+                    conn,
+                    event_id=event_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                    channel_id=body.channel_id,
+                    assignee_user_id=body.assignee_user_id,
+                    shared_title=body.shared_title,
+                    instructions=body.instructions,
+                    due_at=body.due_at,
+                    client_request_id=body.client_request_id,
+                )
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventAssignmentNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventAssignmentForbidden as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventAssignmentConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail="This event assignment already exists") from exc
+
+    assignment = result.assignment
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import (
+            broadcast_channel_system_message,
+        )
+        await broadcast_channel_system_message(
+            assignment["channel_id"],
+            result.message,
+            mentioned_user_ids=[str(assignment["assignee_user_id"])],
+        )
+    except Exception:
+        logger.warning("Could not broadcast event assignment message %s", assignment["id"], exc_info=True)
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+        await broadcast_channel_action_updated(
+            assignment["channel_id"],
+            {"kind": "event_assignment", "id": str(assignment["id"]), "status": "assigned"},
+        )
+    except Exception:
+        logger.warning("Could not broadcast event assignment action %s", assignment["id"], exc_info=True)
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import notify_event_assignment
+        await notify_event_assignment(
+            assignment_id=assignment["id"],
+            event_id=assignment["event_id"],
+            company_id=assignment["company_id"],
+            channel_id=assignment["channel_id"],
+            channel_name=assignment["channel_name"] or "channel",
+            message_id=assignment["message_id"],
+            assignee_user_id=assignment["assignee_user_id"],
+            assigned_by=assignment["assigned_by"],
+            title=assignment["shared_title"],
+        )
+    except Exception:
+        logger.warning("Could not notify event assignment %s", assignment["id"], exc_info=True)
+    return _row_to_assignment(assignment, current_user=current_user, access=access)
+
+
+@router.get("/event-assignments/{assignment_id}", response_model=EmsEventAssignmentOut)
+async def get_event_assignment_route(
+    assignment_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        row, access = await _assignment_access(conn, assignment_id, current_user)
+    return _row_to_assignment(row, current_user=current_user, access=access)
+
+
+@router.post("/event-assignments/{assignment_id}/complete", response_model=EmsEventAssignmentOut)
+async def complete_event_assignment_route(
+    assignment_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        _existing, access = await _assignment_access(conn, assignment_id, current_user)
+        try:
+            async with conn.transaction():
+                updated = await complete_event_assignment(
+                    conn,
+                    assignment_id=assignment_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                )
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventAssignmentNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventAssignmentForbidden as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventAssignmentConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+        await broadcast_channel_action_updated(
+            updated["channel_id"],
+            {"kind": "event_assignment", "id": str(assignment_id), "status": "completed"},
+        )
+    except Exception:
+        logger.warning("Could not broadcast completed assignment %s", assignment_id, exc_info=True)
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import notify_event_assignment
+        await notify_event_assignment(
+            assignment_id=updated["id"],
+            event_id=updated["event_id"],
+            company_id=updated["company_id"],
+            channel_id=updated["channel_id"],
+            channel_name=updated["channel_name"] or "channel",
+            message_id=updated["message_id"],
+            assignee_user_id=updated["assignee_user_id"],
+            assigned_by=updated["assigned_by"],
+            title=updated["shared_title"],
+            completed=True,
+        )
+    except Exception:
+        logger.warning("Could not notify completed assignment %s", assignment_id, exc_info=True)
+    return _row_to_assignment(updated, current_user=current_user, access=access)
+
+
+@router.post("/event-assignments/{assignment_id}/cancel", response_model=EmsEventAssignmentOut)
+async def cancel_event_assignment_route(
+    assignment_id: UUID,
+    current_user=Depends(get_current_user),
+):
+    async with get_connection() as conn:
+        _existing, access = await _assignment_access(conn, assignment_id, current_user)
+        try:
+            async with conn.transaction():
+                updated = await cancel_event_assignment(
+                    conn,
+                    assignment_id=assignment_id,
+                    actor_user_id=current_user.id,
+                    access=access,
+                )
+        except WorkPermissionDenied as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except EventAssignmentNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except EventAssignmentConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+        await broadcast_channel_action_updated(
+            updated["channel_id"],
+            {"kind": "event_assignment", "id": str(assignment_id), "status": "cancelled"},
+        )
+    except Exception:
+        logger.warning("Could not publish cancelled assignment %s", assignment_id, exc_info=True)
+    return _row_to_assignment(updated, current_user=current_user, access=access)
 
 
 @router.get("/event-drafts/{draft_id}", response_model=EmsEventDraftOut)
@@ -179,6 +425,7 @@ async def resolve_event_route(
     body: EmsEventResolveRequest,
     current_user=Depends(get_current_user),
 ):
+    assignment_channels: list[tuple[UUID, UUID]] = []
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT company_id FROM ems_events WHERE id = $1", event_id
@@ -207,6 +454,16 @@ async def resolve_event_route(
                     event_id,
                     company_id,
                 )
+                assignment_channels = [
+                    (row["channel_id"], row["id"])
+                    for row in await conn.fetch(
+                        """
+                        SELECT id, channel_id FROM ems_event_assignments
+                         WHERE event_id = $1 AND status = 'assigned'
+                        """,
+                        event_id,
+                    )
+                ]
         except WorkPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventResolutionNotFound as exc:
@@ -215,6 +472,15 @@ async def resolve_event_route(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except EventResolutionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+        for channel_id, assignment_id in assignment_channels:
+            await broadcast_channel_action_updated(
+                channel_id,
+                {"kind": "event_assignment", "id": str(assignment_id), "status": updated["status"]},
+            )
+    except Exception:
+        logger.warning("Could not publish event assignment resolution for %s", event_id, exc_info=True)
     return _row_to_event(updated)
 
 
@@ -304,6 +570,7 @@ async def update_event(
         raise HTTPException(status_code=400, detail="Invalid category")
 
     dismiss_requested = "dismissed" in sent and bool(body.dismissed)
+    assignment_channels: list[tuple[UUID, UUID]] = []
 
     async with get_connection() as conn:
         company_id = await conn.fetchval(
@@ -391,8 +658,29 @@ async def update_event(
         row = await conn.fetchrow(
             f"{_EVENT_SELECT} WHERE ev.id = $1 AND ev.company_id = $2", event_id, company_id,
         )
+        if dismiss_requested:
+            assignment_channels = [
+                (assignment["channel_id"], assignment["id"])
+                for assignment in await conn.fetch(
+                    """
+                    SELECT id, channel_id FROM ems_event_assignments
+                     WHERE event_id = $1 AND status = 'assigned'
+                    """,
+                    event_id,
+                )
+            ]
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
+    if assignment_channels:
+        try:
+            from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+            for channel_id, assignment_id in assignment_channels:
+                await broadcast_channel_action_updated(
+                    channel_id,
+                    {"kind": "event_assignment", "id": str(assignment_id), "status": "dismissed"},
+                )
+        except Exception:
+            logger.warning("Could not publish event assignment dismissal for %s", event_id, exc_info=True)
     return _row_to_event(row)
 
 
@@ -403,6 +691,7 @@ async def promote(
     background_tasks: BackgroundTasks,
     current_user=Depends(get_current_user),
 ):
+    assignment_channels: list[tuple[UUID, UUID]] = []
     async with get_connection() as conn:
         row = await conn.fetchrow(
             f"{_EVENT_SELECT} WHERE ev.id = $1", event_id,
@@ -442,11 +731,31 @@ async def promote(
                     actor_user_id=current_user.id,
                     actor_email=getattr(current_user, "email", None),
                 )
+                assignment_channels = [
+                    (assignment["channel_id"], assignment["id"])
+                    for assignment in await conn.fetch(
+                        """
+                        SELECT id, channel_id FROM ems_event_assignments
+                         WHERE event_id = $1 AND status = 'assigned'
+                        """,
+                        event_id,
+                    )
+                ]
         except PromoteRaceError as e:
             raise HTTPException(status_code=409, detail=str(e))
 
     for fn, args, kwargs in bg_tasks:
         background_tasks.add_task(fn, *args, **kwargs)
+
+    try:
+        from app.matcha.services.matcha_work.project_task_notifications import broadcast_channel_action_updated
+        for channel_id, assignment_id in assignment_channels:
+            await broadcast_channel_action_updated(
+                channel_id,
+                {"kind": "event_assignment", "id": str(assignment_id), "status": "promoted"},
+            )
+    except Exception:
+        logger.warning("Could not publish event assignment promotion for %s", event_id, exc_info=True)
 
     return PromoteResponse(incident_id=UUID(str(incident_row["id"])))
 

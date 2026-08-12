@@ -95,7 +95,7 @@ export interface ChannelMessage {
   /** Structured pointer to an actionable domain record, when present. */
   metadata?: {
     action?: {
-      kind: 'event_draft' | 'event' | 'project_task' | 'schedule_proposal' | 'inventory_order'
+      kind: 'event_draft' | 'event' | 'event_assignment' | 'project_task' | 'schedule_proposal' | 'inventory_order'
       id: string
       status?: string
     }

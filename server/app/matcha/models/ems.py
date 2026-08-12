@@ -78,6 +78,44 @@ class EmsEventResolveRequest(BaseModel):
     duplicate_of_event_id: Optional[UUID] = None
 
 
+class EmsEventAssignmentCreateRequest(BaseModel):
+    channel_id: UUID
+    assignee_user_id: UUID
+    shared_title: str = Field(..., min_length=1, max_length=300)
+    instructions: Optional[str] = Field(default=None, max_length=4000)
+    due_at: Optional[datetime] = None
+    client_request_id: Optional[UUID] = None
+
+
+class EmsEventAssignmentOut(BaseModel):
+    id: UUID
+    company_id: UUID
+    event_id: UUID
+    channel_id: UUID
+    channel_name: Optional[str] = None
+    message_id: Optional[UUID] = None
+    assignee_user_id: UUID
+    assignee_name: str
+    assignee_email: Optional[str] = None
+    assigned_by: UUID
+    shared_title: str
+    instructions: Optional[str] = None
+    due_at: Optional[datetime] = None
+    status: Literal["assigned", "completed", "cancelled"]
+    event_status: Literal["logged", "completed", "promoted", "dismissed"]
+    completed_by: Optional[UUID] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    can_complete: bool = False
+    can_cancel: bool = False
+    can_view_event: bool = False
+
+
+class EmsEventAssignmentListResponse(BaseModel):
+    assignments: list[EmsEventAssignmentOut]
+
+
 class EmsEventUpdate(BaseModel):
     """True PATCH via model_fields_set — an unsent field is left untouched."""
     title: Optional[str] = None

@@ -6,15 +6,17 @@ interface EventDetailProps {
   event: EmsEvent
   canResolve: boolean
   canPromote: boolean
+  canAssign: boolean
   onResolve: (resolution: 'completed' | 'no_action') => Promise<void>
   onPromote: () => void
+  onAssign: () => void
 }
 
 function humanizeKey(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export function EventDetail({ event, canResolve, canPromote, onResolve, onPromote }: EventDetailProps) {
+export function EventDetail({ event, canResolve, canPromote, canAssign, onResolve, onPromote, onAssign }: EventDetailProps) {
   const [resolving, setResolving] = useState<'completed' | 'no_action' | null>(null)
 
   async function handleResolve(resolution: 'completed' | 'no_action') {
@@ -192,8 +194,16 @@ export function EventDetail({ event, canResolve, canPromote, onResolve, onPromot
         )}
 
         {/* Actions */}
-        {(canResolve || canPromote) && event.status === 'logged' && (
+        {(canResolve || canPromote || canAssign) && event.status === 'logged' && (
           <div className="flex items-center gap-3 pt-2 border-t border-w-line">
+            {canAssign && (
+              <button
+                onClick={onAssign}
+                className="rounded-lg border border-w-line px-4 py-2 text-sm text-w-text hover:bg-w-surface2 transition-colors"
+              >
+                Assign to channel
+              </button>
+            )}
             {canPromote && (
               <button
                 onClick={onPromote}

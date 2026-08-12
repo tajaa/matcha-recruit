@@ -56,6 +56,8 @@ TYPES = {
     # on purpose: the desktop banner path suppresses channel_* types and an
     # urgent flag must banner.
     "ems_urgent_event": "Urgent Event",
+    "event_assigned": "Event Assignment",
+    "event_assignment_completed": "Assignment Completed",
 }
 
 

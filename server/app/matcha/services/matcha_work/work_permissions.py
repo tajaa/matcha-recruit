@@ -34,6 +34,7 @@ class WorkCapability(str, Enum):
     EVENT_REVIEW = "events.review"
     EVENT_RESOLVE = "events.resolve"
     EVENT_PROMOTE = "events.promote"
+    EVENT_ASSIGN = "events.assign"
     SENSITIVE_RECORD_READ = "records.view_sensitive"
     ACTION_PROPOSE = "actions.propose"
     ACTION_APPROVE = "actions.approve"
@@ -74,6 +75,7 @@ _LEVEL_CAPABILITIES: dict[WorkAccessLevel, frozenset[WorkCapability]] = {
             WorkCapability.EVENT_CONFIRM_OWN,
             WorkCapability.EVENT_REVIEW,
             WorkCapability.EVENT_RESOLVE,
+            WorkCapability.EVENT_ASSIGN,
             WorkCapability.SENSITIVE_RECORD_READ,
             WorkCapability.ACTION_PROPOSE,
         }
@@ -84,6 +86,7 @@ _LEVEL_CAPABILITIES: dict[WorkAccessLevel, frozenset[WorkCapability]] = {
             WorkCapability.EVENT_REVIEW,
             WorkCapability.EVENT_RESOLVE,
             WorkCapability.EVENT_PROMOTE,
+            WorkCapability.EVENT_ASSIGN,
             WorkCapability.SENSITIVE_RECORD_READ,
             WorkCapability.ACTION_PROPOSE,
             WorkCapability.ACTION_APPROVE,

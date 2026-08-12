@@ -1,6 +1,6 @@
 import { api } from '../../api/client'
 
-export type ChannelActionKind = 'event_draft' | 'event' | 'project_task' | 'schedule_proposal' | 'inventory_order'
+export type ChannelActionKind = 'event_draft' | 'event' | 'event_assignment' | 'project_task' | 'schedule_proposal' | 'inventory_order'
 
 export interface ChannelAction {
   id: string

@@ -15,3 +15,7 @@ export function canResolveEvents(access: WorkAccess): boolean {
 export function canPromoteEvents(access: WorkAccess): boolean {
   return allows(access, 'events.promote')
 }
+
+export function canAssignEvents(access: WorkAccess): boolean {
+  return allows(access, 'events.assign')
+}

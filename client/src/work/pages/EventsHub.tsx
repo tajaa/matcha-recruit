@@ -5,11 +5,12 @@ import { useMe } from '../../hooks/useMe'
 import { useToast } from '../../components/ui'
 import { ApiError } from '../../api/client'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { canPromoteEvents, canResolveEvents, canReviewEvents } from '../utils/eventsPermissions'
+import { canAssignEvents, canPromoteEvents, canResolveEvents, canReviewEvents } from '../utils/eventsPermissions'
 import { EMS_CATEGORY_LABELS, getEvent, listEvents, resolveEvent, type EmsEvent } from '../api/events'
 import { EventList } from '../components/events/EventList'
 import { EventDetail } from '../components/events/EventDetail'
 import { PromoteModal } from '../components/events/PromoteModal'
+import EventAssignmentModal from '../components/events/EventAssignmentModal'
 
 type StatusFilter = 'all' | 'logged' | 'completed' | 'promoted' | 'dismissed'
 
@@ -30,6 +31,7 @@ export default function EventsHub() {
   const canReview = canReviewEvents(me?.work_access)
   const canResolve = canResolveEvents(me?.work_access)
   const canPromote = canPromoteEvents(me?.work_access)
+  const canAssign = canAssignEvents(me?.work_access)
   const hasIncidents = hasFeature('incidents')
 
   const [events, setEvents] = useState<EmsEvent[]>([])
@@ -40,6 +42,7 @@ export default function EventsHub() {
   const [selectedEvent, setSelectedEvent] = useState<EmsEvent | null>(null)
   const [mobileShowDetail, setMobileShowDetail] = useState(false)
   const [showPromote, setShowPromote] = useState(false)
+  const [showAssign, setShowAssign] = useState(false)
 
   const loadEvents = useCallback(async () => {
     setLoading(true)
@@ -216,8 +219,10 @@ export default function EventsHub() {
               event={selectedEvent}
               canResolve={canResolve}
               canPromote={canPromote && hasIncidents}
+              canAssign={canAssign}
               onResolve={handleResolve}
               onPromote={() => setShowPromote(true)}
+              onAssign={() => setShowAssign(true)}
             />
           </>
         ) : (
@@ -230,6 +235,16 @@ export default function EventsHub() {
 
       {showPromote && selectedEvent && (
         <PromoteModal event={selectedEvent} onClose={() => setShowPromote(false)} onPromoted={handlePromoted} />
+      )}
+      {showAssign && selectedEvent && (
+        <EventAssignmentModal
+          event={selectedEvent}
+          onClose={() => setShowAssign(false)}
+          onCreated={() => {
+            setShowAssign(false)
+            toast('Event assigned to the channel.', 'success')
+          }}
+        />
       )}
     </div>
   )

@@ -84,6 +84,7 @@ async def test_explicit_grant_overrides_home_company_role():
     assert access.level == "reviewer"
     assert access.source == "explicit"
     assert access.allows(WorkCapability.EVENT_RESOLVE)
+    assert access.allows(WorkCapability.EVENT_ASSIGN)
     assert not access.allows(WorkCapability.ACTION_EXECUTE)
 
 
@@ -107,3 +108,15 @@ def test_assert_work_capability_raises_for_member_execution():
     with pytest.raises(WorkPermissionDenied) as exc:
         assert_work_capability(access, WorkCapability.ACTION_EXECUTE)
     assert exc.value.capability is WorkCapability.ACTION_EXECUTE
+
+
+def test_member_cannot_assign_events():
+    access = access_from_capabilities(
+        company_id=uuid4(),
+        user_id=uuid4(),
+        level="member",
+        capabilities={WorkCapability.EVENT_CONFIRM_OWN},
+    )
+    with pytest.raises(WorkPermissionDenied) as exc:
+        assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
+    assert exc.value.capability is WorkCapability.EVENT_ASSIGN

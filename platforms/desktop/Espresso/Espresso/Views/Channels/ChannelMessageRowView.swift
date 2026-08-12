@@ -83,7 +83,39 @@ struct ChannelMessageRowView: View {
                         if let t = ticket {
                             TicketRefChip(id: t.id, title: t.title, column: t.column)
                         }
-                        if !displayBody.isEmpty {
+                        if msg.metadata?.action?.kind == "event_assignment" {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "person.badge.clock")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(appState.themeAccent)
+                                    Text("Event assignment")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(appState.themeText)
+                                    Spacer(minLength: 8)
+                                    Text(msg.metadata?.action?.status == "completed" ? "Completed" : "Assigned")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(appState.themeTextSecondary)
+                                }
+                                if !displayBody.isEmpty {
+                                    Text(mentionAttributedContent(displayBody, mentionedUserIds: msg.mentionedUserIds))
+                                        .font(.system(size: 13))
+                                        .foregroundColor(appState.themeText)
+                                        .textSelection(.enabled)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(appState.themeAccent.opacity(0.10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(appState.themeAccent.opacity(0.28), lineWidth: 1)
+                                    )
+                            )
+                        } else if !displayBody.isEmpty {
                             Text(mentionAttributedContent(displayBody, mentionedUserIds: msg.mentionedUserIds))
                                 .font(.system(size: 13))
                                 .foregroundColor(isMine ? appState.themeOnAccent : appState.themeText)

@@ -1,6 +1,6 @@
 import { Check, CircleX, Loader2, X } from 'lucide-react'
 import { useState } from 'react'
-import { confirmEventDraft, rejectEventDraft, resolveEvent } from '../../../api/events'
+import { cancelEventAssignment, completeEventAssignment, confirmEventDraft, rejectEventDraft, resolveEvent } from '../../../api/events'
 import type { ChannelAction } from '../../../api/channelActions'
 
 interface ChannelActionsDrawerProps {
@@ -16,7 +16,7 @@ export default function ChannelActionsDrawer({ open, actions, loading, onClose, 
   const [error, setError] = useState<string | null>(null)
   if (!open) return null
 
-  async function decide(action: ChannelAction, decision: 'confirm' | 'reject' | 'completed' | 'no_action') {
+  async function decide(action: ChannelAction, decision: 'confirm' | 'reject' | 'completed' | 'no_action' | 'cancel') {
     setBusyId(action.id)
     setError(null)
     try {
@@ -25,6 +25,9 @@ export default function ChannelActionsDrawer({ open, actions, loading, onClose, 
         if (decision === 'reject') await rejectEventDraft(action.id)
       } else if (action.kind === 'event' && (decision === 'completed' || decision === 'no_action')) {
         await resolveEvent(action.id, { resolution: decision })
+      } else if (action.kind === 'event_assignment') {
+        if (decision === 'completed') await completeEventAssignment(action.id)
+        if (decision === 'cancel') await cancelEventAssignment(action.id)
       }
       await onRefresh()
     } catch (caught: unknown) {
@@ -53,6 +56,7 @@ export default function ChannelActionsDrawer({ open, actions, loading, onClose, 
                   {action.allowed_actions.includes('confirm') && <button disabled={busyId === action.id} onClick={() => decide(action, 'confirm')} className="inline-flex items-center gap-1 rounded bg-w-accent px-2 py-1 text-xs font-medium text-black disabled:opacity-50"><Check size={12} /> Add event</button>}
                   {action.allowed_actions.includes('reject') && <button disabled={busyId === action.id} onClick={() => decide(action, 'reject')} className="inline-flex items-center gap-1 rounded border border-w-line px-2 py-1 text-xs text-w-dim disabled:opacity-50"><CircleX size={12} /> Not an event</button>}
                   {action.allowed_actions.includes('complete') && <button disabled={busyId === action.id} onClick={() => decide(action, 'completed')} className="rounded border border-emerald-500/40 px-2 py-1 text-xs text-emerald-300 disabled:opacity-50">Complete</button>}
+                  {action.allowed_actions.includes('cancel') && <button disabled={busyId === action.id} onClick={() => decide(action, 'cancel')} className="rounded border border-w-line px-2 py-1 text-xs text-w-dim disabled:opacity-50">Cancel</button>}
                   {action.allowed_actions.includes('no_action') && <button disabled={busyId === action.id} onClick={() => decide(action, 'no_action')} className="rounded border border-w-line px-2 py-1 text-xs text-w-dim disabled:opacity-50">No action</button>}
                 </div>}
               </section>

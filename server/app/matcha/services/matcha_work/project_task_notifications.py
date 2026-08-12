@@ -56,6 +56,90 @@ async def broadcast_channel_action_updated(channel_id: UUID, action: dict) -> No
     })
 
 
+async def broadcast_channel_system_message(
+    channel_id: UUID,
+    row: dict,
+    *,
+    mentioned_user_ids: list[str] | None = None,
+) -> None:
+    """Broadcast a persisted system message through the Werk socket bridge."""
+    from app.werk.routes.channels_ws import manager
+
+    metadata = row.get("metadata") or {}
+    if isinstance(metadata, str):
+        try:
+            import json
+            metadata = json.loads(metadata)
+        except (TypeError, ValueError):
+            metadata = {}
+
+    payload = {
+        "id": str(row["id"]),
+        "channel_id": str(channel_id),
+        "sender_id": None,
+        "sender_name": "Huume",
+        "sender_avatar_url": None,
+        "content": row["content"],
+        "attachments": [],
+        "reply_to_id": None,
+        "reply_preview": None,
+        "reactions": [],
+        "created_at": row["created_at"].isoformat(),
+        "edited_at": None,
+        "mentioned_user_ids": mentioned_user_ids or [],
+        "client_message_id": None,
+        "message_type": row.get("message_type", "system"),
+        "metadata": metadata,
+    }
+    await manager.broadcast_message(str(channel_id), payload)
+
+
+async def notify_event_assignment(
+    *,
+    assignment_id: UUID,
+    event_id: UUID,
+    company_id: UUID,
+    channel_id: UUID,
+    channel_name: str,
+    message_id: UUID,
+    assignee_user_id: UUID,
+    assigned_by: UUID,
+    title: str,
+    completed: bool = False,
+) -> None:
+    """Send the direct assignment/completion bell notification."""
+    if completed and assignee_user_id == assigned_by:
+        return
+    recipient = assigned_by if completed else assignee_user_id
+    kind = "event_assignment_completed" if completed else "event_assigned"
+    notification_title = (
+        f"Assignment completed: {title}" if completed else f"Assigned: {title}"
+    )
+    body = (
+        f"A teammate completed this assignment in #{channel_name}."
+        if completed
+        else f"You were assigned this event in #{channel_name}."
+    )
+    try:
+        await notif_svc.create_notification(
+            user_id=recipient,
+            company_id=company_id,
+            type=kind,
+            title=notification_title,
+            body=body,
+            link=f"/work/channels/{channel_id}?message={message_id}",
+            metadata={
+                "assignment_id": str(assignment_id),
+                "event_id": str(event_id),
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+                "assigned_by": str(assigned_by),
+            },
+        )
+    except Exception:
+        logger.warning("Failed to notify event assignment %s", assignment_id, exc_info=True)
+
+
 async def _notify_task_assigned(
     *,
     assigned_to: UUID,

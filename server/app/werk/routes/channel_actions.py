@@ -19,7 +19,7 @@ from app.matcha.services.matcha_work.work_permissions import (
 router = APIRouter()
 
 
-ActionKind = Literal["event_draft", "event"]
+ActionKind = Literal["event_draft", "event", "event_assignment"]
 
 
 class ChannelActionOut(BaseModel):
@@ -149,6 +149,54 @@ async def list_channel_actions(
                             "created_at": row["created_at"].isoformat(),
                         }
                     )
+
+        if status in ("open", "assigned", "completed", "cancelled"):
+            assignment_status = "assigned" if status == "open" else status
+            assignments = await conn.fetch(
+                """
+                SELECT a.id, a.event_id, a.message_id, a.assignee_user_id, a.assigned_by,
+                       a.shared_title, a.instructions, a.due_at, a.status,
+                       a.created_at, ev.status AS event_status,
+                       COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), ad.name, u.email) AS assignee_name
+                  FROM ems_event_assignments a
+                  JOIN ems_events ev ON ev.id = a.event_id
+                  JOIN users u ON u.id = a.assignee_user_id
+                  LEFT JOIN clients c ON c.user_id = u.id
+                  LEFT JOIN employees e ON e.user_id = u.id
+                  LEFT JOIN admins ad ON ad.user_id = u.id
+                 WHERE a.channel_id = $1
+                   AND a.status = $2
+                   AND ($3 <> 'open' OR ev.status = 'logged')
+                 ORDER BY a.created_at DESC
+                 LIMIT $4
+                """,
+                channel_id,
+                status,
+                assignment_status,
+                limit,
+            )
+            for row in assignments:
+                allowed: list[str] = []
+                if row["status"] == "assigned" and (
+                    row["assignee_user_id"] == current_user.id
+                    or access.allows(WorkCapability.EVENT_ASSIGN)
+                ):
+                    allowed.append("complete")
+                if row["status"] == "assigned" and access.allows(WorkCapability.EVENT_ASSIGN):
+                    allowed.append("cancel")
+                rows.append(
+                    {
+                        "id": row["id"],
+                        "kind": "event_assignment",
+                        "title": row["shared_title"],
+                        "summary": row["instructions"] or f"Assigned to {row['assignee_name']}",
+                        "status": row["status"] if row["event_status"] == "logged" else row["event_status"],
+                        "source_message_id": row["message_id"],
+                        "allowed_actions": allowed,
+                        "href": f"/work/events/{row['event_id']}" if access.allows(WorkCapability.EVENT_REVIEW) else None,
+                        "created_at": row["created_at"].isoformat(),
+                    }
+                )
 
     rows.sort(key=lambda item: item["created_at"], reverse=True)
     rows = rows[:limit]

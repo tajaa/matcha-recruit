@@ -94,6 +94,31 @@ export interface EmsEventDraftRejectRequest {
   reason?: string
 }
 
+export interface EmsEventAssignment {
+  id: string
+  company_id: string
+  event_id: string
+  channel_id: string
+  channel_name: string | null
+  message_id: string | null
+  assignee_user_id: string
+  assignee_name: string
+  assignee_email?: string | null
+  assigned_by: string
+  shared_title: string
+  instructions: string | null
+  due_at: string | null
+  status: 'assigned' | 'completed' | 'cancelled'
+  event_status: EmsEventStatus
+  completed_by: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  can_complete: boolean
+  can_cancel: boolean
+  can_view_event: boolean
+}
+
 export interface EmsEventResolveRequest {
   resolution: 'completed' | 'no_action'
   note?: string
@@ -162,4 +187,31 @@ export function rejectEventDraft(id: string, body: EmsEventDraftRejectRequest = 
 
 export function resolveEvent(id: string, body: EmsEventResolveRequest) {
   return api.post<EmsEvent>(`/ems/events/${id}/resolve`, body)
+}
+
+export function listEventAssignments(eventId: string) {
+  return api.get<{ assignments: EmsEventAssignment[] }>(`/ems/events/${eventId}/assignments`)
+}
+
+export function createEventAssignment(eventId: string, body: {
+  channel_id: string
+  assignee_user_id: string
+  shared_title: string
+  instructions?: string
+  due_at?: string
+  client_request_id?: string
+}) {
+  return api.post<EmsEventAssignment>(`/ems/events/${eventId}/assignments`, body)
+}
+
+export function getEventAssignment(assignmentId: string) {
+  return api.get<EmsEventAssignment>(`/ems/event-assignments/${assignmentId}`)
+}
+
+export function completeEventAssignment(assignmentId: string) {
+  return api.post<EmsEventAssignment>(`/ems/event-assignments/${assignmentId}/complete`, {})
+}
+
+export function cancelEventAssignment(assignmentId: string) {
+  return api.post<EmsEventAssignment>(`/ems/event-assignments/${assignmentId}/cancel`, {})
 }

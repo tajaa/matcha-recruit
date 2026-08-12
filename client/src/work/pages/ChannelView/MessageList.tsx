@@ -86,7 +86,7 @@ export default function MessageList({
         if (msg.message_type === 'system') {
           const urgent = isUrgentSystemContent(msg.content)
           return (
-            <div key={rowKey} className="mt-3 flex flex-row-reverse gap-2.5">
+            <div id={`channel-message-${msg.id}`} key={rowKey} className="mt-3 flex flex-row-reverse gap-2.5">
               <HuumeAvatar />
               <div className="min-w-0 flex-1 flex flex-col items-end">
                 <div className="flex flex-row-reverse items-baseline gap-2 mb-0.5">
@@ -101,7 +101,9 @@ export default function MessageList({
                       ? 'text-red-200 bg-red-500/10 border border-red-500/40'
                       : 'text-w-dim bg-w-surface2/60 border border-w-line'
                   }`}>
-                    {renderSystemContent(msg.content)}
+                    {msg.metadata?.action?.kind === 'event_assignment'
+                      ? renderMessageContent(msg.content, members, msg.mentioned_user_ids, userId)
+                      : renderSystemContent(msg.content)}
                   </span>
                   {!msg.pending && (
                     <button
@@ -124,7 +126,7 @@ export default function MessageList({
         const isDeleted = !!msg.deleted_at
         const canDelete = !isDeleted && (isOwn || canModerate)
         return (
-          <div key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${msg.pending ? 'opacity-60' : ''}`}>
+          <div id={`channel-message-${msg.id}`} key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${msg.pending ? 'opacity-60' : ''}`}>
             {showAuthor ? (
               msg.sender_avatar_url ? (
                 <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />

@@ -9,7 +9,8 @@ import MessageList from './MessageList'
 import MessageComposer from './MessageComposer'
 import MembersSidebar from './MembersSidebar'
 import ChannelModals from './ChannelModals'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import ChannelActionsDrawer from '../../components/channels/actions/ChannelActionsDrawer'
 import { useChannelActions } from '../../components/channels/actions/useChannelActions'
 
@@ -23,6 +24,7 @@ interface ChannelViewScreenProps {
 
 export default function ChannelViewScreen({ channelId: channelIdOverride, embedded = false }: ChannelViewScreenProps = {}) {
   const [showActions, setShowActions] = useState(false)
+  const [searchParams] = useSearchParams()
   const {
     channelId,
     navigate,
@@ -88,6 +90,13 @@ export default function ChannelViewScreen({ channelId: channelIdOverride, embedd
     secondaryActions,
   } = useChannelView(channelIdOverride, embedded)
   const channelActions = useChannelActions(channelId, isMember)
+
+  const highlightedMessageId = searchParams.get('message')
+  useEffect(() => {
+    if (!highlightedMessageId || !messages.some((message) => message.id === highlightedMessageId)) return
+    const target = document.getElementById(`channel-message-${highlightedMessageId}`)
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [highlightedMessageId, messages])
 
   if (loading) {
     return <ChannelLoading />
