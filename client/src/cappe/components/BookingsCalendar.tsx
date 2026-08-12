@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Check, X, Clock, ShieldCheck } from 'lucide-react'
 import { WEEKDAYS } from './SurfaceShell'
-import type { CappeBooking, CappeAvailabilitySlot, CappeBookingType } from '../types'
+import type { CappeBooking, CappeAvailabilitySlot, CappeBookingType, CappeStaff } from '../types'
+import { applicableSlotsForType } from '../utils/bookingAvailability'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const money = (c: number | null | undefined) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`)
@@ -30,21 +31,32 @@ type Props = {
   bookings: CappeBooking[]
   availability: CappeAvailabilitySlot[]
   types: CappeBookingType[]
+  staff: CappeStaff[]
   onAccept: (b: CappeBooking) => void
   onDecline: (b: CappeBooking) => void
   onStatus: (b: CappeBooking, status: string) => void
 }
 
-export default function BookingsCalendar({ bookings, availability, types, onAccept, onDecline, onStatus }: Props) {
+export default function BookingsCalendar({ bookings, availability, types, staff, onAccept, onDecline, onStatus }: Props) {
   const today = new Date()
   const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() })
   const [selected, setSelected] = useState<string>(dateKey(today))
+  const [selectedTypeId, setSelectedTypeId] = useState('')
 
   const typeName = useMemo(() => {
     const map: Record<string, string> = {}
     types.forEach((t) => { map[t.id] = t.name })
     return map
   }, [types])
+
+  const staffName = useMemo(() => {
+    const map: Record<string, string> = {}
+    staff.forEach((person) => { map[person.id] = person.name })
+    return map
+  }, [staff])
+
+  const selectedType = types.find((type) => type.id === selectedTypeId)
+  const calendarAvailability = selectedType ? applicableSlotsForType(availability, selectedType) : availability
 
   // Bookings grouped by local calendar day (skip cancelled/declined on the grid).
   const byDay = useMemo(() => {
@@ -63,7 +75,7 @@ export default function BookingsCalendar({ bookings, availability, types, onAcce
     const m: Record<number, CappeAvailabilitySlot[]> = {}
     for (const s of availability) (m[s.weekday] ||= []).push(s)
     return m
-  }, [availability])
+  }, [calendarAvailability])
 
   const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate()
   const leadBlanks = pyWeekday(new Date(cursor.y, cursor.m, 1))
@@ -98,6 +110,10 @@ export default function BookingsCalendar({ bookings, availability, types, onAcce
             <button onClick={() => move(1)} className="rounded-lg border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800"><ChevronRight className="h-4 w-4" /></button>
           </div>
         </div>
+        <select value={selectedTypeId} onChange={(event) => setSelectedTypeId(event.target.value)} className="mb-3 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200">
+          <option value="">All appointment types</option>
+          {types.filter((type) => type.status === 'active').map((type) => <option key={type.id} value={type.id}>{type.name}</option>)}
+        </select>
         <div className="grid grid-cols-7 gap-px overflow-hidden rounded-xl border border-zinc-800 bg-zinc-800 text-center">
           {WEEKDAYS.map((d) => (
             <div key={d} className="bg-zinc-900 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{d}</div>
@@ -150,9 +166,10 @@ export default function BookingsCalendar({ bookings, availability, types, onAcce
           <div className="mt-2 flex flex-wrap gap-1.5">
             {selectedAvail.map((s, i) => (
               <span key={i} className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-300">
-                <Clock className="h-3 w-3" /> {hhmm(s.start_time)}–{hhmm(s.end_time)}
-                {s.booking_type_id ? ` · ${typeName[s.booking_type_id] || 'type'}` : ''}
-              </span>
+                 <Clock className="h-3 w-3" /> {hhmm(s.start_time)}–{hhmm(s.end_time)}
+                 {s.booking_type_id ? ` · ${typeName[s.booking_type_id] || 'type'}` : ''}
+                 {s.staff_id ? ` · ${staffName[s.staff_id] || 'staff'}` : ' · Any staff'}
+               </span>
             ))}
           </div>
         ) : (

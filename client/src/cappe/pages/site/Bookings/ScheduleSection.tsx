@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 import { Calendar, List } from 'lucide-react'
 import BookingsCalendar from '../../../components/BookingsCalendar'
-import type { CappeBooking, CappeBookingType, CappeAvailabilitySlot } from '../../../types'
+import type { CappeBooking, CappeBookingType, CappeAvailabilitySlot, CappeStaff } from '../../../types'
 import { money, statusStyle } from './constants'
 
 interface ScheduleSectionProps {
@@ -10,13 +10,14 @@ interface ScheduleSectionProps {
   bookings: CappeBooking[]
   slots: CappeAvailabilitySlot[]
   types: CappeBookingType[]
+  staff: CappeStaff[]
   acceptBooking: (b: CappeBooking) => void
   declineBooking: (b: CappeBooking) => void
   setBookingStatus: (b: CappeBooking, status: string) => void
 }
 
 export function ScheduleSection({
-  view, setView, bookings, slots, types, acceptBooking, declineBooking, setBookingStatus,
+  view, setView, bookings, slots, types, staff, acceptBooking, declineBooking, setBookingStatus,
 }: ScheduleSectionProps) {
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -28,7 +29,7 @@ export function ScheduleSection({
         </div>
       </div>
       {view === 'calendar' ? (
-        <BookingsCalendar bookings={bookings} availability={slots} types={types} onAccept={acceptBooking} onDecline={declineBooking} onStatus={setBookingStatus} />
+        <BookingsCalendar bookings={bookings} availability={slots} types={types} staff={staff} onAccept={acceptBooking} onDecline={declineBooking} onStatus={setBookingStatus} />
       ) : bookings.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-zinc-400"><Calendar className="h-4 w-4" /> No bookings yet.</p>
       ) : (

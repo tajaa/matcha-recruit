@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { Loader2, Trash2, Save } from 'lucide-react'
 import { WEEKDAYS } from '../../../components/SurfaceShell'
 import type { CappeBookingType, CappeAvailabilitySlot, CappeStaff } from '../../../types'
+import { unavailableStaffWindowIndexes } from '../../../utils/bookingAvailability'
 import { hhmm, inputCls } from './constants'
 
 interface AvailabilitySectionProps {
@@ -18,9 +19,12 @@ interface AvailabilitySectionProps {
 export function AvailabilitySection({
   slots, setSlots, setSlot, types, staff, addSlot, saveAvailability, savingAvail,
 }: AvailabilitySectionProps) {
+  const unavailableIndexes = unavailableStaffWindowIndexes(slots, types)
+
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
       <h2 className="mb-3 text-sm font-semibold text-zinc-100">Weekly availability</h2>
+      <p className="mb-3 text-xs text-zinc-500">Staff-specific hours are public only for appointment types assigned to that staff member.</p>
       <div className="space-y-2">
         {slots.map((s, i) => (
           <div key={i} className="flex flex-wrap items-center gap-2">
@@ -41,6 +45,11 @@ export function AvailabilitySection({
               </select>
             )}
             <button type="button" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+            {unavailableIndexes.has(i) && (
+              <p className="basis-full text-xs text-amber-400">
+                This window is not connected to an active appointment type. Assign {staff.find((person) => person.id === s.staff_id)?.name ?? 'this staff member'} to a service, or change the window to Any staff.
+              </p>
+            )}
           </div>
         ))}
       </div>

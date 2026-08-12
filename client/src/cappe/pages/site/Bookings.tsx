@@ -52,6 +52,7 @@ export default function Bookings() {
         bookings={b.bookings}
         slots={b.slots}
         types={b.types}
+        staff={b.staff}
         acceptBooking={b.acceptBooking}
         declineBooking={b.declineBooking}
         setBookingStatus={b.setBookingStatus}

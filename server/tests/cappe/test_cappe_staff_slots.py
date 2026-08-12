@@ -55,6 +55,18 @@ def test_legacy_null_staff_uses_only_null_windows():
     assert _labels(out2) == ["9:00 AM", "10:00 AM"]
 
 
+def test_staffed_type_uses_matching_staff_window():
+    availability = [{
+        "weekday": 1, "start_time": time(11), "end_time": time(19),
+        "booking_type_id": None, "staff_id": "laura",
+    }]
+    staffed = generate_slots(availability, BT, [], "UTC", NOW, days_ahead=21, staff_id="laura")
+    shared = generate_slots(availability, BT, [], "UTC", NOW, days_ahead=21, staff_id=None)
+
+    assert staffed
+    assert shared == []
+
+
 def test_merge_any_staff_unions_and_tracks_who():
     booked = [(datetime(2026, 6, 15, 9, 0, tzinfo=timezone.utc), datetime(2026, 6, 15, 10, 0, tzinfo=timezone.utc))]
     per = [
