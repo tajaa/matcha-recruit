@@ -131,8 +131,9 @@ TOOLS: tuple[HuumeTool, ...] = (
         "Create or revise a DRAFT offer letter. Never sends anything to the "
         "candidate — that's the separate send_offer tool, which requires a "
         "confirm. Pass offer_id to revise an existing draft; omit it to "
-        "create a new one. A new draft needs at minimum candidate_name and "
-        "position_title.",
+        "create a new one. Existing drafts can revise reporting_to, the "
+        "candidate's supervisor or manager. A new draft needs at minimum "
+        "candidate_name and position_title.",
         properties={
             "offer_id": types.Schema(type=types.Type.STRING, description="UUID of an existing draft to revise. Omit to create a new offer."),
             "candidate_name": types.Schema(type=types.Type.STRING),
@@ -142,6 +143,7 @@ TOOLS: tuple[HuumeTool, ...] = (
             "start_date": types.Schema(type=types.Type.STRING, description="ISO date YYYY-MM-DD."),
             "employment_type": types.Schema(type=types.Type.STRING, description="e.g. 'Full-Time Exempt', 'Part-Time', 'Contract'."),
             "location": types.Schema(type=types.Type.STRING, description="Work location or state, e.g. 'Remote' or 'CA'."),
+            "reporting_to": types.Schema(type=types.Type.STRING, description="Name of the candidate's supervisor or manager."),
         },
     ),
     _tool(

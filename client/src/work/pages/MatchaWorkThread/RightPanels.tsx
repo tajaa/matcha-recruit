@@ -115,6 +115,7 @@ export default function RightPanels({
         <HuumePanel
           state={thread!.current_state}
           threadId={threadId!}
+          previewRevision={thread?.version ?? 0}
           lightMode={lightMode}
           streaming={streaming}
           onDismiss={onDismissHuumePanel}

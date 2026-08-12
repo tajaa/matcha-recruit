@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, RotateCw, Send } from 'lucide-react'
 import { getOfferLetter, getOfferLetterPreviewHtml } from '../../../api/offerLetters'
 import type { HuumeActionSendOffer, HuumeOffer, OfferLetterDetail } from '../../../types'
@@ -9,6 +9,8 @@ interface OfferLetterViewerProps {
    * `huume_offer.status`/`.event` in current_state, and the letter itself
    * (signature block) changes once that happens. */
   offer?: HuumeOffer
+  /** Huume draft edits keep the same offer id/status but increment the thread version. */
+  refreshKey?: number
   /** A `send_offer` staged action for THIS offer, still awaiting confirm —
    * shows the exact recipient the sign link will go to (which may be a
    * recipient_email override, not the offer's stored candidate_email). */
@@ -34,31 +36,38 @@ function Field({ label, value }: { label: string; value?: string | null }) {
  * the candidate signing page produce (GET /offer-letters/{id}/preview) — in
  * a sandboxed iframe, plus a terms strip above it. This is the fix for the
  * panel that used to show only a raw offer UUID and a Confirm button. */
-export default function OfferLetterViewer({ offerId, offer, pendingSend, lightMode }: OfferLetterViewerProps) {
+export default function OfferLetterViewer({ offerId, offer, pendingSend, refreshKey, lightMode }: OfferLetterViewerProps) {
   const [detail, setDetail] = useState<OfferLetterDetail | null>(null)
   const [html, setHtml] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
+  const requestSeq = useRef(0)
 
   const load = useCallback(async () => {
+    const requestId = ++requestSeq.current
     setLoading(true)
     setError(null)
     try {
       const [d, h] = await Promise.all([getOfferLetter(offerId), getOfferLetterPreviewHtml(offerId)])
+      if (requestId !== requestSeq.current) return
       setDetail(d)
       setHtml(h)
     } catch (e) {
+      if (requestId !== requestSeq.current) return
       setError(e instanceof Error ? e.message : 'Failed to load the offer letter')
     } finally {
-      setLoading(false)
+      if (requestId === requestSeq.current) setLoading(false)
     }
   }, [offerId])
 
   // offer?.status / offer?.event trigger a refetch even though `load` itself
   // doesn't read them — the letter's signature block changes once the
   // candidate accepts, and that's a status/event flip, not a new offerId.
-  useEffect(() => { void load() }, [load, offer?.status, offer?.event, retryNonce])
+  useEffect(() => {
+    void load()
+    return () => { requestSeq.current += 1 }
+  }, [load, offer?.status, offer?.event, refreshKey, retryNonce])
 
   const muted = lightMode ? 'text-zinc-500' : 'text-zinc-500'
 

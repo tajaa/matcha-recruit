@@ -17,6 +17,7 @@ import RecordViewer, { recordIcon } from './RecordViewer'
 interface HuumePanelProps {
   state: Record<string, unknown>
   threadId: string
+  previewRevision: number
   lightMode?: boolean
   streaming?: boolean
   onStateUpdate: (offerId: string, plan: HuumePlan) => void
@@ -64,7 +65,7 @@ const STATUS_CHIP: Record<HuumeOffer['status'], string> = {
  * memo), with a passive status line for anything awaiting a decision —
  * the actionable Confirm/Cancel lives only in the chat strip
  * (HuumeActionCard) now, so there's exactly one place a click can fire it. */
-export default function HuumePanel({ state, threadId, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss, onReviewInChat }: HuumePanelProps) {
+export default function HuumePanel({ state, threadId, previewRevision, lightMode, streaming, onStateUpdate, onExecuted, onRecordClosed, onDismiss, onReviewInChat }: HuumePanelProps) {
   const { toast } = useToast()
   const navigate = useNavigate()
   const workBase = useWorkBase()
@@ -308,6 +309,7 @@ export default function HuumePanel({ state, threadId, lightMode, streaming, onSt
           <OfferLetterViewer
             key={active.key}
             offerId={active.offerId}
+            refreshKey={previewRevision}
             offer={huume.offer?.offer_id === active.offerId ? huume.offer : undefined}
             pendingSend={
               huume.action?.type === 'send_offer' && huume.action.offer_id === active.offerId

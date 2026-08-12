@@ -811,6 +811,7 @@ export interface OfferLetterDetail {
   candidate_email: string | null
   position_title: string
   company_name: string
+  manager_name: string | null
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired'
   salary: string | null
   bonus: string | null

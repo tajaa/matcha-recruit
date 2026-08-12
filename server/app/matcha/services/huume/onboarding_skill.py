@@ -770,14 +770,15 @@ async def _draft_offer_letter_impl(
                 start_date = COALESCE($5, start_date),
                 employment_type = COALESCE($6, employment_type),
                 location = COALESCE($7, location),
-                source_thread_id = COALESCE(source_thread_id, $8),
+                manager_name = COALESCE($8, manager_name),
+                source_thread_id = COALESCE(source_thread_id, $9),
                 updated_at = NOW()
-            WHERE id = $9 AND company_id = $10 AND status = 'draft'
+            WHERE id = $10 AND company_id = $11 AND status = 'draft'
             RETURNING *
             """,
             fields.get("candidate_name"), fields.get("candidate_email"),
             fields.get("position_title"), fields.get("salary"), start_date,
-            fields.get("employment_type"), fields.get("location"),
+            fields.get("employment_type"), fields.get("location"), fields.get("reporting_to"),
             thread_id, offer_id, company_id,
         )
         if not row:
@@ -791,17 +792,17 @@ async def _draft_offer_letter_impl(
             """
             INSERT INTO offer_letters (
                 candidate_name, position_title, company_name, company_id,
-                salary, start_date, employment_type, location, candidate_email, status,
+                salary, start_date, employment_type, location, manager_name, candidate_email, status,
                 source_thread_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'draft', $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', $11)
             RETURNING *
             """,
             candidate_name, position_title, company_name, company_id,
             fields.get("salary"), start_date,
             fields.get("employment_type") or "Full-Time Exempt",
             fields.get("location") or "Remote",
-            fields.get("candidate_email"),
+            fields.get("reporting_to"), fields.get("candidate_email"),
             thread_id,
         )
         await conn.execute(
@@ -814,7 +815,7 @@ async def _draft_offer_letter_impl(
     # has no use for and shouldn't be re-echoing as context.
     _OFFER_FIELDS = (
         "candidate_name", "candidate_email", "position_title", "salary",
-        "start_date", "employment_type", "location", "status",
+        "start_date", "employment_type", "location", "manager_name", "status",
     )
     offer_out = dict(row)
     return {

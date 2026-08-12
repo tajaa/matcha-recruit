@@ -47,7 +47,7 @@ async def test_insert_branch_stamps_source_thread_id():
 
     result = await _draft_offer_letter_impl(
         conn, company_id=COMPANY_ID, thread_id=THREAD_ID,
-        candidate_name="Jane Doe", position_title="Dental Assistant",
+        candidate_name="Jane Doe", position_title="Dental Assistant", reporting_to="Jordan Lee",
     )
 
     assert result["status"] == "ok"
@@ -55,6 +55,8 @@ async def test_insert_branch_stamps_source_thread_id():
     assert "INSERT INTO offer_letters" in insert_query
     assert "source_thread_id" in insert_query
     assert THREAD_ID in insert_args
+    assert "manager_name" in insert_query
+    assert "Jordan Lee" in insert_args
 
 
 @pytest.mark.asyncio
@@ -68,6 +70,7 @@ async def test_update_branch_stamps_source_thread_id_via_coalesce():
     result = await _draft_offer_letter_impl(
         conn, company_id=COMPANY_ID, thread_id=THREAD_ID,
         offer_id=str(OFFER_ID), candidate_name="Jane Doe",
+        reporting_to="Taylor Morgan",
     )
 
     assert result["status"] == "ok"
@@ -75,3 +78,5 @@ async def test_update_branch_stamps_source_thread_id_via_coalesce():
     assert "UPDATE offer_letters" in update_query
     assert "source_thread_id = COALESCE(source_thread_id" in update_query
     assert THREAD_ID in update_args
+    assert "manager_name = COALESCE" in update_query
+    assert "Taylor Morgan" in update_args
