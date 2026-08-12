@@ -472,6 +472,213 @@ Client: `RoyaltiesPage` — statements table + upload dialog (source select, sid
 
 ---
 
+## Stage 8 — self-administered publishing + sync licensing
+
+### Purpose and rights boundary
+
+Oceanlab should become a controlled rights ledger and licensing workflow for
+music used in YouTube videos, films, television, trailers, advertisements,
+games, and other screen media. It must not infer legal clearance from Finch's
+default 100% split. A default is an editable catalog starting value; it is not
+proof that a writer, publisher, producer, featured artist, sample owner, or
+prior license has authorized a sync.
+
+Keep these rights distinct:
+
+| Right | Existing source of truth | Sync requirement |
+|---|---|---|
+| Master / sound recording | `Recording`, `MasterSplit` | written authority from every master owner or controlled 100% master |
+| Composition / publishing | `Work`, `WorkWriter` | written authority from every writer/publisher or controlled 100% composition |
+| Recording-to-work relationship | `RecordingWork` | known composition, or an explicit admin decision that publishing is unavailable |
+| Release context | `Release`, `Track` | exact recording, version, and delivery asset being licensed |
+
+The public catalog must state that Oceanlab is a label/licensing service, not a
+PRO, The MLC, or a replacement for writer and publisher agreements.
+
+### 8a. Publishing entity and registration ledger
+
+Add migration `oceanlab_app_05_publishing_rights`, chained from the royalty
+migration, with normalized models for:
+
+- `Publisher`: legal entity name, DBA, PRO, IPI/CAE, MLC identity, contact,
+  collection territories, and active status;
+- `WriterAgreement`: work, contributor, publisher, controlled share, effective
+  date, agreement status, signed date, document file, and notes;
+- `CompositionRegistration`: work, authority (`pro`, `mlc`, `iswc`, or other),
+  external identifier, status, submitted/confirmed dates, export file, and
+  notes;
+- `SyncProfile`: recording/work, availability, clearance status, one-stop
+  status, approval requirement, territories, restrictions, allowed media,
+  exclusivity, minimum term/fee guidance, preview file, and notes.
+
+Keep `WorkWriter` as the editable catalog split. `WriterAgreement` proves or
+limits the share Oceanlab may administer; it must not overwrite catalog
+shares. If publisher ownership cannot be represented without ambiguity, keep
+it in the agreement layer rather than silently changing historical splits.
+
+Human setup outside the application:
+
+1. Form the publishing entity and keep legal, tax, and banking records secure.
+2. Join/register the publisher with ASCAP or BMI and capture publisher and
+   writer IPI/CAE values.
+3. Register works with the PRO and The MLC; capture ISWC and external IDs.
+4. Register master rights with SoundExchange separately. SoundExchange is not
+   publishing administration.
+5. Keep ISRC on `Recording`; never use ISRC as the composition identifier.
+
+### 8b. Deterministic clearance gate
+
+Add a clearance service that returns issue codes and explanations, not only a
+boolean. A recording/work can be marked `one_stop_cleared` only when all
+required checks pass:
+
+- master splits total 100% and every non-Finch owner has an active agreement or
+  explicit licensing authority;
+- writer/publishing splits total 100% and every administered share is backed by
+  a `WriterAgreement` or recorded administrator authority;
+- the recording has a linked work, unless publishing is explicitly unavailable;
+- samples, interpolations, featured artist approvals, producer approvals, and
+  prior exclusive grants are cleared or block licensing;
+- territories, media, term, exclusivity, edit/derivative rights, and platform
+  scope are known for the requested use;
+- external registration status is visible, even when registration is pending;
+- required human approval is recorded.
+
+Use explicit statuses such as `not_reviewed`, `needs_documents`,
+`approval_required`, `cleared`, `restricted`, and `blocked`. A solo Finch song
+must still be explicitly cleared after its supporting documentation is
+recorded.
+
+Test missing agreements, 99.9% splits, uncleared samples, workless
+recordings, territory restrictions, expired agreements, co-writers, and a
+fully documented Finch-owned song.
+
+### 8c. Public sync catalog
+
+Add a separate public surface at `/oceanlab/catalog` and public read-only API
+routes under `/api/oceanlab/public`:
+
+- search title, artist, genre, subgenre, mood, energy, BPM/tempo, instruments,
+  vocals, language, explicit status, and sync availability;
+- show approved artwork, artist/title metadata, duration, version, and a
+  licensing request CTA;
+- stream a watermarked or low-resolution preview only;
+- never expose S3 keys, permanent public URLs, original masters, agreements,
+  contributor emails, or internal notes;
+- support shareable track pages and an embeddable preview player;
+- exclude drafts, restricted recordings, and profiles without approved
+  `SyncProfile` rows.
+
+Public catalog reads do not require admin authentication. The request form must
+have rate limiting, bot/spam protection, validation, and notification
+throttling. Prefer opaque public IDs over internal UUIDs in public URLs.
+
+### 8d. Licensing requests and deal workflow
+
+Add migration `oceanlab_app_06_sync_deals` with:
+
+- `SyncRequest`: requester/company/contact, project title and description,
+  media type, platforms, territory, term, paid/organic use, exclusivity, edit
+  rights, budget, requested date, consent, and status;
+- `SyncRequestTrack`: recording/version, intended scene/use, and requested
+  media scope;
+- `SyncQuote`: separate master fee and publishing fee, total, currency, term,
+  territory, usage, exclusivity, expiration, and notes;
+- `SyncLicense`: approved request/quote, licensee, project, rights grant,
+  status, executed agreement file, dates, territory, platforms, exclusivity,
+  edit/derivative rights, fee/invoice references, and approval timestamps;
+- `SyncLicenseTrack`: one license may cover multiple recordings;
+- `SyncApproval`: approver, side (`master`, `publishing`, or `label`),
+  decision, timestamp, reason, and audit metadata;
+- `SyncDelivery`: preview/master/stem file, recipient, expiration, download
+  count, and revocation timestamp.
+
+Workflow:
+
+`new → reviewing → needs_information → quoted → approval_required → approved →
+licensed → delivered`, with `declined`, `expired`, `cancelled`, and `revoked`
+exception states. A license cannot become `licensed` until clearance and all
+required approvals pass. Master and publishing fees remain separate even when
+the customer receives one combined quote.
+
+Admin routes/UI must support request review, issue display, quote creation,
+approval decisions, license generation, secure delivery, expiry, and
+revocation. Customer requests and internal deal notes are never public.
+
+### 8e. Agreements, contracts, and secure delivery
+
+Reuse `oceanlab_files` and the S3-backed object store for agreements, signed
+licenses, preview audio, stems, and approved masters. Add file-purpose values
+or relation tables so an agreement cannot be confused with artwork or a master.
+Store only opaque keys in the database.
+
+Implement:
+
+- upload and version signed writer/publisher agreements;
+- generated quote/license PDF with media, territory, term, platforms,
+  exclusivity, edit rights, parties, and separate fees;
+- short-lived authenticated download links for approved deliveries;
+- recipient-scoped access, download audit log, expiration, and revocation;
+- watermark/preview generation before approval;
+- original master delivery only after the license is active;
+- no browser-visible cloud credentials or permanent public object URLs.
+
+Heavy preview/watermark processing may use Celery. CRUD, clearance, approval,
+and license transitions remain synchronous and deterministic.
+
+### 8f. Film/TV cue sheets and sync revenue
+
+Add `CueSheet` and `CueSheetLine` records for project, episode, cue title,
+recording, work, usage type, duration, start/end time, territory, PRO,
+air/release date, and submission/confirmation status. Export common PRO
+cue-sheet formats where practical and retain a generic CSV mapping for
+authority-specific templates.
+
+Extend royalties so sync income is distinct from master streaming and
+publishing performance/mechanical income. Reports group by recording, work,
+license, client/project, master side, publishing side, and currency.
+
+### 8g. Client surfaces and verification
+
+Admin UI:
+
+- publishing entities and agreement/document register;
+- work/recording clearance checklist with blocking reasons;
+- Sync Profile editor and public-preview toggle;
+- incoming request queue;
+- quote and approval workspace with master/publishing fee split;
+- active licenses, expirations, revocations, and secure deliveries;
+- cue-sheet and sync-revenue exports.
+
+Public UI:
+
+- catalog search and filters;
+- preview player and shareable track page;
+- license-request form and confirmation page without internal rights data.
+
+Verification must prove:
+
+1. A solo Finch song passes only after its publishing/master documentation is
+   recorded and its sync profile is explicitly cleared.
+2. A co-writer or co-publisher song is hidden or unavailable until required
+   agreements and approvals exist.
+3. Public search returns only approved profiles and never a master or private
+   S3 key.
+4. A YouTuber request creates a reviewable request and a quote with separate
+   master/publishing fees.
+5. Film/TV requests support territory, term, media, exclusivity, edit rights,
+   episode/project metadata, and cue-sheet follow-up.
+6. A license cannot activate while clearance or approvals are incomplete.
+7. Expired/revoked delivery links stop working and remain auditable.
+8. Signed license PDFs and delivery records are retrievable by admins.
+9. Cue-sheet exports and sync revenue reconcile to the relevant license.
+
+This phase does not require automatic outreach, PRO APIs, legal advice, or
+automatic legal approval. It provides the controlled catalog, rights evidence,
+request workflow, and manual administration rails.
+
+---
+
 ## Verification
 
 1. **Stage 1** — `docker build` then `docker run --rm <img> ffprobe -version`; `pytest app/oceanlab/tests -q` still ≥73 green; upload a WAV, confirm the S3 object exists, redeploy blue-green, confirm it still resolves.

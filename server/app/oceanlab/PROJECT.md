@@ -2,7 +2,7 @@
 
 ## Context
 
-Finch is starting a natively-digital record label (+publishing, later sync licensing for film/TV). V1 scope agreed: **master ingestion with full metadata → delivery (export package + auto YouTube upload to the label's channel + SoundCloud) → royalty setup/collection for master + publishing per release**. Internal label tool, no artist accounts. Repo `/Users/finch/Documents/github/oceanlab` is empty except bare `client/` + `server/` dirs.
+Finch is starting a natively-digital record label (+publishing and sync licensing for YouTube, film, and TV). V1 scope agreed: **master ingestion with full metadata → delivery (export package + auto YouTube upload to the label's channel + SoundCloud) → royalty setup/collection for master + publishing per release → rights clearance and manual sync licensing**. Internal label tool for administration, with a separate public sync catalog and request surface. Repo `/Users/finch/Documents/github/oceanlab` is empty except bare `client/` + `server/` dirs.
 
 **Stack:** FastAPI + PostgreSQL + SQLAlchemy (sync 2.0 `Mapped[]`, psycopg3) + Alembic in `server/`; TypeScript + React + Vite + Tailwind v4 + TanStack Query in `client/`. DB in existing `matcha-postgres` container.
 
@@ -516,6 +516,9 @@ test_api_releases: create→add tracks→validation 409 on package→complete→
 **Phase 4 — registrations + royalties:** RegistrationTask seed (on create + backfill script); registration_exports (mlc/soundexchange/pro) + generate/download endpoints; statement upload + parser registry + parse job; matching + rematch + manual match; Registrations tab + board page; RoyaltiesPage (upload, MatchTable, summary dashboard w/ dataviz skill).
 *Exit:* DistroKid CSV → ≥90% auto-match by ISRC, rest manually resolvable; dashboard totals reconcile with statement total; MLC/SX/PRO files download with correct rows.
 
+**Phase 5 — self-administered publishing + sync licensing:** publisher and writer-agreement ledger; PRO/MLC/ISWC registration references; deterministic master/publishing clearance gate; sync profiles; public catalog search and preview-only track pages; public YouTuber/film/TV license requests; admin review, separate master/publishing quotes, approvals, executed license PDFs, secure delivery, expiry/revocation, cue-sheet records, and sync revenue reporting.
+*Exit:* only explicitly cleared recordings appear publicly; a co-writer or co-publisher blocks one-stop clearance until required authority exists; a YouTuber request can become an approved license with separate master/publishing fees; film/TV usage produces cue-sheet follow-up; expired/revoked delivery links are inaccessible and auditable.
+
 ## External account setup (human, parallel to build)
 
 | Org | Action | Cost |
@@ -528,6 +531,9 @@ test_api_releases: create→add tracks→validation 409 on package→complete→
 | SoundCloud | Artist Pro on label acct → register API app → creds in .env | ~$12–16/mo |
 | Google Cloud | Project + OAuth client (In production) + `youtube_auth.py` + **audit form** + quota-increase request (audit form has a quota section) | free; audit = weeks |
 | Distributor | TuneCore (own ISRC+UPC) or DistroKid (own ISRC only) | per pricing |
+| Publishing entity | Form label publisher; maintain legal/tax/banking records; register with ASCAP or BMI | varies |
+| The MLC | Register publisher and works; capture MLC/ISWC identifiers | free |
+| Sync administration | Written writer/publisher/master agreements and approval authority for every co-owner | legal/admin cost |
 
 ## Verification
 
