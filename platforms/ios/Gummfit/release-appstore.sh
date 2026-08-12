@@ -202,6 +202,16 @@ PLIST
         echo "${DIM}full log: $log${NC}"
         return 1
     fi
+    local expected_build archived_build
+    expected_build="$(build_number)"
+    archived_build="$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' "$ARCHIVE_PATH/Info.plist" 2>/dev/null || true)"
+    if [[ "$archived_build" != "$expected_build" ]]; then
+        echo "${RED}archive failed${NC}"
+        echo "  expected build: $expected_build"
+        echo "  archived build: $archived_build"
+        echo "  Info.plist must use \$(CURRENT_PROJECT_VERSION), not a hardcoded value"
+        return 1
+    fi
     rm -f "$log"
 }
 
@@ -231,6 +241,8 @@ capture_git_state
 if ! $NO_BUMP; then
     bump_build_number
     bump_marketing_version
+else
+    NEW_VERSION="$(build_number)"
 fi
 
 if ! do_archive; then
