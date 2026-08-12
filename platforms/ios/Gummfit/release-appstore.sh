@@ -3,8 +3,8 @@
 #
 # One-time setup:
 #   1. Register com.gummcap.app in Apple Developer and App Store Connect.
-#   2. Install an Apple Distribution certificate and the "Gummcap App Store"
-#      provisioning profile (or allow xcodebuild to provision it).
+#   2. Ensure the App ID is registered for the team. xcodebuild provisions the
+#      distribution signing assets when passed an App Store Connect API key.
 #   3. Export an App Store Connect API key and set:
 #        APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, APPLE_API_KEY_PATH
 #
@@ -20,7 +20,6 @@
 #   APPLE_TEAM_ID       default: 5D6TJVCPBK
 #   BUNDLE_ID           default: com.gummcap.app
 #   MARKETING_VERSION   overwrite the marketing version before archiving
-#   PROVISIONING_PROFILE_NAME default: Gummcap App Store
 
 set -euo pipefail
 
@@ -58,7 +57,6 @@ done
 
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-5D6TJVCPBK}"
 BUNDLE_ID_OVERRIDE="${BUNDLE_ID:-com.gummcap.app}"
-PROFILE_NAME="${PROVISIONING_PROFILE_NAME:-Gummcap App Store}"
 
 log_attempt() {
     local build="$1" archive="$2" upload="$3" note="${4:-}"
@@ -171,10 +169,7 @@ do_archive() {
     <key>method</key><string>app-store</string>
     <key>destination</key><string>upload</string>
     <key>teamID</key><string>$APPLE_TEAM_ID</string>
-    <key>signingStyle</key><string>manual</string>
-    <key>signingCertificate</key><string>Apple Distribution</string>
-    <key>provisioningProfiles</key>
-    <dict><key>$BUNDLE_ID_OVERRIDE</key><string>$PROFILE_NAME</string></dict>
+    <key>signingStyle</key><string>automatic</string>
     <key>uploadSymbols</key><true/>
 </dict>
 </plist>

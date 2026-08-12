@@ -68,9 +68,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       configs:
-        # See TellUs's project.yml for the full rationale — same manual-signing
-        # requirement for App Store archives (no registered devices on this
-        # release account, so automatic dev-profile signing fails at archive).
+        # Use automatic signing for App Store archives so xcodebuild can fetch
+        # the distribution profile through the App Store Connect API key.
         Release:
           CODE_SIGN_STYLE: Automatic
     entitlements:
