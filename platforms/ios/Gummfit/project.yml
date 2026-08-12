@@ -72,9 +72,7 @@ targets:
         # requirement for App Store archives (no registered devices on this
         # release account, so automatic dev-profile signing fails at archive).
         Release:
-          CODE_SIGN_STYLE: Manual
-          CODE_SIGN_IDENTITY: "Apple Distribution"
-          PROVISIONING_PROFILE_SPECIFIER: "Gummcap App Store"
+          CODE_SIGN_STYLE: Automatic
     entitlements:
       path: Gummfit.entitlements
   GummfitTests:

@@ -127,29 +127,6 @@ capture_git_state() {
     fi
 }
 
-verify_signing_prerequisites() {
-    if ! security find-identity -v -p codesigning 2>/dev/null | grep -Fq 'Apple Distribution:'; then
-        echo "${RED}error:${NC} no valid Apple Distribution signing identity is installed"
-        echo "  Install the Apple Distribution certificate for team ${APPLE_TEAM_ID} in Keychain Access."
-        return 1
-    fi
-
-    local profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
-    local profile name
-    if [[ -d "$profile_dir" ]]; then
-        while IFS= read -r -d '' profile; do
-            name="$(security cms -D -i "$profile" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || true)"
-            if [[ "$name" == "$PROFILE_NAME" ]]; then
-                return 0
-            fi
-        done < <(find "$profile_dir" -maxdepth 1 -type f -name '*.mobileprovision' -print0)
-    fi
-
-    echo "${RED}error:${NC} App Store provisioning profile \"${PROFILE_NAME}\" is not installed"
-    echo "  Download it for ${BUNDLE_ID_OVERRIDE} from Apple Developer, then open the .mobileprovision file."
-    return 1
-}
-
 bump_build_number() {
     OLD_VERSION="$(build_number)"
     [[ -n "$OLD_VERSION" ]] || { echo "${RED}error:${NC} no build number in project.yml"; exit 1; }
@@ -247,7 +224,6 @@ do_upload() {
 }
 
 trap rollback_bump ERR
-verify_signing_prerequisites
 capture_git_state
 if ! $NO_BUMP; then
     bump_build_number
