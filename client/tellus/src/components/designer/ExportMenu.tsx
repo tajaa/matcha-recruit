@@ -25,11 +25,12 @@ export async function exportPng(
   overlay?.visible(false)
   try {
     const pixelRatio = (dpi / 150) / (stage.scaleX() || 1)
-    // toDataURL throws SecurityError if any image tainted the canvas — see the
-    // crossOrigin note in LayerRenderer.
-    const dataUrl = stage.toDataURL({ pixelRatio, mimeType: 'image/png' })
-    const res = await fetch(dataUrl)
-    return await res.blob()
+    // toBlob throws if any image tainted the canvas — see the crossOrigin note
+    // in LayerRenderer. Use Konva's native blob export instead of fetching a
+    // data URL; mobile WebKit can reject fetch(data:) with "Failed to fetch".
+    const blob = await stage.toBlob({ pixelRatio, mimeType: 'image/png' }) as Blob | null
+    if (!blob) throw new Error('Could not create the flyer image.')
+    return blob
   } finally {
     overlay?.visible(wasVisible)
     overlay?.getLayer()?.batchDraw()
