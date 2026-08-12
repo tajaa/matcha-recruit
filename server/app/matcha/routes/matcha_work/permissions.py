@@ -43,6 +43,13 @@ async def _assert_manager(conn, *, current_user: CurrentUser, company_id: UUID) 
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
+async def _company_owner_id(conn, *, company_id: UUID) -> UUID | None:
+    return await conn.fetchval(
+        "SELECT owner_id FROM companies WHERE id = $1",
+        company_id,
+    )
+
+
 @router.get("/permissions")
 async def list_work_permissions(
     company_id: UUID | None = Query(default=None),
@@ -51,6 +58,10 @@ async def list_work_permissions(
     target_company_id = await _target_company(current_user, company_id)
     async with get_connection() as conn:
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
+        company_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1",
+            target_company_id,
+        )
         rows = await conn.fetch(
             """
             WITH eligible AS (
@@ -60,7 +71,9 @@ async def list_work_permissions(
                 UNION
                 SELECT e.user_id, 'company_employee'::text
                   FROM employees e
-                 WHERE e.org_id = $1 AND e.user_id IS NOT NULL
+                 WHERE e.org_id = $1
+                   AND e.user_id IS NOT NULL
+                   AND e.termination_date IS NULL
                 UNION
                 SELECT cm.user_id, 'channel_member'::text
                   FROM channel_members cm
@@ -115,6 +128,7 @@ async def list_work_permissions(
                 user_id=row["user_id"],
                 user_role=row["role"],
                 explicit_level=row["explicit_level"],
+                is_platform_admin=(row["role"] == "admin"),
                 is_company_owner=bool(row["is_company_owner"]),
                 is_company_client="company_client" in row["eligible_via"],
                 is_company_employee="company_employee" in row["eligible_via"],
@@ -133,10 +147,11 @@ async def list_work_permissions(
                 "granted_by": str(row["granted_by"]) if row["granted_by"] else None,
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                 "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
-                "immutable": bool(row["is_company_owner"]),
+                "immutable": bool(row["is_company_owner"]) or row["role"] == "admin",
             })
     return {
         "company_id": target_company_id,
+        "company_name": company_name,
         "permissions": permissions,
     }
 
@@ -151,12 +166,21 @@ async def set_work_permission(
     target_company_id = await _target_company(current_user, company_id)
     async with get_connection() as conn:
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
+        if await _company_owner_id(conn, company_id=target_company_id) == user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="The company owner's access cannot be changed",
+            )
         eligible = await conn.fetchval(
             """
             SELECT EXISTS(
                 SELECT 1 FROM clients WHERE user_id = $1 AND company_id = $2
                 UNION ALL
-                SELECT 1 FROM employees WHERE user_id = $1 AND org_id = $2
+                SELECT 1
+                  FROM employees
+                 WHERE user_id = $1
+                   AND org_id = $2
+                   AND termination_date IS NULL
                 UNION ALL
                 SELECT 1
                   FROM channel_members cm
@@ -232,6 +256,11 @@ async def delete_work_permission(
     target_company_id = await _target_company(current_user, company_id)
     async with get_connection() as conn:
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
+        if await _company_owner_id(conn, company_id=target_company_id) == user_id:
+            raise HTTPException(
+                status_code=400,
+                detail="The company owner's access cannot be changed",
+            )
         async with conn.transaction():
             deleted = await conn.fetchval(
                 """

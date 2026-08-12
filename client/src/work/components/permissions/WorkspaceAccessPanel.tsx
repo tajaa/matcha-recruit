@@ -33,6 +33,7 @@ export default function WorkspaceAccessPanel({ onBackToConnections }: Props) {
   const canManage = canManageWorkPermissions(me?.work_access?.capabilities)
   const [entries, setEntries] = useState<WorkPermissionRosterEntry[]>([])
   const [companyId, setCompanyId] = useState<string>()
+  const [companyName, setCompanyName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -47,6 +48,7 @@ export default function WorkspaceAccessPanel({ onBackToConnections }: Props) {
     try {
       const response = await listWorkPermissions()
       setCompanyId(response.company_id)
+      setCompanyName(response.company_name)
       setEntries(response.permissions)
       if (canManage && response.permissions.every((entry) => !entry.explicit_level)) {
         try {
@@ -111,6 +113,9 @@ export default function WorkspaceAccessPanel({ onBackToConnections }: Props) {
               <ShieldCheck size={20} className="text-w-accent" />
               <h1 className="text-lg font-semibold text-w-text">Workspace access</h1>
             </div>
+            <p className="mt-1 text-xs text-w-faint">
+              Managing: {companyName || companyId || 'Selected company'}
+            </p>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-w-dim">Control who can review sensitive work, approve proposals, and execute Huume actions. These settings apply to this company only.</p>
           </div>
           <button type="button" onClick={() => setShowWizard(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-w-line px-3 py-2 text-xs font-medium text-w-text hover:border-w-accent/50 hover:bg-w-surface2">

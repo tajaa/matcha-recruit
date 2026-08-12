@@ -36,7 +36,7 @@ export interface WorkPermissionMutation {
 
 export function listWorkPermissions(companyId?: string) {
   const query = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
-  return api.get<{ company_id: string; permissions: WorkPermissionRosterEntry[] }>(`/matcha-work/permissions${query}`)
+  return api.get<{ company_id: string; company_name: string | null; permissions: WorkPermissionRosterEntry[] }>(`/matcha-work/permissions${query}`)
 }
 
 export function setWorkPermission(userId: string, level: Exclude<WorkAccessLevel, 'guest'>, companyId?: string) {

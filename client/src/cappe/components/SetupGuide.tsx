@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Check, Copy, Rocket, Loader2, Sparkles, ArrowRight, CircleAlert } from 'lucide-react'
 import { cappeApi } from '../api'
 import { cappeSiteHost } from '../host'
@@ -119,7 +119,6 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
             item={i}
             homePageId={homePageId}
             creatingPage={creatingPage}
-            actionTo={actionTo}
             goToAction={goToAction}
             goToPageAction={goToPageAction}
           />
@@ -136,7 +135,6 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
                 item={i}
                 homePageId={homePageId}
                 creatingPage={creatingPage}
-                actionTo={actionTo}
                 goToAction={goToAction}
                 goToPageAction={goToPageAction}
               />
@@ -174,14 +172,12 @@ function ReadinessRow({
   item,
   homePageId,
   creatingPage,
-  actionTo,
   goToAction,
   goToPageAction,
 }: {
   item: CappeReadiness['items'][number]
   homePageId: string | undefined
   creatingPage: boolean
-  actionTo: (action: string | null) => string
   goToAction: (action: string | null) => void
   goToPageAction: () => void
 }) {

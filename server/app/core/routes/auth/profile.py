@@ -330,6 +330,14 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 current_user.id,
                 default_company_features_json(),
             )
+            work_access = (
+                _work_access_payload(
+                    await resolve_work_access(
+                        conn, user=current_user, company_id=profile["org_id"],
+                    )
+                )
+                if profile else None
+            )
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
                 "profile": {
@@ -351,6 +359,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "created_at": profile["created_at"].isoformat()
                 } if profile else None,
                 "visible_features": visible_features,
+                "work_access": work_access,
             }
 
         elif current_user.role == "broker":

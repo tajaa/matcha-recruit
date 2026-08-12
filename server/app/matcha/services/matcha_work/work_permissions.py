@@ -133,6 +133,8 @@ def effective_access(
     if is_platform_admin:
         level: WorkAccessLevel = "admin"
         source: WorkAccessSource = "platform_admin"
+    elif is_company_owner:
+        level, source = "admin", "company_owner"
     elif explicit_level in _LEVEL_CAPABILITIES and explicit_level != "guest":
         level = explicit_level
         source = "explicit"
@@ -174,9 +176,10 @@ async def resolve_work_access(
 ) -> WorkAccess:
     """Resolve effective Work access for ``user`` in ``company_id``.
 
-    Explicit grants win over defaults. Platform admins are an override. A
-    collaborator who belongs to another company receives guest access unless
-    the target company has explicitly granted a Work level.
+    Platform admins and company owners are immutable admin overrides. Explicit
+    grants win over other membership defaults. A collaborator who belongs to
+    another company receives guest access unless the target company has
+    explicitly granted a Work level.
     """
 
     if user.role == "admin":
@@ -188,6 +191,18 @@ async def resolve_work_access(
             is_platform_admin=True,
         )
     else:
+        owner_id = await conn.fetchval(
+            "SELECT owner_id FROM companies WHERE id = $1",
+            company_id,
+        )
+        if owner_id == user.id:
+            return effective_access(
+                company_id=company_id,
+                user_id=user.id,
+                user_role=user.role,
+                explicit_level=None,
+                is_company_owner=True,
+            )
         explicit_level = await conn.fetchval(
             """
             SELECT level
@@ -197,16 +212,19 @@ async def resolve_work_access(
             company_id,
             user.id,
         )
-        owner_id = await conn.fetchval(
-            "SELECT owner_id FROM companies WHERE id = $1",
-            company_id,
-        )
+        if explicit_level in _LEVEL_CAPABILITIES and explicit_level != "guest":
+            return effective_access(
+                company_id=company_id,
+                user_id=user.id,
+                user_role=user.role,
+                explicit_level=explicit_level,
+            )
         client_company_id = await conn.fetchval(
             "SELECT company_id FROM clients WHERE user_id = $1",
             user.id,
         )
         employee_company_id = await conn.fetchval(
-            "SELECT org_id FROM employees WHERE user_id = $1",
+            "SELECT org_id FROM employees WHERE user_id = $1 AND termination_date IS NULL",
             user.id,
         )
         return effective_access(
@@ -214,7 +232,7 @@ async def resolve_work_access(
             user_id=user.id,
             user_role=user.role,
             explicit_level=explicit_level if explicit_level in _LEVEL_CAPABILITIES else None,
-            is_company_owner=owner_id == user.id,
+            is_company_owner=False,
             is_company_client=client_company_id == company_id,
             is_company_employee=employee_company_id == company_id,
         )

@@ -6,18 +6,31 @@ from uuid import uuid4
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.core.models.auth import CurrentUser
 from app.matcha.routes.matcha_work import permissions
+from app.matcha.routes.matcha_work.permissions import WorkPermissionUpdate
 
 
 class FakeConn:
-    def __init__(self, rows):
+    def __init__(self, rows=None, *, company_name="Example Company", owner_id=None):
         self.rows = rows
+        self.company_name = company_name
+        self.owner_id = owner_id
+        self.roster_query = None
 
     async def fetch(self, query, *args):
         assert "FROM mw_work_permissions" in query
+        self.roster_query = query
         return self.rows
+
+    async def fetchval(self, query, *args):
+        if "SELECT name FROM companies" in query:
+            return self.company_name
+        if "SELECT owner_id FROM companies" in query:
+            return self.owner_id
+        raise AssertionError(f"Unexpected query: {query}")
 
 
 def _connection_context(conn):
@@ -59,6 +72,8 @@ async def test_roster_returns_effective_employee_default(monkeypatch):
 
     entry = result["permissions"][0]
     assert result["company_id"] == company_id
+    assert result["company_name"] == "Example Company"
+    assert "e.termination_date IS NULL" in conn.roster_query
     assert entry["effective_level"] == "member"
     assert entry["effective_source"] == "employee_default"
     assert entry["explicit_level"] is None
@@ -113,3 +128,56 @@ async def test_roster_marks_company_owner_immutable(monkeypatch):
     assert entry["effective_level"] == "admin"
     assert entry["effective_source"] == "company_owner"
     assert entry["immutable"] is True
+
+
+@pytest.mark.asyncio
+async def test_roster_marks_platform_admin_admin(monkeypatch):
+    company_id = uuid4()
+    conn = FakeConn([_row(role="admin", source=("channel_member",))])
+    monkeypatch.setattr(permissions, "get_connection", _connection_context(conn))
+    monkeypatch.setattr(permissions, "_target_company", AsyncMock(return_value=company_id))
+    monkeypatch.setattr(permissions, "_assert_manager", AsyncMock())
+
+    result = await permissions.list_work_permissions(current_user=_user())
+
+    entry = result["permissions"][0]
+    assert entry["effective_level"] == "admin"
+    assert entry["effective_source"] == "platform_admin"
+    assert entry["immutable"] is True
+
+
+@pytest.mark.asyncio
+async def test_set_owner_rejected(monkeypatch):
+    company_id = uuid4()
+    owner_id = uuid4()
+    conn = FakeConn(owner_id=owner_id)
+    monkeypatch.setattr(permissions, "get_connection", _connection_context(conn))
+    monkeypatch.setattr(permissions, "_target_company", AsyncMock(return_value=company_id))
+    monkeypatch.setattr(permissions, "_assert_manager", AsyncMock())
+
+    with pytest.raises(HTTPException) as exc:
+        await permissions.set_work_permission(
+            user_id=owner_id,
+            body=WorkPermissionUpdate(level="member"),
+            current_user=_user(),
+        )
+
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_owner_rejected(monkeypatch):
+    company_id = uuid4()
+    owner_id = uuid4()
+    conn = FakeConn(owner_id=owner_id)
+    monkeypatch.setattr(permissions, "get_connection", _connection_context(conn))
+    monkeypatch.setattr(permissions, "_target_company", AsyncMock(return_value=company_id))
+    monkeypatch.setattr(permissions, "_assert_manager", AsyncMock())
+
+    with pytest.raises(HTTPException) as exc:
+        await permissions.delete_work_permission(
+            user_id=owner_id,
+            current_user=_user(),
+        )
+
+    assert exc.value.status_code == 400

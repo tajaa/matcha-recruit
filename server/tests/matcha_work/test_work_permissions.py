@@ -75,6 +75,27 @@ async def test_same_company_employee_defaults_to_member():
 
 
 @pytest.mark.asyncio
+async def test_terminated_employee_does_not_get_employee_default():
+    company_id = uuid4()
+
+    class TerminatedEmployeeConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if "FROM employees" in query:
+                assert "termination_date IS NULL" in query
+                return None
+            return await super().fetchval(query, *args)
+
+    access = await resolve_work_access(
+        TerminatedEmployeeConn(),
+        user=user("employee"),
+        company_id=company_id,
+    )
+
+    assert access.level == "guest"
+    assert access.source == "external_default"
+
+
+@pytest.mark.asyncio
 async def test_explicit_grant_overrides_home_company_role():
     actor = user("employee")
     company_id = uuid4()
@@ -88,6 +109,25 @@ async def test_explicit_grant_overrides_home_company_role():
     assert access.allows(WorkCapability.EVENT_RESOLVE)
     assert access.allows(WorkCapability.EVENT_ASSIGN)
     assert not access.allows(WorkCapability.ACTION_EXECUTE)
+
+
+@pytest.mark.asyncio
+async def test_explicit_grant_short_circuits_membership_lookups():
+    class ExplicitOnlyConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if "FROM clients" in query or "FROM employees" in query:
+                raise AssertionError("membership lookup should be skipped")
+            return await super().fetchval(query, *args)
+
+    actor = user("employee")
+    access = await resolve_work_access(
+        ExplicitOnlyConn(explicit="operator"),
+        user=actor,
+        company_id=uuid4(),
+    )
+
+    assert access.level == "operator"
+    assert access.source == "explicit"
 
 
 @pytest.mark.asyncio
@@ -153,6 +193,19 @@ def test_effective_explicit_grant_overrides_membership_default():
     assert access.source == "explicit"
     assert access.allows(WorkCapability.SENSITIVE_RECORD_READ)
     assert not access.allows(WorkCapability.ACTION_EXECUTE)
+
+
+def test_owner_outranks_explicit_grant():
+    access = effective_access(
+        company_id=uuid4(),
+        user_id=uuid4(),
+        user_role="client",
+        explicit_level="member",
+        is_company_owner=True,
+    )
+
+    assert access.level == "admin"
+    assert access.source == "company_owner"
 
 
 def test_platform_admin_is_immutable_admin_access():
