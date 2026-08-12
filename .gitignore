@@ -120,6 +120,8 @@ platforms/ios/*/build/
 *.ipa
 *.dSYM.zip
 *.dSYM
+*.mobileprovision
+*.provisionprofile
 
 # Swift Package Manager
 .build/
