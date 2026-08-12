@@ -362,6 +362,18 @@ def test_model_call_bound_forces_a_finish(patched):
     assert data["message"]
 
 
+def test_repeated_rejected_stage_stops_the_loop(patched):
+    """One correction is allowed; a second bad proposal for the same action
+    type must return its validation error instead of consuming all six calls."""
+    invalid_page = [("stage_action", {"type": "create_page", "payload": '{"title":"","preset":"about"}'})]
+    frames, models, store = patched([invalid_page, invalid_page, [("finish", {"message": "ignored"})]])
+    data = _result(frames)
+
+    assert models.calls == setup_agent._MAX_REJECTED_STAGE_ATTEMPTS
+    assert store["actions"] == []
+    assert "title" in data["message"]
+
+
 def test_a_model_error_still_yields_a_result_frame(patched, monkeypatch):
     class _Boom:
         async def generate_content(self, **_kw):

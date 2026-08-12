@@ -114,6 +114,11 @@ _MAX_HISTORY_MESSAGES = 20
 # still force-finishes instead of handing the client a page-sized diff.
 _MAX_TURN_OPS = 60
 
+# Let the model correct one rejected edit batch. A second all-rejected batch
+# means it has not resolved the target/schema from the available page context;
+# continuing to call it only burns the turn's remaining model-call budget.
+_MAX_REJECTED_APPLY_ATTEMPTS = 2
+
 # Screenshots pile up as image Parts in `contents` and are re-sent whole on
 # EVERY later model call — a `max` turn's 5th shot means the 6th-10th calls
 # each pay for 5 images even though only the newest one is relevant to what
@@ -440,6 +445,7 @@ async def run_merlin_agent(
     # is a prompt-following failure the model can repeat; this can't be forgotten).
     screenshot_ok = False
     screenshot_failed = False
+    rejected_apply_attempts = 0
     started = time.monotonic()
 
     def elapsed() -> float:
@@ -876,6 +882,7 @@ async def run_merlin_agent(
             response_parts: list[types.Part] = []
             image_parts: list[types.Part] = []
             finished = False
+            terminal_rejection: Optional[str] = None
 
             # Gemini's parallel function calling makes no ordering promise
             # within one batch — `[finish(...), apply_ops(...)]` is a real
@@ -897,6 +904,17 @@ async def run_merlin_agent(
 
                 if name == "apply_ops":
                     payload, step = do_apply_ops(args)
+                    if not payload.get("applied") and (payload.get("rejected") or payload.get("error")):
+                        rejected_apply_attempts += 1
+                        if rejected_apply_attempts >= _MAX_REJECTED_APPLY_ATTEMPTS:
+                            rejected = payload.get("rejected") or []
+                            reason = payload.get("error")
+                            if not reason and rejected:
+                                reason = rejected[0].get("reason")
+                            terminal_rejection = (
+                                f"I need a detail corrected before I can make that change: "
+                                f"{reason or 'the edit was rejected.'}"
+                            )
                 elif name == "inspect_block":
                     payload, step = do_inspect_block(args)
                 elif name == "render_screenshot":
@@ -925,6 +943,9 @@ async def run_merlin_agent(
                     types.Part.from_function_response(name=name, response=payload)
                 )
 
+            if terminal_rejection:
+                final_message = terminal_rejection
+                break
             if finished:
                 final_message = finish_message
                 break

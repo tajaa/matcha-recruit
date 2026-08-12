@@ -318,6 +318,18 @@ def test_invalid_ops_are_reported_back_not_applied(patched):
     assert data["rejected"], "the bad op must be reported, not silently dropped"
 
 
+def test_repeated_rejected_ops_stop_the_loop(patched):
+    """One corrected edit batch may follow a rejection. Repeating an
+    all-rejected batch must not consume the tier's remaining model calls."""
+    invalid_ops = [("apply_ops", {"ops": '[{"op":"set_field","block":"ghost","path":"heading","value":"x"}]'})]
+    frames, models = patched([invalid_ops, invalid_ops, [("finish", {"message": "ignored"})]])
+    data = _result(frames)
+
+    assert models.calls == merlin_agent._MAX_REJECTED_APPLY_ATTEMPTS
+    assert data["ops"] == []
+    assert "block id not found" in data["message"]
+
+
 def test_malformed_ops_json_does_not_kill_the_turn(patched):
     frames, _ = patched([
         [("apply_ops", {"ops": "not json"})],

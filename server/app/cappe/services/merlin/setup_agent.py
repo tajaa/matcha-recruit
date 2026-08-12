@@ -59,6 +59,10 @@ _MODEL_CALLS = 6
 _WALL_CLOCK = 90.0
 _CALL_TIMEOUT = 60.0
 _MAX_HISTORY_MESSAGES = 20
+# One correction is useful when Gemini sends a malformed payload. A second
+# rejected proposal of the same action type is not new information; stop rather
+# than spending the rest of this activation loop retrying shapes blindly.
+_MAX_REJECTED_STAGE_ATTEMPTS = 2
 
 _LINK_TARGETS = frozenset({
     # settings/design/pages all resolve to sections of the SAME dashboard
@@ -191,6 +195,7 @@ async def run_setup_agent(
     # SetupGuide/pages list without a REST round trip, the same event the
     # Approve button's own response already provides.
     latest_readiness: Optional[dict[str, Any]] = None
+    rejected_stage_attempts: dict[str, int] = {}
 
     model_calls = 0
     started = time.monotonic()
@@ -310,6 +315,7 @@ async def run_setup_agent(
             response_parts: list[types.Part] = []
             finished = False
             finish_message: Optional[str] = None
+            terminal_rejection: Optional[str] = None
 
             # Same reasoning as the page agent: run every non-finish call in
             # the batch before honoring finish, so a [finish, stage_action]
@@ -347,6 +353,14 @@ async def run_setup_agent(
                     payload, entry = await do_stage_action(args)
                     if entry is not None:
                         yield {"type": "staged_action", "action": entry}
+                    elif payload.get("staged") is False or payload.get("error"):
+                        action_type = str(args.get("type") or "that action")
+                        rejected_stage_attempts[action_type] = rejected_stage_attempts.get(action_type, 0) + 1
+                        if rejected_stage_attempts[action_type] >= _MAX_REJECTED_STAGE_ATTEMPTS:
+                            terminal_rejection = (
+                                f"I need a detail corrected before I can propose that: "
+                                f"{payload.get('reason') or payload.get('error') or 'the action was rejected.'}"
+                            )
                     yield record_step({"kind": "stage", "label": payload.get("summary") or payload.get("reason") or "Staged"})
                 elif name == "execute_staged_action":
                     yield {"type": "status", "message": "Making that change…"}
@@ -359,6 +373,9 @@ async def run_setup_agent(
 
                 response_parts.append(types.Part.from_function_response(name=name, response=payload))
 
+            if terminal_rejection:
+                final_message = terminal_rejection
+                break
             if finished:
                 final_message = finish_message
                 break
