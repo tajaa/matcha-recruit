@@ -16,6 +16,7 @@ from app.matcha.services.matcha_work.work_permissions import (
     WorkCapability,
     WorkPermissionDenied,
     assert_work_capability,
+    effective_access,
     resolve_work_access,
 )
 
@@ -52,18 +53,91 @@ async def list_work_permissions(
         await _assert_manager(conn, current_user=current_user, company_id=target_company_id)
         rows = await conn.fetch(
             """
-            SELECT p.user_id, u.email, u.role, p.level, p.granted_by,
-                   p.created_at, p.updated_at
-              FROM mw_work_permissions p
-              JOIN users u ON u.id = p.user_id
-             WHERE p.company_id = $1
-             ORDER BY u.email
+            WITH eligible AS (
+                SELECT c.user_id, 'company_client'::text AS source
+                  FROM clients c
+                 WHERE c.company_id = $1
+                UNION
+                SELECT e.user_id, 'company_employee'::text
+                  FROM employees e
+                 WHERE e.org_id = $1 AND e.user_id IS NOT NULL
+                UNION
+                SELECT cm.user_id, 'channel_member'::text
+                  FROM channel_members cm
+                  JOIN channels ch ON ch.id = cm.channel_id
+                 WHERE ch.company_id = $1
+                   AND cm.removed_for_inactivity IS NOT TRUE
+                UNION
+                SELECT tc.user_id, 'thread_collaborator'::text
+                  FROM mw_thread_collaborators tc
+                  JOIN mw_threads t ON t.id = tc.thread_id
+                 WHERE t.company_id = $1
+                UNION
+                SELECT pc.user_id, 'project_collaborator'::text
+                  FROM mw_project_collaborators pc
+                  JOIN mw_projects p ON p.id = pc.project_id
+                 WHERE p.company_id = $1 AND pc.status = 'active'
+                UNION
+                SELECT owner_id, 'company_owner'::text
+                  FROM companies
+                 WHERE id = $1 AND owner_id IS NOT NULL
+                UNION
+                SELECT p.user_id, 'explicit_grant'::text
+                  FROM mw_work_permissions p
+                 WHERE p.company_id = $1
+            ), grouped AS (
+                SELECT user_id, array_agg(DISTINCT source ORDER BY source) AS eligible_via
+                  FROM eligible
+                 GROUP BY user_id
+            )
+            SELECT g.user_id, u.email, u.role, u.avatar_url,
+                   COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name,
+                   g.eligible_via,
+                   p.level AS explicit_level, p.granted_by, p.created_at, p.updated_at,
+                   (c.owner_id = g.user_id) AS is_company_owner
+              FROM grouped g
+              JOIN users u ON u.id = g.user_id
+              LEFT JOIN clients cl ON cl.user_id = g.user_id AND cl.company_id = $1
+              LEFT JOIN employees e ON e.user_id = g.user_id AND e.org_id = $1
+              LEFT JOIN admins a ON a.user_id = g.user_id
+              LEFT JOIN mw_work_permissions p
+                ON p.company_id = $1 AND p.user_id = g.user_id
+              JOIN companies c ON c.id = $1
+             WHERE u.is_active IS NOT FALSE
+             ORDER BY name, u.email
             """,
             target_company_id,
         )
+        permissions = []
+        for row in rows:
+            access = effective_access(
+                company_id=target_company_id,
+                user_id=row["user_id"],
+                user_role=row["role"],
+                explicit_level=row["explicit_level"],
+                is_company_owner=bool(row["is_company_owner"]),
+                is_company_client="company_client" in row["eligible_via"],
+                is_company_employee="company_employee" in row["eligible_via"],
+            )
+            permissions.append({
+                "user_id": str(row["user_id"]),
+                "email": row["email"],
+                "name": row["name"],
+                "role": row["role"],
+                "avatar_url": row["avatar_url"],
+                "eligible_via": list(row["eligible_via"]),
+                "explicit_level": row["explicit_level"],
+                "effective_level": access.level,
+                "effective_source": access.source,
+                "capabilities": sorted(capability.value for capability in access.capabilities),
+                "granted_by": str(row["granted_by"]) if row["granted_by"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "immutable": bool(row["is_company_owner"]),
+            })
     return {
         "company_id": target_company_id,
-        "permissions": [dict(row) for row in rows],
+        "permissions": permissions,
     }
 
 

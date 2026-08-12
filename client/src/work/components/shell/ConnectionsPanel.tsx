@@ -11,8 +11,11 @@ import {
   searchInvitableUsers,
 } from '../../api/channels'
 import type { UserConnection } from '../../api/channels'
+import WorkspaceAccessPanel from '../permissions/WorkspaceAccessPanel'
+import { canManageWorkPermissions } from '../../utils/workAccess'
+import { useMe } from '../../../hooks/useMe'
 
-type Tab = 'connections' | 'pending' | 'find'
+type Tab = 'connections' | 'pending' | 'find' | 'access'
 
 interface SearchResult {
   id: string
@@ -23,6 +26,8 @@ interface SearchResult {
 }
 
 export default function ConnectionsPanel() {
+  const { me } = useMe()
+  const canManageAccess = canManageWorkPermissions(me?.work_access?.capabilities)
   const [tab, setTab] = useState<Tab>('connections')
   const [connections, setConnections] = useState<UserConnection[]>([])
   const [pending, setPending] = useState<UserConnection[]>([])
@@ -148,7 +153,12 @@ export default function ConnectionsPanel() {
     { key: 'connections', label: 'Connections', count: connections.length || undefined },
     { key: 'pending', label: 'Pending', count: (pending.length + sent.length) || undefined },
     { key: 'find', label: 'Find People' },
+    ...(canManageAccess ? [{ key: 'access' as const, label: 'Workspace access' }] : []),
   ]
+
+  if (tab === 'access' && canManageAccess) {
+    return <WorkspaceAccessPanel onBackToConnections={() => setTab('connections')} />
+  }
 
   return (
     <div className="flex-1 flex flex-col bg-w-surface min-h-0">

@@ -26,7 +26,6 @@ WorkAccessSource = Literal[
     "external_default",
 ]
 
-
 class WorkCapability(str, Enum):
     """Capabilities used by both REST and Huume execution paths."""
 
@@ -103,6 +102,55 @@ def capabilities_for_level(level: WorkAccessLevel) -> frozenset[WorkCapability]:
     return _LEVEL_CAPABILITIES[level]
 
 
+def default_access_for_membership(
+    *,
+    is_company_owner: bool,
+    is_company_client: bool,
+    is_company_employee: bool,
+) -> tuple[WorkAccessLevel, WorkAccessSource]:
+    """Resolve the non-explicit level from company membership."""
+    if is_company_owner:
+        return "admin", "company_owner"
+    if is_company_client:
+        return "operator", "client_default"
+    if is_company_employee:
+        return "member", "employee_default"
+    return "guest", "external_default"
+
+
+def effective_access(
+    *,
+    company_id: UUID,
+    user_id: UUID,
+    user_role: str,
+    explicit_level: WorkAccessLevel | None,
+    is_platform_admin: bool = False,
+    is_company_owner: bool = False,
+    is_company_client: bool = False,
+    is_company_employee: bool = False,
+) -> WorkAccess:
+    """Build effective Work access from already-loaded membership facts."""
+    if is_platform_admin:
+        level: WorkAccessLevel = "admin"
+        source: WorkAccessSource = "platform_admin"
+    elif explicit_level in _LEVEL_CAPABILITIES and explicit_level != "guest":
+        level = explicit_level
+        source = "explicit"
+    else:
+        level, source = default_access_for_membership(
+            is_company_owner=is_company_owner,
+            is_company_client=is_company_client,
+            is_company_employee=is_company_employee,
+        )
+    return WorkAccess(
+        company_id=company_id,
+        user_id=user_id,
+        level=level,
+        capabilities=capabilities_for_level(level),
+        source=source,
+    )
+
+
 def capability_allowed(
     access: WorkAccess,
     capability: WorkCapability,
@@ -132,8 +180,13 @@ async def resolve_work_access(
     """
 
     if user.role == "admin":
-        level: WorkAccessLevel = "admin"
-        source: WorkAccessSource = "platform_admin"
+        return effective_access(
+            company_id=company_id,
+            user_id=user.id,
+            user_role=user.role,
+            explicit_level=None,
+            is_platform_admin=True,
+        )
     else:
         explicit_level = await conn.fetchval(
             """
@@ -144,43 +197,27 @@ async def resolve_work_access(
             company_id,
             user.id,
         )
-        if explicit_level in _LEVEL_CAPABILITIES and explicit_level != "guest":
-            level = explicit_level
-            source = "explicit"
-        else:
-            owner_id = await conn.fetchval(
-                "SELECT owner_id FROM companies WHERE id = $1",
-                company_id,
-            )
-            if owner_id == user.id:
-                level = "admin"
-                source = "company_owner"
-            else:
-                client_company_id = await conn.fetchval(
-                    "SELECT company_id FROM clients WHERE user_id = $1",
-                    user.id,
-                )
-                employee_company_id = await conn.fetchval(
-                    "SELECT org_id FROM employees WHERE user_id = $1",
-                    user.id,
-                )
-                if client_company_id == company_id:
-                    level = "operator"
-                    source = "client_default"
-                elif employee_company_id == company_id:
-                    level = "member"
-                    source = "employee_default"
-                else:
-                    level = "guest"
-                    source = "external_default"
-
-    return WorkAccess(
-        company_id=company_id,
-        user_id=user.id,
-        level=level,
-        capabilities=capabilities_for_level(level),
-        source=source,
-    )
+        owner_id = await conn.fetchval(
+            "SELECT owner_id FROM companies WHERE id = $1",
+            company_id,
+        )
+        client_company_id = await conn.fetchval(
+            "SELECT company_id FROM clients WHERE user_id = $1",
+            user.id,
+        )
+        employee_company_id = await conn.fetchval(
+            "SELECT org_id FROM employees WHERE user_id = $1",
+            user.id,
+        )
+        return effective_access(
+            company_id=company_id,
+            user_id=user.id,
+            user_role=user.role,
+            explicit_level=explicit_level if explicit_level in _LEVEL_CAPABILITIES else None,
+            is_company_owner=owner_id == user.id,
+            is_company_client=client_company_id == company_id,
+            is_company_employee=employee_company_id == company_id,
+        )
 
 
 def access_from_capabilities(

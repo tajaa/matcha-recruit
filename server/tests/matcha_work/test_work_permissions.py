@@ -10,6 +10,8 @@ from app.matcha.services.matcha_work.work_permissions import (
     WorkPermissionDenied,
     access_from_capabilities,
     assert_work_capability,
+    default_access_for_membership,
+    effective_access,
     resolve_work_access,
 )
 
@@ -120,3 +122,47 @@ def test_member_cannot_assign_events():
     with pytest.raises(WorkPermissionDenied) as exc:
         assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
     assert exc.value.capability is WorkCapability.EVENT_ASSIGN
+
+
+@pytest.mark.parametrize(
+    ("owner", "client", "employee", "expected_level", "expected_source"),
+    [
+        (True, False, False, "admin", "company_owner"),
+        (False, True, False, "operator", "client_default"),
+        (False, False, True, "member", "employee_default"),
+        (False, False, False, "guest", "external_default"),
+    ],
+)
+def test_default_access_for_membership(owner, client, employee, expected_level, expected_source):
+    assert default_access_for_membership(
+        is_company_owner=owner,
+        is_company_client=client,
+        is_company_employee=employee,
+    ) == (expected_level, expected_source)
+
+
+def test_effective_explicit_grant_overrides_membership_default():
+    access = effective_access(
+        company_id=uuid4(),
+        user_id=uuid4(),
+        user_role="employee",
+        explicit_level="reviewer",
+        is_company_employee=True,
+    )
+    assert access.level == "reviewer"
+    assert access.source == "explicit"
+    assert access.allows(WorkCapability.SENSITIVE_RECORD_READ)
+    assert not access.allows(WorkCapability.ACTION_EXECUTE)
+
+
+def test_platform_admin_is_immutable_admin_access():
+    access = effective_access(
+        company_id=uuid4(),
+        user_id=uuid4(),
+        user_role="admin",
+        explicit_level=None,
+        is_platform_admin=True,
+    )
+    assert access.level == "admin"
+    assert access.source == "platform_admin"
+    assert access.allows(WorkCapability.PERMISSIONS_MANAGE)

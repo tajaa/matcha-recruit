@@ -100,6 +100,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             return {
                 "level": access.level,
                 "capabilities": sorted(capability.value for capability in access.capabilities),
+                "source": access.source,
             }
 
         if current_user.role == "admin":
@@ -120,6 +121,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 "work_access": {
                     "level": "admin",
                     "capabilities": sorted(capability.value for capability in WorkCapability),
+                    "source": "platform_admin",
                 },
             }
 

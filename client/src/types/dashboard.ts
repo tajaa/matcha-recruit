@@ -383,5 +383,6 @@ export interface MeResponse {
   work_access?: {
     level: 'guest' | 'member' | 'reviewer' | 'operator' | 'admin'
     capabilities: string[]
+    source?: string
   }
 }
