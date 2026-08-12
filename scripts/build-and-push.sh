@@ -437,10 +437,20 @@ build_image() {
     # same value even if HEAD moves mid-run.
     local git_sha="${GIT_SHA:-unknown}"
 
-    local tags=(
-        "${image_uri}:latest"
-        "${image_uri}:${git_sha}"
-    )
+    # A registry build publishes the immutable SHA tag immediately, but leaves
+    # `:latest` alone until every selected build has succeeded. That avoids a
+    # 4GB `--load` import into Docker Desktop solely so `docker push` can send
+    # it straight back to the registry, while retaining the old all-or-nothing
+    # promotion of the deployable tag.
+    local tags=()
+    if [ "$PUSH_TO_ECR" = true ]; then
+        tags=("${image_uri}:${git_sha}")
+    else
+        tags=(
+            "${image_uri}:latest"
+            "${image_uri}:${git_sha}"
+        )
+    fi
 
     # Build tag arguments
     local tag_args=()
@@ -454,12 +464,21 @@ build_image() {
 
     local build_args=(
         --platform "$PLATFORM"
-        --load
         "${tag_args[@]}"
         --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
         --build-arg "GIT_SHA=${git_sha}"
         -f "$dockerfile_path"
     )
+
+    if [ "$PUSH_TO_ECR" = true ]; then
+        # Stream layers straight to ECR. `--load` would first import the full
+        # backend image (currently ~4GB) into Docker Desktop, after which
+        # docker push transmits the same image to ECR.
+        build_args+=(--push)
+        log_info "Direct registry push: ${image_uri}:${git_sha} (skipping local image load)"
+    else
+        build_args+=(--load)
+    fi
 
     if [ ${#extra_build_args[@]} -gt 0 ]; then
         build_args+=("${extra_build_args[@]}")
@@ -527,48 +546,25 @@ push_image() {
         return 0
     fi
 
-    log_section "Pushing $name Image to ECR"
+    log_section "Promoting $name Image in ECR"
 
     # Same SHA as the build step — captured once at script start so a
     # mid-run commit can't desync build and push tags.
     local git_sha="${GIT_SHA:-unknown}"
 
-    local tags=(
-        "${image_uri}:latest"
-        "${image_uri}:${git_sha}"
-    )
-
-    # Sanity-check every tag exists locally BEFORE attempting any push.
-    # Without this, a silent build failure (e.g. parallel buildx --load
-    # race, docker prune between build and push, manual interruption)
-    # surfaces as the cryptic "tag does not exist" docker error in the
-    # middle of the push phase. With this, we fail early with a clear
-    # message pointing to the build phase as the culprit.
-    local missing_tags=()
-    for tag in "${tags[@]}"; do
-        if ! docker image inspect "$tag" >/dev/null 2>&1; then
-            missing_tags+=("$tag")
-        fi
-    done
-    if [ ${#missing_tags[@]} -gt 0 ]; then
-        log_error "Build phase did not produce expected local tag(s) for $name:"
-        for tag in "${missing_tags[@]}"; do
-            log_error "  missing: $tag"
-        done
-        log_error "Re-run the script — see the build phase output above for the underlying error."
-        log_error "(Common cause: a HEAD-moving commit landed mid-run, or a parallel buildx --load race on Docker Desktop.)"
+    # buildx already pushed the SHA-tagged image directly to ECR. Promote its
+    # manifest only after every selected build completed, so `:latest` remains
+    # atomic across backend/frontend without loading or re-uploading layers.
+    log_info "Promoting ${image_uri}:${git_sha} to ${image_uri}:latest (manifest only)"
+    if docker buildx imagetools create \
+        --prefer-index=false \
+        --tag "${image_uri}:latest" \
+        "${image_uri}:${git_sha}"; then
+        log_success "Promoted: ${image_uri}:latest"
+    else
+        log_error "Failed to promote: ${image_uri}:${git_sha} to :latest"
         exit 1
     fi
-
-    for tag in "${tags[@]}"; do
-        log_info "Pushing: $tag"
-        if docker push "$tag"; then
-            log_success "Pushed: $tag"
-        else
-            log_error "Failed to push: $tag"
-            exit 1
-        fi
-    done
 }
 
 # Build backend
