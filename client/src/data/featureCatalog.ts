@@ -53,6 +53,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       matcha_work: 'Matcha Work',
       ems: 'Ops — Events (channel event logging via @huume) — needs Matcha Work too',
       inventory: 'Ops — Inventory (channel stock tracking via @huume) — needs Matcha Work too',
+      inventory_voice: 'Ops — Inventory Voice Audit (Gemini count dictation) — needs Inventory too',
       werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
       werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
@@ -98,6 +99,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
   ems: ['matcha_work'],
   inventory: ['matcha_work'],
+  inventory_voice: ['inventory'],
   werk_lite: ['matcha_work'],
   // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately
   // NOT here even though each needs incidents/osha_logs to do anything — see
@@ -106,4 +108,45 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   // ir_magic_links/ir_copilot default True (subtractive), so enforcing the
   // dependency here would disable-block incidents on any company with either
   // still at its default.
+}
+
+/**
+ * Apply one feature toggle with its dependency closure. Product composition
+ * uses this to keep drafts valid before the backend validates them; the
+ * per-company toggle grid keeps its stricter disabled-state behavior because
+ * it must not silently change another feature.
+ */
+export function applyFeatureToggle(
+  features: Record<string, boolean>,
+  feature: string,
+  enabled: boolean,
+): Record<string, boolean> {
+  const next = { ...features }
+
+  if (enabled) {
+    const enable = (key: string, visiting: Set<string>) => {
+      if (visiting.has(key)) return
+      visiting.add(key)
+      for (const requirement of FEATURE_REQUIRES[key] ?? []) {
+        enable(requirement, visiting)
+      }
+      next[key] = true
+      visiting.delete(key)
+    }
+    enable(feature, new Set())
+  } else {
+    const disable = (key: string, visiting: Set<string>) => {
+      if (visiting.has(key)) return
+      visiting.add(key)
+      next[key] = false
+      for (const dependent of Object.entries(FEATURE_REQUIRES)
+        .filter(([, requirements]) => requirements.includes(key))
+        .map(([candidate]) => candidate)) {
+        disable(dependent, visiting)
+      }
+      visiting.delete(key)
+    }
+    disable(feature, new Set())
+  }
+  return next
 }

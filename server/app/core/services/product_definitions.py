@@ -24,7 +24,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from ..feature_flags import DEFAULT_COMPANY_FEATURES, is_beta
+from ..feature_flags import (
+    DEFAULT_COMPANY_FEATURES,
+    feature_dependency_violations,
+    is_beta,
+)
 
 SIGNUP_SOURCE_PREFIX = "product:"
 
@@ -251,6 +255,13 @@ def validate_features(features: Any, *, beta_features: "frozenset[str]") -> dict
     if beta_on:
         raise ProductDefinitionError(
             f"Feature(s) still in beta, not sellable yet: {', '.join(beta_on)}"
+        )
+    violations = feature_dependency_violations(cleaned)
+    if violations:
+        feature, missing = next(iter(violations.items()))
+        raise ProductDefinitionError(
+            f"'{feature}' requires {', '.join(f'{requirement!r}' for requirement in missing)} "
+            "to be enabled first."
         )
     return cleaned
 

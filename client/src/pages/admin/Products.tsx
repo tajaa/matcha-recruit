@@ -3,7 +3,7 @@ import { Boxes, Check, Copy, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Badge, Button, Input, Select, Textarea, Toggle, useToast } from '../../components/ui'
-import { FEATURE_GROUPS, FEATURE_LABELS } from '../../data/featureCatalog'
+import { applyFeatureToggle, FEATURE_GROUPS, FEATURE_LABELS } from '../../data/featureCatalog'
 import { PRODUCT_NAV_CATALOG } from '../../data/productNavCatalog'
 
 /**
@@ -171,13 +171,18 @@ export default function Products() {
   function toggleFeature(key: string, on: boolean) {
     setDraft((d) => {
       if (!d) return d
-      const features = { ...d.features, [key]: on }
-      const navOrder = on
-        ? [...d.navOrder.filter((f) => f !== key), key]
-        : d.navOrder.filter((f) => f !== key)
+      const features = applyFeatureToggle(d.features, key, on)
+      const newlyEnabled = Object.keys(features).filter((feature) => features[feature] && !d.features[feature])
+      const newlyDisabled = new Set(
+        Object.keys(features).filter((feature) => !features[feature] && d.features[feature]),
+      )
+      const navOrder = [
+        ...d.navOrder.filter((feature) => !newlyDisabled.has(feature)),
+        ...newlyEnabled.filter((feature) => !d.navOrder.includes(feature)),
+      ]
       // Dropping the feature that was the paid gate must drop the gate too,
       // or the save 400s on "gate must be one of the enabled features".
-      const gate_feature = !on && d.gate_feature === key ? '' : d.gate_feature
+      const gate_feature = d.gate_feature && !features[d.gate_feature] ? '' : d.gate_feature
       return { ...d, features, navOrder, gate_feature }
     })
   }
