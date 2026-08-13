@@ -40,6 +40,10 @@ final class PromoService {
         try await client.request(method: "GET", path: "/promo/campaigns")
     }
 
+    func createCampaign(_ body: PromoCampaignCreate) async throws -> PromoCampaign {
+        try await client.request(method: "POST", path: "/promo/campaigns", body: body)
+    }
+
     func campaign(id: String) async throws -> PromoCampaign {
         try await client.request(method: "GET", path: "/promo/campaigns/\(id)")
     }

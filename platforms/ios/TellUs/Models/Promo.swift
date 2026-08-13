@@ -79,6 +79,115 @@ struct PromoCampaignStats: Codable {
     let cancelled: Int
 }
 
+struct PromoCampaignCreate: Encodable, Equatable {
+    let title: String
+    let reward_text: String
+    let description: String?
+    let max_claims: Int
+    let card_expiry_days: Int
+    let starts_at: String?
+    let ends_at: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case title, reward_text, description, max_claims, card_expiry_days, starts_at, ends_at
+    }
+
+    init(
+        title: String,
+        reward_text: String,
+        description: String? = nil,
+        max_claims: Int,
+        card_expiry_days: Int = 30,
+        starts_at: String? = nil,
+        ends_at: String? = nil
+    ) {
+        self.title = title
+        self.reward_text = reward_text
+        self.description = description
+        self.max_claims = max_claims
+        self.card_expiry_days = card_expiry_days
+        self.starts_at = starts_at
+        self.ends_at = ends_at
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(reward_text, forKey: .reward_text)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encode(max_claims, forKey: .max_claims)
+        try container.encode(card_expiry_days, forKey: .card_expiry_days)
+        try container.encodeIfPresent(starts_at, forKey: .starts_at)
+        try container.encodeIfPresent(ends_at, forKey: .ends_at)
+    }
+}
+
+enum PromoCampaignValidationError: LocalizedError, Equatable {
+    case titleRequired
+    case titleTooLong
+    case rewardRequired
+    case rewardTooLong
+    case descriptionTooLong
+    case invalidClaimLimit
+    case invalidExpiryDays
+    case endDateInPast
+
+    var errorDescription: String? {
+        switch self {
+        case .titleRequired: return "Enter a campaign title."
+        case .titleTooLong: return "Campaign titles must be 120 characters or fewer."
+        case .rewardRequired: return "Enter the reward customers will receive."
+        case .rewardTooLong: return "Rewards must be 200 characters or fewer."
+        case .descriptionTooLong: return "Descriptions must be 2,000 characters or fewer."
+        case .invalidClaimLimit: return "Claim limit must be a whole number between 1 and 10,000."
+        case .invalidExpiryDays: return "Card validity must be a whole number of days between 1 and 365."
+        case .endDateInPast: return "The campaign end date must be in the future."
+        }
+    }
+}
+
+struct PromoCampaignDraft: Equatable {
+    var title = ""
+    var rewardText = ""
+    var description = ""
+    var maxClaims = "50"
+    var expiryDays = "30"
+    var hasEndDate = false
+    var endDate = Date().addingTimeInterval(86_400)
+
+    func validated(now: Date = Date()) throws -> PromoCampaignCreate {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw PromoCampaignValidationError.titleRequired }
+        guard title.count <= 120 else { throw PromoCampaignValidationError.titleTooLong }
+
+        let reward = rewardText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reward.isEmpty else { throw PromoCampaignValidationError.rewardRequired }
+        guard reward.count <= 200 else { throw PromoCampaignValidationError.rewardTooLong }
+
+        let description = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard description.count <= 2_000 else { throw PromoCampaignValidationError.descriptionTooLong }
+        guard let claims = Int(maxClaims.trimmingCharacters(in: .whitespacesAndNewlines)), (1...10_000).contains(claims) else {
+            throw PromoCampaignValidationError.invalidClaimLimit
+        }
+        guard let days = Int(expiryDays.trimmingCharacters(in: .whitespacesAndNewlines)), (1...365).contains(days) else {
+            throw PromoCampaignValidationError.invalidExpiryDays
+        }
+        if hasEndDate, endDate <= now {
+            throw PromoCampaignValidationError.endDateInPast
+        }
+
+        let iso = ISO8601DateFormatter()
+        return PromoCampaignCreate(
+            title: title,
+            reward_text: reward,
+            description: description.isEmpty ? nil : description,
+            max_claims: claims,
+            card_expiry_days: days,
+            ends_at: hasEndDate ? iso.string(from: endDate) : nil
+        )
+    }
+}
+
 struct PromoCampaign: Codable, Identifiable, Hashable {
     let id: String
     let title: String
