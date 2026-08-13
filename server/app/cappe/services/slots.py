@@ -30,7 +30,7 @@ def generate_slots(
     now_utc: datetime,
     rules: Optional[Sequence[dict]] = None,
     days_ahead: int = 21,
-    max_slots: int = 60,
+    max_slots: int | None = 60,
     staff_id: Optional[str] = None,
 ) -> list[dict]:
     """Expand availability windows into concrete open slots for one booking type.
@@ -106,7 +106,7 @@ def generate_slots(
                     "time_label": _fmt_time(local_start),
                     "price_cents": price,
                 })
-                if len(out) >= max_slots:
+                if max_slots is not None and len(out) >= max_slots:
                     return out
     return out
 

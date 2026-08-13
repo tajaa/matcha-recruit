@@ -1,8 +1,11 @@
 """Cappe public surface — bookings (locations, staff, booking types, rider,
 availability, slots, create)."""
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, Response
+from fastapi.routing import APIRoute
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -38,8 +41,45 @@ from .._shared import _site_owner, loads_list
 from ._common import _location_ctx, _published_site, _read_rate_limit, _reject_reserved
 
 router = APIRouter()
-
 _MAX_SUGGESTION_BODY_BYTES = 8 * 1024
+_SUGGESTION_SEARCH_DAYS = 14
+
+
+class _BookingSuggestionBodyLimitRoute(APIRoute):
+    """Reject oversized suggestion bodies before FastAPI parses the model."""
+
+    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
+        original_route_handler = super().get_route_handler()
+
+        async def custom_route_handler(request: Request):
+            content_length = request.headers.get("content-length")
+            if content_length and content_length.isdigit() and int(content_length) > _MAX_SUGGESTION_BODY_BYTES:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={"detail": "Request is too large"},
+                )
+
+            received_bytes = 0
+
+            async def limited_receive():
+                nonlocal received_bytes
+                message = await request.receive()
+                if message["type"] == "http.request":
+                    received_bytes += len(message.get("body") or b"")
+                    if received_bytes > _MAX_SUGGESTION_BODY_BYTES:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                            detail="Request is too large",
+                        )
+                return message
+
+            limited_request = Request(request.scope, limited_receive)
+            return await original_route_handler(limited_request)
+
+        return custom_route_handler
+
+
+suggestions_router = APIRouter(route_class=_BookingSuggestionBodyLimitRoute)
 
 
 async def _active_staff_for_type(conn, site_id, type_id) -> list:
@@ -201,6 +241,7 @@ async def _load_live_booking_slots(
     conn, *, site, booking_type, location_id: UUID | None,
     timezone_name: str, days: int, staff_id: UUID | None,
     discounts: list[dict] | None = None, include_staff_ids: bool = False,
+    max_slots: int | None = 60,
 ) -> list[dict]:
     """Generate live candidates shared by the normal picker and AI suggestions."""
     type_id = booking_type["id"]
@@ -243,7 +284,7 @@ async def _load_live_booking_slots(
         sid = str(staff_id)
         slots = generate_slots(
             availability, btype, _busy_for(sid), timezone_name, now_utc, rules,
-            days_ahead=days, staff_id=sid,
+            days_ahead=days, max_slots=max_slots, staff_id=sid,
         )
         if include_staff_ids:
             for slot in slots:
@@ -254,13 +295,13 @@ async def _load_live_booking_slots(
             sid = str(sid_value)
             per_staff.append((sid, generate_slots(
                 availability, btype, _busy_for(sid), timezone_name, now_utc, rules,
-                days_ahead=days, staff_id=sid,
+                days_ahead=days, max_slots=max_slots, staff_id=sid,
             )))
         slots = merge_any_staff_slots(per_staff)
     else:
         slots = generate_slots(
             availability, btype, _busy_for(None), timezone_name, now_utc, rules,
-            days_ahead=days,
+            days_ahead=days, max_slots=max_slots,
         )
 
     pct = best_discount_percent(
@@ -274,7 +315,7 @@ async def _load_live_booking_slots(
     return slots
 
 
-@router.post(
+@suggestions_router.post(
     "/public/sites/{slug}/booking-suggestions",
     response_model=CappeBookingSuggestions,
 )
@@ -282,18 +323,15 @@ async def public_booking_suggestions(
     slug: str, body: CappeBookingSuggestionRequest, request: Request,
 ):
     """Return live booking options parsed from a bounded natural-language request."""
-    content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > _MAX_SUGGESTION_BODY_BYTES:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Request is too large")
     if body.website.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid request")
     ip = client_ip(request)
-    await check_rate_limit(ip, "cappe_booking_suggest_min", 2, 60)
-    await check_rate_limit(ip, "cappe_booking_suggest_hr", 12, 3600)
+    await check_rate_limit(ip, "cappe_booking_suggest_min", 1, 60)
+    await check_rate_limit(ip, "cappe_booking_suggest_hr", 6, 3600)
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
-        await check_rate_limit(str(site["id"]), "cappe_booking_suggest_site_hr", 60, 3600)
+        await check_rate_limit(str(site["id"]), "cappe_booking_suggest_site_hr", 30, 3600)
         loc_id, tz = await _location_ctx(conn, site, body.location_id)
         btype = await conn.fetchrow(
             "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, buffer_minutes, status "
@@ -314,8 +352,8 @@ async def public_booking_suggestions(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That staff member isn't available for this service")
         slots = await _load_live_booking_slots(
             conn, site=site, booking_type=btype, location_id=loc_id,
-            timezone_name=tz, days=60, staff_id=body.staff_id,
-            include_staff_ids=True,
+            timezone_name=tz, days=_SUGGESTION_SEARCH_DAYS, staff_id=body.staff_id,
+            include_staff_ids=True, max_slots=None,
         )
         now_utc = await conn.fetchval("SELECT NOW()")
 

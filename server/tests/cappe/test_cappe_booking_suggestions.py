@@ -1,5 +1,5 @@
 """Pure tests for Cappe natural-language booking suggestion rules."""
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from uuid import UUID
 
 from app.cappe.services.booking_suggestions import (
@@ -11,6 +11,7 @@ from app.cappe.services.booking_suggestions import (
     resolve_booking_windows,
     resolve_staff_preferences,
 )
+from app.cappe.services.slots import generate_slots
 
 
 def test_coerce_booking_preference_bounds_count_and_normalizes_values():
@@ -135,3 +136,25 @@ def test_rank_returns_at_most_three_options():
         slots, staff=[], preferred_staff_ids=[], resolved_windows=[], requested_count=99,
     )
     assert len(options) == 3
+
+
+def test_slot_generation_can_reach_day_fourteen_without_a_slot_cap():
+    availability = [{
+        "weekday": weekday,
+        "start_time": time(9),
+        "end_time": time(17),
+        "booking_type_id": None,
+        "staff_id": None,
+    } for weekday in range(7)]
+    slots = generate_slots(
+        availability,
+        {"id": "type", "duration_minutes": 30, "price_cents": 5000, "pricing_mode": "flat"},
+        [],
+        "UTC",
+        datetime(2026, 8, 1, 8, tzinfo=timezone.utc),
+        days_ahead=14,
+        max_slots=None,
+    )
+
+    assert len(slots) > 60
+    assert slots[-1]["date"] == "2026-08-14"

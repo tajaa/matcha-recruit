@@ -22,7 +22,7 @@ AI-session table.
 - All returned options come from the existing deterministic live-slot generator.
 - Final booking confirmation uses the existing `POST /bookings` transaction and conflict check.
 - No suggestion request writes to the database or sends email.
-- The request is bounded by body length, honeypot, IP limits, per-site limits, and the global Gemini limiter.
+- The request is bounded by an 8 KiB body limit, honeypot, IP limits, per-site limits, and the global Gemini limiter.
 - AWS WAF/CloudFront is required before production exposure.
 
 ## API
@@ -223,16 +223,17 @@ Expected model shape:
 
 1. Validate body size, text length, and honeypot before model or database work.
 2. Apply IP limits:
-   - `cappe_booking_suggest_min`: 2 requests per minute per IP.
-   - `cappe_booking_suggest_hr`: 12 requests per hour per IP.
+   - `cappe_booking_suggest_min`: 1 request per minute per IP.
+   - `cappe_booking_suggest_hr`: 6 requests per hour per IP.
 3. Resolve the published site, active booking type, selected active location,
    and service-qualified active staff.
 4. Apply the per-site budget:
-   - `cappe_booking_suggest_site_hr`: 60 requests per hour per site.
+   - `cappe_booking_suggest_site_hr`: 30 requests per hour per site.
 5. Check `GeminiRateLimiter` with service name
    `cappe_booking_suggestions` and endpoint `parse`.
 6. Load live candidates through the same availability, staff, location,
-   buffer, booking, rate-rule, discount, and timezone logic as the normal slot endpoint.
+   buffer, booking, rate-rule, discount, and timezone logic as the normal slot endpoint,
+   searching the next 14 days without the manual picker's 60-slot display cap.
 7. Release the database connection before the Gemini call.
 8. Call Flash Lite. Record the Gemini call in `finally` after an API request was issued.
 9. Resolve relative windows from the site-local date:
