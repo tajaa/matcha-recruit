@@ -62,6 +62,23 @@ def test_booking_times_bad_timezone_falls_back_to_utc():
     assert bt["local_start"].hour == 14  # UTC fallback, no crash
 
 
+def test_booking_overlap_query_uses_timestamp_range_bounds():
+    """The booking overlap SQL must keep both tstzrange bounds as timestamps.
+
+    PostgreSQL can infer an uncast asyncpg parameter as an interval when it is
+    used with interval arithmetic, producing ``tstzrange(interval, interval)``
+    instead of the required ``tstzrange(timestamptz, timestamptz)``.
+    """
+    from pathlib import Path
+
+    source = Path(__file__).parents[2].joinpath("app/cappe/services/commerce.py").read_text()
+    query = source[source.index("AND tstzrange(starts_at, ends_at)"):]
+    query = query[:query.index("LIMIT 1")]
+    assert "$3::timestamptz" in query
+    assert "$4::timestamptz" in query
+    assert "$7::integer" in query
+
+
 def test_reserved_domain_guard_on_public_intake():
     # Applied to subscribe/order/booking/form email fields.
     assert _is_reserved_test_domain("buyer@example.com") is True

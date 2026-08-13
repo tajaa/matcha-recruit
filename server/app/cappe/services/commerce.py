@@ -324,8 +324,11 @@ async def resolve_booking_slot(
                     AND location_id IS NOT DISTINCT FROM $8
                     AND booking_type_id = $2)
              )
-             AND tstzrange(starts_at, ends_at)
-                 && tstzrange($3 - ($7 * interval '1 minute'), $4 + ($7 * interval '1 minute'))
+              AND tstzrange(starts_at, ends_at)
+                  && tstzrange(
+                       $3::timestamptz - ($7::integer * interval '1 minute'),
+                       $4::timestamptz + ($7::integer * interval '1 minute')
+                     )
            LIMIT 1""",
         site["id"], btype["id"], s_utc, e_utc, exclude_booking_id, staff_id, buf_min, location_id,
     )
