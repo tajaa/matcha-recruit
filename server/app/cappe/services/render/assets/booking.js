@@ -23,19 +23,20 @@ if(rider.length){riderHtml='<div class="cz-rider" style="border:1px solid var(--
 '<div style="font-weight:600;margin-bottom:.4rem">Booking requirements</div><ul style="margin:0 0 .5rem;padding-left:1.1rem;color:var(--muted)">'+
 rider.map(function(i){return '<li>'+RT.esc(i.label)+(i.detail?' — '+RT.esc(i.detail):'')+(i.is_required?'':' (optional)')+'</li>';}).join('')+'</ul>'+
 (reqRider.length?'<label style="display:flex;gap:.5rem;align-items:flex-start"><input type="checkbox" data-ack /> <span>I have read and agree to these requirements.</span></label>':'')+'</div>';}
-box.innerHTML='<select class="cz-field" data-bt>'+types.map(function(t){return '<option value="'+RT.esc(t.id)+'">'+RT.esc(t.name)+' ('+t.duration_minutes+' min) · '+priceLabel(t)+'</option>';}).join('')+'</select>'+
-'<div data-staff style="margin:.45rem 0"></div>'+
-'<div data-slots style="margin:.5rem 0"><p style="color:var(--muted)">Loading times…</p></div>'+
-'<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
-riderHtml+
-'<button class="cz-btn cz-btn--solid cz-btn--block" data-go disabled>Select a time</button><p class="cz-msg"></p>';
-var sb=box.querySelector('[data-go]'),msg=box.querySelector('.cz-msg'),btSel=box.querySelector('[data-bt]'),slotWrap=box.querySelector('[data-slots]'),staffWrap=box.querySelector('[data-staff]'),sel=null;
+ box.innerHTML='<select class="cz-field" data-bt>'+types.map(function(t){return '<option value="'+RT.esc(t.id)+'">'+RT.esc(t.name)+' ('+t.duration_minutes+' min) · '+priceLabel(t)+'</option>';}).join('')+'</select>'+
+ '<div data-staff style="margin:.45rem 0"></div>'+
+ '<details data-ai style="margin:.65rem 0;border:1px solid var(--line);border-radius:var(--radius);padding:.7rem .85rem"><summary style="cursor:pointer;font-weight:600">Describe what works</summary><p style="color:var(--muted);font-size:.88rem;margin:.55rem 0">Tell us your preferred days, times, or staff. We’ll suggest up to three open options.</p><textarea class="cz-field" data-ai-request rows="3" maxlength="1200" placeholder="I prefer Maria this week, Tuesday morning or Friday after 2. Show three options."></textarea><button type="button" class="cz-btn cz-btn--block" data-ai-go style="margin-top:.5rem">Find times</button><div data-ai-options style="margin-top:.55rem"></div></details>'+
+ '<div data-slots style="margin:.5rem 0"><p style="color:var(--muted)">Loading times…</p></div>'+
+ '<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" /><input type="text" data-website tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />'+
+ riderHtml+
+ '<button class="cz-btn cz-btn--solid cz-btn--block" data-go disabled>Select a time</button><p class="cz-msg"></p>';
+ var sb=box.querySelector('[data-go]'),msg=box.querySelector('.cz-msg'),btSel=box.querySelector('[data-bt]'),slotWrap=box.querySelector('[data-slots]'),staffWrap=box.querySelector('[data-staff]'),aiBox=box.querySelector('[data-ai]'),aiGo=box.querySelector('[data-ai-go]'),aiRequest=box.querySelector('[data-ai-request]'),aiOptions=box.querySelector('[data-ai-options]'),sel=null;
 function cur(){return byId[btSel.value];}
 function renderStaff(t){selStaff=null;var ids=(t&&t.staff_ids)||[];if(!ids.length){staffWrap.innerHTML='';return;}
 staffWrap.innerHTML='<p class="cz-label">With</p><div class="cz-staffrow"><button type="button" class="cz-staff cz-staff--on" data-staff-id="">Any available</button>'+
 ids.map(function(id){var s=staffById[id];if(!s)return '';var iu=RT.url(s.image_url);return '<button type="button" class="cz-staff" data-staff-id="'+RT.esc(id)+'">'+(iu?'<img src="'+RT.esc(iu)+'" alt="" />':'')+RT.esc(s.name)+'</button>';}).join('')+'</div>';
 staffWrap.querySelectorAll('.cz-staff').forEach(function(b){b.addEventListener('click',function(){staffWrap.querySelectorAll('.cz-staff').forEach(function(x){x.classList.remove('cz-staff--on');});b.classList.add('cz-staff--on');selStaff=b.getAttribute('data-staff-id')||null;loadSlots();});});}
-function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
+ function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
 var t=cur();if(!t)return;
 RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];
 if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
@@ -58,14 +59,31 @@ timesWrap.querySelectorAll('.cz-slot').forEach(function(b){b.classList.remove('c
 btn.classList.add('cz-slot--on');
 sel={start:btn.getAttribute('data-start'),end:btn.getAttribute('data-end')};sb.disabled=false;sb.textContent='Request booking';});});}
 dayBtns.forEach(function(b,i){b.addEventListener('click',function(){showDay(i);});});showDay(0);
-}).catch(function(){slotWrap.innerHTML='<p style="color:var(--muted)">Could not load times.</p>';});}
-function onType(){renderStaff(cur());loadSlots();}
-btSel.addEventListener('change',onType);onType();
+ }).catch(function(){slotWrap.innerHTML='<p style="color:var(--muted)">Could not load times.</p>';});}
+ function chooseSuggestion(o){
+  sel={start:o.starts_at,end:o.ends_at};
+   if(o.staff_id){selStaff=o.staff_id;staffWrap.querySelectorAll('.cz-staff').forEach(function(b){b.classList.toggle('cz-staff--on',b.getAttribute('data-staff-id')===o.staff_id);});}
+   sb.disabled=false;sb.textContent='Confirm booking';
+  }
+ aiGo.addEventListener('click',function(){
+  var text=aiRequest.value.trim();if(text.length<3){aiOptions.innerHTML='<p class="cz-msg err">Tell us a little more about when you’re available.</p>';return;}
+  if(box.querySelector('[data-website]').value){aiOptions.innerHTML='<p class="cz-msg err">Could not find times.</p>';return;}
+  aiGo.disabled=true;aiGo.textContent='Finding times…';aiOptions.innerHTML='<p style="color:var(--muted)">Checking the live calendar…</p>';
+  var t=cur(),params={booking_type_id:t.id,location_id:selLoc||null,staff_id:selStaff||null,request:text,website:box.querySelector('[data-website]').value};
+  RT.post('/booking-suggestions',params).then(function(d){
+   var opts=(d&&d.options)||[];
+   if(!opts.length){aiOptions.innerHTML='<p style="color:var(--muted)">No matching open times. Try a broader request or use the picker below.</p>';return;}
+   aiOptions.innerHTML='<p class="cz-label">Suggested times'+(d.unmatched_staff_names&&d.unmatched_staff_names.length?' · Could not match: '+RT.esc(d.unmatched_staff_names.join(', ')):'')+'</p>'+opts.map(function(o,i){return '<button type="button" class="cz-slot" data-ai-option="'+i+'">'+RT.esc(o.day_label)+' · '+RT.esc(o.time_label)+(o.staff_name?' · '+RT.esc(o.staff_name):'')+(o.price_cents?' · '+RT.money(o.price_cents,'USD'):'')+'</button>';}).join('');
+   aiOptions.querySelectorAll('[data-ai-option]').forEach(function(b,i){b.addEventListener('click',function(){aiOptions.querySelectorAll('[data-ai-option]').forEach(function(x){x.classList.remove('cz-slot--on');});b.classList.add('cz-slot--on');chooseSuggestion(opts[i]);});});
+  }).catch(function(){aiOptions.innerHTML='<p class="cz-msg err">Could not find times. Use the picker below.</p>';}).finally(function(){aiGo.disabled=false;aiGo.textContent='Find times';});
+ });
+ function onType(){renderStaff(cur());loadSlots();}
+ btSel.addEventListener('change',function(){aiRequest.value='';aiOptions.innerHTML='';onType();});onType();
 sb.addEventListener('click',function(){var t=cur(),email=box.querySelector('[data-email]').value.trim();
 if(!sel){msg.textContent='Pick a time';msg.className='cz-msg err';return;}
 if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
 var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textContent='Please agree to the requirements';msg.className='cz-msg err';return;}
-var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
+ var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
 if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
@@ -73,5 +91,5 @@ sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
 RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
 var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
-}).catch(function(e){sb.disabled=false;sb.textContent='Request booking';msg.textContent=e.message;msg.className='cz-msg err';});});
+ }).catch(function(e){sb.disabled=false;sb.textContent='Request booking';sel=null;msg.textContent=e.message;msg.className='cz-msg err';loadSlots();});});
 }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});}})();

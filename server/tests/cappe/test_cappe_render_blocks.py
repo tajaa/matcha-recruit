@@ -109,6 +109,14 @@ def test_booking_picker_is_two_step_day_then_time():
     assert "Pick a time (" not in html
 
 
+def test_booking_picker_includes_natural_language_suggestions():
+    html = _render({"type": "booking", "heading": "Book a session"})
+    assert "Describe what works" in html
+    assert "data-ai-request" in html
+    assert "booking-suggestions" in html
+    assert "Confirm booking" in html
+
+
 # --- bespoke designer layer (_design) ----------------------------------------
 
 def _main(html: str) -> str:

@@ -291,6 +291,32 @@ class CappeBookingRequest(BaseModel):
     location_id: Optional[UUID] = None  # None = single/main location
 
 
+class CappeBookingSuggestionRequest(BaseModel):
+    """Natural-language availability request; never creates a booking."""
+    booking_type_id: UUID
+    location_id: Optional[UUID] = None
+    staff_id: Optional[UUID] = None
+    request: str = Field(min_length=3, max_length=1200)
+    website: str = Field(default="", max_length=200)
+
+
+class CappeBookingSuggestionOption(BaseModel):
+    staff_id: Optional[UUID] = None
+    staff_name: Optional[str] = None
+    starts_at: datetime
+    ends_at: datetime
+    date: str
+    day_label: str
+    time_label: str
+    price_cents: int
+
+
+class CappeBookingSuggestions(BaseModel):
+    timezone: str
+    options: list[CappeBookingSuggestionOption] = Field(default_factory=list)
+    unmatched_staff_names: list[str] = Field(default_factory=list)
+
+
 class CappeBookingQuoteRequest(BaseModel):
     """Public price quote for a prospective booking (no write)."""
     booking_type_id: UUID
@@ -342,6 +368,9 @@ __all__ = [
     "CappeBookingStatusUpdate",
     "CappeApprovalDecline",
     "CappeBookingRequest",
+    "CappeBookingSuggestionRequest",
+    "CappeBookingSuggestionOption",
+    "CappeBookingSuggestions",
     "CappeBookingQuoteRequest",
     "CappeBookingReschedule",
     "CappeBookingQuote",
