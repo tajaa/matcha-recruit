@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(AppState.self) private var appState
     @State private var vm = FeedbackListViewModel(pageSize: 5)
     @State private var didLoad = false
 
@@ -62,6 +63,29 @@ struct DashboardView: View {
             .padding(.vertical)
         }
         .navigationTitle("Dashboard")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { NotificationsView() } label: {
+                    Image(systemName: "bell.fill")
+                        .overlay(alignment: .topTrailing) {
+                            if appState.unreadCount > 0 {
+                                Text(appState.unreadCount >= 100 ? "99+" : "\(appState.unreadCount)")
+                                    .font(.caption2.bold())
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Color.accentColor, in: Capsule())
+                                    .foregroundStyle(.white)
+                                    .offset(x: 10, y: -10)
+                            }
+                        }
+                }
+                .accessibilityLabel(
+                    appState.unreadCount > 0
+                        ? "Alerts, \(appState.unreadCount) unread"
+                        : "Alerts"
+                )
+            }
+        }
         .task {
             guard !didLoad else { return }
             didLoad = true
