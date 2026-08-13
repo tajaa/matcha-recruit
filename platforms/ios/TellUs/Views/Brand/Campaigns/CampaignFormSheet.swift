@@ -72,7 +72,6 @@ struct CampaignFormSheet: View {
         do {
             let body = try draft.validated()
             guard let created = await vm.create(body) else { return }
-            dismiss()
             onCreated(created)
         } catch let error as PromoCampaignValidationError {
             validationError = error.localizedDescription

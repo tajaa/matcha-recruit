@@ -88,10 +88,6 @@ struct PromoCampaignCreate: Encodable, Equatable {
     let starts_at: String?
     let ends_at: String?
 
-    private enum CodingKeys: String, CodingKey {
-        case title, reward_text, description, max_claims, card_expiry_days, starts_at, ends_at
-    }
-
     init(
         title: String,
         reward_text: String,
@@ -108,17 +104,6 @@ struct PromoCampaignCreate: Encodable, Equatable {
         self.card_expiry_days = card_expiry_days
         self.starts_at = starts_at
         self.ends_at = ends_at
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(title, forKey: .title)
-        try container.encode(reward_text, forKey: .reward_text)
-        try container.encodeIfPresent(description, forKey: .description)
-        try container.encode(max_claims, forKey: .max_claims)
-        try container.encode(card_expiry_days, forKey: .card_expiry_days)
-        try container.encodeIfPresent(starts_at, forKey: .starts_at)
-        try container.encodeIfPresent(ends_at, forKey: .ends_at)
     }
 }
 

@@ -1,10 +1,22 @@
 import SwiftUI
 
+private enum CampaignSheet: Identifiable {
+    case create
+    case qr(PromoCampaign)
+
+    var id: String {
+        switch self {
+        case .create:
+            return "create"
+        case .qr(let campaign):
+            return "qr-\(campaign.id)"
+        }
+    }
+}
+
 struct CampaignsView: View {
     @State private var vm = CampaignsViewModel()
-    @State private var showNew = false
-    @State private var selectedCampaign: PromoCampaign?
-    @State private var campaignAwaitingQR: PromoCampaign?
+    @State private var sheet: CampaignSheet?
 
     var body: some View {
         Group {
@@ -18,7 +30,7 @@ struct CampaignsView: View {
                 )
             } else {
                 List(vm.campaigns) { campaign in
-                    Button { selectedCampaign = campaign } label: {
+                    Button { sheet = .qr(campaign) } label: {
                         CampaignRow(campaign: campaign)
                     }
                     .buttonStyle(.plain)
@@ -29,7 +41,7 @@ struct CampaignsView: View {
         .navigationTitle("Campaigns")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showNew = true } label: {
+                Button { sheet = .create } label: {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel("New campaign")
@@ -40,16 +52,15 @@ struct CampaignsView: View {
         .overlay(alignment: .top) {
             ErrorBanner(message: vm.error).padding(.top, 8)
         }
-        .sheet(isPresented: $showNew, onDismiss: {
-            selectedCampaign = campaignAwaitingQR
-            campaignAwaitingQR = nil
-        }) {
-            CampaignFormSheet(vm: vm) { created in
-                campaignAwaitingQR = created
+        .sheet(item: $sheet) { sheet in
+            switch sheet {
+            case .create:
+                CampaignFormSheet(vm: vm) { created in
+                    self.sheet = .qr(created)
+                }
+            case .qr(let campaign):
+                CampaignQRSheet(campaign: campaign)
             }
-        }
-        .sheet(item: $selectedCampaign) { campaign in
-            CampaignQRSheet(campaign: campaign)
         }
     }
 }
