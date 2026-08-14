@@ -25,7 +25,7 @@ drift accident):
 
 # Quality tier — agent loops, skill/document turns, compaction, classification
 # where the output is the product.
-GEMINI_FLASH = "gemini-3.6-flash"
+GEMINI_FLASH = "gemini-3.7-flash"
 
 # Cheap tier — confirm turns, trivial chat acks, one-shot titles/summaries/
 # extractions. CANONICAL NOTE (other modules point here rather than

@@ -3,7 +3,7 @@
     cd server && ./venv/bin/python -m pytest tests/huume/test_usage_accounting.py -q
 
 Covers: _accumulate_usage folding all five usage_metadata counters (thinking/
-cached were silently dropped pre-2026-07), the gemini-3.6-flash pricing row
+cached were silently dropped pre-2026-07), the gemini-3.7-flash pricing row
 (billing fell to DEFAULT_PRICING ~3x low while the admin ledger priced it
 right), thinking-at-output-rate billing, and the huume feature-label constants
 the admin page's HUUME_FEATURE_PREFIX filter depends on.
@@ -48,15 +48,15 @@ class TestHuumeModelPricing:
         assert MODEL_PRICING[_MODEL] != DEFAULT_PRICING
 
     def test_rate_matches_admin_ledger(self):
-        # ai_usage.PRICING has ("gemini","gemini-3.6-flash"): (1.50, 7.50) —
+        # ai_usage.PRICING has ("gemini","gemini-3.7-flash"): (1.50, 7.50) —
         # the two ledgers must not disagree on the same model again.
         from app.core.services.ai_usage import PRICING
-        inp, outp = PRICING[("gemini", "gemini-3.6-flash")]
-        assert MODEL_PRICING["gemini-3.6-flash"]["input_per_1m"] == Decimal(str(inp))
-        assert MODEL_PRICING["gemini-3.6-flash"]["output_per_1m"] == Decimal(str(outp))
+        inp, outp = PRICING[("gemini", "gemini-3.7-flash")]
+        assert MODEL_PRICING["gemini-3.7-flash"]["input_per_1m"] == Decimal(str(inp))
+        assert MODEL_PRICING["gemini-3.7-flash"]["output_per_1m"] == Decimal(str(outp))
 
     def test_million_token_cost(self):
-        cost = calculate_call_cost("gemini-3.6-flash", 1_000_000, 1_000_000)
+        cost = calculate_call_cost("gemini-3.7-flash", 1_000_000, 1_000_000)
         assert cost == Decimal("9.000000")   # 1.50 in + 7.50 out
 
 
@@ -76,13 +76,13 @@ class TestHuumeLiteTierPricing:
 
 class TestThinkingBilling:
     def test_thinking_bills_at_output_rate(self):
-        with_thinking = calculate_call_cost("gemini-3.6-flash", 0, 100, thinking_tokens=100)
-        as_output = calculate_call_cost("gemini-3.6-flash", 0, 200)
+        with_thinking = calculate_call_cost("gemini-3.7-flash", 0, 100, thinking_tokens=100)
+        as_output = calculate_call_cost("gemini-3.7-flash", 0, 200)
         assert with_thinking == as_output
 
     def test_omitted_and_none_are_identical(self):
-        assert calculate_call_cost("gemini-3.6-flash", 500, 500) == \
-               calculate_call_cost("gemini-3.6-flash", 500, 500, thinking_tokens=None)
+        assert calculate_call_cost("gemini-3.7-flash", 500, 500) == \
+               calculate_call_cost("gemini-3.7-flash", 500, 500, thinking_tokens=None)
 
 
 class TestFeatureLabels:

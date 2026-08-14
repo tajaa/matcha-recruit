@@ -222,7 +222,7 @@ class ModelTier:
     timeout: int
 
 
-# `max` == same model as `regular` (3.6-flash) + thinking_level="high": a
+# `max` == same model as `regular` (3.7-flash) + thinking_level="high": a
 # structured-op task doesn't need a bigger model, it needs the SAME model
 # reasoning longer before it commits to values — the taste gap this tier
 # exists for (see the 2026-07-21 "invisible dark-on-dark restyle" incident)
@@ -232,8 +232,8 @@ class ModelTier:
 # its own rate-limiter key (`record_call("cappe_merlin", "max")`).
 MODEL_TIERS: dict[str, ModelTier] = {
     "lite": ModelTier("gemini-3.5-flash-lite", "minimal", 45),
-    "regular": ModelTier("gemini-3.6-flash", "low", 45),
-    "max": ModelTier("gemini-3.6-flash", "high", 90),
+    "regular": ModelTier("gemini-3.7-flash", "low", 45),
+    "max": ModelTier("gemini-3.7-flash", "high", 90),
 }
 DEFAULT_MODEL_TIER = "lite"
 # Tiers a non-premium (free / hosting) plan may use.

@@ -97,7 +97,7 @@ class _Bounds:
 
 
 # `max` buys depth, not a different model (see MODEL_TIERS — both are
-# gemini-3.6-flash; max thinks harder). Wall clock is the real ceiling: the user
+# gemini-3.7-flash; max thinks harder). Wall clock is the real ceiling: the user
 # is watching an SSE stream.
 _BOUNDS: dict[str, _Bounds] = {
     "regular": _Bounds(model_calls=6, screenshots=3, wall_clock=120.0, prompt_tokens=300_000, total_tokens=375_000),

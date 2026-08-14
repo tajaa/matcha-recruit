@@ -11,6 +11,7 @@ from uuid import UUID
 from google.genai import types
 
 from app.core.services.genai_client import get_genai_client
+from app.core.services.model_catalog import GEMINI_FLASH
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from app.database import connection_or_direct
 from app.matcha.services.matcha_work import github_write
@@ -143,7 +144,7 @@ async def run_huume_code(*, run_id: UUID, company_id: UUID, project_id: UUID, ch
             model_calls += 1
             try:
                 response = await asyncio.wait_for(get_genai_client().aio.models.generate_content(
-                    model="gemini-3.6-flash", contents=contents, config=config,
+                    model=GEMINI_FLASH, contents=contents, config=config,
                 ), timeout=max(1, _WALL_SECONDS - (time.monotonic() - started)))
             finally:
                 await limiter.record_call("huume_code", "agent")

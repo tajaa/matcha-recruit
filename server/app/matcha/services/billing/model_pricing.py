@@ -20,10 +20,16 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "input_per_1m": Decimal("2.00"),
         "output_per_1m": Decimal("12.00"),
     },
-    # Gemini 3.6 Flash — the Huume agent-loop model (huume/agent.py _MODEL).
-    # Must match ai_usage.PRICING's row — the admin ledger priced this
-    # correctly while billing fell to DEFAULT_PRICING (~3x low) on every
-    # Huume turn.
+    # Gemini 3.7 Flash — the fleet quality-tier model (model_catalog.GEMINI_FLASH,
+    # aliased by huume/agent.py _MODEL etc.). Price mirrors 3.6-flash until
+    # Google's 3.7 GA rate is confirmed — an unpriced row would fall to
+    # DEFAULT_PRICING. Must match ai_usage.PRICING's row.
+    "gemini-3.7-flash": {
+        "input_per_1m": Decimal("1.50"),
+        "output_per_1m": Decimal("7.50"),
+    },
+    # Gemini 3.6 Flash — kept for already-logged usage rows; the fleet moved
+    # to 3.7-flash.
     "gemini-3.6-flash": {
         "input_per_1m": Decimal("1.50"),
         "output_per_1m": Decimal("7.50"),

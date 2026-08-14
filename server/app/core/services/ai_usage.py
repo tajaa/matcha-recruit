@@ -50,7 +50,8 @@ LOGGING_ENABLED = os.getenv("AI_USAGE_LOGGING", "1") != "0"
 # logs cost_usd=NULL rather than a guessed number — the admin UI surfaces
 # "unpriced" calls so a real row gets added instead of a fabricated price.
 PRICING: dict[tuple[str, str], tuple[float, float]] = {
-    ("gemini", "gemini-3.6-flash"): (1.50, 7.50),
+    ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
+    ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
     ("gemini", "gemini-3.5-flash-lite"): (0.30, 2.50),
     ("gemini", "gemini-3-flash-preview"): (0.50, 3.00),
