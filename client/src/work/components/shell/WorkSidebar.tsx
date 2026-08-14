@@ -236,10 +236,6 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             Home
           </button>
 
-          {(showEvents || showInventory || showAssets) && (
-            <div className="mt-2 px-2.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-w-dim">Ops</div>
-          )}
-
           {/* Events (HR admin review of @huume-logged events) */}
           {showEvents && (
             <button
