@@ -22,7 +22,10 @@ export function resolveLegacyChannelTarget(
 
 export function LegacyOpsRedirect({ fromPrefix, toPrefix }: { fromPrefix: string; toPrefix: string }) {
   const location = useLocation()
-  const target = `${location.pathname.replace(fromPrefix, toPrefix)}${location.search}${location.hash}`
+  const [toPath, toQuery] = toPrefix.split('?')
+  const existingQuery = location.search.slice(1)
+  const query = [toQuery, existingQuery].filter(Boolean).join('&')
+  const target = `${location.pathname.replace(fromPrefix, toPath)}${query ? `?${query}` : ''}${location.hash}`
   return <Navigate to={target} replace />
 }
 

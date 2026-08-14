@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
+  BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
@@ -20,6 +20,8 @@ import {
   fmtTime, fmtDayLabel, toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 import { useEmployeeSchedule } from './useEmployeeSchedule'
+import type { EmployeeScheduleTab } from './useEmployeeSchedule'
+import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
 import { useMe } from '../../../hooks/useMe'
 
@@ -32,12 +34,18 @@ export default function EmployeeSchedule() {
   // work/pages/ChannelView/systemContent.tsx's `[[shift:<id>:<date>]]`
   // token) — ?date= opens the right week, ?shift= highlights + scrolls to
   // the specific shift once it's on screen.
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const linkedDate = searchParams.get('date') ?? undefined
   const highlightShiftId = searchParams.get('shift') ?? undefined
+  const requestedTab = parseScheduleTab(searchParams.get('tab'))
+  const { me, hasFeature, loading: meLoading } = useMe()
+  const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
+  const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
+    ? 'schedule'
+    : requestedTab
 
   const {
-    tab, setTab,
+    tab, setTab: setScheduleTab,
     weekStart, setWeekStart,
     shifts,
     roster,
@@ -49,7 +57,30 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule(linkedDate)
+  } = useEmployeeSchedule(linkedDate, initialTab)
+
+  useEffect(() => {
+    const blockedIntelligence = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
+    const nextTab = blockedIntelligence ? 'schedule' : requestedTab
+    if (tab !== nextTab) setScheduleTab(nextTab)
+    if (blockedIntelligence) {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current)
+        next.delete('tab')
+        return next
+      }, { replace: true })
+    }
+  }, [intelligenceEnabled, meLoading, requestedTab, setScheduleTab, setSearchParams, tab])
+
+  function setTab(nextTab: EmployeeScheduleTab) {
+    setScheduleTab(nextTab)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (nextTab === 'schedule') next.delete('tab')
+      else next.set('tab', nextTab)
+      return next
+    }, { replace: true })
+  }
 
   return (
     // Same page frame as Compliance/Dashboard/Onboarding/Company/OSHA Logs.
@@ -57,7 +88,7 @@ export default function EmployeeSchedule() {
     // the compact mono tabs those pages use — it's already a deliberate,
     // working motif here, not a chunky-button substitute like Compliance's
     // Button-pills were. Only the shell + tab band placement change.
-    <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+    <div className="min-w-0 overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       <div className="border-b border-white/[0.06] px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -74,9 +105,10 @@ export default function EmployeeSchedule() {
         <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
         <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
         <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
+        {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
       </div>
 
-      <div className="p-5 space-y-6">
+      <div className="min-w-0 space-y-6 p-5">
 
       {tab === 'schedule' && (
         <>
@@ -105,20 +137,22 @@ export default function EmployeeSchedule() {
           {loading ? (
             <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-              {days.map((day) => (
-                <DayColumn
-                  key={day}
-                  day={day}
-                  shifts={shifts.filter((s) => s.starts_at.slice(0, 10) === day)}
-                  roster={roster}
-                  rosterFlags={rosterFlags}
-                  onPatch={patchShift}
-                  onChanged={reload}
-                  highlightShiftId={highlightShiftId}
-                  weekDays={days}
-                />
-              ))}
+            <div className="min-w-0 overflow-x-auto pb-2">
+              <div className="grid min-w-0 grid-cols-1 gap-3 md:min-w-[1120px] md:grid-cols-7">
+                {days.map((day) => (
+                  <DayColumn
+                    key={day}
+                    day={day}
+                    shifts={shifts.filter((s) => s.starts_at.slice(0, 10) === day)}
+                    roster={roster}
+                    rosterFlags={rosterFlags}
+                    onPatch={patchShift}
+                    onChanged={reload}
+                    highlightShiftId={highlightShiftId}
+                    weekDays={days}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </>
@@ -126,9 +160,15 @@ export default function EmployeeSchedule() {
 
       {tab === 'templates' && <TemplatesTab onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
+      {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
     </div>
   )
+}
+
+function parseScheduleTab(value: string | null): EmployeeScheduleTab {
+  if (value === 'templates' || value === 'requests' || value === 'intelligence') return value
+  return 'schedule'
 }
 
 function TabButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
@@ -141,8 +181,8 @@ function TabButton({ active, onClick, icon, children }: { active: boolean; onCli
 
 function Stat({ label, value, tone }: { label: string; value: number | string; tone: string }) {
   return (
-    <div className="bg-zinc-900 px-4 py-4">
-      <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
+    <div className="min-w-0 bg-zinc-900 px-4 py-4">
+      <div className="truncate text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
       <div className={`text-2xl font-light font-mono mt-1.5 ${tone}`}>{value}</div>
     </div>
   )
@@ -290,7 +330,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
   return (
     <div
       ref={cardRef}
-      className={`rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'} ${highlighted ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-950' : ''}`}
+      className={`min-w-0 rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'} ${highlighted ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-950' : ''}`}
     >
       <div className="flex items-center justify-between gap-1">
         <span className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</span>
@@ -344,7 +384,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         </select>
       )}
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         <button onClick={() => setPickerOpen((v) => !v)} disabled={busy || available.length === 0} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 disabled:opacity-40"><Users className="h-3 w-3" /> Assign</button>
         {/* Cancelled is terminal — the backend refuses to republish it, so offering
             an edit here would be a form whose save can only fail. */}

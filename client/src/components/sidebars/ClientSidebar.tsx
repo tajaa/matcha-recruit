@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
-  AlertTriangle, BookOpen, BarChart2, BarChart3, Sparkles, Building2, Accessibility,
+  AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
   Coins, FileSignature, CalendarClock, Radio,
@@ -20,7 +20,6 @@ const nav: (NavItem | NavGroup)[] = [
     items: [
       { to: '/app/employees', icon: Users, label: 'Employees' },
       { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
-      { to: '/ops/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },

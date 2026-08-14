@@ -7,10 +7,13 @@ import {
   toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 
-type Tab = 'schedule' | 'templates' | 'requests'
+export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intelligence'
 
-export function useEmployeeSchedule(initialDate?: string) {
-  const [tab, setTab] = useState<Tab>('schedule')
+export function useEmployeeSchedule(
+  initialDate?: string,
+  initialTab: EmployeeScheduleTab = 'schedule',
+) {
+  const [tab, setTab] = useState<EmployeeScheduleTab>(initialTab)
   // `initialDate` (from a ?date= deep link — see systemContent.tsx's
   // shift-link token) opens the week that date falls in, not always "this
   // week": a shift-chat confirmation can land in a future or past week.

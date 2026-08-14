@@ -27,8 +27,8 @@ function money(n: number | null | undefined): string {
 
 function Stat({ label, value, tone = 'text-zinc-200' }: { label: string; value: number | string; tone?: string }) {
   return (
-    <div className="bg-zinc-900 px-4 py-4">
-      <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
+    <div className="min-w-0 bg-zinc-900 px-4 py-4">
+      <div className="truncate text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
       <div className={`text-2xl font-light font-mono mt-1.5 ${tone}`}>{value}</div>
     </div>
   )
@@ -63,7 +63,7 @@ export default function ScheduleIntelligence() {
   const m = overview?.modules
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
           <BarChart2 className="h-5 w-5 text-zinc-400" /> Schedule Intelligence
@@ -99,7 +99,9 @@ export default function ScheduleIntelligence() {
         </MetricStrip>
       )}
 
-      <PillTabs options={TABS} value={tab} onChange={setTab} />
+      <div className="max-w-full overflow-x-auto">
+        <PillTabs options={TABS} value={tab} onChange={setTab} />
+      </div>
 
       {tab === 'incidents' && <IncidentsPanel />}
       {tab === 'fair_workweek' && <FairWorkweekPanel />}
@@ -118,7 +120,7 @@ function IncidentsPanel() {
   const d = data as IncidentCorrelation
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="min-w-0 p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-1.5">
         Do incidents cluster on understaffed shifts?
         <HelpHint text="Cross-references your incident reports against the staffing level of the shift they occurred on. A meaningfully higher incident rate on understaffed shifts is a signal worth acting on — not a causal claim (there's no time-clock data, only what was scheduled). Fatigue flags call out incidents where the involved employee had under 10 hours' rest before the shift, or was on a 6+ consecutive-day scheduled streak." />
@@ -194,7 +196,7 @@ function FairWorkweekPanel() {
   const d = data as FairWorkweek
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="min-w-0 p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <Scale className="h-4 w-4 text-zinc-500" /> Fair Workweek / predictive-scheduling exposure
         <HelpHint text="Prices out your own late shift changes (retimes, cancellations, added/reduced hours) against the predictability-pay brackets in Fair Workweek ordinances covering your locations (NYC, LA today). A change made with less notice than the ordinance requires gets a dollar estimate. Directional, not a payroll calculation — verify with counsel before budgeting against it." />
@@ -239,7 +241,7 @@ function PretextPanel() {
   const d = data as PretextShield
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="min-w-0 p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <ShieldCheck className="h-4 w-4 text-zinc-500" /> Discipline pretext shield
         <HelpHint text="Flags attendance discipline records where the employee's own schedule was changed frequently — and often on short notice — by the employer in the run-up to the write-up. Disciplining attendance against a schedule you yourself destabilized is a pattern plaintiffs' counsel can use to argue pretext. Advisory only, not a legal determination — review flagged records before relying on them." />
@@ -285,7 +287,7 @@ function CoveragePanel() {
   const gapShifts = d.shifts.filter((s) => s.qualified < s.assigned)
 
   return (
-    <Card className="p-5 space-y-4">
+    <Card className="min-w-0 p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
         <BadgeCheck className="h-4 w-4 text-zinc-500" /> Qualified coverage — next {d.days} days
         <HelpHint text="Checks every assignee on an upcoming published shift against their credential requirements and training records — anyone with an expired credential or overdue training due before the shift date is flagged as lapsed. Reflects what's on file as of now; verify against the source system before relying on it for a compliance decision." />

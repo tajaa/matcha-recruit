@@ -73,7 +73,7 @@ export default function AppRoutes() {
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
         <Route path="employee-schedule" element={<LegacyOpsRedirect fromPrefix="/app/employee-schedule" toPrefix="/ops/schedule" />} />
-        <Route path="schedule-intelligence" element={<LegacyOpsRedirect fromPrefix="/app/schedule-intelligence" toPrefix="/ops/schedule-intelligence" />} />
+        <Route path="schedule-intelligence" element={<LegacyOpsRedirect fromPrefix="/app/schedule-intelligence" toPrefix="/ops/schedule?tab=intelligence" />} />
         <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
         <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />
         <Route path="compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />

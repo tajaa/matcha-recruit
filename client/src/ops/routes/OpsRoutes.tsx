@@ -1,4 +1,4 @@
-import { Outlet, Route, Routes } from 'react-router-dom'
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import WorkLayout from '../../work/layout/WorkLayout'
 import ChannelBrowse from '../../work/pages/ChannelBrowse'
 import ChannelJoinByInvite from '../../work/pages/ChannelJoinByInvite'
@@ -9,7 +9,6 @@ import InventoryHub from '../../work/pages/InventoryHub'
 import ProtocolPage from '../../work/pages/ProtocolPage'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import EmployeeSchedule from '../../pages/app/employees/EmployeeSchedule'
-import ScheduleIntelligence from '../../pages/app/employees/ScheduleIntelligence'
 import OpsHome from '../pages/OpsHome'
 import OpsAccess from '../pages/OpsAccess'
 import { WorkSurfaceProvider } from '../../work/routes/WorkSurfaceContext'
@@ -61,15 +60,7 @@ export default function OpsRoutes() {
             />
             <Route
               path="schedule-intelligence"
-              element={
-                <FeatureGate
-                  feature="schedule_intelligence"
-                  label="Schedule Intelligence"
-                  allowPlatformAdmin
-                >
-                  <ScheduleIntelligence />
-                </FeatureGate>
-              }
+              element={<Navigate to="/ops/schedule?tab=intelligence" replace />}
             />
             <Route path="access" element={<OpsAccess />} />
           </Route>
