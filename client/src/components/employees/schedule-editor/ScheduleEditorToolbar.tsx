@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Edit3, Loader2, Save, Send, X } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, X } from 'lucide-react'
 import type { ScheduleSaveState, } from '../../../hooks/employees/useScheduleEditor'
 import type { ScheduleSummary } from '../../../types/employeeSchedule'
 
@@ -15,6 +15,7 @@ interface ScheduleEditorToolbarProps {
   onTogglePublishedEditing(value: boolean): void
   onPublish(): void
   onExit(): void
+  onHelp(): void
 }
 
 function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
@@ -26,7 +27,7 @@ function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
 
 export default function ScheduleEditorToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
-  onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit,
+  onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
 }: ScheduleEditorToolbarProps) {
   return (
     <div className="border-b border-white/[0.06] bg-zinc-950/90 px-3 py-3 backdrop-blur md:px-5">
@@ -34,6 +35,7 @@ export default function ScheduleEditorToolbar({
         <button onClick={onExit} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100">
           <X className="h-3.5 w-3.5" /> Exit editor
         </button>
+        <button onClick={onHelp} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-100" title="How to use the schedule editor"><HelpCircle className="h-3.5 w-3.5" /> How to use</button>
         <div className="h-5 w-px bg-zinc-800" />
         <button onClick={onPreviousWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></button>
         <button onClick={onThisWeek} className="rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-300 hover:text-zinc-100">This week</button>

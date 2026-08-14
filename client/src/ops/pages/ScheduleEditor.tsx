@@ -11,6 +11,17 @@ import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
 import ScheduleEditorToolbar from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
 import ShiftInspector, { type NewShiftDefaults } from '../../components/employees/schedule-editor/ShiftInspector'
 import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGrid'
+import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
+
+const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v1'
+
+function hasSeenGuide(): boolean {
+  try {
+    return window.localStorage.getItem(GUIDE_STORAGE_KEY) === 'seen'
+  } catch {
+    return false
+  }
+}
 
 function parseWeek(value: string | null): string {
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime())) return value
@@ -31,6 +42,7 @@ export default function ScheduleEditor() {
   const [newDefaults, setNewDefaults] = useState<NewShiftDefaults | null>(null)
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -61,6 +73,11 @@ export default function ScheduleEditor() {
   function canMutate(shift: Shift | undefined): boolean {
     if (!shift || shift.status === 'cancelled') return false
     return shift.status === 'draft' || editPublished
+  }
+
+  function closeGuide() {
+    try { window.localStorage.setItem(GUIDE_STORAGE_KEY, 'seen') } catch { /* best effort */ }
+    setGuideOpen(false)
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -124,6 +141,7 @@ export default function ScheduleEditor() {
           onTogglePublishedEditing={setEditPublished}
           onPublish={handlePublish}
           onExit={() => navigate('/ops/schedule')}
+          onHelp={() => setGuideOpen(true)}
         />
         {editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
@@ -151,6 +169,7 @@ export default function ScheduleEditor() {
         )}
       </div>
       <DragOverlay>{activeDrag ? <div className="rounded-lg border border-emerald-500/50 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 shadow-xl">{activeDrag.kind === 'shift' ? 'Moving shift' : activeDrag.kind === 'shift-assignment' ? 'Moving assignment' : 'Scheduling employee'}</div> : null}</DragOverlay>
+      <ScheduleEditorGuide open={guideOpen} onClose={closeGuide} />
     </DndContext>
   )
 }
