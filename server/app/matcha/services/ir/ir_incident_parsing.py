@@ -118,8 +118,8 @@ def _parse_occurred_at(value) -> datetime:
     """
     if isinstance(value, datetime):
         if value.tzinfo:
-            return value.astimezone(timezone.utc).replace(tzinfo=None)
-        return value
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return _clamp_future_occurred_at(value, value.isoformat())
     if isinstance(value, str):
         text = value.strip()
         if not text:

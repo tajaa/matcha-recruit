@@ -165,3 +165,9 @@ def test_datetime_passthrough_naive():
 def test_datetime_tz_aware_converted_to_naive_utc():
     dt = datetime(2026, 3, 4, 8, 30, tzinfo=timezone(timedelta(hours=-5)))
     assert _parse_occurred_at(dt) == datetime(2026, 3, 4, 13, 30)
+
+
+def test_future_datetime_is_clamped_to_now():
+    future = datetime.now(timezone.utc) + timedelta(days=2)
+    parsed = _parse_occurred_at(future)
+    _assert_about_now(parsed)

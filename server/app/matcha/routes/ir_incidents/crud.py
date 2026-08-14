@@ -44,6 +44,7 @@ from ._shared import (
     _company_filter,
     _gather_incident_people,
     _hydrate_involved_employees,
+    _parse_occurred_at,
     _resolve_employee_refs,
     _safe_json_loads,
     _sync_incident_people,
@@ -643,11 +644,8 @@ async def update_incident(
 
         if incident.occurred_at is not None:
             updates.append(f"occurred_at = ${param_idx}")
-            # Ensure occurred_at is naive UTC for TIMESTAMP column
-            occurred_at = incident.occurred_at
-            if occurred_at.tzinfo:
-                occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
-            params.append(occurred_at)
+            # Keep updates on the same future-date-safe path as creates.
+            params.append(_parse_occurred_at(incident.occurred_at))
             param_idx += 1
 
         if incident.location is not None:
@@ -941,5 +939,4 @@ async def get_linked_er_case(
             "incident_id": str(incident_id),
             "er_case_id": str(incident["er_case_id"]) if incident["er_case_id"] else None,
         }
-
 

@@ -8,7 +8,7 @@ private `_WC_AGG_COLUMNS` / `_WC_QUARTER_COLUMNS` / `_assemble_wc_metrics`
 names back out of this module; moving them here keeps all three private and
 leaves `analytics.py`'s `get_wc_metrics_by_location` a thin handler).
 """
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -54,9 +54,10 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
     see `compute_wc_metrics_by_location` below, which pulls the same aggregates
     for every establishment in one grouped pass and shares `_assemble_wc_metrics`.
     """
-    period_start = _utc_now_naive() - timedelta(days=period_days)
+    as_of = _utc_now_naive()
+    period_start = as_of - timedelta(days=period_days)
     prior_start = period_start - timedelta(days=period_days)
-    quarter_start = _utc_now_naive() - timedelta(days=730)  # 8 quarters back
+    quarter_start = as_of - timedelta(days=730)  # 8 quarters back
 
     profile = await conn.fetchrow(
         """
@@ -80,9 +81,10 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $3
+          AND occurred_at <= $4
         GROUP BY bucket
         """,
-        company_id, period_start, prior_start,
+        company_id, period_start, prior_start, as_of,
     )
 
     # Quarterly bucketing — 8 quarters trailing.
@@ -95,18 +97,21 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $2
+          AND occurred_at <= $3
         GROUP BY quarter_start
         ORDER BY quarter_start
         """,
-        company_id, quarter_start,
+        company_id, quarter_start, as_of,
     )
 
     last_recordable = await conn.fetchval(
         """
         SELECT MAX(occurred_at) FROM ir_incidents
-        WHERE company_id = $1 AND osha_recordable = true
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at <= $2
         """,
-        company_id,
+        company_id, as_of,
     )
 
     cur = next((r for r in rows if r["bucket"] == "current"), None)
@@ -186,9 +191,12 @@ def _assemble_wc_metrics(
         prior_trir = None
         prior_dart_rate = None
 
-    if last_recordable:
-        days_since = (datetime.utcnow() - last_recordable).days
+    now = _utc_now_naive()
+    if last_recordable and last_recordable <= now:
+        days_since = max((now - last_recordable).days, 0)
     else:
+        # A legacy/imported future timestamp is not a valid completed streak.
+        last_recordable = None
         days_since = None
 
     def _delta_pct(curr, prior):
@@ -416,9 +424,10 @@ async def compute_wc_metrics_by_location(
     `_assemble_wc_metrics`) stay private to this module instead of being pulled
     back out into a route file.
     """
-    period_start = _utc_now_naive() - timedelta(days=period_days)
+    as_of = _utc_now_naive()
+    period_start = as_of - timedelta(days=period_days)
     prior_start = period_start - timedelta(days=period_days)
-    quarter_start = _utc_now_naive() - timedelta(days=730)
+    quarter_start = as_of - timedelta(days=730)
     loc_ids = [lr["id"] for lr in loc_rows]
 
     headcounts = await _batch_active_headcounts(conn, company_id, loc_rows)
@@ -433,10 +442,11 @@ async def compute_wc_metrics_by_location(
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $3
+          AND occurred_at <= $5
           AND location_id = ANY($4::uuid[])
         GROUP BY location_id, bucket
         """,
-        company_id, period_start, prior_start, loc_ids,
+        company_id, period_start, prior_start, loc_ids, as_of,
     )
 
     quarter_rows = await conn.fetch(
@@ -449,11 +459,12 @@ async def compute_wc_metrics_by_location(
         WHERE company_id = $1
           AND osha_recordable = true
           AND occurred_at >= $2
+          AND occurred_at <= $4
           AND location_id = ANY($3::uuid[])
         GROUP BY location_id, quarter_start
         ORDER BY quarter_start
         """,
-        company_id, quarter_start, loc_ids,
+        company_id, quarter_start, loc_ids, as_of,
     )
 
     last_rows = await conn.fetch(
@@ -462,10 +473,11 @@ async def compute_wc_metrics_by_location(
         FROM ir_incidents
         WHERE company_id = $1
           AND osha_recordable = true
+          AND occurred_at <= $3
           AND location_id = ANY($2::uuid[])
         GROUP BY location_id
         """,
-        company_id, loc_ids,
+        company_id, loc_ids, as_of,
     )
     last_by_loc = {r["location_id"]: r["last_recordable"] for r in last_rows}
 

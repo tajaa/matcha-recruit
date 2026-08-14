@@ -9,7 +9,7 @@ Run: cd server && ./venv/bin/python -m pytest tests/ir_incidents/test_ir_capa_an
 
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from types import ModuleType
 
 # provisioning.py raises at import time when these are unset, and importing
@@ -99,6 +99,26 @@ def test_corrective_action_overdue_only_when_open_and_past_due():
     # Future due date is not overdue; no due date is not overdue.
     assert _is_overdue(future, "open") is False
     assert _is_overdue(None, "open") is False
+
+
+def test_wc_days_since_ignores_future_recordable_timestamp():
+    from app.matcha.services.ir.ir_wc_metrics import _assemble_wc_metrics
+
+    metrics = _assemble_wc_metrics(
+        period_days=365,
+        location_id=None,
+        industry=None,
+        headcount=0,
+        cur=None,
+        prv=None,
+        quarter_rows=[],
+        last_recordable=(
+            datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=357125)
+        ),
+    )
+
+    assert metrics["days_since_last_recordable"] is None
+    assert metrics["ever_recordable"] is False
 
 
 # ── ITA payload builder + size category ────────────────────────────────────────
