@@ -16,7 +16,7 @@ struct VerifyWaitView: View {
         ScrollView {
             VStack(spacing: 20) {
                 Text("Confirm your email")
-                    .font(.title2.bold())
+                    .gummfitPageTitle()
 
                 Text("We sent a confirmation link to \(email). Click it, then come back and tap below.")
                     .font(.subheadline)
@@ -34,17 +34,19 @@ struct VerifyWaitView: View {
                         Text("I've confirmed — sign me in").frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.gummfitPrimary)
+                .gummfitFullWidth()
                 .disabled(vm.isLoading)
 
                 TextField("Paste confirmation token", text: $pastedToken)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(GummfitTextFieldStyle())
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
                 Button("Confirm with pasted token") {
                     Task { await vm.verifyPastedToken(pastedToken, appState: appState) }
                 }
+                .buttonStyle(.gummfitSecondary)
                 .disabled(pastedToken.isEmpty || vm.isLoading)
 
                 Button(resendCooldown > 0 ? "Resend in \(resendCooldown)s" : "Resend confirmation email") {
@@ -56,10 +58,12 @@ struct VerifyWaitView: View {
                         if vm.error == nil { startCooldown() }
                     }
                 }
+                .buttonStyle(.gummfitGhost)
                 .disabled(resendCooldown > 0)
 
                 Button("Log out") { appState.didLogout(serverSide: false) }
-                    .foregroundStyle(.red)
+                    .buttonStyle(.gummfitGhost)
+                    .foregroundStyle(GummfitTheme.danger)
             }
             .padding(28)
         }

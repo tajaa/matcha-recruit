@@ -35,7 +35,7 @@ struct DirectorySheet: View {
                     if listing.blocked {
                         Section {
                             Label("This listing was blocked by Gummfit.", systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(GummfitTheme.danger)
                         }
                     } else if listing.listed && !listing.visible {
                         Section {

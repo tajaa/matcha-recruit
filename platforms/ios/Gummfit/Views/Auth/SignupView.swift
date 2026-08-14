@@ -15,7 +15,7 @@ struct SignupView: View {
         ScrollView {
             VStack(spacing: 0) {
                 Text("Create your account")
-                    .font(.title2.bold())
+                    .gummfitPageTitle()
                     .padding(.top, 24)
 
                 ErrorBanner(message: vm.error)
@@ -33,7 +33,7 @@ struct SignupView: View {
                     TextField("Name (optional)", text: $vm.displayName)
                         .textContentType(.name)
                         .focused($focusedField, equals: .name)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(GummfitTextFieldStyle())
 
                     TextField("Email", text: $vm.email)
                         .textContentType(.emailAddress)
@@ -41,12 +41,12 @@ struct SignupView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .focused($focusedField, equals: .email)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(GummfitTextFieldStyle())
 
                     SecureField("Password (min 8 characters)", text: $vm.password)
                         .textContentType(.newPassword)
                         .focused($focusedField, equals: .password)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(GummfitTextFieldStyle())
                 }
                 .padding(.top, 20)
 
@@ -60,7 +60,8 @@ struct SignupView: View {
                         Text("Sign up").frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.gummfitPrimary)
+                .gummfitFullWidth()
                 .disabled(!canSubmit)
                 .padding(.top, 24)
             }

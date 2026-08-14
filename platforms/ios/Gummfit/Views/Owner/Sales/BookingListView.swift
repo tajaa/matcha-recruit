@@ -54,17 +54,14 @@ private struct BookingRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(booking.customer_name ?? booking.customer_email ?? "Booking")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(GummfitTheme.textPrimary)
+                    .gummfitSectionTitle()
                 Text(booking.starts_at).font(.caption).foregroundStyle(GummfitTheme.textDim)
                 if let staffName = booking.staff_name {
                     Text(staffName).font(.caption2).foregroundStyle(GummfitTheme.textDim)
                 }
             }
             Spacer()
-            Text(booking.requires_approval && booking.status == .pending ? "Needs review" : booking.status.rawValue.capitalized)
-                .font(.caption2.bold())
-                .foregroundStyle(booking.requires_approval && booking.status == .pending ? .orange : GummfitTheme.textDim)
+            GummfitStatusPill(status: booking.requires_approval && booking.status == .pending ? "pending" : booking.status.rawValue, label: booking.requires_approval && booking.status == .pending ? "Needs review" : nil)
         }
     }
 }

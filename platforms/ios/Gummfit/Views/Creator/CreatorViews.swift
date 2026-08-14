@@ -18,7 +18,7 @@ struct CreatorProfileView: View {
                 if vm.isLoading { ProgressView() }
                 else if let p = vm.profile {
                     List {
-                        Section { Text(p.display_name).font(.title2.bold()); Text("@\(p.handle)").foregroundStyle(.secondary); Text((p.status ?? "draft").replacingOccurrences(of: "_", with: " ")).badge(p.status ?? "unknown"); HStack { PhotosPicker(selection: $avatarPicker, matching: .images) { Label("Avatar", systemImage: "person.crop.circle") }; PhotosPicker(selection: $coverPicker, matching: .images) { Label("Cover", systemImage: "photo") } }; Button("Edit profile") { editing = true } }
+                         Section { Text(p.display_name).gummfitPageTitle(); Text("@\(p.handle)").foregroundStyle(GummfitTheme.textDim); GummfitStatusPill(status: p.status ?? "unknown"); HStack { PhotosPicker(selection: $avatarPicker, matching: .images) { Label("Avatar", systemImage: "person.crop.circle") }; PhotosPicker(selection: $coverPicker, matching: .images) { Label("Cover", systemImage: "photo") } }; Button("Edit profile") { editing = true }.buttonStyle(.gummfitSecondary) }
                         if let bio = p.bio { Section("About") { Text(bio) } }
                         Section("Socials") { ForEach(p.socials) { social in Text("\(social.platform.capitalized) · @\(social.handle)").swipeActions { Button("Delete", role: .destructive) { Task { await deleteSocial(social, profile: p) } } } }; Button("Add social", systemImage: "plus") { editor = .socials } }
                         Section("Portfolio") { ForEach(p.portfolio) { item in Text(item.title).swipeActions { Button("Delete", role: .destructive) { Task { await deletePortfolio(item, profile: p) } } } }; Button("Add portfolio item", systemImage: "plus") { editor = .portfolio } }
@@ -159,7 +159,7 @@ struct OfferDetailView: View {
     @ViewBuilder private func headerSection(_ d: OfferDetail) -> some View {
         Section {
             Text(d.title).font(.headline)
-            Text(d.status).badge(d.status)
+            GummfitStatusPill(status: d.status)
             if let cents = d.total_cents { Text(Formatters.cents(cents)) }
         }
     }

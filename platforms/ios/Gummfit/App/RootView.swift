@@ -56,7 +56,7 @@ private struct OwnerRootView: View {
                     VStack(spacing: 16) {
                         Text(sitesError).multilineTextAlignment(.center).foregroundStyle(GummfitTheme.textDim)
                         Button("Retry") { Task { await appState.loadSites() } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.gummfitPrimary)
                         Button("Sign out", role: .destructive) { appState.didLogout() }
                     }
                     .padding()

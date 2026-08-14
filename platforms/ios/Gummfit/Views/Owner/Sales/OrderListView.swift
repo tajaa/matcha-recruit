@@ -37,19 +37,16 @@ private struct OrderRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(order.customer_name ?? order.customer_email ?? "Order")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(GummfitTheme.textPrimary)
+                    .gummfitSectionTitle()
                 Text(Formatters.cents(order.total_cents ?? order.subtotal_cents, currency: order.currency))
                     .font(.caption)
                     .foregroundStyle(GummfitTheme.textDim)
             }
             Spacer()
             if order.requires_approval && order.status == .pending {
-                Text("Needs review").font(.caption2.bold()).foregroundStyle(.orange)
+                GummfitStatusPill(status: "pending", label: "Needs review")
             } else {
-                Text(order.status.rawValue.capitalized)
-                    .font(.caption2.bold())
-                    .foregroundStyle(GummfitTheme.textDim)
+                GummfitStatusPill(status: order.status.rawValue)
             }
         }
     }

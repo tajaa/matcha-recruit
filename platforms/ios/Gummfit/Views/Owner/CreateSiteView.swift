@@ -18,7 +18,7 @@ struct CreateSiteView: View {
 
             VStack(spacing: 6) {
                 Text(isFirstSite ? "Create your site" : "New site")
-                    .font(.title2.bold())
+                    .gummfitPageTitle()
                 if isFirstSite {
                     Text("Give your business a name to get started. You can change it later.")
                         .font(.subheadline)
@@ -28,7 +28,7 @@ struct CreateSiteView: View {
             }
 
             TextField("Business name", text: $vm.name)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(GummfitTextFieldStyle())
                 .autocorrectionDisabled()
                 .focused($nameFocused)
                 .submitLabel(.go)
@@ -41,7 +41,7 @@ struct CreateSiteView: View {
                     Text("Create").frame(maxWidth: .infinity)
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.gummfitPrimary)
             .disabled(!vm.canSubmit)
 
             if isFirstSite {

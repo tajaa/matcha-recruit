@@ -44,6 +44,27 @@ final class SiteModelDecodeTests: XCTestCase {
         XCTAssertEqual(decoded, .unknown)
     }
 
+    func testPublishedThemeConfigDecodes() throws {
+        let json = """
+        {
+          "id": "site-1", "account_id": "acct-1", "name": "Cara's Bakery",
+          "slug": "caras-bakery", "source_type": "blank", "status": "published",
+          "timezone": "UTC", "is_multi_location": false,
+          "theme_config": {
+            "preset": "editorial", "mode": "light",
+            "fonts": {"heading": "Fraunces", "body": "Inter"},
+            "radius": "md", "colors": {"brand": "#B4532A"}
+          },
+          "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"
+        }
+        """
+        let site = try JSONDecoder().decode(CappeSite.self, from: Data(json.utf8))
+        XCTAssertEqual(site.theme_config?.preset, "editorial")
+        XCTAssertEqual(site.theme_config?.fonts?.heading, "Fraunces")
+        XCTAssertEqual(site.theme_config?.colors?["brand"], "#B4532A")
+        XCTAssertEqual(CappePublishedThemeCatalog.resolved(for: site.theme_config).id, "editorial")
+    }
+
     func testReadinessDecodes() throws {
         let json = """
         {"ready": false, "items": [

@@ -45,8 +45,11 @@ struct MarketingView: View {
     @ViewBuilder private var subscribersSection: some View {
         Section("Subscribers") {
             ForEach(vm.subscribers) { subscriber in
-                Text(subscriber.name ?? subscriber.email)
-                    .badge(subscriber.status)
+                HStack {
+                    Text(subscriber.name ?? subscriber.email)
+                    Spacer()
+                    GummfitStatusPill(status: subscriber.status)
+                }
                     .swipeActions {
                         Button("Delete", role: .destructive) {
                             Task { try? await MarketingService.shared.deleteSubscriber(site.id, subscriber.id); await vm.load(site.id) }
@@ -68,7 +71,7 @@ struct MarketingView: View {
                     }
                     Spacer()
                     if status == "draft" { Button("Send") { confirmCampaign = campaign } }
-                    Text(status).font(.caption)
+                    GummfitStatusPill(status: status)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { if ["draft", "scheduled"].contains(status) { editing = .campaign(campaign) } }
@@ -85,7 +88,13 @@ struct MarketingView: View {
     @ViewBuilder private var formsSection: some View {
         Section("Forms") {
             ForEach(vm.forms) { form in
-                NavigationLink { FormBuilderView(siteId: site.id, form: form) { await vm.load(site.id) } } label: { Text(form.name).badge(form.status) }
+                NavigationLink { FormBuilderView(siteId: site.id, form: form) { await vm.load(site.id) } } label: {
+                    HStack {
+                        Text(form.name)
+                        Spacer()
+                        GummfitStatusPill(status: form.status)
+                    }
+                }
                     .swipeActions {
                         Button("Delete", role: .destructive) {
                             Task { try? await MarketingService.shared.deleteForm(site.id, form.id); await vm.load(site.id) }
@@ -99,7 +108,11 @@ struct MarketingView: View {
     @ViewBuilder private var postsSection: some View {
         Section("Blog") {
             ForEach(vm.posts) { post in
-                Text(post.title).badge(post.status)
+                HStack {
+                    Text(post.title)
+                    Spacer()
+                    GummfitStatusPill(status: post.status)
+                }
                     .contentShape(Rectangle())
                     .onTapGesture { editing = .post(post) }
                     .swipeActions {

@@ -22,7 +22,7 @@ struct ThreadDetailView: View {
             Divider()
             HStack {
                 TextField("Reply…", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(GummfitTextFieldStyle())
                 Button("Send") {
                     Task {
                         let body = draft
@@ -30,6 +30,7 @@ struct ThreadDetailView: View {
                         await vm.reply(siteId: site.id, body: body)
                     }
                 }
+                .buttonStyle(.gummfitPrimary)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isSending)
             }
             .padding()

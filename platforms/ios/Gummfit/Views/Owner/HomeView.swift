@@ -285,14 +285,14 @@ struct HomeView: View {
                         }
                         Spacer()
                         Button("Accept") { Task { await requestsVM.accept(siteId: site.id, request) } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.gummfitPrimary)
                             .controlSize(.small)
                         Button("Decline") {
                             declineTarget = request
                             declineReason = ""
                             showDecline = true
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.gummfitSecondary)
                         .controlSize(.small)
                     }
                     .padding(.vertical, 4)
@@ -373,12 +373,7 @@ struct HomeView: View {
     }
 
     private var statusPill: some View {
-        Text(site.status.rawValue.capitalized)
-            .font(.caption.bold())
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(site.status == .published ? GummfitTheme.accent.opacity(0.18) : Color.white.opacity(0.10), in: Capsule())
-            .foregroundStyle(site.status == .published ? GummfitTheme.accent : GummfitTheme.textPrimary)
+        GummfitStatusPill(status: site.status.rawValue)
     }
 
     @ViewBuilder
