@@ -33,6 +33,7 @@ from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ._shared import resolve_display_name, spawn_bg
 from .channel_broadcasts import _active_broadcast, _assert_member, _assert_owner
+from ..services.channel_access import ChannelCapability, assert_channel_capability, load_channel_access
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,16 @@ CALL_TOKEN_TTL_SECONDS = CALL_MAX_DURATION_SECONDS + 30
 
 # Tracks per-call auto-stop tasks so a manual /stop can cancel them.
 _AUTO_STOP_TASKS: dict[str, asyncio.Task] = {}
+
+
+async def _assert_call_access(conn, channel_id: UUID, current_user: CurrentUser) -> None:
+    access = await load_channel_access(
+        conn,
+        channel_id=channel_id,
+        user_id=current_user.id,
+        user_role=current_user.role,
+    )
+    assert_channel_capability(access, ChannelCapability.CALL)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +304,7 @@ async def start_call(
     orphan_call_id = None  # set inside the txn if an orphan was recovered; pushed after conn closes
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         # werk-lite is a company-paid product: the per-user Werk plan gate
         # (Go Live = Pro) doesn't apply, and WHO may start a call is a company
         # policy (admins only, or any member via werk_lite_calls_all_members)
@@ -308,7 +320,10 @@ async def start_call(
             # Allowlist — never admit personal/individual or broker accounts even
             # if they happen to be cross-tenant channel members. Any company
             # member when the policy is "all", else admins/business-admins only.
-            _allowed = ("admin", "client", "employee") if _feats.get("werk_lite_calls_all_members") else ("admin", "client")
+            _allowed = ("admin", "client", "employee") if (
+                _feats.get("matcha_ops_calls_all_members")
+                or _feats.get("werk_lite_calls_all_members")
+            ) else ("admin", "client")
             if current_user.role not in _allowed:
                 raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
         else:
@@ -453,6 +468,7 @@ async def get_call_token(
         raise HTTPException(status_code=503, detail=str(e))
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_member(conn, channel_id, current_user.id)
 
         call = await _active_call(conn, channel_id)
@@ -523,6 +539,7 @@ async def invite_to_call(
     """Owner invites channel members mid-call. In 'members' mode it's a ping;
     in 'invite_only' mode it also grants join permission."""
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
 
         call = await _active_call(conn, channel_id)
@@ -557,6 +574,7 @@ async def stop_call(
     from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
 
         call = await _active_call(conn, channel_id)
@@ -597,6 +615,7 @@ async def get_call_status(
 ):
     """Current call state for the channel header chip / join banner."""
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_member(conn, channel_id, current_user.id)
         call = await _active_call(conn, channel_id)
         if not call:

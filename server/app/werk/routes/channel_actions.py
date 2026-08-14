@@ -11,9 +11,11 @@ from pydantic import BaseModel
 from app.core.dependencies import get_current_user
 from app.core.models.auth import CurrentUser
 from app.database import get_connection
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkCapability,
-    resolve_work_access,
+from app.matcha.services.ops.permissions import OpsCapability, resolve_ops_access
+from app.werk.services.channel_access import (
+    ChannelCapability,
+    assert_channel_capability,
+    load_channel_access,
 )
 
 router = APIRouter()
@@ -67,7 +69,17 @@ async def list_channel_actions(
         if not channel["is_member"] and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Channel membership required")
 
-        access = await resolve_work_access(
+        channel_access = await load_channel_access(
+            conn,
+            channel_id=channel_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        assert_channel_capability(channel_access, ChannelCapability.AUTOMATION)
+        if not channel_access.features.get("ems"):
+            raise HTTPException(status_code=403, detail="Events are not enabled for this channel")
+
+        access = await resolve_ops_access(
             conn, user=current_user, company_id=channel["company_id"]
         )
         rows: list[dict] = []
@@ -89,7 +101,7 @@ async def list_channel_actions(
             channel_id,
             draft_status,
             current_user.id,
-            access.allows(WorkCapability.EVENT_REVIEW),
+            access.allows(OpsCapability.EVENT_REVIEW),
             limit,
         )
         if status in ("open", "pending"):
@@ -105,9 +117,9 @@ async def list_channel_actions(
                         "allowed_actions": (
                             ["confirm", "reject"]
                             if row["reporter_user_id"] == current_user.id
-                            and access.allows(WorkCapability.EVENT_CONFIRM_OWN)
+                            and access.allows(OpsCapability.EVENT_CONFIRM_OWN)
                             else ["confirm", "reject"]
-                            if access.allows(WorkCapability.EVENT_REVIEW)
+                            if access.allows(OpsCapability.EVENT_REVIEW)
                             else []
                         ),
                         "href": f"/work/events/drafts/{row['id']}",
@@ -129,12 +141,12 @@ async def list_channel_actions(
                 event_status,
                 limit,
             )
-            if access.allows(WorkCapability.EVENT_REVIEW):
+            if access.allows(OpsCapability.EVENT_REVIEW):
                 for row in events:
                     allowed = []
-                    if row["status"] == "logged" and access.allows(WorkCapability.EVENT_RESOLVE):
+                    if row["status"] == "logged" and access.allows(OpsCapability.EVENT_RESOLVE):
                         allowed.extend(["complete", "no_action"])
-                    if row["status"] == "logged" and access.allows(WorkCapability.EVENT_PROMOTE):
+                    if row["status"] == "logged" and access.allows(OpsCapability.EVENT_PROMOTE):
                         allowed.append("promote")
                     rows.append(
                         {
@@ -179,10 +191,10 @@ async def list_channel_actions(
                 allowed: list[str] = []
                 if row["status"] == "assigned" and (
                     row["assignee_user_id"] == current_user.id
-                    or access.allows(WorkCapability.EVENT_ASSIGN)
+                    or access.allows(OpsCapability.EVENT_ASSIGN)
                 ):
                     allowed.append("complete")
-                if row["status"] == "assigned" and access.allows(WorkCapability.EVENT_ASSIGN):
+                if row["status"] == "assigned" and access.allows(OpsCapability.EVENT_ASSIGN):
                     allowed.append("cancel")
                 rows.append(
                     {
@@ -193,7 +205,7 @@ async def list_channel_actions(
                         "status": row["status"] if row["event_status"] == "logged" else row["event_status"],
                         "source_message_id": row["message_id"],
                         "allowed_actions": allowed,
-                        "href": f"/work/events/{row['event_id']}" if access.allows(WorkCapability.EVENT_REVIEW) else None,
+                        "href": f"/ops/events/{row['event_id']}" if access.allows(OpsCapability.EVENT_REVIEW) else None,
                         "created_at": row["created_at"].isoformat(),
                     }
                 )

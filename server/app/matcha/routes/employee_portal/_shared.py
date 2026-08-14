@@ -11,12 +11,12 @@ from typing import Optional
 from fastapi import Depends
 from pydantic import BaseModel
 
-from app.matcha.dependencies import require_feature
+from app.matcha.dependencies import require_all_features, require_feature
 
 _pto_dep = [Depends(require_feature("time_off"))]
 _policies_dep = [Depends(require_feature("policies"))]
 _compliance_plus_dep = [Depends(require_feature("compliance"))]
-_schedule_dep = [Depends(require_feature("employee_schedule"))]
+_schedule_dep = [Depends(require_all_features("matcha_ops", "employee_schedule"))]
 _benefits_dep = [Depends(require_feature("benefits_admin"))]
 
 

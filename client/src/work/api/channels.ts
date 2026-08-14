@@ -6,6 +6,7 @@ export interface ChannelSummary {
   slug: string
   description: string | null
   visibility: string
+  channel_scope?: 'operations' | 'project_discussion' | 'community'
   category?: string | null
   location_id?: string | null
   location_name?: string | null
@@ -136,6 +137,7 @@ export interface ChannelDetail {
   slug: string
   description: string | null
   visibility: string
+  channel_scope?: 'operations' | 'project_discussion' | 'community'
   category?: string | null
   location_id?: string | null
   location_name?: string | null
@@ -152,8 +154,10 @@ export interface ChannelDetail {
   messages: ChannelMessage[]
 }
 
-export const listChannels = () =>
-  api.get<ChannelSummary[]>('/channels')
+export const listChannels = (params?: { scope?: 'operations' | 'project_discussion' | 'community' }) => {
+  const query = params?.scope ? `?scope=${encodeURIComponent(params.scope)}` : ''
+  return api.get<ChannelSummary[]>(`/channels${query}`)
+}
 
 export const discoverChannels = (params?: { q?: string; paid_only?: boolean; category?: string }) => {
   const qs = new URLSearchParams()

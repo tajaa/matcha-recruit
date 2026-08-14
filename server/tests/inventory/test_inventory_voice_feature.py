@@ -26,7 +26,7 @@ def test_inventory_voice_requires_inventory():
 
 def test_inventory_voice_is_valid_with_inventory_enabled():
     features = dict(DEFAULT_COMPANY_FEATURES)
-    features["matcha_work"] = True
+    features["matcha_ops"] = True
     features["inventory"] = True
     features["inventory_voice"] = True
 
@@ -38,8 +38,8 @@ def test_custom_product_rejects_voice_audit_without_its_dependencies():
         validate_features({"inventory_voice": True}, beta_features=frozenset())
 
 
-def test_custom_product_rejects_inventory_chain_without_matcha_work():
-    with pytest.raises(ProductDefinitionError, match="inventory.*matcha_work"):
+def test_custom_product_rejects_inventory_chain_without_matcha_ops():
+    with pytest.raises(ProductDefinitionError, match="inventory.*matcha_ops"):
         validate_features(
             {"inventory": True, "inventory_voice": True},
             beta_features=frozenset(),
@@ -48,12 +48,12 @@ def test_custom_product_rejects_inventory_chain_without_matcha_work():
 
 def test_custom_product_accepts_the_complete_voice_audit_chain():
     features = validate_features(
-        {"matcha_work": True, "inventory": True, "inventory_voice": True},
+        {"matcha_ops": True, "inventory": True, "inventory_voice": True},
         beta_features=frozenset(),
     )
 
     assert features == {
-        "matcha_work": True,
+        "matcha_ops": True,
         "inventory": True,
         "inventory_voice": True,
     }

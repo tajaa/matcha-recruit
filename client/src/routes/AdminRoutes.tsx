@@ -38,6 +38,7 @@ import LandingMediaAdmin from '../pages/admin/LandingMedia'
 import Blogs from '../pages/admin/Blogs'
 import CategoryDetailPage from '../pages/admin/CategoryDetailPage'
 import PolicyDetailPage from '../pages/admin/PolicyDetailPage'
+import MatchaOps from '../pages/admin/MatchaOps'
 
 // Old /admin/jurisdictions + /admin/scope-studio bookmarks/deep-links →
 // unified /admin/studio, preserving any query params (e.g. scope-studio's
@@ -68,6 +69,7 @@ export default function AdminRoutes() {
         <Route path="test-accounts" element={<TestAccounts />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="matcha-work" element={<MatchaWork />} />
+        <Route path="matcha-ops" element={<MatchaOps />} />
         <Route path="cappe" element={<Cappe />} />
         <Route path="cappe-creators" element={<CappeCreators />} />
         <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />

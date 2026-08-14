@@ -52,7 +52,9 @@ from app.core.services.product_definitions import (
 
 logger = logging.getLogger(__name__)
 
-VALID_SOURCES = frozenset({"admin_toggle", "tier_change", "product_sync", "stripe_webhook"})
+VALID_SOURCES = frozenset({
+    "admin_toggle", "tier_change", "product_sync", "stripe_webhook", "migration_backfill",
+})
 
 
 async def record_feature_changes(

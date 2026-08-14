@@ -195,8 +195,8 @@ async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> 
             channel = await conn.fetchrow(
                 """
                 INSERT INTO channels (company_id, name, slug, description, created_by, visibility,
-                    is_paid, currency, inactivity_warning_days)
-                VALUES ($1, $2, $3, $4, $5, 'private', FALSE, 'usd', 3)
+                    channel_scope, is_paid, currency, inactivity_warning_days)
+                VALUES ($1, $2, $3, $4, $5, 'private', 'project_discussion', FALSE, 'usd', 3)
                 RETURNING id
                 """,
                 company_id,

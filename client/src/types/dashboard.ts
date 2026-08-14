@@ -385,4 +385,9 @@ export interface MeResponse {
     capabilities: string[]
     source?: string
   }
+  ops_access?: {
+    level: 'guest' | 'member' | 'reviewer' | 'operator' | 'admin'
+    capabilities: string[]
+    source?: string
+  }
 }

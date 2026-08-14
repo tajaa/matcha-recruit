@@ -1,4 +1,4 @@
-import { Routes, Route, Outlet } from 'react-router-dom'
+import { Routes, Route, Outlet, Navigate } from 'react-router-dom'
 import WorkLayout from '../layout/WorkLayout'
 import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
@@ -33,6 +33,7 @@ import { WorkSurfaceProvider, type WorkSurface } from './WorkSurfaceContext'
 // deliberately narrower route set (channels + boards, no threads/inbox/email).
 // Folding it in here would mean reintroducing all of that as conditionals.
 export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
+  const businessWork = surface === 'matcha-work'
   return (
     <WorkSurfaceProvider value={surface}>
       <Routes>
@@ -42,12 +43,12 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="email" element={<WorkEmail />} />
           <Route path="billing" element={<ChannelBilling />} />
           <Route path="connections" element={<ConnectionsPanel />} />
-          <Route path="channels" element={<ChannelBrowse />} />
-          <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
+          <Route path="channels" element={businessWork ? <Navigate to="/ops/channels" replace /> : <ChannelBrowse />} />
+          <Route path="channels/join/:code" element={businessWork ? <Navigate to="/ops/channels" replace /> : <ChannelJoinByInvite />} />
           <Route path="channels/:channelId" element={<ChannelView />} />
           <Route
             element={
-              <FeatureGate feature="ems" label="Ops — Events">
+              businessWork ? <Navigate to="/ops" replace /> : <FeatureGate feature="ems" label="Ops — Events">
                 <Outlet />
               </FeatureGate>
             }
@@ -58,7 +59,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           </Route>
           <Route
             element={
-              <FeatureGate feature="inventory" label="Ops — Inventory">
+              businessWork ? <Navigate to="/ops" replace /> : <FeatureGate feature="inventory" label="Ops — Inventory">
                 <Outlet />
               </FeatureGate>
             }

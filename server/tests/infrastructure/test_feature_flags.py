@@ -20,6 +20,7 @@ def test_merge_company_features_defaults_include_handbooks():
     assert features["handbooks"] is True
     assert features["accommodations"] is True
     assert features["matcha_work"] is False
+    assert features["matcha_ops"] is False
 
 
 def test_merge_company_features_allows_explicit_override():
@@ -27,6 +28,18 @@ def test_merge_company_features_allows_explicit_override():
     assert features["handbooks"] is False
     # Extra keys not in defaults pass through.
     assert features["policies"] is True
+
+
+def test_ops_features_are_independent_from_matcha_work():
+    features = merge_company_features({"matcha_ops": True})
+    assert features["matcha_ops"] is True
+    assert features["matcha_work"] is False
+
+
+def test_ops_children_require_ops_parent():
+    from app.core.feature_flags import feature_dependency_violations
+
+    assert feature_dependency_violations({"inventory": True})["inventory"] == ("matcha_ops",)
 
 
 def test_merge_company_features_handles_json_string():

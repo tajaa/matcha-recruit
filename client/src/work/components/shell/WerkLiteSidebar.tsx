@@ -31,8 +31,9 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   const base = useWorkBase()
   const { me, hasFeature } = useMe()
   const canCreate = canCreateChannel(me?.user?.role)
-  const showEvents = canReviewEvents(me?.work_access) && hasFeature('ems')
-  const showInventory = canReviewEvents(me?.work_access) && hasFeature('inventory')
+  const opsAccess = me?.ops_access ?? me?.work_access
+  const showEvents = canReviewEvents(opsAccess) && hasFeature('ems')
+  const showInventory = canReviewEvents(opsAccess) && hasFeature('inventory')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])

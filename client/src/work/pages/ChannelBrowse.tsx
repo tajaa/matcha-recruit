@@ -31,11 +31,11 @@ export default function ChannelBrowse() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   useEffect(() => {
-    listChannels()
+    listChannels(surface === 'matcha-ops' ? { scope: 'operations' } : surface === 'werk' ? { scope: 'community' } : undefined)
       .then(setChannels)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }, [surface])
 
   useEffect(() => {
     if (tab !== 'discover') return

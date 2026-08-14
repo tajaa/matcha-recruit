@@ -24,6 +24,7 @@ DEFAULT_VISIBLE_FEATURES = [
     "er_copilot",
     "onboarding",
     "employees",
+    "matcha_ops",
 ]
 DEFAULT_MATCHA_WORK_MODEL_MODE = "light"
 DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE = "light"

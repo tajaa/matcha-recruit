@@ -35,7 +35,7 @@ let _installed = false
 /** Authenticated product surfaces. Everything else (marketing, auth funnel,
  *  public token pages) counts as `public` — that split is the whole point of
  *  tracking logged-out traffic separately. */
-const APP_PREFIXES = ['/app', '/admin', '/work', '/werk', '/werk-lite', '/broker', '/portal']
+const APP_PREFIXES = ['/app', '/admin', '/work', '/werk', '/werk-lite', '/ops', '/broker', '/portal']
 
 function getVisitorId(): string | undefined {
   try {

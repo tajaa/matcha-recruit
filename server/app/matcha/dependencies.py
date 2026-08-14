@@ -538,6 +538,59 @@ def require_any_feature(*feature_names: str):
     return checker
 
 
+def require_all_features(*feature_names: str):
+    """Factory dependency requiring every named company feature.
+
+    This intentionally performs one company lookup and one feature merge for
+    a route that needs a parent plus a capability, rather than stacking
+    multiple ``require_feature`` dependencies and opening one connection per
+    flag.
+    """
+    if not feature_names:
+        raise ValueError("require_all_features needs at least one feature")
+
+    async def checker(current_user=Depends(get_current_user)):
+        if current_user.role == "admin":
+            return current_user
+
+        scope = await resolve_accessible_company_scope(current_user)
+        company_id = scope.get("company_id")
+        if not company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No company associated with this account",
+            )
+
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(enabled_features, $2::jsonb) AS enabled_features,
+                       signup_source
+                FROM companies
+                WHERE id = $1
+                """,
+                company_id,
+                default_company_features_json(),
+            )
+            if row is None or row["enabled_features"] is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Company not found",
+                )
+
+            features = merge_company_features(row["enabled_features"], row["signup_source"])
+            missing = [name for name in feature_names if not features.get(name, False)]
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"All required features ({', '.join(feature_names)}) must be enabled; missing: {', '.join(missing)}",
+                )
+
+        return current_user
+
+    return checker
+
+
 async def verify_manager_access(
     current_user,
     target_employee_id: UUID

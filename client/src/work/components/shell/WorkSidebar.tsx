@@ -32,9 +32,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const brand = useWorkBrand()
   const surface = useWorkSurface()
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
-  const canCreate = canCreateChannel(me?.user?.role)
-  const showEvents = canReviewEvents(me?.work_access) && hasFeature('ems')
-  const showInventory = canReviewEvents(me?.work_access) && hasFeature('inventory')
+  const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
+  const opsAccess = me?.ops_access ?? me?.work_access
+  const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
+  const showInventory = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('inventory')
   const showAssets = canReviewEvents(me?.work_access) && hasFeature('huume')
 
   const {
@@ -173,7 +174,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
   const isActive = (path: string) => location.pathname === path
   const inboxPath = `${base}/inbox`
-  const totalChannelUnread = channels.reduce((sum, ch) => sum + ch.unread_count, 0)
+  const visibleChannels = surface === 'matcha-work'
+    ? channels.filter((channel) => channel.channel_scope === 'project_discussion' || !channel.channel_scope)
+    : channels
+  const totalChannelUnread = visibleChannels.reduce((sum, ch) => sum + ch.unread_count, 0)
   const userName = me?.profile?.name || me?.user?.email?.split('@')[0] || 'User'
   const userEmail = me?.user?.email || ''
   const userAvatar = me?.user?.avatar_url
@@ -327,8 +331,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           />
 
           {/* Channels */}
-          <ChannelsSection
-            channels={channels}
+         <ChannelsSection
+           channels={visibleChannels}
             channelsOpen={sections.channels}
             onToggle={() => sections.toggle('channels')}
             filter={filter}

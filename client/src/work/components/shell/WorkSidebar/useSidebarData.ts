@@ -21,7 +21,7 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
   const loggedEventsCount = useLoggedEventsCount(emsEnabled)
 
   useEffect(() => {
-    listChannels().then(setChannels).catch(() => {})
+    listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
     listProjects().then(setProjects).catch(() => {})
     listThreads('active').then(setThreads).catch(() => {})
     getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
@@ -37,14 +37,14 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
 
   useEffect(() => {
     if (pathname === base) {
-      listChannels().then(setChannels).catch(() => {})
+      listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
     }
   }, [pathname])
 
   // Refetch channels when anywhere in the app creates/joins/leaves one.
   useEffect(() => {
     const handler = () => {
-      listChannels().then(setChannels).catch(() => {})
+      listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
     }
     window.addEventListener(CHANNELS_CHANGED_EVENT, handler)
     return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)

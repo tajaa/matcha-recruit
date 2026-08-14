@@ -28,6 +28,7 @@ from app.core.feature_flags import (
     feature_dependency_violations,
     merge_company_features,
 )
+from app.core.services.company_features import update_company_features
 from app.core.services.feature_beta import load_beta_features, set_beta_status
 from app.core.services.feature_provenance import (
     GRANT_TYPES,
@@ -245,94 +246,20 @@ async def toggle_company_feature(
     company_id: UUID, request: FeatureToggleRequest, current_user=Depends(require_admin),
 ):
     """Toggle a single feature on/off for a company."""
-    if request.feature not in KNOWN_FEATURES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown feature: {request.feature}. Valid features: {', '.join(sorted(KNOWN_FEATURES))}"
-        )
-
     async with get_connection() as conn:
-        async with conn.transaction():
-            is_test_col = "is_test" if await is_test_column_exists(conn) else "FALSE AS is_test"
-            row = await conn.fetchrow(
-                f"""
-                SELECT enabled_features, signup_source, {is_test_col}
-                FROM companies
-                WHERE id = $1
-                FOR UPDATE
-                """,
-                company_id,
+        try:
+            result = await update_company_features(
+                conn,
+                company_id=company_id,
+                updates={request.feature: request.enabled},
+                actor_user_id=current_user.id,
+                source="admin_toggle",
             )
-            if row is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-
-            beta_features = await load_beta_features(conn)
-            try:
-                assert_feature_allowed(
-                    request.feature, bool(request.enabled),
-                    beta_features=beta_features, company_row=row,
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-            # Storage must only ever hold what was actually set — never the
-            # tier overlay's forced entries. Merging with signup_source here
-            # used to materialize e.g. osha_logs:false into a
-            # matcha_lite_essentials company's stored enabled_features; an
-            # Essentials -> Lite upgrade preserves stored, and the matcha_lite
-            # overlay never mentions osha_logs, so that False survived the
-            # upgrade and the paying customer permanently lost OSHA logs.
-            raw = row["enabled_features"]
-            if isinstance(raw, str):
-                try:
-                    raw = json.loads(raw)
-                except json.JSONDecodeError:
-                    raw = {}
-            stored_features = dict(raw) if isinstance(raw, dict) else {}
-
-            old_effective = merge_company_features(row["enabled_features"], row["signup_source"])
-
-            features = dict(stored_features)
-            features[request.feature] = bool(request.enabled)
-
-            await conn.execute(
-                """
-                UPDATE companies
-                SET enabled_features = $1
-                WHERE id = $2
-                """,
-                json.dumps(features),
-                company_id,
-            )
-
-            # Effective (overlay-applied) shape for the audit diff and the
-            # response — GET /company-features already merges with
-            # signup_source, so returning the raw stored dict here made a
-            # tier-forced-off toggle look like it took effect until refresh.
-            new_effective = merge_company_features(features, row["signup_source"])
-            # Only reject a violation this toggle actually introduces — a
-            # company that was already in a violating state (e.g. huume on
-            # without matcha_work, possible before FEATURE_REQUIRES existed)
-            # must not have every UNRELATED toggle 400 with an error naming
-            # a flag the admin never touched.
-            old_violations = feature_dependency_violations(old_effective)
-            new_violations = feature_dependency_violations(new_effective)
-            introduced = {f: m for f, m in new_violations.items() if f not in old_violations}
-            if introduced:
-                feature, missing = next(iter(introduced.items()))
-                # Transaction rolls back on the raise below (still inside the
-                # `async with conn.transaction():` block above) — the UPDATE
-                # a few lines up never commits.
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"'{feature}' requires {', '.join(f'{m!r}' for m in missing)} to be enabled first.",
-                )
-            await record_feature_changes(
-                conn, company_id, old_effective, new_effective,
-                source="admin_toggle", actor_user_id=current_user.id,
-            )
-
-        return {"enabled_features": new_effective}
+        except LookupError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {"enabled_features": result.effective_features}
 
 
 @router.get("/company-features/{company_id}/provenance", dependencies=[Depends(require_admin)])

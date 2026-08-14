@@ -45,7 +45,7 @@ from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
 from .ems import router as ems_router
 from .inventory import router as inventory_router
-from ..dependencies import require_feature, require_any_feature
+from ..dependencies import require_feature, require_any_feature, require_all_features
 from ...core.dependencies import require_admin
 
 # Create main Matcha router
@@ -149,12 +149,12 @@ matcha_router.include_router(labor_relations_router, prefix="/labor", tags=["lab
 # EMS — "@huume" channel event logging + review/promote-to-incident. Promotion
 # additionally requires `incidents` (checked in evaluate_promote, not here).
 matcha_router.include_router(ems_router, prefix="/ems", tags=["ems"],
-                             dependencies=[Depends(require_feature("ems"))])
+                              dependencies=[Depends(require_all_features("matcha_ops", "ems"))])
 
 # Inventory — channel-driven stock tracking via @huume + the /work Inventory
 # page's REST surface (items, movement ledger, order queue).
 matcha_router.include_router(inventory_router, prefix="/inventory", tags=["inventory"],
-                             dependencies=[Depends(require_feature("inventory"))])
+                              dependencies=[Depends(require_all_features("matcha_ops", "inventory"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 # Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)
@@ -200,13 +200,13 @@ matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["d
                              dependencies=[Depends(require_feature("driver_risk"))])
 # Employee scheduling — shift builder + templates over the roster (paid add-on).
 matcha_router.include_router(employee_schedule_router, prefix="/employee-schedule",
-                             tags=["employee-schedule"],
-                             dependencies=[Depends(require_feature("employee_schedule"))])
+                              tags=["employee-schedule"],
+                              dependencies=[Depends(require_all_features("matcha_ops", "employee_schedule"))])
 # Schedule Intelligence — analytics over the schedule data (paid add-on). Each
 # endpoint checks `employee_schedule` itself rather than double-gating the mount.
 matcha_router.include_router(schedule_intelligence_router, prefix="/schedule-intelligence",
-                             tags=["schedule-intelligence"],
-                             dependencies=[Depends(require_feature("schedule_intelligence"))])
+                              tags=["schedule-intelligence"],
+                              dependencies=[Depends(require_all_features("matcha_ops", "schedule_intelligence"))])
 matcha_router.include_router(tcor_router, prefix="/tcor", tags=["tcor"],
                              dependencies=[Depends(require_feature("tcor"))])
 matcha_router.include_router(coi_router, prefix="/coi", tags=["coi"],

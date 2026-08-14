@@ -40,7 +40,9 @@ async def create_misc_tail(conn):
                 description TEXT,
                 created_by UUID NOT NULL REFERENCES users(id),
                 is_archived BOOLEAN DEFAULT false,
-                visibility VARCHAR(20) DEFAULT 'public',
+                 visibility VARCHAR(20) DEFAULT 'public',
+                 channel_scope TEXT NOT NULL DEFAULT 'operations'
+                     CHECK (channel_scope IN ('operations', 'project_discussion', 'community')),
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE(company_id, slug)
@@ -130,6 +132,32 @@ async def create_misc_tail(conn):
         """)
         # Channel permissions columns (for existing tables)
         await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public'")
+        await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS channel_scope TEXT DEFAULT 'operations'")
+        await conn.execute("UPDATE channels SET channel_scope = 'operations' WHERE channel_scope IS NULL")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ops_permissions (
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                level VARCHAR(20) NOT NULL
+                    CHECK (level IN ('member', 'reviewer', 'operator', 'admin')),
+                granted_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (company_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ops_permission_audit_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                action VARCHAR(20) NOT NULL CHECK (action IN ('granted', 'updated', 'revoked')),
+                old_level VARCHAR(20),
+                new_level VARCHAR(20),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
         await conn.execute("ALTER TABLE channel_members ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'member'")
         # Category for channel browse/filter UX (matches Alembic migration zzzz8g9h0i1j2).
         await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS category VARCHAR(50)")

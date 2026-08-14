@@ -7,6 +7,7 @@ import NotificationBell from '../components/shell/NotificationBell'
 import NotificationSettingsMenu from '../components/shell/NotificationSettingsMenu'
 import WorkSidebar from '../components/shell/WorkSidebar'
 import WerkLiteSidebar from '../components/shell/WerkLiteSidebar'
+import OpsSidebar from '../../ops/components/OpsSidebar'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMe } from '../../hooks/useMe'
 import { api } from '../../api/client'
@@ -207,7 +208,7 @@ export default function WorkLayout() {
   // in the top bar — the channel's own header used to stack a second X-row
   // directly under the burger, which read as cramped.
   const inChannel = new RegExp(`^${base}/channels/[^/]+$`).test(pathname)
-  const SidebarComp = surface === 'werk-lite' ? WerkLiteSidebar : WorkSidebar
+  const SidebarComp = surface === 'werk-lite' ? WerkLiteSidebar : surface === 'matcha-ops' ? OpsSidebar : WorkSidebar
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('mw-sidebar')
     return saved !== 'closed'
@@ -270,7 +271,7 @@ export default function WorkLayout() {
   // users under /work. Bounce stale/cross bookmarks, preserving subpath + query.
   // werk-lite is business-only (no personal counterpart), so it's never part of
   // the identity bounce — access is gated by the feature flag instead.
-  if (!loading && surface !== 'werk-lite') {
+  if (!loading && surface !== 'werk-lite' && surface !== 'matcha-ops') {
     // Strip the surface prefix explicitly rather than by a fixed offset: the
     // old slice(5) silently depended on '/work' and '/werk' both being 5 chars,
     // so it would corrupt the tail the moment a base of another length is added.

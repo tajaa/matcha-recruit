@@ -6,6 +6,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
     "accommodations": True,
     "matcha_work": False,
+    # Matcha Ops — company channels, calls, Events, inventory, and scheduling.
+    # Kept separate from Matcha Work so a company can buy the collaboration
+    # workspace without receiving the operational surface.
+    "matcha_ops": False,
     # Werk Lite — the standalone business work-chat surface (/werk-lite): channel
     # chat + LiveKit calls + collaborative boards only. Presentation/entry gate
     # (sidebar entry + page access); the Boards kanban backend stays gated by
@@ -16,6 +20,9 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # Joining an active call is always open to members. Only consulted for
     # werk_lite companies (other surfaces keep the owner + Pro gate).
     "werk_lite_calls_all_members": False,
+    # Matcha Ops call-start policy. False = admins/business admins only;
+    # true = any member may start a call. Joining remains member-only.
+    "matcha_ops_calls_all_members": False,
     "risk_assessment": True,
     "training": False,
     "i9": False,
@@ -240,13 +247,13 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # (services/ems/event_intake.py, mirrors ticket_draft_service.py — NOT
     # the huume agent loop, which hard-requires an mw_threads row) writes an
     # ems_events row and Huume confirms in-channel. Admin/client review in
-    # the /work Events tab and may PROMOTE an event into a real IR incident
+    # the /ops Events tab and may PROMOTE an event into a real IR incident
     # (services/ems/promote.py -> create_incident_core) — AI never
     # auto-creates the incident, same invariant as ir_voice_intake. Gates
-    # the /ems router + the /work events page; promotion additionally
-    # requires `incidents`. Logically meaningless without channels
-    # (matcha_work) to trigger from — see FEATURE_REQUIRES below, same
-    # reasoning as huume. Default off; admin-toggle; NOT bundled.
+    # the /ems router + the /ops events page; promotion additionally
+    # requires `incidents`. Logically meaningless without an Ops channel
+    # to trigger from — see FEATURE_REQUIRES below. Default off; admin-toggle;
+    # NOT bundled.
     "ems": False,
     # Analysis Pilot (full Matcha / Pro). A company-facing, GENERAL-PURPOSE
     # bring-your-own-data analysis engine in a chat UI: the business uploads any
@@ -756,10 +763,13 @@ def assert_feature_allowed(
 FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "huume": ("matcha_work",),
     "huume_code": ("matcha_work",),
-    "werk_lite": ("matcha_work",),
-    "ems": ("matcha_work",),
-    "inventory": ("matcha_work",),
+    "werk_lite": ("matcha_ops", "matcha_work"),
+    "ems": ("matcha_ops",),
+    "inventory": ("matcha_ops",),
     "inventory_voice": ("inventory",),
+    "employee_schedule": ("matcha_ops",),
+    "schedule_intelligence": ("matcha_ops", "employee_schedule"),
+    "matcha_ops_calls_all_members": ("matcha_ops",),
 }
 
 

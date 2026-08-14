@@ -17,6 +17,12 @@ from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ...matcha.dependencies import resolve_accessible_company_scope, require_admin_or_client
 from ...core.services.storage import get_storage
+from ..services.channel_access import (
+    ChannelCapability,
+    ChannelScope,
+    assert_channel_capability,
+    load_channel_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +264,7 @@ class ChannelSummary(BaseModel):
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    channel_scope: ChannelScope = ChannelScope.OPERATIONS
     category: Optional[str] = None
     # Store scope (business_locations). @huume dispatch in a location-scoped
     # channel constrains events/inventory/schedule-chat to this store.
@@ -293,6 +300,7 @@ class ChannelDetail(BaseModel):
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    channel_scope: ChannelScope = ChannelScope.OPERATIONS
     category: Optional[str] = None
     location_id: Optional[UUID] = None
     location_name: Optional[str] = None
@@ -390,6 +398,22 @@ async def _assert_channel_location(conn, company_id: UUID, location_id: Optional
         raise HTTPException(status_code=404, detail="Location not found")
 
 
+async def _require_channel_capability(
+    conn,
+    channel_id: UUID,
+    current_user: CurrentUser,
+    capability: ChannelCapability = ChannelCapability.CHAT,
+):
+    access = await load_channel_access(
+        conn,
+        channel_id=channel_id,
+        user_id=current_user.id,
+        user_role=current_user.role,
+    )
+    assert_channel_capability(access, capability)
+    return access
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -397,6 +421,7 @@ async def _assert_channel_location(conn, company_id: UUID, location_id: Optional
 @router.get("", response_model=list[ChannelSummary])
 async def list_channels(
     archived: bool = Query(False),
+    scope: Optional[ChannelScope] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """List channels in the user's company. archived=true returns the archived
@@ -408,6 +433,7 @@ async def list_channels(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
+                   COALESCE(ch.channel_scope, 'operations') AS channel_scope,
                    ch.category,
                    ch.location_id,
                    (SELECT bl.name FROM business_locations bl WHERE bl.id = ch.location_id) AS location_name,
@@ -439,7 +465,8 @@ async def list_channels(
                    (SELECT u2.avatar_url FROM users u2 WHERE u2.id = ch.created_by) AS created_by_avatar_url,
                    proj.id AS project_id,
                    proj.title AS project_title
-            FROM channels ch
+             FROM channels ch
+             JOIN companies owner_comp ON owner_comp.id = ch.company_id
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
             LEFT JOIN mw_projects proj
                    ON proj.project_data->>'discussion_channel_id' = ch.id::text
@@ -447,14 +474,25 @@ async def list_channels(
               AND (
                 -- Channels in the user's current tenant (excluding private ones they're not in)
                 (ch.company_id = $2 AND (COALESCE(ch.visibility, 'public') != 'private' OR cm.user_id IS NOT NULL))
-                -- OR any channel where the user is already a member (cross-tenant memberships)
-                OR cm.user_id IS NOT NULL
-              )
+                 -- OR any channel where the user is already a member (cross-tenant memberships)
+                 OR cm.user_id IS NOT NULL
+               )
+               AND ($4::text IS NULL OR COALESCE(ch.channel_scope, 'operations') = $4)
+               AND (
+                 $5::boolean
+                 OR COALESCE(ch.channel_scope, 'operations') = 'community'
+                 OR (COALESCE(ch.channel_scope, 'operations') = 'project_discussion'
+                     AND COALESCE((owner_comp.enabled_features->>'matcha_work')::boolean, false))
+                 OR (COALESCE(ch.channel_scope, 'operations') = 'operations'
+                     AND COALESCE((owner_comp.enabled_features->>'matcha_ops')::boolean, false))
+               )
             ORDER BY last_message_at DESC NULLS LAST, ch.created_at DESC
             """,
             current_user.id,
             company_id,
             archived,
+            scope.value if scope else None,
+            current_user.role == "admin",
         )
 
         return [
@@ -464,6 +502,7 @@ async def list_channels(
                 slug=r["slug"],
                 description=r["description"],
                 visibility=r["visibility"],
+                channel_scope=ChannelScope(r["channel_scope"] or "operations"),
                 category=r["category"],
                 location_id=r["location_id"],
                 location_name=r["location_name"],
@@ -556,6 +595,7 @@ async def discover_public_channels(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
+                   COALESCE(ch.channel_scope, 'community') AS channel_scope,
                    ch.category,
                    COALESCE(ch.is_paid, false) AS is_paid,
                    ch.price_cents,
@@ -591,6 +631,7 @@ async def discover_public_channels(
                 slug=r["slug"],
                 description=r["description"],
                 visibility=r["visibility"],
+                channel_scope=ChannelScope(r["channel_scope"] or "community"),
                 category=r["category"],
                 is_paid=r["is_paid"],
                 price_cents=r["price_cents"],
@@ -723,6 +764,18 @@ async def create_channel(
     slug = _slugify(name)
 
     async with get_connection() as conn:
+        company_is_personal = bool(await conn.fetchval(
+            "SELECT COALESCE(is_personal, false) FROM companies WHERE id = $1",
+            company_id,
+        ))
+        if not company_is_personal and current_user.role != "admin":
+            has_ops = await conn.fetchval(
+                "SELECT COALESCE((enabled_features->>'matcha_ops')::boolean, false) FROM companies WHERE id = $1",
+                company_id,
+            )
+            if not has_ops:
+                raise HTTPException(status_code=403, detail="Matcha Ops is required to create company channels")
+
         # Check slug uniqueness, append suffix if needed
         base_slug = slug
         suffix = 0
@@ -776,11 +829,12 @@ async def create_channel(
         row = await conn.fetchrow(
             """
             INSERT INTO channels (company_id, name, slug, description, created_by, visibility, category,
-                is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days, location_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility, category, location_id
+                channel_scope, is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility, category, channel_scope, location_id
             """,
             company_id, name, slug, body.description, current_user.id, visibility, category,
+            "community" if company_is_personal else "operations",
             is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days, location_id,
         )
 
@@ -813,6 +867,7 @@ async def create_channel(
             slug=row["slug"],
             description=row["description"],
             visibility=row["visibility"] or "public",
+            channel_scope=ChannelScope(row["channel_scope"] or ("community" if company_is_personal else "operations")),
             category=row["category"],
             location_id=row["location_id"],
             location_name=(await conn.fetchval(
@@ -1268,7 +1323,7 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency, "
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, COALESCE(channel_scope, 'operations') AS channel_scope, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency, "
             "location_id, (SELECT bl.name FROM business_locations bl WHERE bl.id = channels.location_id) AS location_name, "
             "(SELECT p.id FROM mw_projects p WHERE p.project_data->>'discussion_channel_id' = channels.id::text LIMIT 1) AS project_id "
             "FROM channels WHERE id = $1",
@@ -1276,6 +1331,14 @@ async def get_channel(
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
+
+        access = await load_channel_access(
+            conn,
+            channel_id=channel_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        assert_channel_capability(access, ChannelCapability.CHAT)
 
         # Check membership + get role. `is_member` excludes a removed
         # member — must match the WS send gate (channels_ws.py's is_member
@@ -1368,6 +1431,7 @@ async def get_channel(
         slug=ch["slug"],
         description=ch["description"],
         visibility=ch["visibility"],
+        channel_scope=ChannelScope(ch["channel_scope"] or "operations"),
         category=ch["category"],
         location_id=ch["location_id"],
         location_name=ch["location_name"],
@@ -1409,6 +1473,13 @@ async def get_channel_messages(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        access = await load_channel_access(
+            conn,
+            channel_id=channel_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        assert_channel_capability(access, ChannelCapability.CHAT)
         # Verify channel + membership (allows cross-tenant memberships).
         # removed_for_inactivity IS NOT TRUE — must match the WS send gate
         # and get_channel's membership check exactly (see that function's
@@ -1481,6 +1552,7 @@ async def delete_channel_message(
     tombstone on the client.
     """
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         msg = await conn.fetchrow(
             "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
@@ -1554,6 +1626,7 @@ async def edit_channel_message(
         raise HTTPException(status_code=400, detail="Message too long")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         msg = await conn.fetchrow(
             "SELECT id, sender_id, deleted_at, created_at, message_type FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
@@ -1607,6 +1680,7 @@ async def toggle_reaction(
         raise HTTPException(status_code=400, detail="Invalid emoji")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         # Verify membership
         is_member = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
@@ -1682,6 +1756,7 @@ async def join_channel(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT ch.id, COALESCE(ch.visibility, 'public') AS visibility,
@@ -1754,6 +1829,7 @@ async def add_members(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         # Verify channel exists + requester has permission
         member_row = await conn.fetchrow(
             """
@@ -1880,6 +1956,7 @@ async def update_channel(
 ):
     """Update a channel. Owner/moderator can change name/description. Only owner can change visibility."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         row = await conn.fetchrow(
             "SELECT company_id FROM channels WHERE id = $1", channel_id
         )
@@ -1983,6 +2060,7 @@ async def leave_channel(
 ):
     """Leave a channel. Owners must transfer ownership first."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         member = await conn.fetchrow(
             "SELECT role, stripe_subscription_id FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2042,6 +2120,7 @@ async def set_channel_mute(
     direct @mentions (enforced in the WS notify fan-out). Does not affect
     live message delivery to an open view."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         updated = await conn.fetchval(
             "UPDATE channel_members SET is_muted = $3 WHERE channel_id = $1 AND user_id = $2 RETURNING user_id",
             channel_id, current_user.id, body.muted,
@@ -2078,6 +2157,7 @@ async def set_member_role(
         raise HTTPException(status_code=400, detail="Cannot change your own role")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2113,6 +2193,7 @@ async def kick_member(
         raise HTTPException(status_code=400, detail="Cannot kick yourself. Use /leave instead.")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,

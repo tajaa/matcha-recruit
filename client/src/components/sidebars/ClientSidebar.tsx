@@ -3,7 +3,7 @@ import {
   AlertTriangle, BookOpen, BarChart2, BarChart3, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
-  Coins, FileSignature, CalendarClock,
+  Coins, FileSignature, CalendarClock, Radio,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import SidebarShell from './SidebarShell'
@@ -19,8 +19,8 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'HR Ops',
     items: [
       { to: '/app/employees', icon: Users, label: 'Employees' },
-      { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
-      { to: '/app/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
+      { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
+      { to: '/ops/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/benefits', icon: HeartPulse, label: 'Benefits', feature: 'benefits_admin' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
@@ -79,6 +79,12 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/risk-assessment', icon: BarChart2, label: 'Risk Assessment' },
       { to: '/app/resident-care', icon: HeartPulse, label: 'Resident-Care Risk', feature: 'resident_care' },
       { to: '/app/legal-pilot', icon: Gavel, label: 'Legal Pilot', feature: 'legal_defense' },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { to: '/ops', icon: Radio, label: 'Matcha Ops', feature: 'matcha_ops' },
     ],
   },
   {

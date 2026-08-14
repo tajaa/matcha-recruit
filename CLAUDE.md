@@ -221,7 +221,9 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `accommodations` | ✅ | Accommodation case mgmt |
 | `risk_assessment` | ✅ | Risk-assessment dashboard |
 | `discipline` | ✅ | Progressive discipline workflow |
-| `matcha_work` | ❌ | Projects / threads / channels |
+| `matcha_work` | ❌ | Projects / threads / private project discussion chat / workspace AI |
+| `matcha_ops` | ❌ | Matcha Ops surface — company channels, calls, Events, inventory, scheduling, and channel automation |
+| `matcha_ops_calls_all_members` | ❌ | Matcha Ops call-start policy — false=admins only, true=any member starts; joining remains member-only |
 | `training` | ❌ | Training programs — requirement provenance + auto-assign rules (new-hire/incident/schedule). Forced ON in Matcha-X, OFF in Lite. → `server/app/matcha/services/training/CLAUDE.md` |
 | `i9` | ❌ | I-9 compliance |
 | `cobra` | ❌ | COBRA admin |

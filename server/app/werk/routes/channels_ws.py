@@ -16,6 +16,12 @@ from ...database import get_connection
 from ...core.services.auth import decode_token
 from ...core.services.redis_cache import get_redis_cache, check_rate_limit
 from ...core.models.auth import CurrentUser
+from ..services.channel_access import (
+    ChannelCapability,
+    ChannelScope,
+    assert_channel_capability,
+    load_channel_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -311,10 +317,11 @@ def _ems_row_allowed(row) -> bool:
     is core's merge_company_features — this is the one place werk applies
     it, instead of each caller (and routes/ems.py's now-deleted private
     copy) re-deriving the overlay."""
-    if not row or row["is_personal"]:
+    if not row or row["is_personal"] or row.get("channel_scope") != ChannelScope.OPERATIONS.value:
         return False
     from app.core.feature_flags import merge_company_features
-    return bool(merge_company_features(row["enabled_features"], row["signup_source"]).get("ems"))
+    features = merge_company_features(row["enabled_features"], row["signup_source"])
+    return bool(features.get("matcha_ops") and features.get("ems"))
 
 
 async def _ems_company_gate(conn, channel_id_str: str):
@@ -325,6 +332,7 @@ async def _ems_company_gate(conn, channel_id_str: str):
     row = await conn.fetchrow(
         """
         SELECT ch.company_id, comp.is_personal, comp.enabled_features,
+               COALESCE(ch.channel_scope, 'operations') AS channel_scope,
                comp.signup_source
         FROM channels ch
         JOIN companies comp ON comp.id = ch.company_id
@@ -345,21 +353,28 @@ async def _ems_flag_enabled(conn, company_id) -> bool:
         "SELECT is_personal, enabled_features, signup_source FROM companies WHERE id = $1",
         company_id,
     )
-    return _ems_row_allowed(row)
+    if not row or row["is_personal"]:
+        return False
+    from app.core.feature_flags import merge_company_features
+    features = merge_company_features(row["enabled_features"], row["signup_source"])
+    return bool(features.get("matcha_ops") and features.get("ems"))
 
 
 def _inventory_row_allowed(row) -> bool:
     """Same shape as _ems_row_allowed, keyed on the `inventory` flag."""
-    if not row or row["is_personal"]:
+    if not row or row["is_personal"] or row.get("channel_scope") != ChannelScope.OPERATIONS.value:
         return False
     from app.core.feature_flags import merge_company_features
-    return bool(merge_company_features(row["enabled_features"], row["signup_source"]).get("inventory"))
+    features = merge_company_features(row["enabled_features"], row["signup_source"])
+    return bool(features.get("matcha_ops") and features.get("inventory"))
 
 
 async def _inventory_company_gate(conn, channel_id_str: str):
     row = await conn.fetchrow(
         """
-        SELECT ch.company_id, comp.is_personal, comp.enabled_features, comp.signup_source
+        SELECT ch.company_id, comp.is_personal, comp.enabled_features,
+               COALESCE(ch.channel_scope, 'operations') AS channel_scope,
+               comp.signup_source
         FROM channels ch JOIN companies comp ON comp.id = ch.company_id
         WHERE ch.id = $1
         """,
@@ -697,7 +712,11 @@ async def _schedule_company_features(conn, company_id) -> dict:
     )
     if not row or row["is_personal"]:
         return {}
-    return merge_company_features(row["enabled_features"], row["signup_source"])
+    features = merge_company_features(row["enabled_features"], row["signup_source"])
+    if not features.get("matcha_ops"):
+        features["employee_schedule"] = False
+        features["schedule_intelligence"] = False
+    return features
 
 
 async def _bg_schedule_request(
@@ -726,8 +745,24 @@ async def _bg_schedule_request(
         sys_row = None
 
         async with get_connection() as conn:
-            company_id = await _ems_company_gate(conn, channel_id_str)
-            if company_id is None:
+            channel_row = await conn.fetchrow(
+                """
+                SELECT ch.company_id, COALESCE(ch.channel_scope, 'operations') AS channel_scope,
+                       comp.is_personal, comp.enabled_features, comp.signup_source
+                  FROM channels ch
+                  JOIN companies comp ON comp.id = ch.company_id
+                 WHERE ch.id = $1
+                """,
+                UUID(channel_id_str),
+            )
+            if not channel_row or channel_row["is_personal"] or channel_row["channel_scope"] != "operations":
+                return
+            from app.core.feature_flags import merge_company_features
+            channel_features = merge_company_features(
+                channel_row["enabled_features"], channel_row["signup_source"]
+            )
+            company_id = channel_row["company_id"]
+            if not channel_features.get("matcha_ops"):
                 return
 
             # Rate-limit BEFORE any write: previously the authz-refusal pill
@@ -3274,6 +3309,21 @@ async def channel_websocket(
                         })
                         continue
                     async with get_connection() as conn:
+                        try:
+                            access = await load_channel_access(
+                                conn,
+                                channel_id=ch_uuid,
+                                user_id=user.id,
+                                user_role=user.role,
+                            )
+                            assert_channel_capability(access, ChannelCapability.CHAT)
+                        except (HTTPException, PermissionError):
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Channel unavailable for this account",
+                                "channel_id": str(ch_uuid),
+                            })
+                            continue
                         # Verify membership (allows cross-tenant memberships; REST uses the same rule)
                         ok = await conn.fetchval(
                             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",
@@ -3383,6 +3433,22 @@ async def channel_websocket(
                     attachments_json = _json.dumps(attachments) if attachments else "[]"
                     reply_target_type: Optional[str] = None
                     async with get_connection() as conn:
+                        try:
+                            access = await load_channel_access(
+                                conn,
+                                channel_id=ch_uuid,
+                                user_id=user.id,
+                                user_role=user.role,
+                            )
+                            assert_channel_capability(access, ChannelCapability.CHAT)
+                        except (HTTPException, PermissionError):
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Channel unavailable for this account",
+                                "channel_id": channel_id,
+                                "client_message_id": client_message_id,
+                            })
+                            continue
                         # Verify membership (exclude removed members)
                         is_member = await conn.fetchval(
                             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",

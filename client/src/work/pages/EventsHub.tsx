@@ -28,10 +28,11 @@ export default function EventsHub() {
   const base = useWorkBase()
   const { me, loading: meLoading, hasFeature } = useMe()
   const { toast } = useToast()
-  const canReview = canReviewEvents(me?.work_access)
-  const canResolve = canResolveEvents(me?.work_access)
-  const canPromote = canPromoteEvents(me?.work_access)
-  const canAssign = canAssignEvents(me?.work_access)
+  const opsAccess = me?.ops_access ?? me?.work_access
+  const canReview = canReviewEvents(opsAccess)
+  const canResolve = canResolveEvents(opsAccess)
+  const canPromote = canPromoteEvents(opsAccess)
+  const canAssign = canAssignEvents(opsAccess)
   const hasIncidents = hasFeature('incidents')
 
   const [events, setEvents] = useState<EmsEvent[]>([])

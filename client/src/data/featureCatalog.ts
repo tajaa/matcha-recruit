@@ -51,13 +51,21 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
     label: 'Matcha Work',
     features: {
       matcha_work: 'Matcha Work',
-      ems: 'Ops — Events (channel event logging via @huume) — needs Matcha Work too',
-      inventory: 'Ops — Inventory (channel stock tracking via @huume) — needs Matcha Work too',
-      inventory_voice: 'Ops — Inventory Voice Audit (Gemini count dictation) — needs Inventory too',
-      werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
-      werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
       huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat) — needs Matcha Work too',
+    },
+  },
+  {
+    label: 'Matcha Ops',
+    features: {
+      matcha_ops: 'Matcha Ops',
+      ems: 'Ops — Events (channel event logging via @huume)',
+      inventory: 'Ops — Inventory (channel stock tracking via @huume)',
+      inventory_voice: 'Ops — Inventory Voice Audit (Gemini count dictation) — needs Inventory too',
+      employee_schedule: 'Ops — Employee Schedule',
+      schedule_intelligence: 'Ops — Schedule Intelligence — needs Employee Schedule too',
+      matcha_ops_calls_all_members: 'Matcha Ops — any member can start calls',
+      werk_lite: 'Werk Lite (Ops channels + Work boards)',
     },
   },
   {
@@ -97,10 +105,13 @@ export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
  */
 export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
-  ems: ['matcha_work'],
-  inventory: ['matcha_work'],
+  ems: ['matcha_ops'],
+  inventory: ['matcha_ops'],
   inventory_voice: ['inventory'],
-  werk_lite: ['matcha_work'],
+  employee_schedule: ['matcha_ops'],
+  schedule_intelligence: ['matcha_ops', 'employee_schedule'],
+  matcha_ops_calls_all_members: ['matcha_ops'],
+  werk_lite: ['matcha_ops', 'matcha_work'],
   // osha_export/osha_auto_report/ir_magic_links/ir_copilot are deliberately
   // NOT here even though each needs incidents/osha_logs to do anything — see
   // the backend FEATURE_REQUIRES comment (feature_flags.py) for why: the
