@@ -11,6 +11,11 @@ cannot itself hang.
 Prints one "<rev>  <docstring first line>" per pending revision. Prints nothing
 and exits 0 when the database is already at every head — which the caller reads
 as "nothing to do".
+
+The database can be at a sibling head while another sibling branch is still
+pending. Do not pass all database heads as the end of one ``iterate_revisions``
+range: Alembic treats unrelated current revisions as a range error/empty walk.
+Instead, compute the applied ancestor closure and filter the complete graph.
 """
 
 import sys
@@ -22,6 +27,24 @@ from alembic.script import ScriptDirectory
 SERVER_ROOT = Path(__file__).resolve().parent.parent / "server"
 
 
+def _revision_closure(script: ScriptDirectory, revisions: tuple[str, ...]) -> set[str]:
+    """Return the revisions represented by the supplied database heads."""
+    applied: set[str] = set()
+    for revision in revisions:
+        applied.update(
+            rev.revision for rev in script.iterate_revisions(revision, "base")
+        )
+    return applied
+
+
+def pending_revisions(script: ScriptDirectory, current: tuple[str, ...]):
+    """Return missing revisions in the order Alembic will apply them."""
+    applied = _revision_closure(script, current)
+    all_revisions = list(script.iterate_revisions(script.get_heads(), "base"))
+    all_revisions.reverse()
+    return [rev for rev in all_revisions if rev.revision not in applied]
+
+
 def main() -> int:
     current = tuple(a for a in sys.argv[1:] if a)
 
@@ -29,18 +52,7 @@ def main() -> int:
     cfg.set_main_option("script_location", str(SERVER_ROOT / "alembic"))
     script = ScriptDirectory.from_config(cfg)
 
-    heads = set(script.get_heads())
-    if set(current) == heads:
-        return 0
-
-    # iterate_revisions walks heads -> current (newest first); reverse for the
-    # order they will actually be applied in.
-    pending = list(script.iterate_revisions(heads, current or ("base",)))
-    pending.reverse()
-
-    for rev in pending:
-        if rev.revision in current:
-            continue
+    for rev in pending_revisions(script, current):
         doc = (rev.doc or "").strip().splitlines()
         summary = doc[0] if doc else ""
         print(f"{rev.revision}  {summary}")
