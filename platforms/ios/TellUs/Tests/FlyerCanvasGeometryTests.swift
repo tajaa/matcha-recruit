@@ -73,4 +73,16 @@ final class FlyerCanvasGeometryTests: XCTestCase {
         )
         XCTAssertEqual(resizedImage.box.width / resizedImage.box.height, 2, accuracy: 0.01)
     }
+
+    func testResizeHandleAccountsForLayerRotation() {
+        let design = FlyerDesignFactory.blank()
+        let layer = FlyerDesignFactory.shape(in: design, shape: "rect").withRotation(45).moved(to: CGPoint(x: 100, y: 100))
+        let angle = CGFloat(45 * Double.pi / 180)
+        let corner = CGPoint(
+            x: layer.origin.x + layer.box.width * cos(angle),
+            y: layer.origin.y + layer.box.width * sin(angle)
+        )
+
+        XCTAssertEqual(FlyerCanvasGeometry.resizeHandle(at: corner, layer: layer), .topRight)
+    }
 }

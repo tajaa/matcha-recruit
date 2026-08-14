@@ -93,8 +93,8 @@ struct CampaignDesignerView: View {
         .sheet(isPresented: $assistantSheet) {
             FlyerAssistantPanel(
                 campaignID: vm.campaignID,
-                design: vm.document.design,
-                selectedLayer: selectedLayer,
+                currentDesign: { vm.document.design },
+                currentSelectedLayer: { selectedLayer },
                 assets: vm.renderAssets,
                 assistant: assistant,
                 onDesign: { next in
@@ -302,12 +302,7 @@ struct CampaignDesignerView: View {
     }
 
     private func numericField(_ title: String, value: Double, onCommit: @escaping (Double) -> Void) -> some View {
-        TextField(title, value: Binding(
-            get: { value },
-            set: { onCommit($0) }
-        ), format: .number)
-        .textFieldStyle(.roundedBorder)
-        .keyboardType(.numbersAndPunctuation)
+        FlyerNumericField(title: title, value: value, onCommit: onCommit)
     }
 
     private func syncTextDraft() {
@@ -316,6 +311,28 @@ struct CampaignDesignerView: View {
             return
         }
         textDraft = layer.text
+    }
+}
+
+private struct FlyerNumericField: View {
+    let title: String
+    let value: Double
+    let onCommit: (Double) -> Void
+    @State private var draft: Double
+
+    init(title: String, value: Double, onCommit: @escaping (Double) -> Void) {
+        self.title = title
+        self.value = value
+        self.onCommit = onCommit
+        _draft = State(initialValue: value)
+    }
+
+    var body: some View {
+        TextField(title, value: $draft, format: .number)
+            .textFieldStyle(.roundedBorder)
+            .keyboardType(.numbersAndPunctuation)
+            .onSubmit { onCommit(draft) }
+            .onChange(of: value) { _, newValue in draft = newValue }
     }
 }
 

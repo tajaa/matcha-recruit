@@ -2,8 +2,8 @@ import SwiftUI
 
 struct FlyerAssistantPanel: View {
     let campaignID: String
-    let design: FlyerDesign
-    let selectedLayer: DesignLayer?
+    let currentDesign: () -> FlyerDesign
+    let currentSelectedLayer: () -> DesignLayer?
     let assets: FlyerRenderAssets
     let assistant: FlyerAssistantViewModel
     let onDesign: (FlyerDesign) -> Void
@@ -42,7 +42,7 @@ struct FlyerAssistantPanel: View {
                 Divider()
                 ideas
                 HStack(alignment: .bottom, spacing: 8) {
-                    TextField(selectedLayer == nil ? "Ask for a change..." : "Change selected layer...", text: $draft, axis: .vertical)
+                    TextField(currentSelectedLayer() == nil ? "Ask for a change..." : "Change selected layer...", text: $draft, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
                     Button {
                         send(draft)
@@ -137,6 +137,7 @@ struct FlyerAssistantPanel: View {
     }
 
     private func send(_ text: String) {
+        let selectedLayer = currentSelectedLayer()
         let selection: FlyerAiSelection?
         if let selectedLayer {
             let selectedText: String?
@@ -150,7 +151,7 @@ struct FlyerAssistantPanel: View {
             selection = nil
         }
         Task {
-            if let next = await assistant.send(campaignID: campaignID, design: design, message: text, selection: selection) {
+            if let next = await assistant.send(campaignID: campaignID, design: currentDesign(), message: text, selection: selection) {
                 onDesign(next)
             }
         }

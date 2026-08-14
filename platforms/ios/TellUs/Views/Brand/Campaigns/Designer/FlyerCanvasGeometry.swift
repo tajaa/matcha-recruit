@@ -71,13 +71,14 @@ enum FlyerCanvasGeometry {
         guard layer.kind != "unknown", !layer.isLocked else { return nil }
         let origin = layer.origin
         let box = layer.box
+        let localPoint = rotatedPoint(point, around: origin, radians: -layer.rotation * .pi / 180)
         let corners: [(FlyerResizeHandle, CGPoint)] = [
             (.topLeft, origin),
             (.topRight, CGPoint(x: origin.x + box.width, y: origin.y)),
             (.bottomLeft, CGPoint(x: origin.x, y: origin.y + box.height)),
             (.bottomRight, CGPoint(x: origin.x + box.width, y: origin.y + box.height)),
         ]
-        return corners.first { _, corner in abs(point.x - corner.x) <= tolerance && abs(point.y - corner.y) <= tolerance }?.0
+        return corners.first { _, corner in abs(localPoint.x - corner.x) <= tolerance && abs(localPoint.y - corner.y) <= tolerance }?.0
     }
 
     static func resized(

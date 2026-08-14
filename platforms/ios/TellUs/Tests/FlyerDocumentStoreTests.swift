@@ -3,6 +3,16 @@ import XCTest
 
 @MainActor
 final class FlyerDocumentStoreTests: XCTestCase {
+    func testNoOpApplyDoesNotDirtyDocument() {
+        let initial = FlyerDesignFactory.blank()
+        let store = FlyerDocumentStore(initial)
+
+        store.apply(initial, commit: true)
+
+        XCTAssertFalse(store.isDirty)
+        XCTAssertFalse(store.canUndo)
+    }
+
     func testUncommittedGestureThenCommitCreatesOneUndoStep() {
         let initial = FlyerDesignFactory.blank()
         let layer = FlyerDesignFactory.text(in: initial, text: "Headline")

@@ -86,13 +86,14 @@ enum FlyerRenderer {
             .kern: CGFloat(layer.letterSpacing),
         ]
         NSString(string: layer.text).draw(
-            in: CGRect(x: 0, y: 0, width: CGFloat(layer.width), height: CGFloat(layer.fontSize * layer.lineHeight)),
+            in: CGRect(x: 0, y: 0, width: CGFloat(layer.width), height: layer.measuredHeight),
             withAttributes: attributes
         )
     }
 
     private static func draw(_ layer: ImageLayer, assets: FlyerRenderAssets, in context: CGContext) {
-        guard let image = layer.slot == "logo" ? assets.logo : nil, let cgImage = image.cgImage else { return }
+        let image = layer.slot == "logo" ? assets.logo : assets.images[layer.src]
+        guard let cgImage = image?.cgImage else { return }
         context.interpolationQuality = .high
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: layer.width, height: layer.height))
     }
@@ -158,12 +159,10 @@ enum FlyerRenderer {
         falseColor.color0 = CIColor(color: foreground)
         falseColor.color1 = CIColor(color: background)
         guard let output = falseColor.outputImage else { return nil }
-        let extent = output.extent.insetBy(dx: -4, dy: -4)
         let scale = 4.0
         let scaled = output.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let context = CIContext()
         guard let image = context.createCGImage(scaled, from: scaled.extent) else { return nil }
-        _ = extent
         return UIImage(cgImage: image)
     }
 

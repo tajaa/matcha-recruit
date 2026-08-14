@@ -18,6 +18,7 @@ final class FlyerDocumentStore {
     private(set) var revision: UInt64 = 0
 
     private var baseline: FlyerDesign
+    private var savedDesign: FlyerDesign
     private var past: [FlyerDesign] = []
     private var future: [FlyerDesign] = []
 
@@ -26,11 +27,13 @@ final class FlyerDocumentStore {
     init(_ initial: FlyerDesign) {
         design = initial
         baseline = initial
+        savedDesign = initial
     }
 
     func reset(to next: FlyerDesign) {
         design = next
         baseline = next
+        savedDesign = next
         past = []
         future = []
         isDirty = false
@@ -41,7 +44,7 @@ final class FlyerDocumentStore {
     func apply(_ next: FlyerDesign, commit: Bool) {
         design = next
         revision &+= 1
-        isDirty = true
+        isDirty = design != savedDesign
         guard commit else { return }
         if baseline != next {
             past.append(baseline)
@@ -58,7 +61,7 @@ final class FlyerDocumentStore {
         if future.count > Self.maxHistory { future.removeLast(future.count - Self.maxHistory) }
         design = previous
         baseline = previous
-        isDirty = true
+        isDirty = design != savedDesign
         revision &+= 1
         updateAvailability()
     }
@@ -70,7 +73,7 @@ final class FlyerDocumentStore {
         if past.count > Self.maxHistory { past.removeFirst(past.count - Self.maxHistory) }
         design = next
         baseline = next
-        isDirty = true
+        isDirty = design != savedDesign
         revision &+= 1
         updateAvailability()
     }
@@ -83,6 +86,7 @@ final class FlyerDocumentStore {
     /// since its snapshot was captured.
     func markSaved(_ snapshot: FlyerSaveSnapshot) {
         guard snapshot.revision == revision, snapshot.design == design else { return }
+        savedDesign = snapshot.design
         isDirty = false
     }
 

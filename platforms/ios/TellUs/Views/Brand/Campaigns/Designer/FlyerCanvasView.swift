@@ -38,6 +38,7 @@ final class FlyerCanvasUIView: UIView {
     private var pan: UIPanGestureRecognizer!
     private var dragLayer: DesignLayer?
     private var dragStartOrigin: CGPoint = .zero
+    private var didMove = false
     private var resizeLayer: DesignLayer?
     private var resizeHandle: FlyerResizeHandle?
 
@@ -82,10 +83,13 @@ final class FlyerCanvasUIView: UIView {
         context.scaleBy(x: artboard.width / CGFloat(design.artboard.w), y: artboard.height / CGFloat(design.artboard.h))
         FlyerRenderer.draw(design: design, claimURL: claimURL, assets: assets, in: context)
         if let selectedLayerID, let layer = design.layers.first(where: { $0.id == selectedLayerID }), layer.kind != "unknown" {
+            context.saveGState()
+            context.translateBy(x: layer.origin.x, y: layer.origin.y)
+            context.rotate(by: CGFloat(layer.rotation * .pi / 180))
             context.setStrokeColor(UIColor.systemOrange.cgColor)
             context.setLineWidth(4 / max(0.01, artboard.width / CGFloat(design.artboard.w)))
             context.setLineDash(phase: 0, lengths: [8, 5])
-            let box = CGRect(origin: layer.origin, size: layer.box)
+            let box = CGRect(origin: .zero, size: layer.box)
             context.stroke(box)
             context.setFillColor(UIColor.systemOrange.cgColor)
             let handleSize = 18 / max(0.01, artboard.width / CGFloat(design.artboard.w))
@@ -98,6 +102,7 @@ final class FlyerCanvasUIView: UIView {
             for corner in corners {
                 context.fillEllipse(in: CGRect(x: corner.x - handleSize / 2, y: corner.y - handleSize / 2, width: handleSize, height: handleSize))
             }
+            context.restoreGState()
         }
         context.restoreGState()
     }
@@ -111,6 +116,7 @@ final class FlyerCanvasUIView: UIView {
             onSelect?(id)
             guard let id, let layer = design.layers.first(where: { $0.id == id }), !layer.isLocked else {
                 dragLayer = nil
+                didMove = false
                 resizeLayer = nil
                 return
             }
@@ -118,13 +124,23 @@ final class FlyerCanvasUIView: UIView {
                 resizeLayer = layer
                 resizeHandle = handle
                 dragLayer = nil
+                didMove = false
                 return
             }
             dragLayer = layer
             dragStartOrigin = layer.origin
+            didMove = false
         case .changed, .ended:
             if let original = resizeLayer, let resizeHandle {
                 let translation = recognizer.translation(in: self)
+                didMove = didMove || hypot(translation.x, translation.y) > 1
+                guard didMove else {
+                    if recognizer.state == .ended {
+                        self.resizeLayer = nil
+                        self.resizeHandle = nil
+                    }
+                    return
+                }
                 let scale = artboardRect(in: bounds).width / CGFloat(design.artboard.w)
                 let changed = FlyerCanvasGeometry.resized(
                     original,
@@ -140,6 +156,11 @@ final class FlyerCanvasUIView: UIView {
             }
             guard let original = dragLayer else { return }
             let translation = recognizer.translation(in: self)
+            didMove = didMove || hypot(translation.x, translation.y) > 1
+            guard didMove else {
+                if recognizer.state == .ended { dragLayer = nil }
+                return
+            }
             let scale = artboardRect(in: bounds).width / CGFloat(design.artboard.w)
             let proposed = CGPoint(
                 x: dragStartOrigin.x + translation.x / max(0.01, scale),
@@ -151,6 +172,7 @@ final class FlyerCanvasUIView: UIView {
             if recognizer.state == .ended { dragLayer = nil }
         default:
             dragLayer = nil
+            didMove = false
             resizeLayer = nil
             resizeHandle = nil
         }

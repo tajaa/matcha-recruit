@@ -13,6 +13,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     var campaign: PromoCampaign?
     var brand: Brand?
     var logoImage: UIImage?
+    var imageAssets: [String: UIImage] = [:]
     var selectedLayerID: String?
     var isLoading = false
     var error: String?
@@ -38,7 +39,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     }
 
     var renderAssets: FlyerRenderAssets {
-        FlyerRenderAssets.bundled.withLogo(logoImage)
+        FlyerRenderAssets.bundled.withLogo(logoImage).withImages(imageAssets)
     }
 
     func load() async {
@@ -62,6 +63,7 @@ final class FlyerDesignerViewModel: LoadableVM {
             error = nil
             saveError = nil
             await loadLogo(urlString: loadedBrand.logo_url)
+            await loadImages(for: loadedDesign)
             Task { @MainActor [weak self] in
                 self?.palettePresets = (try? await FlyerAiService.shared.schema().palettes) ?? []
             }
@@ -77,6 +79,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     func apply(_ next: FlyerDesign, commit: Bool) {
         guard isLoaded else { return }
         document.apply(next, commit: commit)
+        loadImagesInBackground(for: next)
         scheduleAutosave()
     }
 
@@ -222,6 +225,45 @@ final class FlyerDesignerViewModel: LoadableVM {
             if !Task.isCancelled { logoImage = UIImage(data: data) }
         } catch {
             logoImage = nil
+        }
+    }
+
+    private var loadingImageSources = Set<String>()
+
+    private func loadImagesInBackground(for design: FlyerDesign) {
+        for source in imageSources(in: design) where imageAssets[source] == nil && !loadingImageSources.contains(source) {
+            loadingImageSources.insert(source)
+            Task { @MainActor [weak self] in
+                await self?.loadImage(source: source)
+            }
+        }
+    }
+
+    private func loadImages(for design: FlyerDesign) async {
+        for source in imageSources(in: design) where imageAssets[source] == nil {
+            if !loadingImageSources.contains(source) {
+                loadingImageSources.insert(source)
+            }
+            await loadImage(source: source)
+        }
+    }
+
+    private func imageSources(in design: FlyerDesign) -> Set<String> {
+        Set(design.layers.compactMap { layer in
+            guard case .image(let image) = layer, image.slot != "logo", !image.src.isEmpty else { return nil }
+            return image.src
+        })
+    }
+
+    private func loadImage(source: String) async {
+        defer { loadingImageSources.remove(source) }
+        guard imageAssets[source] == nil, let url = URL(string: source) else { return }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard !Task.isCancelled, let image = UIImage(data: data) else { return }
+            imageAssets[source] = image
+        } catch {
+            // A missing optional image should not block editing the rest of the flyer.
         }
     }
 }

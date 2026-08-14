@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // Mirrors client/tellus/src/api/types.ts's FlyerDesign and
 // server/app/tellus/services/flyer_ai/catalog.py.
@@ -93,6 +94,28 @@ struct TextLayer: Codable, Equatable {
     var width: Double
     var lineHeight: Double
     var letterSpacing: Double
+}
+
+extension TextLayer {
+    var measuredHeight: CGFloat {
+        let font = UIFont(name: flyerFontName(fontFamily), size: CGFloat(fontSize))
+            ?? UIFont.systemFont(ofSize: CGFloat(fontSize), weight: fontStyle == "bold" ? .bold : .regular)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = CGFloat(max(0, fontSize * (lineHeight - 1)))
+        paragraph.lineBreakMode = .byWordWrapping
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .paragraphStyle: paragraph,
+            .kern: CGFloat(letterSpacing),
+        ]
+        let measured = NSString(string: text).boundingRect(
+            with: CGSize(width: CGFloat(width), height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil
+        ).height
+        return max(CGFloat(fontSize * lineHeight), measured)
+    }
 }
 
 struct ImageLayer: Codable, Equatable {
@@ -193,7 +216,7 @@ enum DesignLayer: Codable, Equatable, Identifiable {
     /// matching utils/designer.ts:layerBox.
     var box: CGSize {
         switch self {
-        case .text(let l): return CGSize(width: l.width, height: l.fontSize * l.lineHeight)
+        case .text(let l): return CGSize(width: l.width, height: l.measuredHeight)
         case .image(let l): return CGSize(width: l.width, height: l.height)
         case .sticker(let l): return CGSize(width: l.width, height: l.height)
         case .shape(let l): return CGSize(width: l.width, height: l.height)
@@ -201,6 +224,7 @@ enum DesignLayer: Codable, Equatable, Identifiable {
         case .unknown: return .zero
         }
     }
+
 
     var rotation: Double {
         switch self {

@@ -81,6 +81,12 @@ final class FlyerDesignDecodeTests: XCTestCase {
         XCTAssertEqual(design.layers[0].box.width, 600)
     }
 
+    func testWrappedTextBoxIncludesAllLines() throws {
+        let design = try decode(minimal.replacingOccurrences(of: "\"Hi\"", with: "\"This is a headline that wraps\""))
+
+        XCTAssertGreaterThan(design.layers[0].box.height, 57.6)
+    }
+
     func testHasUsableQRIgnoresAnOffArtboardCode() throws {
         var design = try decode(minimal)
         XCTAssertTrue(design.hasUsableQR)
