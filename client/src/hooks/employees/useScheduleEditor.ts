@@ -26,6 +26,8 @@ export function useScheduleEditor(weekStart: string) {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set())
   const requestVersion = useRef(0)
+  const mutationQueues = useRef(new Map<string, Promise<unknown>>())
+  const pendingCounts = useRef(new Map<string, number>())
 
   const reload = useCallback(async () => {
     const version = ++requestVersion.current
@@ -59,46 +61,74 @@ export function useScheduleEditor(weekStart: string) {
     }))
   }, [])
 
-  const mutate = useCallback(async <T,>(
-    key: string,
+  const mutate = useCallback(<T,>(
+    keys: string | string[],
     operation: (force: boolean) => Promise<T>,
     onSuccess: (result: T) => void,
   ): Promise<T | null> => {
-    setPendingKeys((current) => new Set(current).add(key))
-    setSaveState('saving')
-    try {
-      let result: T
-      try {
-        result = await operation(false)
-      } catch (error) {
-        const prompt = conflictPrompt(error)
-        if (!prompt || !window.confirm(prompt)) {
-          if (prompt) setSaveState('idle')
-          else throw error
-          return null
-        }
-        result = await operation(true)
-      }
-      onSuccess(result)
-      setSaveState('saved')
-      setLastSavedAt(new Date())
-      return result
-    } catch (error) {
-      setSaveState('error')
-      toast(errorMessage(error), 'error')
-      await reload()
-      return null
-    } finally {
-      setPendingKeys((current) => {
-        const next = new Set(current)
-        next.delete(key)
-        return next
-      })
+    const mutationKeys = [...new Set(Array.isArray(keys) ? keys : [keys])].sort()
+    for (const key of mutationKeys) {
+      pendingCounts.current.set(key, (pendingCounts.current.get(key) ?? 0) + 1)
     }
+    setPendingKeys((current) => new Set([...current, ...mutationKeys]))
+
+    const execute = async (): Promise<T | null> => {
+      setSaveState('saving')
+      try {
+        let result: T
+        try {
+          result = await operation(false)
+        } catch (error) {
+          const prompt = conflictPrompt(error)
+          if (!prompt || !window.confirm(prompt)) {
+            if (prompt) setSaveState('idle')
+            else throw error
+            return null
+          }
+          result = await operation(true)
+        }
+        onSuccess(result)
+        setSaveState('saved')
+        setLastSavedAt(new Date())
+        return result
+      } catch (error) {
+        setSaveState('error')
+        toast(errorMessage(error), 'error')
+        await reload()
+        return null
+      } finally {
+        for (const key of mutationKeys) {
+          const count = pendingCounts.current.get(key) ?? 0
+          if (count <= 1) pendingCounts.current.delete(key)
+          else pendingCounts.current.set(key, count - 1)
+        }
+        setPendingKeys((current) => {
+          const next = new Set(current)
+          for (const key of mutationKeys) {
+            if (!pendingCounts.current.has(key)) next.delete(key)
+          }
+          return next
+        })
+      }
+    }
+
+    const previous = mutationKeys
+      .map((key) => mutationQueues.current.get(key))
+      .filter((promise): promise is Promise<unknown> => !!promise)
+      .map((promise) => promise.catch(() => undefined))
+    const run = Promise.all(previous).then(execute)
+    let tracked: Promise<T | null>
+    tracked = run.finally(() => {
+      for (const key of mutationKeys) {
+        if (mutationQueues.current.get(key) === tracked) mutationQueues.current.delete(key)
+      }
+    })
+    for (const key of mutationKeys) mutationQueues.current.set(key, tracked)
+    return tracked
   }, [reload, toast])
 
   const createDraft = useCallback((payload: ShiftPayload) => mutate(
-    'new-shift',
+    ['new-shift'],
     (force) => createShift(payload, force),
     (result) => {
       setShifts((current) => [...current, result].sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at)))
@@ -114,7 +144,7 @@ export function useScheduleEditor(weekStart: string) {
   ), [mutate])
 
   const updateShiftDraft = useCallback((shift: Shift, payload: Partial<ShiftPayload>) => mutate(
-    `shift:${shift.id}`,
+    [`shift:${shift.id}`],
     (force) => updateShift(shift.id, payload, force),
     patchShift,
   ), [mutate, patchShift])
@@ -130,27 +160,27 @@ export function useScheduleEditor(weekStart: string) {
   ), [updateShiftDraft])
 
   const assignToShift = useCallback((shift: Shift, employeeId: string) => mutate(
-    `shift:${shift.id}`,
+    [`shift:${shift.id}`],
     (force) => assignEmployee(shift.id, employeeId, force),
     patchShift,
   ), [mutate, patchShift])
 
   const moveEmployee = useCallback((employeeId: string, fromShiftId: string, toShiftId: string) => mutate(
-    `move:${fromShiftId}:${toShiftId}:${employeeId}`,
+    [`shift:${fromShiftId}`, `shift:${toShiftId}`],
     (force) => moveAssignment({ employee_id: employeeId, from_shift_id: fromShiftId, to_shift_id: toShiftId }, force),
     patchMove,
   ), [mutate, patchMove])
 
   const unassignFromShift = useCallback((shift: Shift, employeeId: string) => mutate(
-    `shift:${shift.id}`,
+    [`shift:${shift.id}`],
     (force) => unassignEmployee(shift.id, employeeId, force),
     patchShift,
   ), [mutate, patchShift])
 
   const removeShift = useCallback(async (shift: Shift) => {
     const result = await mutate(
-      `shift:${shift.id}`,
-    (force) => deleteShift(shift.id, force),
+      [`shift:${shift.id}`],
+      (force) => deleteShift(shift.id, force),
       () => {
         setShifts((current) => current.filter((item) => item.id !== shift.id))
         setSummary((current) => current ? {

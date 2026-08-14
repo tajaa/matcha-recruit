@@ -127,7 +127,7 @@ export default function ScheduleEditor() {
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragCancel={() => setActiveDrag(null)} onDragEnd={handleDragEnd}>
-      <div className="flex min-h-full min-w-0 flex-col bg-zinc-950 text-zinc-100">
+      <div className="flex h-full min-h-0 min-w-0 flex-col bg-zinc-950 text-zinc-100">
         <ScheduleEditorToolbar
           weekStart={weekStart}
           summary={editor.summary}

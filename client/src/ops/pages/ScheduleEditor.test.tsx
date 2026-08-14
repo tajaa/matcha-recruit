@@ -56,4 +56,17 @@ describe('ScheduleEditor', () => {
     expect(screen.getAllByText(/8\/9|8\/10|8\/11|8\/12|8\/13|8\/14|8\/15/).length).toBeGreaterThanOrEqual(7)
     expect(screen.getByText('Opener')).toBeInTheDocument()
   })
+
+  it('keeps roster scrolling independent from the schedule grid', () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    const roster = screen.getByText('Roster').closest('aside')
+    const employeeList = screen.getByText('Aisha Rivera').closest('button')?.parentElement
+
+    expect(roster).toHaveClass('lg:h-full')
+    expect(employeeList).toHaveClass('overflow-y-auto')
+  })
 })

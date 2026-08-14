@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BarChart2, AlertTriangle, Scale, ShieldCheck, BadgeCheck } from 'lucide-react'
+import { AlertTriangle, Scale, ShieldCheck, BadgeCheck } from 'lucide-react'
 import { Card, MetricStrip, PillTabs, Badge, HelpHint } from '../../../components/ui'
 import { RegisterSpinner } from '../../../components/register/registerKit'
 import { useAsync } from '../../../hooks/useAsync'
@@ -51,7 +51,7 @@ export default function ScheduleIntelligence() {
   if (overview && overview.available === false) {
     return (
       <Card className="p-6">
-        <h1 className="text-lg font-semibold text-zinc-100 mb-2">Schedule Intelligence</h1>
+        <h2 className="text-lg font-semibold text-zinc-100 mb-2">Schedule Intelligence</h2>
         <p className="text-sm text-zinc-400 max-w-xl">
           Turn on Employee Scheduling to unlock these insights — Schedule Intelligence reads its
           shift and staffing data.
@@ -65,10 +65,7 @@ export default function ScheduleIntelligence() {
   return (
     <div className="min-w-0 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-          <BarChart2 className="h-5 w-5 text-zinc-400" /> Schedule Intelligence
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1 max-w-2xl">
+        <p className="text-sm text-zinc-500 max-w-2xl">
           Insights no other scheduling tool can show — because they cross your schedule with your
           own incident, discipline, credential, and training records.
         </p>

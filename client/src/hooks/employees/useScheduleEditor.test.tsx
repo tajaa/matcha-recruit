@@ -62,4 +62,29 @@ describe('useScheduleEditor', () => {
     expect(moveAssignmentMock).toHaveBeenCalledWith({ employee_id: 'e1', from_shift_id: 's1', to_shift_id: 's2' }, false)
     await waitFor(() => expect(result.current.shifts.find((item) => item.id === 's2')?.assignments[0]?.employee_id).toBe('e1'))
   })
+
+  it('serializes mutations that affect the same shift', async () => {
+    let releaseFirst: (value: ReturnType<typeof shift>) => void = () => undefined
+    const firstResponse = new Promise<ReturnType<typeof shift>>((resolve) => {
+      releaseFirst = resolve
+    })
+    updateShiftMock.mockImplementationOnce(() => firstResponse)
+
+    const { result } = renderHook(() => useScheduleEditor('2026-08-09'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    let firstMutation: Promise<unknown> = Promise.resolve()
+    let secondMutation: Promise<unknown> = Promise.resolve()
+    act(() => {
+      firstMutation = result.current.updateShiftDraft(result.current.shifts[0], { role: 'First' })
+      secondMutation = result.current.updateShiftDraft(result.current.shifts[0], { role: 'Second' })
+    })
+    await waitFor(() => expect(updateShiftMock).toHaveBeenCalledTimes(1))
+
+    releaseFirst(shift('s1', ['e1']))
+    await act(async () => { await Promise.all([firstMutation, secondMutation]) })
+
+    expect(updateShiftMock).toHaveBeenCalledTimes(2)
+    expect(updateShiftMock.mock.calls[1][1]).toEqual({ role: 'Second' })
+  })
 })

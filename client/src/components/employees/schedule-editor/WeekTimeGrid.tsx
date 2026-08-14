@@ -32,7 +32,7 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
   const gridTemplateColumns = `48px ${layouts.map((layout) => `${layout.width}px`).join(' ')}`
   const gridMinWidth = 48 + layouts.reduce((total, layout) => total + layout.width, 0)
   return (
-    <div className="min-w-0 flex-1 overflow-x-auto bg-zinc-950 p-3 md:p-5">
+    <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-zinc-950 p-3 md:p-5">
       <div style={{ minWidth: gridMinWidth }}>
         <div className="grid border-b border-zinc-800" style={{ gridTemplateColumns }}>
           <div />
