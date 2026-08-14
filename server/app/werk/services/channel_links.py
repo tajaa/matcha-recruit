@@ -42,7 +42,9 @@ async def channel_app_path(conn, channel_id: UUID, *, suffix: str | None = None)
     if row["channel_scope"] == "project_discussion" and row["project_id"]:
         return _append_suffix(f"/work/projects/{row['project_id']}?tab=chat", suffix)
     if row["channel_scope"] == "community":
-        return _append_suffix(f"/werk/channels/{channel_id}", suffix)
+        # /work is the identity-neutral business entry point. Personal users
+        # are bounced to /werk by WorkLayout, while business users stay here.
+        return _append_suffix(f"/work/channels/{channel_id}", suffix)
     return _append_suffix(f"/ops/channels/{channel_id}", suffix)
 
 

@@ -148,7 +148,6 @@ async def confirm_event_draft(
     draft_id: UUID,
     actor_user_id: UUID,
     access: OpsAccess,
-    reason: str,
 ) -> DraftDecisionResult:
     """Confirm a draft and create its final event atomically.
 

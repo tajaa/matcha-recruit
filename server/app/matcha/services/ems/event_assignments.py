@@ -20,6 +20,10 @@ from app.matcha.services.ops.permissions import (
 )
 
 
+def assignment_channel_scope_allowed(channel_scope: str | None) -> bool:
+    return (channel_scope or "operations") == "operations"
+
+
 class EventAssignmentError(Exception):
     """Base class for assignment domain errors."""
 
@@ -127,7 +131,8 @@ async def create_event_assignment(
 
     channel = await conn.fetchrow(
         """
-        SELECT id, company_id, name, is_archived
+        SELECT id, company_id, name, is_archived,
+               COALESCE(channel_scope, 'operations') AS channel_scope
           FROM channels
          WHERE id = $1
         """,
@@ -137,6 +142,8 @@ async def create_event_assignment(
         raise EventAssignmentForbidden("Assignment channel must belong to the event company")
     if channel["is_archived"]:
         raise EventAssignmentConflict("Archived channels cannot receive event assignments")
+    if not assignment_channel_scope_allowed(channel["channel_scope"]):
+        raise EventAssignmentForbidden("Assignments must target an Operations channel")
 
     actor_member = await conn.fetchval(
         """

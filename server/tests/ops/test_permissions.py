@@ -8,6 +8,7 @@ from app.matcha.services.ops.permissions import (
     OpsCapability,
     OpsPermissionDenied,
     assert_ops_capability,
+    can_revoke_ops_permission,
 )
 
 
@@ -41,3 +42,21 @@ def test_ops_permission_denied_is_independent():
 
 def test_ops_admin_can_manage_permissions():
     assert _access("admin").allows(OpsCapability.PERMISSIONS_MANAGE)
+
+
+def test_non_platform_admin_cannot_revoke_own_permission():
+    user_id = uuid4()
+    assert not can_revoke_ops_permission(
+        actor_user_id=user_id,
+        target_user_id=user_id,
+        source="explicit",
+    )
+
+
+def test_platform_admin_can_revoke_own_permission():
+    user_id = uuid4()
+    assert can_revoke_ops_permission(
+        actor_user_id=user_id,
+        target_user_id=user_id,
+        source="platform_admin",
+    )

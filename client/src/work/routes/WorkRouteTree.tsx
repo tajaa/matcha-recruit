@@ -1,10 +1,10 @@
-import { Routes, Route, Outlet, Navigate } from 'react-router-dom'
+import { Routes, Route, Outlet } from 'react-router-dom'
 import WorkLayout from '../layout/WorkLayout'
 import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
 import ProjectView from '../pages/ProjectView'
 import ChannelView from '../pages/ChannelView'
-import LegacyChannelRedirect, { LegacyInviteRedirect, LegacyOpsRedirect } from '../pages/LegacySurfaceRedirect'
+import LegacyChannelRedirect, { LegacyOpsRedirect } from '../pages/LegacySurfaceRedirect'
 import WorkEmail from '../pages/WorkEmail'
 import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
@@ -44,9 +44,9 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="email" element={<WorkEmail />} />
           <Route path="billing" element={<ChannelBilling />} />
           <Route path="connections" element={<ConnectionsPanel />} />
-          <Route path="channels" element={businessWork ? <Navigate to="/ops/channels" replace /> : <ChannelBrowse />} />
-          <Route path="channels/join/:code" element={businessWork ? <LegacyInviteRedirect /> : <ChannelJoinByInvite />} />
-          <Route path="channels/:channelId" element={businessWork ? <LegacyChannelRedirect /> : <ChannelView />} />
+          <Route path="channels" element={<ChannelBrowse />} />
+          <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
+          <Route path="channels/:channelId" element={businessWork ? <LegacyChannelRedirect communityElement={<ChannelView />} /> : <ChannelView />} />
           <Route
             element={
               businessWork ? <LegacyOpsRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="ems" label="Ops — Events">

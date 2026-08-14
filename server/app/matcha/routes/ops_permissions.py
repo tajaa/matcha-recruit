@@ -22,6 +22,7 @@ from app.matcha.services.ops.permissions import (
     OpsCapability,
     OpsPermissionGrant,
     assert_ops_capability,
+    can_revoke_ops_permission,
     list_ops_permissions,
     resolve_ops_access,
     revoke_ops_permission,
@@ -104,7 +105,11 @@ async def upsert_permission(
         company_id, access = await _manager_access(conn, current_user)
         # A manager may not demote or promote themselves into a dead end; the
         # owner/platform-admin source is immutable anyway (resolved, not stored).
-        if user_id == current_user.id and access.source != "platform_admin":
+        if not can_revoke_ops_permission(
+            actor_user_id=current_user.id,
+            target_user_id=user_id,
+            source=access.source,
+        ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot change your own permission level")
         grant = await upsert_ops_permission(
             conn,
@@ -122,7 +127,12 @@ async def delete_permission(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     async with get_connection() as conn:
-        company_id, _access = await _manager_access(conn, current_user)
+        company_id, access = await _manager_access(conn, current_user)
+        if user_id == current_user.id and access.source != "platform_admin":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot revoke your own permission level",
+            )
         await revoke_ops_permission(
             conn,
             company_id=company_id,

@@ -189,6 +189,7 @@ async def _notify_call_started(
     """
     try:
         from ...matcha.services import notification_service as notif_svc
+        from ..services.channel_links import channel_app_path
 
         async with get_connection() as conn:
             ch = await conn.fetchrow(
@@ -214,7 +215,7 @@ async def _notify_call_started(
                     type="call_started",
                     title=f"{owner_name} started an audio call in #{channel_name}",
                     body=f"Click to join ({policy}, up to {CALL_MAX_PARTICIPANTS} people).",
-                    link=f"/work?channel={channel_id}",
+                    link=await channel_app_path(conn, channel_id),
                     metadata={
                         "channel_id": str(channel_id),
                         "call_id": str(call_id),

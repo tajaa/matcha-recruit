@@ -2,17 +2,21 @@
 
 from uuid import uuid4
 
-from app.matcha.services.ems.event_assignments import may_complete_event_assignment
-from app.matcha.services.matcha_work.work_permissions import access_from_capabilities, WorkCapability
+from app.matcha.services.ems.event_assignments import (
+    assignment_channel_scope_allowed,
+    may_complete_event_assignment,
+)
+from app.matcha.services.ops.permissions import OpsCapability, OpsAccess
 
 
 def test_assignee_can_complete_without_sensitive_event_access():
     assignee = uuid4()
-    access = access_from_capabilities(
+    access = OpsAccess(
         company_id=uuid4(),
         user_id=assignee,
         level="member",
-        capabilities={WorkCapability.EVENT_CONFIRM_OWN},
+        capabilities=frozenset({OpsCapability.EVENT_CONFIRM_OWN}),
+        source="explicit",
     )
     assert may_complete_event_assignment(
         assignee_user_id=assignee,
@@ -23,11 +27,12 @@ def test_assignee_can_complete_without_sensitive_event_access():
 
 def test_event_manager_can_complete_for_assignee():
     manager = uuid4()
-    access = access_from_capabilities(
+    access = OpsAccess(
         company_id=uuid4(),
         user_id=manager,
         level="reviewer",
-        capabilities={WorkCapability.EVENT_ASSIGN},
+        capabilities=frozenset({OpsCapability.EVENT_ASSIGN}),
+        source="explicit",
     )
     assert may_complete_event_assignment(
         assignee_user_id=uuid4(),
@@ -37,14 +42,22 @@ def test_event_manager_can_complete_for_assignee():
 
 
 def test_unrelated_member_cannot_complete_assignment():
-    access = access_from_capabilities(
+    access = OpsAccess(
         company_id=uuid4(),
         user_id=uuid4(),
         level="member",
-        capabilities={WorkCapability.EVENT_CONFIRM_OWN},
+        capabilities=frozenset({OpsCapability.EVENT_CONFIRM_OWN}),
+        source="explicit",
     )
     assert not may_complete_event_assignment(
         assignee_user_id=uuid4(),
         actor_user_id=access.user_id,
         access=access,
     )
+
+
+def test_assignments_only_target_operations_channels():
+    assert assignment_channel_scope_allowed(None)
+    assert assignment_channel_scope_allowed("operations")
+    assert not assignment_channel_scope_allowed("project_discussion")
+    assert not assignment_channel_scope_allowed("community")

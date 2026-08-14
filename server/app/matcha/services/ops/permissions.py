@@ -59,6 +59,11 @@ class OpsPermissionDenied(PermissionError):
         super().__init__(f"Matcha Ops capability required: {capability.value}")
 
 
+def can_revoke_ops_permission(*, actor_user_id: UUID, target_user_id: UUID, source: str) -> bool:
+    """Prevent non-platform managers from revoking their own grant."""
+    return actor_user_id != target_user_id or source == "platform_admin"
+
+
 @dataclass(frozen=True)
 class OpsAccess:
     company_id: UUID

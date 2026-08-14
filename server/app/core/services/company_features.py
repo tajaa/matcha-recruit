@@ -41,6 +41,18 @@ def _stored_features(raw: object) -> dict[str, object]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _introduced_dependency_violations(
+    previous: dict[str, tuple[str, ...]],
+    current: dict[str, tuple[str, ...]],
+) -> dict[str, tuple[str, ...]]:
+    """Return violations whose missing-prerequisite set has grown."""
+    return {
+        feature: missing
+        for feature, missing in current.items()
+        if set(missing) - set(previous.get(feature, ()))
+    }
+
+
 async def update_company_features(
     conn,
     *,
@@ -109,11 +121,7 @@ async def update_company_features(
         new_effective = merge_company_features(stored, row["signup_source"])
         old_violations = feature_dependency_violations(old_effective)
         new_violations = feature_dependency_violations(new_effective)
-        introduced = {
-            feature: missing
-            for feature, missing in new_violations.items()
-            if feature not in old_violations
-        }
+        introduced = _introduced_dependency_violations(old_violations, new_violations)
         if introduced:
             feature, missing = next(iter(introduced.items()))
             raise ValueError(

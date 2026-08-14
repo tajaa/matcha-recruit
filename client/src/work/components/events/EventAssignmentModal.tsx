@@ -23,7 +23,7 @@ export default function EventAssignmentModal({ event, onClose, onCreated }: Even
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    listChannels()
+    listChannels({ scope: 'operations' })
       .then((rows) => setChannels(rows.filter((channel) => channel.is_member)))
       .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : 'Could not load channels.'))
       .finally(() => setLoading(false))

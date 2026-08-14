@@ -191,7 +191,8 @@ async def create_tip_checkout(
     _ensure_stripe()
     settings = get_settings()
     from .channel_links import resolve_channel_app_path
-    channel_path = await resolve_channel_app_path(channel_id)
+    channel_path = await resolve_channel_app_path(channel_id, suffix="?tipped=1")
+    cancel_path = await resolve_channel_app_path(channel_id)
 
     metadata = {
         "type": "channel_tip",
@@ -206,8 +207,8 @@ async def create_tip_checkout(
     def _create():
         session = stripe.checkout.Session.create(
             mode="payment",
-            success_url=f"{settings.app_base_url}{channel_path}?tipped=1",
-            cancel_url=f"{settings.app_base_url}{channel_path}",
+            success_url=f"{settings.app_base_url}{channel_path}",
+            cancel_url=f"{settings.app_base_url}{cancel_path}",
             payment_method_types=["card"],
             metadata=metadata,
             line_items=[{
