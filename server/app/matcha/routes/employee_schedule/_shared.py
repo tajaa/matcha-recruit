@@ -155,7 +155,8 @@ async def fetch_shifts(
         """
         SELECT entity_id, details, created_at
         FROM schedule_audit_log
-        WHERE company_id = $1 AND action = 'assignment.availability_override'
+        WHERE company_id = $1 AND entity_type = 'assignment'
+          AND action = 'assignment.availability_override'
           AND entity_id = ANY($2::uuid[])
         ORDER BY created_at DESC
         """,

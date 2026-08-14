@@ -31,6 +31,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const base = useWorkBase()
   const brand = useWorkBrand()
   const surface = useWorkSurface()
+  const showChannels = surface !== 'matcha-work'
   const { me, isPersonal, mwBetaLite, hasFeature } = useMe()
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
@@ -46,7 +47,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     pendingConnections,
     plusActive,
     loggedEventsCount,
-  } = useSidebarData(isPersonal, base, location.pathname, showEvents)
+  } = useSidebarData(isPersonal, base, location.pathname, showEvents, showChannels)
 
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
@@ -201,7 +202,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         openChats={() => sections.open('chats')}
         showEvents={showEvents}
         showInventory={showInventory}
-        showChannels={surface !== 'matcha-work'}
+        showChannels={showChannels}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -328,20 +329,21 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           />
 
           {/* Channels */}
-         <ChannelsSection
-           channels={visibleChannels}
-            channelsOpen={sections.channels}
-            onToggle={() => sections.toggle('channels')}
-            filter={filter}
-            totalChannelUnread={totalChannelUnread}
-            canCreate={canCreate}
-            opsEnabled={surface === 'matcha-work' && hasFeature('matcha_ops')}
-            base={base}
-            navigate={navigate}
-            isActive={isActive}
-            setShowCreateChannel={setShowCreateChannel}
-            rename={rename}
-          />
+          {showChannels && (
+            <ChannelsSection
+              channels={visibleChannels}
+              channelsOpen={sections.channels}
+              onToggle={() => sections.toggle('channels')}
+              filter={filter}
+              totalChannelUnread={totalChannelUnread}
+              canCreate={canCreate}
+              base={base}
+              navigate={navigate}
+              isActive={isActive}
+              setShowCreateChannel={setShowCreateChannel}
+              rename={rename}
+            />
+          )}
 
           {/* Projects */}
           {mwBetaLite && (

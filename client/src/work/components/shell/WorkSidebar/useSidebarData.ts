@@ -11,7 +11,13 @@ import { useLoggedEventsCount } from '../../../hooks/useLoggedEventsCount'
  *  subscription status. `emsEnabled` gates the events fetch — false for any
  *  caller without both the `ems` flag and events-review permission, so a
  *  regular employee never fires a request the backend would just 403. */
-export function useSidebarData(isPersonal: boolean, base: string, pathname: string, emsEnabled = false) {
+export function useSidebarData(
+  isPersonal: boolean,
+  base: string,
+  pathname: string,
+  emsEnabled: boolean,
+  showChannels: boolean,
+) {
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [projects, setProjects] = useState<MWProject[]>([])
   const [threads, setThreads] = useState<MWThread[]>([])
@@ -19,8 +25,6 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
   const [pendingConnections, setPendingConnections] = useState(0)
   const [plusActive, setPlusActive] = useState<boolean | null>(null)
   const loggedEventsCount = useLoggedEventsCount(emsEnabled)
-  const showChannels = base !== '/work'
-
   useEffect(() => {
     if (showChannels) listChannels().then(setChannels).catch(() => {})
     listProjects().then(setProjects).catch(() => {})

@@ -9,7 +9,6 @@ import {
 } from '../../../api/employees/scheduleIntelligence'
 import type {
   IncidentCorrelation, FairWorkweek, PretextShield, QualifiedCoverage,
-  AvailabilityOverrides,
 } from '../../../types/scheduleIntelligence'
 
 type Tab = 'incidents' | 'fair_workweek' | 'pretext' | 'coverage' | 'availability'
@@ -122,7 +121,7 @@ function AvailabilityOverridesPanel() {
   const { data, loading } = useAsync(() => fetchAvailabilityOverrides(90), [])
   if (loading) return <RegisterSpinner />
   if (!data || data.available === false) return null
-  const d = data as AvailabilityOverrides
+  const d = data
   return (
     <Card className="min-w-0 p-5 space-y-4">
       <h3 className="text-sm font-medium text-zinc-200">Assignments outside logged availability</h3>

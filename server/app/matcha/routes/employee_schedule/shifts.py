@@ -377,6 +377,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
         fw_event = "retime" if retimed else None
         fw_shift_published = existing["published_at"] is not None
         forced: dict[str, list[dict]] = {}
+        availability_overrides: dict[str, list[dict]] = {}
         if compliance_relevant and new_status != "cancelled":
             new_break = patch.get("break_minutes", existing["break_minutes"])
             new_location = patch.get("location_id", existing["location_id"])
@@ -398,7 +399,6 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             if assignees and retimed:
                 avail_map = await fetch_availability(
                     conn, company_id, [row["employee_id"] for row in assignees])
-            availability_overrides: dict[str, list[dict]] = {}
             for row in assignees:
                 emp = row["employee_id"]
                 avail = availability_violations(
