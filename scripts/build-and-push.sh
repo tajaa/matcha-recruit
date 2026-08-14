@@ -473,8 +473,10 @@ build_image() {
     if [ "$PUSH_TO_ECR" = true ]; then
         # Stream layers straight to ECR. `--load` would first import the full
         # backend image (currently ~4GB) into Docker Desktop, after which
-        # docker push transmits the same image to ECR.
-        build_args+=(--push)
+        # docker push transmits the same image to ECR. Disable BuildKit's
+        # provenance/SBOM attestations: the EC2 Docker daemon cannot pull
+        # their `application/vnd.in-toto+json` OCI descriptors from ECR.
+        build_args+=(--push --provenance=false --sbom=false)
         log_info "Direct registry push: ${image_uri}:${git_sha} (skipping local image load)"
     else
         build_args+=(--load)
