@@ -11,13 +11,16 @@
 		00179CD2F4A6C201A2D728D5 /* IntakeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B1A9D21D8778D2CB64E83ED /* IntakeModels.swift */; };
 		0503F142C7850643261E632C /* FeedbackListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADB255B08E8CDAEDA5A3B70 /* FeedbackListViewModel.swift */; };
 		06FDF491FFDF7ECD2A3EF20F /* BrandListingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28366F8AB2B42570CDF5D57 /* BrandListingsView.swift */; };
+		07039C96E160136D628299E6 /* FlyerDesign+Editor.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED387AEF2DA7A5E47747C81C /* FlyerDesign+Editor.swift */; };
 		073CE4E2F408CA6ECAC14B13 /* BoardManageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C908F67BEF84C21B72B389 /* BoardManageView.swift */; };
 		080315F693E1CB805EDA0A01 /* BoardModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6D1CBDCC03BFCFAD9FDC5B /* BoardModels.swift */; };
 		081B2C25EC58A21EB8E65365 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 1B33634240300E3AF740158E /* GoogleSignInSwift */; };
 		08F052F08F3D53CE662EF605 /* PointsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F919589717C5A4166B81F2 /* PointsStore.swift */; };
+		0D83D17788E0E7D85703DF9B /* FlyerDesignerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 339C7200735D5202A1AAA8BC /* FlyerDesignerViewModel.swift */; };
 		0F669322DE46DEAF8EAFA54D /* CampaignFormSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23FC388A7080337EAE1FC2D3 /* CampaignFormSheet.swift */; };
 		1062323E17F8D1EFAACE037E /* AuthErrorMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00718BF85F4562F6013E014F /* AuthErrorMappingTests.swift */; };
 		10FF78DFF8B06C487F83C793 /* GamificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ED611965D6EDD1C547821AE /* GamificationService.swift */; };
+		1162CBC286F1C1D6E6D7C07F /* FlyerDocumentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 940BC74017D026743E70189E /* FlyerDocumentStoreTests.swift */; };
 		127768E81AC4D76733DE42BA /* LikesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48333E67EBFD6B0195800D80 /* LikesService.swift */; };
 		12DDC696CA6FD8B3D80DABA8 /* PlaceModelDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B2DDEC179146C0E41857353 /* PlaceModelDecodeTests.swift */; };
 		12F274B2C9298F4089416AE2 /* LedgerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3122BC2EAFEF5370945130F8 /* LedgerViewModel.swift */; };
@@ -34,32 +37,42 @@
 		1D3E72E40253FA6108A276CB /* BrandMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0735099047713E748887B6D7 /* BrandMoreView.swift */; };
 		1E898DB007FA66524AAE9EA7 /* BillingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6DED366EC3A21D6021D6A45 /* BillingViewModel.swift */; };
 		20DCFB1E446F8C3E1AF24469 /* BrandTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241643204D022959EBDE0B96 /* BrandTabView.swift */; };
+		21971D9F8C5B0EB5BBD10457 /* FlyerExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */; };
 		232AF41EF442D7724C347033 /* FeedbackFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CF6E718AC0FF710987593E /* FeedbackFilterBar.swift */; };
+		247B5F88FD45913E6E0AB53C /* FlyerAssetCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */; };
 		252F908591A0CDC05FB5FA19 /* TellUsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623E5CFE228337E6B9F79DCA /* TellUsApp.swift */; };
+		25D7A1BA826B0B64F46794C6 /* FlyerAiModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16EBB2347EA8AAB845B6C09 /* FlyerAiModelTests.swift */; };
 		28195C1F2EDD525F7BB8D407 /* BoardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B5499C45CE7127DE10E87A /* BoardService.swift */; };
 		29E89AB949709190DA076ED7 /* RewardsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A1D2E2B31051AE546A75D3E /* RewardsService.swift */; };
 		29E8AE425126C5675D7B6738 /* ResetTokenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F8DCC486BE89564146F89D /* ResetTokenTests.swift */; };
 		2AA387FE1BF510741F27CA2A /* FlyerDesignDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122629DF1DFB7ACC4C4862AB /* FlyerDesignDecodeTests.swift */; };
+		2C5D53B25FBEDA29CC3BAC7E /* paper-ticket.json in Resources */ = {isa = PBXBuildFile; fileRef = B44F551DECE185F68C8B3F61 /* paper-ticket.json */; };
 		30168536137756866874083C /* MarketplaceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C5F7D90C298398647304C01 /* MarketplaceViewModel.swift */; };
 		31252015DA63199827CCB110 /* MyReviewsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4267E8284FBC9C8736C943D4 /* MyReviewsView.swift */; };
 		31ED67CB822478D8EBC028C3 /* AsyncMediaImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 498BC6CA7A16D1A186018EC3 /* AsyncMediaImage.swift */; };
 		325DBD6C4F0E0E17CAFDEFDC /* DmThreadsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 492D2961C4F6207F4CA32D14 /* DmThreadsViewModel.swift */; };
 		348D8D7EE36202AF09F88D93 /* StoresView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1311A7BEB1178BDBABF3CD3C /* StoresView.swift */; };
+		35C554C896055AC5BD760C55 /* FlyerAssistantPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A8C039BBE225CC32CF5C1C9 /* FlyerAssistantPanel.swift */; };
 		361CEF0CE30745AEC70ABB2C /* PlaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444F4E97AF52DD7B4AD63B30 /* PlaceModels.swift */; };
 		368F0643A3618D8D45C1ABE0 /* EnumFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4929B2B7D47AA89B47FE8C73 /* EnumFallbackTests.swift */; };
 		3706AECF40EADD4D29FC2BE5 /* CommsModelDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A10EEAADD1526EED294CAAB /* CommsModelDecodeTests.swift */; };
+		380BD927B94D329E1065758B /* bold-offer.json in Resources */ = {isa = PBXBuildFile; fileRef = F9C879DC311D048939ADA67F /* bold-offer.json */; };
 		3874D8DB4FBDC87B759ED5B6 /* ReviewModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5FB5884C131FC1C2DA7EB3 /* ReviewModels.swift */; };
 		3BE1B799B73C9E49FCEFC2D5 /* DmThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B95F376EAF82528BCF97E8B1 /* DmThreadView.swift */; };
 		3CBD4E85B031FA445F4E5883 /* ConsumerSettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 167A76D9756F79AC4623B1BB /* ConsumerSettingsViewModel.swift */; };
 		3D90493CD9A9F0B8ABC40E34 /* ResetPasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0380EB70DA824F7877DEA8E7 /* ResetPasswordView.swift */; };
 		3E2399ECBB2BC1F193A0CD34 /* RedemptionsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8267CDD10EE596CB506C02A3 /* RedemptionsViewModel.swift */; };
 		3FF06B8B5A212DF0E49BAFB7 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76505E7AA1162E834E83E7A4 /* Theme.swift */; };
+		408B499177A06708C36B7738 /* FlyerCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFA432473BB3105663C01E9 /* FlyerCanvasView.swift */; };
 		42D6C59A2F43C08009A62CEC /* IntakeLoaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7043EEB1E2B785717EA5264 /* IntakeLoaderView.swift */; };
 		435E1AA1FE8B53BF5DB8ED68 /* LinkQRSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C501A7A7280D1BA0996F4A6 /* LinkQRSheet.swift */; };
 		44C3C0E9BEDADF489BF9C003 /* MediaByteLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE3337A22A71AAAB0228580D /* MediaByteLoader.swift */; };
 		44CF80AB0A951B4C1CC0E0C9 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C459AC73786CFF77D443C /* AuthService.swift */; };
 		44EF0F19BA0BC3ABDCE9E624 /* FeedbackComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CAFE1BDB35549BEDB0EF1B /* FeedbackComposerSheet.swift */; };
+		4647E39B68D8F62791F15A42 /* index.json in Resources */ = {isa = PBXBuildFile; fileRef = CAF78A5F92F53542D6061D9C /* index.json */; };
+		468DAA84EBCD49AB4D0B9B7A /* FlyerAiService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A88160914CC8FC194D8A6E1D /* FlyerAiService.swift */; };
 		472263E8DDCB565DAC583872 /* LikeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEA7A330126DD5661E60C196 /* LikeModels.swift */; };
+		4879A3DE5DF9A94CC064FDAF /* FlyerDesignerAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0538B41A93B05A20E15718A8 /* FlyerDesignerAssets.swift */; };
 		48E780489323B8855DFDFDE8 /* CampaignsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED3A2BF05479A879AAFB47E3 /* CampaignsViewModel.swift */; };
 		49174FE6BB8FB4F128946E1E /* PromptsEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A7E0808259EA27A292392EE /* PromptsEditorView.swift */; };
 		495A149B7731AE619E976F9B /* CardWalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1CAF2D56D1FD4447E2A19BD /* CardWalletView.swift */; };
@@ -88,9 +101,11 @@
 		6067D69CAA33E79E08CE0277 /* MyReviewsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A68E1AF11F6315B7788862 /* MyReviewsViewModel.swift */; };
 		6127251E1795ABA8356F1849 /* MyReviewDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ADA0118F22FDB45F6F0DBB6 /* MyReviewDetailView.swift */; };
 		6876F7D0D35829C651C6276A /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A0AF484D719E9A5A768B33 /* LoginView.swift */; };
+		69D2645A62015505CAFC6D82 /* FlyerRenderAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E1B1A7B7F6DCA640EC6FA0A /* FlyerRenderAssets.swift */; };
 		6B810CAC73A3A548B4ED2106 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = DFB037C699D050E52D93B522 /* GoogleSignIn */; };
 		6D7C7343DE331B59E152DF97 /* FlyerDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B173F5A337E4402646C93081 /* FlyerDesign.swift */; };
 		6E641333A36CCCA3BB190A84 /* CommsComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B12CBD23DCDD3D049765C2 /* CommsComposerSheet.swift */; };
+		710FAEE59FBACC2D3DB479BA /* CampaignDesignerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35D6E29B729AB8C1AA05C60 /* CampaignDesignerView.swift */; };
 		7149377CE11CD3B873C52C60 /* NotificationsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7579BE36B7660D6C65F72532 /* NotificationsViewModel.swift */; };
 		71B01DAEB08CDD50666170B0 /* BoardFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB680B484B3D224C4107A83 /* BoardFeedView.swift */; };
 		738CB8DF736A105F970F80F5 /* ConsumerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E34D0FA687C97E2048DC01 /* ConsumerSettingsView.swift */; };
@@ -98,9 +113,13 @@
 		758DB2F05F019D57C9425AF6 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB1C2BC10BBA1BE9934EF176 /* ErrorBanner.swift */; };
 		779D72C86ADCA52B4CB7BE16 /* BillingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63F6737F449A9E6BED4C6B8 /* BillingService.swift */; };
 		77BB793CBC899B52623DE1E2 /* BillingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 812D5CED1DF16EDC69BD364B /* BillingView.swift */; };
+		79E97DCDE74D4F0D3725BD7E /* FlyerAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5078EC3E1CA6C851A5E10CB8 /* FlyerAssetCatalog.swift */; };
 		7AC7AD0CF59B8A7379078D22 /* BillingWallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151125289349005300989275 /* BillingWallView.swift */; };
+		7B09EC2A92303F0F3BEF1E3E /* FlyerExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */; };
 		7B8195F7A7A1A118ECCFCB83 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5D559252032C31DB1132DF /* AuthModels.swift */; };
+		7D67C88E00D66440A3054C8E /* FlyerDesignEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC8E2E108DB9C9159CA256D /* FlyerDesignEditorTests.swift */; };
 		7F3E5642FD93BE8E5B7FB97B /* MarketplaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8277978AD490D97B6612C672 /* MarketplaceView.swift */; };
+		7F944A0C4A18EAD62EA2CEB7 /* FlyerDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8E1992409FE22D8A01E73B /* FlyerDocumentStore.swift */; };
 		859C8725001F35CC246BA470 /* ListingRedemptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D31FC130BB26AA2278C864AC /* ListingRedemptionsView.swift */; };
 		871430051919E79F0A631D6D /* MediaUploadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D50A5881FAAA48C55CFB053 /* MediaUploadService.swift */; };
 		8E73D58D4225D34E0E01F896 /* BrandAccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1AA7536DB2EA1F9EFC9523 /* BrandAccountView.swift */; };
@@ -110,6 +129,7 @@
 		92E3BAF2BC75E540B6785C34 /* LinkFormSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF4B6C7D6FE42F31F6F24B83 /* LinkFormSheet.swift */; };
 		934A6C97DCFB7085322ECE1E /* RewardsHomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0645227825199FB89D56FC68 /* RewardsHomeViewModel.swift */; };
 		95BBF4F794CFE96BBB97AD0C /* Promo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 293CC8DAE157D1ED94F44F7E /* Promo.swift */; };
+		9646BBBAF7729CCFE6689C6B /* social-drop.json in Resources */ = {isa = PBXBuildFile; fileRef = 82EBCB85B561BF172B3FB9C1 /* social-drop.json */; };
 		982ED00055A4D9FFA2CD43DA /* DmModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D48E1E2F311614994F0B703 /* DmModels.swift */; };
 		991F70A2215BC41D3A6BE726 /* MediaVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F02C950A92539061E2F85CF /* MediaVideoView.swift */; };
 		99A591C70441414C7AFDAFF2 /* MessagesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E904B35F99279EA6917CA6 /* MessagesListView.swift */; };
@@ -141,6 +161,7 @@
 		BC1E14C784E93577E4E72757 /* BrandScanViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04B82A8325FAC90B486CD51D /* BrandScanViewModel.swift */; };
 		BC2E1488D73864811760B95B /* BrandAdminService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12219571AAD16C7F81CAAE2C /* BrandAdminService.swift */; };
 		BCB6B60A085B0CBCCACDE91E /* RedemptionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 575FDD74DF74FF7E74897F33 /* RedemptionDetailView.swift */; };
+		BD2C6F10B3E8CD276A202EF5 /* FlyerAssistantViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 853A2F425FD873E9FD7760A2 /* FlyerAssistantViewModel.swift */; };
 		BD7BF549837F137B6AB902C5 /* CampaignModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1661D002836CE7A23C3F9C71 /* CampaignModelTests.swift */; };
 		BF18C268B6EB8B22851E5792 /* BoardPostCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A16F7A9097C311494B1030E0 /* BoardPostCard.swift */; };
 		BF357C7B0C2CC3C83BF62A6C /* LeaderboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38694E7D294277B629F5ECAA /* LeaderboardViewModel.swift */; };
@@ -152,6 +173,7 @@
 		CA26B572147010E3330661E6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 470976BC01FBDDC8DDC4FB45 /* Assets.xcassets */; };
 		CAD65F62626846396E974CCB /* BrandListingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6694B2E89D8C438164363A /* BrandListingsViewModel.swift */; };
 		CAF27A94651FD7F525D92B0A /* BoardFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AD4A9AC69ACC20A2550BC0 /* BoardFeedViewModel.swift */; };
+		CD0F14A18D4E9FF220C29A06 /* FlyerCanvasGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FC2E626C7487966CEC2E0C4 /* FlyerCanvasGeometry.swift */; };
 		CD78C79E4632F508A0C67503 /* CommsComposerViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F802C9F8E9921F362238624 /* CommsComposerViewModel.swift */; };
 		D18C5744DED412D2689A2990 /* IntakeSubmissionEncodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4293E9CCB88B052A3A50541 /* IntakeSubmissionEncodingTests.swift */; };
 		D251D92ECFFDE8B339678288 /* BoardPostsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4D8F2CA0DD7AC4DF8C2FF6 /* BoardPostsView.swift */; };
@@ -159,6 +181,7 @@
 		D5D42F2E2B568676E8721062 /* RedemptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7848F41DE15963B027582F4 /* RedemptionsView.swift */; };
 		D870ECC20F008AAB4DBEF5B6 /* IntakeMediaSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB63D94B3E0761DE3FD397F0 /* IntakeMediaSection.swift */; };
 		D877717C6600C85FC506293A /* RewardsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F656F57D6DE0D8442586D0B /* RewardsModels.swift */; };
+		DAA4D134C479BADC8ECF95A4 /* FlyerRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCDC47AB4BACB13EC77EF970 /* FlyerRenderer.swift */; };
 		DC259F8875606C6800E73DB9 /* GoogleSignInService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93673FD387EEBCB83F305FD1 /* GoogleSignInService.swift */; };
 		DD5C0413B3408628B8B9AE48 /* PromoCardsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903108A0540AB799AB37A9D2 /* PromoCardsViewModel.swift */; };
 		DF57A2F12222CB2FDD249038 /* ServiceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 435938425BC684245B959C27 /* ServiceCache.swift */; };
@@ -168,9 +191,12 @@
 		EA80FF57B7593E1F24A0D743 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F906639496ADC42CB4FE64E /* JSONValue.swift */; };
 		EABCD1B1C25355013FA5E6DE /* IntakeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17B81C26682F48314228AA9 /* IntakeViewModel.swift */; };
 		EAC994A95A05C360D00B733E /* BoardManageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA11E30321D419A5C987DE8 /* BoardManageViewModel.swift */; };
+		EC5F05247AE8E00E48C615A8 /* counter-card.json in Resources */ = {isa = PBXBuildFile; fileRef = 3E0A1ED04CD32CCF4A1FB0C6 /* counter-card.json */; };
+		F36C5502CA4AAC700FA713F6 /* FlyerCanvasGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D459C7B78BEE039F4494BF /* FlyerCanvasGeometryTests.swift */; };
 		F420A397E555A0EDCFB67566 /* CardDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F18AEA1388A2F776A59984E /* CardDetailView.swift */; };
 		F577F1E6931A120B0E40A914 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0217582C9EDE8A22711A5F32 /* TeamView.swift */; };
 		F65B65C92A5EAED077ECD83A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C3A81B953E2B84B5051A11 /* RootView.swift */; };
+		F67340CA5DE3A9E5AB67CFA1 /* FlyerAiModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272008ADD503B94B4FBCA3BE /* FlyerAiModels.swift */; };
 		F9554CB17D04F86C02574FB2 /* VerifyWaitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA8ADF5B9D1FE188C86BBCD /* VerifyWaitView.swift */; };
 		FCBCEEC1D3BC7621FBEB305D /* StoresViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93006100FE7EF0C759F49455 /* StoresViewModel.swift */; };
 		FD0B4FD8599C83D34D2EF427 /* BoardManageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 701BA2F706CEBAC8F882585B /* BoardManageService.swift */; };
@@ -198,6 +224,7 @@
 		04A1938E1A0FE1C5BE1CE783 /* FeedbackListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackListView.swift; sourceTree = "<group>"; };
 		04B82A8325FAC90B486CD51D /* BrandScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandScanViewModel.swift; sourceTree = "<group>"; };
 		04D8925F3FDA7B0468D6CC9B /* RedeemConfirmSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemConfirmSheet.swift; sourceTree = "<group>"; };
+		0538B41A93B05A20E15718A8 /* FlyerDesignerAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignerAssets.swift; sourceTree = "<group>"; };
 		0645227825199FB89D56FC68 /* RewardsHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsHomeViewModel.swift; sourceTree = "<group>"; };
 		07084B891A11097AF6F59213 /* LoadableVM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadableVM.swift; sourceTree = "<group>"; };
 		0735099047713E748887B6D7 /* BrandMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMoreView.swift; sourceTree = "<group>"; };
@@ -205,7 +232,9 @@
 		0C4D8F2CA0DD7AC4DF8C2FF6 /* BoardPostsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardPostsView.swift; sourceTree = "<group>"; };
 		0C501A7A7280D1BA0996F4A6 /* LinkQRSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkQRSheet.swift; sourceTree = "<group>"; };
 		0C5F7D90C298398647304C01 /* MarketplaceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceViewModel.swift; sourceTree = "<group>"; };
+		0E1B1A7B7F6DCA640EC6FA0A /* FlyerRenderAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerRenderAssets.swift; sourceTree = "<group>"; };
 		0ED611965D6EDD1C547821AE /* GamificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamificationService.swift; sourceTree = "<group>"; };
+		0FC2E626C7487966CEC2E0C4 /* FlyerCanvasGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerCanvasGeometry.swift; sourceTree = "<group>"; };
 		12219571AAD16C7F81CAAE2C /* BrandAdminService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandAdminService.swift; sourceTree = "<group>"; };
 		122629DF1DFB7ACC4C4862AB /* FlyerDesignDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignDecodeTests.swift; sourceTree = "<group>"; };
 		1311A7BEB1178BDBABF3CD3C /* StoresView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoresView.swift; sourceTree = "<group>"; };
@@ -215,6 +244,7 @@
 		16715380BCDA263282B4D825 /* ScannedTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannedTargetTests.swift; sourceTree = "<group>"; };
 		167A76D9756F79AC4623B1BB /* ConsumerSettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsumerSettingsViewModel.swift; sourceTree = "<group>"; };
 		16CF6E718AC0FF710987593E /* FeedbackFilterBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackFilterBar.swift; sourceTree = "<group>"; };
+		1A8C039BBE225CC32CF5C1C9 /* FlyerAssistantPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAssistantPanel.swift; sourceTree = "<group>"; };
 		1C6D1CBDCC03BFCFAD9FDC5B /* BoardModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardModels.swift; sourceTree = "<group>"; };
 		1D5F87528F1DB356936BCBAB /* DmService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmService.swift; sourceTree = "<group>"; };
 		1E1AA7536DB2EA1F9EFC9523 /* BrandAccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandAccountView.swift; sourceTree = "<group>"; };
@@ -222,6 +252,7 @@
 		23FC388A7080337EAE1FC2D3 /* CampaignFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignFormSheet.swift; sourceTree = "<group>"; };
 		241643204D022959EBDE0B96 /* BrandTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandTabView.swift; sourceTree = "<group>"; };
 		25A68E1AF11F6315B7788862 /* MyReviewsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyReviewsViewModel.swift; sourceTree = "<group>"; };
+		272008ADD503B94B4FBCA3BE /* FlyerAiModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAiModels.swift; sourceTree = "<group>"; };
 		286329CF724A878B61FB171C /* LikeButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeButton.swift; sourceTree = "<group>"; };
 		293CC8DAE157D1ED94F44F7E /* Promo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Promo.swift; sourceTree = "<group>"; };
 		2A10EEAADD1526EED294CAAB /* CommsModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsModelDecodeTests.swift; sourceTree = "<group>"; };
@@ -230,9 +261,12 @@
 		2F18AEA1388A2F776A59984E /* CardDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardDetailView.swift; sourceTree = "<group>"; };
 		3122BC2EAFEF5370945130F8 /* LedgerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerViewModel.swift; sourceTree = "<group>"; };
 		3150E63F05FA5D3231B44DFB /* DmThreadViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmThreadViewModel.swift; sourceTree = "<group>"; };
+		339C7200735D5202A1AAA8BC /* FlyerDesignerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignerViewModel.swift; sourceTree = "<group>"; };
 		38694E7D294277B629F5ECAA /* LeaderboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardViewModel.swift; sourceTree = "<group>"; };
 		39137A3DF15E7BEAEA7AD9B0 /* MediaPrepareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPrepareTests.swift; sourceTree = "<group>"; };
 		3ADB255B08E8CDAEDA5A3B70 /* FeedbackListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackListViewModel.swift; sourceTree = "<group>"; };
+		3E0A1ED04CD32CCF4A1FB0C6 /* counter-card.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "counter-card.json"; sourceTree = "<group>"; };
+		3EFA432473BB3105663C01E9 /* FlyerCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerCanvasView.swift; sourceTree = "<group>"; };
 		4267E8284FBC9C8736C943D4 /* MyReviewsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyReviewsView.swift; sourceTree = "<group>"; };
 		435938425BC684245B959C27 /* ServiceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceCache.swift; sourceTree = "<group>"; };
 		43C3A81B953E2B84B5051A11 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -248,6 +282,7 @@
 		4BF422EB85AA8AE9C73C3AE6 /* PlacesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesView.swift; sourceTree = "<group>"; };
 		4E9CFF63EBA5637561862B6E /* QRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeView.swift; sourceTree = "<group>"; };
 		4EA11E30321D419A5C987DE8 /* BoardManageViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageViewModel.swift; sourceTree = "<group>"; };
+		5078EC3E1CA6C851A5E10CB8 /* FlyerAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAssetCatalog.swift; sourceTree = "<group>"; };
 		5292CAA63DAD42EA22C36156 /* RedeemErrorMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemErrorMappingTests.swift; sourceTree = "<group>"; };
 		53F950625092ADC37BBF82C2 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
 		575FDD74DF74FF7E74897F33 /* RedemptionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedemptionDetailView.swift; sourceTree = "<group>"; };
@@ -265,6 +300,7 @@
 		6A578F89613997948D8E4A18 /* ReviewsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewsService.swift; sourceTree = "<group>"; };
 		6CABBDB4EDC995FE6D7337FD /* LeaderboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardView.swift; sourceTree = "<group>"; };
 		6CB680B484B3D224C4107A83 /* BoardFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardFeedView.swift; sourceTree = "<group>"; };
+		6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAssetCatalogTests.swift; sourceTree = "<group>"; };
 		6FB596F39CE01A1C51B3A5E9 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
 		701BA2F706CEBAC8F882585B /* BoardManageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageService.swift; sourceTree = "<group>"; };
 		7059D2CD2BBB8E88FC1D6B9B /* ReportDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportDetailView.swift; sourceTree = "<group>"; };
@@ -284,9 +320,11 @@
 		8267CDD10EE596CB506C02A3 /* RedemptionsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedemptionsViewModel.swift; sourceTree = "<group>"; };
 		8277978AD490D97B6612C672 /* MarketplaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceView.swift; sourceTree = "<group>"; };
 		82E8FABED57D5AD2689A56D8 /* ClaimSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaimSheet.swift; sourceTree = "<group>"; };
+		82EBCB85B561BF172B3FB9C1 /* social-drop.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "social-drop.json"; sourceTree = "<group>"; };
 		830CB917F2C097015A899752 /* IntakeCanSubmitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeCanSubmitTests.swift; sourceTree = "<group>"; };
 		83BD6365CC72637D042DA2E7 /* PromoClaimViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoClaimViewModel.swift; sourceTree = "<group>"; };
 		8516E685E08B50BC16A269BA /* FeedbackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackService.swift; sourceTree = "<group>"; };
+		853A2F425FD873E9FD7760A2 /* FlyerAssistantViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAssistantViewModel.swift; sourceTree = "<group>"; };
 		8620888DD950FF04C499C09E /* CampaignQRSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignQRSheet.swift; sourceTree = "<group>"; };
 		8B0B7C23B6AB726B957F5815 /* PublicBrandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicBrandService.swift; sourceTree = "<group>"; };
 		8B2DDEC179146C0E41857353 /* PlaceModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModelDecodeTests.swift; sourceTree = "<group>"; };
@@ -295,6 +333,7 @@
 		912BAA56AAA5F035FFB751CE /* MoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoreView.swift; sourceTree = "<group>"; };
 		93006100FE7EF0C759F49455 /* StoresViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoresViewModel.swift; sourceTree = "<group>"; };
 		93673FD387EEBCB83F305FD1 /* GoogleSignInService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleSignInService.swift; sourceTree = "<group>"; };
+		940BC74017D026743E70189E /* FlyerDocumentStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDocumentStoreTests.swift; sourceTree = "<group>"; };
 		9D48E1E2F311614994F0B703 /* DmModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmModels.swift; sourceTree = "<group>"; };
 		9EDD8C3621A91133C2363919 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		9F02C950A92539061E2F85CF /* MediaVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaVideoView.swift; sourceTree = "<group>"; };
@@ -302,10 +341,12 @@
 		A00674CD4B169012EDFBE125 /* JoinRequestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JoinRequestsView.swift; sourceTree = "<group>"; };
 		A16F7A9097C311494B1030E0 /* BoardPostCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardPostCard.swift; sourceTree = "<group>"; };
 		A26A522E964D4D48D5A00C2C /* GamificationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamificationModels.swift; sourceTree = "<group>"; };
+		A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerExportService.swift; sourceTree = "<group>"; };
 		A3CC25F9952C1C40A86D586C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A4293E9CCB88B052A3A50541 /* IntakeSubmissionEncodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSubmissionEncodingTests.swift; sourceTree = "<group>"; };
 		A678136683561762A5FD353D /* IntakeSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSuccessView.swift; sourceTree = "<group>"; };
 		A8284F73AF3E428EDC3198E8 /* PromoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoService.swift; sourceTree = "<group>"; };
+		A88160914CC8FC194D8A6E1D /* FlyerAiService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAiService.swift; sourceTree = "<group>"; };
 		AA3F9B3BA1BC02ADF1B66CAF /* BoardsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardsListView.swift; sourceTree = "<group>"; };
 		AAAFA1038994D79A25707ECA /* LikeModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeModelDecodeTests.swift; sourceTree = "<group>"; };
 		AD0FA8209511AB459396B453 /* PlacesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesService.swift; sourceTree = "<group>"; };
@@ -313,15 +354,21 @@
 		AD5FB5884C131FC1C2DA7EB3 /* ReviewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewModels.swift; sourceTree = "<group>"; };
 		AF4FB3621A4ED5ACA172FEC3 /* CampaignsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignsView.swift; sourceTree = "<group>"; };
 		B1149B903446576E2B5DAC6A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		B16EBB2347EA8AAB845B6C09 /* FlyerAiModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAiModelTests.swift; sourceTree = "<group>"; };
 		B173F5A337E4402646C93081 /* FlyerDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesign.swift; sourceTree = "<group>"; };
 		B1F3C8CACC67245C0E6B16D0 /* FeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackModels.swift; sourceTree = "<group>"; };
+		B35D6E29B729AB8C1AA05C60 /* CampaignDesignerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignDesignerView.swift; sourceTree = "<group>"; };
+		B44F551DECE185F68C8B3F61 /* paper-ticket.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "paper-ticket.json"; sourceTree = "<group>"; };
 		B50526C517FF9773D6EED36D /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		B5230B1664F4ACC10CEB088D /* RewardsHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsHomeView.swift; sourceTree = "<group>"; };
 		B95F376EAF82528BCF97E8B1 /* DmThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmThreadView.swift; sourceTree = "<group>"; };
 		B9A3C219569DF4F0A878CB51 /* NotificationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsView.swift; sourceTree = "<group>"; };
 		BA5D559252032C31DB1132DF /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
+		BC8E1992409FE22D8A01E73B /* FlyerDocumentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDocumentStore.swift; sourceTree = "<group>"; };
+		BDC8E2E108DB9C9159CA256D /* FlyerDesignEditorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignEditorTests.swift; sourceTree = "<group>"; };
 		BEC2C30F5FB62DCB21DF28FF /* ReportMediaGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportMediaGallery.swift; sourceTree = "<group>"; };
 		BF4B6C7D6FE42F31F6F24B83 /* LinkFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkFormSheet.swift; sourceTree = "<group>"; };
+		BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerExportTests.swift; sourceTree = "<group>"; };
 		BFFDBE21B733AF628A3609E1 /* PlacesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesViewModel.swift; sourceTree = "<group>"; };
 		C0C908F67BEF84C21B72B389 /* BoardManageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageView.swift; sourceTree = "<group>"; };
 		C12A6DF92066D903F3F352B0 /* PostRepliesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRepliesView.swift; sourceTree = "<group>"; };
@@ -333,6 +380,7 @@
 		C86E94F5A4422E72995108E2 /* BrandSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandSettingsView.swift; sourceTree = "<group>"; };
 		C8FE19C11E899DA5972FEB6A /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		CA85C8AA6DD1149D6884D9FA /* BusinessInboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BusinessInboxView.swift; sourceTree = "<group>"; };
+		CAF78A5F92F53542D6061D9C /* index.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = index.json; sourceTree = "<group>"; };
 		CB1C2BC10BBA1BE9934EF176 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		CB63D94B3E0761DE3FD397F0 /* IntakeMediaSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeMediaSection.swift; sourceTree = "<group>"; };
 		CDA8ADF5B9D1FE188C86BBCD /* VerifyWaitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyWaitView.swift; sourceTree = "<group>"; };
@@ -342,6 +390,7 @@
 		D31FC130BB26AA2278C864AC /* ListingRedemptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingRedemptionsView.swift; sourceTree = "<group>"; };
 		D5B12CBD23DCDD3D049765C2 /* CommsComposerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsComposerSheet.swift; sourceTree = "<group>"; };
 		D7BB64C68ECBFC9E076C645C /* CameraPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPicker.swift; sourceTree = "<group>"; };
+		D8D459C7B78BEE039F4494BF /* FlyerCanvasGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerCanvasGeometryTests.swift; sourceTree = "<group>"; };
 		D8F8DCC486BE89564146F89D /* ResetTokenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetTokenTests.swift; sourceTree = "<group>"; };
 		DD0CC763FC40E8EA4AF14563 /* ListingFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingFormSheet.swift; sourceTree = "<group>"; };
 		DEA4879239FF2BB4FBC9675F /* LedgerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerView.swift; sourceTree = "<group>"; };
@@ -351,6 +400,7 @@
 		EB5940EF565CAD65C33CC508 /* RedeemErrorMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemErrorMapping.swift; sourceTree = "<group>"; };
 		EB6694B2E89D8C438164363A /* BrandListingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandListingsViewModel.swift; sourceTree = "<group>"; };
 		EB851A9824E8ECB7CFE73F1E /* SafeURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeURL.swift; sourceTree = "<group>"; };
+		ED387AEF2DA7A5E47747C81C /* FlyerDesign+Editor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "FlyerDesign+Editor.swift"; sourceTree = "<group>"; };
 		ED3A2BF05479A879AAFB47E3 /* CampaignsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignsViewModel.swift; sourceTree = "<group>"; };
 		EEA7A330126DD5661E60C196 /* LikeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LikeModels.swift; sourceTree = "<group>"; };
 		F17B81C26682F48314228AA9 /* IntakeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeViewModel.swift; sourceTree = "<group>"; };
@@ -359,7 +409,9 @@
 		F63F6737F449A9E6BED4C6B8 /* BillingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillingService.swift; sourceTree = "<group>"; };
 		F6A761302B409F544CE842E7 /* NotificationsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsService.swift; sourceTree = "<group>"; };
 		F7848F41DE15963B027582F4 /* RedemptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedemptionsView.swift; sourceTree = "<group>"; };
+		F9C879DC311D048939ADA67F /* bold-offer.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "bold-offer.json"; sourceTree = "<group>"; };
 		FC7D22037CD95E36A90D944D /* ConsumerTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsumerTabView.swift; sourceTree = "<group>"; };
+		FCDC47AB4BACB13EC77EF970 /* FlyerRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerRenderer.swift; sourceTree = "<group>"; };
 		FEE6D2F6E45C3F58CD8411AE /* NotificationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationModels.swift; sourceTree = "<group>"; };
 		FF626FAAAF99449A1BDC6E49 /* MembersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MembersView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -380,11 +432,24 @@
 		03556DE5CB930A98F3719B86 /* Campaigns */ = {
 			isa = PBXGroup;
 			children = (
+				BB05347970973F41D51310B6 /* Designer */,
 				23FC388A7080337EAE1FC2D3 /* CampaignFormSheet.swift */,
 				8620888DD950FF04C499C09E /* CampaignQRSheet.swift */,
 				AF4FB3621A4ED5ACA172FEC3 /* CampaignsView.swift */,
 			);
 			path = Campaigns;
+			sourceTree = "<group>";
+		};
+		0F4BD0AF89C33D68672DCE72 /* templates */ = {
+			isa = PBXGroup;
+			children = (
+				F9C879DC311D048939ADA67F /* bold-offer.json */,
+				3E0A1ED04CD32CCF4A1FB0C6 /* counter-card.json */,
+				CAF78A5F92F53542D6061D9C /* index.json */,
+				B44F551DECE185F68C8B3F61 /* paper-ticket.json */,
+				82EBCB85B561BF172B3FB9C1 /* social-drop.json */,
+			);
+			path = templates;
 			sourceTree = "<group>";
 		};
 		202281EFBA77E0DECD9B701D /* Views */ = {
@@ -434,6 +499,9 @@
 				492D2961C4F6207F4CA32D14 /* DmThreadsViewModel.swift */,
 				3150E63F05FA5D3231B44DFB /* DmThreadViewModel.swift */,
 				3ADB255B08E8CDAEDA5A3B70 /* FeedbackListViewModel.swift */,
+				853A2F425FD873E9FD7760A2 /* FlyerAssistantViewModel.swift */,
+				339C7200735D5202A1AAA8BC /* FlyerDesignerViewModel.swift */,
+				BC8E1992409FE22D8A01E73B /* FlyerDocumentStore.swift */,
 				F17B81C26682F48314228AA9 /* IntakeViewModel.swift */,
 				38694E7D294277B629F5ECAA /* LeaderboardViewModel.swift */,
 				3122BC2EAFEF5370945130F8 /* LedgerViewModel.swift */,
@@ -514,7 +582,10 @@
 				9D48E1E2F311614994F0B703 /* DmModels.swift */,
 				6FB596F39CE01A1C51B3A5E9 /* Enums.swift */,
 				B1F3C8CACC67245C0E6B16D0 /* FeedbackModels.swift */,
+				272008ADD503B94B4FBCA3BE /* FlyerAiModels.swift */,
 				B173F5A337E4402646C93081 /* FlyerDesign.swift */,
+				ED387AEF2DA7A5E47747C81C /* FlyerDesign+Editor.swift */,
+				0538B41A93B05A20E15718A8 /* FlyerDesignerAssets.swift */,
 				A26A522E964D4D48D5A00C2C /* GamificationModels.swift */,
 				7B1A9D21D8778D2CB64E83ED /* IntakeModels.swift */,
 				5F906639496ADC42CB4FE64E /* JSONValue.swift */,
@@ -540,6 +611,10 @@
 				12219571AAD16C7F81CAAE2C /* BrandAdminService.swift */,
 				1D5F87528F1DB356936BCBAB /* DmService.swift */,
 				8516E685E08B50BC16A269BA /* FeedbackService.swift */,
+				A88160914CC8FC194D8A6E1D /* FlyerAiService.swift */,
+				5078EC3E1CA6C851A5E10CB8 /* FlyerAssetCatalog.swift */,
+				A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */,
+				0E1B1A7B7F6DCA640EC6FA0A /* FlyerRenderAssets.swift */,
 				0ED611965D6EDD1C547821AE /* GamificationService.swift */,
 				93673FD387EEBCB83F305FD1 /* GoogleSignInService.swift */,
 				CDC7AD1415E7B2708866E7A6 /* IntakeService.swift */,
@@ -624,6 +699,7 @@
 		7AEF871B670326451A7233F3 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				B416530E7E2B2926AACE5CB7 /* FlyerDesigner */,
 				470976BC01FBDDC8DDC4FB45 /* Assets.xcassets */,
 			);
 			path = Resources;
@@ -677,6 +753,14 @@
 			path = Rewards;
 			sourceTree = "<group>";
 		};
+		B416530E7E2B2926AACE5CB7 /* FlyerDesigner */ = {
+			isa = PBXGroup;
+			children = (
+				0F4BD0AF89C33D68672DCE72 /* templates */,
+			);
+			path = FlyerDesigner;
+			sourceTree = "<group>";
+		};
 		B90EA2EE7434B865D11F9E9D /* Support */ = {
 			isa = PBXGroup;
 			children = (
@@ -684,6 +768,18 @@
 				EB5940EF565CAD65C33CC508 /* RedeemErrorMapping.swift */,
 			);
 			path = Support;
+			sourceTree = "<group>";
+		};
+		BB05347970973F41D51310B6 /* Designer */ = {
+			isa = PBXGroup;
+			children = (
+				B35D6E29B729AB8C1AA05C60 /* CampaignDesignerView.swift */,
+				1A8C039BBE225CC32CF5C1C9 /* FlyerAssistantPanel.swift */,
+				0FC2E626C7487966CEC2E0C4 /* FlyerCanvasGeometry.swift */,
+				3EFA432473BB3105663C01E9 /* FlyerCanvasView.swift */,
+				FCDC47AB4BACB13EC77EF970 /* FlyerRenderer.swift */,
+			);
+			path = Designer;
 			sourceTree = "<group>";
 		};
 		BED4D5EB3C228C98A750B334 /* Scan */ = {
@@ -816,7 +912,13 @@
 				1661D002836CE7A23C3F9C71 /* CampaignModelTests.swift */,
 				2A10EEAADD1526EED294CAAB /* CommsModelDecodeTests.swift */,
 				4929B2B7D47AA89B47FE8C73 /* EnumFallbackTests.swift */,
+				B16EBB2347EA8AAB845B6C09 /* FlyerAiModelTests.swift */,
+				6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */,
+				D8D459C7B78BEE039F4494BF /* FlyerCanvasGeometryTests.swift */,
 				122629DF1DFB7ACC4C4862AB /* FlyerDesignDecodeTests.swift */,
+				BDC8E2E108DB9C9159CA256D /* FlyerDesignEditorTests.swift */,
+				940BC74017D026743E70189E /* FlyerDocumentStoreTests.swift */,
+				BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */,
 				830CB917F2C097015A899752 /* IntakeCanSubmitTests.swift */,
 				A4293E9CCB88B052A3A50541 /* IntakeSubmissionEncodingTests.swift */,
 				43EFA764158C1E7138ABD208 /* IntakeTokenTests.swift */,
@@ -931,6 +1033,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				CA26B572147010E3330661E6 /* Assets.xcassets in Resources */,
+				380BD927B94D329E1065758B /* bold-offer.json in Resources */,
+				EC5F05247AE8E00E48C615A8 /* counter-card.json in Resources */,
+				4647E39B68D8F62791F15A42 /* index.json in Resources */,
+				2C5D53B25FBEDA29CC3BAC7E /* paper-ticket.json in Resources */,
+				9646BBBAF7729CCFE6689C6B /* social-drop.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -945,7 +1052,13 @@
 				BD7BF549837F137B6AB902C5 /* CampaignModelTests.swift in Sources */,
 				3706AECF40EADD4D29FC2BE5 /* CommsModelDecodeTests.swift in Sources */,
 				368F0643A3618D8D45C1ABE0 /* EnumFallbackTests.swift in Sources */,
+				25D7A1BA826B0B64F46794C6 /* FlyerAiModelTests.swift in Sources */,
+				247B5F88FD45913E6E0AB53C /* FlyerAssetCatalogTests.swift in Sources */,
+				F36C5502CA4AAC700FA713F6 /* FlyerCanvasGeometryTests.swift in Sources */,
 				2AA387FE1BF510741F27CA2A /* FlyerDesignDecodeTests.swift in Sources */,
+				7D67C88E00D66440A3054C8E /* FlyerDesignEditorTests.swift in Sources */,
+				1162CBC286F1C1D6E6D7C07F /* FlyerDocumentStoreTests.swift in Sources */,
+				21971D9F8C5B0EB5BBD10457 /* FlyerExportTests.swift in Sources */,
 				8FBB89AA1D211C613A51EAAD /* IntakeCanSubmitTests.swift in Sources */,
 				D18C5744DED412D2689A2990 /* IntakeSubmissionEncodingTests.swift in Sources */,
 				A83D071F75999630570F6E01 /* IntakeTokenTests.swift in Sources */,
@@ -1000,6 +1113,7 @@
 				20DCFB1E446F8C3E1AF24469 /* BrandTabView.swift in Sources */,
 				54FF359E836B704ECA9FB14B /* BusinessInboxView.swift in Sources */,
 				A16469F887A07D97BE67A159 /* CameraPicker.swift in Sources */,
+				710FAEE59FBACC2D3DB479BA /* CampaignDesignerView.swift in Sources */,
 				0F669322DE46DEAF8EAFA54D /* CampaignFormSheet.swift in Sources */,
 				5B32AEE48903C0BE1EB103BC /* CampaignQRSheet.swift in Sources */,
 				50210C73B311B641E66E30A1 /* CampaignsView.swift in Sources */,
@@ -1029,7 +1143,21 @@
 				0503F142C7850643261E632C /* FeedbackListViewModel.swift in Sources */,
 				FD667EA6CE17C06CCB9A7CD9 /* FeedbackModels.swift in Sources */,
 				9C8D08792F45976C3466D64E /* FeedbackService.swift in Sources */,
+				F67340CA5DE3A9E5AB67CFA1 /* FlyerAiModels.swift in Sources */,
+				468DAA84EBCD49AB4D0B9B7A /* FlyerAiService.swift in Sources */,
+				79E97DCDE74D4F0D3725BD7E /* FlyerAssetCatalog.swift in Sources */,
+				35C554C896055AC5BD760C55 /* FlyerAssistantPanel.swift in Sources */,
+				BD2C6F10B3E8CD276A202EF5 /* FlyerAssistantViewModel.swift in Sources */,
+				CD0F14A18D4E9FF220C29A06 /* FlyerCanvasGeometry.swift in Sources */,
+				408B499177A06708C36B7738 /* FlyerCanvasView.swift in Sources */,
+				07039C96E160136D628299E6 /* FlyerDesign+Editor.swift in Sources */,
 				6D7C7343DE331B59E152DF97 /* FlyerDesign.swift in Sources */,
+				4879A3DE5DF9A94CC064FDAF /* FlyerDesignerAssets.swift in Sources */,
+				0D83D17788E0E7D85703DF9B /* FlyerDesignerViewModel.swift in Sources */,
+				7F944A0C4A18EAD62EA2CEB7 /* FlyerDocumentStore.swift in Sources */,
+				7B09EC2A92303F0F3BEF1E3E /* FlyerExportService.swift in Sources */,
+				69D2645A62015505CAFC6D82 /* FlyerRenderAssets.swift in Sources */,
+				DAA4D134C479BADC8ECF95A4 /* FlyerRenderer.swift in Sources */,
 				5D71E2653709F0018A3BE44C /* GamificationModels.swift in Sources */,
 				10FF78DFF8B06C487F83C793 /* GamificationService.swift in Sources */,
 				DC259F8875606C6800E73DB9 /* GoogleSignInService.swift in Sources */,

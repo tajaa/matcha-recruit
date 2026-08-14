@@ -82,3 +82,22 @@ final class PromoService {
 struct FlyerDesignEnvelope: Codable {
     let design_json: FlyerDesign?
 }
+
+struct FlyerUploadResponse: Codable, Equatable {
+    let flyer_image_url: String
+}
+
+extension PromoService {
+    func uploadFlyer(
+        campaignId: String,
+        pngData: Data,
+        filename: String = "flyer.png"
+    ) async throws -> FlyerUploadResponse {
+        try await client.uploadMultipart(
+            path: "/promo/campaigns/\(campaignId)/flyer",
+            data: pngData,
+            mimeType: "image/png",
+            filename: filename
+        )
+    }
+}

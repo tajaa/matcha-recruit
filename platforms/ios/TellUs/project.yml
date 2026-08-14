@@ -35,6 +35,7 @@ targets:
       - path: Resources
     resources:
       - path: Resources/Assets.xcassets
+      - path: Resources/FlyerDesigner
     info:
       path: Info.plist
       properties:

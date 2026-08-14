@@ -1,0 +1,28 @@
+import XCTest
+@testable import TellUs
+
+final class FlyerAssetCatalogTests: XCTestCase {
+    func testAllBundledTemplatesDecodeWithMatchingPresetDimensions() throws {
+        let catalog = FlyerAssetCatalog(bundle: Bundle.main)
+        let templates = try catalog.templates()
+
+        XCTAssertEqual(templates.map(\.id), ["bold-offer", "paper-ticket", "counter-card", "social-drop"])
+        for template in templates {
+            let spec = try XCTUnwrap(FlyerArtboardPresets.spec(for: template.design.artboard.preset))
+            XCTAssertEqual(template.design.artboard.w, spec.w, template.id)
+            XCTAssertEqual(template.design.artboard.h, spec.h, template.id)
+            XCTAssertTrue(template.design.hasUsableQR, template.id)
+        }
+    }
+
+    func testEveryWireStickerIDMapsToBundledImageName() {
+        let expected = [
+            "star-burst.svg", "star.svg", "sparkle.svg", "ribbon.svg",
+            "tag.svg", "coffee-cup.svg", "heart.svg", "arrow-down.svg",
+        ]
+        XCTAssertEqual(Set(FlyerAssetCatalog.stickerImageNames.keys), Set(expected))
+        for imageName in FlyerAssetCatalog.stickerImageNames.values {
+            XCTAssertTrue(imageName.hasPrefix("sticker-"))
+        }
+    }
+}

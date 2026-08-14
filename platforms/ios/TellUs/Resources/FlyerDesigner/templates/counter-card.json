@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "artboard": { "preset": "reward_card", "w": 1050, "h": 600 },
+  "background": { "kind": "color", "color": "paper" },
+  "layers": [
+    { "id": "t3-block", "type": "shape", "shape": "rect", "x": 0, "y": 0, "width": 420, "height": 600, "rotation": 0, "opacity": 1, "fill": "ink", "cornerRadius": 0 },
+    { "id": "t3-qrpad", "type": "shape", "shape": "rect", "x": 70, "y": 110, "width": 380, "height": 380, "rotation": 0, "opacity": 1, "fill": "#ffffff", "cornerRadius": 18 },
+    { "id": "t3-qr", "type": "qr", "x": 100, "y": 140, "size": 320, "rotation": 0, "opacity": 1, "fg": "#17140f", "bg": "#ffffff" },
+    { "id": "t3-logo", "type": "image", "src": "", "slot": "logo", "x": 520, "y": 70, "width": 120, "height": 120, "rotation": 0, "opacity": 1 },
+    { "id": "t3-title", "type": "text", "text": "Scan for a reward", "x": 520, "y": 230, "width": 470, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 58, "fontStyle": "bold", "fill": "ink", "align": "left", "lineHeight": 1.15, "letterSpacing": 0 },
+    { "id": "t3-sub", "type": "text", "text": "Free drink on your next visit", "x": 520, "y": 370, "width": 470, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 32, "fontStyle": "normal", "fill": "muted", "align": "left", "lineHeight": 1.25, "letterSpacing": 0 },
+    { "id": "t3-rule", "type": "shape", "shape": "line", "x": 520, "y": 480, "width": 200, "height": 5, "rotation": 0, "opacity": 1, "fill": "brand" }
+  ]
+}

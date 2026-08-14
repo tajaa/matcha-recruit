@@ -27,6 +27,12 @@ struct CampaignQRSheet: View {
                         .multilineTextAlignment(.center)
                 }
 
+                NavigationLink {
+                    CampaignDesignerView(campaignID: campaign.id)
+                } label: {
+                    Label(campaign.has_design ? "Edit flyer design" : "Design flyer", systemImage: "paintbrush")
+                }
+
                 if let url = URL(string: claimURL) {
                     ShareLink(item: url) {
                         Label("Share claim link", systemImage: "square.and.arrow.up")
