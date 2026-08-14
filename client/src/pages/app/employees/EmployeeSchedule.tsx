@@ -354,6 +354,9 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
           return (
             <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
               {a.name}
+              {a.availability_overridden && (
+                <span className="text-orange-400" title="Availability override">Availability override</span>
+              )}
               {lapseCount > 0 && (
                 <span className="text-amber-400" title={`${flags?.overdue_training ?? 0} overdue training, ${flags?.lapsed_credentials ?? 0} lapsed credential(s)`}>
                   ⚠ {lapseCount}

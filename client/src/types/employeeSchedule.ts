@@ -11,6 +11,8 @@ export interface ShiftAssignment {
   name: string
   job_title: string | null
   status: AssignmentStatus
+  availability_overridden: boolean
+  availability_override_at: string | null
 }
 
 export interface Shift {

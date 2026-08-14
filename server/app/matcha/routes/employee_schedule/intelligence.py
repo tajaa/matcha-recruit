@@ -106,3 +106,16 @@ async def get_qualified_coverage(
             days=days,
         )
     return {"available": True, **data}
+
+
+@router.get("/availability-overrides")
+async def get_availability_overrides(
+    days: int = Query(90, ge=1, le=365),
+    current_user=Depends(require_admin_or_client),
+):
+    company_id, features = await _company_and_features(current_user)
+    if not features.get("employee_schedule"):
+        return _unavailable()
+    async with get_connection() as conn:
+        data = await si.build_availability_overrides(conn, company_id, days=days)
+    return {"available": True, **data}

@@ -134,6 +134,28 @@ export type ScheduleIntelOverview = {
       shifts_with_lapses: number
       sources: { credentials: unknown[] | null; training: unknown[] | null }
     }
+    availability_overrides: { count: number }
   }
+  disclaimer: string
+}
+
+export type AvailabilityOverride = {
+  shift_id: string
+  employee_id: string
+  employee_name: string
+  job_title: string | null
+  role: string | null
+  location_name: string | null
+  starts_at: string
+  ends_at: string
+  overridden_at: string
+  violations: { type?: string; message?: string; [key: string]: unknown }[]
+}
+
+export type AvailabilityOverrides = {
+  available: true
+  days: number
+  count: number
+  items: AvailabilityOverride[]
   disclaimer: string
 }

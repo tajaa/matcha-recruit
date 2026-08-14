@@ -20,7 +20,7 @@ from ...services.scheduling.schedule_rules import (  # re-exported for the route
     build_patch, conflict_detail, shift_full_detail, shift_window_on_date,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
-    _iso, fetch_availability, find_conflicts, log_audit, shift_snapshot,
+    _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
 )
 
 _SHIFT_COLS = (
@@ -151,6 +151,30 @@ async def fetch_shifts(
         """,
         shift_ids,
     )
+    override_rows = await conn.fetch(
+        """
+        SELECT entity_id, details, created_at
+        FROM schedule_audit_log
+        WHERE company_id = $1 AND action = 'assignment.availability_override'
+          AND entity_id = ANY($2::uuid[])
+        ORDER BY created_at DESC
+        """,
+        company_id, shift_ids,
+    )
+    overrides: dict[tuple[str, str], dict] = {}
+    for row in override_rows:
+        details = row["details"]
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except json.JSONDecodeError:
+                details = {}
+        employee_id = details.get("employee_id")
+        if employee_id:
+            overrides.setdefault(
+                (str(row["entity_id"]), str(employee_id)),
+                {"at": _iso(row["created_at"]), "violations": details.get("violations", [])},
+            )
     by_shift: dict[str, list[dict]] = {}
     for r in assign_rows:
         by_shift.setdefault(str(r["shift_id"]), []).append(
@@ -159,6 +183,12 @@ async def fetch_shifts(
                 "name": _display_name(r["first_name"], r["last_name"]),
                 "job_title": r["job_title"],
                 "status": r["status"],
+                "availability_overridden": (
+                    str(r["shift_id"]), str(r["employee_id"])
+                ) in overrides,
+                "availability_override_at": overrides.get(
+                    (str(r["shift_id"]), str(r["employee_id"])), {}
+                ).get("at"),
             }
         )
     for s in shifts:

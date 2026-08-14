@@ -10,7 +10,9 @@ from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import AssignmentCreate, AssignmentMove
 from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
-from ...services.scheduling.shift_writes import apply_assignment_core, remove_assignment_core
+from ...services.scheduling.shift_writes import (
+    apply_assignment_core, log_availability_override, remove_assignment_core,
+)
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_shift_open_for_assignment,
@@ -81,6 +83,7 @@ async def move_employee_assignment(
                     },
                 )
 
+            target_availability: list[dict] = []
             if not force:
                 if target["assigned_count"] >= target["required_staff"]:
                     raise_shift_full(target["assigned_count"], target["required_staff"])
@@ -91,12 +94,12 @@ async def move_employee_assignment(
                 )
                 if conflicts:
                     raise_conflict(body.employee_id, conflicts)
-                availability = await fetch_availability(conn, company_id, [body.employee_id])
-                violations = availability_violations(
-                    availability[body.employee_id], target["starts_at"], target["ends_at"],
-                )
-                if violations:
-                    raise_outside_availability(body.employee_id, violations)
+            availability = await fetch_availability(conn, company_id, [body.employee_id])
+            target_availability = availability_violations(
+                availability[body.employee_id], target["starts_at"], target["ends_at"],
+            )
+            if target_availability and not force:
+                raise_outside_availability(body.employee_id, target_availability)
 
             if source["published_at"] is not None:
                 source_violations = await _fair_workweek_advisories(
@@ -142,6 +145,11 @@ async def move_employee_assignment(
                 actor_user_id=current_user.id,
                 audit_details=audit_details,
             )
+            if target_availability:
+                await log_availability_override(
+                    conn, company_id, body.to_shift_id, current_user.id,
+                    body.employee_id, target_availability,
+                )
             if source_violations or target_violations:
                 await log_audit(
                     conn, company_id, "assignment", body.to_shift_id,
@@ -164,6 +172,10 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
         shift = await fetch_shift_for_write(conn, company_id, shift_id)
         assert_shift_open_for_assignment(shift)
         await assert_employee_in_company(conn, company_id, body.employee_id)
+        avail_map = await fetch_availability(conn, company_id, [body.employee_id])
+        availability = availability_violations(
+            avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],
+        )
         if not force:
             conflicts = await find_conflicts(
                 conn, company_id, body.employee_id,
@@ -174,11 +186,8 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 raise_conflict(body.employee_id, conflicts)
             if shift["assigned_count"] >= shift["required_staff"]:
                 raise_shift_full(shift["assigned_count"], shift["required_staff"])
-            avail_map = await fetch_availability(conn, company_id, [body.employee_id])
-            avail = availability_violations(
-                avail_map[body.employee_id], shift["starts_at"], shift["ends_at"])
-            if avail:
-                raise_outside_availability(body.employee_id, avail)
+            if availability:
+                raise_outside_availability(body.employee_id, availability)
         # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
         # overridden, advisories (409) can.
         violations = await check_shift_compliance(
@@ -210,8 +219,13 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                             })
             if violations:  # forced advisories — record the override on the log
                 await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
-                                "assignment.compliance_override",
-                                {"employee_id": str(body.employee_id), "violations": violations})
+                                 "assignment.compliance_override",
+                                 {"employee_id": str(body.employee_id), "violations": violations})
+            if availability:
+                await log_availability_override(
+                    conn, company_id, shift_id, current_user.id,
+                    body.employee_id, availability,
+                )
             if shift["kind"] == "training" and shift["training_requirement_id"] is not None:
                 requirement = await conn.fetchrow(
                     "SELECT id, title, training_type, frequency_months "

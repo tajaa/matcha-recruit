@@ -201,6 +201,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         openChats={() => sections.open('chats')}
         showEvents={showEvents}
         showInventory={showInventory}
+        showChannels={surface !== 'matcha-work'}
         loggedEventsCount={loggedEventsCount}
       />
     )

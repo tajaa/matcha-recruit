@@ -15,18 +15,19 @@ interface ShiftBlockProps {
   onResize(endMinute: number): void
 }
 
-function AssignmentChip({ employeeId, name, shiftId, editable }: {
+function AssignmentChip({ employeeId, name, shiftId, editable, availabilityOverridden }: {
   employeeId: string
   name: string
   shiftId: string
   editable: boolean
+  availabilityOverridden: boolean
 }) {
   const { attributes, listeners, setNodeRef } = useDraggable({
     id: `assignment-${shiftId}-${employeeId}`,
     data: { kind: 'shift-assignment', employeeId, fromShiftId: shiftId },
     disabled: !editable,
   })
-  return <button ref={setNodeRef} {...listeners} {...attributes} className="flex w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-left text-[10px] text-zinc-300 hover:bg-zinc-700"><Users className="h-2.5 w-2.5 shrink-0 text-zinc-500" /><span className="truncate">{name}</span></button>
+  return <button ref={setNodeRef} {...listeners} {...attributes} className="flex w-full items-center gap-1 truncate rounded bg-zinc-800 px-1.5 py-0.5 text-left text-[10px] text-zinc-300 hover:bg-zinc-700"><Users className="h-2.5 w-2.5 shrink-0 text-zinc-500" /><span className="truncate">{name}</span>{availabilityOverridden && <span className="ml-auto shrink-0 text-orange-400" title="Availability override">!</span>}</button>
 }
 
 export default function ShiftBlock({ shift, pending, editable, selectedEmployeeId, style, onOpen, onAssignSelected, onResize }: ShiftBlockProps) {
@@ -71,7 +72,7 @@ export default function ShiftBlock({ shift, pending, editable, selectedEmployeeI
         </button>
       </div>
       <div className="mt-1 space-y-0.5">
-        {shift.assignments.map((assignment) => <AssignmentChip key={assignment.employee_id} employeeId={assignment.employee_id} name={assignment.name} shiftId={shift.id} editable={editable} />)}
+        {shift.assignments.map((assignment) => <AssignmentChip key={assignment.employee_id} employeeId={assignment.employee_id} name={assignment.name} shiftId={shift.id} editable={editable} availabilityOverridden={assignment.availability_overridden} />)}
       </div>
       <div className="mt-1 flex items-center justify-between gap-1 text-[9px]">
         <span className={open ? 'text-amber-400' : 'text-emerald-400'}>{assigned}/{shift.required_staff}</span>

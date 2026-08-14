@@ -5,19 +5,21 @@ import { RegisterSpinner } from '../../../components/register/registerKit'
 import { useAsync } from '../../../hooks/useAsync'
 import {
   fetchOverview, fetchIncidentCorrelation, fetchFairWorkweek, fetchPretextShield,
-  fetchQualifiedCoverage,
+  fetchQualifiedCoverage, fetchAvailabilityOverrides,
 } from '../../../api/employees/scheduleIntelligence'
 import type {
   IncidentCorrelation, FairWorkweek, PretextShield, QualifiedCoverage,
+  AvailabilityOverrides,
 } from '../../../types/scheduleIntelligence'
 
-type Tab = 'incidents' | 'fair_workweek' | 'pretext' | 'coverage'
+type Tab = 'incidents' | 'fair_workweek' | 'pretext' | 'coverage' | 'availability'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'incidents', label: 'Incident Correlation' },
   { value: 'fair_workweek', label: 'Fair Workweek' },
   { value: 'pretext', label: 'Pretext Shield' },
   { value: 'coverage', label: 'Qualified Coverage' },
+  { value: 'availability', label: 'Availability Overrides' },
 ]
 
 function money(n: number | null | undefined): string {
@@ -72,11 +74,16 @@ export default function ScheduleIntelligence() {
       </div>
 
       {m && (
-        <MetricStrip cols="grid-cols-2 md:grid-cols-4">
+        <MetricStrip cols="grid-cols-2 md:grid-cols-5">
           <Stat
             label="Understaffed incident rate"
             value={m.incidents.suppressed ? 'n/a' : (m.incidents.by_staffing?.understaffed.incident_rate ?? '—')}
             tone={m.incidents.suppressed ? 'text-zinc-600' : 'text-amber-400'}
+          />
+          <Stat
+            label="Availability overrides"
+            value={m.availability_overrides.count}
+            tone={m.availability_overrides.count ? 'text-orange-400' : 'text-zinc-200'}
           />
           <Stat
             label="Fair Workweek exposure"
@@ -104,9 +111,34 @@ export default function ScheduleIntelligence() {
       {tab === 'fair_workweek' && <FairWorkweekPanel />}
       {tab === 'pretext' && <PretextPanel />}
       {tab === 'coverage' && <CoveragePanel />}
+      {tab === 'availability' && <AvailabilityOverridesPanel />}
 
       {overview && <Disclaimer text={overview.disclaimer} />}
     </div>
+  )
+}
+
+function AvailabilityOverridesPanel() {
+  const { data, loading } = useAsync(() => fetchAvailabilityOverrides(90), [])
+  if (loading) return <RegisterSpinner />
+  if (!data || data.available === false) return null
+  const d = data as AvailabilityOverrides
+  return (
+    <Card className="min-w-0 p-5 space-y-4">
+      <h3 className="text-sm font-medium text-zinc-200">Assignments outside logged availability</h3>
+      <p className="text-xs text-zinc-500">{d.count} current assignment(s) were deliberately placed outside recurring availability in the last {d.days} days.</p>
+      {d.items.length === 0 ? <p className="text-sm text-zinc-500">No availability overrides found.</p> : (
+        <div className="divide-y divide-zinc-800">
+          {d.items.map((item) => (
+            <div key={`${item.shift_id}-${item.employee_id}`} className="flex flex-wrap items-center justify-between gap-2 py-3 text-xs">
+              <div><span className="text-zinc-200">{item.employee_name}</span><span className="text-zinc-500"> · {item.role || 'Shift'} · {item.location_name || 'No location'}</span></div>
+              <div className="font-mono text-orange-400">{new Date(item.starts_at).toLocaleString()}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <Disclaimer text={d.disclaimer} />
+    </Card>
   )
 }
 

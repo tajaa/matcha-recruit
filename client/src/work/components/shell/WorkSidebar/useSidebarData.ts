@@ -19,9 +19,10 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
   const [pendingConnections, setPendingConnections] = useState(0)
   const [plusActive, setPlusActive] = useState<boolean | null>(null)
   const loggedEventsCount = useLoggedEventsCount(emsEnabled)
+  const showChannels = base !== '/work'
 
   useEffect(() => {
-    listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
+    if (showChannels) listChannels().then(setChannels).catch(() => {})
     listProjects().then(setProjects).catch(() => {})
     listThreads('active').then(setThreads).catch(() => {})
     getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
@@ -33,22 +34,23 @@ export function useSidebarData(isPersonal: boolean, base: string, pathname: stri
         ))
         .catch(() => setPlusActive(false))
     }
-  }, [])
+  }, [showChannels])
 
   useEffect(() => {
-    if (pathname === base) {
-      listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
+    if (showChannels && pathname === base) {
+      listChannels().then(setChannels).catch(() => {})
     }
-  }, [pathname])
+  }, [pathname, showChannels])
 
   // Refetch channels when anywhere in the app creates/joins/leaves one.
   useEffect(() => {
+    if (!showChannels) return
     const handler = () => {
-      listChannels(base === '/work' ? { scope: 'project_discussion' } : undefined).then(setChannels).catch(() => {})
+      listChannels().then(setChannels).catch(() => {})
     }
     window.addEventListener(CHANNELS_CHANGED_EVENT, handler)
     return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)
-  }, [])
+  }, [showChannels])
 
   // Refetch threads when a title changes (auto-title landing, manual rename)
   // or any other thread-list-affecting change fires.

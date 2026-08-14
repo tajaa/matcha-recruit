@@ -337,6 +337,23 @@ def test_availability_violation_blocks_without_force(monkeypatch):
     assert conn.audits == []
 
 
+def test_force_availability_violation_writes_override_audit(monkeypatch):
+    violation = [{"weekday": 3, "message": "Employee is unavailable"}]
+    conn, source_id, target_id = _setup(monkeypatch, availability=violation)
+
+    _call(conn, source_id, target_id, force=True)
+
+    assert [audit["action"] for audit in conn.audits] == [
+        "assignment.delete",
+        "assignment.create",
+        "assignment.availability_override",
+    ]
+    assert conn.audits[-1]["details"] == {
+        "employee_id": str(EMPLOYEE_ID),
+        "violations": violation,
+    }
+
+
 def test_hard_compliance_block_cannot_be_forced(monkeypatch):
     violation = [{"check": "minor_hours", "severity": "block", "message": "Hard limit"}]
     conn, source_id, target_id = _setup(monkeypatch, compliance=violation)

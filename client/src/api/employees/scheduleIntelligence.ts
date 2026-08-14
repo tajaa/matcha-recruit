@@ -2,10 +2,17 @@ import { api } from '../client'
 import type {
   ScheduleIntelOverview, IncidentCorrelation, FairWorkweek, PretextShield,
   QualifiedCoverage, Unavailable,
+  AvailabilityOverrides,
 } from '../../types/scheduleIntelligence'
 
 export function fetchOverview() {
   return api.get<ScheduleIntelOverview | Unavailable>('/schedule-intelligence/overview')
+}
+
+export function fetchAvailabilityOverrides(days = 90) {
+  return api.get<AvailabilityOverrides | Unavailable>(
+    `/schedule-intelligence/availability-overrides?days=${days}`,
+  )
 }
 
 export function fetchIncidentCorrelation(days = 180) {

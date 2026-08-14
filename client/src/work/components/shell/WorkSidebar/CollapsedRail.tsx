@@ -18,6 +18,7 @@ interface Props {
   openChats: () => void
   showEvents: boolean
   showInventory: boolean
+  showChannels: boolean
   loggedEventsCount: number
 }
 
@@ -38,6 +39,7 @@ export default function CollapsedRail({
   openChats,
   showEvents,
   showInventory,
+  showChannels,
   loggedEventsCount,
 }: Props) {
   return (
@@ -102,7 +104,7 @@ export default function CollapsedRail({
         </button>
       )}
 
-      <button
+      {showChannels && <button
         onClick={() => { onToggle(); openChannels() }}
         className={`relative p-2 rounded-lg transition-colors ${pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
         title="Channels"
@@ -113,7 +115,7 @@ export default function CollapsedRail({
             {totalChannelUnread > 9 ? '!' : totalChannelUnread}
           </span>
         )}
-      </button>
+      </button>}
 
       {mwBetaLite && (
         <button

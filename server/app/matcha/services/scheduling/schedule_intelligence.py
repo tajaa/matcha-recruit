@@ -45,6 +45,10 @@ QUALIFIED_COVERAGE_DISCLAIMER = (
     "Reflects credential/training records as stored on the platform as of now — "
     "verify against the source system before relying on it for a compliance decision."
 )
+AVAILABILITY_OVERRIDE_DISCLAIMER = (
+    "Assignments shown here were deliberately placed outside the employee's logged recurring "
+    "availability. This is an operational review signal, not a timekeeping or legal conclusion."
+)
 
 _ATTENDANCE_LOOKBACK_DAYS = 90
 _PRETEXT_LOOKBACK_MONTHS = 6
@@ -569,6 +573,55 @@ async def build_qualified_coverage(
 
 # ── Overview ──────────────────────────────────────────────────────────────
 
+async def build_availability_overrides(conn, company_id: UUID, *, days: int = 90) -> dict[str, Any]:
+    """Return current assignments created through an availability override."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = await conn.fetch(
+        """
+        SELECT sal.entity_id AS shift_id, sal.details, sal.created_at,
+               s.starts_at, s.ends_at, s.role, s.location_id,
+               e.id AS employee_id, e.first_name, e.last_name, e.job_title,
+               bl.name AS location_name
+        FROM schedule_audit_log sal
+        JOIN schedule_shifts s ON s.id = sal.entity_id AND s.company_id = sal.company_id
+        JOIN schedule_shift_assignments a ON a.shift_id = s.id
+        JOIN employees e ON e.id = a.employee_id
+        LEFT JOIN business_locations bl ON bl.id = s.location_id
+        WHERE sal.company_id = $1
+          AND sal.action = 'assignment.availability_override'
+          AND sal.created_at >= $2
+          AND (sal.details->>'employee_id')::uuid = a.employee_id
+        ORDER BY s.starts_at ASC, e.last_name ASC, e.first_name ASC, sal.created_at DESC
+        """,
+        company_id, since,
+    )
+    items = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (str(row["shift_id"]), str(row["employee_id"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        details = _details(row["details"])
+        items.append({
+            "shift_id": str(row["shift_id"]),
+            "employee_id": str(row["employee_id"]),
+            "employee_name": f"{row['first_name']} {row['last_name']}".strip(),
+            "job_title": row["job_title"],
+            "role": row["role"],
+            "location_name": row["location_name"],
+            "starts_at": row["starts_at"].isoformat(),
+            "ends_at": row["ends_at"].isoformat(),
+            "overridden_at": row["created_at"].isoformat(),
+            "violations": details.get("violations", []),
+        })
+    return {
+        "days": days,
+        "count": len(items),
+        "items": items,
+        "disclaimer": AVAILABILITY_OVERRIDE_DISCLAIMER,
+    }
+
 async def build_overview(
     conn, company_id: UUID, *, credential_templates_enabled: bool, training_enabled: bool,
 ) -> dict[str, Any]:
@@ -580,6 +633,7 @@ async def build_overview(
         credential_templates_enabled=credential_templates_enabled,
         training_enabled=training_enabled,
     )
+    availability = await build_availability_overrides(conn, company_id)
     total_exposure = sum(
         (loc["exposure_estimate"] or 0) for loc in fw["locations"] if loc["exposure_estimate"] is not None
     )
@@ -606,6 +660,7 @@ async def build_overview(
                 "shifts_with_lapses": understaffed_lapsed,
                 "sources": coverage["sources"],
             },
+            "availability_overrides": {"count": availability["count"]},
         },
         "disclaimer": (
             "All Schedule Intelligence figures are directional estimates computed from "

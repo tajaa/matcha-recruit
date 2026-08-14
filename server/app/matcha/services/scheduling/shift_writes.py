@@ -70,6 +70,22 @@ async def log_audit(
     )
 
 
+async def log_availability_override(
+    conn,
+    company_id: UUID,
+    shift_id: UUID,
+    actor_user_id: UUID,
+    employee_id: UUID,
+    violations: list[dict],
+) -> None:
+    """Record a forced assignment outside the employee's availability."""
+    await log_audit(
+        conn, company_id, "assignment", shift_id, actor_user_id,
+        "assignment.availability_override",
+        {"employee_id": str(employee_id), "violations": violations},
+    )
+
+
 async def find_conflicts(
     conn,
     company_id: UUID,

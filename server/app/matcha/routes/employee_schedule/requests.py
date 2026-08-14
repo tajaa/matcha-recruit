@@ -22,6 +22,7 @@ from ._shared import (
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
     fetch_availability, availability_violations, raise_outside_availability,
 )
+from ...services.scheduling.shift_writes import log_availability_override
 from ._compliance import check_shift_compliance, raise_for_violations
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,14 @@ async def review_request(request_id: UUID, body: RequestReview,
                     "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
                     req["shift_id"], company_id,
                 )
+                availability_override: list[dict] = []
+                if window:
+                    avail_map = await fetch_availability(
+                        conn, company_id, [req["target_employee_id"]])
+                    availability_override = availability_violations(
+                        avail_map[req["target_employee_id"]],
+                        window["starts_at"], window["ends_at"],
+                    )
                 if window and not body.force:
                     conflicts = await find_conflicts(
                         conn, company_id, req["target_employee_id"],
@@ -126,13 +135,8 @@ async def review_request(request_id: UUID, body: RequestReview,
                     )
                     if conflicts:
                         raise_conflict(req["target_employee_id"], conflicts)
-                    avail_map = await fetch_availability(
-                        conn, company_id, [req["target_employee_id"]])
-                    avail = availability_violations(
-                        avail_map[req["target_employee_id"]],
-                        window["starts_at"], window["ends_at"])
-                    if avail:
-                        raise_outside_availability(req["target_employee_id"], avail)
+                    if availability_override:
+                        raise_outside_availability(req["target_employee_id"], availability_override)
                 if window:
                     # Approving a swap is an assignment write like any other —
                     # without this, a swap was the one path that bypassed the
@@ -212,6 +216,11 @@ async def review_request(request_id: UUID, body: RequestReview,
                                 "training assignment failed for swapped-in training shift %s",
                                 req["shift_id"],
                             )
+                    if availability_override:
+                        await log_availability_override(
+                            conn, company_id, req["shift_id"], current_user.id,
+                            req["target_employee_id"], availability_override,
+                        )
 
             shift_starts_at = None
             if req["shift_id"] is not None:

@@ -25,7 +25,7 @@ from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
-    fetch_availability, availability_violations, raise_outside_availability,
+    fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
     shift_window_on_date, fetch_schedule_locations,
 )
 from ._compliance import (
@@ -172,23 +172,27 @@ async def create_shift(body: ShiftCreate,
             )
 
         avail_map: dict = {}
-        if body.employee_ids and not force:
+        if body.employee_ids:
             avail_map = await fetch_availability(
                 conn, company_id, list(dict.fromkeys(body.employee_ids)))
 
         forced: dict[str, list[dict]] = {}
+        availability_overrides: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
+            avail = availability_violations(
+                avail_map.get(emp_id, {}), body.starts_at, body.ends_at,
+            )
             if not force:
                 conflicts = await find_conflicts(
                     conn, company_id, emp_id, body.starts_at, body.ends_at,
                 )
                 if conflicts:
                     raise_conflict(emp_id, conflicts)
-                avail = availability_violations(
-                    avail_map.get(emp_id, {}), body.starts_at, body.ends_at)
                 if avail:
                     raise_outside_availability(emp_id, avail)
+            if avail:
+                availability_overrides[str(emp_id)] = avail
             violations = await check_shift_compliance(
                 conn, company_id, location_id=body.location_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
@@ -224,6 +228,10 @@ async def create_shift(body: ShiftCreate,
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
+            for emp_id, avail in availability_overrides.items():
+                await log_availability_override(
+                    conn, company_id, shift_id, current_user.id, UUID(emp_id), avail,
+                )
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -387,11 +395,15 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     training_enabled=bool(company_features.get("training")),
                 )
             avail_map: dict = {}
-            if assignees and retimed and not force:
+            if assignees and retimed:
                 avail_map = await fetch_availability(
                     conn, company_id, [row["employee_id"] for row in assignees])
+            availability_overrides: dict[str, list[dict]] = {}
             for row in assignees:
                 emp = row["employee_id"]
+                avail = availability_violations(
+                    avail_map.get(emp, {}), new_start, new_end,
+                ) if retimed else []
                 if retimed and not force:
                     conflicts = await find_conflicts(
                         conn, company_id, emp, new_start, new_end,
@@ -399,9 +411,10 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     )
                     if conflicts:
                         raise_conflict(emp, conflicts)
-                    avail = availability_violations(avail_map.get(emp, {}), new_start, new_end)
                     if avail:
                         raise_outside_availability(emp, avail)
+                if avail:
+                    availability_overrides[str(emp)] = avail
                 violations = await check_shift_compliance(
                     conn, company_id, location_id=new_location,
                     starts_at=new_start, ends_at=new_end,
@@ -482,6 +495,11 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
+            for employee_id, avail in availability_overrides.items():
+                await log_availability_override(
+                    conn, company_id, shift_id, current_user.id,
+                    UUID(employee_id), avail,
+                )
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
