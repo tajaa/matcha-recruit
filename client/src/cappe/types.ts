@@ -597,6 +597,8 @@ export type CappeBooking = {
   customer_email: string | null
   starts_at: string
   ends_at: string
+  location_id?: string | null
+  location_name?: string | null
   status: 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'completed'
   note: string | null
   requires_approval: boolean

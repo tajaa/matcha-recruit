@@ -3,17 +3,12 @@ import { useParams } from 'react-router-dom'
 import { Loader2, Calendar, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react'
 import { cappePublicGet, cappePublicPost } from '../api'
 import type { CappePublicBooking, CappeSlot, CappeSlotsResponse } from '../types'
+import { formatBookingDateTime } from '../utils/bookingTime'
 
 function money(cents: number | null): string {
   if (!cents) return ''
   return `$${(cents / 100).toFixed(2)}`
 }
-function whenLong(ts: string): string {
-  return new Date(ts).toLocaleString([], {
-    weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-}
-
 // Public, token-gated page where a customer views / cancels / reschedules their
 // booking from an emailed link. No account required.
 export default function CappeBookingManage() {
@@ -129,7 +124,7 @@ export default function CappeBookingManage() {
           <div>
             <div className="text-base font-semibold text-zinc-50">{booking.type_name}</div>
             <div className="mt-1 flex items-center gap-1.5 text-sm text-zinc-400">
-              <Calendar className="h-4 w-4" /> {whenLong(booking.starts_at)}
+              <Calendar className="h-4 w-4" /> {formatBookingDateTime(booking.starts_at, booking.timezone)}
             </div>
             <div className="mt-1 text-xs text-zinc-500">Times shown in {booking.timezone}</div>
           </div>

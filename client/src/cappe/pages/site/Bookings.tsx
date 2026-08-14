@@ -42,7 +42,13 @@ export default function Bookings() {
 
       {/* Requests needing approval — the creator's queue */}
       {b.pending.length > 0 && (
-        <PendingRequests pending={b.pending} acceptBooking={b.acceptBooking} declineBooking={b.declineBooking} />
+        <PendingRequests
+          pending={b.pending}
+          timezoneForBooking={b.timezoneForBooking}
+          allLocations={b.isAllLocationsView}
+          acceptBooking={b.acceptBooking}
+          declineBooking={b.declineBooking}
+        />
       )}
 
       {/* Schedule — calendar / list of all bookings */}
@@ -56,6 +62,9 @@ export default function Bookings() {
         acceptBooking={b.acceptBooking}
         declineBooking={b.declineBooking}
         setBookingStatus={b.setBookingStatus}
+        calendarTimezone={b.calendarTimezone}
+        timezoneForBooking={b.timezoneForBooking}
+        allLocations={b.isAllLocationsView}
       />
 
       {/* Staff / stylists */}

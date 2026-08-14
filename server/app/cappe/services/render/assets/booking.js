@@ -15,7 +15,8 @@ var types=r[0],rider=(r[1]&&r[1].items)||[],staffList=r[2]||[];
 if(!types.length){box.innerHTML='<p style="color:var(--muted)">No appointments available.</p>';return;}
 var byId={};types.forEach(function(t){byId[t.id]=t;});
 var staffById={};staffList.forEach(function(s){staffById[s.id]=s;});
-var selStaff=null;
+ var selStaff=null,bookingTimezone='UTC';
+ function formatBookingWhen(timestamp){return new Date(timestamp).toLocaleString([], {timeZone:bookingTimezone});}
 function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,'USD');return t.pricing_mode==='hourly'?m+'/hr':m;}
 var reqRider=rider.filter(function(i){return i.is_required;});
 var riderHtml='';
@@ -38,7 +39,7 @@ ids.map(function(id){var s=staffById[id];if(!s)return '';var iu=RT.url(s.image_u
 staffWrap.querySelectorAll('.cz-staff').forEach(function(b){b.addEventListener('click',function(){staffWrap.querySelectorAll('.cz-staff').forEach(function(x){x.classList.remove('cz-staff--on');});b.classList.add('cz-staff--on');selStaff=b.getAttribute('data-staff-id')||null;loadSlots();});});}
  function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
 var t=cur();if(!t)return;
-RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];
+ RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];bookingTimezone=(d&&d.timezone)||bookingTimezone;
 if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
 // One price line when every slot costs the same; otherwise show price per time.
@@ -70,7 +71,7 @@ dayBtns.forEach(function(b,i){b.addEventListener('click',function(){showDay(i);}
   if(box.querySelector('[data-website]').value){aiOptions.innerHTML='<p class="cz-msg err">Could not find times.</p>';return;}
   aiGo.disabled=true;aiGo.textContent='Finding times…';aiOptions.innerHTML='<p style="color:var(--muted)">Checking the live calendar…</p>';
   var t=cur(),params={booking_type_id:t.id,location_id:selLoc||null,staff_id:selStaff||null,request:text,website:box.querySelector('[data-website]').value};
-  RT.post('/booking-suggestions',params).then(function(d){
+   RT.post('/booking-suggestions',params).then(function(d){bookingTimezone=(d&&d.timezone)||bookingTimezone;
    var opts=(d&&d.options)||[];
    if(!opts.length){aiOptions.innerHTML='<p style="color:var(--muted)">No matching open times. Try a broader request or use the picker below.</p>';return;}
    aiOptions.innerHTML='<p class="cz-label">Suggested times'+(d.unmatched_staff_names&&d.unmatched_staff_names.length?' · Could not match: '+RT.esc(d.unmatched_staff_names.join(', ')):'')+'</p>'+opts.map(function(o,i){return '<button type="button" class="cz-slot" data-ai-option="'+i+'">'+RT.esc(o.day_label)+' · '+RT.esc(o.time_label)+(o.staff_name?' · '+RT.esc(o.staff_name):'')+(o.price_cents?' · '+RT.money(o.price_cents,'USD'):'')+'</button>';}).join('');
@@ -89,7 +90,8 @@ if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
  sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
 RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
-var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
+ var note=res.requires_approval?'Request sent for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(formatBookingWhen(res.starts_at))+price+'. A confirmation is on its way.';
+ note+=' Times in '+RT.esc(res.timezone||bookingTimezone)+'.';
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
  }).catch(function(e){sb.disabled=false;sb.textContent='Request booking';sel=null;msg.textContent=e.message;msg.className='cz-msg err';loadSlots();});});
   box.dispatchEvent(new CustomEvent('cappe:booking-ready'));

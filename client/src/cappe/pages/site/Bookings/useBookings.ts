@@ -23,6 +23,7 @@ export function useBookings() {
   const [discounts, setDiscounts] = useState<CappeDiscount[]>([])
   const [staff, setStaff] = useState<CappeStaff[]>([])
   const [locations, setLocations] = useState<CappeLocation[]>([])
+  const [siteTimezone, setSiteTimezone] = useState('UTC')
   const [multiLoc, setMultiLoc] = useState(false)  // site.is_multi_location — gates the branch UI
   const [selLoc, setSelLoc] = useState<string>('')  // '' = Shared / all locations
   const [showLocMgr, setShowLocMgr] = useState(false)
@@ -70,7 +71,10 @@ export function useBookings() {
   }
 
   useEffect(() => {
-    cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => setMultiLoc(!!s.is_multi_location)).catch(() => {})
+    cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => {
+      setMultiLoc(!!s.is_multi_location)
+      setSiteTimezone(s.timezone || 'UTC')
+    }).catch(() => {})
     cappeApi.get<CappeLocation[]>(`/sites/${siteId}/locations`).catch(() => [] as CappeLocation[])
       .then((locs) => {
         setLocations(locs)
@@ -281,25 +285,36 @@ export function useBookings() {
   // --- Booking actions ---
   async function acceptBooking(b: CappeBooking) {
     const updated = await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/accept`)
-    setBookings((list) => list.map((x) => (x.id === b.id ? updated : x)))
+    setBookings((list) => list.map((x) => (
+      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
+    )))
   }
   async function declineBooking(b: CappeBooking) {
     const reason = window.prompt('Reason for declining (optional, shown to the customer):') ?? undefined
     const updated = await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/decline`, { reason })
-    setBookings((list) => list.map((x) => (x.id === b.id ? updated : x)))
+    setBookings((list) => list.map((x) => (
+      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
+    )))
   }
   async function setBookingStatus(b: CappeBooking, status: string) {
     const updated = await cappeApi.patch<CappeBooking>(`/sites/${siteId}/bookings/${b.id}`, { status })
-    setBookings((list) => list.map((x) => (x.id === b.id ? updated : x)))
+    setBookings((list) => list.map((x) => (
+      x.id === b.id ? { ...updated, location_name: updated.location_name ?? x.location_name } : x
+    )))
   }
 
   const pending = bookings.filter((b) => b.status === 'pending' && b.requires_approval)
   const hasHourly = types.some((t) => t.pricing_mode === 'hourly')
+  const calendarTimezone = locations.find((location) => location.id === selLoc)?.timezone || siteTimezone
+  const timezoneForBooking = (booking: CappeBooking): string =>
+    locations.find((location) => location.id === booking.location_id)?.timezone || siteTimezone
+  const isAllLocationsView = selLoc === '' && locations.some((location) => location.active)
 
   return {
     siteId, account,
     types, setTypes, slots, setSlots, bookings, rules, setRules, rider, setRider,
     products, discounts, setDiscounts, staff, locations,
+    calendarTimezone, timezoneForBooking, isAllLocationsView,
     multiLoc, selLoc, showLocMgr, setShowLocMgr, locForm, setLocForm,
     loading, error, view, setView,
     typeForm, setTypeForm, staffForm, setStaffForm,

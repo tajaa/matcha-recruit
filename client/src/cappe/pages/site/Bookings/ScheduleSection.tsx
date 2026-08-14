@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { Calendar, List } from 'lucide-react'
 import BookingsCalendar from '../../../components/BookingsCalendar'
 import type { CappeBooking, CappeBookingType, CappeAvailabilitySlot, CappeStaff } from '../../../types'
+import { formatBookingDateTime } from '../../../utils/bookingTime'
 import { money, statusStyle } from './constants'
 
 interface ScheduleSectionProps {
@@ -14,10 +15,14 @@ interface ScheduleSectionProps {
   acceptBooking: (b: CappeBooking) => void
   declineBooking: (b: CappeBooking) => void
   setBookingStatus: (b: CappeBooking, status: string) => void
+  calendarTimezone: string
+  timezoneForBooking: (booking: CappeBooking) => string
+  allLocations: boolean
 }
 
 export function ScheduleSection({
   view, setView, bookings, slots, types, staff, acceptBooking, declineBooking, setBookingStatus,
+  calendarTimezone, timezoneForBooking, allLocations,
 }: ScheduleSectionProps) {
   return (
     <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -29,7 +34,18 @@ export function ScheduleSection({
         </div>
       </div>
       {view === 'calendar' ? (
-        <BookingsCalendar bookings={bookings} availability={slots} types={types} staff={staff} onAccept={acceptBooking} onDecline={declineBooking} onStatus={setBookingStatus} />
+        <BookingsCalendar
+          bookings={bookings}
+          availability={slots}
+          types={types}
+          staff={staff}
+          onAccept={acceptBooking}
+          onDecline={declineBooking}
+          onStatus={setBookingStatus}
+          calendarTimezone={calendarTimezone}
+          timezoneForBooking={timezoneForBooking}
+          allLocations={allLocations}
+        />
       ) : bookings.length === 0 ? (
         <p className="flex items-center gap-2 text-sm text-zinc-400"><Calendar className="h-4 w-4" /> No bookings yet.</p>
       ) : (
@@ -38,7 +54,10 @@ export function ScheduleSection({
             <li key={b.id} className="flex items-center gap-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-zinc-200">{b.customer_email || 'No email'} <span className="text-zinc-500">{money(b.quoted_price_cents)}</span></div>
-                <div className="text-xs text-zinc-400">{new Date(b.starts_at).toLocaleString()}</div>
+                <div className="text-xs text-zinc-400">
+                  {formatBookingDateTime(b.starts_at, timezoneForBooking(b))}
+                  {allLocations && b.location_name && ` · ${b.location_name}`}
+                </div>
               </div>
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[b.status]}`}>{b.status}</span>
               <select value={b.status} onChange={(e) => setBookingStatus(b, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">

@@ -1,14 +1,17 @@
 import { Check, X, Clock, ShieldCheck } from 'lucide-react'
 import type { CappeBooking } from '../../../types'
+import { formatBookingDateTime, formatBookingTime } from '../../../utils/bookingTime'
 import { money } from './constants'
 
 interface PendingRequestsProps {
   pending: CappeBooking[]
+  timezoneForBooking: (booking: CappeBooking) => string
+  allLocations: boolean
   acceptBooking: (b: CappeBooking) => void
   declineBooking: (b: CappeBooking) => void
 }
 
-export function PendingRequests({ pending, acceptBooking, declineBooking }: PendingRequestsProps) {
+export function PendingRequests({ pending, timezoneForBooking, allLocations, acceptBooking, declineBooking }: PendingRequestsProps) {
   return (
     <section className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/[0.05] p-5">
       <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-amber-200">
@@ -20,7 +23,8 @@ export function PendingRequests({ pending, acceptBooking, declineBooking }: Pend
             <div className="min-w-0 flex-1">
               <div className="truncate text-zinc-100">{b.customer_name || b.customer_email || 'Customer'}</div>
               <div className="text-xs text-zinc-400">
-                {new Date(b.starts_at).toLocaleString()} – {new Date(b.ends_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {formatBookingDateTime(b.starts_at, timezoneForBooking(b))} – {formatBookingTime(b.ends_at, timezoneForBooking(b))}
+                {allLocations && b.location_name && <>{' · '}{b.location_name}</>}
                 {' · '}<span className="text-emerald-400">{money(b.quoted_price_cents)}</span>
                 {b.rider_acknowledged && <span className="ml-2 inline-flex items-center gap-1 text-zinc-500"><ShieldCheck className="h-3 w-3" /> agreed to rider</span>}
               </div>

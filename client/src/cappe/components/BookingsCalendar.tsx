@@ -1,16 +1,26 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Check, X, Clock, ShieldCheck } from 'lucide-react'
 import { WEEKDAYS } from './SurfaceShell'
 import type { CappeBooking, CappeAvailabilitySlot, CappeBookingType, CappeStaff } from '../types'
 import { applicableSlotsForType } from '../utils/bookingAvailability'
+import { bookingDateKey, formatBookingTime } from '../utils/bookingTime'
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 const money = (c: number | null | undefined) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`)
 const hhmm = (t: string) => t.slice(0, 5)
 
-// JS getDay() is Sun=0..Sat=6; availability.weekday is Python Mon=0..Sun=6.
-const pyWeekday = (d: Date) => (d.getDay() + 6) % 7
-const dateKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// Calendar dates are logical dates in the selected business timezone. UTC date
+// objects are used only for arithmetic so the browser timezone cannot shift them.
+const pyWeekday = (d: Date) => (d.getUTCDay() + 6) % 7
+const dateKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+const dateParts = (key: string) => {
+  const [y, m, d] = key.split('-').map(Number)
+  return { y, m: m - 1, d }
+}
+const dateFromKey = (key: string) => {
+  const { y, m, d } = dateParts(key)
+  return new Date(Date.UTC(y, m, d))
+}
 
 const dotColor: Record<string, string> = {
   pending: 'bg-amber-400',
@@ -35,13 +45,26 @@ type Props = {
   onAccept: (b: CappeBooking) => void
   onDecline: (b: CappeBooking) => void
   onStatus: (b: CappeBooking, status: string) => void
+  calendarTimezone: string
+  timezoneForBooking: (booking: CappeBooking) => string
+  allLocations: boolean
 }
 
-export default function BookingsCalendar({ bookings, availability, types, staff, onAccept, onDecline, onStatus }: Props) {
-  const today = new Date()
-  const [cursor, setCursor] = useState({ y: today.getFullYear(), m: today.getMonth() })
-  const [selected, setSelected] = useState<string>(dateKey(today))
+export default function BookingsCalendar({
+  bookings, availability, types, staff, onAccept, onDecline, onStatus,
+  calendarTimezone, timezoneForBooking, allLocations,
+}: Props) {
+  const todayKey = bookingDateKey(new Date().toISOString(), calendarTimezone)
+  const todayParts = dateParts(todayKey)
+  const [cursor, setCursor] = useState({ y: todayParts.y, m: todayParts.m })
+  const [selected, setSelected] = useState<string>(todayKey)
   const [selectedTypeId, setSelectedTypeId] = useState('')
+
+  useEffect(() => {
+    const next = dateParts(bookingDateKey(new Date().toISOString(), calendarTimezone))
+    setCursor({ y: next.y, m: next.m })
+    setSelected(bookingDateKey(new Date().toISOString(), calendarTimezone))
+  }, [calendarTimezone])
 
   const typeName = useMemo(() => {
     const map: Record<string, string> = {}
@@ -63,22 +86,22 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
     const m: Record<string, CappeBooking[]> = {}
     for (const b of bookings) {
       if (b.status === 'cancelled' || b.status === 'declined') continue
-      const k = dateKey(new Date(b.starts_at))
+      const k = bookingDateKey(b.starts_at, timezoneForBooking(b))
       ;(m[k] ||= []).push(b)
     }
     Object.values(m).forEach((list) => list.sort((a, z) => +new Date(a.starts_at) - +new Date(z.starts_at)))
     return m
-  }, [bookings])
+  }, [bookings, timezoneForBooking])
 
   // Availability windows grouped by Python weekday.
   const availByWeekday = useMemo(() => {
     const m: Record<number, CappeAvailabilitySlot[]> = {}
-    for (const s of availability) (m[s.weekday] ||= []).push(s)
+    for (const s of calendarAvailability) (m[s.weekday] ||= []).push(s)
     return m
   }, [calendarAvailability])
 
-  const daysInMonth = new Date(cursor.y, cursor.m + 1, 0).getDate()
-  const leadBlanks = pyWeekday(new Date(cursor.y, cursor.m, 1))
+  const daysInMonth = new Date(Date.UTC(cursor.y, cursor.m + 1, 0)).getUTCDate()
+  const leadBlanks = pyWeekday(new Date(Date.UTC(cursor.y, cursor.m, 1)))
   const cells: (number | null)[] = [
     ...Array(leadBlanks).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
@@ -86,14 +109,12 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
   while (cells.length % 7 !== 0) cells.push(null)
 
   const move = (delta: number) => {
-    const d = new Date(cursor.y, cursor.m + delta, 1)
-    setCursor({ y: d.getFullYear(), m: d.getMonth() })
+    const d = new Date(Date.UTC(cursor.y, cursor.m + delta, 1))
+    setCursor({ y: d.getUTCFullYear(), m: d.getUTCMonth() })
   }
-  const todayKey = dateKey(today)
 
   const selectedDate = useMemo(() => {
-    const [y, m, d] = selected.split('-').map(Number)
-    return new Date(y, m - 1, d)
+    return dateFromKey(selected)
   }, [selected])
   const selectedBookings = byDay[selected] || []
   const selectedAvail = availByWeekday[pyWeekday(selectedDate)] || []
@@ -105,7 +126,7 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-zinc-100">{MONTHS[cursor.m]} {cursor.y}</h3>
           <div className="flex items-center gap-1">
-            <button onClick={() => setCursor({ y: today.getFullYear(), m: today.getMonth() })} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800">Today</button>
+            <button onClick={() => setCursor({ y: todayParts.y, m: todayParts.m })} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800">Today</button>
             <button onClick={() => move(-1)} className="rounded-lg border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800"><ChevronLeft className="h-4 w-4" /></button>
             <button onClick={() => move(1)} className="rounded-lg border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800"><ChevronRight className="h-4 w-4" /></button>
           </div>
@@ -120,9 +141,9 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
           ))}
           {cells.map((day, i) => {
             if (day == null) return <div key={i} className="min-h-[68px] bg-zinc-950/40" />
-            const k = dateKey(new Date(cursor.y, cursor.m, day))
+            const k = dateKey(new Date(Date.UTC(cursor.y, cursor.m, day)))
             const dayBookings = byDay[k] || []
-            const hasAvail = (availByWeekday[pyWeekday(new Date(cursor.y, cursor.m, day))] || []).length > 0
+            const hasAvail = (availByWeekday[pyWeekday(new Date(Date.UTC(cursor.y, cursor.m, day)))] || []).length > 0
             const isToday = k === todayKey
             const isSel = k === selected
             return (
@@ -139,7 +160,7 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
                   {dayBookings.slice(0, 2).map((b) => (
                     <div key={b.id} className="flex items-center gap-1 truncate text-[10px] text-zinc-300">
                       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotColor[b.status] || 'bg-zinc-500'}`} />
-                      <span className="truncate">{new Date(b.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                      <span className="truncate">{formatBookingTime(b.starts_at, timezoneForBooking(b))}</span>
                     </div>
                   ))}
                   {dayBookings.length > 2 && <div className="text-[10px] text-zinc-500">+{dayBookings.length - 2} more</div>}
@@ -154,12 +175,15 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
           <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-sky-400" /> Completed</span>
           <span className="flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500/40" /> Open for booking</span>
         </div>
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {allLocations ? 'Bookings use each location’s local time.' : `Times in ${calendarTimezone}.`}
+        </p>
       </div>
 
       {/* day detail */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
         <h3 className="text-sm font-semibold text-zinc-100">
-          {selectedDate.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}
+          {new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' }).format(selectedDate)}
         </h3>
 
         {selectedAvail.length > 0 ? (
@@ -188,8 +212,9 @@ export default function BookingsCalendar({ bookings, availability, types, staff,
                     <div className="min-w-0">
                       <div className="truncate text-zinc-100">{b.customer_name || b.customer_email || 'Customer'}</div>
                       <div className="text-xs text-zinc-400">
-                        {new Date(b.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                        –{new Date(b.ends_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                        {formatBookingTime(b.starts_at, timezoneForBooking(b))}
+                        –{formatBookingTime(b.ends_at, timezoneForBooking(b))}
+                        {allLocations && (b.location_name || timezoneForBooking(b)) ? ` · ${b.location_name || timezoneForBooking(b)}` : ''}
                         {b.booking_type_id && typeName[b.booking_type_id] ? ` · ${typeName[b.booking_type_id]}` : ''}
                         {b.staff_name ? ` · ${b.staff_name}` : ''}
                         {' · '}<span className="text-emerald-400">{money(b.quoted_price_cents)}</span>
