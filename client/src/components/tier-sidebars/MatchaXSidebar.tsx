@@ -3,7 +3,7 @@ import {
   IconPeople, IconSeal, IconSetup, IconShield,
   IconSteps, IconTraining, IconTrend,
 } from '../sidebars/nav-icons'
-import { CalendarClock, BarChart3, HeartPulse, Sparkles, LayoutDashboard } from 'lucide-react'
+import { CalendarClock, BarChart3, HeartPulse, Sparkles, LayoutDashboard, Radio } from 'lucide-react'
 import SidebarShell from '../sidebars/SidebarShell'
 import type { NavItem, NavGroup } from '../sidebars/SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -70,6 +70,13 @@ const nav: (NavItem | NavGroup)[] = [
     // on 'huume' in THREAD_MODE_TOGGLES (work/components/panels/constants.ts).
     items: [
       { to: '/work', icon: Sparkles, label: 'Matcha-Work', feature: 'matcha_work' },
+    ],
+  },
+  {
+    label: 'Operations',
+    defaultOpen: true,
+    items: [
+      { to: '/ops', icon: Radio, label: 'Matcha Ops', feature: 'matcha_ops' },
     ],
   },
   {

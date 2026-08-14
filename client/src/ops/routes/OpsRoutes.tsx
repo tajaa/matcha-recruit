@@ -16,7 +16,7 @@ import { WorkSurfaceProvider } from '../../work/routes/WorkSurfaceContext'
 import type { ReactNode } from 'react'
 
 function OpsGate({ children }: { children: ReactNode }) {
-  return <FeatureGate feature="matcha_ops" label="Matcha Ops">{children}</FeatureGate>
+  return <FeatureGate feature="matcha_ops" label="Matcha Ops" allowPlatformAdmin>{children}</FeatureGate>
 }
 
 export default function OpsRoutes() {

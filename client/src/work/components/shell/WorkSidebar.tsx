@@ -338,6 +338,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             filter={filter}
             totalChannelUnread={totalChannelUnread}
             canCreate={canCreate}
+            opsEnabled={surface === 'matcha-work' && hasFeature('matcha_ops')}
             base={base}
             navigate={navigate}
             isActive={isActive}

@@ -1,8 +1,6 @@
-import { useEffect, type ReactNode } from 'react'
-import { getMeCacheAgeMs, useMe } from '../../hooks/useMe'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useMe } from '../../hooks/useMe'
 import { UpgradeUpsellCard } from './UpgradeUpsellCard'
-
-const STALE_REVALIDATE_AFTER_MS = 60_000
 
 type Props = {
   /** Company feature flag (`enabled_features.<name>`) required to view children.
@@ -18,6 +16,8 @@ type Props = {
   pitch?: string
   /** Optional bullets of unlocked capabilities. */
   bullets?: string[]
+  /** Platform admins bypass this client-side gate when the backend admits them. */
+  allowPlatformAdmin?: boolean
 }
 
 /**
@@ -26,23 +26,26 @@ type Props = {
  * page or backend 403. While `useMe` is still loading we render nothing to
  * avoid a flash of upsell on legitimate full-tier users.
  *
- * On a denial, if the `useMe` cache is older than 60s we kick off a
- * background revalidation — covers the case where sales just flipped the
- * company's feature flags and the user URL-hops to the page in the same
- * session.
+ * On a denial, we perform one revalidation before showing the upsell. This
+ * covers the case where an admin or webhook flipped the company's feature
+ * flags while the current SPA session still holds the previous profile.
  */
-export function FeatureGate({ feature, anyOf, label, children, pitch, bullets }: Props) {
-  const { hasFeature, loading, refresh } = useMe()
-  const allowed = anyOf ? anyOf.some((f) => hasFeature(f)) : hasFeature(feature ?? '')
+export function FeatureGate({ feature, anyOf, label, children, pitch, bullets, allowPlatformAdmin = false }: Props) {
+  const { me, hasFeature, loading, refresh } = useMe()
+  const allowed = (allowPlatformAdmin && me?.user.role === 'admin') ||
+    (anyOf ? anyOf.some((f) => hasFeature(f)) : hasFeature(feature ?? ''))
   const sourceFlag = feature ?? anyOf?.[0] ?? 'unknown'
+  const refreshAttempted = useRef(false)
+  const [revalidating, setRevalidating] = useState(false)
 
   useEffect(() => {
-    if (!loading && !allowed && getMeCacheAgeMs() > STALE_REVALIDATE_AFTER_MS) {
-      refresh()
-    }
+    if (loading || allowed || refreshAttempted.current) return
+    refreshAttempted.current = true
+    setRevalidating(true)
+    void refresh().finally(() => setRevalidating(false))
   }, [loading, allowed, refresh])
 
-  if (loading) return null
+  if (loading || revalidating || (!allowed && !refreshAttempted.current)) return null
   if (allowed) return <>{children}</>
   return (
     <div className="p-6">

@@ -79,4 +79,24 @@ describe('useMe — authFailed distinguishes no-session from lookup-failure', ()
     expect(result.current.authFailed).toBe(false)
     expect(result.current.me).not.toBeNull()
   })
+
+  it('propagates a refreshed entitlement to every mounted consumer', async () => {
+    const withoutOps = { user: { id: 'u1', role: 'client' }, profile: { enabled_features: { matcha_ops: false } } }
+    const withOps = { user: { id: 'u1', role: 'client' }, profile: { enabled_features: { matcha_ops: true } } }
+    mockGet.mockResolvedValueOnce(withoutOps)
+
+    const first = renderHook(() => useMe())
+    const second = renderHook(() => useMe())
+    await waitFor(() => expect(first.result.current.loading).toBe(false))
+    await waitFor(() => expect(second.result.current.loading).toBe(false))
+    expect(first.result.current.hasFeature('matcha_ops')).toBe(false)
+    expect(second.result.current.hasFeature('matcha_ops')).toBe(false)
+
+    mockGet.mockResolvedValueOnce(withOps)
+    await act(async () => { await first.result.current.refresh() })
+
+    expect(first.result.current.hasFeature('matcha_ops')).toBe(true)
+    expect(second.result.current.hasFeature('matcha_ops')).toBe(true)
+    expect(mockGet).toHaveBeenCalledTimes(2)
+  })
 })

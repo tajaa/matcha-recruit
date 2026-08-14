@@ -199,7 +199,7 @@ function TokenIndicator() {
 export default function WorkLayout() {
   usePresenceHeartbeat()
   useChannelNotifications()
-  const { isPersonal, loading } = useMe()
+  const { isPersonal, loading, hasFeature } = useMe()
   const { pathname, search } = useLocation()
   const surface = useWorkSurface()
   const brand = useWorkBrand()
@@ -306,7 +306,7 @@ export default function WorkLayout() {
             <X className="h-5 w-5" />
           </Link>
         )}
-        {surface === 'matcha-work' && (
+        {(surface === 'matcha-work' || surface === 'matcha-ops') && (
           <>
             <Link
               to="/app"
@@ -322,6 +322,22 @@ export default function WorkLayout() {
               <ArrowLeft size={16} />
             </Link>
             <div className="hidden sm:block h-4 w-px bg-w-line" />
+            {surface === 'matcha-work' && hasFeature('matcha_ops') && (
+              <>
+                <Link
+                  to="/ops"
+                  className="hidden sm:inline text-sm text-w-dim hover:text-w-text transition-colors"
+                >
+                  Matcha Ops
+                </Link>
+                <Link
+                  to="/ops"
+                  className="sm:hidden text-xs text-w-dim hover:text-w-text transition-colors"
+                >
+                  Ops
+                </Link>
+              </>
+            )}
           </>
         )}
         <span className="hidden sm:inline text-sm font-medium tracking-tight text-w-text">{brand}</span>

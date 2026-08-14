@@ -11,6 +11,7 @@ interface Props {
   filter: string
   totalChannelUnread: number
   canCreate: boolean
+  opsEnabled: boolean
   base: string
   navigate: NavigateFunction
   isActive: (path: string) => boolean
@@ -26,6 +27,7 @@ export default function ChannelsSection({
   filter,
   totalChannelUnread,
   canCreate,
+  opsEnabled,
   base,
   navigate,
   isActive,
@@ -71,9 +73,22 @@ export default function ChannelsSection({
       </button>
       {(channelsOpen || !!filter) && (
         <div className="space-y-0.5 mt-0.5">
-          {channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase())).length === 0 && (
-            <p className="px-2.5 py-1 text-[11px] text-w-faint">No channels</p>
-          )}
+          {(() => {
+            const filteredChannels = channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase()))
+            if (filteredChannels.length > 0) return null
+            if (opsEnabled && !filter) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => navigate('/ops')}
+                  className="w-full px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-accent"
+                >
+                  Ops channels live in Matcha Ops
+                </button>
+              )
+            }
+            return <p className="px-2.5 py-1 text-[11px] text-w-faint">No channels</p>
+          })()}
           {channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase())).map((ch) => (
             <div
               key={ch.id}

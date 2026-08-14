@@ -6,6 +6,7 @@ import type { MeResponse } from '../types/dashboard'
 let _cache: MeResponse | null = null
 let _cacheAt = 0
 let _promise: Promise<MeResponse> | null = null
+const _listeners = new Set<(data: MeResponse) => void>()
 
 // Past this age the cache is served stale-while-revalidate: callers get the
 // cached value instantly, a background refetch picks up feature flips
@@ -18,6 +19,7 @@ function _revalidate(): Promise<MeResponse> {
     _cache = data
     _cacheAt = Date.now()
     _promise = null
+    for (const listener of _listeners) listener(data)
     return data
   }).catch((err) => {
     _promise = null
@@ -79,10 +81,17 @@ export function useMe() {
     setAuthFailed(isNoSession(err))
   }, [])
 
+  useEffect(() => {
+    _listeners.add(apply)
+    return () => {
+      _listeners.delete(apply)
+    }
+  }, [apply])
+
   const refresh = useCallback(() => {
     invalidateMeCache()
     setLoading(true)
-    _fetch()
+    return _fetch()
       .then(apply)
       .catch(fail)
       .finally(() => setLoading(false))
