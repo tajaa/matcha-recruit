@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+from asyncio import sleep as async_sleep
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -146,6 +147,13 @@ _FILES_MAX = 120
 _GEMINI_RETRY_ATTEMPTS = 3
 _GEMINI_RETRY_DELAYS = (2.0, 5.0)
 _GEMINI_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+_GEMINI_RETRY_MESSAGE_PATTERNS = (
+    r"\b429\b",
+    r"\b500\s+INTERNAL\b",
+    r"\b(?:502|503|504)\b",
+    r"\b(?:UNAVAILABLE|RESOURCE_EXHAUSTED|DEADLINE_EXCEEDED)\b",
+    r"\bRATE[\s_-]+LIMIT\b",
+)
 
 
 def _is_retryable_gemini_error(exc: Exception) -> bool:
@@ -160,10 +168,7 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
         except (TypeError, ValueError):
             pass
     message = str(exc).upper()
-    return any(marker in message for marker in (
-        "429", "500 INTERNAL", "502", "503", "504", "UNAVAILABLE",
-        "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "RATE LIMIT",
-    ))
+    return any(re.search(pattern, message) for pattern in _GEMINI_RETRY_MESSAGE_PATTERNS)
 
 
 def build_prompt(pr: PrInfo, product: str) -> str:
@@ -376,13 +381,13 @@ async def generate_entry(client, pr: PrInfo, product: str) -> dict | None:
         except Exception as exc:  # noqa: BLE001 — SDK exception types vary by transport
             if attempt == _GEMINI_RETRY_ATTEMPTS - 1 or not _is_retryable_gemini_error(exc):
                 raise
-            delay = _GEMINI_RETRY_DELAYS[attempt]
+            delay = _GEMINI_RETRY_DELAYS[min(attempt, len(_GEMINI_RETRY_DELAYS) - 1)]
             print(
                 f"Gemini transient error for PR #{pr.number} ({product}); "
                 f"retrying in {delay:g}s: {exc}",
                 file=sys.stderr,
             )
-            await asyncio.sleep(delay)
+            await async_sleep(delay)
     raw = (getattr(response, "text", None) or "").strip()
     return parse_entry(raw, pr, product)
 

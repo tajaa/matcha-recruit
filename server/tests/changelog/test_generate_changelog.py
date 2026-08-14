@@ -206,7 +206,7 @@ class TestGenerateEntryRetries:
         async def no_sleep(_delay):
             return None
 
-        monkeypatch.setattr(gc.asyncio, "sleep", no_sleep)
+        monkeypatch.setattr(gc, "async_sleep", no_sleep)
         client = _fake_client([RuntimeError("500 INTERNAL"), _response()])
 
         entry = asyncio.run(gc.generate_entry(client, _pr(number=7), "matcha"))
@@ -220,7 +220,7 @@ class TestGenerateEntryRetries:
         async def record_sleep(delay):
             sleep_calls.append(delay)
 
-        monkeypatch.setattr(gc.asyncio, "sleep", record_sleep)
+        monkeypatch.setattr(gc, "async_sleep", record_sleep)
         client = _fake_client([RuntimeError("400 INVALID_ARGUMENT")])
 
         with pytest.raises(RuntimeError, match="400 INVALID_ARGUMENT"):
@@ -228,3 +228,44 @@ class TestGenerateEntryRetries:
 
         assert client.aio.models.calls == 1
         assert sleep_calls == []
+
+    def test_retries_use_last_delay_when_attempts_grow(self, monkeypatch):
+        sleep_calls = []
+
+        async def record_sleep(delay):
+            sleep_calls.append(delay)
+
+        monkeypatch.setattr(gc, "async_sleep", record_sleep)
+        monkeypatch.setattr(gc, "_GEMINI_RETRY_ATTEMPTS", 4)
+        client = _fake_client([
+            RuntimeError("503"),
+            RuntimeError("503"),
+            RuntimeError("503"),
+            _response(),
+        ])
+
+        asyncio.run(gc.generate_entry(client, _pr(number=9), "matcha"))
+
+        assert client.aio.models.calls == 4
+        assert sleep_calls == [2.0, 5.0, 5.0]
+
+
+class TestRetryableGeminiError:
+    @pytest.mark.parametrize("message", [
+        "429 RESOURCE_EXHAUSTED",
+        "500 INTERNAL SERVER ERROR",
+        "502 BAD GATEWAY",
+        "503 UNAVAILABLE",
+        "504 DEADLINE_EXCEEDED",
+        "rate_limit exceeded",
+    ])
+    def test_matches_transient_status_messages(self, message):
+        assert gc._is_retryable_gemini_error(RuntimeError(message))
+
+    @pytest.mark.parametrize("message", [
+        "request id 1429",
+        "resource version 1503",
+        "400 INVALID_ARGUMENT",
+    ])
+    def test_ignores_non_transient_messages(self, message):
+        assert not gc._is_retryable_gemini_error(RuntimeError(message))
