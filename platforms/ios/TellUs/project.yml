@@ -74,6 +74,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.beetlejuse.app
         INFOPLIST_FILE: Info.plist
+        # Keep entitlements as authored files. XcodeGen's `entitlements.path`
+        # regenerates its target file and would erase the APNs environment key.
+        CODE_SIGN_ENTITLEMENTS: TellUs.entitlements
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -106,8 +109,6 @@ targets:
         product: GoogleSignIn
       - package: GoogleSignIn
         product: GoogleSignInSwift
-    entitlements:
-      path: TellUs.entitlements
   TellUsTests:
     type: bundle.unit-test
     platform: iOS

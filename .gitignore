@@ -87,6 +87,7 @@ server/agent/workspace/inbox/*
 *.pem
 *.key
 *.p12
+*.p8
 service-account*.json
 
 # Node
