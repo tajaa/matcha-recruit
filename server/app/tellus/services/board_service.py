@@ -152,6 +152,8 @@ async def notify_board_members(
     conn, board_id: UUID, kind: str, title: str, body: Optional[str],
     reference_type: str, reference_id: str,
     exclude_account_id: Optional[UUID] = None,
+    slug: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> None:
     """Fan-out to every approved board member in one statement.
 
@@ -160,28 +162,45 @@ async def notify_board_members(
     target list, which Postgres can fail to infer (asyncpg's Parse then errors
     with "could not determine data type of parameter $2"). Every caller here
     passes plain strings (kind/title/reference_type/reference_id) or a
-    possibly-NULL string (body), so casting the lot to text is always correct."""
-    await conn.execute(
+    possibly-NULL string (body), so casting the lot to text is always correct.
+    """
+    rows = await conn.fetch(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
            SELECT account_id, $2::text, $3::text, $4::text, $5::text, $6::text
            FROM tellus_board_memberships
            WHERE board_id = $1 AND status = 'approved'
-             AND ($7::uuid IS NULL OR account_id <> $7)""",
+             AND ($7::uuid IS NULL OR account_id <> $7)
+           RETURNING account_id""",
         board_id, kind, title, body, reference_type, reference_id, exclude_account_id,
+    )
+    from . import push
+    push.schedule_push(
+        [r["account_id"] for r in rows], kind, title, body,
+        reference_type=reference_type, reference_id=reference_id,
+        slug=slug, name=name,
     )
 
 
 async def notify_board_team(
     conn, brand_id: UUID, kind: str, title: str, body: Optional[str],
     reference_type: str, reference_id: str,
+    slug: Optional[str] = None,
+    name: Optional[str] = None,
 ) -> None:
     """Same shape over tellus_brand_members — see notify_board_members for why
     the ::text casts on $2-$6 aren't optional."""
-    await conn.execute(
+    rows = await conn.fetch(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
            SELECT account_id, $2::text, $3::text, $4::text, $5::text, $6::text
-           FROM tellus_brand_members WHERE brand_id = $1""",
+           FROM tellus_brand_members WHERE brand_id = $1
+           RETURNING account_id""",
         brand_id, kind, title, body, reference_type, reference_id,
+    )
+    from . import push
+    push.schedule_push(
+        [r["account_id"] for r in rows], kind, title, body,
+        reference_type=reference_type, reference_id=reference_id,
+        slug=slug, name=name,
     )
 
 

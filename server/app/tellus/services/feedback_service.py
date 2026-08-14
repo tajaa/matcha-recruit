@@ -15,7 +15,7 @@ import secrets
 from typing import Optional
 from uuid import UUID
 
-from .points_service import award_points
+from .points_service import award_points, notify_account
 
 logger = logging.getLogger(__name__)
 
@@ -197,11 +197,9 @@ async def create_report(
             note = f"New {sentiment} feedback" + (f" at {store_name}" if store_name else "")
             if reward_status == "pending":
                 note += " — reward approval needed"
-            await conn.execute(
-                """INSERT INTO tellus_notifications
-                       (account_id, kind, title, body, reference_type, reference_id)
-                   VALUES ($1, 'feedback', 'New feedback', $2, 'report', $3)""",
-                brand["owner_account_id"], note, str(report_id),
+            await notify_account(
+                conn, brand["owner_account_id"], "feedback", "New feedback", note,
+                reference_type="report", reference_id=str(report_id),
             )
 
     return {

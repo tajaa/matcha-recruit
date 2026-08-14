@@ -130,6 +130,10 @@ class Settings:
     apns_team_id: Optional[str] = None
     apns_auth_key_path: Optional[str] = None
     apns_bundle_id: Optional[str] = None
+    # Tell-Us app APNs topic — distinct bundle id from the Werk client, so the
+    # shared .p8 key is reused against a second topic. Falls back to
+    # apns_bundle_id in the tellus push service if unset.
+    apns_bundle_id_tellus: Optional[str] = None
     apns_use_sandbox: bool = True
 
     # Cappe (website builder) — base domain for tenant subdomains
@@ -359,6 +363,7 @@ def load_settings() -> Settings:
         apns_team_id=os.getenv("APNS_TEAM_ID"),
         apns_auth_key_path=os.getenv("APNS_AUTH_KEY_PATH"),
         apns_bundle_id=os.getenv("APNS_BUNDLE_ID", "com.matchawork.app"),
+        apns_bundle_id_tellus=os.getenv("APNS_BUNDLE_ID_TELLUS", "com.beetlejuse.app"),
         apns_use_sandbox=os.getenv("APNS_USE_SANDBOX", "true").lower() == "true",
         cappe_base_domain=os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com"),
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),

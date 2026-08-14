@@ -98,6 +98,9 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: "Apple Distribution"
           PROVISIONING_PROFILE_SPECIFIER: "Beetlejuse App Store"
+          # Push uses the production APNs environment in App Store/TestFlight
+          # builds; the base TellUs.entitlements keeps `development` for Debug.
+          CODE_SIGN_ENTITLEMENTS: TellUs-Release.entitlements
     dependencies:
       - package: GoogleSignIn
         product: GoogleSignIn

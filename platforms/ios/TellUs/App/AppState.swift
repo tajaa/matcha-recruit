@@ -1,5 +1,7 @@
 import Foundation
 import Observation
+import UIKit
+import UserNotifications
 
 @MainActor
 @Observable
@@ -24,8 +26,12 @@ final class AppState {
     /// may have more than one business inbox through team membership.
     var inboxBrands: [InboxBrand] = []
     var unreadCount = 0
+    /// Set when the user taps a push; RootView presents the destination as a
+    /// full-screen cover and SwiftUI nils it back out on dismissal.
+    var pendingDeepLink: DeepLinkRoute?
 
     private var pollTask: Task<Void, Never>?
+    private var pushObserver: NSObjectProtocol?
 
     init() {
         // Fired by APIClient only after a DEFINITIVE refresh rejection
@@ -35,6 +41,12 @@ final class AppState {
         }
         APIClient.shared.onPaymentRequired = { [weak self] in
             Task { @MainActor in self?.handle402() }
+        }
+        pushObserver = NotificationCenter.default.addObserver(
+            forName: .tellusPushTapped, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let route = DeepLinkRoute.parse(userInfo: note.userInfo ?? [:]) else { return }
+            Task { @MainActor in self?.pendingDeepLink = route }
         }
         Task { await restore() }
     }
@@ -61,10 +73,24 @@ final class AppState {
             }
         }
         startPolling()
+        requestPushPermission()
     }
 
     func didLogin(_ response: TokenResponse) {
         route(response.account)
+    }
+
+    /// Ask for notification permission (once per install) and register this
+    /// device for remote notifications. `registerForRemoteNotifications`
+    /// hands the token back through AppDelegate → PushService, which upserts it
+    /// server-side; a re-login also re-fires `PushService.register()` in case
+    /// the token was already cached before a session existed.
+    private func requestPushPermission() {
+        Task {
+            guard (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) == true else { return }
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        Task { await PushService.shared.register() }
     }
 
     /// Idempotent — a background 401 firing `onUnauthorized` and a manual
@@ -78,6 +104,7 @@ final class AppState {
         } else {
             APIClient.shared.accessToken = nil
         }
+        Task { await PushService.shared.unregister() }
         account = nil
         moderatedBrands = []
         inboxBrands = []

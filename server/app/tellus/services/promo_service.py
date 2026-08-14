@@ -218,7 +218,34 @@ async def create_campaign(conn, brand_id: UUID, data) -> dict:
         brand_id, data.title, data.description, data.reward_text, token,
         data.max_claims, data.card_expiry_days, data.starts_at, data.ends_at,
     )
+    await notify_campaign_followers(conn, brand_id, dict(row))
     return _serialize_campaign(dict(row))
+
+
+async def notify_campaign_followers(conn, brand_id: UUID, campaign: dict) -> None:
+    """Fan a "campaign starts" notification out to every consumer following the
+    brand, in one statement. A campaign is live the moment it is created (there
+    is no scheduled-publish state), so creation *is* the "campaign begins"
+    moment. Followers get the brand slug/name in the push payload so the client
+    can deep-link to the brand's screen."""
+    brand = await conn.fetchrow("SELECT name, slug FROM tellus_brands WHERE id = $1", brand_id)
+    if brand is None:
+        return
+    title = f"{brand['name']}: {campaign['title']}"
+    body = campaign.get("description") or "A business you follow just started a new promo."
+    rows = await conn.fetch(
+        """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
+           SELECT consumer_account_id, $2::text, $3::text, $4::text, 'brand', $5::text
+           FROM tellus_brand_follows WHERE brand_id = $1
+           RETURNING account_id""",
+        brand_id, "promo_campaign", title, body, str(brand_id),
+    )
+    from . import push
+    push.schedule_push(
+        [r["account_id"] for r in rows], "promo_campaign", title, body,
+        reference_type="brand", reference_id=str(brand_id),
+        slug=brand["slug"], name=brand["name"],
+    )
 
 
 async def list_campaigns(conn, brand_id: UUID) -> list[dict]:

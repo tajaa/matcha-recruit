@@ -27,6 +27,7 @@ from .promo import router as promo_router
 from .promo_public import router as promo_public_router
 from .prompts import router as prompts_router
 from .public_intake import router as public_intake_router
+from .push import router as push_router
 from .rewards import router as rewards_router
 
 tellus_router = APIRouter(tags=["tellus"])
@@ -67,6 +68,9 @@ tellus_router.include_router(likes_router)
 # Mixed-role: brand campaign/scanner CRUD (require_paid_brand) + consumer
 # card reads (require_consumer), per-endpoint.
 tellus_router.include_router(promo_router)
+
+# Push device-token registration (any authenticated Tell-Us account).
+tellus_router.include_router(push_router)
 
 # Internal admin (require_tellus_admin per-route — TELLUS_ADMIN_EMAILS allowlist).
 tellus_router.include_router(admin_router)

@@ -3,6 +3,7 @@ import GoogleSignIn
 
 @main
 struct TellUsApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
     @Environment(\.scenePhase) private var scenePhase
 

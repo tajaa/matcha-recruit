@@ -109,11 +109,21 @@ async def check_and_award_badges(conn, account_id: UUID) -> list[str]:
 
 
 async def notify_account(conn, account_id: UUID, kind: str, title: str, body: str | None,
-                  reference_type: str | None = None, reference_id: str | None = None) -> None:
+                  reference_type: str | None = None, reference_id: str | None = None,
+                  slug: str | None = None, name: str | None = None) -> None:
+    """Insert an in-app notification and (fire-and-forget) push it to the
+    account's iOS devices. `slug`/`name` ride in the push payload so a tapped
+    board-post / campaign push can deep-link to the right brand screen."""
     await conn.execute(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
            VALUES ($1, $2, $3, $4, $5, $6)""",
         account_id, kind, title, body, reference_type, reference_id,
+    )
+    from . import push
+    push.schedule_push(
+        [account_id], kind, title, body,
+        reference_type=reference_type, reference_id=reference_id,
+        slug=slug, name=name,
     )
 
 
