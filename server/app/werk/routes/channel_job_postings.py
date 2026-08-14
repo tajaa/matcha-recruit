@@ -13,6 +13,12 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
+from ..services.channel_access import (
+    ChannelAccessDenied,
+    ChannelCapability,
+    assert_channel_capability,
+    load_channel_access,
+)
 from ..services.channel_job_posting_service import (
     create_job_posting_product_and_price,
     create_job_posting_checkout,
@@ -67,11 +73,26 @@ class RejectPostingRequest(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _get_member_role(conn, channel_id: UUID, user_id: UUID) -> Optional[str]:
-    """Return the user's role in the channel, or None if not a member."""
+async def _get_member_role(conn, channel_id: UUID, current_user: CurrentUser) -> Optional[str]:
+    """Return the user's role in the channel, or None if not a member.
+
+    Also enforces channel-scope access: project-discussion channels are
+    refused outright and an Operations channel requires the owning company's
+    ``matcha_ops`` entitlement, so the Operations-adjacent job-posting surface
+    can never run on a Work project channel or a revoked-Ops tenant.
+    """
+    try:
+        access = await load_channel_access(
+            conn, channel_id=channel_id, user_id=current_user.id, user_role=current_user.role,
+        )
+    except ChannelAccessDenied:
+        return None
+    if current_user.role != "admin" and not access.is_member:
+        return None
+    assert_channel_capability(access, ChannelCapability.MANAGE)
     return await conn.fetchval(
         "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
-        channel_id, user_id,
+        channel_id, current_user.id,
     )
 
 
@@ -90,7 +111,10 @@ async def create_job_posting(
     # call below (network I/O) so a slow Stripe response doesn't hold a pool
     # connection idle.
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        access = await load_channel_access(
+            conn, channel_id=channel_id, user_id=current_user.id, user_role=current_user.role,
+        )
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can create job postings")
 
@@ -103,12 +127,7 @@ async def create_job_posting(
             raise HTTPException(status_code=404, detail="Channel not found")
         company_id = ch["company_id"]
 
-        company_row = await conn.fetchrow(
-            "SELECT enabled_features, signup_source FROM companies WHERE id = $1", company_id
-        )
-        from ...core.feature_flags import merge_company_features
-        merged = merge_company_features(company_row["enabled_features"], company_row["signup_source"])
-        if not merged.get("channel_job_postings") and current_user.role != "admin":
+        if not access.features.get("channel_job_postings") and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Job postings feature is not enabled for this company")
 
     # Owner posts skip approval and go straight to draft (then checkout).
@@ -154,6 +173,7 @@ async def create_job_posting(
             if initial_status == "pending_approval":
                 try:
                     from ...matcha.services import notification_service as notif_svc
+                    from ..services.channel_links import channel_app_path
                     owner_id = await conn.fetchval(
                         "SELECT user_id FROM channel_members WHERE channel_id = $1 AND role = 'owner' LIMIT 1",
                         channel_id,
@@ -165,7 +185,7 @@ async def create_job_posting(
                             type="channel_job_posting_pending",
                             title=f"Job posting needs approval: {body.title}",
                             body=f"{ch['name']} moderator created a new posting awaiting your approval",
-                            link=f"/work/channels/{channel_id}/job-postings/{row['id']}",
+                            link=await channel_app_path(conn, channel_id, suffix=f"/job-postings/{row['id']}"),
                         )
                 except Exception:
                     pass
@@ -193,7 +213,7 @@ async def list_job_postings(
 ):
     """List job postings in a channel. Owners/mods see all; members see active + invited."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
@@ -267,7 +287,7 @@ async def get_job_posting(
 ):
     """Get full detail for a job posting. Invited member or owner/mod."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
@@ -343,7 +363,7 @@ async def update_job_posting(
 ):
     """Update a job posting (owner/mod only). Cannot update closed postings."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can update job postings")
 
@@ -393,7 +413,7 @@ async def checkout_job_posting(
 ):
     """Create a Stripe checkout session for a job posting subscription (owner/mod only)."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can manage billing")
 
@@ -438,7 +458,7 @@ async def cancel_job_posting(
 ):
     """Cancel the Stripe subscription for a job posting (owner/mod only)."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can manage billing")
 
@@ -468,7 +488,7 @@ async def close_job_posting(
 ):
     """Close a job posting (owner/mod only). Does NOT cancel Stripe subscription."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can close job postings")
 
@@ -505,7 +525,7 @@ async def invite_to_posting(
 ):
     """Invite channel members to a job posting (owner/mod only)."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can send invitations")
 
@@ -556,7 +576,7 @@ async def list_applicants(
 ):
     """List applications for a job posting (owner/mod only)."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can view applicants")
 
@@ -631,7 +651,7 @@ async def apply_to_posting(
     we snapshot it into channel_job_applications.resume_snapshot.
     """
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
@@ -699,6 +719,7 @@ async def apply_to_posting(
         # Send notification to the posting creator
         try:
             from ...matcha.services import notification_service as notif_svc
+            from ..services.channel_links import channel_app_path
             company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
             applicant_name = await resolve_display_name(conn, current_user.id)
             if company_id:
@@ -708,7 +729,7 @@ async def apply_to_posting(
                     type="job_application_received",
                     title=f"New application for {posting['title']}",
                     body=f"{applicant_name} applied to your job posting",
-                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}/applicants",
+                    link=await channel_app_path(conn, channel_id, suffix=f"/job-postings/{posting_id}/applicants"),
                 )
         except Exception:
             pass
@@ -762,7 +783,7 @@ async def update_application(
 ):
     """Update an application's status and reviewer notes (owner/mod only)."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can review applications")
 
@@ -791,6 +812,7 @@ async def update_application(
         # Notify the applicant
         try:
             from ...matcha.services import notification_service as notif_svc
+            from ..services.channel_links import channel_app_path
             company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
             posting_title = await conn.fetchval(
                 "SELECT title FROM channel_job_postings WHERE id = $1", posting_id,
@@ -803,7 +825,7 @@ async def update_application(
                     type="job_application_status_changed",
                     title=f"Application update: {posting_title}",
                     body=f"Your application status changed to {status_label}",
-                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}",
+                    link=await channel_app_path(conn, channel_id, suffix=f"/job-postings/{posting_id}"),
                 )
         except Exception:
             pass
@@ -824,7 +846,7 @@ async def approve_job_posting(
     """Channel owner approves a mod-created pending posting. Transitions
     status pending_approval → draft so the recruiter can run checkout."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the channel owner can approve job postings")
 
@@ -853,6 +875,7 @@ async def approve_job_posting(
         # Tell the recruiter their post is approved and ready for checkout.
         try:
             from ...matcha.services import notification_service as notif_svc
+            from ..services.channel_links import channel_app_path
             company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
             if company_id:
                 await notif_svc.create_notification(
@@ -861,7 +884,7 @@ async def approve_job_posting(
                     type="channel_job_posting_approved",
                     title=f"Job posting approved: {posting['title']}",
                     body="The channel owner approved your posting. Complete checkout to activate it.",
-                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}",
+                    link=await channel_app_path(conn, channel_id, suffix=f"/job-postings/{posting_id}"),
                 )
         except Exception:
             pass
@@ -883,7 +906,7 @@ async def reject_job_posting(
     """Channel owner rejects a pending posting. Status becomes 'rejected'
     and the posting is hidden from the feed."""
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the channel owner can reject job postings")
 
@@ -911,6 +934,7 @@ async def reject_job_posting(
 
         try:
             from ...matcha.services import notification_service as notif_svc
+            from ..services.channel_links import channel_app_path
             company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
             if company_id:
                 await notif_svc.create_notification(
@@ -919,7 +943,7 @@ async def reject_job_posting(
                     type="channel_job_posting_rejected",
                     title=f"Job posting rejected: {posting['title']}",
                     body=body.reason or "The channel owner rejected your posting.",
-                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}",
+                    link=await channel_app_path(conn, channel_id, suffix=f"/job-postings/{posting_id}"),
                 )
         except Exception:
             pass
@@ -947,6 +971,7 @@ async def my_pending_approvals(
                    {_USER_NAME_EXPR} AS posted_by_name
             FROM channel_job_postings jp
             JOIN channels ch ON ch.id = jp.channel_id
+            JOIN companies comp ON comp.id = ch.company_id
             JOIN channel_members cm ON cm.channel_id = ch.id
             JOIN users u ON u.id = jp.posted_by
             LEFT JOIN clients c ON c.user_id = u.id
@@ -954,6 +979,13 @@ async def my_pending_approvals(
             LEFT JOIN admins a ON a.user_id = u.id
             WHERE jp.status = 'pending_approval'
               AND cm.user_id = $1 AND cm.role = 'owner'
+              AND (
+                COALESCE(ch.channel_scope, 'community') = 'community'
+                OR (
+                  COALESCE(ch.channel_scope, 'community') = 'operations'
+                  AND COALESCE((comp.enabled_features->>'matcha_ops')::boolean, false)
+                )
+              )
             ORDER BY jp.created_at DESC
             """,
             current_user.id,
@@ -976,7 +1008,7 @@ async def list_open_postings(
     a URL parameter. Only members of the channel see anything.
     """
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
@@ -1015,7 +1047,7 @@ async def get_job_posting_fee(
     default is used.
     """
     async with get_connection() as conn:
-        role = await _get_member_role(conn, channel_id, current_user.id)
+        role = await _get_member_role(conn, channel_id, current_user)
         if role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can view the job posting fee")
 
@@ -1049,8 +1081,16 @@ async def my_invitations(
             FROM channel_job_invitations inv
             JOIN channel_job_postings jp ON jp.id = inv.posting_id
             JOIN channels ch ON ch.id = jp.channel_id
+            JOIN companies comp ON comp.id = ch.company_id
             WHERE inv.user_id = $1
               AND jp.status = 'active'
+              AND (
+                COALESCE(ch.channel_scope, 'community') = 'community'
+                OR (
+                  COALESCE(ch.channel_scope, 'community') = 'operations'
+                  AND COALESCE((comp.enabled_features->>'matcha_ops')::boolean, false)
+                )
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM channel_job_applications app
                   WHERE app.posting_id = inv.posting_id AND app.applicant_id = inv.user_id

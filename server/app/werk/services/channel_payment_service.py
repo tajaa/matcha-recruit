@@ -118,8 +118,9 @@ async def create_checkout_session(
     _ensure_stripe()
     settings = get_settings()
 
-    resolved_success = success_url or f"{settings.app_base_url}/work/channels/{channel_id}?subscribed=1"
-    resolved_cancel = cancel_url or f"{settings.app_base_url}/work/channels/{channel_id}?canceled=1"
+    from .channel_links import resolve_channel_app_path
+    resolved_success = success_url or f"{settings.app_base_url}{await resolve_channel_app_path(channel_id, suffix='?subscribed=1')}"
+    resolved_cancel = cancel_url or f"{settings.app_base_url}{await resolve_channel_app_path(channel_id, suffix='?canceled=1')}"
 
     metadata = {
         "channel_id": str(channel_id),
@@ -189,6 +190,8 @@ async def create_tip_checkout(
     """Create a one-time Stripe checkout for a tip. Returns checkout URL."""
     _ensure_stripe()
     settings = get_settings()
+    from .channel_links import resolve_channel_app_path
+    channel_path = await resolve_channel_app_path(channel_id)
 
     metadata = {
         "type": "channel_tip",
@@ -203,8 +206,8 @@ async def create_tip_checkout(
     def _create():
         session = stripe.checkout.Session.create(
             mode="payment",
-            success_url=f"{settings.app_base_url}/work/channels/{channel_id}?tipped=1",
-            cancel_url=f"{settings.app_base_url}/work/channels/{channel_id}",
+            success_url=f"{settings.app_base_url}{channel_path}?tipped=1",
+            cancel_url=f"{settings.app_base_url}{channel_path}",
             payment_method_types=["card"],
             metadata=metadata,
             line_items=[{
@@ -432,6 +435,7 @@ async def handle_payment_failed(stripe_subscription_id: str) -> None:
         # channel is hosted (cross-tenant subscribes to personal channels).
         try:
             from ...matcha.services import notification_service as notif_svc
+            from .channel_links import channel_app_path
             channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", row["channel_id"])
             subscriber_company_id = await conn.fetchval(
                 "SELECT company_id FROM clients WHERE user_id = $1", row["user_id"],
@@ -442,7 +446,7 @@ async def handle_payment_failed(stripe_subscription_id: str) -> None:
                 type="channel_payment_failed",
                 title=f"Payment failed for #{channel_name}",
                 body="Your subscription payment failed. Please update your payment method to keep access.",
-                link=f"/work/channels/{row['channel_id']}",
+                link=await channel_app_path(conn, row["channel_id"]),
                 send_email=True,
             )
         except Exception as e:

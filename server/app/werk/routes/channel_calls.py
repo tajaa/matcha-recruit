@@ -33,7 +33,7 @@ from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ._shared import resolve_display_name, spawn_bg
 from .channel_broadcasts import _active_broadcast, _assert_member, _assert_owner
-from ..services.channel_access import ChannelCapability, assert_channel_capability, load_channel_access
+from ..services.channel_access import ChannelCapability, ChannelScope, assert_channel_capability, load_channel_access
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ CALL_TOKEN_TTL_SECONDS = CALL_MAX_DURATION_SECONDS + 30
 _AUTO_STOP_TASKS: dict[str, asyncio.Task] = {}
 
 
-async def _assert_call_access(conn, channel_id: UUID, current_user: CurrentUser) -> None:
+async def _assert_call_access(conn, channel_id: UUID, current_user: CurrentUser):
     access = await load_channel_access(
         conn,
         channel_id=channel_id,
@@ -56,6 +56,46 @@ async def _assert_call_access(conn, channel_id: UUID, current_user: CurrentUser)
         user_role=current_user.role,
     )
     assert_channel_capability(access, ChannelCapability.CALL)
+    return access
+
+
+async def assert_ops_call_start_allowed(
+    conn,
+    *,
+    access,
+    user: CurrentUser,
+) -> None:
+    """Apply the Matcha Ops call-start policy to an Operations channel.
+
+    ``matcha_ops_calls_all_members=false`` → only a platform admin or a client
+    who belongs to the channel-OWNING company may start; true → any active
+    member. Joining stays open either way. Never admits a personal/individual
+    or broker account merely because it happens to be a channel member.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT cm.user_id IS NOT NULL
+               AND cm.removed_for_inactivity IS NOT TRUE AS is_member
+          FROM channel_members cm
+         WHERE cm.channel_id = $1 AND cm.user_id = $2
+        """,
+        access.channel_id,
+        user.id,
+    )
+    if not row or not row["is_member"]:
+        raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
+
+    if user.role == "admin":
+        return
+    if access.features.get("matcha_ops_calls_all_members"):
+        return
+
+    client_company_id = await conn.fetchval(
+        "SELECT company_id FROM clients WHERE user_id = $1", user.id
+    )
+    if user.role == "client" and client_company_id == access.company_id:
+        return
+    raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
 
 
 # ---------------------------------------------------------------------------
@@ -304,32 +344,38 @@ async def start_call(
     orphan_call_id = None  # set inside the txn if an orphan was recovered; pushed after conn closes
 
     async with get_connection() as conn:
-        await _assert_call_access(conn, channel_id, current_user)
-        # werk-lite is a company-paid product: the per-user Werk plan gate
-        # (Go Live = Pro) doesn't apply, and WHO may start a call is a company
-        # policy (admins only, or any member via werk_lite_calls_all_members)
-        # rather than owner-only. Joining stays open to members either way.
-        # Every other surface (matcha-work / personal Werk) keeps the Pro +
-        # owner gate unchanged.
-        _chan = await conn.fetchrow("SELECT company_id FROM channels WHERE id = $1", channel_id)
-        if not _chan:
-            raise HTTPException(status_code=404, detail="Channel not found")
-        _feats = await _channel_company_features(conn, _chan["company_id"])
-        if _feats.get("werk_lite"):
-            await _assert_member(conn, channel_id, current_user.id)
-            # Allowlist — never admit personal/individual or broker accounts even
-            # if they happen to be cross-tenant channel members. Any company
-            # member when the policy is "all", else admins/business-admins only.
-            _allowed = ("admin", "client", "employee") if (
-                _feats.get("matcha_ops_calls_all_members")
-                or _feats.get("werk_lite_calls_all_members")
-            ) else ("admin", "client")
-            if current_user.role not in _allowed:
-                raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
+        access = await _assert_call_access(conn, channel_id, current_user)
+        # Operations channels follow the Matcha Ops call-start policy
+        # (matcha_ops_calls_all_members), NOT the personal Pro+owner gate and
+        # NOT the werk-lite allowlist. Join stays open either way.
+        if access.scope is ChannelScope.OPERATIONS:
+            await assert_ops_call_start_allowed(conn, access=access, user=current_user)
         else:
-            # Same Pro/Business gate as Go Live — starting is gated, joining is free.
-            await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
-            await _assert_owner(conn, channel_id, current_user.id)
+            # werk-lite is a company-paid product: the per-user Werk plan gate
+            # (Go Live = Pro) doesn't apply, and WHO may start a call is a company
+            # policy (admins only, or any member via werk_lite_calls_all_members)
+            # rather than owner-only. Joining stays open to members either way.
+            # Every other surface (matcha-work / personal Werk) keeps the Pro +
+            # owner gate unchanged.
+            _chan = await conn.fetchrow("SELECT company_id FROM channels WHERE id = $1", channel_id)
+            if not _chan:
+                raise HTTPException(status_code=404, detail="Channel not found")
+            _feats = await _channel_company_features(conn, _chan["company_id"])
+            if _feats.get("werk_lite"):
+                await _assert_member(conn, channel_id, current_user.id)
+                # Allowlist — never admit personal/individual or broker accounts even
+                # if they happen to be cross-tenant channel members. Any company
+                # member when the policy is "all", else admins/business-admins only.
+                _allowed = ("admin", "client", "employee") if (
+                    _feats.get("matcha_ops_calls_all_members")
+                    or _feats.get("werk_lite_calls_all_members")
+                ) else ("admin", "client")
+                if current_user.role not in _allowed:
+                    raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
+            else:
+                # Same Pro/Business gate as Go Live — starting is gated, joining is free.
+                await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
+                await _assert_owner(conn, channel_id, current_user.id)
 
         # Serialize the check-then-insert against concurrent call/broadcast
         # starts on the SAME channel. The advisory lock (same key in

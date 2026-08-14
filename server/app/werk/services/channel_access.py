@@ -115,3 +115,39 @@ def ops_automation_allowed(access: ChannelAccess, feature: str) -> bool:
         and bool(access.features.get("matcha_ops"))
         and bool(access.features.get(feature))
     )
+
+
+async def channel_ops_automation_enabled(
+    conn,
+    *,
+    channel_id: UUID,
+    feature: str,
+) -> bool:
+    """Background-safe automation gate.
+
+    Re-resolves the channel's scope and the OWNING company's features at reply
+    time, so a reply to an already-created automation pill is refused once the
+    channel is reclassified (e.g. legacy collab → ``project_discussion``) or the
+    tenant's ``matcha_ops``/domain flag is revoked. Never runs Ops automation
+    in a project-discussion or community channel.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT COALESCE(ch.channel_scope, 'operations') AS channel_scope,
+               comp.enabled_features, comp.signup_source
+          FROM channels ch
+          JOIN companies comp ON comp.id = ch.company_id
+         WHERE ch.id = $1
+        """,
+        channel_id,
+    )
+    if not row:
+        return False
+    try:
+        scope = ChannelScope(row["channel_scope"])
+    except ValueError:
+        scope = ChannelScope.OPERATIONS
+    if scope is not ChannelScope.OPERATIONS:
+        return False
+    features = merge_company_features(row["enabled_features"], row["signup_source"])
+    return bool(features.get("matcha_ops")) and bool(features.get(feature))

@@ -52,11 +52,11 @@ from app.matcha.services.ems.resolution import (
     EventResolutionNotFound,
     resolve_event,
 )
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkCapability,
-    WorkPermissionDenied,
-    assert_work_capability,
-    resolve_work_access,
+from app.matcha.services.ops.permissions import (
+    OpsCapability,
+    OpsPermissionDenied,
+    assert_ops_capability,
+    resolve_ops_access,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,14 +89,14 @@ def _row_to_assignment(row, *, current_user, access) -> EmsEventAssignmentOut:
         data["status"] == "assigned"
         and (
             data["assignee_user_id"] == current_user.id
-            or access.allows(WorkCapability.EVENT_ASSIGN)
+            or access.allows(OpsCapability.EVENT_ASSIGN)
         )
     )
     data["can_cancel"] = (
         data["status"] == "assigned"
-        and access.allows(WorkCapability.EVENT_ASSIGN)
+        and access.allows(OpsCapability.EVENT_ASSIGN)
     )
-    data["can_view_event"] = access.allows(WorkCapability.EVENT_REVIEW)
+    data["can_view_event"] = access.allows(OpsCapability.EVENT_REVIEW)
     return EmsEventAssignmentOut(**data)
 
 
@@ -104,7 +104,7 @@ async def _assignment_access(conn, assignment_id: UUID, current_user, *, allow_a
     row = await get_event_assignment(conn, assignment_id=assignment_id)
     if not row:
         raise HTTPException(status_code=404, detail="Event assignment not found")
-    access = await resolve_work_access(
+    access = await resolve_ops_access(
         conn, user=current_user, company_id=row["company_id"]
     )
     is_member = await conn.fetchval(
@@ -117,7 +117,7 @@ async def _assignment_access(conn, assignment_id: UUID, current_user, *, allow_a
         current_user.id,
     )
     is_assignee = row["assignee_user_id"] == current_user.id
-    if not is_member and not access.allows(WorkCapability.EVENT_ASSIGN) and not (allow_assignee and is_assignee):
+    if not is_member and not access.allows(OpsCapability.EVENT_ASSIGN) and not (allow_assignee and is_assignee):
         raise HTTPException(status_code=404, detail="Event assignment not found")
     return row, access
 
@@ -129,7 +129,7 @@ async def _draft_access(conn, draft_id: UUID, current_user):
     )
     if not row:
         raise HTTPException(status_code=404, detail="Event draft not found")
-    access = await resolve_work_access(
+    access = await resolve_ops_access(
         conn, user=current_user, company_id=row["company_id"]
     )
     if not may_decide_event_draft(
@@ -152,10 +152,10 @@ async def list_event_assignments_route(
         )
         if not company_id:
             raise HTTPException(status_code=404, detail="Event not found")
-        access = await resolve_work_access(conn, user=current_user, company_id=company_id)
+        access = await resolve_ops_access(conn, user=current_user, company_id=company_id)
         try:
-            assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
-        except WorkPermissionDenied as exc:
+            assert_ops_capability(access, OpsCapability.EVENT_ASSIGN)
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         rows = await list_event_assignments(
             conn, event_id=event_id, company_id=company_id,
@@ -177,7 +177,7 @@ async def create_event_assignment_route(
         )
         if not company_id:
             raise HTTPException(status_code=404, detail="Event not found")
-        access = await resolve_work_access(conn, user=current_user, company_id=company_id)
+        access = await resolve_ops_access(conn, user=current_user, company_id=company_id)
         try:
             async with conn.transaction():
                 result = await create_event_assignment(
@@ -192,7 +192,7 @@ async def create_event_assignment_route(
                     due_at=body.due_at,
                     client_request_id=body.client_request_id,
                 )
-        except WorkPermissionDenied as exc:
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventAssignmentNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -268,7 +268,7 @@ async def complete_event_assignment_route(
                     actor_user_id=current_user.id,
                     access=access,
                 )
-        except WorkPermissionDenied as exc:
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventAssignmentNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -319,7 +319,7 @@ async def cancel_event_assignment_route(
                     actor_user_id=current_user.id,
                     access=access,
                 )
-        except WorkPermissionDenied as exc:
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventAssignmentNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -436,7 +436,7 @@ async def resolve_event_route(
         if not row:
             raise HTTPException(status_code=404, detail="Event not found")
         company_id = row["company_id"]
-        access = await resolve_work_access(
+        access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id
         )
         try:
@@ -467,7 +467,7 @@ async def resolve_event_route(
                         event_id,
                     )
                 ]
-        except WorkPermissionDenied as exc:
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except EventResolutionNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -517,12 +517,12 @@ async def list_events(
         where.append(f"ev.channel_id = ${len(params)}")
 
     async with get_connection() as conn:
-        access = await resolve_work_access(
+        access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id,
         )
         try:
-            assert_work_capability(access, WorkCapability.EVENT_REVIEW)
-        except WorkPermissionDenied as exc:
+            assert_ops_capability(access, OpsCapability.EVENT_REVIEW)
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         total = await conn.fetchval(
             f"SELECT COUNT(*) FROM ems_events ev WHERE {' AND '.join(where)}", *params,
@@ -546,12 +546,12 @@ async def get_event(
             f"{_EVENT_SELECT} WHERE ev.id = $1", event_id,
         )
         if row:
-            access = await resolve_work_access(
+            access = await resolve_ops_access(
                 conn, user=current_user, company_id=row["company_id"],
             )
             try:
-                assert_work_capability(access, WorkCapability.EVENT_REVIEW)
-            except WorkPermissionDenied as exc:
+                assert_ops_capability(access, OpsCapability.EVENT_REVIEW)
+            except OpsPermissionDenied as exc:
                 raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -581,12 +581,12 @@ async def update_event(
         )
         if not company_id:
             raise HTTPException(status_code=404, detail="Event not found")
-        access = await resolve_work_access(
+        access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id,
         )
         try:
-            assert_work_capability(access, WorkCapability.EVENT_RESOLVE)
-        except WorkPermissionDenied as exc:
+            assert_ops_capability(access, OpsCapability.EVENT_RESOLVE)
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         if dismiss_requested:
             # A promoted event must not be silently flipped to dismissed
@@ -703,12 +703,12 @@ async def promote(
             raise HTTPException(status_code=404, detail="Event not found")
         event = dict(row)
         company_id = event["company_id"]
-        access = await resolve_work_access(
+        access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id,
         )
         try:
-            assert_work_capability(access, WorkCapability.EVENT_PROMOTE)
-        except WorkPermissionDenied as exc:
+            assert_ops_capability(access, OpsCapability.EVENT_PROMOTE)
+        except OpsPermissionDenied as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
         from app.core.feature_flags import get_company_features

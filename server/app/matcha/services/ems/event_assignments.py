@@ -13,10 +13,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkAccess,
-    WorkCapability,
-    assert_work_capability,
+from app.matcha.services.ops.permissions import (
+    OpsAccess,
+    OpsCapability,
+    assert_ops_capability,
 )
 
 
@@ -46,10 +46,10 @@ def may_complete_event_assignment(
     *,
     assignee_user_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
 ) -> bool:
     """The assignee or an event manager may close the assignment."""
-    return actor_user_id == assignee_user_id or access.allows(WorkCapability.EVENT_ASSIGN)
+    return actor_user_id == assignee_user_id or access.allows(OpsCapability.EVENT_ASSIGN)
 
 
 _ASSIGNMENT_SELECT = """
@@ -90,7 +90,7 @@ async def create_event_assignment(
     *,
     event_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
     channel_id: UUID,
     assignee_user_id: UUID,
     shared_title: str,
@@ -105,7 +105,7 @@ async def create_event_assignment(
     for action cards and status refreshes.
     """
 
-    assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
+    assert_ops_capability(access, OpsCapability.EVENT_ASSIGN)
     if access.company_id is None:
         raise EventAssignmentForbidden("Event assignment requires a company scope")
 
@@ -271,7 +271,7 @@ async def complete_event_assignment(
     *,
     assignment_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
 ) -> dict:
     row = await conn.fetchrow(
         f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE",
@@ -322,9 +322,9 @@ async def cancel_event_assignment(
     *,
     assignment_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
 ) -> dict:
-    assert_work_capability(access, WorkCapability.EVENT_ASSIGN)
+    assert_ops_capability(access, OpsCapability.EVENT_ASSIGN)
     row = await conn.fetchrow(
         f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE",
         assignment_id,

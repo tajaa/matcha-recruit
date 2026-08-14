@@ -171,7 +171,7 @@ export function renderSystemContent(text: string): ReactNode[] {
       nodes.push(
         <Link
           key={key++}
-          to={`/app/employee-schedule?date=${shiftDate}&shift=${shiftId}`}
+          to={`/ops/schedule?date=${shiftDate}&shift=${shiftId}`}
           className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
         >
           View shift →

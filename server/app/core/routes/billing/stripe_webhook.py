@@ -142,13 +142,14 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         sender_id,
                     )
                     from app.matcha.services import notification_service as notif_svc
+                    from app.werk.services.channel_links import channel_app_path
                     await notif_svc.create_notification(
                         user_id=creator_id,
                         company_id=company_id,
                         type="channel_tip_received",
                         title=f"${amount/100:.2f} tip in #{channel_name}",
                         body=f"{sender_name} sent you a tip" + (f": \"{tip_message}\"" if tip_message else ""),
-                        link=f"/work/channels/{channel_id}",
+                        link=await channel_app_path(conn, channel_id),
                     )
                 logger.info("Channel tip processed: %s -> %s, $%.2f", sender_id, creator_id, amount/100)
             except Exception as exc:

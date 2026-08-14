@@ -97,7 +97,8 @@ async def _send_mention_email_async(
             return
 
         web_base = os.getenv("PUBLIC_WEB_BASE_URL", "https://hey-matcha.com")
-        channel_url = f"{web_base}/work/channels/{channel_id}"
+        from app.werk.services.channel_links import channel_app_path
+        channel_url = f"{web_base}{await channel_app_path(conn, channel_id)}"
         excerpt = (content or "").strip()
         if len(excerpt) > 200:
             excerpt = excerpt[:200].rstrip() + "…"

@@ -121,16 +121,18 @@ async def notify_event_assignment(
         else f"You were assigned this event in #{channel_name}."
     )
     try:
+        from app.werk.services.channel_links import resolve_channel_app_path
+        channel_path = await resolve_channel_app_path(
+            channel_id,
+            suffix=f"?message={message_id}" if message_id else None,
+        )
         await notif_svc.create_notification(
             user_id=recipient,
             company_id=company_id,
             type=kind,
             title=notification_title,
             body=body,
-            link=(
-                f"/work/channels/{channel_id}?message={message_id}"
-                if message_id else f"/work/channels/{channel_id}"
-            ),
+            link=channel_path,
             metadata={
                 "assignment_id": str(assignment_id),
                 "event_id": str(event_id),

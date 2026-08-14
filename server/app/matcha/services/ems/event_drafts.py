@@ -8,9 +8,9 @@ from typing import Any
 from uuid import UUID
 
 from app.matcha.services.ems.event_intake import persist_event
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkAccess,
-    WorkCapability,
+from app.matcha.services.ops.permissions import (
+    OpsAccess,
+    OpsCapability,
 )
 
 
@@ -50,16 +50,16 @@ def may_decide_event_draft(
     *,
     reporter_user_id: UUID | None,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
 ) -> bool:
     if access.company_id is None:
         return False
-    if access.allows(WorkCapability.EVENT_REVIEW):
+    if access.allows(OpsCapability.EVENT_REVIEW):
         return True
     return (
         reporter_user_id is not None
         and reporter_user_id == actor_user_id
-        and access.allows(WorkCapability.EVENT_CONFIRM_OWN)
+        and access.allows(OpsCapability.EVENT_CONFIRM_OWN)
     )
 
 
@@ -147,7 +147,8 @@ async def confirm_event_draft(
     *,
     draft_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
+    reason: str,
 ) -> DraftDecisionResult:
     """Confirm a draft and create its final event atomically.
 
@@ -252,7 +253,7 @@ async def reject_event_draft(
     *,
     draft_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
     reason: str | None = None,
 ) -> DraftDecisionResult:
     row = await conn.fetchrow(

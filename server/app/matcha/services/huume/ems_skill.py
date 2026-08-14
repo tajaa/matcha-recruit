@@ -19,10 +19,7 @@ from uuid import UUID
 
 from app.database import get_connection
 from app.core.models.auth import CurrentUser
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkCapability,
-    resolve_work_access,
-)
+from app.matcha.services.ops.permissions import resolve_ops_access
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +42,7 @@ async def execute_promote(
         if actor is None:
             return {"status": "error", "message": "Your account is no longer available."}
         actor_email = actor["email"]
-        access = await resolve_work_access(
+        access = await resolve_ops_access(
             conn,
             user=CurrentUser(id=actor["id"], email=actor["email"], role=actor["role"]),
             company_id=company_id,

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 from ...database import get_connection
 from .channel_payment_service import cancel_subscription_immediately
+from .channel_links import resolve_channel_app_path
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ async def run_inactivity_checks() -> None:
                             f"You were removed from #{ch['name']} due to "
                             f"{ch['inactivity_threshold_days']} days of inactivity."
                         ),
-                        link=f"/work/channels/{channel_id}",
+                        link=await resolve_channel_app_path(channel_id),
                         send_email=True,
                     )
                 except Exception:
@@ -146,7 +147,7 @@ async def run_inactivity_checks() -> None:
                             f"You have ~{days_left} day(s) to contribute in "
                             f"#{ch['name']} before being removed for inactivity."
                         ),
-                        link=f"/work/channels/{channel_id}",
+                        link=await resolve_channel_app_path(channel_id),
                         send_email=True,
                     )
                 except Exception:

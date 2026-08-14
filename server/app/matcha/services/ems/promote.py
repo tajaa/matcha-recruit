@@ -15,7 +15,7 @@ from typing import Any, Collection, Literal, Optional
 from uuid import UUID
 
 from app.matcha.services.ir.ir_incident_create import create_incident_core
-from app.matcha.services.matcha_work.work_permissions import WorkCapability
+from app.matcha.services.ops.permissions import OpsCapability
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,12 @@ class PromoteVerdict:
 def evaluate_promote(
     *,
     role: Optional[str] = None,
-    capabilities: Collection[WorkCapability] | None = None,
+    capabilities: Collection[OpsCapability] | None = None,
     features: dict,
     event_status: str,
 ) -> PromoteVerdict:
     if capabilities is not None:
-        allowed = WorkCapability.EVENT_PROMOTE in capabilities
+        allowed = OpsCapability.EVENT_PROMOTE in capabilities
     else:
         # Compatibility for callers that have not yet resolved Work access.
         allowed = role in _ALLOWED_ROLES

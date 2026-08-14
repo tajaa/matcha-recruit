@@ -95,14 +95,9 @@ async def create_job_posting_checkout(
         "user_id": str(user_id),
     }
 
-    success_url = (
-        f"{settings.app_base_url}/work/channels/{channel_id}"
-        f"?posting={posting_id}&activated=1"
-    )
-    cancel_url = (
-        f"{settings.app_base_url}/work/channels/{channel_id}"
-        f"?posting={posting_id}&canceled=1"
-    )
+    from .channel_links import resolve_channel_app_path
+    success_url = f"{settings.app_base_url}{await resolve_channel_app_path(channel_id, suffix=f'?posting={posting_id}&activated=1')}"
+    cancel_url = f"{settings.app_base_url}{await resolve_channel_app_path(channel_id, suffix=f'?posting={posting_id}&canceled=1')}"
 
     def _create():
         session = stripe.checkout.Session.create(
@@ -279,13 +274,14 @@ async def handle_job_posting_payment_failed(stripe_subscription_id: str) -> None
 
         try:
             from ...matcha.services import notification_service as notif_svc
+            from .channel_links import channel_app_path
             await notif_svc.create_notification(
                 user_id=row["posted_by"],
                 company_id=row["company_id"],
                 type="job_posting_payment_failed",
                 title=f"Payment failed for job posting: {row['title']}",
                 body="Your job posting subscription payment failed. Please update your payment method to keep it active.",
-                link=f"/work/channels/{row['channel_id']}",
+                link=await channel_app_path(conn, row["channel_id"]),
                 send_email=True,
             )
         except Exception as e:
@@ -388,6 +384,8 @@ async def send_invitations(
     # Send notification for each invited user
     try:
         from ...matcha.services import notification_service as notif_svc
+        from .channel_links import resolve_channel_app_path
+        channel_path = await resolve_channel_app_path(channel_id, suffix=f"?posting={posting_id}")
         for uid in user_ids:
             try:
                 await notif_svc.create_notification(
@@ -396,7 +394,7 @@ async def send_invitations(
                     type="job_posting_invite",
                     title=f"You're invited to apply: {posting_title}",
                     body=f"{inviter_name} invited you to apply for a position in a channel",
-                    link=f"/work/channels/{channel_id}?posting={posting_id}",
+                    link=channel_path,
                     send_email=True,
                 )
             except Exception as e:

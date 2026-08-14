@@ -6,10 +6,10 @@ import json
 from typing import Literal
 from uuid import UUID
 
-from app.matcha.services.matcha_work.work_permissions import (
-    WorkAccess,
-    WorkCapability,
-    assert_work_capability,
+from app.matcha.services.ops.permissions import (
+    OpsAccess,
+    OpsCapability,
+    assert_ops_capability,
 )
 
 
@@ -34,7 +34,7 @@ async def resolve_event(
     company_id: UUID,
     event_id: UUID,
     actor_user_id: UUID,
-    access: WorkAccess,
+    access: OpsAccess,
     resolution: EventResolution,
     note: str | None = None,
     resolution_code: str | None = None,
@@ -42,7 +42,7 @@ async def resolve_event(
 ) -> dict:
     if access.company_id != company_id:
         raise EventResolutionNotFound("Event not found")
-    assert_work_capability(access, WorkCapability.EVENT_RESOLVE)
+    assert_ops_capability(access, OpsCapability.EVENT_RESOLVE)
 
     row = await conn.fetchrow(
         """

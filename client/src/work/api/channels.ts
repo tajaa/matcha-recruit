@@ -150,6 +150,7 @@ export interface ChannelDetail {
   member_count: number
   is_member: boolean
   my_role: string | null // owner, moderator, member
+  project_id?: string | null
   members: ChannelMember[]
   messages: ChannelMessage[]
 }

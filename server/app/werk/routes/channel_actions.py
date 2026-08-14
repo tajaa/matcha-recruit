@@ -122,7 +122,7 @@ async def list_channel_actions(
                             if access.allows(OpsCapability.EVENT_REVIEW)
                             else []
                         ),
-                        "href": f"/work/events/drafts/{row['id']}",
+                        "href": f"/ops/events/drafts/{row['id']}",
                         "created_at": row["created_at"].isoformat(),
                     }
                 )
@@ -157,7 +157,7 @@ async def list_channel_actions(
                             "status": row["status"],
                             "source_message_id": row["message_id"],
                             "allowed_actions": allowed,
-                            "href": f"/work/events/{row['id']}",
+                        "href": f"/ops/events/{row['id']}",
                             "created_at": row["created_at"].isoformat(),
                         }
                     )

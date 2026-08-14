@@ -20,6 +20,7 @@ from ..services.channel_access import (
     ChannelCapability,
     ChannelScope,
     assert_channel_capability,
+    channel_ops_automation_enabled,
     load_channel_access,
 )
 
@@ -1088,6 +1089,10 @@ async def _bg_inventory_reply(
         sys_row = None
 
         async with get_connection() as conn:
+            if not await channel_ops_automation_enabled(
+                conn, channel_id=UUID(channel_id_str), feature="inventory"
+            ):
+                return False
             async with conn.transaction():
                 claimed_order = await conn.fetchrow(
                     """
@@ -1390,6 +1395,10 @@ async def _bg_receipt_reply(
         sys_row = None
 
         async with get_connection() as conn:
+            if not await channel_ops_automation_enabled(
+                conn, channel_id=UUID(channel_id_str), feature="inventory"
+            ):
+                return False
             claimed = await conn.fetchrow(
                 """
                 UPDATE inventory_receipt_drafts SET confirm_message_id = NULL, updated_at = NOW()
@@ -1518,6 +1527,10 @@ async def _bg_schedule_reply(
         sys_row = None
 
         async with get_connection() as conn:
+            if not await channel_ops_automation_enabled(
+                conn, channel_id=UUID(channel_id_str), feature="employee_schedule"
+            ):
+                return False
             claimed_row = await conn.fetchrow(
                 """
                 UPDATE schedule_chat_proposals
@@ -2094,6 +2107,10 @@ async def _bg_ems_clarify(
         reply_uuid = UUID(reply_to_id_str)
 
         async with get_connection() as conn:
+            if not await channel_ops_automation_enabled(
+                conn, channel_id=UUID(channel_id_str), feature="ems"
+            ):
+                return False
             async with conn.transaction():
                 # Atomic claim: first reply to this question wins. A claim
                 # miss (stale pill, already answered) exits the transaction
@@ -2259,6 +2276,10 @@ async def _bg_ems_draft_reply(
         )
 
         async with get_connection() as conn:
+            if not await channel_ops_automation_enabled(
+                conn, channel_id=UUID(channel_id_str), feature="ems"
+            ):
+                return False
             draft_row = await conn.fetchrow(
                 """
                 SELECT id, company_id
@@ -2283,9 +2304,9 @@ async def _bg_ems_draft_reply(
                 email=user_row["email"],
                 role=user_row["role"],
             )
-            from app.matcha.services.matcha_work.work_permissions import resolve_work_access
+            from app.matcha.services.ops.permissions import resolve_ops_access
 
-            access = await resolve_work_access(
+            access = await resolve_ops_access(
                 conn, user=actor, company_id=draft_row["company_id"]
             )
             draft = await conn.fetchrow(

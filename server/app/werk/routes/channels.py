@@ -1922,13 +1922,14 @@ async def add_members(
                     uid,
                 )
                 from ...matcha.services import notification_service as notif_svc
+                from ..services.channel_links import channel_app_path
                 await notif_svc.create_notification(
                     user_id=uid,
                     company_id=recipient_company_id,
                     type="channel_added",
                     title=f"Added to #{channel_name or 'channel'}",
                     body=f"You've been added to the channel #{channel_name}",
-                    link=f"/work/channels/{channel_id}",
+                    link=await channel_app_path(conn, channel_id),
                 )
             except Exception:
                 logger.warning("Failed to send channel_added notification to %s", uid, exc_info=True)
@@ -2986,7 +2987,9 @@ def _invite_to_dict(row, base_url: str) -> dict:
     return ChannelInvite(
         id=row["id"],
         code=row["code"],
-        url=f"{base_url}/work/channels/join/{row['code']}",
+        # Invite redemption is surface-neutral; the landing page resolves the
+        # target channel first and then routes the user to its owning shell.
+        url=f"{base_url}/join-channel/{row['code']}",
         max_uses=row["max_uses"],
         use_count=row["use_count"],
         expires_at=row["expires_at"],

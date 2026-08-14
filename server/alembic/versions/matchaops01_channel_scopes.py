@@ -10,7 +10,7 @@ from alembic import op
 revision = "matchaops01"
 down_revision = "ems04"
 branch_labels = None
-depends_on = ("inventory01",)
+depends_on = ("inventory01", "proddef01", "v2w3x4y5z6a", "feataudit01")
 
 
 def upgrade() -> None:
@@ -58,26 +58,6 @@ def upgrade() -> None:
     # or own a business channel, without granting Ops to every Work tenant.
     op.execute(
         """
-        UPDATE companies c
-           SET enabled_features = jsonb_set(
-               COALESCE(c.enabled_features, '{}'::jsonb), '{matcha_ops}', 'true'::jsonb, true
-           )
-         WHERE c.is_personal IS NOT TRUE
-           AND (
-               COALESCE((c.enabled_features->>'ems')::boolean, false)
-               OR COALESCE((c.enabled_features->>'inventory')::boolean, false)
-               OR COALESCE((c.enabled_features->>'employee_schedule')::boolean, false)
-               OR COALESCE((c.enabled_features->>'schedule_intelligence')::boolean, false)
-               OR COALESCE((c.enabled_features->>'werk_lite')::boolean, false)
-               OR EXISTS (
-                   SELECT 1 FROM channels ch
-                    WHERE ch.company_id = c.id AND ch.channel_scope = 'operations'
-               )
-           )
-        """
-    )
-    op.execute(
-        """
         UPDATE companies
            SET enabled_features = jsonb_set(
                COALESCE(enabled_features, '{}'::jsonb),
@@ -92,10 +72,14 @@ def upgrade() -> None:
         """
         UPDATE product_definitions
            SET features = jsonb_set(COALESCE(features, '{}'::jsonb), '{matcha_ops}', 'true'::jsonb, true)
-         WHERE COALESCE(features, '{}'::jsonb) ?| ARRAY[
-             'ems', 'inventory', 'employee_schedule', 'schedule_intelligence', 'werk_lite'
-         ]
-           AND NOT COALESCE(features, '{}'::jsonb) ? 'matcha_ops'
+          WHERE COALESCE((features->>'matcha_ops')::boolean, false) IS NOT TRUE
+           AND (
+               COALESCE((features->>'ems')::boolean, false)
+               OR COALESCE((features->>'inventory')::boolean, false)
+               OR COALESCE((features->>'employee_schedule')::boolean, false)
+               OR COALESCE((features->>'schedule_intelligence')::boolean, false)
+               OR COALESCE((features->>'werk_lite')::boolean, false)
+           )
         """
     )
     op.execute(
@@ -104,10 +88,14 @@ def upgrade() -> None:
            SET preconfigured_features = jsonb_set(
                COALESCE(preconfigured_features, '{}'::jsonb), '{matcha_ops}', 'true'::jsonb, true
            )
-         WHERE COALESCE(preconfigured_features, '{}'::jsonb) ?| ARRAY[
-             'ems', 'inventory', 'employee_schedule', 'schedule_intelligence', 'werk_lite'
-         ]
-           AND NOT COALESCE(preconfigured_features, '{}'::jsonb) ? 'matcha_ops'
+          WHERE COALESCE((preconfigured_features->>'matcha_ops')::boolean, false) IS NOT TRUE
+            AND (
+                COALESCE((preconfigured_features->>'ems')::boolean, false)
+                OR COALESCE((preconfigured_features->>'inventory')::boolean, false)
+                OR COALESCE((preconfigured_features->>'employee_schedule')::boolean, false)
+                OR COALESCE((preconfigured_features->>'schedule_intelligence')::boolean, false)
+                OR COALESCE((preconfigured_features->>'werk_lite')::boolean, false)
+            )
         """
     )
 
@@ -123,16 +111,31 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        WITH changed AS (
+            UPDATE companies c
+               SET enabled_features = jsonb_set(
+                   COALESCE(c.enabled_features, '{}'::jsonb),
+                   '{matcha_ops}', 'true'::jsonb, true
+               )
+             WHERE c.is_personal IS NOT TRUE
+               AND COALESCE((c.enabled_features->>'matcha_ops')::boolean, false) IS NOT TRUE
+               AND (
+                   COALESCE((c.enabled_features->>'ems')::boolean, false)
+                   OR COALESCE((c.enabled_features->>'inventory')::boolean, false)
+                   OR COALESCE((c.enabled_features->>'employee_schedule')::boolean, false)
+                   OR COALESCE((c.enabled_features->>'schedule_intelligence')::boolean, false)
+                   OR COALESCE((c.enabled_features->>'werk_lite')::boolean, false)
+                   OR EXISTS (
+                       SELECT 1 FROM channels ch
+                        WHERE ch.company_id = c.id AND ch.channel_scope = 'operations'
+                   )
+               )
+             RETURNING c.id
+        )
         INSERT INTO company_feature_audit_log
             (company_id, feature, old_value, new_value, source)
-        SELECT c.id, 'matcha_ops', false, true, 'migration_backfill'
-          FROM companies c
-         WHERE (c.enabled_features->>'matcha_ops')::boolean IS TRUE
-           AND NOT EXISTS (
-               SELECT 1 FROM company_feature_audit_log a
-                WHERE a.company_id = c.id AND a.feature = 'matcha_ops'
-                  AND a.new_value IS TRUE
-           )
+        SELECT id, 'matcha_ops', false, true, 'migration_backfill'
+          FROM changed
         """
     )
 

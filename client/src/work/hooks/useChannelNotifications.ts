@@ -6,7 +6,7 @@ import { useToast } from '../../components/ui/Toast'
 import { useMe } from '../../hooks/useMe'
 import { getChannelSoundEnabled, getChannelToastEnabled } from './useNotificationSettings'
 import { playNotificationSound } from '../utils/notificationSound'
-import { useWorkBase } from '../routes/WorkSurfaceContext'
+import { useWorkBase, useWorkSurface } from '../routes/WorkSurfaceContext'
 
 /**
  * Mount once at the top of WorkLayout. Owns:
@@ -28,6 +28,12 @@ export function useChannelNotifications() {
   const navigate = useNavigate()
   const location = useLocation()
   const base = useWorkBase()
+  const surface = useWorkSurface()
+  const channelScope = surface === 'matcha-work'
+    ? 'project_discussion'
+    : surface === 'werk'
+      ? 'community'
+      : 'operations'
 
   // Keep pathname in a ref so the message listener (set up once) always
   // reads the current value without needing to re-subscribe on every nav.
@@ -55,7 +61,7 @@ export function useChannelNotifications() {
     let cancelled = false
     // Load membership list, join every room, and track mute state.
     const loadChannels = () => {
-      listChannels()
+      listChannels({ scope: channelScope })
         .then((channels: ChannelSummary[]) => {
           if (cancelled) return
           for (const ch of channels) {
@@ -136,7 +142,7 @@ export function useChannelNotifications() {
       // Note: we don't leave rooms or disconnect — the shared socket lives
       // for the app's lifetime and other components may still depend on it.
     }
-  }, [userId, toast, navigate, base])
+  }, [userId, toast, navigate, base, channelScope])
 }
 
 function truncate(s: string, n: number): string {

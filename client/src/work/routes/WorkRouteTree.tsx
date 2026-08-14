@@ -4,6 +4,7 @@ import MatchaWorkList from '../pages/MatchaWorkList'
 import MatchaWorkThread from '../pages/MatchaWorkThread'
 import ProjectView from '../pages/ProjectView'
 import ChannelView from '../pages/ChannelView'
+import LegacyChannelRedirect, { LegacyInviteRedirect, LegacyOpsRedirect } from '../pages/LegacySurfaceRedirect'
 import WorkEmail from '../pages/WorkEmail'
 import ChannelBrowse from '../pages/ChannelBrowse'
 import ChannelJoinByInvite from '../pages/ChannelJoinByInvite'
@@ -44,11 +45,11 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           <Route path="billing" element={<ChannelBilling />} />
           <Route path="connections" element={<ConnectionsPanel />} />
           <Route path="channels" element={businessWork ? <Navigate to="/ops/channels" replace /> : <ChannelBrowse />} />
-          <Route path="channels/join/:code" element={businessWork ? <Navigate to="/ops/channels" replace /> : <ChannelJoinByInvite />} />
-          <Route path="channels/:channelId" element={<ChannelView />} />
+          <Route path="channels/join/:code" element={businessWork ? <LegacyInviteRedirect /> : <ChannelJoinByInvite />} />
+          <Route path="channels/:channelId" element={businessWork ? <LegacyChannelRedirect /> : <ChannelView />} />
           <Route
             element={
-              businessWork ? <Navigate to="/ops" replace /> : <FeatureGate feature="ems" label="Ops — Events">
+              businessWork ? <LegacyOpsRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="ems" label="Ops — Events">
                 <Outlet />
               </FeatureGate>
             }
@@ -59,7 +60,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           </Route>
           <Route
             element={
-              businessWork ? <Navigate to="/ops" replace /> : <FeatureGate feature="inventory" label="Ops — Inventory">
+              businessWork ? <LegacyOpsRedirect fromPrefix="/work" toPrefix="/ops" /> : <FeatureGate feature="inventory" label="Ops — Inventory">
                 <Outlet />
               </FeatureGate>
             }

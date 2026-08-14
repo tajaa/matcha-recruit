@@ -657,6 +657,7 @@ async def get_broadcast_status(
 ):
     """Return current broadcast state for the channel sidebar badge."""
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_member(conn, channel_id, current_user.id)
         bc = await _active_broadcast(conn, channel_id)
         weekly = await _weekly_broadcast_count(conn, channel_id)

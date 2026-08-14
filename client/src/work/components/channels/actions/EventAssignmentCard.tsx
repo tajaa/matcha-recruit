@@ -76,7 +76,7 @@ export default function EventAssignmentCard({ action }: EventAssignmentCardProps
       {assignment.due_at && <div className="mt-1 text-[10px] text-w-faint">Due {new Date(assignment.due_at).toLocaleString()}</div>}
       <div className="mt-2 flex items-center gap-2">
         <span className={`text-[10px] ${eventClosed || assignment.status !== 'assigned' ? 'text-w-dim' : 'text-amber-300'}`}>{stateLabel}</span>
-        {assignment.can_view_event && <a href={`/work/events/${assignment.event_id}`} className="ml-auto text-[10px] text-w-accent hover:underline">View event</a>}
+        {assignment.can_view_event && <a href={`/ops/events/${assignment.event_id}`} className="ml-auto text-[10px] text-w-accent hover:underline">View event</a>}
         {assignment.can_complete && assignment.status === 'assigned' && !eventClosed && (
           <button
             type="button"

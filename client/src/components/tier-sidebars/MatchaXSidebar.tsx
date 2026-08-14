@@ -56,8 +56,8 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/discipline', icon: IconSteps, label: 'Performance Action', feature: 'discipline' },
       { to: '/app/credential-templates', icon: IconSeal, label: 'Credentialing', feature: 'credential_templates' },
       { to: '/app/workforce-compliance', icon: IconAudit, label: 'Workforce Compliance', feature: 'workforce_compliance' },
-      { to: '/app/employee-schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
-      { to: '/app/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
+      { to: '/ops/schedule', icon: CalendarClock, label: 'Schedule', feature: 'employee_schedule' },
+      { to: '/ops/schedule-intelligence', icon: BarChart3, label: 'Schedule Intelligence', feature: 'schedule_intelligence' },
     ],
   },
   {
