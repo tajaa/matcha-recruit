@@ -11,8 +11,10 @@ export default function OpsSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
   const base = useWorkBase()
-  const { hasFeature } = useMe()
+  const { me, hasFeature } = useMe()
   const [channels, setChannels] = useState<ChannelSummary[]>([])
+
+  const canAccessFeature = (feature: string) => me?.user.role === 'admin' || hasFeature(feature)
 
   useEffect(() => {
     listChannels({ scope: 'operations' }).then(setChannels).catch(() => {})
@@ -28,9 +30,9 @@ export default function OpsSidebar({ open, onToggle }: Props) {
     <nav className="flex-1 space-y-1 overflow-y-auto px-2 pb-3">
       <button onClick={() => go('')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(base) && location.pathname === base ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><Home size={14} /> Home</button>
       <div className="mt-3 px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-w-dim">Operations</div>
-      {hasFeature('ems') && <button onClick={() => go('/events')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/events`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><ClipboardList size={14} /> Events</button>}
-      {hasFeature('inventory') && <button onClick={() => go('/inventory')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/inventory`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><Package size={14} /> Inventory</button>}
-       {hasFeature('employee_schedule') && <button onClick={() => go('/schedule')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/schedule`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><CalendarDays size={14} /> Schedule</button>}
+      {canAccessFeature('ems') && <button onClick={() => go('/events')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/events`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><ClipboardList size={14} /> Events</button>}
+      {canAccessFeature('inventory') && <button onClick={() => go('/inventory')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/inventory`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><Package size={14} /> Inventory</button>}
+       {canAccessFeature('employee_schedule') && <button onClick={() => go('/schedule')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/schedule`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><CalendarDays size={14} /> Schedule</button>}
        <button onClick={() => go('/access')} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/access`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><ShieldCheck size={14} /> Access</button>
       <div className="mt-3 flex items-center justify-between px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wider text-w-dim"><span>Channels</span><button onClick={() => go('/channels')} className="text-w-dim hover:text-w-accent"><Hash size={12} /></button></div>
       {channels.map((channel) => <button key={channel.id} onClick={() => go(`/channels/${channel.id}`)} className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${active(`${base}/channels/${channel.id}`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'}`}><Hash size={14} /> <span className="truncate">{channel.name}</span>{channel.unread_count > 0 && <span className="ml-auto text-[10px] text-w-accent">{channel.unread_count}</span>}</button>)}

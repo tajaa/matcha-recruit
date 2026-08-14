@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMe } from '../../hooks/useMe'
 import { UpgradeUpsellCard } from './UpgradeUpsellCard'
 
+const REVALIDATION_TIMEOUT_MS = 3_000
+
 type Props = {
   /** Company feature flag (`enabled_features.<name>`) required to view children.
    *  Mutually exclusive with `anyOf` — provide one or the other. */
@@ -42,10 +44,29 @@ export function FeatureGate({ feature, anyOf, label, children, pitch, bullets, a
     if (loading || allowed || refreshAttempted.current) return
     refreshAttempted.current = true
     setRevalidating(true)
-    void refresh().finally(() => setRevalidating(false))
+    let active = true
+    const timeoutId = window.setTimeout(() => {
+      if (active) setRevalidating(false)
+    }, REVALIDATION_TIMEOUT_MS)
+
+    void refresh().then(
+      () => {
+        if (active) setRevalidating(false)
+      },
+      () => {
+        if (active) setRevalidating(false)
+      },
+    ).finally(() => window.clearTimeout(timeoutId))
+
+    return () => {
+      active = false
+      window.clearTimeout(timeoutId)
+    }
   }, [loading, allowed, refresh])
 
-  if (loading || revalidating || (!allowed && !refreshAttempted.current)) return null
+  if (loading || revalidating || (!allowed && !refreshAttempted.current)) {
+    return <div role="status" className="p-6 text-sm text-w-dim">Checking access…</div>
+  }
   if (allowed) return <>{children}</>
   return (
     <div className="p-6">
