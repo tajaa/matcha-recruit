@@ -24,6 +24,11 @@ from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ._shared import resolve_display_name
+from ..services.channel_access import (
+    ChannelCapability,
+    assert_channel_capability,
+    load_channel_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,16 @@ async def _assert_owner(conn, channel_id: UUID, user_id: UUID) -> None:
     role = await _assert_member(conn, channel_id, user_id)
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only the channel owner can perform this action")
+
+
+async def _assert_call_access(conn, channel_id: UUID, current_user: CurrentUser) -> None:
+    access = await load_channel_access(
+        conn,
+        channel_id=channel_id,
+        user_id=current_user.id,
+        user_role=current_user.role,
+    )
+    assert_channel_capability(access, ChannelCapability.CALL)
 
 
 async def _active_broadcast(conn, channel_id: UUID):
@@ -222,6 +237,7 @@ async def start_broadcast(
     orphan_broadcast_id = None  # set inside the txn if an orphan was recovered; pushed after conn closes
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
 
         # Serialize check-then-insert against concurrent broadcast/call starts
@@ -339,6 +355,7 @@ async def stop_broadcast(
     from ...core.services.livekit_service import delete_room
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
 
         bc = await _active_broadcast(conn, channel_id)
@@ -389,6 +406,7 @@ async def get_viewer_token(
         raise HTTPException(status_code=503, detail=str(e))
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_member(conn, channel_id, current_user.id)
 
         bc = await _active_broadcast(conn, channel_id)
@@ -439,6 +457,7 @@ async def refresh_broadcast_token(
         raise HTTPException(status_code=503, detail=str(e))
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_member(conn, channel_id, current_user.id)
         bc = await _active_broadcast(conn, channel_id)
         if not bc:
@@ -501,6 +520,7 @@ async def promote_publisher(
         raise HTTPException(status_code=503, detail=str(e))
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
         bc = await _active_broadcast(conn, channel_id)
         if not bc:
@@ -574,6 +594,7 @@ async def demote_publisher(
         raise HTTPException(status_code=503, detail=str(e))
 
     async with get_connection() as conn:
+        await _assert_call_access(conn, channel_id, current_user)
         await _assert_owner(conn, channel_id, current_user.id)
         bc = await _active_broadcast(conn, channel_id)
         if not bc:

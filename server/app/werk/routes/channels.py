@@ -2243,6 +2243,7 @@ async def unarchive_channel(
 ):
     """Restore an archived channel. Owner or admin only."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         row = await conn.fetchrow("SELECT is_archived FROM channels WHERE id = $1", channel_id)
         if not row:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -2268,6 +2269,7 @@ async def delete_channel(
 ):
     """Soft-delete a channel (mark archived). Owner or admin only. Cancels any active paid subscriptions."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         row = await conn.fetchrow(
             "SELECT name, is_archived, is_paid FROM channels WHERE id = $1",
             channel_id,
@@ -2354,6 +2356,7 @@ async def transfer_ownership(
 ):
     """Transfer channel ownership to another member."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2413,6 +2416,7 @@ async def upload_channel_files(
         raise HTTPException(status_code=400, detail=f"Maximum {_MAX_CHANNEL_FILE_COUNT} files per message")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         is_member = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
             channel_id, current_user.id,
@@ -2463,6 +2467,8 @@ async def get_channel_payment_info(
 ):
     """Get payment info for a channel from the current user's perspective."""
     from ..services.channel_payment_service import get_payment_info
+    async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
     return await get_payment_info(channel_id, current_user.id)
 
 
@@ -2479,6 +2485,7 @@ async def create_channel_checkout(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT ch.id, ch.name, ch.is_paid, ch.stripe_price_id, ch.created_by,
@@ -2556,6 +2563,7 @@ async def cancel_channel_subscription(
 ):
     """Cancel the current user's subscription to a paid channel."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         member = await conn.fetchrow(
             "SELECT stripe_subscription_id, subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2595,6 +2603,7 @@ async def update_channel_price_route(
     that amount to each subscription. Only new subscribers get the new price.
     """
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             """
             SELECT is_paid, stripe_product_id, stripe_price_id, currency,
@@ -2651,6 +2660,7 @@ async def update_paid_settings(
 ):
     """Update inactivity settings for a paid channel. Owner only."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -2996,6 +3006,7 @@ async def create_invite(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         # Verify channel belongs to user's company
         ch_exists = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channels WHERE id = $1 AND company_id = $2)",
@@ -3048,6 +3059,7 @@ async def list_invites(
 ):
     """List active invite links for a channel. Owner/moderator only."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -3078,6 +3090,7 @@ async def revoke_invite(
 ):
     """Revoke an invite link. Owner/moderator only."""
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -3120,6 +3133,7 @@ async def join_by_invite(
             raise HTTPException(status_code=410, detail="This invite link has expired")
 
         channel_id = invite["channel_id"]
+        await _require_channel_capability(conn, channel_id, current_user)
 
         # Same-company is always allowed; cross-company invite redeem is
         # allowed only for public channels in personal-account workspaces
@@ -3279,6 +3293,7 @@ async def create_email_invites(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         ch = await conn.fetchrow(
             "SELECT id, name, company_id, COALESCE(is_paid, false) AS is_paid, is_archived "
             "FROM channels WHERE id = $1",
@@ -3590,6 +3605,7 @@ async def send_tip(
         raise HTTPException(status_code=400, detail="Message must be 200 characters or fewer")
 
     async with get_connection() as conn:
+        await _require_channel_capability(conn, channel_id, current_user)
         # Verify membership
         is_member = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
