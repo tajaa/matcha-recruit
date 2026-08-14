@@ -43,11 +43,11 @@ describe('renderSystemContent', () => {
     )
     const link = parts.find(
       (p): p is React.ReactElement<{ to: string; children: string }> =>
-        isValidElement(p) && (p.props as { to?: string }).to?.startsWith('/app/employee-schedule') === true,
+        isValidElement(p) && (p.props as { to?: string }).to?.startsWith('/ops/schedule') === true,
     )
     expect(link).toBeDefined()
     expect(link!.props.to).toBe(
-      '/app/employee-schedule?date=2026-08-01&shift=26c4ef29-ca1d-4c59-9719-30219f8e9056',
+      '/ops/schedule?date=2026-08-01&shift=26c4ef29-ca1d-4c59-9719-30219f8e9056',
     )
     expect(link!.props.children).toBe('View shift →')
   })
