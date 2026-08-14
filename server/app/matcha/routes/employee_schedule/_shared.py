@@ -207,6 +207,25 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     return row
 
 
+async def fetch_locked_shift_pair(conn, company_id: UUID, first_id: UUID, second_id: UUID) -> dict[str, Any]:
+    """Fetch two tenant-owned shifts under row locks in deterministic order."""
+    rows = await conn.fetch(
+        """
+        SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
+               s.location_id, s.break_minutes, s.role, s.kind,
+               s.training_requirement_id, s.published_at,
+               (SELECT COUNT(*) FROM schedule_shift_assignments a
+                WHERE a.shift_id = s.id) AS assigned_count
+        FROM schedule_shifts s
+        WHERE s.company_id = $1 AND s.id = ANY($2::uuid[])
+        ORDER BY s.id
+        FOR UPDATE
+        """,
+        company_id, sorted({first_id, second_id}),
+    )
+    return {str(row["id"]): row for row in rows}
+
+
 def assert_shift_open_for_assignment(shift) -> None:
     """A cancelled shift is terminal — assigning to it would staff a dead shift."""
     if shift["status"] == "cancelled":
@@ -338,4 +357,26 @@ async def fetch_roster(conn, company_id: UUID) -> list[dict]:
             "department": r["department"],
         }
         for r in rows
+    ]
+
+
+async def fetch_schedule_locations(conn, company_id: UUID) -> list[dict]:
+    rows = await conn.fetch(
+        """
+        SELECT id, name, city, state, is_active
+        FROM business_locations
+        WHERE company_id = $1
+        ORDER BY is_active DESC, name NULLS LAST, city, state
+        """,
+        company_id,
+    )
+    return [
+        {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "city": row["city"],
+            "state": row["state"],
+            "is_active": row["is_active"],
+        }
+        for row in rows
     ]

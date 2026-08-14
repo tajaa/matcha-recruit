@@ -26,7 +26,7 @@ from ._shared import (
     assert_employee_in_company, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, raise_outside_availability,
-    shift_window_on_date,
+    shift_window_on_date, fetch_schedule_locations,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -75,6 +75,7 @@ async def get_week(
         # publish touches.
         shifts = await fetch_shifts(conn, company_id, lo, hi, starts_within=True)
         roster = await fetch_roster(conn, company_id)
+        locations = await fetch_schedule_locations(conn, company_id)
 
         features = await get_company_features(company_id, conn=conn)
         training_enabled = bool(features.get("training"))
@@ -103,6 +104,7 @@ async def get_week(
         "week_start": start.isoformat(),
         "shifts": shifts,
         "roster": roster,
+        "locations": locations,
         "roster_flags": roster_flags,
         "summary": _summarize(shifts),
     }

@@ -48,6 +48,25 @@ export interface RosterEmployee {
   department: string | null
 }
 
+export interface ScheduleLocation {
+  id: string
+  name: string | null
+  city: string
+  state: string
+  is_active: boolean
+}
+
+export interface AssignmentMovePayload {
+  employee_id: string
+  from_shift_id: string
+  to_shift_id: string
+}
+
+export interface AssignmentMoveResponse {
+  source_shift: Shift
+  target_shift: Shift
+}
+
 // Per-employee lapse counts for the roster picker. `null` = both `training`
 // and `credential_templates` are off for this company (module-off, not
 // "checked and clean" — an employee absent from the map has nothing lapsed).
@@ -57,6 +76,7 @@ export interface WeekResponse {
   week_start: string
   shifts: Shift[]
   roster: RosterEmployee[]
+  locations: ScheduleLocation[]
   roster_flags: RosterFlags | null
   summary: ScheduleSummary
 }

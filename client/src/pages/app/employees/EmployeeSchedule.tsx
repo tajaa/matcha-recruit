@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy,
@@ -97,7 +97,10 @@ export default function EmployeeSchedule() {
             </h1>
             <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
           </div>
-          <ScheduleLawPanel />
+           <div className="flex shrink-0 items-center gap-2">
+             <Link to={`/ops/schedule/editor?week=${weekStart}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200">Full shift editor</Link>
+             <ScheduleLawPanel />
+           </div>
         </div>
       </div>
 

@@ -24,6 +24,7 @@ vi.mock('../../work/pages/InventoryAudit', () => ({ default: () => <div>Inventor
 vi.mock('../../work/pages/InventoryHub', () => ({ default: () => <div>Inventory page</div> }))
 vi.mock('../../work/pages/ProtocolPage', () => ({ default: () => <div>Protocol page</div> }))
 vi.mock('../../pages/app/employees/EmployeeSchedule', () => ({ default: () => <div>Schedule page</div> }))
+vi.mock('../pages/ScheduleEditor', () => ({ default: () => <div>Schedule editor page</div> }))
 vi.mock('../pages/OpsHome', () => ({ default: () => <div>Ops home page</div> }))
 vi.mock('../pages/OpsAccess', () => ({ default: () => <div>Ops access page</div> }))
 
@@ -45,6 +46,7 @@ describe('OpsRoutes', () => {
     ['/ops/events', 'Events page'],
     ['/ops/inventory', 'Inventory page'],
     ['/ops/schedule', 'Schedule page'],
+    ['/ops/schedule/editor', 'Schedule editor page'],
     ['/ops/schedule-intelligence', 'Schedule page'],
   ])('admits platform admins to %s without company flags', (path, marker) => {
     render(

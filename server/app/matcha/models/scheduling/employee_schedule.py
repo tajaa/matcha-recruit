@@ -103,6 +103,18 @@ class AssignmentCreate(BaseModel):
     employee_id: UUID
 
 
+class AssignmentMove(BaseModel):
+    employee_id: UUID
+    from_shift_id: UUID
+    to_shift_id: UUID
+
+    @model_validator(mode="after")
+    def _different_shifts(self) -> "AssignmentMove":
+        if self.from_shift_id == self.to_shift_id:
+            raise ValueError("source and destination shifts must differ")
+        return self
+
+
 class PublishRange(BaseModel):
     """Bulk-publish every draft shift whose start falls in [start, end)."""
 

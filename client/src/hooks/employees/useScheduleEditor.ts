@@ -1,0 +1,189 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  assignEmployee, createShift, deleteShift, fetchWeek, moveAssignment,
+  publishRange, unassignEmployee, updateShift,
+} from '../../api/employees/employeeSchedule'
+import { useToast } from '../../components/ui'
+import { conflictPrompt } from '../../pages/app/employees/scheduleConflicts'
+import { moveShiftWindow, resizeShiftWindow } from '../../components/employees/schedule-editor/calendarMath'
+import type {
+  AssignmentMoveResponse, RosterEmployee, RosterFlags, ScheduleLocation,
+  ScheduleSummary, Shift, ShiftPayload,
+} from '../../types/employeeSchedule'
+import { addDays, errorMessage } from '../../types/employeeSchedule'
+
+export type ScheduleSaveState = 'idle' | 'saving' | 'saved' | 'error'
+
+export function useScheduleEditor(weekStart: string) {
+  const { toast } = useToast()
+  const [shifts, setShifts] = useState<Shift[]>([])
+  const [roster, setRoster] = useState<RosterEmployee[]>([])
+  const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)
+  const [locations, setLocations] = useState<ScheduleLocation[]>([])
+  const [summary, setSummary] = useState<ScheduleSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saveState, setSaveState] = useState<ScheduleSaveState>('idle')
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null)
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set())
+  const requestVersion = useRef(0)
+
+  const reload = useCallback(async () => {
+    const version = ++requestVersion.current
+    setLoading(true)
+    try {
+      const week = await fetchWeek(weekStart)
+      if (version !== requestVersion.current) return
+      setShifts(week.shifts)
+      setRoster(week.roster)
+      setRosterFlags(week.roster_flags)
+      setLocations(week.locations ?? [])
+      setSummary(week.summary)
+    } finally {
+      if (version === requestVersion.current) setLoading(false)
+    }
+  }, [weekStart])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  const patchShift = useCallback((updated: Shift) => {
+    setShifts((current) => current.map((shift) => shift.id === updated.id ? updated : shift))
+  }, [])
+
+  const patchMove = useCallback((result: AssignmentMoveResponse) => {
+    setShifts((current) => current.map((shift) => {
+      if (shift.id === result.source_shift.id) return result.source_shift
+      if (shift.id === result.target_shift.id) return result.target_shift
+      return shift
+    }))
+  }, [])
+
+  const mutate = useCallback(async <T,>(
+    key: string,
+    operation: (force: boolean) => Promise<T>,
+    onSuccess: (result: T) => void,
+  ): Promise<T | null> => {
+    setPendingKeys((current) => new Set(current).add(key))
+    setSaveState('saving')
+    try {
+      let result: T
+      try {
+        result = await operation(false)
+      } catch (error) {
+        const prompt = conflictPrompt(error)
+        if (!prompt || !window.confirm(prompt)) {
+          if (prompt) setSaveState('idle')
+          else throw error
+          return null
+        }
+        result = await operation(true)
+      }
+      onSuccess(result)
+      setSaveState('saved')
+      setLastSavedAt(new Date())
+      return result
+    } catch (error) {
+      setSaveState('error')
+      toast(errorMessage(error), 'error')
+      await reload()
+      return null
+    } finally {
+      setPendingKeys((current) => {
+        const next = new Set(current)
+        next.delete(key)
+        return next
+      })
+    }
+  }, [reload, toast])
+
+  const createDraft = useCallback((payload: ShiftPayload) => mutate(
+    'new-shift',
+    (force) => createShift(payload, force),
+    (result) => {
+      setShifts((current) => [...current, result].sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at)))
+      setSummary((current) => current ? {
+        ...current,
+        total_shifts: current.total_shifts + 1,
+        draft: current.draft + Number(result.status === 'draft'),
+        published: current.published + Number(result.status === 'published'),
+        open_shifts: current.open_shifts + Number(result.status !== 'cancelled' && result.assignments.length < result.required_staff),
+        assigned: current.assigned + result.assignments.length,
+      } : current)
+    },
+  ), [mutate])
+
+  const updateShiftDraft = useCallback((shift: Shift, payload: Partial<ShiftPayload>) => mutate(
+    `shift:${shift.id}`,
+    (force) => updateShift(shift.id, payload, force),
+    patchShift,
+  ), [mutate, patchShift])
+
+  const moveShift = useCallback((shift: Shift, targetDate: string, targetMinute: number) => updateShiftDraft(
+    shift,
+    moveShiftWindow(shift, targetDate, targetMinute),
+  ), [updateShiftDraft])
+
+  const resizeShift = useCallback((shift: Shift, endMinute: number) => updateShiftDraft(
+    shift,
+    resizeShiftWindow(shift, endMinute),
+  ), [updateShiftDraft])
+
+  const assignToShift = useCallback((shift: Shift, employeeId: string) => mutate(
+    `shift:${shift.id}`,
+    (force) => assignEmployee(shift.id, employeeId, force),
+    patchShift,
+  ), [mutate, patchShift])
+
+  const moveEmployee = useCallback((employeeId: string, fromShiftId: string, toShiftId: string) => mutate(
+    `move:${fromShiftId}:${toShiftId}:${employeeId}`,
+    (force) => moveAssignment({ employee_id: employeeId, from_shift_id: fromShiftId, to_shift_id: toShiftId }, force),
+    patchMove,
+  ), [mutate, patchMove])
+
+  const unassignFromShift = useCallback((shift: Shift, employeeId: string) => mutate(
+    `shift:${shift.id}`,
+    (force) => unassignEmployee(shift.id, employeeId, force),
+    patchShift,
+  ), [mutate, patchShift])
+
+  const removeShift = useCallback(async (shift: Shift) => {
+    const result = await mutate(
+      `shift:${shift.id}`,
+    (force) => deleteShift(shift.id, force),
+      () => {
+        setShifts((current) => current.filter((item) => item.id !== shift.id))
+        setSummary((current) => current ? {
+          ...current,
+          total_shifts: current.total_shifts - 1,
+          draft: current.draft - Number(shift.status === 'draft'),
+          published: current.published - Number(shift.status === 'published'),
+          open_shifts: current.open_shifts - Number(shift.status !== 'cancelled' && shift.assignments.length < shift.required_staff),
+          assigned: current.assigned - shift.assignments.length,
+        } : current)
+      },
+    )
+    return result !== null
+  }, [mutate])
+
+  const publishWeek = useCallback(async () => {
+    setSaveState('saving')
+    try {
+      const result = await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
+      setShifts(result.shifts)
+      setSummary(result.summary)
+      setSaveState('saved')
+      setLastSavedAt(new Date())
+    } catch (error) {
+      setSaveState('error')
+      toast(errorMessage(error), 'error')
+      throw error
+    }
+  }, [toast, weekStart])
+
+  return {
+    shifts, roster, rosterFlags, locations, summary, loading, saveState, lastSavedAt, pendingKeys,
+    reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
+    moveEmployee, unassignFromShift, removeShift, publishWeek,
+  }
+}

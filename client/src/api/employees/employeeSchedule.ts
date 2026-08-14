@@ -2,6 +2,7 @@ import { api } from '../client'
 import type {
   Shift, ShiftPayload, WeekResponse, ScheduleSummary,
   ShiftTemplate, TemplatePayload, ScheduleRequest,
+  AssignmentMovePayload, AssignmentMoveResponse,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
@@ -64,6 +65,13 @@ export function assignEmployee(shiftId: string, employeeId: string, force = fals
 export function unassignEmployee(shiftId: string, employeeId: string, force = false) {
   return api.delete<Shift>(
     `/employee-schedule/shifts/${shiftId}/assignments/${employeeId}${force ? '?force=true' : ''}`,
+  )
+}
+
+export function moveAssignment(payload: AssignmentMovePayload, force = false) {
+  return api.post<AssignmentMoveResponse>(
+    `/employee-schedule/assignments/move${force ? '?force=true' : ''}`,
+    payload,
   )
 }
 

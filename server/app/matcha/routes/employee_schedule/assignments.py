@@ -4,23 +4,155 @@ import logging
 from datetime import timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from app.matcha.models.scheduling.employee_schedule import AssignmentCreate
+from app.matcha.models.scheduling.employee_schedule import AssignmentCreate, AssignmentMove
 from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
+from ...services.scheduling.shift_writes import apply_assignment_core, remove_assignment_core
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
+    fetch_locked_shift_pair,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.post("/assignments/move")
+async def move_employee_assignment(
+    body: AssignmentMove,
+    force: bool = Query(False, description="Move despite overlap, capacity, availability, or advisory violations"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Move one assignment atomically between two tenant-owned shifts."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            shifts = await fetch_locked_shift_pair(
+                conn, company_id, body.from_shift_id, body.to_shift_id,
+            )
+            source = shifts.get(str(body.from_shift_id))
+            target = shifts.get(str(body.to_shift_id))
+            if source is None or target is None:
+                raise HTTPException(status_code=404, detail="Shift not found")
+            if source["status"] == "cancelled":
+                raise HTTPException(status_code=409, detail="Cannot move an assignment from a cancelled shift")
+            if target["status"] == "cancelled":
+                raise HTTPException(status_code=409, detail="Cannot move an assignment to a cancelled shift")
+
+            await assert_employee_in_company(conn, company_id, body.employee_id)
+            assignment = await conn.fetchrow(
+                """
+                SELECT assigned_by
+                FROM schedule_shift_assignments
+                WHERE shift_id = $1 AND employee_id = $2
+                """,
+                body.from_shift_id, body.employee_id,
+            )
+            if assignment is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "assignment_missing",
+                        "message": "Employee is not assigned to the source shift",
+                    },
+                )
+            already_target = await conn.fetchval(
+                """
+                SELECT 1
+                FROM schedule_shift_assignments
+                WHERE shift_id = $1 AND employee_id = $2
+                """,
+                body.to_shift_id, body.employee_id,
+            )
+            if already_target:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "assignment_exists",
+                        "message": "Employee is already assigned to the destination shift",
+                    },
+                )
+
+            if not force:
+                if target["assigned_count"] >= target["required_staff"]:
+                    raise_shift_full(target["assigned_count"], target["required_staff"])
+                conflicts = await find_conflicts(
+                    conn, company_id, body.employee_id,
+                    target["starts_at"], target["ends_at"],
+                    exclude_shift_id=body.from_shift_id,
+                )
+                if conflicts:
+                    raise_conflict(body.employee_id, conflicts)
+                availability = await fetch_availability(conn, company_id, [body.employee_id])
+                violations = availability_violations(
+                    availability[body.employee_id], target["starts_at"], target["ends_at"],
+                )
+                if violations:
+                    raise_outside_availability(body.employee_id, violations)
+
+            if source["published_at"] is not None:
+                source_violations = await _fair_workweek_advisories(
+                    conn, company_id,
+                    location_id=source["location_id"],
+                    starts_at=source["starts_at"], ends_at=source["ends_at"],
+                    event="unassign", shift_published=True, min_rest_gap_hours=None,
+                )
+                raise_for_violations(source_violations, force=force)
+            else:
+                source_violations = []
+
+            target_violations = await check_shift_compliance(
+                conn, company_id, location_id=target["location_id"],
+                starts_at=target["starts_at"], ends_at=target["ends_at"],
+                break_minutes=target["break_minutes"] or 0,
+                employee_id=body.employee_id,
+                exclude_shift_id=body.from_shift_id,
+                fw_event="assign",
+                fw_shift_published=(target["published_at"] is not None),
+                shift_kind=target["kind"],
+                training_requirement_id=target["training_requirement_id"],
+            )
+            raise_for_violations(target_violations, force=force)
+
+            audit_details = {
+                "source": "schedule_editor_move",
+                "from_shift_id": str(body.from_shift_id),
+                "to_shift_id": str(body.to_shift_id),
+            }
+            await remove_assignment_core(
+                conn, company_id,
+                shift_id=body.from_shift_id,
+                employee_id=body.employee_id,
+                actor_user_id=current_user.id,
+                shift_row=source,
+                audit_details=audit_details,
+            )
+            await apply_assignment_core(
+                conn, company_id,
+                shift_row=target,
+                employee_id=body.employee_id,
+                actor_user_id=current_user.id,
+                audit_details=audit_details,
+            )
+            if source_violations or target_violations:
+                await log_audit(
+                    conn, company_id, "assignment", body.to_shift_id,
+                    current_user.id, "assignment.compliance_override",
+                    {"employee_id": str(body.employee_id), "violations": source_violations + target_violations},
+                )
+
+        return {
+            "source_shift": await fetch_shift_by_id(conn, company_id, body.from_shift_id),
+            "target_shift": await fetch_shift_by_id(conn, company_id, body.to_shift_id),
+        }
 
 
 @router.post("/shifts/{shift_id}/assignments")

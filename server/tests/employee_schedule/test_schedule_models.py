@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityReplace,
     AvailabilityWindow,
+    AssignmentMove,
     DuplicateShift,
     GenerateFromTemplate,
     PublishRange,
@@ -24,6 +25,39 @@ from app.matcha.models.scheduling.employee_schedule import (
 
 AWARE = datetime(2026, 7, 13, 9, tzinfo=timezone.utc)
 AWARE_END = datetime(2026, 7, 13, 17, tzinfo=timezone.utc)
+
+
+# -- assignment moves ---------------------------------------------------------
+
+def test_assignment_move_accepts_distinct_shifts():
+    source = "11111111-1111-1111-1111-111111111111"
+    target = "22222222-2222-2222-2222-222222222222"
+    move = AssignmentMove(
+        employee_id="33333333-3333-3333-3333-333333333333",
+        from_shift_id=source,
+        to_shift_id=target,
+    )
+    assert str(move.from_shift_id) == source
+    assert str(move.to_shift_id) == target
+
+
+def test_assignment_move_rejects_same_shift():
+    shift_id = "11111111-1111-1111-1111-111111111111"
+    with pytest.raises(ValidationError):
+        AssignmentMove(
+            employee_id="33333333-3333-3333-3333-333333333333",
+            from_shift_id=shift_id,
+            to_shift_id=shift_id,
+        )
+
+
+def test_assignment_move_rejects_invalid_uuid():
+    with pytest.raises(ValidationError):
+        AssignmentMove(
+            employee_id="not-a-uuid",
+            from_shift_id="11111111-1111-1111-1111-111111111111",
+            to_shift_id="22222222-2222-2222-2222-222222222222",
+        )
 
 
 # ── tz normalization ────────────────────────────────────────────────────────
