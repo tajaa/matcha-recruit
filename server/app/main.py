@@ -31,6 +31,7 @@ _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 # logging separately and never references %(request_id)s, so this is a
 # no-op there — request_id_var just reads its "-" default.
 from .core.request_context import RequestIDMiddleware, request_id_var  # noqa: E402
+from .cappe.services.common import normalize_host_header  # noqa: E402
 
 _base_log_record_factory = logging.getLogRecordFactory()
 
@@ -329,7 +330,7 @@ class DynamicTrustedHostMiddleware:
         host = ""
         for name, value in scope.get("headers") or []:
             if name == b"host":
-                host = value.decode("latin-1").split(":", 1)[0].strip().lower().rstrip(".")
+                host = normalize_host_header(value.decode("latin-1")) or ""
                 break
         allowed = _host_in_allowlist(host)
         if not allowed and scope["type"] == "http":

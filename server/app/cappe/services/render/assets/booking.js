@@ -87,9 +87,10 @@ var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textCont
 if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
 if(selLoc)body.location_id=selLoc;
-sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
+ sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
 RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
 var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
  }).catch(function(e){sb.disabled=false;sb.textContent='Request booking';sel=null;msg.textContent=e.message;msg.className='cz-msg err';loadSlots();});});
-}).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});}})();
+  box.dispatchEvent(new CustomEvent('cappe:booking-ready'));
+ }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});}})();

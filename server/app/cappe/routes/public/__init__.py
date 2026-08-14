@@ -13,6 +13,7 @@ from fastapi import APIRouter
 
 from . import (
     blog,
+    booking_suggestion_access,
     booking_selfserve,
     bookings,
     creators,
@@ -36,6 +37,7 @@ router.include_router(shop.router)
 router.include_router(newsletter.router)
 router.include_router(forms.router)
 router.include_router(reviews.router)
+router.include_router(booking_suggestion_access.router)
 router.include_router(bookings.router)
 router.include_router(bookings.suggestions_router)
 router.include_router(booking_selfserve.router)

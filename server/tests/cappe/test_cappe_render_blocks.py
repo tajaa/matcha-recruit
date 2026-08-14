@@ -117,6 +117,13 @@ def test_booking_picker_includes_natural_language_suggestions():
     assert "Confirm booking" in html
 
 
+def test_booking_access_gate_uses_ready_event_without_polling():
+    html = _render({"type": "booking", "heading": "Book a session"})
+    assert "cappe:booking-ready" in html
+    assert "setTimeout(findAi,25)" not in html
+    assert "initializeAccessGate" in html
+
+
 # --- bespoke designer layer (_design) ----------------------------------------
 
 def _main(html: str) -> str:

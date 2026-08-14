@@ -300,6 +300,19 @@ class CappeBookingSuggestionRequest(BaseModel):
     website: str = Field(default="", max_length=200)
 
 
+class CappeBookingSuggestionAccessRequest(BaseModel):
+    email: EmailStr
+    website: str = Field(default="", max_length=200)
+
+
+class CappeBookingSuggestionAccessRedeem(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+
+
+class CappeBookingSuggestionAccessStatus(BaseModel):
+    status: Literal["sent", "required", "eligible"]
+
+
 class CappeBookingSuggestionOption(BaseModel):
     staff_id: Optional[UUID] = None
     staff_name: Optional[str] = None
@@ -369,6 +382,9 @@ __all__ = [
     "CappeApprovalDecline",
     "CappeBookingRequest",
     "CappeBookingSuggestionRequest",
+    "CappeBookingSuggestionAccessRequest",
+    "CappeBookingSuggestionAccessRedeem",
+    "CappeBookingSuggestionAccessStatus",
     "CappeBookingSuggestionOption",
     "CappeBookingSuggestions",
     "CappeBookingQuoteRequest",

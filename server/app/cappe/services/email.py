@@ -36,6 +36,45 @@ def thread_url(token: str) -> str:
     """Client-facing link to the public message thread page."""
     return f"{_base_url()}/cappe/thread/{token}"
 
+
+def suggestion_access_url(origin: str, token: str) -> str:
+    """Tenant-host URL with the secret in the fragment, never sent in a request."""
+    return f"{origin.rstrip('/')}/__cappe/booking-suggestions/access#{token}"
+
+
+async def send_cappe_booking_suggestion_access_email(
+    to_email: str,
+    to_name: str | None,
+    site_name: str,
+    access_url: str,
+) -> None:
+    """Send a short-lived link that unlocks AI suggestions for an existing client."""
+    name = (to_name or "there").strip()
+    greeting = f"Hi {name}," if to_name else "Hi there,"
+    e_site = escape(site_name or "this site")
+    html = _email_shell(
+        f"Find a time with {e_site}",
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        f"{escape(greeting)} We found your client record. Use this link to ask for AI-matched open times.</p>"
+        f'<p style="margin:0;font-size:12px;line-height:1.6;color:#71717a;">'
+        "The link expires in 15 minutes and works once.</p>",
+        cta_label="Find open times",
+        cta_url=access_url,
+        footer=site_name or "Cappe",
+    )
+    text = (
+        f"{greeting}\n\nUse this link to ask for AI-matched open times at {site_name}:\n"
+        f"{access_url}\n\nThis link expires in 15 minutes and works once."
+    )
+    await _send(
+        to_email,
+        to_name,
+        f"Your booking access link — {site_name}",
+        html,
+        text,
+        label="booking suggestion access",
+    )
+
 _CCY_SYMBOL = {"USD": "$", "CAD": "$", "AUD": "$", "EUR": "€", "GBP": "£"}
 
 

@@ -1,6 +1,7 @@
 """Lightweight Redis cache module for server-side response caching."""
 
 import json
+import hmac
 import os
 import time as _time
 from collections import defaultdict
@@ -98,6 +99,16 @@ _rl_attempts: dict[str, list[float]] = defaultdict(list)
 _TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))
 
 
+def _trusted_proxy_count(request: Request) -> int:
+    """Count the nginx hop and an authenticated CloudFront hop when present."""
+    count = _TRUSTED_PROXY_COUNT
+    expected = os.getenv("CAPPE_CLOUDFRONT_ORIGIN_SECRET", "")
+    provided = request.headers.get("x-cappe-origin-verify", "")
+    if expected and provided and hmac.compare_digest(expected, provided):
+        count += 1
+    return count
+
+
 def client_ip(request: Request) -> str:
     """Real client IP, proxy-aware (anti-spoofing for rate limits).
 
@@ -112,7 +123,7 @@ def client_ip(request: Request) -> str:
     if fwd:
         parts = [p.strip() for p in fwd.split(",") if p.strip()]
         if parts:
-            idx = max(0, len(parts) - _TRUSTED_PROXY_COUNT)
+            idx = max(0, len(parts) - _trusted_proxy_count(request))
             return parts[idx]
     return request.client.host if request.client else "unknown"
 

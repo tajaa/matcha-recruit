@@ -29,6 +29,7 @@ from app.cappe.routes.render import (  # noqa: E402
     _custom_domain_candidates,
     subdomain_from_host,
 )
+from app.cappe.services.common import normalize_host_header  # noqa: E402
 
 
 # --- safe_subdomain_base (creation-side reserved guard) -----------------------
@@ -107,6 +108,27 @@ def test_custom_domain_candidates_strips_port_and_case():
 ])
 def test_custom_domain_candidates_excludes_non_tenants(host):
     assert _custom_domain_candidates(host) == []
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("tenant.gummfit.com:443", "tenant.gummfit.com"),
+    ("Tenant.Gummfit.com.", "tenant.gummfit.com"),
+    ("[::1]:8001", "::1"),
+])
+def test_normalize_host_header_accepts_unambiguous_authorities(raw, expected):
+    assert normalize_host_header(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    "tenant.gummfit.com:443@attacker.example",
+    "tenant.gummfit.com,attacker.example",
+    "https://tenant.gummfit.com",
+    "tenant.gummfit.com/path",
+    " tenant.gummfit.com",
+    "tenant.gummfit.com:abc",
+])
+def test_normalize_host_header_rejects_ambiguous_authorities(raw):
+    assert normalize_host_header(raw) is None
 
 
 # --- normalize_custom_domain ----------------------------------------------------

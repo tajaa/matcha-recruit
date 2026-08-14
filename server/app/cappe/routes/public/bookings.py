@@ -1,11 +1,9 @@
 """Cappe public surface — bookings (locations, staff, booking types, rider,
 availability, slots, create)."""
-from collections.abc import Awaitable, Callable
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, Response
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -37,49 +35,16 @@ from ...services.booking_suggestions import (
     resolve_booking_windows,
     resolve_staff_preferences,
 )
+from .booking_suggestion_access import require_booking_suggestion_session
+from ._body_limit import CappePublicJsonBodyLimitRoute, limited_public_router
 from .._shared import _site_owner, loads_list
 from ._common import _location_ctx, _published_site, _read_rate_limit, _reject_reserved
 
 router = APIRouter()
-_MAX_SUGGESTION_BODY_BYTES = 8 * 1024
 _SUGGESTION_SEARCH_DAYS = 14
-
-
-class _BookingSuggestionBodyLimitRoute(APIRoute):
-    """Reject oversized suggestion bodies before FastAPI parses the model."""
-
-    def get_route_handler(self) -> Callable[[Request], Awaitable[Response]]:
-        original_route_handler = super().get_route_handler()
-
-        async def custom_route_handler(request: Request):
-            content_length = request.headers.get("content-length")
-            if content_length and content_length.isdigit() and int(content_length) > _MAX_SUGGESTION_BODY_BYTES:
-                return JSONResponse(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    content={"detail": "Request is too large"},
-                )
-
-            received_bytes = 0
-
-            async def limited_receive():
-                nonlocal received_bytes
-                message = await request.receive()
-                if message["type"] == "http.request":
-                    received_bytes += len(message.get("body") or b"")
-                    if received_bytes > _MAX_SUGGESTION_BODY_BYTES:
-                        raise HTTPException(
-                            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                            detail="Request is too large",
-                        )
-                return message
-
-            limited_request = Request(request.scope, limited_receive)
-            return await original_route_handler(limited_request)
-
-        return custom_route_handler
-
-
-suggestions_router = APIRouter(route_class=_BookingSuggestionBodyLimitRoute)
+suggestions_router = limited_public_router()
+# Kept as a module alias for existing body-limit tests and downstream imports.
+_BookingSuggestionBodyLimitRoute = CappePublicJsonBodyLimitRoute
 
 
 async def _active_staff_for_type(conn, site_id, type_id) -> list:
@@ -320,7 +285,10 @@ async def _load_live_booking_slots(
     response_model=CappeBookingSuggestions,
 )
 async def public_booking_suggestions(
-    slug: str, body: CappeBookingSuggestionRequest, request: Request,
+    slug: str,
+    body: CappeBookingSuggestionRequest,
+    request: Request,
+    verified_client_email: str = Depends(require_booking_suggestion_session),
 ):
     """Return live booking options parsed from a bounded natural-language request."""
     if body.website.strip():

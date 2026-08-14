@@ -11,7 +11,7 @@ from ...services.commerce import validate_intake as _validate_intake  # noqa: F4
 async def _published_site(conn, slug: str):
     """Resolve a published site by slug, or 404. Returns the row (incl. id, timezone)."""
     row = await conn.fetchrow(
-        "SELECT id, name, slug, theme_config, meta_config, timezone, status "
+        "SELECT id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, status "
         "FROM cappe_sites WHERE slug = $1",
         slug,
     )

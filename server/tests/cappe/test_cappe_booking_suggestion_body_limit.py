@@ -10,6 +10,8 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.models.bookings import CappeBookingSuggestionRequest  # noqa: E402
 from app.cappe.routes.public.bookings import _BookingSuggestionBodyLimitRoute  # noqa: E402
+from app.cappe.routes.public import booking_suggestion_access  # noqa: E402
+from app.cappe.routes.public._body_limit import CappePublicJsonBodyLimitRoute  # noqa: E402
 
 
 def _client(monkeypatch):
@@ -48,3 +50,10 @@ def test_chunked_oversized_body_is_rejected_before_endpoint(monkeypatch):
 
     assert response.status_code == 413
     assert response.json()["detail"] == "Request is too large"
+
+
+def test_access_router_uses_the_same_body_limit_route():
+    assert all(
+        isinstance(route, CappePublicJsonBodyLimitRoute)
+        for route in booking_suggestion_access.router.routes
+    )

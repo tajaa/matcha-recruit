@@ -60,9 +60,21 @@ registration auto-refunds (`finalize_domain_registration`).
    abuse gate against LE issuance for arbitrary hostnames.
 
 5. **DNS** — registered domains: `point_at_app` sets apex A → `CAPPE_DOMAIN_TARGET_IP`
-   and `www` CNAME → apex automatically. Connected domains: the tenant points
-   their own A record at us (shown in the connect UI), then completes the TXT
-   verification.
+and `www` CNAME → apex automatically. Connected domains: the tenant points
+their own A record at us (shown in the connect UI), then completes the TXT
+verification.
+
+## AI booking edge policy
+
+Manual booking remains available on canonical and verified custom domains, but
+AI suggestions and their 30-minute host-only session cookie work only on the
+canonical tenant host (`https://<subdomain>.<CAPPE_BASE_DOMAIN>`). Access links
+are generated from the stored subdomain, never from request forwarding headers.
+
+Before exposing the flow publicly, put `gummfit.com` and
+`*.gummfit.com` behind the CloudFront/WAF setup documented in
+`docs/ops/CAPPE_EDGE.md`. Keep custom domains on their existing renderer path
+until per-domain CloudFront aliases and certificates are implemented.
 
 ## Connect (BYO) verification
 `POST /domains/connect` creates a **pending** claim + a token; the tenant adds a

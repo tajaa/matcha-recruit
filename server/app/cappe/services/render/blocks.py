@@ -326,6 +326,7 @@ _STORE_JS = (_ASSETS / "store.js").read_text(encoding="utf-8")
 
 
 _BOOKING_JS = (_ASSETS / "booking.js").read_text(encoding="utf-8")
+_BOOKING_ACCESS_JS = (_ASSETS / "booking_suggestion_access.js").read_text(encoding="utf-8")
 
 
 _NEWSLETTER_JS = (_ASSETS / "newsletter.js").read_text(encoding="utf-8")
@@ -359,7 +360,8 @@ def _booking(b, t, editable=False):
     wid = "bk" + str(_uid())
     return (f'<section id="book" class="cz-form-sec"><div class="cz-wrap">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-form"><p style="color:var(--muted)">Loading...</p></div></div></section>'
-            f'<script>{_BOOKING_JS.replace("__ID__", wid)}</script>')
+            f'<script>{_BOOKING_JS.replace("__ID__", wid)}</script>'
+            f'<script>{_BOOKING_ACCESS_JS.replace("__ID__", wid)}</script>')
 
 
 def _newsletter(b, t, editable=False):

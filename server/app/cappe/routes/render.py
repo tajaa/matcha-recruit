@@ -14,12 +14,16 @@ lookup + a Redis GET on the hot path.
 """
 import os
 import time
+import json
+from html import escape
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 
 from ...core.services.redis_cache import cache_get, cache_set, get_redis_cache
 from ...database import get_connection
+from ..services.booking_suggestion_access import canonical_suggestion_host
+from ..services.common import normalize_host_header
 from ..services.render import render_site_html
 from ..services.render_cache import invalidate_site_render_cache
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
@@ -71,10 +75,7 @@ def _prod_suffix() -> str:
 
 
 def _norm_host(host: str | None) -> str | None:
-    if not host:
-        return None
-    host = host.split(":", 1)[0].strip().lower().rstrip(".")
-    return host or None
+    return normalize_host_header(host)
 
 
 def subdomain_from_host(host: str | None) -> str | None:
@@ -155,7 +156,7 @@ async def _resolve_published_site(conn, host: str | None):
     sub = subdomain_from_host(host)
     if sub:
         return await conn.fetchrow(
-            "SELECT id, name, slug, theme_config, meta_config FROM cappe_sites "
+            "SELECT id, name, slug, subdomain, custom_domain, theme_config, meta_config FROM cappe_sites "
             "WHERE subdomain = $1 AND status = 'published'",
             sub,
         )
@@ -163,7 +164,7 @@ async def _resolve_published_site(conn, host: str | None):
     if not candidates:
         return None
     return await conn.fetchrow(
-        "SELECT id, name, slug, theme_config, meta_config FROM cappe_sites "
+        "SELECT id, name, slug, subdomain, custom_domain, theme_config, meta_config FROM cappe_sites "
         "WHERE custom_domain = ANY($1::text[]) AND status = 'published'",
         candidates,
     )
@@ -268,3 +269,44 @@ async def render_home(request: Request):
 @router.get("/p/{page_slug}", response_class=HTMLResponse)
 async def render_page(page_slug: str, request: Request):
     return await _render(request, page_slug)
+
+
+@router.get("/__cappe/booking-suggestions/access", response_class=HTMLResponse)
+async def booking_suggestion_access_page(request: Request):
+    """Redeem a fragment token on the tenant host, then return to the site."""
+    host = request.headers.get("host")
+    if subdomain_from_host(host) is None and not _custom_domain_candidates(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+    if site is None:
+        return _not_found_html("Site not found")
+    normalized_host = _norm_host(host)
+    canonical_host = canonical_suggestion_host(site)
+    local_hosts = {
+        f"{site['subdomain']}.localhost",
+        f"{site['subdomain']}.cappe.localhost",
+    }
+    if normalized_host not in {canonical_host, *local_hosts}:
+        return _not_found_html("Booking access is available on the tenant host")
+    slug = json.dumps(site["slug"])
+    safe_name = escape(site["name"] or "Booking")
+    title = escape(f"Booking access | {site['name']}")
+    return HTMLResponse(
+        f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b0d;color:#e4e4e7;font:16px system-ui,sans-serif}}main{{max-width:32rem;padding:2rem;text-align:center}}p{{color:#a1a1aa;line-height:1.6}}a{{color:#c6f16b}}</style>
+</head><body><main><h1>Opening booking access...</h1><p id="message">Checking your secure link.</p><a id="back" href="/" hidden>Return to {safe_name}</a></main>
+<script>(function(){{
+var msg=document.getElementById('message'),back=document.getElementById('back'),token=window.location.hash.slice(1),slug={slug};
+function fail(text){{msg.textContent=text;back.hidden=false;}}
+window.history.replaceState(null,'',window.location.pathname+window.location.search);
+if(!token){{fail('This access link is missing its token.');return;}}
+fetch('/api/cappe/public/sites/'+encodeURIComponent(slug)+'/booking-suggestions/access/redeem',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{token:token}})}})
+ .then(function(r){{if(!r.ok)throw new Error('expired');return r.json();}})
+ .then(function(){{window.location.replace('/#book');}})
+ .catch(function(){{fail('This access link is invalid or has expired.');}});
+}})();</script></body></html>""",
+        headers={**tenant_security_headers(), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )

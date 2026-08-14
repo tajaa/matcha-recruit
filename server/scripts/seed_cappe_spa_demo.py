@@ -26,6 +26,7 @@ from app.core.services.auth import hash_password  # noqa: E402
 from app.database import close_pool, get_connection, init_pool  # noqa: E402
 
 EMAIL = "lumiere@example.com"          # reserved domain → auto-verifies, safe
+AI_CLIENT_EMAIL = "ai-client@lumiere.test"  # reserved domain; safe local client fixture
 PASSWORD = "spademo123"
 PIC = "https://picsum.photos/seed"
 
@@ -148,6 +149,11 @@ async def seed(conn):
                                     theme_config, meta_config, timezone, published_at)
            VALUES ($1, $2, $3, $3, 'blank', 'published', $4, $5, 'America/Los_Angeles', NOW()) RETURNING id""",
         acct_id, "Lumière Skincare Spa", "lumiere-spa", json.dumps(THEME), json.dumps(META),
+    )
+    await conn.execute(
+        """INSERT INTO cappe_clients (site_id, email, name, source)
+           VALUES ($1, $2, 'AI Test Client', 'manual')""",
+        site_id, AI_CLIENT_EMAIL,
     )
 
     # Staff
