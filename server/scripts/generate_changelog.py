@@ -143,6 +143,27 @@ FIX_EXAMPLE = {
 
 _BODY_MAX_CHARS = 4000
 _FILES_MAX = 120
+_GEMINI_RETRY_ATTEMPTS = 3
+_GEMINI_RETRY_DELAYS = (2.0, 5.0)
+_GEMINI_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    """Recognize transient SDK/API failures without retrying bad requests."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return True
+    for attr in ("status_code", "code"):
+        value = getattr(exc, attr, None)
+        try:
+            if int(value) in _GEMINI_RETRY_STATUS_CODES:
+                return True
+        except (TypeError, ValueError):
+            pass
+    message = str(exc).upper()
+    return any(marker in message for marker in (
+        "429", "500 INTERNAL", "502", "503", "504", "UNAVAILABLE",
+        "RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED", "RATE LIMIT",
+    ))
 
 
 def build_prompt(pr: PrInfo, product: str) -> str:
@@ -345,10 +366,23 @@ async def generate_entry(client, pr: PrInfo, product: str) -> dict | None:
     abort or continue)."""
     prompt = build_prompt(pr, product)
     config = types.GenerateContentConfig(temperature=0.3, response_mime_type="application/json")
-    response = await asyncio.wait_for(
-        client.aio.models.generate_content(model=GEMINI_FLASH, contents=[prompt], config=config),
-        timeout=60,
-    )
+    for attempt in range(_GEMINI_RETRY_ATTEMPTS):
+        try:
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(model=GEMINI_FLASH, contents=[prompt], config=config),
+                timeout=60,
+            )
+            break
+        except Exception as exc:  # noqa: BLE001 — SDK exception types vary by transport
+            if attempt == _GEMINI_RETRY_ATTEMPTS - 1 or not _is_retryable_gemini_error(exc):
+                raise
+            delay = _GEMINI_RETRY_DELAYS[attempt]
+            print(
+                f"Gemini transient error for PR #{pr.number} ({product}); "
+                f"retrying in {delay:g}s: {exc}",
+                file=sys.stderr,
+            )
+            await asyncio.sleep(delay)
     raw = (getattr(response, "text", None) or "").strip()
     return parse_entry(raw, pr, product)
 

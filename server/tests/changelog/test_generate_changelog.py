@@ -5,8 +5,12 @@ see AUTO_CHANGELOG_PLAN.md Part 6 for the full case list.
 scripts/ is not an app package, so it's added to sys.path directly (the
 script does the same to itself when run standalone).
 """
+import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -174,3 +178,53 @@ class TestBuildPrompt:
         prompt = gc.build_prompt(pr, "matcha")
         assert "f119.py" in prompt
         assert "f150.py" not in prompt
+
+
+class _FakeModels:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    async def generate_content(self, **_kwargs):
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _fake_client(outcomes):
+    return SimpleNamespace(aio=SimpleNamespace(models=_FakeModels(outcomes)))
+
+
+def _response():
+    return SimpleNamespace(text='{"title":"T","summary":"S","whatsNew":["x"]}')
+
+
+class TestGenerateEntryRetries:
+    def test_retries_transient_gemini_error(self, monkeypatch):
+        async def no_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(gc.asyncio, "sleep", no_sleep)
+        client = _fake_client([RuntimeError("500 INTERNAL"), _response()])
+
+        entry = asyncio.run(gc.generate_entry(client, _pr(number=7), "matcha"))
+
+        assert entry["id"] == "pr-7-some-pr"
+        assert client.aio.models.calls == 2
+
+    def test_does_not_retry_non_transient_error(self, monkeypatch):
+        sleep_calls = []
+
+        async def record_sleep(delay):
+            sleep_calls.append(delay)
+
+        monkeypatch.setattr(gc.asyncio, "sleep", record_sleep)
+        client = _fake_client([RuntimeError("400 INVALID_ARGUMENT")])
+
+        with pytest.raises(RuntimeError, match="400 INVALID_ARGUMENT"):
+            asyncio.run(gc.generate_entry(client, _pr(number=8), "matcha"))
+
+        assert client.aio.models.calls == 1
+        assert sleep_calls == []
