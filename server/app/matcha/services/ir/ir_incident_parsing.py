@@ -119,7 +119,8 @@ def _parse_occurred_at(value) -> datetime:
     if isinstance(value, datetime):
         if value.tzinfo:
             value = value.astimezone(timezone.utc).replace(tzinfo=None)
-        return _clamp_future_occurred_at(value, value.isoformat())
+        # Typed API dates are unambiguous, so never retain a future occurrence.
+        return min(value, _utc_now_naive())
     if isinstance(value, str):
         text = value.strip()
         if not text:

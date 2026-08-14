@@ -168,6 +168,6 @@ def test_datetime_tz_aware_converted_to_naive_utc():
 
 
 def test_future_datetime_is_clamped_to_now():
-    future = datetime.now(timezone.utc) + timedelta(days=2)
+    future = datetime.now(timezone.utc) + timedelta(minutes=1)
     parsed = _parse_occurred_at(future)
     _assert_about_now(parsed)
