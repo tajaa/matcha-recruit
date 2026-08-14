@@ -93,8 +93,8 @@ struct MWModelOption: Identifiable {
 // Values must be in the server's SUPPORTED_MODELS (matcha_work_ai/_models.py)
 // or the override silently no-ops. Pro-preview retired from matcha-work
 // (2026-07-31) — two-model fleet now; server-side _MODEL_ALIASES still
-// accepts the old three ids from any not-yet-updated build.
+// accepts old picker ids from any not-yet-updated build.
 let mwModelOptions: [MWModelOption] = [
-    MWModelOption(id: "flash-lite", label: "Flash Lite 3.5", value: "gemini-3.5-flash-lite"),
-    MWModelOption(id: "flash", label: "Flash 3.6", value: "gemini-3.6-flash"),
+    MWModelOption(id: "flash-lite", label: "Flash Lite 3.7", value: "gemini-3.7-flash-lite"),
+    MWModelOption(id: "flash", label: "Flash 3.7", value: "gemini-3.7-flash"),
 ]

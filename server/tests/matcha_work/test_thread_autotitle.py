@@ -9,7 +9,7 @@ from app.matcha.services.matcha_work import thread_title_service as svc
 
 class TestThinkingConfigNeverUsesBudget:
     def test_maybe_autotitle_source_has_no_thinking_budget(self):
-        # thinking_budget=0 is a hard 400 on gemini-3.5-flash-lite (this
+        # thinking_budget=0 is a hard 400 on gemini-3.7-flash-lite (this
         # service's model) — found live via dev-remote.sh smoke test after
         # the F1/F2 fixes only covered provider.py + huume/routing.py, not
         # this call site. thinking_level="minimal" is the thinking-off

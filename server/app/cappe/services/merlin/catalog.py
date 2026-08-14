@@ -231,7 +231,7 @@ class ModelTier:
 # on an identical model+prompt; gated premium like `regular`, tracked under
 # its own rate-limiter key (`record_call("cappe_merlin", "max")`).
 MODEL_TIERS: dict[str, ModelTier] = {
-    "lite": ModelTier("gemini-3.5-flash-lite", "minimal", 45),
+    "lite": ModelTier("gemini-3.7-flash-lite", "minimal", 45),
     "regular": ModelTier("gemini-3.7-flash", "low", 45),
     "max": ModelTier("gemini-3.7-flash", "high", 90),
 }

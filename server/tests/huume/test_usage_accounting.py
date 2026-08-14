@@ -69,7 +69,7 @@ class TestHuumeLiteTierPricing:
 
     def test_lite_rate_matches_admin_ledger(self):
         from app.core.services.ai_usage import PRICING
-        inp, outp = PRICING[("gemini", "gemini-3.5-flash-lite")]
+        inp, outp = PRICING[("gemini", "gemini-3.7-flash-lite")]
         assert MODEL_PRICING[FLASH_LITE]["input_per_1m"] == Decimal(str(inp))
         assert MODEL_PRICING[FLASH_LITE]["output_per_1m"] == Decimal(str(outp))
 

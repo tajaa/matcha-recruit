@@ -30,8 +30,8 @@ export const THREAD_MODE_TOGGLES: {
 ]
 
 export const MODEL_OPTIONS = [
-  { id: 'gemini-3.5-flash-lite', label: 'Flash Lite 3.5' },
-  { id: 'gemini-3.6-flash', label: 'Flash 3.6' },
+  { id: 'gemini-3.7-flash-lite', label: 'Flash Lite 3.7' },
+  { id: 'gemini-3.7-flash', label: 'Flash 3.7' },
 ] as const
 
 export function formatTokens(n: number): string {

@@ -53,7 +53,8 @@ PRICING: dict[tuple[str, str], tuple[float, float]] = {
     ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
     ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
-    ("gemini", "gemini-3.5-flash-lite"): (0.30, 2.50),
+    ("gemini", "gemini-3.7-flash-lite"): (0.30, 2.50),  # fleet cheap tier (rate mirrors 3.5-flash-lite pending 3.7 GA)
+    ("gemini", "gemini-3.5-flash-lite"): (0.30, 2.50),  # kept for already-logged rows
     ("gemini", "gemini-3-flash-preview"): (0.50, 3.00),
     ("gemini", "gemini-3.1-flash-lite"): (0.25, 1.50),
     # Image output bills at the image rate (~$30/1M ≈ $0.039/1290-token image).

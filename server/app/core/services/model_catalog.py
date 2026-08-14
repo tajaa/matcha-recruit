@@ -15,7 +15,7 @@ Deliberately NOT migrated here (each is its own product decision, not a
 drift accident):
 - `gemini-3.1-flash-lite` legacy call sites (recruiting, thread_uploads,
   impact_summary, grounding_verifier, gemini_compliance light model) — a
-  silent bump to 3.5-flash-lite would ~3x their cost.
+  silent bump to the 3.7-flash-lite fleet tier would ~3x their cost.
 - `gemini-3.1-pro-preview` in the ER deep-analysis paths (er_analysis,
   er_case_context `model_override == "pro"`).
 - The image models (image_gen, pdf.py) and the Live/analysis models in
@@ -34,4 +34,4 @@ GEMINI_FLASH = "gemini-3.7-flash"
 # (probed live 2026-08-01 — the retired gemini-3-flash-preview tolerated it,
 # which is how a budget=0 code path survived until this fleet bump).
 # Thinking-off is ThinkingConfig(thinking_level="minimal"), never a budget.
-GEMINI_FLASH_LITE = "gemini-3.5-flash-lite"
+GEMINI_FLASH_LITE = "gemini-3.7-flash-lite"

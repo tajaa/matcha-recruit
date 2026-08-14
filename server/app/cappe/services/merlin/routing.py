@@ -38,7 +38,7 @@ AUTO_TIER = "auto"
 _COMPLEXITY_TIERS = {"trivial": "lite", "standard": "regular", "complex": "max"}
 _FALLBACK_TIER = "regular"
 
-_CLASSIFIER_MODEL = "gemini-3.5-flash-lite"
+_CLASSIFIER_MODEL = "gemini-3.7-flash-lite"
 _CLASSIFIER_TIMEOUT = 6.0
 
 # Heuristic pre-filter. A short, imperative edit against a section the user has

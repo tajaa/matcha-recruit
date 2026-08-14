@@ -54,7 +54,7 @@ export function useThreadController() {
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
 
   // Model selector
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3.6-flash')
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3.7-flash')
 
   // Token usage
   const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)

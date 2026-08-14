@@ -70,7 +70,7 @@ MAX_BLURB_LEN = 200
 
 # Cheapest tier: this is a short classification over text we already hold, not a
 # reasoning task. It runs on every publish, so cost per call matters.
-_MODEL = "gemini-3.5-flash-lite"
+_MODEL = "gemini-3.7-flash-lite"
 _TIMEOUT_S = 30
 
 _rate_limiter: Optional[GeminiRateLimiter] = None
