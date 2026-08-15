@@ -4,7 +4,9 @@ struct HeldRepliesView: View {
     @Bindable var vm: BoardManageViewModel
 
     var body: some View {
-        if vm.heldReplies.isEmpty {
+        if vm.loadState.isLoading(.held) && vm.heldReplies.isEmpty {
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else if vm.heldReplies.isEmpty {
             EmptyState(icon: "checkmark.bubble", title: "No replies awaiting review")
         } else {
             List(vm.heldReplies) { reply in

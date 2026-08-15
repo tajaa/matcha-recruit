@@ -10,7 +10,10 @@ final class BoardManageViewModel: LoadableVM {
     /// The board's slug — needed for the Posts tab (GET /boards/{slug} is
     /// the only listing endpoint; server has no /board/manage/posts). Brand
     /// accounts pass their own brand_slug; moderators pass ModeratedBrand.slug.
-    let slug: String?
+    /// var, not let — brand_slug can be nil at construction and arrive later
+    /// (AppState.refreshWall() swaps `account`, and BrandTabView carries no
+    /// `.id()` to force a rebuild), so updateSlug(_:) can correct it in place.
+    private(set) var slug: String?
     /// True only when brandId != nil — a moderator's own account is fine
     /// even if the moderated brand's plan lapses, so this never routes to
     /// AppState.brandWall; it's a local, dismissable alert instead.
@@ -22,25 +25,69 @@ final class BoardManageViewModel: LoadableVM {
     var members: [BoardMemberEntry] = []
     var posts: [BoardPost] = []
     var team: [BrandTeamMember] = []
+    var loadState = TabLoadState()
     var isLoading = false
     var error: String?
+
+    enum BoardManageError: LocalizedError {
+        case missingSlug
+        var errorDescription: String? {
+            "Couldn't figure out which brand's board to show. Try reopening this tab."
+        }
+    }
 
     init(brandId: String?, slug: String? = nil) {
         self.brandId = brandId
         self.slug = slug
     }
 
-    func loadPosts() async {
-        guard let slug else { return }
-        await withLoad {
-            posts = try await BoardService.shared.board(slug: slug, limit: 50).posts
+    /// Sets a slug that arrived after construction and invalidates the
+    /// Posts tab so the next visit refetches instead of showing a stale
+    /// "No posts yet" (or the missingSlug error) forever. No-op when the
+    /// slug hasn't actually changed.
+    func updateSlug(_ newSlug: String?) {
+        guard newSlug != slug else { return }
+        slug = newSlug
+        posts = []
+        loadState.invalidate(.posts)
+    }
+
+    func loadSummary() async {
+        summary = (try? await BoardManageService.shared.summary(brandId: brandId)) ?? summary
+    }
+
+    /// One entry point for every sub-tab. Idempotent — an already-loaded tab
+    /// is a no-op unless forced, so `.task(id: tab)` firing again on every
+    /// Picker tap is free.
+    func loadTab(_ tab: BoardTab, force: Bool = false) async {
+        guard loadState.begin(tab, force: force) else { return }
+        let outcome = await withLoad {
+            switch tab {
+            case .requests:
+                self.requests = try await BoardManageService.shared.requests(brandId: self.brandId)
+            case .held:
+                self.heldReplies = try await BoardManageService.shared.heldReplies(brandId: self.brandId)
+            case .members:
+                self.members = try await BoardManageService.shared.members(brandId: self.brandId)
+            case .team:
+                self.team = try await BoardManageService.shared.team(brandId: self.brandId)
+            case .posts:
+                // Was `guard let slug else { return }` — a silent no-op that
+                // looked exactly like an empty board. Fail loudly instead.
+                guard let slug = self.slug else { throw BoardManageError.missingSlug }
+                self.posts = try await BoardService.shared.board(slug: slug, limit: 50).posts
+            }
+        }
+        switch outcome {
+        case .success: loadState.succeed(tab)
+        case .cancelled: loadState.cancel(tab)
+        case .failed: loadState.fail(tab)
         }
     }
 
-    func loadTeam() async {
-        await withLoad {
-            team = try await BoardManageService.shared.team(brandId: brandId)
-        }
+    func refresh(_ tab: BoardTab) async {
+        await loadSummary()
+        await loadTab(tab, force: true)
     }
 
     func updatePost(_ id: String, _ body: BoardPostUpdate) async {
@@ -75,19 +122,6 @@ final class BoardManageViewModel: LoadableVM {
             }
         } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
-        }
-    }
-
-    func load() async {
-        await withLoad {
-            async let s = BoardManageService.shared.summary(brandId: brandId)
-            async let r = BoardManageService.shared.requests(brandId: brandId)
-            async let h = BoardManageService.shared.heldReplies(brandId: brandId)
-            async let m = BoardManageService.shared.members(brandId: brandId)
-            summary = try await s
-            requests = try await r
-            heldReplies = try await h
-            members = try await m
         }
     }
 
@@ -135,15 +169,15 @@ final class BoardManageViewModel: LoadableVM {
     }
 
     /// Runs a mutation and applies a targeted local update on success instead
-    /// of refetching all 4 endpoints (summary/requests/held/members) — that
-    /// refetch is reserved for .task/.refreshable. Still refreshes the
-    /// summary's counters (cheap, single endpoint) so the header badges track.
+    /// of refetching every tab — refetching a tab wholesale is reserved for
+    /// .task(id:)/.refreshable. Still refreshes the summary's counters
+    /// (cheap, single endpoint) so the header badges track.
     private func run(_ action: @escaping () async throws -> Void, onSuccess: @escaping @MainActor () -> Void) async {
         error = nil
         do {
             try await action()
             onSuccess()
-            summary = (try? await BoardManageService.shared.summary(brandId: brandId)) ?? summary
+            await loadSummary()
         } catch APIError.paymentRequired {
             if brandId != nil {
                 planPausedAlert = true
@@ -154,8 +188,8 @@ final class BoardManageViewModel: LoadableVM {
             // Another moderator already acted on this row — refetch the
             // queue it came from instead of leaving a stale row on screen.
             error = "Already moderated — refreshing."
-            heldReplies = (try? await BoardManageService.shared.heldReplies(brandId: brandId)) ?? heldReplies
-            requests = (try? await BoardManageService.shared.requests(brandId: brandId)) ?? requests
+            await loadTab(.held, force: true)
+            await loadTab(.requests, force: true)
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription

@@ -6,7 +6,9 @@ struct BoardPostsView: View {
     @State private var pendingDelete: BoardPost?
 
     var body: some View {
-        if vm.posts.isEmpty {
+        if vm.loadState.isLoading(.posts) && vm.posts.isEmpty {
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else if vm.posts.isEmpty {
             EmptyState(icon: "square.and.pencil", title: "No posts yet", hint: "Use the + button above.")
         } else {
             List(vm.posts) { post in

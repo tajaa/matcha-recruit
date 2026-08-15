@@ -2,12 +2,14 @@ import SwiftUI
 
 struct BoardManageView: View {
     let brandId: String?
+    let slug: String?
     @State private var vm: BoardManageViewModel
-    @State private var tab = 0
+    @State private var tab: BoardTab = .requests
     @State private var showCompose = false
 
     init(brandId: String?, slug: String? = nil) {
         self.brandId = brandId
+        self.slug = slug
         _vm = State(initialValue: BoardManageViewModel(brandId: brandId, slug: slug))
     }
 
@@ -26,11 +28,7 @@ struct BoardManageView: View {
             }
 
             Picker("", selection: $tab) {
-                Text("Requests").tag(0)
-                Text("Held").tag(1)
-                Text("Posts").tag(2)
-                Text("Members").tag(3)
-                Text("Team").tag(4)
+                ForEach(BoardTab.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .tint(TU.ember)
@@ -38,11 +36,11 @@ struct BoardManageView: View {
 
             Group {
                 switch tab {
-                case 0: JoinRequestsView(vm: vm)
-                case 1: HeldRepliesView(vm: vm)
-                case 2: BoardPostsView(vm: vm)
-                case 3: MembersView(vm: vm)
-                default: TeamView(vm: vm)
+                case .requests: JoinRequestsView(vm: vm)
+                case .held: HeldRepliesView(vm: vm)
+                case .posts: BoardPostsView(vm: vm)
+                case .members: MembersView(vm: vm)
+                case .team: TeamView(vm: vm)
                 }
             }
         }
@@ -50,16 +48,23 @@ struct BoardManageView: View {
         .themedContainer()
         .navigationTitle("Board")
         .toolbar {
-            if tab == 2 {
+            if tab == .posts {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showCompose = true } label: { Image(systemName: "plus") }
                 }
             }
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
-        .task { await vm.load() }
-        .task(id: tab) { if tab == 2 { await vm.loadPosts() } }
-        .refreshable { await vm.load() }
+        .task { await vm.loadSummary() }
+        .task(id: tab) { await vm.loadTab(tab) }
+        .task(id: slug) {
+            // A late-arriving slug (AppState.refreshWall() swapping account
+            // under an already-built view) invalidates Posts and re-fires
+            // the currently visible tab's load.
+            vm.updateSlug(slug)
+            await vm.loadTab(tab)
+        }
+        .refreshable { await vm.refresh(tab) }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
         .alert("Plan paused", isPresented: $vm.planPausedAlert) {
             Button("OK", role: .cancel) {}

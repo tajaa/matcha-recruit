@@ -5,7 +5,9 @@ struct MembersView: View {
     @State private var pendingRemoval: BoardMemberEntry?
 
     var body: some View {
-        if vm.members.isEmpty {
+        if vm.loadState.isLoading(.members) && vm.members.isEmpty {
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else if vm.members.isEmpty {
             EmptyState(icon: "person.3", title: "No members yet")
         } else {
             List(vm.members) { member in

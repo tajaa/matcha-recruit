@@ -4,7 +4,9 @@ struct JoinRequestsView: View {
     @Bindable var vm: BoardManageViewModel
 
     var body: some View {
-        if vm.requests.isEmpty {
+        if vm.loadState.isLoading(.requests) && vm.requests.isEmpty {
+            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+        } else if vm.requests.isEmpty {
             EmptyState(icon: "person.badge.clock", title: "No pending requests")
         } else {
             List(vm.requests) { request in

@@ -29,7 +29,10 @@ struct TeamView: View {
             }
             .padding()
 
-            if vm.team.isEmpty {
+            if vm.loadState.isLoading(.team) && vm.team.isEmpty {
+                ProgressView()
+                Spacer()
+            } else if vm.team.isEmpty {
                 EmptyState(icon: "person.3", title: "No team members yet")
                 Spacer()
             } else {
@@ -66,6 +69,5 @@ struct TeamView: View {
             }
         }
         .themedContainer()
-        .task { await vm.loadTeam() }
     }
 }
