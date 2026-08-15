@@ -42,4 +42,21 @@ enum Formatters {
         let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d:00", comps.hour ?? 0, comps.minute ?? 0)
     }
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Parses a server ISO-8601 UTC timestamp (`starts_at`/`ends_at`) and renders it
+    /// in the business's timezone. Falls back to UTC if `timezone` is missing/invalid —
+    /// mirrors `validTimezone()` in client/src/cappe/utils/bookingTime.ts.
+    static func bookingDateTime(_ isoString: String, timezone: String?) -> String {
+        guard let date = isoFormatter.date(from: isoString) else { return isoString }
+        let df = DateFormatter()
+        df.dateFormat = "EEE, MMM d · h:mm a"
+        df.timeZone = timezone.flatMap { TimeZone(identifier: $0) } ?? TimeZone(identifier: "UTC")
+        return df.string(from: date)
+    }
 }

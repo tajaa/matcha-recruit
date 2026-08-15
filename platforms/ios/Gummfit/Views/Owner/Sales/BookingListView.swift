@@ -16,7 +16,7 @@ struct BookingListView: View {
                 ContentUnavailableView("No bookings yet", systemImage: "calendar")
             } else {
                 List(vm.bookings) { booking in
-                    BookingRow(booking: booking)
+                    BookingRow(booking: booking, timezone: site.timezone)
                         .gummfitListRow()
                         .swipeActions {
                             if booking.requires_approval && booking.status == .pending {
@@ -49,13 +49,15 @@ struct BookingListView: View {
 
 private struct BookingRow: View {
     let booking: CappeBooking
+    let timezone: String?
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(booking.customer_name ?? booking.customer_email ?? "Booking")
                     .gummfitSectionTitle()
-                Text(booking.starts_at).font(.caption).foregroundStyle(GummfitTheme.textDim)
+                Text(Formatters.bookingDateTime(booking.starts_at, timezone: timezone))
+                    .font(.caption).foregroundStyle(GummfitTheme.textDim)
                 if let staffName = booking.staff_name {
                     Text(staffName).font(.caption2).foregroundStyle(GummfitTheme.textDim)
                 }
