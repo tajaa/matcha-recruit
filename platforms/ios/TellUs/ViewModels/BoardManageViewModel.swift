@@ -187,9 +187,11 @@ final class BoardManageViewModel: LoadableVM {
         } catch let APIError.httpError(409, _) {
             // Another moderator already acted on this row — refetch the
             // queue it came from instead of leaving a stale row on screen.
-            error = "Already moderated — refreshing."
+            // Must run AFTER the refetch: loadTab's withLoad clears error
+            // to nil on success, which was wiping this message immediately.
             await loadTab(.held, force: true)
             await loadTab(.requests, force: true)
+            error = "Already moderated — refreshing."
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription
