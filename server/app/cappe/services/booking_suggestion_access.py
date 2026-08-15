@@ -71,7 +71,7 @@ async def issue_suggestion_link(
     await conn.execute(
         """
         INSERT INTO cappe_booking_suggestion_links (site_id, client_email, token_hash, expires_at)
-        VALUES ($1, $2, $3, $4 + ($5 * INTERVAL '1 second'))
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (site_id, client_email)
         DO UPDATE SET
             token_hash = EXCLUDED.token_hash,
@@ -82,8 +82,7 @@ async def issue_suggestion_link(
         site_id,
         email,
         hash_access_token(token),
-        now,
-        int(SUGGESTION_LINK_TTL.total_seconds()),
+        now + SUGGESTION_LINK_TTL,
     )
     return token, client.get("name")
 
@@ -123,7 +122,7 @@ async def redeem_suggestion_link(
     await conn.execute(
         """
         INSERT INTO cappe_booking_suggestion_sessions (site_id, client_email, token_hash, expires_at)
-        VALUES ($1, $2, $3, $4 + ($5 * INTERVAL '1 second'))
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (site_id, client_email)
         DO UPDATE SET
             token_hash = EXCLUDED.token_hash,
@@ -134,8 +133,7 @@ async def redeem_suggestion_link(
         link["site_id"],
         link["client_email"],
         hash_access_token(session_token),
-        now,
-        int(SUGGESTION_SESSION_TTL.total_seconds()),
+        now + SUGGESTION_SESSION_TTL,
     )
     return link["site_id"], link["client_email"], session_token
 
