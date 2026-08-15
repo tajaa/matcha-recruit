@@ -5,6 +5,7 @@ pre-moderation analogue of review_state+moderation_status. Every member-facing
 predicate is strict equality status='approved' so any future state fails closed
 (same principle as moderation_status='visible' on the public brand page).
 """
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -17,16 +18,17 @@ from .points_service import award_points, notify_account
 
 BOARD_PAUSED_DETAIL = "This board is paused."     # plan lapsed / is_active=false → 409
 
-# Consumer board-membership cap. tellus_accounts has no tier column yet —
-# every consumer is free tier today. When a paid consumer tier ships, branch
-# on `account` here (e.g. account.plan == "paid") instead of always
-# returning FREE_BOARD_MEMBERSHIP_LIMIT. This is the only place that needs
-# to change.
+# Consumer board-membership cap. Admin-granted paid tiers use the larger cap;
+# an expired gift falls back to the free entitlement without a worker.
 FREE_BOARD_MEMBERSHIP_LIMIT = 3
-PAID_BOARD_MEMBERSHIP_LIMIT = 12  # unused until a paid consumer tier exists
+PAID_BOARD_MEMBERSHIP_LIMIT = 12
 
 
 def board_membership_limit(account: TellusAccount) -> int:
+    if account.consumer_tier == "paid":
+        expires_at = account.consumer_tier_expires_at
+        if expires_at is None or expires_at > datetime.now(timezone.utc):
+            return PAID_BOARD_MEMBERSHIP_LIMIT
     return FREE_BOARD_MEMBERSHIP_LIMIT
 
 

@@ -488,6 +488,8 @@ export interface AdminAccountSummary {
   report_count: number
   brand_id: string | null
   brand_name: string | null
+  consumer_tier: 'free' | 'paid'
+  consumer_tier_expires_at: string | null
 }
 
 export interface AdminAccountList {
@@ -557,6 +559,11 @@ export interface AdminPointsAdjustResult {
   balance: number
   lifetime: number
   level: number
+}
+
+export interface AdminTierActionResult {
+  consumer_tier: 'free' | 'paid'
+  consumer_tier_expires_at: string | null
 }
 
 export interface AdminBrandSummary {

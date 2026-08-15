@@ -11,6 +11,7 @@ from uuid import UUID
 ADMIN_ACTIONS = (
     "account.suspend", "account.unsuspend", "account.force_logout",
     "account.verify_email", "account.password_reset_issued", "account.points_adjust",
+    "account.tier_grant", "account.tier_revoke",
     "brand.plan_comp", "brand.plan_cancel", "brand.assign_owner", "brand.unassign_owner",
     "brand.claim_requested", "brand.claim_approve", "brand.claim_reject", "brand.claim_cancelled",
     "report.moderate", "dm_thread.block", "dm_thread.unblock",

@@ -11,6 +11,7 @@ from app.tellus.models.admin import (
     TellusAdminEarningRuleUpdate,
     TellusAdminPlanAction,
     TellusAdminPointsAdjust,
+    TellusAdminTierAction,
     TellusPasswordResetConfirm,
 )
 from app.tellus.routes.admin._shared import account_filter_sql, report_filter_sql
@@ -251,6 +252,14 @@ class TestAdminModels:
 
     def test_account_statuses_tripwire(self):
         assert ACCOUNT_STATUSES == ("active", "suspended")
+
+    def test_tier_action_accepts_permanent_gift(self):
+        action = TellusAdminTierAction(action="grant", note="Launch gift")
+        assert action.duration_days is None
+
+    def test_tier_action_rejects_duration_on_revoke(self):
+        with pytest.raises(Exception):
+            TellusAdminTierAction(action="revoke", duration_days=30)
 
 
 class TestBoardAdminActionsRegistered:

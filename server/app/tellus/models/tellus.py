@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, StringConstraints, model_validator
 
 AccountType = Literal["consumer", "brand"]
+ConsumerTier = Literal["free", "paid"]
 ReportCategory = Literal["service", "cleanliness", "facilities", "safety", "compliment", "other"]
 Sentiment = Literal["positive", "neutral", "negative"]
 ReportStatus = Literal["new", "reviewing", "resolved", "archived"]
@@ -82,6 +83,8 @@ class TellusAccount(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     leaderboard_opt_in: bool = True
+    consumer_tier: ConsumerTier = "free"
+    consumer_tier_expires_at: Optional[datetime] = None
     # Populated for brand accounts (the brand they own).
     brand_id: Optional[UUID] = None
     # Brand billing state — null for consumer accounts.

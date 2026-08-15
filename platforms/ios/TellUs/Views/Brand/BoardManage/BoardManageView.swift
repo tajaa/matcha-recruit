@@ -56,16 +56,9 @@ struct BoardManageView: View {
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
         .task { await vm.loadSummary() }
-        .onAppear {
+        .task(id: "\(tab.rawValue):\(slug ?? \"\")") {
             vm.updateSlug(slug)
-            Task { await vm.loadTab(tab) }
-        }
-        .onChange(of: tab) { _, newTab in
-            Task { await vm.loadTab(newTab) }
-        }
-        .onChange(of: slug) { _, newSlug in
-            vm.updateSlug(newSlug)
-            Task { await vm.loadTab(tab) }
+            await vm.loadTab(tab)
         }
         .refreshable { await vm.refresh(tab) }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }

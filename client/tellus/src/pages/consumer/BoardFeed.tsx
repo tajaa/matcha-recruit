@@ -24,10 +24,11 @@ export default function BoardFeed() {
   const [loadingMore, setLoadingMore] = useState(false)
   const [err, setErr] = useState('')
   const [forbidden, setForbidden] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [redeemMsg, setRedeemMsg] = useState('')
 
   async function load(reset: boolean) {
-    if (reset) { setLoading(true); setForbidden(false) } else { setLoadingMore(true) }
+    if (reset) { setLoading(true); setForbidden(false); setPaused(false) } else { setLoadingMore(true) }
     setErr('')
     try {
       const offset = reset ? 0 : posts.length
@@ -37,6 +38,7 @@ export default function BoardFeed() {
       setPosts(reset ? p.posts : [...posts, ...p.posts])
     } catch (e) {
       if (e instanceof ApiError && e.status === 403) setForbidden(true)
+      else if (e instanceof ApiError && e.status === 409 && e.message === 'This board is paused.') setPaused(true)
       else setErr(e instanceof Error ? e.message : 'Failed to load this board')
     } finally {
       setLoading(false); setLoadingMore(false)
@@ -64,6 +66,14 @@ export default function BoardFeed() {
           You need to be an approved member of this regulars board to view it.{' '}
           <Link to={`/b/${slug}`} className="font-semibold text-tu-accent hover:underline">Request to join from the brand page →</Link>
         </p>
+      </Card>
+    )
+  }
+
+  if (paused) {
+    return (
+      <Card>
+        <p className="text-sm text-tu-dim">This board is paused — new memberships are not being accepted right now.</p>
       </Card>
     )
   }

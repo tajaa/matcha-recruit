@@ -24,6 +24,7 @@ from ...models.admin import (
     TellusAdminPasswordResetResponse,
     TellusAdminPointsAdjust,
     TellusAdminSuspendRequest,
+    TellusAdminTierAction,
 )
 from ._shared import account_filter_sql, decode_audit_rows
 
@@ -34,6 +35,7 @@ _ACCOUNT_SELECT = """
            (a.email_verified_at IS NOT NULL) AS email_verified, a.city, a.state, a.created_at,
            COALESCE(pb.points_balance, 0) AS points_balance,
            (SELECT COUNT(*) FROM tellus_reports r WHERE r.reporter_account_id = a.id) AS report_count,
+           a.consumer_tier, a.consumer_tier_expires_at,
            b.id AS brand_id, b.name AS brand_name
     FROM tellus_accounts a
     LEFT JOIN tellus_points_balances pb ON pb.account_id = a.id
@@ -259,3 +261,62 @@ async def points_adjust(
                     },
                 )
     return result
+
+
+@router.post("/admin/accounts/{account_id}/tier")
+async def update_consumer_tier(
+    account_id: UUID, body: TellusAdminTierAction,
+    admin: TellusAccount = Depends(require_tellus_admin),
+):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            old = await conn.fetchrow(
+                "SELECT account_type, consumer_tier, consumer_tier_expires_at "
+                "FROM tellus_accounts WHERE id = $1 FOR UPDATE",
+                account_id,
+            )
+            if old is None:
+                raise HTTPException(404, "Account not found")
+            if old["account_type"] != "consumer":
+                raise HTTPException(409, "Paid consumer tiers apply only to consumer accounts")
+
+            if body.action == "grant":
+                row = await conn.fetchrow(
+                    """UPDATE tellus_accounts
+                       SET consumer_tier = 'paid',
+                           consumer_tier_expires_at = CASE
+                               WHEN $2::int IS NULL THEN NULL
+                               ELSE NOW() + ($2::int * INTERVAL '1 day')
+                           END,
+                           updated_at = NOW()
+                       WHERE id = $1
+                       RETURNING consumer_tier, consumer_tier_expires_at""",
+                    account_id, body.duration_days,
+                )
+                action_name = "account.tier_grant"
+            else:
+                row = await conn.fetchrow(
+                    """UPDATE tellus_accounts
+                       SET consumer_tier = 'free', consumer_tier_expires_at = NULL, updated_at = NOW()
+                       WHERE id = $1
+                       RETURNING consumer_tier, consumer_tier_expires_at""",
+                    account_id,
+                )
+                action_name = "account.tier_revoke"
+
+            await record_admin_action(
+                conn, admin, action_name, "account", account_id,
+                {
+                    "previous_tier": old["consumer_tier"],
+                    "previous_expires_at": old["consumer_tier_expires_at"],
+                    "new_tier": row["consumer_tier"],
+                    "new_expires_at": row["consumer_tier_expires_at"],
+                    "duration_days": body.duration_days,
+                    "note": body.note,
+                },
+            )
+
+    return {
+        "consumer_tier": row["consumer_tier"],
+        "consumer_tier_expires_at": row["consumer_tier_expires_at"],
+    }

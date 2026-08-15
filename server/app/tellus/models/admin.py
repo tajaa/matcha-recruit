@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Must match ck_tellus_accounts_status (tellus_app_08).
 ACCOUNT_STATUSES = ("active", "suspended")
@@ -26,6 +26,8 @@ class TellusAdminAccountSummary(BaseModel):
     report_count: int = 0
     brand_id: Optional[UUID] = None
     brand_name: Optional[str] = None
+    consumer_tier: Literal["free", "paid"] = "free"
+    consumer_tier_expires_at: Optional[datetime] = None
 
 
 class TellusAdminAccountList(BaseModel):
@@ -92,6 +94,18 @@ class TellusAdminPointsAdjust(BaseModel):
         if abs(v) > 100_000:
             raise ValueError("delta out of range (±100,000)")
         return v
+
+
+class TellusAdminTierAction(BaseModel):
+    action: Literal["grant", "revoke"]
+    duration_days: Optional[int] = Field(None, ge=1, le=3650)
+    note: Optional[str] = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def _validate_duration(self) -> "TellusAdminTierAction":
+        if self.action == "revoke" and self.duration_days is not None:
+            raise ValueError("duration_days is only valid when granting paid tier")
+        return self
 
 
 class TellusAdminBrandSummary(BaseModel):

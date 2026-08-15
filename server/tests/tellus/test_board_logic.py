@@ -4,7 +4,7 @@ DB-touching paths (join/approve/reply/redeem atomicity, points award) are
 integration-level — run manually against dev per the repo's DB-test policy.
 """
 import inspect
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -88,6 +88,19 @@ class TestReplyTransitions:
 class TestBoardMembershipLimit:
     def test_free_tier_limit_is_three(self):
         account = TellusAccount(id=uuid4(), email="member@example.test")
+
+        assert board_membership_limit(account) == 3
+
+    def test_active_paid_tier_limit_is_twelve(self):
+        account = TellusAccount(id=uuid4(), email="member@example.test", consumer_tier="paid")
+
+        assert board_membership_limit(account) == 12
+
+    def test_expired_paid_tier_falls_back_to_free_limit(self):
+        account = TellusAccount(
+            id=uuid4(), email="member@example.test", consumer_tier="paid",
+            consumer_tier_expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
 
         assert board_membership_limit(account) == 3
 

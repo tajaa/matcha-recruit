@@ -91,6 +91,7 @@ async def require_tellus_account(
         row = await conn.fetchrow(
             """SELECT a.id, a.email, a.display_name, a.account_type, a.status,
                       a.city, a.state, a.leaderboard_opt_in, a.tokens_valid_after,
+                      a.consumer_tier, a.consumer_tier_expires_at,
                       b.id AS brand_id, b.plan_status, b.location_count, b.slug AS brand_slug
                FROM tellus_accounts a
                LEFT JOIN tellus_brands b ON b.owner_account_id = a.id
@@ -120,6 +121,8 @@ async def require_tellus_account(
         city=row["city"],
         state=row["state"],
         leaderboard_opt_in=row["leaderboard_opt_in"],
+        consumer_tier=row["consumer_tier"],
+        consumer_tier_expires_at=row["consumer_tier_expires_at"],
         brand_id=row["brand_id"],
         plan_status=row["plan_status"],
         location_count=row["location_count"],

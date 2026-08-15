@@ -2,9 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
-import { Button, Card, Chip, ErrorText, Input, Spinner } from '../../components/ui'
+import { Button, Card, Chip, ErrorText, Input, Select, Spinner } from '../../components/ui'
 import { AuditList } from './AuditList'
-import type { AdminAccountDetail, AdminPasswordResetResponse, AdminPointsAdjustResult } from '../../api/types'
+import type {
+  AdminAccountDetail,
+  AdminPasswordResetResponse,
+  AdminPointsAdjustResult,
+  AdminTierActionResult,
+} from '../../api/types'
 
 const LABEL = 'font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-tu-faint'
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
@@ -25,6 +30,8 @@ export default function AdminAccountDetail() {
   const [clamp, setClamp] = useState(false)
   const [adjustError, setAdjustError] = useState('')
   const idemKeyRef = useRef<string>(crypto.randomUUID())
+  const [giftDuration, setGiftDuration] = useState('30')
+  const [giftNote, setGiftNote] = useState('')
 
   async function refresh() {
     if (!id) return
@@ -121,10 +128,32 @@ export default function AdminAccountDetail() {
     }
   }
 
+  async function updateTier(action: 'grant' | 'revoke') {
+    if (action === 'revoke' && !window.confirm('Revoke this consumer\'s paid tier now?')) return
+    await withBusy(async () => {
+      const result = await tellusApi.post<AdminTierActionResult>(`/admin/accounts/${id}/tier`, {
+        action,
+        duration_days: action === 'grant' && giftDuration ? Number(giftDuration) : null,
+        note: giftNote || null,
+      })
+      setGiftNote('')
+      setData((current) => current ? { ...current, account: {
+        ...current.account,
+        consumer_tier: result.consumer_tier,
+        consumer_tier_expires_at: result.consumer_tier_expires_at,
+      } } : current)
+      await refresh()
+    })
+  }
+
   if (error && !data) return <p className="p-4 text-sm text-tu-bad">{error}</p>
   if (!data) return <Spinner />
 
   const { account } = data
+  const paidTierActive = account.consumer_tier === 'paid' && (
+    account.consumer_tier_expires_at === null || new Date(account.consumer_tier_expires_at) > new Date()
+  )
+  const paidTierExpired = account.consumer_tier === 'paid' && !paidTierActive
 
   return (
     <div className="space-y-4 pb-8">
@@ -150,6 +179,45 @@ export default function AdminAccountDetail() {
         )}
         <ErrorText>{error}</ErrorText>
       </Card>
+
+      {account.account_type === 'consumer' && (
+        <Card>
+          <div className={`mb-2 ${LABEL}`}>Consumer tier</div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <Chip tone={paidTierActive ? 'positive' : paidTierExpired ? 'negative' : undefined}>
+              {paidTierActive ? 'paid' : paidTierExpired ? 'paid (expired)' : 'free'}
+            </Chip>
+            {paidTierActive && account.consumer_tier_expires_at && (
+              <span className="text-tu-dim">through {fmtDate(account.consumer_tier_expires_at)}</span>
+            )}
+            {paidTierActive && !account.consumer_tier_expires_at && (
+              <span className="text-tu-dim">permanent gift</span>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="w-36">
+              <Select
+                label="Gift duration"
+                value={giftDuration}
+                onChange={(e) => setGiftDuration(e.target.value)}
+                options={[
+                  { value: '30', label: '30 days' },
+                  { value: '90', label: '90 days' },
+                  { value: '365', label: '1 year' },
+                  { value: '', label: 'Permanent' },
+                ]}
+              />
+            </div>
+            <div className="min-w-[14rem] flex-1">
+              <Input label="Gift note" value={giftNote} onChange={(e) => setGiftNote(e.target.value)} placeholder="Why is this being gifted?" />
+            </div>
+            <Button size="sm" loading={busy} onClick={() => void updateTier('grant')}>Gift paid tier</Button>
+            {paidTierActive && (
+              <Button size="sm" variant="danger" loading={busy} onClick={() => void updateTier('revoke')}>Revoke</Button>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card>
         <div className={`mb-3 ${LABEL}`}>Actions</div>
