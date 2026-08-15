@@ -5,9 +5,6 @@ struct BookingTypesView: View {
 
     @State private var vm = BookingTypesViewModel()
     @State private var showCreate = false
-    @State private var newName = ""
-    @State private var newDuration = 30
-    @State private var newPriceCents = 0
 
     var body: some View {
         List {
@@ -35,33 +32,8 @@ struct BookingTypesView: View {
             }
         }
         .sheet(isPresented: $showCreate) {
-            NavigationStack {
-                Form {
-                    TextField("Name", text: $newName)
-                    Stepper("\(newDuration) minutes", value: $newDuration, in: 5...480, step: 5)
-                    HStack {
-                        Text("Price")
-                        Spacer()
-                        TextField("0.00", value: Binding(
-                            get: { Double(newPriceCents) / 100 },
-                            set: { newPriceCents = Int(($0 * 100).rounded()) }
-                        ), format: .number.precision(.fractionLength(2)))
-                            .keyboardType(.decimalPad)
-                    }
-                }
-                .navigationTitle("New booking type")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Save") {
-                            Task {
-                                await vm.create(siteId: site.id, CappeBookingTypeCreate(name: newName, duration_minutes: newDuration, price_cents: newPriceCents))
-                                newName = ""; newDuration = 30; newPriceCents = 0
-                                showCreate = false
-                            }
-                        }
-                        .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
+            BookingTypeCreateSheet(siteId: site.id) { created in
+                vm.types.insert(created, at: 0)
             }
         }
         .task { await vm.load(siteId: site.id) }
