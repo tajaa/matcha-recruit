@@ -22,6 +22,7 @@ weak task references can't silently garbage-collect an in-flight push.
 import asyncio
 import logging
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -67,8 +68,10 @@ async def _get_client():
     topic = settings.apns_bundle_id_tellus or settings.apns_bundle_id
     try:
         from aioapns import APNs
+        # aioapns 4.x expects PEM contents, not the filesystem path.
+        auth_key = Path(settings.apns_auth_key_path).read_text()
         _client = APNs(
-            key=settings.apns_auth_key_path,
+            key=auth_key,
             key_id=settings.apns_key_id,
             team_id=settings.apns_team_id,
             topic=topic,

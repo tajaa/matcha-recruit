@@ -13,6 +13,7 @@ Setup (one-time, per environment):
      APNS_BUNDLE_ID (com.matchawork.app), APNS_USE_SANDBOX (true for dev builds).
 """
 import logging
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
@@ -42,8 +43,10 @@ async def _get_client():
         return None
     try:
         from aioapns import APNs
+        # aioapns 4.x expects PEM contents, not the filesystem path.
+        auth_key = Path(settings.apns_auth_key_path).read_text()
         _client = APNs(
-            key=settings.apns_auth_key_path,
+            key=auth_key,
             key_id=settings.apns_key_id,
             team_id=settings.apns_team_id,
             topic=settings.apns_bundle_id,
