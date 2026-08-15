@@ -281,7 +281,7 @@ async def complete_event_assignment(
     access: OpsAccess,
 ) -> dict:
     row = await conn.fetchrow(
-        f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE",
+        f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE OF a",
         assignment_id,
     )
     if not row:
@@ -333,7 +333,7 @@ async def cancel_event_assignment(
 ) -> dict:
     assert_ops_capability(access, OpsCapability.EVENT_ASSIGN)
     row = await conn.fetchrow(
-        f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE",
+        f"{_ASSIGNMENT_SELECT} WHERE a.id = $1 FOR UPDATE OF a",
         assignment_id,
     )
     if not row or row["company_id"] != access.company_id:
