@@ -17,6 +17,18 @@ from .points_service import award_points, notify_account
 
 BOARD_PAUSED_DETAIL = "This board is paused."     # plan lapsed / is_active=false → 409
 
+# Consumer board-membership cap. tellus_accounts has no tier column yet —
+# every consumer is free tier today. When a paid consumer tier ships, branch
+# on `account` here (e.g. account.plan == "paid") instead of always
+# returning FREE_BOARD_MEMBERSHIP_LIMIT. This is the only place that needs
+# to change.
+FREE_BOARD_MEMBERSHIP_LIMIT = 3
+PAID_BOARD_MEMBERSHIP_LIMIT = 12  # unused until a paid consumer tier exists
+
+
+def board_membership_limit(account: TellusAccount) -> int:
+    return FREE_BOARD_MEMBERSHIP_LIMIT
+
 
 async def ensure_board(conn, brand_id: UUID) -> dict:
     """Lazy-create the brand's single board row. ON CONFLICT (brand_id) DO NOTHING

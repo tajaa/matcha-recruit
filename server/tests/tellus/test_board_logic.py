@@ -18,9 +18,14 @@ from app.tellus.models.tellus import (
     TellusBoardPostCreate,
     TellusBoardPostUpdate,
     TellusBoardReplyCreate,
+    TellusAccount,
     TellusListingCreate,
 )
-from app.tellus.services.board_service import can_reply_transition, reply_visible_to
+from app.tellus.services.board_service import (
+    board_membership_limit,
+    can_reply_transition,
+    reply_visible_to,
+)
 
 AUTHOR = uuid4()
 OTHER_MEMBER = uuid4()
@@ -78,6 +83,13 @@ class TestReplyTransitions:
             can_reply_transition(a, b) for a in statuses for b in statuses
         )
         assert allowed == 3
+
+
+class TestBoardMembershipLimit:
+    def test_free_tier_limit_is_three(self):
+        account = TellusAccount(id=uuid4(), email="member@example.test")
+
+        assert board_membership_limit(account) == 3
 
 
 class TestBoardModels:

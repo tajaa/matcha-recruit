@@ -110,6 +110,24 @@ async def request_join(
                     detail="The brand has declined this request.",
                 )
 
+            # One membership slot spans all boards. Serialize joins per account
+            # so concurrent requests cannot both pass the count check.
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+                str(account.id),
+            )
+            active_count = await conn.fetchval(
+                "SELECT count(*) FROM tellus_board_memberships "
+                "WHERE account_id = $1 AND status IN ('pending', 'approved')",
+                account.id,
+            )
+            limit = bs.board_membership_limit(account)
+            if active_count >= limit:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"You're already on {limit} boards — leave one to join another.",
+                )
+
             try:
                 async with conn.transaction():
                     row = await conn.fetchrow(
