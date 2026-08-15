@@ -10,23 +10,25 @@ struct JoinRequestsView: View {
             List(vm.requests) { request in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(request.account_display_name).font(.headline)
-                    if let note = request.note { Text(note).font(.footnote).foregroundStyle(.secondary) }
+                    if let note = request.note { Text(note).font(.footnote).foregroundStyle(TU.textDim) }
                     HStack(spacing: 12) {
                         Label("\(request.review_count)", systemImage: "star.bubble")
                         if request.hearted { Label("hearted", systemImage: "heart.fill").foregroundStyle(.pink) }
                         Label("\(request.redemption_count)", systemImage: "ticket")
                     }
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(TU.textDim)
                     HStack {
                         Button("Approve") { Task { await vm.approveRequest(request.id) } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.borderedProminent).tint(TU.ember)
                         Button("Decline") { Task { await vm.declineRequest(request.id) } }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.bordered).tint(TU.textDim)
                     }
                 }
                 .padding(.vertical, 4)
+                .themedRow()
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .themedScreen()
         }
     }
 }

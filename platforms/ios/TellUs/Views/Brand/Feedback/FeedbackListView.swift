@@ -31,10 +31,13 @@ struct FeedbackListView: View {
                     .onAppear {
                         if report.id == vm.reports.last?.id { Task { await vm.load(reset: false) } }
                     }
+                    .themedRow()
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
             }
         }
+        .themedContainer()
         .navigationTitle("Feedback")
         .task { await vm.load(reset: true) }
         .refreshable { await vm.load(reset: true) }

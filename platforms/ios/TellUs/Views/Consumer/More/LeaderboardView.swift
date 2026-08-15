@@ -15,14 +15,15 @@ struct LeaderboardView: View {
                             .frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
                             Text(entry.display_name).font(.subheadline.bold())
-                            Text("Level \(entry.level)").font(.caption).foregroundStyle(.secondary)
+                            Text("Level \(entry.level)").font(.caption).foregroundStyle(TU.textDim)
                         }
                         Spacer()
                         Text("\(entry.lifetime_points) pts").font(.subheadline.bold())
                     }
-                    .listRowBackground(entry.is_you ? Color.accentColor.opacity(0.12) : nil)
+                    .listRowBackground(entry.is_you ? TU.ember.opacity(0.15) : TU.inkRaised)
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .themedScreen()
             }
         }
         .navigationTitle("Leaderboard")

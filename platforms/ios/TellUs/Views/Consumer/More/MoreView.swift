@@ -14,21 +14,27 @@ struct MoreView: View {
                 NavigationLink("Leaderboard") { LeaderboardView() }
                 NavigationLink("Places") { PlacesView() }
             }
+            .listRowBackground(TU.inkRaised)
 
             Section {
                 NavigationLink("Settings") { ConsumerSettingsView() }
             }
+            .listRowBackground(TU.inkRaised)
 
             if !appState.moderatedBrands.isEmpty {
                 Section {
                     NavigationLink("Moderate") { ModerateTabView() }
                 }
+                .listRowBackground(TU.inkRaised)
             }
 
             Section {
                 Button("Sign out", role: .destructive) { showLogoutConfirm = true }
             }
+            .listRowBackground(TU.inkRaised)
         }
+        .listStyle(.insetGrouped)
+        .themedScreen()
         .navigationTitle("More")
         .confirmationDialog(
             "Sign out?", isPresented: $showLogoutConfirm, titleVisibility: .visible

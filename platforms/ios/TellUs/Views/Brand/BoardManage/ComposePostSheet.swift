@@ -62,6 +62,8 @@ struct ComposePostSheet: View {
                     Text(error).foregroundStyle(.red).font(.footnote)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(EmberBackground())
             .navigationTitle(isEditing ? "Edit post" : "New post")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }

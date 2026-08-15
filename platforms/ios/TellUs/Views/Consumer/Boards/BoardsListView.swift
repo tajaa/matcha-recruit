@@ -13,6 +13,7 @@ struct BoardsListView: View {
                         NavigationLink(membership.brand_name) {
                             BoardFeedView(slug: membership.brand_slug, brandName: membership.brand_name)
                         }
+                        .themedRow()
                     } else {
                         HStack {
                             Text(membership.brand_name)
@@ -26,9 +27,11 @@ struct BoardsListView: View {
                                 }
                             }
                         }
+                        .themedRow()
                     }
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .themedScreen()
             }
         }
         .navigationTitle("Boards")

@@ -13,13 +13,15 @@ struct MembersView: View {
                     Text(member.account_display_name)
                     Spacer()
                     Text(Formatters.relativeString(from: member.joined_at))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TU.textDim)
                 }
                 .swipeActions {
                     Button("Remove", role: .destructive) { pendingRemoval = member }
                 }
+                .themedRow()
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .themedScreen()
             .confirmationDialog("Remove this member?", isPresented: Binding(
                 get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
             ), titleVisibility: .visible) {

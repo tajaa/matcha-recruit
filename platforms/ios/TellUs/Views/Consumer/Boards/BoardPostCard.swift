@@ -28,18 +28,18 @@ struct BoardPostCard: View {
                         PointsPill(points: listing.points_cost)
                     }
                     .padding(10)
-                    .background(.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                    .background(TU.ember.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 }
             }
 
             if post.kind == .event, let start = post.event_starts_at {
                 Label(Formatters.relativeString(from: start), systemImage: "calendar")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(TU.textDim)
             }
 
             HStack(spacing: 12) {
                 Text("\(post.approved_reply_count) replies")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(TU.textDim)
                 LikeButton(
                     target: .boardPost, id: post.id,
                     count: post.likeCount, liked: post.likedByMe,
@@ -48,6 +48,6 @@ struct BoardPostCard: View {
             }
         }
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .glassCard(radius: 12)
     }
 }

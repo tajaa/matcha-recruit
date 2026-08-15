@@ -19,6 +19,7 @@ struct ConsumerSettingsView: View {
                 }
                 if vm.savedProfile { Text("Saved.").font(.footnote).foregroundStyle(.green) }
             }
+            .listRowBackground(TU.inkRaised)
 
             Section("Location") {
                 TextField("City", text: $city)
@@ -29,11 +30,14 @@ struct ConsumerSettingsView: View {
                 }
                 if vm.savedLocation { Text("Saved.").font(.footnote).foregroundStyle(.green) }
             }
+            .listRowBackground(TU.inkRaised)
 
             if let error = vm.error {
                 Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                    .listRowBackground(TU.inkRaised)
             }
         }
+        .themedScreen()
         .navigationTitle("Settings")
         .onAppear {
             displayName = appState.account?.display_name ?? ""

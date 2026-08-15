@@ -15,14 +15,16 @@ struct RedemptionsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(redemption.listing_title ?? "Reward").font(.headline)
                             HStack {
-                                if let brand = redemption.brand_name { Text(brand).font(.caption).foregroundStyle(.secondary) }
+                                if let brand = redemption.brand_name { Text(brand).font(.caption).foregroundStyle(TU.textDim) }
                                 Spacer()
                                 StatusChip(text: redemption.status.rawValue, tint: color(for: redemption.status))
                             }
                         }
                     }
+                    .themedRow()
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .themedScreen()
             }
         }
         .task { await vm.load() }

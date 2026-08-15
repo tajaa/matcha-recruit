@@ -16,16 +16,16 @@ struct RedeemConfirmSheet: View {
             VStack(spacing: 20) {
                 Text(listing.title).font(.title2.bold())
                 if let description = listing.description {
-                    Text(description).foregroundStyle(.secondary)
+                    Text(description).foregroundStyle(TU.textDim)
                 }
                 PointsPill(points: listing.points_cost)
                 if let balance {
                     Text("Your balance: \(balance) pts")
                         .font(.footnote)
-                        .foregroundStyle(insufficientBalance ? .red : .secondary)
+                        .foregroundStyle(insufficientBalance ? .red : TU.textDim)
                 }
                 if let terms = listing.terms {
-                    Text(terms).font(.caption).foregroundStyle(.secondary)
+                    Text(terms).font(.caption).foregroundStyle(TU.textDim)
                 }
 
                 ErrorBanner(message: flow.error)
@@ -38,23 +38,18 @@ struct RedeemConfirmSheet: View {
                         }
                         if let expires = redemption.expires_at {
                             Text("Expires \(Formatters.relativeString(from: expires))")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(TU.textDim)
                         }
                     }
-                    Button("Done") { dismiss() }
-                        .frame(maxWidth: .infinity).padding()
-                        .background(.tint, in: RoundedRectangle(cornerRadius: 10))
-                        .foregroundStyle(.white)
+                    Button("Done") { dismiss() }.buttonStyle(EmberButtonStyle())
                 } else {
                     Button {
                         Task { await flow.redeem(listing) }
                     } label: {
-                        if flow.isRedeeming { ProgressView().tint(.white) }
+                        if flow.isRedeeming { ProgressView().tint(TU.ink) }
                         else { Text("Redeem for \(listing.points_cost) points").bold() }
                     }
-                    .frame(maxWidth: .infinity).padding()
-                    .background(insufficientBalance ? Color.gray : Color.accentColor, in: RoundedRectangle(cornerRadius: 10))
-                    .foregroundStyle(.white)
+                    .buttonStyle(EmberButtonStyle(enabled: !insufficientBalance))
                     .disabled(insufficientBalance || flow.isRedeeming)
                 }
             }
@@ -64,6 +59,7 @@ struct RedeemConfirmSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
+            .themedContainer()
         }
         .presentationDetents([.medium])
     }

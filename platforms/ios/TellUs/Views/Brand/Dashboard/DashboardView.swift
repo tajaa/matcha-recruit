@@ -10,34 +10,34 @@ struct DashboardView: View {
             VStack(spacing: 16) {
                 if let stats = vm.stats {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                        statTile("Total", stats.total, .primary)
-                        statTile("New", stats.new, .blue)
+                        statTile("Total", stats.total, .white)
+                        statTile("New", stats.new, TU.ember)
                         statTile("Positive", stats.positive, .green)
-                        statTile("Neutral", stats.neutral, .gray)
+                        statTile("Neutral", stats.neutral, TU.textDim)
                         statTile("Negative", stats.negative, .red)
                     }
                     .padding(.horizontal)
 
                     if !stats.by_category.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("By category").font(.headline)
+                            Text("By category").font(.headline).foregroundStyle(.white.opacity(0.92))
                             ForEach(stats.by_category.sorted { $0.value > $1.value }, id: \.key) { key, count in
                                 HStack {
                                     Text(key.capitalized)
                                     Spacer()
-                                    Text("\(count)").foregroundStyle(.secondary)
+                                    Text("\(count)").foregroundStyle(TU.textDim)
                                 }
                                 .font(.subheadline)
                             }
                         }
                         .padding()
-                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        .glassCard(radius: 10)
                         .padding(.horizontal)
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Recent feedback").font(.headline).padding(.horizontal)
+                    Text("Recent feedback").font(.headline).foregroundStyle(.white.opacity(0.92)).padding(.horizontal)
                     ForEach(vm.reports) { report in
                         NavigationLink {
                             ReportDetailView(id: report.id)
@@ -49,11 +49,11 @@ struct DashboardView: View {
                                     SentimentBadge(sentiment: report.sentiment)
                                 }
                                 if let description = report.description {
-                                    Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(description).font(.caption).foregroundStyle(TU.textDim).lineLimit(2)
                                 }
                             }
                             .padding()
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            .glassCard(radius: 10)
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal)
@@ -62,19 +62,21 @@ struct DashboardView: View {
             }
             .padding(.vertical)
         }
+        .themedScreen()
         .navigationTitle("Dashboard")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { NotificationsView() } label: {
                     Image(systemName: "bell.fill")
+                        .foregroundStyle(.white.opacity(0.85))
                         .overlay(alignment: .topTrailing) {
                             if appState.unreadCount > 0 {
                                 Text(appState.unreadCount >= 100 ? "99+" : "\(appState.unreadCount)")
                                     .font(.caption2.bold())
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 2)
-                                    .background(Color.accentColor, in: Capsule())
-                                    .foregroundStyle(.white)
+                                    .background(TU.ember, in: Capsule())
+                                    .foregroundStyle(TU.ink)
                                     .offset(x: 10, y: -10)
                             }
                         }
@@ -102,10 +104,10 @@ struct DashboardView: View {
     private func statTile(_ label: String, _ value: Int, _ color: Color) -> some View {
         VStack {
             Text("\(value)").font(.title.bold()).foregroundStyle(color)
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.caption).foregroundStyle(TU.textDim)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .glassCard(radius: 10)
     }
 }

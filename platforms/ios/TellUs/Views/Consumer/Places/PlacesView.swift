@@ -12,6 +12,7 @@ struct PlacesView: View {
                     .textInputAutocapitalization(.words)
                     .autocorrectionDisabled()
             }
+            .listRowBackground(TU.inkRaised)
 
             if !vm.dbResults.isEmpty {
                 Section("On Tell-Us") {
@@ -21,6 +22,7 @@ struct PlacesView: View {
                         }
                     }
                 }
+                .listRowBackground(TU.inkRaised)
             }
 
             if !vm.suggestions.isEmpty {
@@ -29,6 +31,7 @@ struct PlacesView: View {
                         SuggestionRow(suggestion: suggestion, vm: vm)
                     }
                 }
+                .listRowBackground(TU.inkRaised)
             }
 
             if vm.noMatches {
@@ -36,6 +39,7 @@ struct PlacesView: View {
                     EmptyState(icon: "mappin.slash", title: "No matches",
                                hint: "Add it manually below.")
                 }
+                .listRowBackground(TU.inkRaised)
             }
 
             if vm.noMatches || vm.showManualForm {
@@ -60,8 +64,11 @@ struct PlacesView: View {
                     }
                     .disabled(vm.submittingManual)
                 }
+                .listRowBackground(TU.inkRaised)
             }
         }
+        .listStyle(.insetGrouped)
+        .themedScreen()
         .navigationTitle("Places")
         .navigationDestination(item: $vm.navigateToken) { scanned in
             IntakeLoaderView(token: scanned.token)
@@ -107,7 +114,7 @@ private struct PlaceResultRow: View {
                         Text("unclaimed")
                             .font(.caption2.bold())
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.15), in: Capsule())
+                            .background(TU.surface, in: Capsule())
                     }
                 }
                 HStack(spacing: 8) {
@@ -119,7 +126,7 @@ private struct PlaceResultRow: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(TU.textDim)
             }
 
             Spacer()
@@ -150,7 +157,7 @@ private struct SuggestionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(suggestion.name)
                 if let secondary = suggestion.secondary_text {
-                    Text(secondary).font(.caption).foregroundStyle(.secondary)
+                    Text(secondary).font(.caption).foregroundStyle(TU.textDim)
                 }
             }
             Spacer()

@@ -10,17 +10,18 @@ struct RedemptionDetailView: View {
                 Text(code)
                     .font(.system(.largeTitle, design: .monospaced))
                     .padding()
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .glassCard(radius: 12)
             }
             StatusChip(text: redemption.status.rawValue)
             if let expires = redemption.expires_at {
                 Text("Expires \(Formatters.relativeString(from: expires))")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(TU.textDim)
             }
             Text("\(redemption.points_spent) points spent")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.footnote).foregroundStyle(TU.textDim)
         }
         .padding()
+        .themedContainer()
         .navigationTitle("Redemption")
         .navigationBarTitleDisplayMode(.inline)
     }

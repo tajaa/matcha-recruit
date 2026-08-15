@@ -18,15 +18,17 @@ struct BoardPostsView: View {
                         StatusChip(text: post.kind.rawValue)
                     }
                     if let body = post.body { Text(body).font(.subheadline).lineLimit(2) }
-                    Text("\(post.approved_reply_count) replies").font(.caption).foregroundStyle(.secondary)
+                    Text("\(post.approved_reply_count) replies").font(.caption).foregroundStyle(TU.textDim)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { editingPost = post }
                 .swipeActions {
                     Button("Delete", role: .destructive) { pendingDelete = post }
                 }
+                .themedRow()
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .themedScreen()
             .sheet(item: $editingPost) { post in
                 ComposePostSheet(vm: vm, editing: post)
             }

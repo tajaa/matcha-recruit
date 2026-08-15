@@ -19,7 +19,10 @@ struct BoardFeedView: View {
                     Button("Request to join") {
                         Task { try? await BoardService.shared.join(slug: slug, note: nil); await vm.load() }
                     }
+                    .buttonStyle(EmberButtonStyle())
+                    .padding(.horizontal)
                 }
+                .themedContainer()
             } else if let page = vm.page {
                 List(page.posts) { post in
                     NavigationLink {
@@ -28,8 +31,10 @@ struct BoardFeedView: View {
                         BoardPostCard(post: post) { _ in }
                             .allowsHitTesting(false)
                     }
+                    .themedRow()
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .themedScreen()
             } else {
                 ProgressView()
             }

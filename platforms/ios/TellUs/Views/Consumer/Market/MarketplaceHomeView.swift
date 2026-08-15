@@ -11,6 +11,7 @@ struct MarketplaceHomeView: View {
                 Text("Cards").tag(2)
             }
             .pickerStyle(.segmented)
+            .tint(TU.ember)
             .padding()
 
             switch tab {
@@ -19,6 +20,7 @@ struct MarketplaceHomeView: View {
             default: CardWalletView()
             }
         }
+        .themedContainer()
         .navigationTitle("Market")
         .navigationDestination(for: PromoCard.self) { CardDetailView(card: $0) }
     }

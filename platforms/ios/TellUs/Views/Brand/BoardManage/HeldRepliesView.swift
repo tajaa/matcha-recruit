@@ -14,14 +14,16 @@ struct HeldRepliesView: View {
                     Text(reply.body)
                     HStack {
                         Button("Approve (+15 pts)") { Task { await vm.approveReply(reply.id) } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.borderedProminent).tint(TU.ember)
                         Button("Reject") { Task { await vm.rejectReply(reply.id) } }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(.bordered).tint(TU.textDim)
                     }
                 }
                 .padding(.vertical, 4)
+                .themedRow()
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
+            .themedScreen()
         }
     }
 }

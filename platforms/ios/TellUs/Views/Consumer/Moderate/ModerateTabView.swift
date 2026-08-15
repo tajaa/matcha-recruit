@@ -18,6 +18,7 @@ struct ModerateTabView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .tint(TU.ember)
                     .padding()
 
                     if let brand = selectedBrand {
@@ -25,8 +26,10 @@ struct ModerateTabView: View {
                             .id(brand.brand_id)
                     } else {
                         EmptyState(icon: "checkmark.shield", title: "Pick a brand to moderate")
+                        Spacer()
                     }
                 }
+                .themedContainer()
                 .onAppear { if selectedBrand == nil { selectedBrand = appState.moderatedBrands.first } }
             }
         }

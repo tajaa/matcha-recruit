@@ -12,28 +12,32 @@ struct TeamView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                TextField("Add by email", text: $newEmail)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
-                    .textFieldStyle(.roundedBorder)
+                GlassField {
+                    TextField("Add by email", text: $newEmail)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.emailAddress)
+                }
                 Button("Add") {
                     let email = newEmail
                     newEmail = ""
                     Task { await vm.addTeamMember(email: email) }
                 }
+                .buttonStyle(GhostButtonStyle())
+                .frame(width: 80)
                 .disabled(newEmail.isEmpty)
             }
             .padding()
 
             if vm.team.isEmpty {
                 EmptyState(icon: "person.3", title: "No team members yet")
+                Spacer()
             } else {
                 List(vm.team) { member in
                     HStack {
                         VStack(alignment: .leading) {
                             Text(member.account_display_name)
-                            Text(member.email).font(.caption).foregroundStyle(.secondary)
+                            Text(member.email).font(.caption).foregroundStyle(TU.textDim)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 6) {
@@ -45,6 +49,7 @@ struct TeamView: View {
                                 ))
                                 .labelsHidden()
                                 .toggleStyle(.switch)
+                                .tint(TU.ember)
                                 .scaleEffect(0.8)
                             }
                         }
@@ -54,10 +59,13 @@ struct TeamView: View {
                             Button("Remove", role: .destructive) { Task { await vm.removeTeamMember(member.id) } }
                         }
                     }
+                    .themedRow()
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
             }
         }
+        .themedContainer()
         .task { await vm.loadTeam() }
     }
 }

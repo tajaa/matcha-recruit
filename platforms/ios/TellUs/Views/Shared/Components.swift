@@ -73,7 +73,7 @@ struct SentimentBadge: View {
 
 struct StatusChip: View {
     let text: String
-    var tint: Color = .secondary
+    var tint: Color = TU.textDim
     var body: some View {
         Text(text.replacingOccurrences(of: "_", with: " ").capitalized)
             .font(.caption2.bold())
@@ -89,9 +89,9 @@ struct EmptyState: View {
     var hint: String? = nil
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 36)).foregroundStyle(.secondary)
-            Text(title).font(.headline)
-            if let hint { Text(hint).font(.footnote).foregroundStyle(.secondary) }
+            Image(systemName: icon).font(.system(size: 36)).foregroundStyle(TU.textDim)
+            Text(title).font(.headline).foregroundStyle(.white.opacity(0.92))
+            if let hint { Text(hint).font(.footnote).foregroundStyle(TU.textDim) }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)

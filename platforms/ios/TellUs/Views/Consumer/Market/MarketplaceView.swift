@@ -31,15 +31,15 @@ struct MarketplaceView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(listing.title).font(.headline).foregroundStyle(.primary)
+                                    Text(listing.title).font(.headline).foregroundStyle(.white.opacity(0.92))
                                     if let brand = listing.brand_name {
-                                        Text(brand).font(.caption).foregroundStyle(.secondary)
+                                        Text(brand).font(.caption).foregroundStyle(TU.textDim)
                                     }
                                     PointsPill(points: listing.points_cost)
                                 }
                                 Spacer()
                                 if listing.quantity_remaining == 0 {
-                                    StatusChip(text: "Sold out", tint: .gray)
+                                    StatusChip(text: "Sold out", tint: TU.textDim)
                                 }
                             }
                         }
@@ -52,8 +52,10 @@ struct MarketplaceView: View {
                             onError: { vm.error = $0 }
                         )
                     }
+                    .themedRow()
                 }
-                .listStyle(.plain)
+                .listStyle(.insetGrouped)
+                .themedScreen()
             }
         }
         .sheet(item: $selected, onDismiss: {

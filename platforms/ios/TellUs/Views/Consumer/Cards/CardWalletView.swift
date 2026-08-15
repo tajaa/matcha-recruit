@@ -31,7 +31,7 @@ struct CardWalletView: View {
                 .scrollContentBackground(.hidden)
             }
         }
-        .background(TU.ink)
+        .background(EmberBackground())
         .navigationTitle("My cards")
         .task { await vm.load() }
         .refreshable { await vm.load() }

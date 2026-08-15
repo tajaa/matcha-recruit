@@ -20,6 +20,7 @@ struct BoardManageView: View {
                     Label("\(summary.member_count)", systemImage: "person.3")
                 }
                 .font(.footnote)
+                .foregroundStyle(TU.textDim)
                 .padding(.horizontal)
                 .padding(.top, 4)
             }
@@ -32,6 +33,7 @@ struct BoardManageView: View {
                 Text("Team").tag(4)
             }
             .pickerStyle(.segmented)
+            .tint(TU.ember)
             .padding()
 
             Group {
@@ -45,6 +47,7 @@ struct BoardManageView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .themedContainer()
         .navigationTitle("Board")
         .toolbar {
             if tab == 2 {

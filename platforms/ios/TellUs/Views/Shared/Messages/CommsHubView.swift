@@ -16,6 +16,7 @@ struct CommsHubView: View {
                     Label("Messages with businesses", systemImage: "message")
                 }
             }
+            .listRowBackground(TU.inkRaised)
 
             if !appState.inboxBrands.isEmpty {
                 Section("Business inboxes") {
@@ -27,13 +28,16 @@ struct CommsHubView: View {
                                 Text(brand.name)
                                 Text(brand.role.capitalized)
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(TU.textDim)
                             }
                         }
                     }
                 }
+                .listRowBackground(TU.inkRaised)
             }
         }
+        .listStyle(.insetGrouped)
+        .themedScreen()
         .navigationTitle("Comms")
     }
 }

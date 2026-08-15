@@ -54,23 +54,29 @@ struct PostRepliesView: View {
                             }
                         }
                     }
+                    .themedRow()
                 }
             }
         }
+        .listStyle(.insetGrouped)
+        .themedScreen()
         .safeAreaInset(edge: .bottom) {
             HStack {
-                TextField("Add a reply…", text: $newReply)
-                    .textFieldStyle(.roundedBorder)
+                GlassField {
+                    TextField("Add a reply…", text: $newReply)
+                }
                 Button("Send") {
                     Task {
                         await vm.reply(postId: post.id, body: newReply)
                         newReply = ""
                     }
                 }
+                .buttonStyle(GhostButtonStyle())
+                .frame(width: 90)
                 .disabled(newReply.isEmpty)
             }
             .padding()
-            .background(.bar)
+            .background(TU.ink)
         }
         .navigationTitle(post.title)
         .navigationBarTitleDisplayMode(.inline)

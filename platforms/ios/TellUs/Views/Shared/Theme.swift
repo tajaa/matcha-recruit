@@ -56,6 +56,36 @@ struct EmberBackground: View {
     }
 }
 
+// MARK: - Themed screens
+
+/// One-line retrofit for a List/ScrollView/Form screen: drops `EmberBackground`
+/// behind the content and clears the system chrome that would otherwise paint
+/// over it. Attach to the scroll view itself, not a wrapping VStack —
+/// `.scrollContentBackground(.hidden)` only affects the view it's called on.
+struct ThemedScreen: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .scrollContentBackground(.hidden)
+            .background(EmberBackground())
+            .toolbarBackground(.hidden, for: .navigationBar)
+    }
+}
+
+extension View {
+    func themedScreen() -> some View { modifier(ThemedScreen()) }
+
+    /// Same background/chrome for a non-scrolling container hosting a
+    /// segmented Picker + a switched child List/ScrollView — no
+    /// `.scrollContentBackground` here since there's no scroll view at this
+    /// level; the child still needs its own `.scrollContentBackground(.hidden)`.
+    func themedContainer() -> some View {
+        self.background(EmberBackground()).toolbarBackground(.hidden, for: .navigationBar)
+    }
+
+    /// List row treatment — dark slab fill, keeps swipeActions/onDelete intact.
+    func themedRow() -> some View { self.listRowBackground(TU.inkRaised) }
+}
+
 // MARK: - Brand mark
 
 /// The app mark — shared by the splash and the login header so

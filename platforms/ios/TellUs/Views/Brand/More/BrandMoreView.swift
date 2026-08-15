@@ -14,11 +14,15 @@ struct BrandMoreView: View {
                 NavigationLink("Settings & prompts") { BrandSettingsView() }
                 NavigationLink("Billing") { BillingView() }
             }
+            .listRowBackground(TU.inkRaised)
             Section {
                 NavigationLink("Alerts") { NotificationsView() }
                 NavigationLink("Account") { BrandAccountView() }
             }
+            .listRowBackground(TU.inkRaised)
         }
+        .listStyle(.insetGrouped)
+        .themedScreen()
         .navigationTitle("More")
     }
 }
