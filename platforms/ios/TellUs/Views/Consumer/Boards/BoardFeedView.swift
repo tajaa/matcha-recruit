@@ -15,12 +15,20 @@ struct BoardFeedView: View {
         Group {
             if vm.notAMember {
                 VStack(spacing: 12) {
-                    EmptyState(icon: "lock", title: "You're not a member of this board yet")
-                    Button("Request to join") {
-                        Task { try? await BoardService.shared.join(slug: slug, note: nil); await vm.load() }
+                    switch vm.membershipStatus {
+                    case .pending:
+                        EmptyState(icon: "clock", title: "Request sent",
+                                   hint: "Waiting for \(brandName) to approve your request to join.")
+                    case .declined, .removed:
+                        EmptyState(icon: "lock", title: "This board isn't open to you right now")
+                    default:
+                        EmptyState(icon: "lock", title: "You're not a member of this board yet")
+                        Button("Request to join") {
+                            Task { await vm.requestJoin() }
+                        }
+                        .buttonStyle(EmberButtonStyle())
+                        .padding(.horizontal)
                     }
-                    .buttonStyle(EmberButtonStyle())
-                    .padding(.horizontal)
                     Spacer()
                 }
                 .themedContainer()
