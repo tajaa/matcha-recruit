@@ -14,6 +14,11 @@ struct ProductFormView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var bookingTypes: [CappeBookingType] = []
     @State private var showStockAdjust = false
+    @State private var showCreateBookingType = false
+    @State private var newTypeName = ""
+    @State private var newTypeDuration = 30
+    @State private var newTypePriceCents = 0
+    @State private var creatingBookingType = false
 
     var body: some View {
         Form {
@@ -49,12 +54,19 @@ struct ProductFormView: View {
                 if vm.fulfillment == .booking {
                     Picker("Booking type", selection: Binding(
                         get: { vm.bookingTypeId ?? "" },
-                        set: { vm.bookingTypeId = $0.isEmpty ? nil : $0 }
+                        set: { newValue in
+                            if newValue == "__new__" {
+                                showCreateBookingType = true
+                            } else {
+                                vm.bookingTypeId = newValue.isEmpty ? nil : newValue
+                            }
+                        }
                     )) {
                         Text("None").tag("")
                         ForEach(bookingTypes) { type in
                             Text(type.name).tag(type.id)
                         }
+                        Text("+ New booking type").tag("__new__")
                     }
                 }
                 Toggle("Requires approval before it goes through", isOn: $vm.requiresApproval)
@@ -147,6 +159,44 @@ struct ProductFormView: View {
         .task {
             if let existing { vm.load(from: existing) }
             bookingTypes = (try? await BookingsService.shared.listTypes(siteId: site.id)) ?? []
+        }
+        .sheet(isPresented: $showCreateBookingType) {
+            NavigationStack {
+                Form {
+                    TextField("Name", text: $newTypeName)
+                    Stepper("\(newTypeDuration) minutes", value: $newTypeDuration, in: 5...480, step: 5)
+                    HStack {
+                        Text("Price")
+                        Spacer()
+                        TextField("0.00", value: Binding(
+                            get: { Double(newTypePriceCents) / 100 },
+                            set: { newTypePriceCents = Int(($0 * 100).rounded()) }
+                        ), format: .number.precision(.fractionLength(2)))
+                            .keyboardType(.decimalPad)
+                    }
+                }
+                .navigationTitle("New booking type")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Save") {
+                            Task {
+                                creatingBookingType = true
+                                defer { creatingBookingType = false }
+                                if let created = try? await BookingsService.shared.createType(
+                                    siteId: site.id,
+                                    CappeBookingTypeCreate(name: newTypeName, duration_minutes: newTypeDuration, price_cents: newTypePriceCents)
+                                ) {
+                                    bookingTypes.append(created)
+                                    vm.bookingTypeId = created.id
+                                }
+                                newTypeName = ""; newTypeDuration = 30; newTypePriceCents = 0
+                                showCreateBookingType = false
+                            }
+                        }
+                        .disabled(newTypeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || creatingBookingType)
+                    }
+                }
+            }
         }
     }
 

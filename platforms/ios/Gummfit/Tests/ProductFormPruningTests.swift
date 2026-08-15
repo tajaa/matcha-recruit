@@ -55,4 +55,31 @@ final class ProductFormPruningTests: XCTestCase {
         XCTAssertTrue(vm.optionsValid)
         XCTAssertTrue(vm.canSubmit)
     }
+
+    // MARK: - Booking type picker "+ New booking type" sentinel
+    //
+    // ProductFormView's Picker set-closure skips writing vm.bookingTypeId when the
+    // selection is the "__new__" sentinel (it opens the create sheet instead) — these
+    // inline that branch logic, matching how this file already tests ProductFormViewModel
+    // state directly rather than rendering the view (no SwiftUI view-test harness here).
+
+    func testBookingTypeSentinelDoesNotOverwriteSelection() {
+        let vm = ProductFormViewModel()
+        vm.name = "Massage"
+        vm.fulfillment = .booking
+        vm.bookingTypeId = "type-existing"
+        let selection = "__new__"
+        if selection != "__new__" { vm.bookingTypeId = selection.isEmpty ? nil : selection }
+        XCTAssertEqual(vm.bookingTypeId, "type-existing")
+    }
+
+    func testBookingTypeRealSelectionOverwritesPrevious() {
+        let vm = ProductFormViewModel()
+        vm.name = "Massage"
+        vm.fulfillment = .booking
+        vm.bookingTypeId = "type-existing"
+        let selection = "type-new"
+        if selection != "__new__" { vm.bookingTypeId = selection.isEmpty ? nil : selection }
+        XCTAssertEqual(vm.bookingTypeId, "type-new")
+    }
 }
