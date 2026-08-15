@@ -16,6 +16,8 @@ import asyncpg
 import pytest
 
 from app.cappe.services.booking_suggestion_access import (
+    SUGGESTION_LINK_TTL,
+    SUGGESTION_SESSION_TTL,
     issue_suggestion_link,
     redeem_suggestion_link,
 )
@@ -88,6 +90,100 @@ async def test_realdb_issue_and_redeem_are_single_current_capabilities():
 
         redeemed = await asyncio.gather(redeem(), redeem())
         assert sum(result is not None for result in redeemed) == 1
+    finally:
+        async with pool.acquire() as conn:
+            if site_id is not None:
+                await conn.execute(
+                    "DELETE FROM cappe_booking_suggestion_sessions WHERE site_id = $1 AND client_email = $2",
+                    site_id,
+                    email,
+                )
+                await conn.execute(
+                    "DELETE FROM cappe_booking_suggestion_links WHERE site_id = $1 AND client_email = $2",
+                    site_id,
+                    email,
+                )
+                await conn.execute(
+                    "DELETE FROM cappe_clients WHERE site_id = $1 AND email = $2",
+                    site_id,
+                    email,
+                )
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_realdb_expiry_is_timestamptz_not_interval():
+    """Regression for DatatypeMismatchError: expires_at must land as a real
+    timestamptz ~TTL in the future, and re-issuing must upsert (needs the
+    UNIQUE (site_id, client_email) constraint the ON CONFLICT target relies on)."""
+    _assert_local_database(DATABASE_URL)
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4)
+    email = "integration-expiry@cappe.test"
+    site_id = None
+    try:
+        async with pool.acquire() as conn:
+            site_id = await conn.fetchval(
+                "SELECT id FROM cappe_sites WHERE slug = 'lumiere-spa' AND status = 'published'"
+            )
+            if site_id is None:
+                pytest.skip("seed Lumiere before running the integration test")
+            await conn.execute(
+                "INSERT INTO cappe_clients (site_id, email, name, source) "
+                "VALUES ($1, $2, 'Integration Expiry', 'manual') "
+                "ON CONFLICT (site_id, email) DO UPDATE SET name = EXCLUDED.name",
+                site_id,
+                email,
+            )
+
+        now = datetime.now(timezone.utc)
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                issued = await issue_suggestion_link(
+                    conn, site_id=site_id, email=email, now=now
+                )
+        assert issued is not None
+        token, _client_name = issued
+
+        async with pool.acquire() as conn:
+            expires_at = await conn.fetchval(
+                "SELECT expires_at FROM cappe_booking_suggestion_links "
+                "WHERE site_id = $1 AND client_email = $2",
+                site_id,
+                email,
+            )
+        assert expires_at is not None
+        drift = abs((expires_at - (now + SUGGESTION_LINK_TTL)).total_seconds())
+        assert drift < 2, f"expires_at drifted {drift}s from expected TTL"
+
+        # Re-issuing for the same (site_id, email) must upsert, not 42P10.
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                reissued = await issue_suggestion_link(
+                    conn, site_id=site_id, email=email, now=now
+                )
+        assert reissued is not None
+        token = reissued[0]
+
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                redeemed = await redeem_suggestion_link(
+                    conn, site_id=site_id, token=token, now=now
+                )
+        assert redeemed is not None
+
+        async with pool.acquire() as conn:
+            session_expires_at = await conn.fetchval(
+                "SELECT expires_at FROM cappe_booking_suggestion_sessions "
+                "WHERE site_id = $1 AND client_email = $2",
+                site_id,
+                email,
+            )
+        assert session_expires_at is not None
+        session_drift = abs(
+            (session_expires_at - (now + SUGGESTION_SESSION_TTL)).total_seconds()
+        )
+        assert session_drift < 2, f"session expires_at drifted {session_drift}s from expected TTL"
     finally:
         async with pool.acquire() as conn:
             if site_id is not None:
