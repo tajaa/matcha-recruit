@@ -72,6 +72,23 @@ build_number() {
         | head -1 | sed -E 's/.*"([0-9.]+)"/\1/'
 }
 
+highest_uploaded_build() {
+    [[ -f "$RELEASE_LOG" ]] || return 0
+    awk '
+        /archive=OK[[:space:]]+upload=OK/ {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^build=[0-9]+$/) {
+                    build = substr($i, 7) + 0
+                    if (build > highest) highest = build
+                }
+            }
+        }
+        END {
+            if (highest > 0) print highest
+        }
+    ' "$RELEASE_LOG"
+}
+
 if [[ -n "$SET_BUILD" ]]; then
     [[ "$SET_BUILD" =~ ^[0-9]+(\.[0-9]+)*$ ]] || {
         echo "${RED}error:${NC} --set-build must be numeric (for example 18)"; exit 1;
@@ -134,7 +151,16 @@ bump_build_number() {
     local prefix last
     prefix="${OLD_VERSION%.*}"
     last="${OLD_VERSION##*.}"
-    if [[ "$prefix" == "$last" ]]; then NEW_VERSION=$((last + 1)); else NEW_VERSION="${prefix}.$((last + 1))"; fi
+    local highest_uploaded
+    highest_uploaded="$(highest_uploaded_build)"
+    if [[ "$OLD_VERSION" =~ ^[0-9]+$ && "$highest_uploaded" =~ ^[0-9]+$ && "$OLD_VERSION" -le "$highest_uploaded" ]]; then
+        NEW_VERSION=$((highest_uploaded + 1))
+        echo "${DIM}local release history already contains build ${highest_uploaded}; skipping ASC duplicate${NC}"
+    elif [[ "$prefix" == "$last" ]]; then
+        NEW_VERSION=$((last + 1))
+    else
+        NEW_VERSION="${prefix}.$((last + 1))"
+    fi
     PROJECT_YML_BACKUP="$(mktemp -t gummfit-projectyml.XXXXXX)"
     cp "$PROJECT_YML" "$PROJECT_YML_BACKUP"
     sed -i '' "s/CURRENT_PROJECT_VERSION: \"${OLD_VERSION}\"/CURRENT_PROJECT_VERSION: \"${NEW_VERSION}\"/g" "$PROJECT_YML"
