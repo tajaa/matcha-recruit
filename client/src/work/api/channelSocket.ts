@@ -53,11 +53,32 @@ export function clearChannelOutbox(tokenAtLogout: string | null) {
  * room-scoped) and sit in localStorage forever with nothing to remove it. */
 const OUTBOX_MAX_AGE_MS = 10 * 60 * 1000
 
+/** Shared add/remove/dispatch boilerplate for a Set-backed listener group.
+ * Dispatch swallows per-listener errors so one bad/stale listener can't
+ * break the others sharing this socket. */
+class ListenerSet<T> {
+  private listeners: Set<(arg: T) => void> = new Set()
+
+  add(handler: (arg: T) => void) {
+    this.listeners.add(handler)
+  }
+
+  remove(handler: (arg: T) => void) {
+    this.listeners.delete(handler)
+  }
+
+  dispatch(arg: T) {
+    for (const fn of this.listeners) {
+      try { fn(arg) } catch { /* swallow so one bad listener doesn't kill others */ }
+    }
+  }
+}
+
 export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
-  private messageListeners: Set<MessageHandler> = new Set()
-  private channelActionListeners: Set<ChannelActionHandler> = new Set()
-  private notificationListeners: Set<NotificationHandler> = new Set()
+  private messageListeners = new ListenerSet<ChannelMessage>()
+  private channelActionListeners = new ListenerSet<ChannelActionUpdate>()
+  private notificationListeners = new ListenerSet<MWNotification>()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -73,13 +94,7 @@ export class ChannelSocket extends BaseSocket {
   }
 
   removeMessageListener(handler: MessageHandler) {
-    this.messageListeners.delete(handler)
-  }
-
-  private _dispatchMessage(msg: ChannelMessage) {
-    for (const fn of this.messageListeners) {
-      try { fn(msg) } catch { /* swallow so one bad listener doesn't kill others */ }
-    }
+    this.messageListeners.remove(handler)
   }
 
   addChannelActionListener(handler: ChannelActionHandler) {
@@ -87,13 +102,7 @@ export class ChannelSocket extends BaseSocket {
   }
 
   removeChannelActionListener(handler: ChannelActionHandler) {
-    this.channelActionListeners.delete(handler)
-  }
-
-  private _dispatchChannelAction(update: ChannelActionUpdate) {
-    for (const fn of this.channelActionListeners) {
-      try { fn(update) } catch { /* one stale view must not break other listeners */ }
-    }
+    this.channelActionListeners.remove(handler)
   }
 
   addNotificationListener(handler: NotificationHandler) {
@@ -101,13 +110,7 @@ export class ChannelSocket extends BaseSocket {
   }
 
   removeNotificationListener(handler: NotificationHandler) {
-    this.notificationListeners.delete(handler)
-  }
-
-  private _dispatchNotification(notification: MWNotification) {
-    for (const fn of this.notificationListeners) {
-      try { fn(notification) } catch { /* one stale listener must not break others */ }
-    }
+    this.notificationListeners.remove(handler)
   }
 
   onTyping: TypingHandler | null = null
@@ -253,7 +256,7 @@ export class ChannelSocket extends BaseSocket {
       case 'message': {
         const m = data.message as ChannelMessage
         if (m.client_message_id) this.removeFromOutbox(m.client_message_id)
-        this._dispatchMessage(m)
+        this.messageListeners.dispatch(m)
         break
       }
       case 'message_deleted':
@@ -285,12 +288,12 @@ export class ChannelSocket extends BaseSocket {
           action: data.action as { kind: string; id: string; status: string },
           }
           this.onChannelActionUpdated?.(update)
-          this._dispatchChannelAction(update)
+          this.channelActionListeners.dispatch(update)
         }
         break
       case 'notification': {
         const notification = data.notification as MWNotification | undefined
-        if (notification) this._dispatchNotification(notification)
+        if (notification) this.notificationListeners.dispatch(notification)
         break
       }
       case 'typing':
