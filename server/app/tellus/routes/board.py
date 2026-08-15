@@ -368,7 +368,7 @@ async def create_reply(
                     conn, brand["id"], "board_reply_pending", "New reply awaiting approval",
                     f"{account.display_name or 'A member'} replied to a board post.",
                     reference_type="board_post", reference_id=str(post_id),
-                    slug=brand["slug"], name=brand["name"],
+                    slug=slug, name=brand["name"],
                 )
 
     return TellusBoardReply(

@@ -29,6 +29,10 @@ final class AppState {
     /// Set when the user taps a push; RootView presents the destination as a
     /// full-screen cover and SwiftUI nils it back out on dismissal.
     var pendingDeepLink: DeepLinkRoute?
+    /// A push tapped before a usable phase exists (restoring/loggedOut/verifyPending/
+    /// brandWall) — replayed into `pendingDeepLink` once `route(_:)` reaches
+    /// `.consumer`/`.brand`, instead of presenting over the splash/login screen.
+    private var deferredDeepLink: DeepLinkRoute?
 
     private var pollTask: Task<Void, Never>?
     private var pushObserver: NSObjectProtocol?
@@ -46,7 +50,15 @@ final class AppState {
             forName: .tellusPushTapped, object: nil, queue: .main
         ) { [weak self] note in
             guard let route = DeepLinkRoute.parse(userInfo: note.userInfo ?? [:]) else { return }
-            Task { @MainActor in self?.pendingDeepLink = route }
+            Task { @MainActor in
+                guard let self else { return }
+                switch self.phase {
+                case .consumer, .brand:
+                    self.pendingDeepLink = route
+                default:
+                    self.deferredDeepLink = route
+                }
+            }
         }
         Task { await restore() }
     }
@@ -74,6 +86,10 @@ final class AppState {
         }
         startPolling()
         requestPushPermission()
+        if let deferred = deferredDeepLink {
+            deferredDeepLink = nil
+            pendingDeepLink = deferred
+        }
     }
 
     func didLogin(_ response: TokenResponse) {
@@ -99,16 +115,24 @@ final class AppState {
         guard phase != .loggedOut else { return }
         pollTask?.cancel()
         pollTask = nil
-        if serverSide {
-            Task { await AuthService.shared.logout() }
-        } else {
-            APIClient.shared.accessToken = nil
+        // Unregister must go out on the wire before the access token is
+        // cleared/invalidated below — otherwise the request 401s and the
+        // device-token row survives, leaving a shared device receiving the
+        // previous account's pushes.
+        Task {
+            await PushService.shared.unregister()
+            if serverSide {
+                await AuthService.shared.logout()
+            } else {
+                APIClient.shared.accessToken = nil
+            }
         }
-        Task { await PushService.shared.unregister() }
         account = nil
         moderatedBrands = []
         inboxBrands = []
         unreadCount = 0
+        pendingDeepLink = nil
+        deferredDeepLink = nil
         phase = .loggedOut
         // Cross-account media leak: a shared device relaunching into a
         // different account must not see the previous account's cached

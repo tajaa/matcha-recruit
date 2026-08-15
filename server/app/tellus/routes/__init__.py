@@ -5,8 +5,9 @@ never passes through matcha's require_feature chain (Tell-Us has no company /
 feature flags). Auth is per-endpoint via the require_tellus_account family; the
 auth + public-intake sub-routers are intentionally unauthenticated.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from ..services.push import flush_pushes
 from .admin import router as admin_router
 from .auth import router as auth_router
 from .billing import router as billing_router
@@ -30,7 +31,12 @@ from .public_intake import router as public_intake_router
 from .push import router as push_router
 from .rewards import router as rewards_router
 
-tellus_router = APIRouter(tags=["tellus"])
+tellus_router = APIRouter(
+    tags=["tellus"],
+    # Drains services.push's per-request queue after every handler returns
+    # successfully (dropped on any raised exception) — see push.flush_pushes.
+    dependencies=[Depends(flush_pushes)],
+)
 
 
 @tellus_router.get("/health")

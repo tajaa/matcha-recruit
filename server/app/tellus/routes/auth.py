@@ -384,12 +384,17 @@ async def businesses(account: TellusAccount = Depends(require_tellus_account)):
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(account: TellusAccount = Depends(require_tellus_account)):
-    """Server-side logout — advance the revocation watermark."""
+    """Server-side logout — advance the revocation watermark and drop this
+    account's device tokens. Belt-and-braces alongside the client's own
+    POST /push/unregister call: on a forced (401-triggered) logout the client
+    may not be able to get that request out before its token goes stale, so a
+    shared device would otherwise keep receiving this account's pushes."""
     async with get_connection() as conn:
         await conn.execute(
             "UPDATE tellus_accounts SET tokens_valid_after = NOW(), updated_at = NOW() WHERE id = $1",
             account.id,
         )
+        await conn.execute("DELETE FROM tellus_device_tokens WHERE account_id = $1", account.id)
 
 
 @router.post("/me/location", response_model=TellusAccount)

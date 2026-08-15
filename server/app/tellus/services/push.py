@@ -6,13 +6,22 @@ Mirrors `core/services/apns_service.py` but talks to the Tell-Us
 `tellus_accounts`, not `users`, so matcha's sender cannot address them.
 
 Best-effort + lazy: if `aioapns` isn't installed or the `APNS_*` env isn't
-configured, every call is a silent no-op. `schedule_push` is fire-and-forget
-(a detached asyncio task) so a push never blocks the response and never holds
-the caller's DB transaction open — `notify_account` runs inside `conn.transaction()`
-blocks, and an APNs round-trip must not delay the commit or pin the connection.
+configured, every call is a silent no-op.
+
+`schedule_push` never blocks the caller and never dispatches while the
+caller's DB transaction is open — inside a request, it enqueues onto a
+per-request `ContextVar` queue instead of firing immediately. `flush_pushes`
+(a FastAPI yield-dependency wired on `tellus_router`) drains that queue only
+after the whole request completed without raising, so a push can never fire
+for a notification row that got rolled back by a later error in the same
+handler. Outside a request (workers/scripts, no `flush_pushes` in the call
+stack), `schedule_push` dispatches immediately — same as before. Dispatched
+sends are tracked in `_inflight` with `add_done_callback` so the event loop's
+weak task references can't silently garbage-collect an in-flight push.
 """
 import asyncio
 import logging
+from contextvars import ContextVar
 from typing import Optional
 from uuid import UUID
 
@@ -23,6 +32,12 @@ logger = logging.getLogger(__name__)
 
 _client = None
 _disabled_logged = False
+
+# Per-request queue of (account_ids, title, body, payload) push jobs. `None`
+# outside a request (no flush_pushes dependency in the call stack) — that
+# case dispatches immediately, matching pre-queue behavior for workers/scripts.
+_queue: ContextVar[Optional[list]] = ContextVar("tellus_push_queue", default=None)
+_inflight: set = set()
 
 # Kinds that warrant a push. Points/level/badge/streak notifications fire in
 # immediate response to the user's own in-app action (they are already looking
@@ -86,15 +101,19 @@ async def register_token(
     platform: str = "ios",
     bundle_id: Optional[str] = None,
 ) -> None:
-    """Upsert a device token for the account (idempotent on token)."""
+    """Upsert a device token, scoped per (account, token) — not per token alone.
+    A bare token-unique upsert lets any account that learns another device's
+    APNs token silently reassign that device's push stream to itself; keying
+    on the pair means registering the same token under a second account adds
+    a second row instead of stealing the first (send_to_accounts dedupes by
+    token so a shared device still gets one alert, not two)."""
     async with get_connection() as conn:
         await conn.execute(
             """
             INSERT INTO tellus_device_tokens (account_id, token, platform, bundle_id, last_seen_at)
             VALUES ($1, $2, $3, $4, NOW())
-            ON CONFLICT (token) DO UPDATE
-              SET account_id = EXCLUDED.account_id,
-                  platform = EXCLUDED.platform,
+            ON CONFLICT (account_id, token) DO UPDATE
+              SET platform = EXCLUDED.platform,
                   bundle_id = EXCLUDED.bundle_id,
                   last_seen_at = NOW()
             """,
@@ -127,7 +146,9 @@ async def send_to_accounts(
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            "SELECT token FROM tellus_device_tokens WHERE account_id = ANY($1::uuid[]) AND platform = 'ios'",
+            """SELECT DISTINCT token FROM tellus_device_tokens
+               WHERE account_id = ANY($1::uuid[]) AND platform = 'ios'
+                 AND last_seen_at > NOW() - INTERVAL '60 days'""",
             list(account_ids),
         )
     if not rows:
@@ -174,11 +195,18 @@ def schedule_push(
     slug: Optional[str] = None,
     name: Optional[str] = None,
 ) -> None:
-    """Fire-and-forget push for a notification that was just inserted.
+    """Queue (or, outside a request, immediately fire) a push for a
+    notification that was just inserted.
 
     Gated on `kind` being in PUSH_KINDS so points/level/badge noise never
     reaches the lock screen. `slug`/`name` ride in the payload so a tapped
-    board-post / campaign push can deep-link to the right brand screen."""
+    board-post / campaign push can deep-link to the right brand screen.
+
+    Inside a request, this only enqueues — `flush_pushes` (the `tellus_router`
+    dependency) dispatches after the handler returns successfully, and drops
+    the queue if the handler raised. Never call this after yielding control
+    back past the request (e.g. from a detached background task) expecting
+    immediate delivery — queue it before the handler returns."""
     if kind not in PUSH_KINDS:
         return
     if not account_ids:
@@ -192,7 +220,20 @@ def schedule_push(
         "slug": slug,
         "name": name,
     }
-    asyncio.create_task(_safe_send(account_ids, title, body, payload))
+    job = (list(account_ids), title, body, payload)
+    queue = _queue.get()
+    if queue is None:
+        _dispatch(job)
+    else:
+        queue.append(job)
+
+
+def _dispatch(job: tuple) -> None:
+    """Spawn the send as a tracked task — `_inflight` holds a strong
+    reference so the event loop's weak task refs can't GC it mid-await."""
+    task = asyncio.create_task(_safe_send(*job))
+    _inflight.add(task)
+    task.add_done_callback(_inflight.discard)
 
 
 async def _safe_send(
@@ -202,3 +243,20 @@ async def _safe_send(
         await send_to_accounts(account_ids, title, body, payload)
     except Exception as e:  # noqa: BLE001
         logger.warning("Tell-Us APNs push failed: %s", e)
+
+
+async def flush_pushes():
+    """FastAPI yield-dependency — wrap the whole request. Pushes queued
+    during the request only go out if the handler completes without raising;
+    an exception (404/409/500/...) means whatever DB row the push referenced
+    may have rolled back, so the queue is dropped, not dispatched."""
+    token = _queue.set([])
+    try:
+        yield
+    except Exception:
+        raise
+    else:
+        for job in _queue.get() or []:
+            _dispatch(job)
+    finally:
+        _queue.reset(token)

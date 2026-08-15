@@ -321,6 +321,7 @@ async def take_comms_thread(thread_id: UUID, background: BackgroundTasks, accoun
             await notify_account(
                 conn, account.id, "dm_assignment", "Comms conversation assigned",
                 "You took a conversation.", reference_type="dm_thread", reference_id=str(thread_id),
+                suppress_push=True,
             )
         model, _, _ = await _thread_response(conn, thread_id, account)
     return model

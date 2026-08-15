@@ -110,15 +110,22 @@ async def check_and_award_badges(conn, account_id: UUID) -> list[str]:
 
 async def notify_account(conn, account_id: UUID, kind: str, title: str, body: str | None,
                   reference_type: str | None = None, reference_id: str | None = None,
-                  slug: str | None = None, name: str | None = None) -> None:
-    """Insert an in-app notification and (fire-and-forget) push it to the
-    account's iOS devices. `slug`/`name` ride in the push payload so a tapped
-    board-post / campaign push can deep-link to the right brand screen."""
+                  slug: str | None = None, name: str | None = None,
+                  suppress_push: bool = False) -> None:
+    """Insert an in-app notification and (queue a) push it to the account's
+    iOS devices. `slug`/`name` ride in the push payload so a tapped
+    board-post / campaign push can deep-link to the right brand screen.
+    `suppress_push=True` keeps the bell row but skips the device push — for
+    notifications whose recipient is the acting user themselves (e.g. taking
+    a conversation notifies the taker for the in-app bell, but shouldn't also
+    buzz their own phone)."""
     await conn.execute(
         """INSERT INTO tellus_notifications (account_id, kind, title, body, reference_type, reference_id)
            VALUES ($1, $2, $3, $4, $5, $6)""",
         account_id, kind, title, body, reference_type, reference_id,
     )
+    if suppress_push:
+        return
     from . import push
     push.schedule_push(
         [account_id], kind, title, body,

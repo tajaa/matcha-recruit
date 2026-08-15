@@ -224,10 +224,15 @@ async def create_campaign(conn, brand_id: UUID, data) -> dict:
 
 async def notify_campaign_followers(conn, brand_id: UUID, campaign: dict) -> None:
     """Fan a "campaign starts" notification out to every consumer following the
-    brand, in one statement. A campaign is live the moment it is created (there
-    is no scheduled-publish state), so creation *is* the "campaign begins"
-    moment. Followers get the brand slug/name in the push payload so the client
-    can deep-link to the brand's screen."""
+    brand, in one statement. Skipped entirely for a future-dated campaign
+    (`starts_at` in the future) — there is no scheduler to fire this later, so
+    a campaign that isn't claimable yet (see `claim_reason`'s "not_started")
+    simply gets no start notification rather than a false "just started" push.
+    Followers get the brand slug/name in the push payload so the client can
+    deep-link to the brand's screen."""
+    starts_at = campaign.get("starts_at")
+    if starts_at is not None and starts_at > datetime.now(timezone.utc):
+        return
     brand = await conn.fetchrow("SELECT name, slug FROM tellus_brands WHERE id = $1", brand_id)
     if brand is None:
         return

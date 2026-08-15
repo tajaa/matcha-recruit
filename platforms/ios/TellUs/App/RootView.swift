@@ -49,6 +49,11 @@ private struct DeepLinkDestinationView: View {
                 BoardManageView(brandId: nil, slug: slug ?? appState.account?.brand_slug)
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Close") { appState.pendingDeepLink = nil }
+            }
+        }
     }
 }
 
