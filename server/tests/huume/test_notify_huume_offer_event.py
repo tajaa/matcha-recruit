@@ -33,6 +33,7 @@ OFFER_ID = uuid4()
 THREAD_ID = uuid4()
 CREATOR_ID = uuid4()
 APPROVER_ID = uuid4()
+SENDER_ID = uuid4()
 
 
 def _conn_ctx(conn):
@@ -119,8 +120,27 @@ class TestThreadLookup:
         )
 
         first_query = conn.fetchrow.call_args_list[0].args[0]
-        assert "mw_threads WHERE id = " in first_query
+        assert "FROM mw_threads t" in first_query
         assert conn.fetchrow.call_count == 1  # never falls through to the reverse lookup
+
+    @pytest.mark.asyncio
+    async def test_offer_sender_is_notified_when_not_thread_creator_or_approver(self, monkeypatch):
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "id": THREAD_ID,
+            "created_by": CREATOR_ID,
+            "offer_sender_id": SENDER_ID,
+        })
+        conn.fetch = AsyncMock(return_value=[])
+        monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        bulk = _patch_side_effects(monkeypatch)
+
+        await offer_letters_mod._notify_huume_thread_of_offer_event(
+            _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
+        )
+
+        assert set(bulk.call_args.kwargs["user_ids"]) == {CREATOR_ID, SENDER_ID}
+        assert "huume_assets" in conn.fetchrow.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_linked_offer_letter_id_when_no_source_thread(self, monkeypatch):

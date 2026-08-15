@@ -123,6 +123,36 @@ describe('ChannelSocket outbox', () => {
     expect(latest().frames().some((f) => f.client_message_id === 'cmid-echo')).toBe(false)
   })
 
+  it('dispatches notification frames to listeners and supports cleanup', () => {
+    const s = new ChannelSocket()
+    const received: string[] = []
+    const handler = (notification: { id: string }) => received.push(notification.id)
+    s.addNotificationListener(handler)
+    s.connect()
+
+    latest().receive({
+      type: 'notification',
+      notification: {
+        id: 'notification-1',
+        type: 'huume_offer',
+        title: 'Offer accepted',
+        body: 'The candidate signed the offer.',
+        link: '/work/thread-1',
+        metadata: {},
+        is_read: false,
+        created_at: '2026-08-14T00:00:00Z',
+      },
+    })
+    expect(received).toEqual(['notification-1'])
+
+    s.removeNotificationListener(handler)
+    latest().receive({
+      type: 'notification',
+      notification: { id: 'notification-2' },
+    })
+    expect(received).toEqual(['notification-1'])
+  })
+
   it('scopes the outbox to the current user, so a different login does not replay it', () => {
     const s1 = new ChannelSocket()
     s1.connect()

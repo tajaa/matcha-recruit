@@ -691,8 +691,8 @@ async def _notify_huume_thread_of_offer_event(
     offer: dict, *, event: str, detail: str,
 ) -> None:
     """Best-effort: post a system notice into the matcha-work thread that
-    originated this offer, and bell-notify the thread's creator plus any
-    designated HR approvers. Never raises — a candidate's click must not 500
+    originated this offer, and bell-notify the offer sender, thread's creator,
+    plus any designated HR approvers. Never raises — a candidate's click must not 500
     because a thread got deleted or a WS push hiccuped. `thread_id` is bound
     before the try body so the except's own logging can't itself raise.
 
@@ -717,12 +717,34 @@ async def _notify_huume_thread_of_offer_event(
             thread = None
             if offer.get("source_thread_id"):
                 thread = await conn.fetchrow(
-                    "SELECT id, created_by FROM mw_threads WHERE id = $1 AND company_id = $2",
-                    offer["source_thread_id"], offer["company_id"],
+                    """
+                    SELECT t.id, t.created_by,
+                           (
+                               SELECT ha.created_by
+                               FROM huume_assets ha
+                               WHERE ha.company_id = t.company_id
+                                 AND ha.ref_table = 'offer_letters'
+                                 AND ha.ref_id = $3::text
+                           ) AS offer_sender_id
+                    FROM mw_threads t
+                    WHERE t.id = $1 AND t.company_id = $2
+                    """,
+                    offer["source_thread_id"], offer["company_id"], offer["id"],
                 )
             if not thread:
                 thread = await conn.fetchrow(
-                    "SELECT id, created_by FROM mw_threads WHERE linked_offer_letter_id = $1 AND company_id = $2",
+                    """
+                    SELECT t.id, t.created_by,
+                           (
+                               SELECT ha.created_by
+                               FROM huume_assets ha
+                               WHERE ha.company_id = t.company_id
+                                 AND ha.ref_table = 'offer_letters'
+                                 AND ha.ref_id = $1::text
+                           ) AS offer_sender_id
+                    FROM mw_threads t
+                    WHERE t.linked_offer_letter_id = $1 AND t.company_id = $2
+                    """,
                     offer["id"], offer["company_id"],
                 )
             if not thread:
@@ -740,6 +762,8 @@ async def _notify_huume_thread_of_offer_event(
         recipient_ids = {r["id"] for r in approver_rows}
         if thread["created_by"]:
             recipient_ids.add(thread["created_by"])
+        if thread.get("offer_sender_id"):
+            recipient_ids.add(thread["offer_sender_id"])
 
         await apply_update(
             thread_id,

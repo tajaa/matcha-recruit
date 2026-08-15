@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { relativeTime as timeAgo } from '../../../utils/format'
 import { Bell, ClipboardCheck, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { getSharedChannelSocket } from '../../api/channelSocket'
 import {
   getNotifications,
   getNotificationUnreadCount,
@@ -28,6 +29,7 @@ export default function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
+  const notificationIdsRef = useRef<Set<string>>(new Set())
 
   // Poll unread count
   useEffect(() => {
@@ -42,10 +44,33 @@ export default function NotificationBell() {
     if (!open) return
     setLoading(true)
     getNotifications(false, 20)
-      .then((r) => setNotifications(r.notifications))
+      .then((r) => {
+        notificationIdsRef.current = new Set(r.notifications.map((n) => n.id))
+        setNotifications(r.notifications)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [open])
+
+  // The backend persists the bell row and pushes the same payload over the
+  // shared channel socket. Keep polling as reconciliation, but don't make the
+  // user wait for the next poll to learn that an off-thread event happened.
+  useEffect(() => {
+    const socket = getSharedChannelSocket()
+    const handleNotification = (notification: MWNotification) => {
+      const alreadySeen = notificationIdsRef.current.has(notification.id)
+      notificationIdsRef.current.add(notification.id)
+      setNotifications((prev) => [
+        notification,
+        ...prev.filter((item) => item.id !== notification.id),
+      ].slice(0, 20))
+      if (!alreadySeen && !notification.is_read) {
+        setUnreadCount((count) => count + 1)
+      }
+    }
+    socket.addNotificationListener(handleNotification)
+    return () => socket.removeNotificationListener(handleNotification)
+  }, [])
 
   // Close on click outside
   useEffect(() => {

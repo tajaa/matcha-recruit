@@ -1,4 +1,5 @@
 import type { ChannelMessage, ChannelReaction } from './channels'
+import type { MWNotification } from './notifications'
 import { BaseSocket } from './baseSocket'
 
 type MessageHandler = (msg: ChannelMessage) => void
@@ -7,6 +8,7 @@ type OnlineHandler = (users: { id: string; name: string; avatar_url: string | nu
 type UserEventHandler = (user: { id: string; name: string }) => void
 type ChannelActionUpdate = { channel_id: string; action: { kind: string; id: string; status: string } }
 type ChannelActionHandler = (update: ChannelActionUpdate) => void
+type NotificationHandler = (notification: MWNotification) => void
 
 /** Durable outbox for sends attempted while the socket was down. Mirrors
  * Espresso's channels_outbox_v1 (UserDefaults) — safe to blind-replay because
@@ -55,6 +57,7 @@ export class ChannelSocket extends BaseSocket {
   private joinedRooms: Set<string> = new Set()
   private messageListeners: Set<MessageHandler> = new Set()
   private channelActionListeners: Set<ChannelActionHandler> = new Set()
+  private notificationListeners: Set<NotificationHandler> = new Set()
 
   // Deprecated single-handler; kept for backward compat. Setting this adds
   // the handler to the multi-listener set. Prefer addMessageListener.
@@ -90,6 +93,20 @@ export class ChannelSocket extends BaseSocket {
   private _dispatchChannelAction(update: ChannelActionUpdate) {
     for (const fn of this.channelActionListeners) {
       try { fn(update) } catch { /* one stale view must not break other listeners */ }
+    }
+  }
+
+  addNotificationListener(handler: NotificationHandler) {
+    this.notificationListeners.add(handler)
+  }
+
+  removeNotificationListener(handler: NotificationHandler) {
+    this.notificationListeners.delete(handler)
+  }
+
+  private _dispatchNotification(notification: MWNotification) {
+    for (const fn of this.notificationListeners) {
+      try { fn(notification) } catch { /* one stale listener must not break others */ }
     }
   }
 
@@ -271,6 +288,11 @@ export class ChannelSocket extends BaseSocket {
           this._dispatchChannelAction(update)
         }
         break
+      case 'notification': {
+        const notification = data.notification as MWNotification | undefined
+        if (notification) this._dispatchNotification(notification)
+        break
+      }
       case 'typing':
         this.onTyping?.(data.user as { id: string; name: string })
         break
