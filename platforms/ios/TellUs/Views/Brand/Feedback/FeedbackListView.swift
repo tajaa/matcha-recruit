@@ -9,6 +9,7 @@ struct FeedbackListView: View {
 
             if vm.reports.isEmpty && !vm.isLoading {
                 EmptyState(icon: "bubble.left.and.text.bubble.right", title: "No feedback yet")
+                Spacer()
             } else {
                 List(vm.reports) { report in
                     NavigationLink {

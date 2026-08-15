@@ -20,8 +20,9 @@ struct MarketplaceHomeView: View {
             default: CardWalletView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .themedContainer()
-        .navigationTitle("Market")
+        .navigationTitle("Rewards")
         .navigationDestination(for: PromoCard.self) { CardDetailView(card: $0) }
     }
 }

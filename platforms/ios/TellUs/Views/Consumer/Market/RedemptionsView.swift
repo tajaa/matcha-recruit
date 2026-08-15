@@ -6,7 +6,11 @@ struct RedemptionsView: View {
     var body: some View {
         Group {
             if vm.redemptions.isEmpty && !vm.isLoading {
-                EmptyState(icon: "ticket", title: "No redemptions yet")
+                VStack {
+                    EmptyState(icon: "ticket", title: "No redemptions yet")
+                    Spacer()
+                }
+                .themedContainer()
             } else {
                 List(vm.redemptions) { redemption in
                     NavigationLink {

@@ -21,6 +21,7 @@ struct BoardFeedView: View {
                     }
                     .buttonStyle(EmberButtonStyle())
                     .padding(.horizontal)
+                    Spacer()
                 }
                 .themedContainer()
             } else if let page = vm.page {

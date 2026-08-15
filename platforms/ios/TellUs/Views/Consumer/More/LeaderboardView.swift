@@ -6,7 +6,11 @@ struct LeaderboardView: View {
     var body: some View {
         Group {
             if vm.entries.isEmpty && !vm.isLoading {
-                EmptyState(icon: "trophy", title: "No leaderboard data yet")
+                VStack {
+                    EmptyState(icon: "trophy", title: "No leaderboard data yet")
+                    Spacer()
+                }
+                .themedContainer()
             } else {
                 List(vm.entries) { entry in
                     HStack {

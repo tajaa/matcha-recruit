@@ -132,6 +132,11 @@ private struct PlaceResultRow: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 6) {
+                if place.claimed {
+                    NavigationLink("View board") {
+                        BoardFeedView(slug: place.slug, brandName: place.name)
+                    }
+                }
                 if place.messaging_enabled {
                     Button("Message") { onMessage(place.slug) }
                 }

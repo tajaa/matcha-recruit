@@ -6,7 +6,18 @@ struct BoardsListView: View {
     var body: some View {
         Group {
             if vm.memberships.isEmpty && !vm.isLoading {
-                EmptyState(icon: "person.3", title: "No boards yet", hint: "Join a brand's regulars board from their feedback page.")
+                VStack(spacing: 12) {
+                    EmptyState(icon: "person.3", title: "No boards yet", hint: "Search for a brand to join their regulars board.")
+                    NavigationLink {
+                        PlacesView()
+                    } label: {
+                        Text("Search for a brand")
+                    }
+                    .buttonStyle(EmberButtonStyle())
+                    .padding(.horizontal)
+                    Spacer()
+                }
+                .themedContainer()
             } else {
                 List(vm.memberships) { membership in
                     if membership.status == .approved {
