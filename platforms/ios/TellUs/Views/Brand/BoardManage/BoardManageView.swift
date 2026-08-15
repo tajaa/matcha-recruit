@@ -19,7 +19,7 @@ struct BoardManageView: View {
                     Label("\(summary.held_replies)", systemImage: "checkmark.bubble")
                     Label("\(summary.member_count)", systemImage: "person.3")
                 }
-                .font(.footnote)
+                .font(.interFootnote)
                 .foregroundStyle(TU.textDim)
                 .padding(.horizontal)
                 .padding(.top, 4)

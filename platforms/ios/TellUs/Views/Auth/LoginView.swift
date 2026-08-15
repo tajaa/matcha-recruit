@@ -58,7 +58,7 @@ struct LoginView: View {
                     .padding(.top, 12)
 
                     Button("Have a reset link?") { showResetPassword = true }
-                        .font(.system(size: 14))
+                        .font(.custom("Inter-Regular", size: 14))
                         .foregroundStyle(TU.textDim)
                         .riseIn(4)
                         .padding(.top, 20)
@@ -87,12 +87,12 @@ struct LoginView: View {
 
             VStack(spacing: 8) {
                 Text("Beetlejuse")
-                    .font(.system(size: 34, weight: .bold))
+                    .font(.custom("Inter-Regular", size: 34).weight(.bold))
                     .tracking(-0.8)
                     .foregroundStyle(.white)
 
                 Text("Say what you think. Leave with points.")
-                    .font(.system(size: 15))
+                    .font(.custom("Inter-Regular", size: 15))
                     .foregroundStyle(TU.textDim)
                     .multilineTextAlignment(.center)
             }

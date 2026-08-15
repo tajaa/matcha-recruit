@@ -30,7 +30,7 @@ struct PostRepliesView: View {
                 ForEach(replies) { reply in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(reply.author_name).font(.caption.bold())
+                            Text(reply.author_name).font(.interCaption.bold())
                             if reply.status == .held {
                                 StatusChip(text: "awaiting moderation", tint: .orange)
                             }

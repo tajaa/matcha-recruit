@@ -29,7 +29,7 @@ struct LinkFormSheet: View {
                     DatePicker("Expires at", selection: $expiresAt, displayedComponents: .date)
                 }
                 if let error = vm.error {
-                    Text(error).foregroundStyle(.red).font(.footnote)
+                    Text(error).foregroundStyle(.red).font(.interFootnote)
                 }
             }
             .navigationTitle("New link")

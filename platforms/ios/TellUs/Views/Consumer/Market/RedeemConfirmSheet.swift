@@ -14,31 +14,31 @@ struct RedeemConfirmSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
-                Text(listing.title).font(.title2.bold())
+                Text(listing.title).font(.interTitle2.bold())
                 if let description = listing.description {
                     Text(description).foregroundStyle(TU.textDim)
                 }
                 PointsPill(points: listing.points_cost)
                 if let balance {
                     Text("Your balance: \(balance) pts")
-                        .font(.footnote)
+                        .font(.interFootnote)
                         .foregroundStyle(insufficientBalance ? .red : TU.textDim)
                 }
                 if let terms = listing.terms {
-                    Text(terms).font(.caption).foregroundStyle(TU.textDim)
+                    Text(terms).font(.interCaption).foregroundStyle(TU.textDim)
                 }
 
                 ErrorBanner(message: flow.error)
 
                 if let redemption = flow.lastRedemption {
                     VStack(spacing: 8) {
-                        Text("Redeemed!").font(.headline).foregroundStyle(.green)
+                        Text("Redeemed!").font(.interHeadline).foregroundStyle(.green)
                         if let code = redemption.code {
                             Text(code).font(.system(.title3, design: .monospaced))
                         }
                         if let expires = redemption.expires_at {
                             Text("Expires \(Formatters.relativeString(from: expires))")
-                                .font(.caption).foregroundStyle(TU.textDim)
+                                .font(.interCaption).foregroundStyle(TU.textDim)
                         }
                     }
                     Button("Done") { dismiss() }.buttonStyle(EmberButtonStyle())

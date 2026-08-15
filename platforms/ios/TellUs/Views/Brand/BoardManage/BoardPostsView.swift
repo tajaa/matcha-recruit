@@ -12,13 +12,13 @@ struct BoardPostsView: View {
             List(vm.posts) { post in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        if post.is_pinned { Image(systemName: "pin.fill").font(.caption).foregroundStyle(.orange) }
-                        Text(post.title).font(.headline)
+                        if post.is_pinned { Image(systemName: "pin.fill").font(.interCaption).foregroundStyle(.orange) }
+                        Text(post.title).font(.interHeadline)
                         Spacer()
                         StatusChip(text: post.kind.rawValue)
                     }
-                    if let body = post.body { Text(body).font(.subheadline).lineLimit(2) }
-                    Text("\(post.approved_reply_count) replies").font(.caption).foregroundStyle(TU.textDim)
+                    if let body = post.body { Text(body).font(.interSubheadline).lineLimit(2) }
+                    Text("\(post.approved_reply_count) replies").font(.interCaption).foregroundStyle(TU.textDim)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { editingPost = post }

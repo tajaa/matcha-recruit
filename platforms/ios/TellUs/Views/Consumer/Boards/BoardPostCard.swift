@@ -10,20 +10,20 @@ struct BoardPostCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 if post.is_pinned {
-                    Image(systemName: "pin.fill").font(.caption).foregroundStyle(.orange)
+                    Image(systemName: "pin.fill").font(.interCaption).foregroundStyle(.orange)
                 }
-                Text(post.title).font(.headline)
+                Text(post.title).font(.interHeadline)
                 Spacer()
                 StatusChip(text: post.kind.rawValue)
             }
-            if let body = post.body { Text(body).font(.subheadline) }
+            if let body = post.body { Text(body).font(.interSubheadline) }
 
             if post.kind == .deal, let listing = post.listing {
                 Button {
                     onRedeem(listing)
                 } label: {
                     HStack {
-                        Text(listing.title).font(.subheadline.bold())
+                        Text(listing.title).font(.interSubheadline.bold())
                         Spacer()
                         PointsPill(points: listing.points_cost)
                     }
@@ -34,12 +34,12 @@ struct BoardPostCard: View {
 
             if post.kind == .event, let start = post.event_starts_at {
                 Label(Formatters.relativeString(from: start), systemImage: "calendar")
-                    .font(.caption).foregroundStyle(TU.textDim)
+                    .font(.interCaption).foregroundStyle(TU.textDim)
             }
 
             HStack(spacing: 12) {
                 Text("\(post.approved_reply_count) replies")
-                    .font(.caption).foregroundStyle(TU.textDim)
+                    .font(.interCaption).foregroundStyle(TU.textDim)
                 LikeButton(
                     target: .boardPost, id: post.id,
                     count: post.likeCount, liked: post.likedByMe,

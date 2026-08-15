@@ -25,7 +25,7 @@ struct FeedbackFilterBar: View {
                 Label(vm.sentimentFilter?.rawValue.capitalized ?? "Sentiment", systemImage: "face.smiling")
             }
         }
-        .font(.footnote)
+        .font(.interFootnote)
         .padding(.horizontal)
         .padding(.vertical, 8)
     }

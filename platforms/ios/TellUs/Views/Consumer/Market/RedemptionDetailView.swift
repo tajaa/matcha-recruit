@@ -5,7 +5,7 @@ struct RedemptionDetailView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text(redemption.listing_title ?? "Reward").font(.title2.bold())
+            Text(redemption.listing_title ?? "Reward").font(.interTitle2.bold())
             if let code = redemption.code {
                 Text(code)
                     .font(.system(.largeTitle, design: .monospaced))
@@ -15,10 +15,10 @@ struct RedemptionDetailView: View {
             StatusChip(text: redemption.status.rawValue)
             if let expires = redemption.expires_at {
                 Text("Expires \(Formatters.relativeString(from: expires))")
-                    .font(.footnote).foregroundStyle(TU.textDim)
+                    .font(.interFootnote).foregroundStyle(TU.textDim)
             }
             Text("\(redemption.points_spent) points spent")
-                .font(.footnote).foregroundStyle(TU.textDim)
+                .font(.interFootnote).foregroundStyle(TU.textDim)
         }
         .padding()
         .themedContainer()

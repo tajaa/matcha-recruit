@@ -25,7 +25,7 @@ struct LinkQRSheet: View {
                 } label: {
                     Label(copied ? "Copied!" : "Copy link", systemImage: "doc.on.doc")
                 }
-                Text(url).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(url).font(.interCaption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding()
             .navigationTitle(link.label ?? "Feedback link")

@@ -16,6 +16,7 @@ struct TellUsApp: App {
                 // has nothing luminous behind it.
                 .preferredColorScheme(.dark)
                 .tint(TU.ember)
+                .environment(\.font, .interBody)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         appState.resumePolling()

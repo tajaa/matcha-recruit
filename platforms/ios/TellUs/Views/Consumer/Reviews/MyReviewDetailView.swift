@@ -104,7 +104,7 @@ struct MyReviewDetailView: View {
             }
 
             if let error = vm.error {
-                Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
             }
         }
         .navigationTitle(review.brand_name)

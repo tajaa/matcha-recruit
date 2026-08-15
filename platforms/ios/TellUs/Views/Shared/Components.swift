@@ -33,7 +33,7 @@ struct PointsPill: View {
     let points: Int
     var body: some View {
         Label("\(points)", systemImage: "sparkles")
-            .font(.footnote.bold())
+            .font(.interFootnote.bold())
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(.tint.opacity(0.15), in: Capsule())
@@ -46,7 +46,7 @@ struct LevelProgressBar: View {
     let level: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Level \(level)").font(.caption.bold())
+            Text("Level \(level)").font(.interCaption.bold())
             ProgressView(value: min(max(progress, 0), 1))
                 .tint(.accentColor)
         }
@@ -57,7 +57,7 @@ struct SentimentBadge: View {
     let sentiment: Sentiment
     var body: some View {
         Text(sentiment.rawValue.capitalized)
-            .font(.caption2.bold())
+            .font(.interCaption2.bold())
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(color.opacity(0.15), in: Capsule())
             .foregroundStyle(color)
@@ -76,7 +76,7 @@ struct StatusChip: View {
     var tint: Color = TU.textDim
     var body: some View {
         Text(text.replacingOccurrences(of: "_", with: " ").capitalized)
-            .font(.caption2.bold())
+            .font(.interCaption2.bold())
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(tint.opacity(0.15), in: Capsule())
             .foregroundStyle(tint)
@@ -89,9 +89,9 @@ struct EmptyState: View {
     var hint: String? = nil
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 36)).foregroundStyle(TU.textDim)
-            Text(title).font(.headline).foregroundStyle(.white.opacity(0.92))
-            if let hint { Text(hint).font(.footnote).foregroundStyle(TU.textDim) }
+            Image(systemName: icon).font(.custom("Inter-Regular", size: 36)).foregroundStyle(TU.textDim)
+            Text(title).font(.interHeadline).foregroundStyle(.white.opacity(0.92))
+            if let hint { Text(hint).font(.interFootnote).foregroundStyle(TU.textDim) }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)

@@ -51,7 +51,7 @@ struct PlacesView: View {
                     TextField("State (optional)", text: $vm.addState)
                         .textInputAutocapitalization(.characters)
                     if let manualError = vm.manualError {
-                        Text(manualError).font(.footnote).foregroundStyle(.red)
+                        Text(manualError).font(.interFootnote).foregroundStyle(.red)
                     }
                     Button {
                         Task { await vm.submitManual() }
@@ -109,10 +109,10 @@ private struct PlaceResultRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(place.name).font(.body)
+                    Text(place.name).font(.interBody)
                     if !place.claimed {
                         Text("unclaimed")
-                            .font(.caption2.bold())
+                            .font(.interCaption2.bold())
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(TU.surface, in: Capsule())
                     }
@@ -125,7 +125,7 @@ private struct PlaceResultRow: View {
                         Label("\(place.review_count)", systemImage: "star.fill")
                     }
                 }
-                .font(.caption)
+                .font(.interCaption)
                 .foregroundStyle(TU.textDim)
             }
 
@@ -147,7 +147,7 @@ private struct PlaceResultRow: View {
                     Button("Leave feedback") { vm.navigateToken = ScannedToken(target: .intake(token)) }
                 }
             }
-            .font(.caption.bold())
+            .font(.interCaption.bold())
             .buttonStyle(.borderless)
         }
     }
@@ -162,7 +162,7 @@ private struct SuggestionRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(suggestion.name)
                 if let secondary = suggestion.secondary_text {
-                    Text(secondary).font(.caption).foregroundStyle(TU.textDim)
+                    Text(secondary).font(.interCaption).foregroundStyle(TU.textDim)
                 }
             }
             Spacer()

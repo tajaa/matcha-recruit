@@ -17,9 +17,9 @@ struct RedemptionsView: View {
                         RedemptionDetailView(redemption: redemption)
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(redemption.listing_title ?? "Reward").font(.headline)
+                            Text(redemption.listing_title ?? "Reward").font(.interHeadline)
                             HStack {
-                                if let brand = redemption.brand_name { Text(brand).font(.caption).foregroundStyle(TU.textDim) }
+                                if let brand = redemption.brand_name { Text(brand).font(.interCaption).foregroundStyle(TU.textDim) }
                                 Spacer()
                                 StatusChip(text: redemption.status.rawValue, tint: color(for: redemption.status))
                             }

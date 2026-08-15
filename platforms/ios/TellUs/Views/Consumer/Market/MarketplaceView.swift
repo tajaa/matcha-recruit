@@ -31,9 +31,9 @@ struct MarketplaceView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 8))
                                 }
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(listing.title).font(.headline).foregroundStyle(.white.opacity(0.92))
+                                    Text(listing.title).font(.interHeadline).foregroundStyle(.white.opacity(0.92))
                                     if let brand = listing.brand_name {
-                                        Text(brand).font(.caption).foregroundStyle(TU.textDim)
+                                        Text(brand).font(.interCaption).foregroundStyle(TU.textDim)
                                     }
                                     PointsPill(points: listing.points_cost)
                                 }

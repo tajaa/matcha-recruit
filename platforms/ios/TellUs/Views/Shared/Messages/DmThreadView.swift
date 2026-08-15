@@ -33,7 +33,7 @@ struct DmThreadView: View {
                 Text(vm.thread?.status == .closed
                      ? "This conversation is closed."
                      : "This conversation has ended.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.interFootnote).foregroundStyle(.secondary)
                     .padding()
                     .frame(maxWidth: .infinity)
                     .background(.bar)

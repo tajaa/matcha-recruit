@@ -19,14 +19,14 @@ struct CardDetailView: View {
             VStack(spacing: 20) {
                 VStack(spacing: 6) {
                     Text(card.brand_name)
-                        .font(.subheadline)
+                        .font(.interSubheadline)
                         .foregroundStyle(TU.textDim)
                     Text(card.reward_text)
-                        .font(.title2.bold())
+                        .font(.interTitle2.bold())
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white)
                     Text(card.campaign_title)
-                        .font(.footnote)
+                        .font(.interFootnote)
                         .foregroundStyle(TU.textDim)
                 }
                 .padding(.top, 12)
@@ -46,7 +46,7 @@ struct CardDetailView: View {
                             .textSelection(.enabled)
 
                         Text("Expires \(Formatters.relativeString(from: card.expires_at))")
-                            .font(.caption)
+                            .font(.interCaption)
                             .foregroundStyle(TU.textDim)
                     }
                 } else {
@@ -75,14 +75,14 @@ struct CardDetailView: View {
     private var spentState: some View {
         VStack(spacing: 10) {
             Image(systemName: card.status == "redeemed" ? "checkmark.seal.fill" : "xmark.seal.fill")
-                .font(.system(size: 52))
+                .font(.custom("Inter-Regular", size: 52))
                 .foregroundStyle(card.status == "redeemed" ? TU.ember : TU.textDim)
             Text(statusHeadline)
-                .font(.headline)
+                .font(.interHeadline)
                 .foregroundStyle(.white)
             if let at = card.redeemed_at {
                 Text(detailLine(at: at))
-                    .font(.footnote)
+                    .font(.interFootnote)
                     .foregroundStyle(TU.textDim)
                     .multilineTextAlignment(.center)
             }

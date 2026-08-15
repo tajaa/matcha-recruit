@@ -37,7 +37,7 @@ struct TeamView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(member.account_display_name)
-                            Text(member.email).font(.caption).foregroundStyle(TU.textDim)
+                            Text(member.email).font(.interCaption).foregroundStyle(TU.textDim)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 6) {

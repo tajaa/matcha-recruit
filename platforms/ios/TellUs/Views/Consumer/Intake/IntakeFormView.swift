@@ -9,8 +9,8 @@ struct IntakeFormView: View {
         } else if let config = vm.config {
             Form {
                 Section {
-                    Text(config.brand_name).font(.headline)
-                    if let store = config.store_name { Text(store).font(.subheadline).foregroundStyle(.secondary) }
+                    Text(config.brand_name).font(.interHeadline)
+                    if let store = config.store_name { Text(store).font(.interSubheadline).foregroundStyle(.secondary) }
                 }
 
                 Section("Category") {
@@ -67,7 +67,7 @@ struct IntakeFormView: View {
                 }
 
                 if let error = vm.submitError {
-                    Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                    Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
                 }
 
                 Section {

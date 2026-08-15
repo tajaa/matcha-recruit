@@ -48,20 +48,20 @@ private struct CardRow: View {
         NavigationLink(value: card) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(card.reward_text)
-                    .font(.headline)
+                    .font(.interHeadline)
                     .foregroundStyle(.white)
                 Text(card.brand_name)
-                    .font(.subheadline)
+                    .font(.interSubheadline)
                     .foregroundStyle(TU.textDim)
                 HStack(spacing: 6) {
                     StatusChip(text: card.status)
                     if card.status == "issued" {
                         Text("Expires \(Formatters.relativeString(from: card.expires_at))")
-                            .font(.caption)
+                            .font(.interCaption)
                             .foregroundStyle(TU.textDim)
                     } else if let at = card.redeemed_at {
                         Text("Used \(Formatters.relativeString(from: at))")
-                            .font(.caption)
+                            .font(.interCaption)
                             .foregroundStyle(TU.textDim)
                     }
                 }

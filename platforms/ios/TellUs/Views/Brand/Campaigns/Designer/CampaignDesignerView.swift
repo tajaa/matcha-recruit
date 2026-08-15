@@ -39,7 +39,7 @@ struct CampaignDesignerView: View {
             toolbar
             if let exportError = vm.exportError {
                 Text(exportError)
-                    .font(.footnote)
+                    .font(.interFootnote)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
@@ -47,7 +47,7 @@ struct CampaignDesignerView: View {
             }
             if let saveError = vm.saveError {
                 Text(saveError)
-                    .font(.footnote)
+                    .font(.interFootnote)
                     .foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
@@ -181,7 +181,7 @@ struct CampaignDesignerView: View {
     private var inspector: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Layers").font(.headline)
+                Text("Layers").font(.interHeadline)
                 Spacer()
                 if selectedLayer != nil {
                     Button(role: .destructive) { vm.deleteSelected() } label: {
@@ -214,7 +214,7 @@ struct CampaignDesignerView: View {
                 selectedControls(for: selectedLayer)
             } else {
                 Text("Select a layer to edit it, or drag a layer on the canvas.")
-                    .font(.footnote)
+                    .font(.interFootnote)
                     .foregroundStyle(.secondary)
             }
         }
@@ -264,7 +264,7 @@ struct CampaignDesignerView: View {
                     get: { layer.isLocked },
                     set: { locked in vm.updateSelected { selected in selected.withLock(locked) } }
                 ))
-                .font(.footnote)
+                .font(.interFootnote)
             }
             HStack {
                 numericField("Width", value: layer.box.width) { value in
@@ -291,7 +291,7 @@ struct CampaignDesignerView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Opacity \(Int(layer.opacity * 100))%")
-                    .font(.caption)
+                    .font(.interCaption)
                     .foregroundStyle(.secondary)
                 Slider(value: Binding(
                     get: { layer.opacity },
@@ -375,7 +375,7 @@ private struct SharePreviewSheet: View {
         NavigationStack {
             VStack(spacing: 16) {
                 Image(systemName: "photo")
-                    .font(.system(size: 48))
+                    .font(.custom("Inter-Regular", size: 48))
                     .foregroundStyle(.secondary)
                 ShareLink(item: url) {
                     Label("Share PNG", systemImage: "square.and.arrow.up")

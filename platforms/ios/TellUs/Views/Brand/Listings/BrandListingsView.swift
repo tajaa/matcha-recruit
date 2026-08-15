@@ -17,14 +17,14 @@ struct BrandListingsView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(listing.title).font(.subheadline.bold())
+                                Text(listing.title).font(.interSubheadline.bold())
                                     .foregroundStyle(listing.is_active ? .primary : .secondary)
                                 Spacer()
                                 StatusChip(text: listing.visibility.rawValue)
                             }
                             Text("\(listing.points_cost) pts · \(listing.quantity_claimed) claimed" +
                                  (listing.quantity_total.map { " / \($0)" } ?? ""))
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.interCaption).foregroundStyle(.secondary)
                         }
                     }
                     .swipeActions {

@@ -11,7 +11,7 @@ struct ErrorBanner: View {
     var body: some View {
         if let message, !message.isEmpty, !dismissed {
             Text(message)
-                .font(.footnote)
+                .font(.interFootnote)
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)

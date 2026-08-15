@@ -15,14 +15,14 @@ struct LeaderboardView: View {
                 List(vm.entries) { entry in
                     HStack {
                         Text("#\(entry.rank)")
-                            .font(.headline)
+                            .font(.interHeadline)
                             .frame(width: 36, alignment: .leading)
                         VStack(alignment: .leading) {
-                            Text(entry.display_name).font(.subheadline.bold())
-                            Text("Level \(entry.level)").font(.caption).foregroundStyle(TU.textDim)
+                            Text(entry.display_name).font(.interSubheadline.bold())
+                            Text("Level \(entry.level)").font(.interCaption).foregroundStyle(TU.textDim)
                         }
                         Spacer()
-                        Text("\(entry.lifetime_points) pts").font(.subheadline.bold())
+                        Text("\(entry.lifetime_points) pts").font(.interSubheadline.bold())
                     }
                     .listRowBackground(entry.is_you ? TU.ember.opacity(0.15) : TU.inkRaised)
                 }

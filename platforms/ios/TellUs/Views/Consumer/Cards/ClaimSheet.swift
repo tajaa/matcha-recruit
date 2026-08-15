@@ -52,19 +52,19 @@ struct ClaimSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14))
                 }
                 Text(preview.brand_name)
-                    .font(.subheadline)
+                    .font(.interSubheadline)
                     .foregroundStyle(TU.textDim)
                 Text(preview.title)
-                    .font(.title2.bold())
+                    .font(.interTitle2.bold())
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
                 Text(preview.reward_text)
-                    .font(.title3)
+                    .font(.interTitle3)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(TU.ember)
                 if let description = preview.description, !description.isEmpty {
                     Text(description)
-                        .font(.footnote)
+                        .font(.interFootnote)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(TU.textDim)
                 }
@@ -84,7 +84,7 @@ struct ClaimSheet: View {
                 .disabled(vm.claiming)
 
                 Text("One card per person, while they last.")
-                    .font(.caption)
+                    .font(.interCaption)
                     .foregroundStyle(TU.textDim)
             }
             .padding()

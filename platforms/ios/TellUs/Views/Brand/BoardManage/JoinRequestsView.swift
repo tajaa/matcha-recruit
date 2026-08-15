@@ -9,14 +9,14 @@ struct JoinRequestsView: View {
         } else {
             List(vm.requests) { request in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(request.account_display_name).font(.headline)
-                    if let note = request.note { Text(note).font(.footnote).foregroundStyle(TU.textDim) }
+                    Text(request.account_display_name).font(.interHeadline)
+                    if let note = request.note { Text(note).font(.interFootnote).foregroundStyle(TU.textDim) }
                     HStack(spacing: 12) {
                         Label("\(request.review_count)", systemImage: "star.bubble")
                         if request.hearted { Label("hearted", systemImage: "heart.fill").foregroundStyle(.pink) }
                         Label("\(request.redemption_count)", systemImage: "ticket")
                     }
-                    .font(.caption).foregroundStyle(TU.textDim)
+                    .font(.interCaption).foregroundStyle(TU.textDim)
                     HStack {
                         Button("Approve") { Task { await vm.approveRequest(request.id) } }
                             .buttonStyle(.borderedProminent).tint(TU.ember)

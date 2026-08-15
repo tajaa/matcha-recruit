@@ -45,7 +45,7 @@ struct ListingRedemptionsView: View {
                                 Text(code).font(.system(.subheadline, design: .monospaced))
                             }
                             Text(Formatters.relativeString(from: redemption.created_at))
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.interCaption2).foregroundStyle(.secondary)
                         }
                         Spacer()
                         StatusChip(text: redemption.status.rawValue)

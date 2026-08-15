@@ -19,7 +19,7 @@ struct SignupView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Create your account")
-                        .font(.system(size: 28, weight: .bold))
+                        .font(.custom("Inter-Regular", size: 28).weight(.bold))
                         .tracking(-0.6)
                         .foregroundStyle(.white)
                         .riseIn(0)
@@ -47,7 +47,7 @@ struct SignupView: View {
                         sectionLabel("Where you are")
                             .padding(.top, 24)
                         Text("Optional — powers the marketplace and leaderboard.")
-                            .font(.system(size: 12))
+                            .font(.custom("Inter-Regular", size: 12))
                             .foregroundStyle(TU.textDim)
                             .padding(.top, 4)
                         consumerFields

@@ -20,14 +20,14 @@ struct DashboardView: View {
 
                     if !stats.by_category.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("By category").font(.headline).foregroundStyle(.white.opacity(0.92))
+                            Text("By category").font(.interHeadline).foregroundStyle(.white.opacity(0.92))
                             ForEach(stats.by_category.sorted { $0.value > $1.value }, id: \.key) { key, count in
                                 HStack {
                                     Text(key.capitalized)
                                     Spacer()
                                     Text("\(count)").foregroundStyle(TU.textDim)
                                 }
-                                .font(.subheadline)
+                                .font(.interSubheadline)
                             }
                         }
                         .padding()
@@ -37,19 +37,19 @@ struct DashboardView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Recent feedback").font(.headline).foregroundStyle(.white.opacity(0.92)).padding(.horizontal)
+                    Text("Recent feedback").font(.interHeadline).foregroundStyle(.white.opacity(0.92)).padding(.horizontal)
                     ForEach(vm.reports) { report in
                         NavigationLink {
                             ReportDetailView(id: report.id)
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    Text(report.title ?? report.category.rawValue.capitalized).font(.subheadline.bold())
+                                    Text(report.title ?? report.category.rawValue.capitalized).font(.interSubheadline.bold())
                                     Spacer()
                                     SentimentBadge(sentiment: report.sentiment)
                                 }
                                 if let description = report.description {
-                                    Text(description).font(.caption).foregroundStyle(TU.textDim).lineLimit(2)
+                                    Text(description).font(.interCaption).foregroundStyle(TU.textDim).lineLimit(2)
                                 }
                             }
                             .padding()
@@ -72,7 +72,7 @@ struct DashboardView: View {
                         .overlay(alignment: .topTrailing) {
                             if appState.unreadCount > 0 {
                                 Text(appState.unreadCount >= 100 ? "99+" : "\(appState.unreadCount)")
-                                    .font(.caption2.bold())
+                                    .font(.interCaption2.bold())
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 2)
                                     .background(TU.ember, in: Capsule())
@@ -103,8 +103,8 @@ struct DashboardView: View {
 
     private func statTile(_ label: String, _ value: Int, _ color: Color) -> some View {
         VStack {
-            Text("\(value)").font(.title.bold()).foregroundStyle(color)
-            Text(label).font(.caption).foregroundStyle(TU.textDim)
+            Text("\(value)").font(.interTitle.bold()).foregroundStyle(color)
+            Text(label).font(.interCaption).foregroundStyle(TU.textDim)
         }
         .frame(maxWidth: .infinity)
         .padding()

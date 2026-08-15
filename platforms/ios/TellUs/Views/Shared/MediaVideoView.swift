@@ -29,7 +29,7 @@ struct MediaVideoView: View {
                     ZStack {
                         Color.black.opacity(0.85)
                         Image(systemName: "play.circle.fill")
-                            .font(.title)
+                            .font(.interTitle)
                             .foregroundStyle(.white)
                     }
                 }

@@ -15,7 +15,7 @@ struct BusinessInboxView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(brand.name)
                             Text(brand.role.capitalized)
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.interCaption).foregroundStyle(.secondary)
                         }
                     }
                 }

@@ -23,7 +23,7 @@ struct FlyerAssistantPanel: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if assistant.messages.isEmpty {
                             Text("Ask for a change in plain language, or start from a generated idea. Each turn becomes one undo step.")
-                                .font(.footnote)
+                                .font(.interFootnote)
                                 .foregroundStyle(.secondary)
                             quickPromptView
                         }
@@ -33,7 +33,7 @@ struct FlyerAssistantPanel: View {
                         }
 
                         if let error = assistant.error {
-                            Text(error).font(.footnote).foregroundStyle(.red)
+                            Text(error).font(.interFootnote).foregroundStyle(.red)
                         }
                     }
                     .padding()
@@ -80,12 +80,12 @@ struct FlyerAssistantPanel: View {
                 .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
             ForEach(Array(message.results.enumerated()), id: \.offset) { _, result in
                 Label(result.summary, systemImage: result.ok ? "checkmark" : "xmark")
-                    .font(.caption)
+                    .font(.interCaption)
                     .foregroundStyle(result.ok ? Color.secondary : Color.red)
             }
             ForEach(Array(message.rejected.enumerated()), id: \.offset) { _, rejection in
                 Text("Skipped - \(rejection.reason)")
-                    .font(.caption)
+                    .font(.interCaption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -122,7 +122,7 @@ struct FlyerAssistantPanel: View {
                                         onLayerChange: { _, _ in }
                                     )
                                     .frame(width: 100, height: 100)
-                                    Text(idea.label).font(.caption).lineLimit(1)
+                                    Text(idea.label).font(.interCaption).lineLimit(1)
                                 }
                                 .frame(width: 110)
                             }

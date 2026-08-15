@@ -80,14 +80,14 @@ private struct CampaignRow: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
                 Text(campaign.title)
-                    .font(.headline)
+                    .font(.interHeadline)
                     .foregroundStyle(.primary)
                 Spacer()
                 StatusChip(text: campaign.status, tint: statusColor)
             }
 
             Text(campaign.reward_text)
-                .font(.subheadline)
+                .font(.interSubheadline)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
@@ -100,12 +100,12 @@ private struct CampaignRow: View {
                     Text("\(stats.outstanding) outstanding")
                 }
             }
-            .font(.caption)
+            .font(.interCaption)
             .foregroundStyle(.secondary)
 
             if let ends = campaign.ends_at {
                 Text("Ends \(Formatters.relativeString(from: ends))")
-                    .font(.caption2)
+                    .font(.interCaption2)
                     .foregroundStyle(.secondary)
             }
         }

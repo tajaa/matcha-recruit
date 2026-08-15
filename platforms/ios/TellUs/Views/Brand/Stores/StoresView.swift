@@ -13,8 +13,8 @@ struct StoresView: View {
             Section("Stores") {
                 ForEach(vm.stores) { store in
                     VStack(alignment: .leading) {
-                        Text(store.name).font(.subheadline.bold())
-                        if let address = store.address { Text(address).font(.caption).foregroundStyle(.secondary) }
+                        Text(store.name).font(.interSubheadline.bold())
+                        if let address = store.address { Text(address).font(.interCaption).foregroundStyle(.secondary) }
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { editingStore = store }
@@ -31,10 +31,10 @@ struct StoresView: View {
                         VStack(alignment: .leading) {
                             Text(link.label ?? String(link.token.prefix(8)))
                             if let storeName = link.store_name {
-                                Text(storeName).font(.caption).foregroundStyle(.secondary)
+                                Text(storeName).font(.interCaption).foregroundStyle(.secondary)
                             }
                             Text("\(link.use_count) uses" + (link.max_uses.map { " / \($0) max" } ?? ""))
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.interCaption2).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if link.revoked_at != nil {

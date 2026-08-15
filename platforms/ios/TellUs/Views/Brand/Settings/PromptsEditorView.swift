@@ -19,7 +19,7 @@ struct PromptsEditorView: View {
             }
 
             if let error = vm.error {
-                Text(error).foregroundStyle(.red).font(.footnote)
+                Text(error).foregroundStyle(.red).font(.interFootnote)
             }
         }
         .navigationTitle("Prompts")

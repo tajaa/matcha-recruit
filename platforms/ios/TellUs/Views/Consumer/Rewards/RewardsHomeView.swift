@@ -68,7 +68,7 @@ struct RewardsHomeView: View {
                         .overlay(alignment: .topTrailing) {
                             if appState.unreadCount > 0 {
                                 Text(appState.unreadCount >= 100 ? "99+" : "\(appState.unreadCount)")
-                                    .font(.caption2.bold())
+                                    .font(.interCaption2.bold())
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 2)
                                     .background(TU.ember, in: Capsule())
@@ -113,7 +113,7 @@ struct RewardsHomeView: View {
 
                 if balance.current_streak > 0 {
                     Label("\(balance.current_streak)-day streak", systemImage: "flame.fill")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.custom("Inter-Regular", size: 13).weight(.semibold))
                         .foregroundStyle(TU.emberHot)
                 }
             }
@@ -126,7 +126,7 @@ struct RewardsHomeView: View {
     private func ledgerRow(_ entry: LedgerEntry) -> some View {
         HStack {
             Text(entry.description ?? entry.reason.replacingOccurrences(of: "_", with: " ").capitalized)
-                .font(.system(size: 14))
+                .font(.custom("Inter-Regular", size: 14))
                 .foregroundStyle(.white.opacity(0.92))
             Spacer()
             Text(entry.delta > 0 ? "+\(entry.delta)" : "\(entry.delta)")

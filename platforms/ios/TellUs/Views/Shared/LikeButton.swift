@@ -42,9 +42,9 @@ struct LikeButton: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: liked ? "heart.fill" : "heart")
-                    .font(.caption)
+                    .font(.interCaption)
                 if count > 0 {
-                    Text("\(count)").font(.caption)
+                    Text("\(count)").font(.interCaption)
                 }
             }
             .foregroundStyle(liked ? TU.ember : TU.textDim)

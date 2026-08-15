@@ -9,8 +9,8 @@ struct HeldRepliesView: View {
         } else {
             List(vm.heldReplies) { reply in
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(reply.post_title).font(.caption).foregroundStyle(.secondary)
-                    Text(reply.author_name).font(.subheadline.bold())
+                    Text(reply.post_title).font(.interCaption).foregroundStyle(.secondary)
+                    Text(reply.author_name).font(.interSubheadline.bold())
                     Text(reply.body)
                     HStack {
                         Button("Approve (+15 pts)") { Task { await vm.approveReply(reply.id) } }

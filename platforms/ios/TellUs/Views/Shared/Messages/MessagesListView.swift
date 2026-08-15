@@ -21,20 +21,20 @@ struct MessagesListView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(thread.counterparty_name).font(.headline)
+                                Text(thread.counterparty_name).font(.interHeadline)
                                 HStack(spacing: 6) {
                                     Text(thread.kind == .feedback ? "Feedback" : (thread.topic?.label ?? "Question"))
                                     if let store = thread.store_name { Text("· \(store)") }
                                 }
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.interCaption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 4) {
                                 Text(Formatters.relativeString(from: thread.last_message_at))
-                                    .font(.caption2).foregroundStyle(.secondary)
+                                    .font(.interCaption2).foregroundStyle(.secondary)
                                 if thread.unread_count > 0 {
                                     Text("\(thread.unread_count)")
-                                        .font(.caption2.bold())
+                                        .font(.interCaption2.bold())
                                         .padding(.horizontal, 6).padding(.vertical, 2)
                                         .background(.red, in: Capsule())
                                         .foregroundStyle(.white)

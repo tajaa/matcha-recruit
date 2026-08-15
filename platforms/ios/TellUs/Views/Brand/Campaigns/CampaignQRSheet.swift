@@ -19,10 +19,10 @@ struct CampaignQRSheet: View {
 
                 VStack(spacing: 6) {
                     Text(campaign.title)
-                        .font(.headline)
+                        .font(.interHeadline)
                         .multilineTextAlignment(.center)
                     Text(campaign.reward_text)
-                        .font(.subheadline)
+                        .font(.interSubheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -47,7 +47,7 @@ struct CampaignQRSheet: View {
                 }
 
                 Text(claimURL)
-                    .font(.caption)
+                    .font(.interCaption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)

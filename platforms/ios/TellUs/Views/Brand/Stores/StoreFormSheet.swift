@@ -30,7 +30,7 @@ struct StoreFormSheet: View {
                 TextField("State", text: $state)
                 TextField("Zip code", text: $zipcode)
                 if let error = vm.error {
-                    Text(error).foregroundStyle(.red).font(.footnote)
+                    Text(error).foregroundStyle(.red).font(.interFootnote)
                 }
             }
             .navigationTitle(editing == nil ? "New store" : "Edit store")

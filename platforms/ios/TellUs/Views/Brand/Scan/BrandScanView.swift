@@ -71,15 +71,15 @@ struct BrandScanView: View {
     private func resultCard(_ outcome: BrandScanViewModel.Outcome) -> some View {
         VStack(spacing: 14) {
             Image(systemName: icon(outcome))
-                .font(.system(size: 64))
+                .font(.custom("Inter-Regular", size: 64))
                 .foregroundStyle(tint(outcome))
             Text(headline(outcome))
-                .font(.title2.bold())
+                .font(.interTitle2.bold())
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white)
             if let sub = subhead(outcome) {
                 Text(sub)
-                    .font(.subheadline)
+                    .font(.interSubheadline)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(TU.textDim)
             }

@@ -8,7 +8,7 @@ struct IntakeMediaSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Photos & video").font(.subheadline.bold())
+            Text("Photos & video").font(.interSubheadline.bold())
 
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
@@ -17,13 +17,13 @@ struct IntakeMediaSection: View {
                     }
                     PhotosPicker(selection: $photosPickerItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
                         Image(systemName: "photo.badge.plus")
-                            .font(.title2)
+                            .font(.interTitle2)
                             .frame(width: 64, height: 64)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                     }
                     Button { showCamera = true } label: {
                         Image(systemName: "camera")
-                            .font(.title2)
+                            .font(.interTitle2)
                             .frame(width: 64, height: 64)
                             .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                     }

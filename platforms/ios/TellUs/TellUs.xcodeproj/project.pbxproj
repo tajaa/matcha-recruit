@@ -97,6 +97,7 @@
 		5B6CECED9F76A2D139AFD1B6 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1149B903446576E2B5DAC6A /* AppState.swift */; };
 		5BC1FEB0D86054E4BE53AAC3 /* BadgesGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681E0DBFEB7F81844E8EA40F /* BadgesGrid.swift */; };
 		5D53D8FAA59729A6C133D4AE /* IntakeFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0A797503B96D681CFC8BD4F /* IntakeFormView.swift */; };
+		5D65AD1AFBDA09B9243CFBAC /* Inter.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4A9E76EEFE9BF1973FFFA2CE /* Inter.ttf */; };
 		5D71E2653709F0018A3BE44C /* GamificationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A26A522E964D4D48D5A00C2C /* GamificationModels.swift */; };
 		5E4FD115C54234C3F83E3BCD /* BoardsListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 769EEE79DD3209263DAACE7B /* BoardsListViewModel.swift */; };
 		6067D69CAA33E79E08CE0277 /* MyReviewsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A68E1AF11F6315B7788862 /* MyReviewsViewModel.swift */; };
@@ -282,6 +283,7 @@
 		4929B2B7D47AA89B47FE8C73 /* EnumFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnumFallbackTests.swift; sourceTree = "<group>"; };
 		492D2961C4F6207F4CA32D14 /* DmThreadsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmThreadsViewModel.swift; sourceTree = "<group>"; };
 		498BC6CA7A16D1A186018EC3 /* AsyncMediaImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncMediaImage.swift; sourceTree = "<group>"; };
+		4A9E76EEFE9BF1973FFFA2CE /* Inter.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Inter.ttf; sourceTree = "<group>"; };
 		4ADA0118F22FDB45F6F0DBB6 /* MyReviewDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyReviewDetailView.swift; sourceTree = "<group>"; };
 		4BF422EB85AA8AE9C73C3AE6 /* PlacesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesView.swift; sourceTree = "<group>"; };
 		4E9CFF63EBA5637561862B6E /* QRCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeView.swift; sourceTree = "<group>"; };
@@ -673,6 +675,14 @@
 			path = Brand;
 			sourceTree = "<group>";
 		};
+		6312BE8BD25D3E78F7EC7853 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				4A9E76EEFE9BF1973FFFA2CE /* Inter.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		6402138CCA2518E04B1AB3DB /* Cards */ = {
 			isa = PBXGroup;
 			children = (
@@ -709,6 +719,7 @@
 			isa = PBXGroup;
 			children = (
 				B416530E7E2B2926AACE5CB7 /* FlyerDesigner */,
+				6312BE8BD25D3E78F7EC7853 /* Fonts */,
 				470976BC01FBDDC8DDC4FB45 /* Assets.xcassets */,
 			);
 			path = Resources;
@@ -1042,6 +1053,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				CA26B572147010E3330661E6 /* Assets.xcassets in Resources */,
+				5D65AD1AFBDA09B9243CFBAC /* Inter.ttf in Resources */,
 				380BD927B94D329E1065758B /* bold-offer.json in Resources */,
 				EC5F05247AE8E00E48C615A8 /* counter-card.json in Resources */,
 				4647E39B68D8F62791F15A42 /* index.json in Resources */,

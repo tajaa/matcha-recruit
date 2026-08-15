@@ -36,10 +36,13 @@ targets:
     resources:
       - path: Resources/Assets.xcassets
       - path: Resources/FlyerDesigner
+      - path: Resources/Fonts
     info:
       path: Info.plist
       properties:
         CFBundleDisplayName: Beetlejuse
+        UIAppFonts:
+          - Inter.ttf
         # Required by App Store validation for any app built against the iOS 11+
         # SDK. actool only auto-injects this when Xcode generates the Info.plist
         # itself; XcodeGen writes a fully-specified one, so it has to be stated

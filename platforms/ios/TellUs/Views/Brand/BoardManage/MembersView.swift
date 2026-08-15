@@ -13,7 +13,7 @@ struct MembersView: View {
                     Text(member.account_display_name)
                     Spacer()
                     Text(Formatters.relativeString(from: member.joined_at))
-                        .font(.caption).foregroundStyle(TU.textDim)
+                        .font(.interCaption).foregroundStyle(TU.textDim)
                 }
                 .swipeActions {
                     Button("Remove", role: .destructive) { pendingRemoval = member }

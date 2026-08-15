@@ -40,9 +40,9 @@ struct BrandSettingsView: View {
                 }
             ))
             Text("Customers can ask questions from your TellUs profile when this is on.")
-                .font(.footnote).foregroundStyle(.secondary)
+                .font(.interFootnote).foregroundStyle(.secondary)
             Button("Save") { Task { await vm.saveBrand(name: name, rewardMode: rewardMode) } }
-            if vm.savedBrand { Text("Saved.").font(.footnote).foregroundStyle(.green) }
+            if vm.savedBrand { Text("Saved.").font(.interFootnote).foregroundStyle(.green) }
         }
     }
 
@@ -69,7 +69,7 @@ struct BrandSettingsView: View {
     @ViewBuilder
     private var errorSection: some View {
         if let error = vm.error {
-            Section { Text(error).foregroundStyle(.red).font(.footnote) }
+            Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
         }
     }
 

@@ -13,13 +13,13 @@ struct MyReviewsView: View {
                         MyReviewDetailView(review: review, vm: vm)
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(review.brand_name).font(.headline)
-                            if let title = review.title { Text(title).font(.subheadline) }
+                            Text(review.brand_name).font(.interHeadline)
+                            if let title = review.title { Text(title).font(.interSubheadline) }
                             HStack {
                                 StatusChip(text: review.review_state.rawValue, tint: review.review_state == .published ? .green : .orange)
                                 Spacer()
                                 if let rating = review.rating {
-                                    Label("\(rating)", systemImage: "star.fill").font(.caption).foregroundStyle(.yellow)
+                                    Label("\(rating)", systemImage: "star.fill").font(.interCaption).foregroundStyle(.yellow)
                                 }
                             }
                         }

@@ -37,7 +37,7 @@ struct CampaignFormSheet: View {
                     Section {
                         Text(validationError)
                             .foregroundStyle(.red)
-                            .font(.footnote)
+                            .font(.interFootnote)
                     }
                 }
 
@@ -45,7 +45,7 @@ struct CampaignFormSheet: View {
                     Section {
                         Text(error)
                             .foregroundStyle(.red)
-                            .font(.footnote)
+                            .font(.interFootnote)
                     }
                 }
             }

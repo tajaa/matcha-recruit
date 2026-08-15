@@ -53,13 +53,13 @@ struct ComposePostSheet: View {
                     DatePicker("Starts", selection: $eventStart)
                     DatePicker("Ends", selection: $eventEnd)
                     if eventRangeInvalid {
-                        Text("End time must be after the start time.").foregroundStyle(.red).font(.footnote)
+                        Text("End time must be after the start time.").foregroundStyle(.red).font(.interFootnote)
                     }
                 }
                 Toggle("Pin to top", isOn: $isPinned)
 
                 if let error = vm.error {
-                    Text(error).foregroundStyle(.red).font(.footnote)
+                    Text(error).foregroundStyle(.red).font(.interFootnote)
                 }
             }
             .scrollContentBackground(.hidden)

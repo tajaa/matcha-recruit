@@ -27,7 +27,7 @@ struct CommsHubView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(brand.name)
                                 Text(brand.role.capitalized)
-                                    .font(.caption)
+                                    .font(.interCaption)
                                     .foregroundStyle(TU.textDim)
                             }
                         }

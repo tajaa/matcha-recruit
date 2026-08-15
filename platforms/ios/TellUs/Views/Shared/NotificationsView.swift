@@ -56,12 +56,12 @@ struct NotificationsView: View {
             Image(systemName: icon(for: item.kind))
                 .foregroundStyle(item.is_read ? Color.secondary : Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title).font(.subheadline.bold())
-                if let body = item.body { Text(body).font(.caption).foregroundStyle(.secondary) }
+                Text(item.title).font(.interSubheadline.bold())
+                if let body = item.body { Text(body).font(.interCaption).foregroundStyle(.secondary) }
             }
             Spacer()
             Text(Formatters.relativeString(from: item.created_at))
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.interCaption2).foregroundStyle(.secondary)
         }
     }
 }

@@ -11,12 +11,12 @@ struct VerifyWaitView: View {
         ScrollView {
             VStack(spacing: 20) {
                 Image(systemName: "envelope.badge.fill")
-                    .font(.system(size: 44))
+                    .font(.custom("Inter-Regular", size: 44))
                     .foregroundStyle(.tint)
                     .padding(.top, 40)
 
                 Text("Check your email")
-                    .font(.title2.bold())
+                    .font(.interTitle2.bold())
 
                 Text("We emailed a verification link to \(email). Open it, then come back here.")
                     .multilineTextAlignment(.center)
@@ -51,7 +51,7 @@ struct VerifyWaitView: View {
 
                 VStack(spacing: 8) {
                     Text("Or paste the verification link/token")
-                        .font(.footnote)
+                        .font(.interFootnote)
                         .foregroundStyle(.secondary)
                     TextField("Verification token", text: $pastedToken)
                         .textInputAutocapitalization(.never)
@@ -67,7 +67,7 @@ struct VerifyWaitView: View {
                 .padding(.top, 16)
 
                 Button("Back to login") { appState.phase = .loggedOut }
-                    .font(.footnote)
+                    .font(.interFootnote)
                     .padding(.top, 16)
             }
             .padding(.bottom, 40)

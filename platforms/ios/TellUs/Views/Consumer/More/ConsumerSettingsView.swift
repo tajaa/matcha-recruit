@@ -17,7 +17,7 @@ struct ConsumerSettingsView: View {
                 Button("Save profile") {
                     Task { await vm.saveProfile(appState: appState, displayName: displayName, leaderboardOptIn: leaderboardOptIn) }
                 }
-                if vm.savedProfile { Text("Saved.").font(.footnote).foregroundStyle(.green) }
+                if vm.savedProfile { Text("Saved.").font(.interFootnote).foregroundStyle(.green) }
             }
             .listRowBackground(TU.inkRaised)
 
@@ -28,12 +28,12 @@ struct ConsumerSettingsView: View {
                 Button("Save location") {
                     Task { await vm.saveLocation(appState: appState, city: city, state: state, zipcode: zipcode) }
                 }
-                if vm.savedLocation { Text("Saved.").font(.footnote).foregroundStyle(.green) }
+                if vm.savedLocation { Text("Saved.").font(.interFootnote).foregroundStyle(.green) }
             }
             .listRowBackground(TU.inkRaised)
 
             if let error = vm.error {
-                Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
                     .listRowBackground(TU.inkRaised)
             }
         }

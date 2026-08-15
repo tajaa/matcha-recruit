@@ -17,7 +17,7 @@ struct FeedbackListView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(report.title ?? report.category.rawValue.capitalized).font(.subheadline.bold())
+                                Text(report.title ?? report.category.rawValue.capitalized).font(.interSubheadline.bold())
                                 Spacer()
                                 SentimentBadge(sentiment: report.sentiment)
                             }

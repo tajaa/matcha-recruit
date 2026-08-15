@@ -56,6 +56,30 @@ struct EmberBackground: View {
     }
 }
 
+// MARK: - Typeface
+
+/// Inter (variable font, bundled as Resources/Fonts/Inter.ttf, PostScript
+/// name "Inter-Regular") replaces the system font everywhere. It's a
+/// variable font — `.weight(_:)`/`.bold()` chained onto these adjust the
+/// wght axis directly rather than substituting a static face, which is why
+/// every token below is declared at the Regular instance.
+extension Font {
+    static func inter(_ size: CGFloat, relativeTo style: Font.TextStyle) -> Font {
+        .custom("Inter-Regular", size: size, relativeTo: style)
+    }
+
+    static var interLargeTitle: Font { inter(34, relativeTo: .largeTitle) }
+    static var interTitle: Font { inter(28, relativeTo: .title) }
+    static var interTitle2: Font { inter(22, relativeTo: .title2) }
+    static var interTitle3: Font { inter(20, relativeTo: .title3) }
+    static var interHeadline: Font { inter(17, relativeTo: .headline).weight(.semibold) }
+    static var interBody: Font { inter(17, relativeTo: .body) }
+    static var interSubheadline: Font { inter(15, relativeTo: .subheadline) }
+    static var interFootnote: Font { inter(13, relativeTo: .footnote) }
+    static var interCaption: Font { inter(12, relativeTo: .caption) }
+    static var interCaption2: Font { inter(11, relativeTo: .caption2) }
+}
+
 // MARK: - Themed screens
 
 /// One-line retrofit for a List/ScrollView/Form screen: drops `EmberBackground`
@@ -134,12 +158,12 @@ struct GlassField<Content: View>: View {
         HStack(spacing: 10) {
             if let icon {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.custom("Inter-Regular", size: 14).weight(.medium))
                     .foregroundStyle(isFocused ? TU.ember : TU.textDim)
                     .frame(width: 18)
             }
             content
-                .font(.system(size: 16))
+                .font(.custom("Inter-Regular", size: 16))
                 .foregroundStyle(.white)
                 .tint(TU.ember)
         }
@@ -160,7 +184,7 @@ struct EmberButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 16, weight: .semibold))
+            .font(.custom("Inter-Regular", size: 16).weight(.semibold))
             .foregroundStyle(enabled ? TU.ink : TU.textDim)
             .frame(maxWidth: .infinity)
             .frame(height: 52)
@@ -177,7 +201,7 @@ struct EmberButtonStyle: ButtonStyle {
 struct GhostButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 16, weight: .medium))
+            .font(.custom("Inter-Regular", size: 16).weight(.medium))
             .foregroundStyle(.white.opacity(0.92))
             .frame(maxWidth: .infinity)
             .frame(height: 52)

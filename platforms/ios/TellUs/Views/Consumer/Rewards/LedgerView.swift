@@ -10,7 +10,7 @@ struct LedgerView: View {
                     VStack(alignment: .leading) {
                         Text(entry.description ?? entry.reason.replacingOccurrences(of: "_", with: " ").capitalized)
                         Text(Formatters.relativeString(from: entry.created_at))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.interCaption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(entry.delta > 0 ? "+\(entry.delta)" : "\(entry.delta)")

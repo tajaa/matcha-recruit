@@ -86,7 +86,7 @@ private struct ReportDetailForm: View {
     private var summarySection: some View {
         Section {
             HStack {
-                Text(report.title ?? report.category.rawValue.capitalized).font(.headline)
+                Text(report.title ?? report.category.rawValue.capitalized).font(.interHeadline)
                 Spacer()
                 SentimentBadge(sentiment: report.sentiment)
             }
@@ -155,7 +155,7 @@ private struct ReportDetailForm: View {
         Section("Answers") {
             ForEach(report.answers) { answer in
                 VStack(alignment: .leading) {
-                    Text(answer.prompt_text).font(.caption).foregroundStyle(.secondary)
+                    Text(answer.prompt_text).font(.interCaption).foregroundStyle(.secondary)
                     Text(answer.answer)
                 }
             }

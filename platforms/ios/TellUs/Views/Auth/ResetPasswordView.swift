@@ -48,7 +48,7 @@ struct ResetPasswordView: View {
                         SecureField("Confirm password", text: $confirm)
                     }
                     if let error {
-                        Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                        Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
                     }
                     Section {
                         Button {

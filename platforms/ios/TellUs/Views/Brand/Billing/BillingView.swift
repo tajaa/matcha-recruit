@@ -22,7 +22,7 @@ struct BillingView: View {
                     Button("Update") { Task { await vm.setLocations(Int(locationCount)) } }
                     if let pricing = vm.pricing {
                         Text(String(format: "$%.2f per location / mo", Double(pricing.price_per_location_cents) / 100))
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.interCaption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -38,7 +38,7 @@ struct BillingView: View {
                 }
             }
             if let error = vm.error {
-                Section { Text(error).foregroundStyle(.red).font(.footnote) }
+                Section { Text(error).foregroundStyle(.red).font(.interFootnote) }
             }
         }
         .navigationTitle("Billing")

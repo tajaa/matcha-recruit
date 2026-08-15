@@ -10,7 +10,7 @@ struct BrandAccountView: View {
                 Section {
                     Text(account.email)
                     if let slug = account.brand_slug {
-                        Text("tellus/b/\(slug)").font(.caption).foregroundStyle(.secondary)
+                        Text("tellus/b/\(slug)").font(.interCaption).foregroundStyle(.secondary)
                     }
                     LabeledContent("Plan", value: account.plan_status?.rawValue.capitalized ?? "—")
                 }

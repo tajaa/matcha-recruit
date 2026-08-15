@@ -22,10 +22,10 @@ struct CommsComposerSheet: View {
                         Label(page.brand_name, systemImage: "building.2")
                         if !page.claimed {
                             Text("This business has not claimed its TellUs profile yet.")
-                                .font(.footnote).foregroundStyle(.secondary)
+                                .font(.interFootnote).foregroundStyle(.secondary)
                         } else if !page.messaging_enabled {
                             Text("Messaging is currently unavailable for this business.")
-                                .font(.footnote).foregroundStyle(.secondary)
+                                .font(.interFootnote).foregroundStyle(.secondary)
                         }
                     }
 
@@ -55,7 +55,7 @@ struct CommsComposerSheet: View {
                             ))
                             .frame(minHeight: 120)
                             Text("Ask about hours, availability, inventory, or anything else you need to know.")
-                                .font(.footnote).foregroundStyle(.secondary)
+                                .font(.interFootnote).foregroundStyle(.secondary)
                         }
                     }
                 }

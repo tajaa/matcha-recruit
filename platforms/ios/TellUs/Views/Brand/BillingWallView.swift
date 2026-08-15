@@ -11,10 +11,10 @@ struct BillingWallView: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "creditcard.trianglebadge.exclamationmark")
-                .font(.system(size: 48))
+                .font(.custom("Inter-Regular", size: 48))
                 .foregroundStyle(.orange)
             Text("Your Beetlejuse plan isn't active")
-                .font(.title2.bold())
+                .font(.interTitle2.bold())
                 .multilineTextAlignment(.center)
             Text("Manage billing to reactivate your brand dashboard.")
                 .foregroundStyle(.secondary)
