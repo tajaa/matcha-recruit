@@ -56,7 +56,7 @@ struct BoardManageView: View {
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
         .task { await vm.loadSummary() }
-        .task(id: "\(tab.rawValue):\(slug ?? \"\")") {
+        .task(id: tab.rawValue.description + ":" + (slug ?? "")) {
             vm.updateSlug(slug)
             await vm.loadTab(tab)
         }
