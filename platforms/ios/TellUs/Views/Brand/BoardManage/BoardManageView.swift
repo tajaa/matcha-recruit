@@ -56,13 +56,16 @@ struct BoardManageView: View {
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
         .task { await vm.loadSummary() }
-        .task(id: tab) { await vm.loadTab(tab) }
-        .task(id: slug) {
-            // A late-arriving slug (AppState.refreshWall() swapping account
-            // under an already-built view) invalidates Posts and re-fires
-            // the currently visible tab's load.
+        .onAppear {
             vm.updateSlug(slug)
-            await vm.loadTab(tab)
+            Task { await vm.loadTab(tab) }
+        }
+        .onChange(of: tab) { _, newTab in
+            Task { await vm.loadTab(newTab) }
+        }
+        .onChange(of: slug) { _, newSlug in
+            vm.updateSlug(newSlug)
+            Task { await vm.loadTab(tab) }
         }
         .refreshable { await vm.refresh(tab) }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }

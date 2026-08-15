@@ -4,10 +4,21 @@ struct JoinRequestsView: View {
     @Bindable var vm: BoardManageViewModel
 
     var body: some View {
-        if vm.loadState.isLoading(.requests) && vm.requests.isEmpty {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-        } else if vm.requests.isEmpty {
-            EmptyState(icon: "person.badge.clock", title: "No pending requests")
+        if vm.requests.isEmpty {
+            switch vm.loadState.phase(.requests) {
+            case .failed:
+                VStack(spacing: 12) {
+                    EmptyState(icon: "wifi.exclamationmark", title: "Couldn't load",
+                               hint: "Check your connection and try again.")
+                    Button("Retry") { Task { await vm.loadTab(.requests, force: true) } }
+                        .buttonStyle(EmberButtonStyle())
+                        .padding(.horizontal)
+                }
+            case .loaded:
+                EmptyState(icon: "person.badge.clock", title: "No pending requests")
+            case .idle, .loading:
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+            }
         } else {
             List(vm.requests) { request in
                 VStack(alignment: .leading, spacing: 6) {

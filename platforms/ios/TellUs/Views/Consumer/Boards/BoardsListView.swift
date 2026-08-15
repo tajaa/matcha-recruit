@@ -46,6 +46,16 @@ struct BoardsListView: View {
             }
         }
         .navigationTitle("Boards")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    PlacesView()
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                }
+                .accessibilityLabel("Find boards")
+            }
+        }
         .task { await vm.load() }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }

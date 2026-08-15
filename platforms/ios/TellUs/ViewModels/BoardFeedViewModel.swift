@@ -10,6 +10,7 @@ final class BoardFeedViewModel: LoadableVM {
     var isLoading = false
     var error: String?
     var notAMember = false
+    var boardPaused = false
     /// Set only once `notAMember` is true — distinguishes "never requested"
     /// from "request sent, awaiting the brand's approval" so the locked
     /// screen doesn't keep offering a re-tappable join button that just
@@ -27,8 +28,12 @@ final class BoardFeedViewModel: LoadableVM {
             page = try await BoardService.shared.board(slug: slug)
             notAMember = false
             membershipStatus = nil
+            boardPaused = false
             error = nil
+        } catch APIError.httpError(409, let message) where message == "This board is paused." {
+            markPausedBoard()
         } catch APIError.httpError(403, _) {
+            boardPaused = false
             notAMember = true
             await refreshMembershipStatus()
         } catch {
@@ -42,18 +47,49 @@ final class BoardFeedViewModel: LoadableVM {
             .first { $0.brand_slug == slug }?.status
     }
 
+    /// The join endpoint has already persisted a pending membership when it
+    /// returns success, so the feed can update immediately without a second
+    /// board request that is expected to return 403 until approval.
+    func markPendingMembership() {
+        page = nil
+        notAMember = true
+        membershipStatus = .pending
+        boardPaused = false
+        error = nil
+    }
+
+    /// Show why a non-member cannot request access. Paused boards do not have
+    /// a pending membership, so the join CTA must not remain available.
+    func markPausedBoard() {
+        page = nil
+        notAMember = true
+        membershipStatus = nil
+        boardPaused = true
+        error = nil
+    }
+
     func requestJoin() async {
         do {
             try await BoardService.shared.join(slug: slug, note: nil)
-        } catch APIError.httpError(409, _) {
-            // Already pending/declined server-side — fall through to load(),
-            // which re-derives the real status below.
+            markPendingMembership()
+        } catch APIError.httpError(409, let message) {
+            if message == "Request already pending" {
+                // This is a successful user-visible outcome: the request is
+                // already in the queue. Avoid GET /boards (403) and relying
+                // on a second membership lookup just to rediscover pending.
+                markPendingMembership()
+            } else if message == "This board is paused." {
+                markPausedBoard()
+            } else {
+                // Declined/removed and other board conflicts still need the
+                // normal status derivation path.
+                await load()
+            }
         } catch {
             if error.isCancellation { return }
             self.error = error.localizedDescription
             return
         }
-        await load()
     }
 
     func loadReplies(postId: String) async {

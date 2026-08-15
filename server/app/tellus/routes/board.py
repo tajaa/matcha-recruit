@@ -221,6 +221,8 @@ async def get_board(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This brand has no board yet.")
             membership = await bs.get_approved_membership(conn, board["id"], account.id)
             if membership is None:
+                if brand["plan_status"] != "active" or not board["is_active"]:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=bs.BOARD_PAUSED_DETAIL)
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Request to join this board from the brand page",

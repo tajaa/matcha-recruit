@@ -6,10 +6,21 @@ struct BoardPostsView: View {
     @State private var pendingDelete: BoardPost?
 
     var body: some View {
-        if vm.loadState.isLoading(.posts) && vm.posts.isEmpty {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-        } else if vm.posts.isEmpty {
-            EmptyState(icon: "square.and.pencil", title: "No posts yet", hint: "Use the + button above.")
+        if vm.posts.isEmpty {
+            switch vm.loadState.phase(.posts) {
+            case .failed:
+                VStack(spacing: 12) {
+                    EmptyState(icon: "wifi.exclamationmark", title: "Couldn't load",
+                               hint: "Check your connection and try again.")
+                    Button("Retry") { Task { await vm.loadTab(.posts, force: true) } }
+                        .buttonStyle(EmberButtonStyle())
+                        .padding(.horizontal)
+                }
+            case .loaded:
+                EmptyState(icon: "square.and.pencil", title: "No posts yet", hint: "Use the + button above.")
+            case .idle, .loading:
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+            }
         } else {
             List(vm.posts) { post in
                 VStack(alignment: .leading, spacing: 4) {

@@ -12,6 +12,18 @@ final class BoardManageViewModelTests: XCTestCase {
         )
     }
 
+    private func makeRequest(id: String = "r1") -> BoardJoinRequest {
+        BoardJoinRequest(
+            id: id, account_display_name: "Jane", note: nil,
+            requested_at: "2026-01-01T00:00:00Z", review_count: 0,
+            hearted: false, redemption_count: 0
+        )
+    }
+
+    private func makeMember(id: String = "m1") -> BoardMemberEntry {
+        BoardMemberEntry(id: id, account_display_name: "Jane", joined_at: "2026-01-01T00:00:00Z")
+    }
+
     func testUpdateSlugInvalidatesPostsTab() {
         let vm = BoardManageViewModel(brandId: nil, slug: "old-slug")
         _ = vm.loadState.begin(.posts)
@@ -44,5 +56,19 @@ final class BoardManageViewModelTests: XCTestCase {
 
         XCTAssertEqual(vm.loadState.phase(.posts), .failed)
         XCTAssertNotNil(vm.error)
+    }
+
+    func testApproveRequestInvalidatesMembersTab() {
+        let vm = BoardManageViewModel(brandId: nil, slug: "slug")
+        _ = vm.loadState.begin(.members)
+        vm.loadState.succeed(.members)
+        vm.requests = [makeRequest()]
+        vm.members = [makeMember()]
+
+        vm.applyApprovedRequest("r1")
+
+        XCTAssertEqual(vm.loadState.phase(.members), .idle)
+        XCTAssertTrue(vm.requests.isEmpty)
+        XCTAssertEqual(vm.members.count, 1)
     }
 }

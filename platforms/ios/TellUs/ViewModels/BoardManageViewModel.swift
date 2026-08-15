@@ -125,9 +125,16 @@ final class BoardManageViewModel: LoadableVM {
         }
     }
 
+    /// Apply the local effects of approval. The member list is a separate tab
+    /// whose cached contents are now stale because approval creates a member.
+    func applyApprovedRequest(_ id: String) {
+        requests.removeAll { $0.id == id }
+        loadState.invalidate(.members)
+    }
+
     func approveRequest(_ id: String) async {
         await run({ try await BoardManageService.shared.approveRequest(id: id, brandId: self.brandId) }) {
-            self.requests.removeAll { $0.id == id }
+            self.applyApprovedRequest(id)
         }
     }
 
@@ -170,7 +177,7 @@ final class BoardManageViewModel: LoadableVM {
 
     /// Runs a mutation and applies a targeted local update on success instead
     /// of refetching every tab — refetching a tab wholesale is reserved for
-    /// .task(id:)/.refreshable. Still refreshes the summary's counters
+    /// the tab-load triggers/.refreshable. Still refreshes the summary's counters
     /// (cheap, single endpoint) so the header badges track.
     private func run(_ action: @escaping () async throws -> Void, onSuccess: @escaping @MainActor () -> Void) async {
         error = nil

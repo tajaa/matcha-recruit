@@ -72,4 +72,15 @@ final class BoardTabLoadStateTests: XCTestCase {
         XCTAssertEqual(state.phase(.posts), .idle)
         XCTAssertTrue(state.begin(.posts))
     }
+
+    func testHasLoadedOnlyTrueWhenLoaded() {
+        var state = TabLoadState()
+        XCTAssertFalse(state.hasLoaded(.posts))
+        _ = state.begin(.posts)
+        XCTAssertFalse(state.hasLoaded(.posts))
+        state.fail(.posts)
+        XCTAssertFalse(state.hasLoaded(.posts))
+        state.succeed(.posts)
+        XCTAssertTrue(state.hasLoaded(.posts))
+    }
 }

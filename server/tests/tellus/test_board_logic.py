@@ -254,6 +254,13 @@ class TestBoardSourceGuards:
         src = inspect.getsource(routes.board.request_join)
         assert '"declined", "removed"' in src or "'declined', 'removed'" in src
 
+    def test_nonmembers_see_paused_board_state(self):
+        from app.tellus import routes
+
+        src = inspect.getsource(routes.board.get_board)
+        assert 'brand["plan_status"] != "active" or not board["is_active"]' in src
+        assert "detail=bs.BOARD_PAUSED_DETAIL" in src
+
     def test_notification_fanout_casts_params(self):
         """asyncpg can fail to infer parameter types inside an INSERT...SELECT
         target list — the ::text casts on $2-$6 are load-bearing, not

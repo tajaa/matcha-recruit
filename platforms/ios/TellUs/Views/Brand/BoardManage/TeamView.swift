@@ -29,12 +29,22 @@ struct TeamView: View {
             }
             .padding()
 
-            if vm.loadState.isLoading(.team) && vm.team.isEmpty {
-                ProgressView()
-                Spacer()
-            } else if vm.team.isEmpty {
-                EmptyState(icon: "person.3", title: "No team members yet")
-                Spacer()
+            if vm.team.isEmpty {
+                switch vm.loadState.phase(.team) {
+                case .failed:
+                    EmptyState(icon: "wifi.exclamationmark", title: "Couldn't load",
+                               hint: "Check your connection and try again.")
+                    Button("Retry") { Task { await vm.loadTab(.team, force: true) } }
+                        .buttonStyle(EmberButtonStyle())
+                        .padding(.horizontal)
+                    Spacer()
+                case .loaded:
+                    EmptyState(icon: "person.3", title: "No team members yet")
+                    Spacer()
+                case .idle, .loading:
+                    ProgressView()
+                    Spacer()
+                }
             } else {
                 List(vm.team) { member in
                     HStack {

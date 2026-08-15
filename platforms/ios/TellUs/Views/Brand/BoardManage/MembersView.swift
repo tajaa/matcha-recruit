@@ -5,10 +5,21 @@ struct MembersView: View {
     @State private var pendingRemoval: BoardMemberEntry?
 
     var body: some View {
-        if vm.loadState.isLoading(.members) && vm.members.isEmpty {
-            ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
-        } else if vm.members.isEmpty {
-            EmptyState(icon: "person.3", title: "No members yet")
+        if vm.members.isEmpty {
+            switch vm.loadState.phase(.members) {
+            case .failed:
+                VStack(spacing: 12) {
+                    EmptyState(icon: "wifi.exclamationmark", title: "Couldn't load",
+                               hint: "Check your connection and try again.")
+                    Button("Retry") { Task { await vm.loadTab(.members, force: true) } }
+                        .buttonStyle(EmberButtonStyle())
+                        .padding(.horizontal)
+                }
+            case .loaded:
+                EmptyState(icon: "person.3", title: "No members yet")
+            case .idle, .loading:
+                ProgressView().frame(maxWidth: .infinity).padding(.vertical, 40)
+            }
         } else {
             List(vm.members) { member in
                 HStack {

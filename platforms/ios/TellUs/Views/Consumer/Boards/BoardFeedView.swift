@@ -13,7 +13,14 @@ struct BoardFeedView: View {
 
     var body: some View {
         Group {
-            if vm.notAMember {
+            if vm.boardPaused {
+                VStack(spacing: 12) {
+                    EmptyState(icon: "pause.circle", title: "This board is paused",
+                               hint: "The brand has not opened this board for new members yet.")
+                    Spacer()
+                }
+                .themedContainer()
+            } else if vm.notAMember {
                 VStack(spacing: 12) {
                     switch vm.membershipStatus {
                     case .pending:
