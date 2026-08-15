@@ -44,6 +44,7 @@ struct BoardManageView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .navigationTitle("Board")
         .toolbar {
             if tab == 2 {

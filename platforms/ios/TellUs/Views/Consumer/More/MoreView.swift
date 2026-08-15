@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Consumer overflow tab — everything that does not fit the 4 primary tabs
-/// (Home/Market/Scan/Comms). The admin console stays web-only permanently.
+/// (Home/Rewards/Boards/Comms). The admin console stays web-only permanently.
 struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var showLogoutConfirm = false
@@ -11,7 +11,6 @@ struct MoreView: View {
             Section {
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
-                NavigationLink("Boards") { BoardsListView() }
                 NavigationLink("Leaderboard") { LeaderboardView() }
                 NavigationLink("Places") { PlacesView() }
             }

@@ -10,10 +10,10 @@ struct ConsumerTabView: View {
                 .tabItem { Label("Home", systemImage: "sparkles") }
 
             NavigationStack { MarketplaceHomeView() }
-                .tabItem { Label("Market", systemImage: "gift") }
+                .tabItem { Label("Rewards", systemImage: "gift") }
 
-            NavigationStack { ScanView() }
-                .tabItem { Label("Scan", systemImage: "qrcode.viewfinder") }
+            NavigationStack { BoardsListView() }
+                .tabItem { Label("Boards", systemImage: "person.3") }
 
             NavigationStack { CommsHubView() }
                 .tabItem { Label("Comms", systemImage: "message") }
