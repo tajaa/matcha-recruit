@@ -39,7 +39,7 @@ struct TeamView: View {
                         .padding(.horizontal)
                     Spacer()
                 case .loaded:
-                    EmptyState(icon: "person.3", title: "No team members yet")
+                    EmptyState(icon: "checkmark.shield", title: "No team members yet")
                     Spacer()
                 case .idle, .loading:
                     ProgressView()

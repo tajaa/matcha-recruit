@@ -21,7 +21,7 @@ struct BoardManageView: View {
             Section {
                 ForEach(BoardTab.allCases) { tab in
                     NavigationLink {
-                        BoardSectionScreen(tab: tab, vm: vm)
+                        BoardSectionScreen(tab: tab, slug: slug, vm: vm)
                     } label: {
                         BoardSectionRow(tab: tab, count: badges[tab])
                     }
@@ -88,6 +88,7 @@ private struct BoardSectionRow: View {
 /// hosted on the shared parent, now scoped to the section that needs them.
 private struct BoardSectionScreen: View {
     let tab: BoardTab
+    let slug: String?
     @Bindable var vm: BoardManageViewModel
     @State private var showCompose = false
 
@@ -113,7 +114,13 @@ private struct BoardSectionScreen: View {
             }
         }
         .sheet(isPresented: $showCompose) { ComposePostSheet(vm: vm) }
-        .task { await vm.loadTab(tab) }
+        .task {
+            // Atomic with loadTab — a late-arriving slug (see the `slug` doc
+            // comment on BoardManageViewModel) must land before this section
+            // loads, or Posts throws missingSlug on a stale nil.
+            vm.updateSlug(slug)
+            await vm.loadTab(tab)
+        }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
         .alert("Plan paused", isPresented: $vm.planPausedAlert) {
             Button("OK", role: .cancel) {}
