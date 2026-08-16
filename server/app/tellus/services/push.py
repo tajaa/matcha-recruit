@@ -118,8 +118,9 @@ async def register_token(
             INSERT INTO tellus_device_tokens
                 (account_id, token, platform, bundle_id, latitude, longitude,
                  location_updated_at, last_seen_at)
-            VALUES ($1, $2, $3, $4, $5, $6,
-                    CASE WHEN $5 IS NOT NULL AND $6 IS NOT NULL THEN NOW() END,
+            VALUES ($1, $2, $3, $4, $5::double precision, $6::double precision,
+                    CASE WHEN $5::double precision IS NOT NULL
+                              AND $6::double precision IS NOT NULL THEN NOW() END,
                     NOW())
             ON CONFLICT (account_id, token) DO UPDATE
               SET platform = EXCLUDED.platform,

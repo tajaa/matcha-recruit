@@ -5,6 +5,7 @@ No real DB — a hand-written fake connection records executed SQL so the
 test can assert the push_sent_at UPDATE ran (or didn't) without a live
 Postgres connection.
 """
+import inspect
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -74,6 +75,13 @@ class _Connection:
 
 def _device_row(token: str, account_id):
     return {"token": token, "account_id": account_id}
+
+
+def test_device_registration_casts_nullable_coordinates():
+    src = inspect.getsource(push_service.register_token)
+
+    assert "$5::double precision" in src
+    assert "$6::double precision" in src
 
 
 @pytest.mark.asyncio
