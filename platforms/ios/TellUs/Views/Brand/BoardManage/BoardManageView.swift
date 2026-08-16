@@ -27,12 +27,8 @@ struct BoardManageView: View {
                 .padding(.top, 4)
             }
 
-            Picker("", selection: $tab) {
-                ForEach(BoardTab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .tint(TU.ember)
-            .padding()
+            BoardTabBar(selection: $tab)
+                .padding()
 
             Group {
                 switch tab {
@@ -66,5 +62,46 @@ struct BoardManageView: View {
         } message: {
             Text("This brand's plan isn't active — board mutations are disabled until they reactivate.")
         }
+    }
+}
+
+/// Plain-SwiftUI tab strip — not `Picker(.segmented)`. That's a UIKit
+/// `UISegmentedControl` bridge whose per-segment tap regions get out of sync
+/// with the app's custom Inter font environment override on real devices
+/// (fine in the simulator, unresponsive on-device with 5 tight segments).
+/// Same shape as `SignupView.accountTypeSwitch`/`typeButton`.
+private struct BoardTabBar: View {
+    @Binding var selection: BoardTab
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(BoardTab.allCases) { tab in
+                let selected = selection == tab
+                Button {
+                    selection = tab
+                } label: {
+                    Text(tab.title)
+                        .font(.interCaption.weight(selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? TU.ink : TU.textDim)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(TU.ember)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(TU.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(TU.hairline, lineWidth: 1)
+        )
     }
 }
