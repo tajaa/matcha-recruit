@@ -76,6 +76,7 @@ struct TeamView: View {
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
+                .refreshable { await vm.refresh(.team) }
             }
         }
         .themedContainer()

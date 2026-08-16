@@ -37,6 +37,7 @@ struct HeldRepliesView: View {
             }
             .listStyle(.insetGrouped)
             .themedScreen()
+            .refreshable { await vm.refresh(.held) }
         }
     }
 }

@@ -42,6 +42,7 @@ struct BoardPostsView: View {
             }
             .listStyle(.insetGrouped)
             .themedScreen()
+            .refreshable { await vm.refresh(.posts) }
             .sheet(item: $editingPost) { post in
                 ComposePostSheet(vm: vm, editing: post)
             }

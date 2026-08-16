@@ -42,6 +42,7 @@ struct JoinRequestsView: View {
             }
             .listStyle(.insetGrouped)
             .themedScreen()
+            .refreshable { await vm.refresh(.requests) }
         }
     }
 }

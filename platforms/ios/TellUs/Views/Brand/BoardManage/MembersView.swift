@@ -35,6 +35,7 @@ struct MembersView: View {
             }
             .listStyle(.insetGrouped)
             .themedScreen()
+            .refreshable { await vm.refresh(.members) }
             .confirmationDialog("Remove this member?", isPresented: Binding(
                 get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
             ), titleVisibility: .visible) {

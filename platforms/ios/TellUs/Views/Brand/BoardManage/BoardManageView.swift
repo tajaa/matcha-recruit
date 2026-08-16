@@ -60,7 +60,6 @@ struct BoardManageView: View {
             vm.updateSlug(slug)
             await vm.loadTab(tab)
         }
-        .refreshable { await vm.refresh(tab) }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
         .alert("Plan paused", isPresented: $vm.planPausedAlert) {
             Button("OK", role: .cancel) {}
