@@ -11,6 +11,7 @@ final class PlacesViewModel {
     var searchError: String?
     var addingPlaceId: String?          // per-suggestion spinner
     var navigateToken: ScannedToken?    // reuses ScanView.swift's Identifiable wrapper
+    var navigateToBrandSlug: String?    // claimed place just created — open its native page
 
     // Manual-add form
     var addName = ""
@@ -118,8 +119,7 @@ final class PlacesViewModel {
         if let token = resp.intake_token {
             navigateToken = ScannedToken(target: .intake(token))
         } else {
-            // Claimed place — no native brand page yet; open the web one.
-            SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(resp.slug)"))
+            navigateToBrandSlug = resp.slug
         }
     }
 }

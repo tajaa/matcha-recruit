@@ -50,6 +50,7 @@ targets:
         CFBundleIconName: AppIcon
         LSRequiresIPhoneOS: true
         NSCameraUsageDescription: "Beetlejuse uses the camera to scan feedback and reward QR codes, and to take photos for your feedback."
+        NSLocationWhenInUseUsageDescription: "Beetlejuse uses your location to show nearby businesses to try and follow."
         GIDClientID: "62787429179-qskffndotvi3hqpnu12oeigjaojd3402.apps.googleusercontent.com"
         CFBundleURLTypes:
           - CFBundleURLSchemes:

@@ -52,6 +52,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Beetlejuse uses the camera to scan feedback and reward QR codes, and to take photos for your feedback.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Beetlejuse uses your location to show nearby businesses to try and follow.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Inter.ttf</string>

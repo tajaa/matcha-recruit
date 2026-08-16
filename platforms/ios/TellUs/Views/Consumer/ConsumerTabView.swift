@@ -6,7 +6,7 @@ struct ConsumerTabView: View {
     var body: some View {
         @Bindable var appState = appState
         TabView {
-            NavigationStack { RewardsHomeView() }
+            NavigationStack { DiscoverView() }
                 .tabItem { Label("Home", systemImage: "sparkles") }
 
             NavigationStack { MarketplaceHomeView() }

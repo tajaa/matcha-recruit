@@ -22,6 +22,14 @@ final class PlacesService {
         try await client.request(method: "POST", path: "/places", body: body)
     }
 
+    func follow(slug: String) async throws -> FollowedBrand {
+        try await client.request(method: "POST", path: "/places/\(slug)/follow")
+    }
+
+    func unfollow(slug: String) async throws {
+        try await client.requestVoid(method: "DELETE", path: "/places/\(slug)/follow")
+    }
+
     /// `percentEncodedQuery` leaves "+" literal (valid per RFC 3986), but the
     /// server's Starlette `parse_qsl` decodes "+" as a space — force-encode it.
     static func queryString(_ items: [URLQueryItem]) -> String {

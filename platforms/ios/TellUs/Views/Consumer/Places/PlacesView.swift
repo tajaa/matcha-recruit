@@ -73,6 +73,9 @@ struct PlacesView: View {
         .navigationDestination(item: $vm.navigateToken) { scanned in
             IntakeLoaderView(token: scanned.token)
         }
+        .navigationDestination(item: $vm.navigateToBrandSlug) { slug in
+            BrandDetailView(slug: slug)
+        }
         .navigationDestination(item: $openedThread) { thread in
             DmThreadView(vm: DmThreadViewModel(thread: thread))
         }
@@ -140,8 +143,8 @@ private struct PlaceResultRow: View {
                 if place.messaging_enabled {
                     Button("Message") { onMessage(place.slug) }
                 }
-                Button("See reviews") {
-                    SafeURL.open(URL(string: APIClient.shared.webOrigin + "/tellus/b/\(place.slug)"))
+                NavigationLink("See reviews") {
+                    BrandDetailView(slug: place.slug)
                 }
                 if !place.claimed, let token = place.intake_token {
                     Button("Leave feedback") { vm.navigateToken = ScannedToken(target: .intake(token)) }

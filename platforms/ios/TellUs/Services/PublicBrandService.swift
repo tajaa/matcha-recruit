@@ -11,4 +11,12 @@ final class PublicBrandService {
     func brand(slug: String) async throws -> PublicBrandPage {
         try await client.request(method: "GET", path: "/b/\(slug)")
     }
+
+    /// Same endpoint as `brand(slug:)`, decoded into the fuller
+    /// TellusPublicBrandPage shape BrandDetailView needs (reviews, rating,
+    /// follow/board state) — the narrow PublicBrandPage above only carries
+    /// what native Comms needs before starting a conversation.
+    func brandDetail(slug: String) async throws -> TellusPublicBrandPage {
+        try await client.request(method: "GET", path: "/b/\(slug)")
+    }
 }

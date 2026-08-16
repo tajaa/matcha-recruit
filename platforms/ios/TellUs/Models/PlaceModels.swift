@@ -74,3 +74,13 @@ struct PlaceCreateResponse: Decodable {
     let intake_token: String?
     let existing: Bool
 }
+
+// Mirrors server/app/tellus/models/tellus.py TellusFollowedBrand.
+struct FollowedBrand: Decodable {
+    let slug: String
+    let name: String
+    let logo_url: String?
+    let city: String?
+    let state: String?
+    let messaging_enabled: Bool
+}
