@@ -34,13 +34,32 @@ def upgrade() -> None:
             WHERE t.ctid = ranked.ctid AND ranked.rn > 1
             """
         )
+        # Plain `ADD CONSTRAINT ... UNIQUE` implicitly creates a same-named
+        # index, so if a same-named index already exists WITHOUT a matching
+        # constraint (e.g. left over from an earlier partial/manual fix),
+        # Postgres raises duplicate_table (42P07) — a different SQLSTATE
+        # than duplicate_object (42710) — which the naive `EXCEPTION WHEN
+        # duplicate_object` guard does not catch. Attach the orphaned index
+        # as the constraint instead of trying to recreate it.
         op.execute(
             f"""
             DO $$ BEGIN
-                ALTER TABLE {table}
-                    ADD CONSTRAINT {table}_site_id_client_email_key
-                    UNIQUE (site_id, client_email);
-            EXCEPTION WHEN duplicate_object THEN NULL;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = '{table}_site_id_client_email_key'
+                ) THEN
+                    IF EXISTS (
+                        SELECT 1 FROM pg_class
+                        WHERE relname = '{table}_site_id_client_email_key' AND relkind = 'i'
+                    ) THEN
+                        EXECUTE 'ALTER TABLE {table} ADD CONSTRAINT '
+                            || '{table}_site_id_client_email_key UNIQUE USING INDEX '
+                            || '{table}_site_id_client_email_key';
+                    ELSE
+                        EXECUTE 'ALTER TABLE {table} ADD CONSTRAINT '
+                            || '{table}_site_id_client_email_key UNIQUE (site_id, client_email)';
+                    END IF;
+                END IF;
             END $$
             """
         )
