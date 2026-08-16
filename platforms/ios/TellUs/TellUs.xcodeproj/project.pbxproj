@@ -221,6 +221,7 @@
 		F577F1E6931A120B0E40A914 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0217582C9EDE8A22711A5F32 /* TeamView.swift */; };
 		F65B65C92A5EAED077ECD83A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C3A81B953E2B84B5051A11 /* RootView.swift */; };
 		F67340CA5DE3A9E5AB67CFA1 /* FlyerAiModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272008ADD503B94B4FBCA3BE /* FlyerAiModels.swift */; };
+		F8CE68A3285F974D45247FD4 /* ShareCampaignSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A440C8B5F64C24F814AF989F /* ShareCampaignSheet.swift */; };
 		F9554CB17D04F86C02574FB2 /* VerifyWaitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA8ADF5B9D1FE188C86BBCD /* VerifyWaitView.swift */; };
 		FB29B7D6176BE85ACBC041BC /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF0346DC015F14E88683573B /* PushService.swift */; };
 		FCBCEEC1D3BC7621FBEB305D /* StoresViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93006100FE7EF0C759F49455 /* StoresViewModel.swift */; };
@@ -387,6 +388,7 @@
 		A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerExportService.swift; sourceTree = "<group>"; };
 		A3CC25F9952C1C40A86D586C /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A4293E9CCB88B052A3A50541 /* IntakeSubmissionEncodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSubmissionEncodingTests.swift; sourceTree = "<group>"; };
+		A440C8B5F64C24F814AF989F /* ShareCampaignSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCampaignSheet.swift; sourceTree = "<group>"; };
 		A678136683561762A5FD353D /* IntakeSuccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeSuccessView.swift; sourceTree = "<group>"; };
 		A74591A02410EC2E56ACB1DC /* BrandDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandDetailViewModel.swift; sourceTree = "<group>"; };
 		A8284F73AF3E428EDC3198E8 /* PromoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoService.swift; sourceTree = "<group>"; };
@@ -861,6 +863,7 @@
 				3EFA432473BB3105663C01E9 /* FlyerCanvasView.swift */,
 				FCDC47AB4BACB13EC77EF970 /* FlyerRenderer.swift */,
 				06DEBA4181272F06A4A49978 /* LayerInspectorBar.swift */,
+				A440C8B5F64C24F814AF989F /* ShareCampaignSheet.swift */,
 				B019466FC3AF67360C2F6628 /* TemplateGalleryView.swift */,
 			);
 			path = Designer;
@@ -1359,6 +1362,7 @@
 				A9513922BB10427DDCB136A8 /* SafeURL.swift in Sources */,
 				AB8018FFD42630C7264602DF /* ScanView.swift in Sources */,
 				DF57A2F12222CB2FDD249038 /* ServiceCache.swift in Sources */,
+				F8CE68A3285F974D45247FD4 /* ShareCampaignSheet.swift in Sources */,
 				B6084C1538E66DAB12CB9EB8 /* SignupView.swift in Sources */,
 				1B6253A779ADBC57F9E2D1DB /* StoreFormSheet.swift in Sources */,
 				348D8D7EE36202AF09F88D93 /* StoresView.swift in Sources */,

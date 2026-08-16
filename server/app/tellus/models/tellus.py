@@ -20,7 +20,7 @@ DmSenderRole = Literal["brand", "consumer"]
 DmKind = Literal["feedback", "general"]
 DmTopic = Literal["hours", "availability", "inventory", "order", "service", "accessibility", "other"]
 DmStatus = Literal["waiting_brand", "waiting_consumer", "closed"]
-BoardPostKind = Literal["update", "deal", "event", "question"]
+BoardPostKind = Literal["update", "deal", "event", "question", "promo"]
 BoardReplyStatus = Literal["held", "approved", "rejected", "removed"]
 BoardModerationStatus = Literal["visible", "flagged", "removed"]
 BoardMembershipStatus = Literal["pending", "approved", "declined", "removed", "left", "cancelled"]
@@ -923,6 +923,7 @@ class TellusBoardPostCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     body: Optional[str] = Field(default=None, max_length=8000)
     listing_id: Optional[UUID] = None
+    campaign_id: Optional[UUID] = None
     event_starts_at: Optional[datetime] = None
     event_ends_at: Optional[datetime] = None
     is_pinned: bool = False
@@ -931,6 +932,8 @@ class TellusBoardPostCreate(BaseModel):
     def _deal_needs_listing(self):
         if self.kind == "deal" and self.listing_id is None:
             raise ValueError("A deal post needs a listing_id")
+        if self.kind == "promo" and self.campaign_id is None:
+            raise ValueError("A promo post needs a campaign_id")
         return self
 
 
@@ -958,12 +961,23 @@ class TellusBoardReply(BaseModel):
     liked_by_me: bool = False
 
 
+class TellusBoardPostCampaign(BaseModel):
+    id: UUID
+    title: str
+    reward_text: str
+    flyer_image_url: Optional[str] = None
+    claim_url: str
+    status: str
+    campaign_type: Optional[str] = None
+
+
 class TellusBoardPost(BaseModel):
     id: UUID
     kind: BoardPostKind
     title: str
     body: Optional[str] = None
     listing: Optional[TellusListing] = None     # embedded for kind='deal'
+    campaign: Optional[TellusBoardPostCampaign] = None  # embedded for kind='promo'
     event_starts_at: Optional[datetime] = None
     event_ends_at: Optional[datetime] = None
     is_pinned: bool = False

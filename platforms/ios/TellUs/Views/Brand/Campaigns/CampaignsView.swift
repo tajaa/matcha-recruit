@@ -4,6 +4,7 @@ enum CampaignSheet: Identifiable {
     case create
     case qr(PromoCampaign)
     case design(PromoCampaign)
+    case share(PromoCampaign)
 
     var id: String {
         switch self {
@@ -13,6 +14,8 @@ enum CampaignSheet: Identifiable {
             return "qr-\(campaign.id)"
         case .design(let campaign):
             return "design-\(campaign.id)"
+        case .share(let campaign):
+            return "share-\(campaign.id)"
         }
     }
 }
@@ -65,6 +68,8 @@ struct CampaignsView: View {
                 NavigationStack {
                     CampaignDesignerView(campaignID: campaign.id)
                 }
+            case .share(let campaign):
+                ShareCampaignSheet(campaign: campaign, onPostedToLocals: {})
             }
         }
         .alert(
@@ -122,6 +127,11 @@ private struct CampaignListItem: View {
             }
             Button { sheet = .design(campaign) } label: {
                 Label(campaign.has_design ? "Edit flyer" : "Design flyer", systemImage: "paintbrush")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button { sheet = .share(campaign) } label: {
+                Label("Share campaign", systemImage: "person.3.fill")
             }
             .buttonStyle(.bordered)
             .controlSize(.small)

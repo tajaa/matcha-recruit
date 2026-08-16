@@ -25,6 +25,7 @@ from app.tellus.services.board_service import (
     board_membership_limit,
     can_reply_transition,
     reply_visible_to,
+    serialize_post,
 )
 
 AUTHOR = uuid4()
@@ -130,7 +131,18 @@ class TestBoardModels:
         assert set(BoardReplyStatus.__args__) == {"held", "approved", "rejected", "removed"}
 
     def test_post_kind_literals_match_migration(self):
-        assert set(BoardPostKind.__args__) == {"update", "deal", "event", "question"}
+        assert set(BoardPostKind.__args__) == {"update", "deal", "event", "question", "promo"}
+
+    def test_promo_post_requires_campaign(self):
+        with pytest.raises(ValueError):
+            TellusBoardPostCreate(kind="promo", title="Summer offer")
+
+    def test_promo_post_with_campaign_ok(self):
+        post = TellusBoardPostCreate(kind="promo", title="Summer offer", campaign_id=uuid4())
+        assert post.campaign_id is not None
+
+    def test_non_promo_post_may_omit_campaign(self):
+        assert TellusBoardPostCreate(kind="update", title="News").campaign_id is None
 
 
 class TestBoardPostUpdateContract:
@@ -222,6 +234,38 @@ class TestBoardSourceGuards:
         # (a savepoint), not the outer one opened at the top of the handler
         between = src[precheck_idx:insert_idx]
         assert "async with conn.transaction():" in between
+
+    def test_create_post_force_nulls_campaign_id_for_non_promo(self):
+        from app.tellus.routes import board
+
+        src = inspect.getsource(board.create_post)
+        assert 'campaign_id = body.campaign_id if body.kind == "promo" else None' in src
+
+    def test_list_posts_batches_campaign_lookup(self):
+        from app.tellus.routes import board
+
+        src = inspect.getsource(board.get_board)
+        assert "ANY($1::uuid[])" in src
+
+
+class TestPromoPostSerialization:
+    def test_serialize_post_embeds_campaign_only_when_attached(self):
+        row = {
+            "id": uuid4(), "kind": "promo", "title": "Summer", "body": None,
+            "listing_id": None, "campaign_id": uuid4(), "event_starts_at": None,
+            "event_ends_at": None, "is_pinned": False, "moderation_status": "visible",
+            "created_at": datetime.now(timezone.utc), "like_count": 0, "liked_by_me": False,
+            "approved_reply_count": 0, "held_reply_count": 0,
+        }
+        assert serialize_post(row, viewer_is_mod=False).campaign is None
+        campaign = {
+            "id": row["campaign_id"], "title": "Summer", "reward_text": "Free drink",
+            "flyer_image_url": None, "claim_token": "claim-token", "status": "active",
+            "campaign_type": "qr",
+        }
+        post = serialize_post(row, viewer_is_mod=False, campaign_row=campaign)
+        assert post.campaign is not None
+        assert post.campaign.claim_url == "/tellus/p/claim-token"
 
     def test_nondeal_posts_cannot_carry_listing(self):
         from app.tellus import routes

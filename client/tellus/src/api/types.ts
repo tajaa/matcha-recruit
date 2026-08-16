@@ -689,7 +689,7 @@ export interface TellusNotification {
 // server/app/tellus/models/tellus.py.
 // ---------------------------------------------------------------------------
 
-export type BoardPostKind = 'update' | 'deal' | 'event' | 'question'
+export type BoardPostKind = 'update' | 'deal' | 'event' | 'question' | 'promo'
 export type BoardReplyStatus = 'held' | 'approved' | 'rejected' | 'removed'
 export type BoardMembershipStatus = 'pending' | 'approved' | 'declined' | 'removed' | 'left' | 'cancelled'
 export type ListingVisibility = 'public' | 'board'
@@ -718,6 +718,7 @@ export interface BoardPost {
   title: string
   body: string | null
   listing: Listing | null
+  campaign: BoardPostCampaign | null
   event_starts_at: string | null
   event_ends_at: string | null
   is_pinned: boolean
@@ -727,6 +728,16 @@ export interface BoardPost {
   created_at: string
   like_count: number
   liked_by_me: boolean
+}
+
+export interface BoardPostCampaign {
+  id: string
+  title: string
+  reward_text: string
+  flyer_image_url: string | null
+  claim_url: string
+  status: string
+  campaign_type: string | null
 }
 
 export interface BoardPage {

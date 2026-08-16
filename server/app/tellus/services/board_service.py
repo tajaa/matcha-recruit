@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 
-from ..models.tellus import TellusAccount, TellusBoardPost, TellusBoardReply
+from ..models.tellus import TellusAccount, TellusBoardPost, TellusBoardPostCampaign, TellusBoardReply
 from .access_service import assert_capability, find_brand_access
 from .marketplace_service import serialize_listing
 from .points_service import award_points, notify_account
@@ -271,13 +271,21 @@ async def approve_reply_and_award(
     return dict(row)
 
 
-def serialize_post(row, *, viewer_is_mod: bool, listing_row=None) -> TellusBoardPost:
+def serialize_post(row, *, viewer_is_mod: bool, listing_row=None, campaign_row=None) -> TellusBoardPost:
     return TellusBoardPost(
         id=row["id"],
         kind=row["kind"],
         title=row["title"],
         body=row["body"],
         listing=serialize_listing(listing_row) if listing_row is not None else None,
+        campaign=(
+            TellusBoardPostCampaign(
+                id=campaign_row["id"], title=campaign_row["title"], reward_text=campaign_row["reward_text"],
+                flyer_image_url=campaign_row["flyer_image_url"],
+                claim_url=f"/tellus/p/{campaign_row['claim_token']}", status=campaign_row["status"],
+                campaign_type=campaign_row["campaign_type"],
+            ) if campaign_row is not None else None
+        ),
         event_starts_at=row["event_starts_at"],
         event_ends_at=row["event_ends_at"],
         is_pinned=row["is_pinned"],

@@ -280,8 +280,21 @@ async def get_board(
             )
             listings_by_id = {r["id"]: r for r in lrows}
 
+        campaign_ids = [r["campaign_id"] for r in rows if r["campaign_id"] is not None]
+        campaigns_by_id = {}
+        if campaign_ids:
+            crows = await conn.fetch(
+                "SELECT id, title, reward_text, flyer_image_url, claim_token, status, campaign_type "
+                "FROM tellus_promo_campaigns WHERE id = ANY($1::uuid[]) AND brand_id = $2",
+                campaign_ids, brand["id"],
+            )
+            campaigns_by_id = {r["id"]: r for r in crows}
+
         posts = [
-            bs.serialize_post(r, viewer_is_mod=viewer_is_mod, listing_row=listings_by_id.get(r["listing_id"]))
+            bs.serialize_post(
+                r, viewer_is_mod=viewer_is_mod, listing_row=listings_by_id.get(r["listing_id"]),
+                campaign_row=campaigns_by_id.get(r["campaign_id"]),
+            )
             for r in rows
         ]
 
@@ -593,18 +606,32 @@ async def create_post(
                         detail="Pick a board-only reward",
                     )
 
+            campaign_row = None
+            if body.kind == "promo":
+                campaign_row = await conn.fetchrow(
+                    "SELECT id, title, reward_text, flyer_image_url, claim_token, status, campaign_type "
+                    "FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+                    body.campaign_id, brand["id"],
+                )
+                if campaign_row is None or campaign_row["status"] == "cancelled":
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail="Pick an active campaign of your own",
+                    )
+
             # Only a validated deal listing may attach — an update/event/question
             # post can't carry an unvalidated (possibly cross-brand) listing_id.
             listing_id = body.listing_id if body.kind == "deal" else None
+            campaign_id = body.campaign_id if body.kind == "promo" else None
 
             row = await conn.fetchrow(
                 """INSERT INTO tellus_board_posts
-                       (board_id, author_account_id, kind, title, body, listing_id,
+                       (board_id, author_account_id, kind, title, body, listing_id, campaign_id,
                         event_starts_at, event_ends_at, is_pinned)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                    RETURNING *""",
-                board["id"], account.id, body.kind, body.title, body.body, listing_id,
-                body.event_starts_at, body.event_ends_at, body.is_pinned,
+                 board["id"], account.id, body.kind, body.title, body.body, listing_id, campaign_id,
+                 body.event_starts_at, body.event_ends_at, body.is_pinned,
             )
             await bs.notify_board_members(
                 conn, board["id"], "board_post", f"{brand['name']}: {row['title']}", body.body,
@@ -614,7 +641,7 @@ async def create_post(
             )
 
     row_dict = {**dict(row), "approved_reply_count": 0, "held_reply_count": 0}
-    return bs.serialize_post(row_dict, viewer_is_mod=True, listing_row=listing_row)
+    return bs.serialize_post(row_dict, viewer_is_mod=True, listing_row=listing_row, campaign_row=campaign_row)
 
 
 @router.patch("/board/posts/{post_id}", response_model=TellusBoardPost)
@@ -668,9 +695,16 @@ async def update_post(
                 "LEFT JOIN tellus_brands b ON b.id = l.brand_id WHERE l.id = $1 AND l.brand_id = $2",
                 row["listing_id"], brand["id"], account.id,
             )
+        campaign_row = None
+        if row["campaign_id"] is not None:
+            campaign_row = await conn.fetchrow(
+                "SELECT id, title, reward_text, flyer_image_url, claim_token, status, campaign_type "
+                "FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+                row["campaign_id"], brand["id"],
+            )
 
     row_dict = {**dict(row), **dict(counts)}
-    return bs.serialize_post(row_dict, viewer_is_mod=True, listing_row=listing_row)
+    return bs.serialize_post(row_dict, viewer_is_mod=True, listing_row=listing_row, campaign_row=campaign_row)
 
 
 @router.delete("/board/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)

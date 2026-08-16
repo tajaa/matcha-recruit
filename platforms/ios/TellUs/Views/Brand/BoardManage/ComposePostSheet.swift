@@ -76,8 +76,8 @@ struct ComposePostSheet: View {
                                 ))
                             } else {
                                 await vm.createPost(BoardPostCreate(
-                                    kind: kind.rawValue, title: title, body: body_.isEmpty ? nil : body_,
-                                    listing_id: nil,
+                                     kind: kind.rawValue, title: title, body: body_.isEmpty ? nil : body_,
+                                     listing_id: nil, campaign_id: nil,
                                     event_starts_at: kind == .event ? Self.iso.string(from: eventStart) : nil,
                                     event_ends_at: kind == .event ? Self.iso.string(from: eventEnd) : nil
                                 ))

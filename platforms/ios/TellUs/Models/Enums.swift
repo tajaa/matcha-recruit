@@ -59,7 +59,7 @@ enum RewardStatus: String, Codable, FallbackDecodable {
 }
 
 enum BoardPostKind: String, Codable, CaseIterable, FallbackDecodable {
-    case update, deal, event, question, unknown
+    case update, deal, event, question, promo, unknown
 }
 
 enum BoardReplyStatus: String, Codable, FallbackDecodable {

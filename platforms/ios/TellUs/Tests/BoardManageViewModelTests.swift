@@ -5,7 +5,7 @@ import XCTest
 final class BoardManageViewModelTests: XCTestCase {
     private func makePost(id: String = "p1") -> BoardPost {
         BoardPost(
-            id: id, kind: .update, title: "Test post", body: nil, listing: nil,
+            id: id, kind: .update, title: "Test post", body: nil, listing: nil, campaign: nil,
             event_starts_at: nil, event_ends_at: nil, is_pinned: false,
             moderation_status: "visible", approved_reply_count: 0, held_reply_count: nil,
             created_at: "2026-01-01T00:00:00Z", like_count: nil, liked_by_me: nil

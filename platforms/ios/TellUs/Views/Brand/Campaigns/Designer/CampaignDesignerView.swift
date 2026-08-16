@@ -6,6 +6,7 @@ struct CampaignDesignerView: View {
     @State private var shareURL: URL?
     @State private var exportSheet = false
     @State private var shareSheet = false
+    @State private var shareCampaignSheet = false
     @State private var assistant: FlyerAssistantViewModel
     @State private var assistantSheet = false
     @State private var templateGallery = false
@@ -110,12 +111,21 @@ struct CampaignDesignerView: View {
                 },
                 onUpload: {
                     Task { await vm.useAsCampaignFlyer(); exportSheet = false }
+                },
+                onShareCampaign: {
+                    exportSheet = false
+                    shareCampaignSheet = true
                 }
             )
         }
         .sheet(isPresented: $shareSheet) {
             if let shareURL {
                 SharePreviewSheet(url: shareURL)
+            }
+        }
+        .sheet(isPresented: $shareCampaignSheet) {
+            if let campaign = vm.campaign {
+                ShareCampaignSheet(campaign: campaign, onPostedToLocals: {})
             }
         }
         .sheet(isPresented: $assistantSheet) {
@@ -359,6 +369,7 @@ private struct FlyerNumericField: View {
 private struct FlyerExportSheet: View {
     let onShare: (FlyerExportDPI) -> Void
     let onUpload: () -> Void
+    let onShareCampaign: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -374,6 +385,9 @@ private struct FlyerExportSheet: View {
                 Section("Campaign") {
                     Button { onUpload() } label: {
                         Label("Use as campaign flyer", systemImage: "photo.badge.arrow.down")
+                    }
+                    Button { onShareCampaign() } label: {
+                        Label("Share campaign", systemImage: "person.3.fill")
                     }
                 }
             }

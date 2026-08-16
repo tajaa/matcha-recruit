@@ -6,7 +6,7 @@ import { LikeButton } from './LikeButton'
 import type { BoardPost, BoardReply } from '../api/types'
 
 const KIND_LABEL: Record<BoardPost['kind'], string> = {
-  update: 'Update', deal: 'Deal', event: 'Event', question: 'Question',
+  update: 'Update', deal: 'Deal', event: 'Event', question: 'Question', promo: 'Promo',
 }
 
 function fmtRange(start: string | null, end: string | null): string {
@@ -106,7 +106,7 @@ export function BoardPostCard({
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
           {post.is_pinned && <Pin className="h-3.5 w-3.5 text-tu-accent" />}
-          <Chip tone={post.kind === 'deal' ? 'positive' : undefined}>{KIND_LABEL[post.kind]}</Chip>
+          <Chip tone={post.kind === 'deal' || post.kind === 'promo' ? 'positive' : undefined}>{KIND_LABEL[post.kind]}</Chip>
           {isMod && post.moderation_status !== 'visible' && <Chip tone="negative">{post.moderation_status}</Chip>}
         </div>
         <span className="whitespace-nowrap text-xs text-tu-faint">{new Date(post.created_at).toLocaleDateString()}</span>
@@ -134,6 +134,21 @@ export function BoardPostCard({
               <Button size="sm" onClick={() => onRedeem(post.listing!.id)}>Redeem</Button>
             )
           )}
+        </div>
+      )}
+
+      {post.kind === 'promo' && post.campaign && (
+        <div className="mt-2.5 overflow-hidden rounded-lg border border-tu-border bg-tu-panel2">
+          {post.campaign.flyer_image_url && (
+            <img src={post.campaign.flyer_image_url} alt="" className="max-h-80 w-full object-contain bg-white" />
+          )}
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <div>
+              <p className="text-sm font-semibold">{post.campaign.title}</p>
+              <p className="text-xs text-tu-faint">{post.campaign.reward_text}</p>
+            </div>
+            <a href={post.campaign.claim_url} className="text-xs font-semibold text-tu-accent hover:underline">Claim offer</a>
+          </div>
         </div>
       )}
 

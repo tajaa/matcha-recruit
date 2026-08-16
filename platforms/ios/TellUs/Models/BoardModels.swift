@@ -27,6 +27,7 @@ struct BoardPost: Codable, Identifiable {
     let body: String?
     /// Embedded for kind == .deal.
     let listing: Listing?
+    let campaign: BoardPostCampaign?
     let event_starts_at: String?
     let event_ends_at: String?
     let is_pinned: Bool
@@ -39,6 +40,16 @@ struct BoardPost: Codable, Identifiable {
     let liked_by_me: Bool?
     var likeCount: Int { like_count ?? 0 }
     var likedByMe: Bool { liked_by_me ?? false }
+}
+
+struct BoardPostCampaign: Codable, Hashable {
+    let id: String
+    let title: String
+    let reward_text: String
+    let flyer_image_url: String?
+    let claim_url: String
+    let status: String
+    let campaign_type: String?
 }
 
 struct BoardPage: Codable {
@@ -127,6 +138,7 @@ struct BoardPostCreate: Encodable {
     /// REQUIRED for kind == "deal"; must be a board-visibility listing owned
     /// by this brand. v1 UI omits the deal kind (no listing picker built).
     let listing_id: String?
+    let campaign_id: String?
     let event_starts_at: String?
     let event_ends_at: String?
 }
