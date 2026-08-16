@@ -54,11 +54,11 @@ async def public_brand_page(
             brand["id"], viewer_id,
         )) if viewer_id is not None else False
         invite_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM tellus_brand_invites WHERE brand_id = $1 LIMIT 500) c",
+            "SELECT COUNT(*) FROM (SELECT 1 FROM tellus_brand_fan_invites WHERE brand_id = $1 LIMIT 500) c",
             brand["id"],
         )
         invited_by_me = bool(await conn.fetchval(
-            "SELECT EXISTS (SELECT 1 FROM tellus_brand_invites WHERE brand_id = $1 AND consumer_account_id = $2)",
+            "SELECT EXISTS (SELECT 1 FROM tellus_brand_fan_invites WHERE brand_id = $1 AND consumer_account_id = $2)",
             brand["id"], viewer_id,
         )) if viewer_id is not None else False
         intake_token = None

@@ -15,7 +15,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute(
-        """CREATE TABLE IF NOT EXISTS tellus_brand_invites (
+        """CREATE TABLE IF NOT EXISTS tellus_brand_fan_invites (
                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                brand_id UUID NOT NULL REFERENCES tellus_brands(id) ON DELETE CASCADE,
                consumer_account_id UUID REFERENCES tellus_accounts(id) ON DELETE SET NULL,
@@ -23,15 +23,15 @@ def upgrade() -> None:
            )"""
     )
     op.execute(
-        """CREATE UNIQUE INDEX IF NOT EXISTS ux_tellus_brand_invites_account_brand
-             ON tellus_brand_invites (brand_id, consumer_account_id)
+        """CREATE UNIQUE INDEX IF NOT EXISTS ux_tellus_brand_fan_invites_account_brand
+             ON tellus_brand_fan_invites (brand_id, consumer_account_id)
             WHERE consumer_account_id IS NOT NULL"""
     )
     op.execute(
-        """CREATE INDEX IF NOT EXISTS ix_tellus_brand_invites_brand
-             ON tellus_brand_invites (brand_id)"""
+        """CREATE INDEX IF NOT EXISTS ix_tellus_brand_fan_invites_brand
+             ON tellus_brand_fan_invites (brand_id)"""
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP TABLE IF EXISTS tellus_brand_invites")
+    op.execute("DROP TABLE IF EXISTS tellus_brand_fan_invites")

@@ -179,7 +179,7 @@ async def discover(
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
                        (SELECT COUNT(*) FROM (
-                            SELECT 1 FROM tellus_brand_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT 500
                        ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
@@ -236,7 +236,7 @@ async def discover(
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
                        (SELECT COUNT(*) FROM (
-                            SELECT 1 FROM tellus_brand_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT 500
                        ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
@@ -358,13 +358,13 @@ async def invite_brand(
                                 detail="This business is already on Tell-Us.")
 
         result = await conn.execute(
-            """INSERT INTO tellus_brand_invites (brand_id, consumer_account_id)
+            """INSERT INTO tellus_brand_fan_invites (brand_id, consumer_account_id)
                VALUES ($1, $2) ON CONFLICT DO NOTHING""",
             brand["id"], account.id,
         )
         already_invited = result == "INSERT 0 0"
         invite_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM tellus_brand_invites WHERE brand_id = $1", brand["id"]
+            "SELECT COUNT(*) FROM tellus_brand_fan_invites WHERE brand_id = $1", brand["id"]
         )
 
     share_url = f"/tellus/b/{body.slug}?invite=1"
