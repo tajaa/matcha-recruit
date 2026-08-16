@@ -1,12 +1,14 @@
 import SwiftUI
 
 struct StoresView: View {
+    var openAddOnAppear: Bool = false
     @State private var vm = StoresViewModel()
     @State private var editingStore: Store?
     @State private var showNewStore = false
     @State private var showNewLink = false
     @State private var pendingDeleteStore: Store?
     @State private var qrLink: FeedbackLink?
+    @State private var didAutoOpen = false
 
     var body: some View {
         List {
@@ -55,7 +57,16 @@ struct StoresView: View {
             }
         }
         .navigationTitle("Stores & QR")
-        .task { await vm.load() }
+        .task {
+            await vm.load()
+            // Guarded so re-appearing after dismissing the sheet (pop/push
+            // within the same NavigationStack) doesn't reopen it — .task can
+            // re-run on view identity changes, this must only fire once.
+            if openAddOnAppear, !didAutoOpen {
+                didAutoOpen = true
+                showNewStore = true
+            }
+        }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
         .sheet(isPresented: $showNewStore) { StoreFormSheet(vm: vm) }

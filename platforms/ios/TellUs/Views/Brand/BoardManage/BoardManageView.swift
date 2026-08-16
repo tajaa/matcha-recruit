@@ -36,7 +36,7 @@ struct BoardManageView: View {
         }
         .listStyle(.insetGrouped)
         .themedScreen()
-        .navigationTitle("Board")
+        .navigationTitle("Locals")
         .refreshable { await vm.loadSummary() }
         .task { await vm.loadSummary() }
         .task(id: slug ?? "") { vm.updateSlug(slug) }

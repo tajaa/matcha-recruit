@@ -12,7 +12,10 @@ struct BrandTabView: View {
                 .tabItem { Label("Feedback", systemImage: "bubble.left.and.text.bubble.right") }
 
             NavigationStack { BoardManageView(brandId: nil, slug: appState.account?.brand_slug) }
-                .tabItem { Label("Board", systemImage: "person.3") }
+                .tabItem { Label("Locals", systemImage: "person.3") }
+
+            NavigationStack { CampaignsView() }
+                .tabItem { Label("Campaigns", systemImage: "ticket.fill") }
 
             NavigationStack { MessagesListView(scope: .business(brandID: nil)) }
                 .tabItem { Label("Comms", systemImage: "message") }

@@ -27,11 +27,11 @@ const CONSUMER_NAV: NavItem[] = [
 
 const BRAND_NAV: NavItem[] = [
   { to: '/brand/feedback', label: 'Feedback', icon: MessageSquare, end: false },
+  { to: '/brand/campaigns', label: 'Campaigns', icon: Ticket },
   { to: '/brand/messages', label: 'Comms', icon: MessageCircle },
   { to: '/brand/board', label: 'Regulars', icon: Users },
   { to: '/brand/stores', label: 'Stores & QR', icon: Store },
   { to: '/brand/listings', label: 'Rewards', icon: ListChecks },
-  { to: '/brand/campaigns', label: 'Campaigns', icon: Ticket },
   { to: '/brand/billing', label: 'Billing', icon: CreditCard },
   { to: '/brand/settings', label: 'Settings', icon: Settings },
 ]
