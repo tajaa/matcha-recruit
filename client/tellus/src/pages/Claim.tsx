@@ -17,6 +17,9 @@ const UNAVAILABLE_COPY: Record<ClaimUnavailableReason, string> = {
   paused: "This promo isn't currently active.",
   not_started: "This promo hasn't started yet.",
   ended: 'This promo has ended.',
+  location_required: 'Sign in and enable location to claim this local offer.',
+  outside_radius: 'This offer is only available while you are near the store.',
+  not_pushed: 'This local offer has not been sent yet.',
 }
 
 export default function Claim() {
@@ -149,9 +152,14 @@ export default function Claim() {
               </Button>
             </>
           ) : unavailable ? (
-            <p className="rounded-lg border border-tu-border bg-tu-panel2 px-3 py-2.5 text-sm text-tu-dim">
-              {UNAVAILABLE_COPY[preview.reason]}
-            </p>
+            <>
+              <p className="rounded-lg border border-tu-border bg-tu-panel2 px-3 py-2.5 text-sm text-tu-dim">
+                {UNAVAILABLE_COPY[preview.reason]}
+              </p>
+              {preview.reason === 'location_required' && !getTellusToken() && (
+                <Button className="w-full" onClick={bounceToLogin}>Sign in to check availability</Button>
+              )}
+            </>
           ) : isBrand ? (
             <p className="rounded-lg border border-tu-border bg-tu-panel2 px-3 py-2.5 text-sm text-tu-dim">
               Reward cards are for customer accounts.

@@ -33,6 +33,9 @@ final class PromoClaimViewModel: LoadableVM {
         case "not_started": return "This offer hasn't started yet."
         case "ended": return "This offer has ended."
         case "brand_inactive": return "This brand's account is no longer active."
+        case "location_required": return "Sign in and enable location to claim this local offer."
+        case "outside_radius": return "This offer is only available while you are near the store."
+        case "not_pushed": return "This local offer has not been sent yet."
         default: return "This offer isn't available right now."
         }
     }

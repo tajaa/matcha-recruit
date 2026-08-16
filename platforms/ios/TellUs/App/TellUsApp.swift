@@ -20,6 +20,7 @@ struct TellUsApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         appState.resumePolling()
+                        Task { await PushService.shared.refreshLocation() }
                     } else {
                         appState.pausePolling()
                     }

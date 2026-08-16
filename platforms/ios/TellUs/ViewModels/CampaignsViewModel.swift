@@ -5,13 +5,17 @@ import Observation
 @Observable
 final class CampaignsViewModel: LoadableVM {
     var campaigns: [PromoCampaign] = []
+    var stores: [Store] = []
     var isLoading = false
     var isCreating = false
     var error: String?
 
     func load() async {
         await withLoad {
-            campaigns = try await PromoService.shared.campaigns()
+            async let loadedCampaigns = PromoService.shared.campaigns()
+            async let loadedStores = BrandAdminService.shared.stores()
+            campaigns = try await loadedCampaigns
+            stores = try await loadedStores
         }
     }
 
@@ -26,6 +30,16 @@ final class CampaignsViewModel: LoadableVM {
         } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
             return nil
+        }
+    }
+
+    func push(_ campaign: PromoCampaign) async {
+        do {
+            _ = try await PromoService.shared.pushCampaign(id: campaign.id)
+            await load()
+            error = nil
+        } catch {
+            if !error.isCancellation { self.error = error.localizedDescription }
         }
     }
 }

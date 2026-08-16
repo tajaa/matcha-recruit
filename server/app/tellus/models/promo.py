@@ -3,12 +3,14 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 CampaignStatus = Literal["active", "paused", "cancelled"]
+CampaignType = Literal["qr", "location"]
 EffectiveCardStatus = Literal["issued", "redeemed", "cancelled", "expired"]
 ClaimUnavailableReason = Literal[
     "ok", "cap_reached", "cancelled", "brand_inactive", "paused", "not_started", "ended",
+    "location_required", "outside_radius", "not_pushed",
 ]
 
 
@@ -20,6 +22,15 @@ class CampaignCreate(BaseModel):
     card_expiry_days: int = Field(default=30, ge=1, le=365)
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
+    campaign_type: CampaignType = "qr"
+    store_id: Optional[UUID] = None
+    radius_miles: Optional[float] = Field(default=None, gt=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_location_fields(self) -> "CampaignCreate":
+        if self.campaign_type == "location" and (self.store_id is None or self.radius_miles is None):
+            raise ValueError("Location campaigns require a store and radius.")
+        return self
 
 
 class CampaignPatch(BaseModel):
@@ -57,6 +68,12 @@ class CampaignOut(BaseModel):
     has_design: bool
     cancelled_at: Optional[datetime]
     created_at: datetime
+    campaign_type: CampaignType = "qr"
+    store_id: Optional[UUID] = None
+    store_name: Optional[str] = None
+    radius_miles: Optional[float] = None
+    push_sent_at: Optional[datetime] = None
+    push_sent_count: int = 0
     stats: Optional[CampaignStats] = None
 
 
@@ -66,6 +83,12 @@ class DesignPut(BaseModel):
 
 class CancelOut(BaseModel):
     invalidated_count: int
+
+
+class PushOut(BaseModel):
+    sent_count: int
+    store_name: str
+    radius_miles: float
 
 
 class ScannerCreate(BaseModel):

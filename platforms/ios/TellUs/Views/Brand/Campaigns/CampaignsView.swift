@@ -30,10 +30,25 @@ struct CampaignsView: View {
                 )
             } else {
                 List(vm.campaigns) { campaign in
-                    Button { sheet = .qr(campaign) } label: {
-                        CampaignRow(campaign: campaign)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button { sheet = .qr(campaign) } label: {
+                            CampaignRow(campaign: campaign)
+                        }
+                        .buttonStyle(.plain)
+                        if campaign.campaign_type == "location", campaign.push_sent_at == nil {
+                            Button {
+                                Task { await vm.push(campaign) }
+                            } label: {
+                                Label("Push to in-radius followers", systemImage: "location.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(TU.ember)
+                        } else if campaign.campaign_type == "location", let sent = campaign.push_sent_count {
+                            Text("Pushed to \(sent) follower\(sent == 1 ? "" : "s")")
+                                .font(.interCaption)
+                                .foregroundStyle(TU.textDim)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
                 .listStyle(.plain)
             }
@@ -92,6 +107,10 @@ private struct CampaignRow: View {
                 .lineLimit(2)
 
             HStack(spacing: 6) {
+                if campaign.campaign_type == "location" {
+                    Text("Location · \(campaign.store_name ?? "store") · \(campaign.radius_miles ?? 0, specifier: "%.1f") mi")
+                    Text("·")
+                }
                 Text("\(campaign.claim_count) / \(campaign.max_claims) claimed")
                 if let stats = campaign.stats {
                     Text("·")

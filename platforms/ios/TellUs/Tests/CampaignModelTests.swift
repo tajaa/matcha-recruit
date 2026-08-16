@@ -33,6 +33,17 @@ final class CampaignModelTests: XCTestCase {
         XCTAssertTrue(json.contains("\"ends_at\":\"2026-09-01T12:30:00Z\""))
     }
 
+    func testLocationCampaignEncodesStoreAndRadius() throws {
+        let body = PromoCampaignCreate(
+            title: "Nearby", reward_text: "Free coffee", max_claims: 25,
+            campaign_type: "location", store_id: "store-1", radius_miles: 7.5
+        )
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(body), encoding: .utf8))
+        XCTAssertTrue(json.contains("\"campaign_type\":\"location\""))
+        XCTAssertTrue(json.contains("\"store_id\":\"store-1\""))
+        XCTAssertTrue(json.contains("\"radius_miles\":7.5"))
+    }
+
     func testDraftTrimsTextAndBuildsCreateRequest() throws {
         var draft = PromoCampaignDraft()
         draft.title = "  Free coffee  "

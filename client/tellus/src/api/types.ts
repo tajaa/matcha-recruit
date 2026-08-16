@@ -837,9 +837,11 @@ export interface AdminBoardReplyRow {
 // ── Promo campaigns / QR reward cards ───────────────────────────────────────
 
 export type PromoCampaignStatus = 'active' | 'paused' | 'cancelled'
+export type PromoCampaignType = 'qr' | 'location'
 export type EffectiveCardStatus = 'issued' | 'redeemed' | 'cancelled' | 'expired'
 export type ClaimUnavailableReason =
-  'ok' | 'cap_reached' | 'cancelled' | 'brand_inactive' | 'paused' | 'not_started' | 'ended'
+  'ok' | 'cap_reached' | 'cancelled' | 'brand_inactive' | 'paused' | 'not_started' | 'ended' |
+  'location_required' | 'outside_radius' | 'not_pushed'
 
 export interface PromoCampaignStats {
   claimed: number
@@ -866,6 +868,12 @@ export interface PromoCampaign {
   has_design: boolean
   cancelled_at: string | null
   created_at: string
+  campaign_type: PromoCampaignType
+  store_id: string | null
+  store_name: string | null
+  radius_miles: number | null
+  push_sent_at: string | null
+  push_sent_count: number
   stats: PromoCampaignStats | null
 }
 

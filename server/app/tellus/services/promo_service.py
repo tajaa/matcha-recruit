@@ -34,11 +34,29 @@ from uuid import UUID
 from .points_service import notify_account
 
 CARD_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{12,64}$")
+LOCATION_FRESHNESS_HOURS = 6
+MILES_TO_KM = 1.60934
+
+_DEVICE_DISTANCE_SQL = """
+    6371.0 * acos(least(1.0, greatest(-1.0,
+        sin(radians($2)) * sin(radians(dt.latitude)) +
+        cos(radians($2)) * cos(radians(dt.latitude)) *
+        cos(radians(dt.longitude - $3))
+    )))
+"""
 
 _CAMPAIGN_COLUMNS = (
     "id, brand_id, title, description, reward_text, claim_token, max_claims, "
     "claim_count, status, card_expiry_days, starts_at, ends_at, flyer_image_url, "
-    "(design_json IS NOT NULL) AS has_design, cancelled_at, created_at, updated_at"
+    "(design_json IS NOT NULL) AS has_design, cancelled_at, created_at, updated_at, "
+    "campaign_type, store_id, radius_miles, push_sent_at, push_sent_count"
+)
+_CAMPAIGN_COLUMNS_QUALIFIED = (
+    "c.id, c.brand_id, c.title, c.description, c.reward_text, c.claim_token, "
+    "c.max_claims, c.claim_count, c.status, c.card_expiry_days, c.starts_at, c.ends_at, "
+    "c.flyer_image_url, (c.design_json IS NOT NULL) AS has_design, c.cancelled_at, "
+    "c.created_at, c.updated_at, c.campaign_type, c.store_id, c.radius_miles, "
+    "c.push_sent_at, c.push_sent_count"
 )
 
 _CARD_SELECT_SQL = """
@@ -171,6 +189,12 @@ def _serialize_campaign(row: dict, stats: Optional[dict] = None) -> dict:
         "has_design": row["has_design"],
         "cancelled_at": row["cancelled_at"],
         "created_at": row["created_at"],
+        "campaign_type": row.get("campaign_type", "qr"),
+        "store_id": row.get("store_id"),
+        "store_name": row.get("store_name"),
+        "radius_miles": row.get("radius_miles"),
+        "push_sent_at": row.get("push_sent_at"),
+        "push_sent_count": row.get("push_sent_count", 0),
         "stats": stats,
     }
 
@@ -208,18 +232,35 @@ def _serialize_scanner(row: dict) -> dict:
 # ── brand CRUD ────────────────────────────────────────────────────────────────
 
 async def create_campaign(conn, brand_id: UUID, data) -> dict:
+    if data.campaign_type == "location":
+        store = await conn.fetchrow(
+            "SELECT id, name, lat, lng FROM tellus_stores WHERE id = $1 AND brand_id = $2",
+            data.store_id, brand_id,
+        )
+        if store is None:
+            raise PromoError(404, "store_not_found", "Choose one of your stores for this campaign.")
+        if store["lat"] is None or store["lng"] is None:
+            raise PromoError(409, "store_location_missing", "The selected store needs a valid address first.")
     token = secrets.token_urlsafe(12)
     row = await conn.fetchrow(
         f"""INSERT INTO tellus_promo_campaigns
                 (brand_id, title, description, reward_text, claim_token,
-                 max_claims, card_expiry_days, starts_at, ends_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 max_claims, card_expiry_days, starts_at, ends_at,
+                 campaign_type, store_id, radius_miles)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING {_CAMPAIGN_COLUMNS}""",
         brand_id, data.title, data.description, data.reward_text, token,
         data.max_claims, data.card_expiry_days, data.starts_at, data.ends_at,
+        data.campaign_type, data.store_id, data.radius_miles,
     )
-    await notify_campaign_followers(conn, brand_id, dict(row))
-    return _serialize_campaign(dict(row))
+    result = dict(row)
+    result["store_name"] = (
+        await conn.fetchval("SELECT name FROM tellus_stores WHERE id = $1", data.store_id)
+        if data.store_id else None
+    )
+    if data.campaign_type == "qr":
+        await notify_campaign_followers(conn, brand_id, result)
+    return _serialize_campaign(result)
 
 
 async def notify_campaign_followers(conn, brand_id: UUID, campaign: dict) -> None:
@@ -249,7 +290,7 @@ async def notify_campaign_followers(conn, brand_id: UUID, campaign: dict) -> Non
     push.schedule_push(
         [r["account_id"] for r in rows], "promo_campaign", title, body,
         reference_type="brand", reference_id=str(brand_id),
-        slug=brand["slug"], name=brand["name"],
+        slug=brand["slug"], name=brand["name"], claim_token=campaign.get("claim_token"),
     )
 
 
@@ -258,16 +299,18 @@ async def list_campaigns(conn, brand_id: UUID) -> list[dict]:
         f"""SELECT c.id, c.brand_id, c.title, c.description, c.reward_text, c.claim_token,
                    c.max_claims, c.claim_count, c.status, c.card_expiry_days, c.starts_at,
                    c.ends_at, c.flyer_image_url, (c.design_json IS NOT NULL) AS has_design,
-                   c.cancelled_at, c.created_at,
+                   c.cancelled_at, c.created_at, c.campaign_type, c.store_id, c.radius_miles,
+                   c.push_sent_at, c.push_sent_count, s.name AS store_name,
                    COUNT(pc.id) FILTER (WHERE pc.status IS NOT NULL) AS claimed,
                    COUNT(pc.id) FILTER (WHERE pc.status = 'redeemed') AS redeemed,
                    COUNT(pc.id) FILTER (WHERE pc.status = 'issued' AND pc.expires_at >  NOW()) AS outstanding,
                    COUNT(pc.id) FILTER (WHERE pc.status = 'issued' AND pc.expires_at <= NOW()) AS expired,
                    COUNT(pc.id) FILTER (WHERE pc.status = 'cancelled') AS cancelled
-            FROM tellus_promo_campaigns c
-            LEFT JOIN tellus_promo_cards pc ON pc.campaign_id = c.id
-            WHERE c.brand_id = $1
-            GROUP BY c.id
+             FROM tellus_promo_campaigns c
+             LEFT JOIN tellus_promo_cards pc ON pc.campaign_id = c.id
+             LEFT JOIN tellus_stores s ON s.id = c.store_id
+             WHERE c.brand_id = $1
+             GROUP BY c.id, s.name
             ORDER BY c.created_at DESC""",
         brand_id,
     )
@@ -285,7 +328,9 @@ async def list_campaigns(conn, brand_id: UUID) -> list[dict]:
 
 async def get_campaign_owned(conn, brand_id: UUID, campaign_id: UUID) -> dict:
     row = await conn.fetchrow(
-        f"SELECT {_CAMPAIGN_COLUMNS} FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+        f"SELECT {_CAMPAIGN_COLUMNS_QUALIFIED}, s.name AS store_name "
+        "FROM tellus_promo_campaigns c LEFT JOIN tellus_stores s ON s.id = c.store_id "
+        "WHERE c.id = $1 AND c.brand_id = $2",
         campaign_id, brand_id,
     )
     if row is None:
@@ -351,7 +396,9 @@ async def update_campaign(conn, brand_id: UUID, campaign_id: UUID, patch) -> dic
 
     if not sets:
         row = await conn.fetchrow(
-            f"SELECT {_CAMPAIGN_COLUMNS} FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
+            f"SELECT {_CAMPAIGN_COLUMNS_QUALIFIED}, s.name AS store_name "
+            "FROM tellus_promo_campaigns c LEFT JOIN tellus_stores s ON s.id = c.store_id "
+            "WHERE c.id = $1 AND c.brand_id = $2",
             campaign_id, brand_id,
         )
         return _serialize_campaign(dict(row))
@@ -366,7 +413,96 @@ async def update_campaign(conn, brand_id: UUID, campaign_id: UUID, patch) -> dic
         # Closes the window where a concurrent cancel lands between the
         # pre-check above and this UPDATE.
         raise PromoError(409, "already_cancelled", "This campaign is cancelled and can no longer be edited.")
-    return _serialize_campaign(dict(row))
+    result = dict(row)
+    result["store_name"] = await conn.fetchval(
+        "SELECT name FROM tellus_stores WHERE id = $1", result.get("store_id")
+    ) if result.get("store_id") else None
+    return _serialize_campaign(result)
+
+
+async def push_campaign(conn, brand_id: UUID, campaign_id: UUID) -> dict:
+    """Push a location campaign once to fresh, in-radius follower devices."""
+    async with conn.transaction():
+        campaign = await conn.fetchrow(
+            f"""SELECT {_CAMPAIGN_COLUMNS_QUALIFIED}, s.name AS store_name, s.lat AS store_lat,
+                       s.lng AS store_lng, b.name AS brand_name, b.slug AS brand_slug,
+                       b.plan_status
+                  FROM tellus_promo_campaigns c
+                  JOIN tellus_brands b ON b.id = c.brand_id
+                  LEFT JOIN tellus_stores s ON s.id = c.store_id
+                 WHERE c.id = $1 AND c.brand_id = $2
+                 FOR UPDATE OF c""",
+            campaign_id, brand_id,
+        )
+        if campaign is None:
+            raise PromoError(404, "not_found", "Campaign not found.")
+        if campaign["campaign_type"] != "location":
+            raise PromoError(409, "not_location", "Only location campaigns can be pushed this way.")
+        if campaign["push_sent_at"] is not None:
+            raise PromoError(409, "already_pushed", "This location campaign was already pushed.")
+        if campaign["status"] != "active":
+            raise PromoError(409, "not_active", "Only active campaigns can be pushed.")
+        if campaign["plan_status"] != "active":
+            raise PromoError(402, "brand_inactive", "This brand's account is not active.")
+        now = datetime.now(timezone.utc)
+        if campaign["starts_at"] is not None and campaign["starts_at"] > now:
+            raise PromoError(409, "not_started", "This campaign has not started yet.")
+        if campaign["ends_at"] is not None and campaign["ends_at"] <= now:
+            raise PromoError(409, "ended", "This campaign has ended.")
+        if (
+            campaign["radius_miles"] is None
+            or campaign["store_lat"] is None
+            or campaign["store_lng"] is None
+        ):
+            raise PromoError(409, "store_location_missing", "The selected store needs a valid address first.")
+
+        radius_km = campaign["radius_miles"] * MILES_TO_KM
+        rows = await conn.fetch(
+            f"""SELECT DISTINCT ON (dt.token) dt.token, dt.account_id
+                  FROM tellus_brand_follows f
+                  JOIN tellus_device_tokens dt ON dt.account_id = f.consumer_account_id
+                 WHERE f.brand_id = $1
+                   AND dt.platform = 'ios'
+                   AND dt.latitude IS NOT NULL AND dt.longitude IS NOT NULL
+                   AND dt.location_updated_at > NOW() - INTERVAL '{LOCATION_FRESHNESS_HOURS} hours'
+                   AND dt.latitude BETWEEN $2 - ($4 / 111.045)
+                                       AND $2 + ($4 / 111.045)
+                   AND dt.longitude BETWEEN $3 - ($4 / (111.045 * greatest(cos(radians($2)), 0.01)))
+                                        AND $3 + ($4 / (111.045 * greatest(cos(radians($2)), 0.01)))
+                   AND ({_DEVICE_DISTANCE_SQL}) <= $4
+                 ORDER BY dt.token, dt.location_updated_at DESC""",
+            brand_id, campaign["store_lat"], campaign["store_lng"], radius_km,
+        )
+        tokens = [r["token"] for r in rows]
+        account_ids = list(dict.fromkeys(r["account_id"] for r in rows))
+        brand_title = f"{campaign['brand_name']}: {campaign['title']}"
+        body = campaign["description"] or "A location-only promo is available near you."
+        if account_ids:
+            await conn.execute(
+                """INSERT INTO tellus_notifications
+                           (account_id, kind, title, body, reference_type, reference_id)
+                    SELECT unnest($1::uuid[]), $2, $3, $4, 'promo_campaign', $5""",
+                account_ids, "promo_campaign", brand_title, body, str(campaign_id),
+            )
+        await conn.execute(
+            """UPDATE tellus_promo_campaigns
+                  SET push_sent_at = NOW(), push_sent_count = $3, updated_at = NOW()
+                WHERE id = $1 AND brand_id = $2""",
+            campaign_id, brand_id, len(account_ids),
+        )
+
+    from . import push
+    push.schedule_token_push(
+        tokens, "promo_campaign", brand_title, body,
+        reference_type="promo_campaign", reference_id=str(campaign_id),
+        slug=campaign["brand_slug"], name=campaign["brand_name"],
+        claim_token=campaign["claim_token"],
+    )
+    return {
+        "sent_count": len(account_ids),
+        "store_name": campaign["store_name"],
+        "radius_miles": campaign["radius_miles"],
+    }
 
 
 async def cancel_campaign(conn, brand_id: UUID, campaign_id: UUID) -> int:
@@ -440,14 +576,45 @@ async def set_flyer_url(conn, brand_id: UUID, campaign_id: UUID, url: str) -> Op
 
 # ── claim ─────────────────────────────────────────────────────────────────────
 
+async def _location_claim_allowed(conn, campaign: dict, account_id: UUID) -> bool:
+    if campaign.get("campaign_type", "qr") != "location":
+        return True
+    if (
+        campaign.get("radius_miles") is None
+        or campaign.get("store_lat") is None
+        or campaign.get("store_lng") is None
+    ):
+        return False
+    radius_km = campaign["radius_miles"] * MILES_TO_KM
+    return bool(await conn.fetchval(
+        f"""SELECT EXISTS (
+                 SELECT 1
+                   FROM tellus_device_tokens dt
+                  WHERE dt.account_id = $1
+                    AND dt.platform = 'ios'
+                    AND dt.latitude IS NOT NULL AND dt.longitude IS NOT NULL
+                    AND dt.location_updated_at > NOW() - INTERVAL '{LOCATION_FRESHNESS_HOURS} hours'
+                    AND dt.latitude BETWEEN $2 - ($4 / 111.045)
+                                        AND $2 + ($4 / 111.045)
+                    AND dt.longitude BETWEEN $3 - ($4 / (111.045 * greatest(cos(radians($2)), 0.01)))
+                                         AND $3 + ($4 / (111.045 * greatest(cos(radians($2)), 0.01)))
+                    AND ({_DEVICE_DISTANCE_SQL}) <= $4
+             )""",
+        account_id, campaign["store_lat"], campaign["store_lng"], radius_km,
+    ))
+
+
 async def resolve_claim_preview(conn, claim_token: str, viewer_account_id: Optional[UUID]) -> dict:
     campaign = await conn.fetchrow(
         """SELECT c.id, c.brand_id, c.title, c.description, c.reward_text, c.status,
-                  c.starts_at, c.ends_at, c.claim_count, c.max_claims, c.flyer_image_url,
-                  b.name AS brand_name, b.logo_url AS brand_logo_url, b.plan_status
-           FROM tellus_promo_campaigns c
-           JOIN tellus_brands b ON b.id = c.brand_id
-           WHERE c.claim_token = $1""",
+                   c.starts_at, c.ends_at, c.claim_count, c.max_claims, c.flyer_image_url,
+                   c.campaign_type, c.radius_miles, c.push_sent_at,
+                   s.lat AS store_lat, s.lng AS store_lng,
+                   b.name AS brand_name, b.logo_url AS brand_logo_url, b.plan_status
+            FROM tellus_promo_campaigns c
+            JOIN tellus_brands b ON b.id = c.brand_id
+            LEFT JOIN tellus_stores s ON s.id = c.store_id
+            WHERE c.claim_token = $1""",
         claim_token,
     )
     if campaign is None:
@@ -464,6 +631,13 @@ async def resolve_claim_preview(conn, claim_token: str, viewer_account_id: Optio
         if existing is not None:
             already_claimed = True
             card_token = existing["card_token"]
+    if not already_claimed and reason == "ok" and campaign["campaign_type"] == "location":
+        if campaign["push_sent_at"] is None:
+            reason = "not_pushed"
+        elif viewer_account_id is None:
+            reason = "location_required"
+        elif not await _location_claim_allowed(conn, dict(campaign), viewer_account_id):
+            reason = "outside_radius"
 
     return {
         "brand_name": campaign["brand_name"],
@@ -487,8 +661,10 @@ async def claim_card(conn, claim_token: str, account_id: UUID) -> tuple[dict, bo
         # every campaign belonging to the same brand on one row.
         campaign = await conn.fetchrow(
             """SELECT c.id, c.status, c.starts_at, c.ends_at, c.claim_count, c.max_claims,
-                      c.card_expiry_days, b.plan_status
+                       c.card_expiry_days, c.campaign_type, c.radius_miles, c.push_sent_at,
+                       s.lat AS store_lat, s.lng AS store_lng, b.plan_status
                FROM tellus_promo_campaigns c JOIN tellus_brands b ON b.id = c.brand_id
+               LEFT JOIN tellus_stores s ON s.id = c.store_id
                WHERE c.claim_token = $1 FOR UPDATE OF c""",
             claim_token,
         )
@@ -506,6 +682,11 @@ async def claim_card(conn, claim_token: str, account_id: UUID) -> tuple[dict, bo
         reason = claim_reason(dict(campaign))
         if reason != "ok":
             raise PromoError(410, reason, _CLAIM_UNAVAILABLE_MESSAGES.get(reason, "This promo isn't available."))
+        if campaign["campaign_type"] == "location":
+            if campaign["push_sent_at"] is None:
+                raise PromoError(410, "not_pushed", _CLAIM_UNAVAILABLE_MESSAGES["not_pushed"])
+            if not await _location_claim_allowed(conn, dict(campaign), account_id):
+                raise PromoError(410, "outside_radius", _CLAIM_UNAVAILABLE_MESSAGES["outside_radius"])
 
         card_token = secrets.token_urlsafe(16)
         inserted = await conn.fetchrow(
@@ -556,6 +737,9 @@ _CLAIM_UNAVAILABLE_MESSAGES = {
     "not_started": "This promo hasn't started yet.",
     "ended": "This promo has ended.",
     "cap_reached": "This promo has reached its claim limit.",
+    "location_required": "Sign in and enable location to claim this local offer.",
+    "outside_radius": "This offer is only available while you are near the store.",
+    "not_pushed": "This local offer has not been sent yet.",
 }
 
 

@@ -16,6 +16,13 @@ final class PushService {
         let token: String
         let platform: String
         let bundle_id: String
+        let latitude: Double?
+        let longitude: Double?
+    }
+    private struct LocationBody: Encodable {
+        let token: String
+        let latitude: Double
+        let longitude: Double
     }
     private struct UnregisterBody: Encodable { let token: String }
     private struct OkResp: Decodable { let ok: Bool }
@@ -29,13 +36,30 @@ final class PushService {
 
     func register() async {
         guard let token = deviceToken, APIClient.shared.accessToken != nil else { return }
+        let coordinate = await LocationService.shared.requestAuthorizedOnce()
         do {
             let _: OkResp = try await APIClient.shared.request(
                 method: "POST", path: "/push/register",
-                body: RegisterBody(token: token, platform: "ios", bundle_id: bundleId)
+                body: RegisterBody(
+                    token: token, platform: "ios", bundle_id: bundleId,
+                    latitude: coordinate?.latitude, longitude: coordinate?.longitude
+                )
             )
         } catch {
             print("[Push] register failed: \(error.localizedDescription)")
+        }
+    }
+
+    func refreshLocation() async {
+        guard let token = deviceToken, APIClient.shared.accessToken != nil,
+              let coordinate = await LocationService.shared.requestAuthorizedOnce() else { return }
+        do {
+            let _: OkResp = try await APIClient.shared.request(
+                method: "POST", path: "/push/location",
+                body: LocationBody(token: token, latitude: coordinate.latitude, longitude: coordinate.longitude)
+            )
+        } catch {
+            print("[Push] location update failed: \(error.localizedDescription)")
         }
     }
 

@@ -17,6 +17,7 @@ from ..models.promo import (
     CancelOut,
     CardOut,
     DesignPut,
+    PushOut,
     RedeemIn,
     RedeemOut,
     ScannerCreate,
@@ -48,7 +49,10 @@ def _raise(e: PromoError):
 @router.post("/promo/campaigns", response_model=CampaignOut, status_code=status.HTTP_201_CREATED)
 async def create_campaign(body: CampaignCreate, account: TellusAccount = Depends(require_paid_brand)):
     async with get_connection() as conn:
-        return await promo_service.create_campaign(conn, account.brand_id, body)
+        try:
+            return await promo_service.create_campaign(conn, account.brand_id, body)
+        except PromoError as e:
+            _raise(e)
 
 
 @router.get("/promo/campaigns", response_model=list[CampaignOut])
@@ -93,6 +97,16 @@ async def cancel_campaign(campaign_id: UUID, account: TellusAccount = Depends(re
         except PromoError as e:
             _raise(e)
     return CancelOut(invalidated_count=count)
+
+
+@router.post("/promo/campaigns/{campaign_id}/push", response_model=PushOut)
+async def push_campaign(campaign_id: UUID, account: TellusAccount = Depends(require_paid_brand)):
+    async with get_connection() as conn:
+        try:
+            result = await promo_service.push_campaign(conn, account.brand_id, campaign_id)
+        except PromoError as e:
+            _raise(e)
+    return PushOut(**result)
 
 
 @router.put("/promo/campaigns/{campaign_id}/design", status_code=status.HTTP_204_NO_CONTENT)

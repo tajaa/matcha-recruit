@@ -8,7 +8,7 @@ notification out to their devices.
 from typing import Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..dependencies import require_tellus_account
 from ..models.tellus import TellusAccount
@@ -21,6 +21,14 @@ class DeviceTokenBody(BaseModel):
     token: str
     platform: str = "ios"
     bundle_id: Optional[str] = None
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
+
+class DeviceLocationBody(BaseModel):
+    token: str
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
 
 
 class UnregisterBody(BaseModel):
@@ -33,7 +41,18 @@ async def register_device(
     account: TellusAccount = Depends(require_tellus_account),
 ):
     """Upsert a device token for the current account (idempotent on token)."""
-    await push.register_token(account.id, body.token, body.platform, body.bundle_id)
+    await push.register_token(
+        account.id, body.token, body.platform, body.bundle_id, body.latitude, body.longitude
+    )
+    return {"ok": True}
+
+
+@router.post("/push/location")
+async def update_device_location(
+    body: DeviceLocationBody,
+    account: TellusAccount = Depends(require_tellus_account),
+):
+    await push.update_location(account.id, body.token, body.latitude, body.longitude)
     return {"ok": True}
 
 

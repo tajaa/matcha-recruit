@@ -51,6 +51,16 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    /// Refreshes location without presenting a permission prompt. Push
+    /// targeting only uses coordinates the user has already authorized.
+    func requestAuthorizedOnce() async -> CLLocationCoordinate2D? {
+        guard manager.authorizationStatus == .authorizedWhenInUse
+                || manager.authorizationStatus == .authorizedAlways else {
+            return nil
+        }
+        return await requestOnce()
+    }
+
     private func startTimeoutIfNeeded() {
         guard timeoutTask == nil else { return }
         timeoutTask = Task { [weak self] in

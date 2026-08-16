@@ -87,6 +87,9 @@ struct PromoCampaignCreate: Encodable, Equatable {
     let card_expiry_days: Int
     let starts_at: String?
     let ends_at: String?
+    let campaign_type: String
+    let store_id: String?
+    let radius_miles: Double?
 
     init(
         title: String,
@@ -95,7 +98,10 @@ struct PromoCampaignCreate: Encodable, Equatable {
         max_claims: Int,
         card_expiry_days: Int = 30,
         starts_at: String? = nil,
-        ends_at: String? = nil
+        ends_at: String? = nil,
+        campaign_type: String = "qr",
+        store_id: String? = nil,
+        radius_miles: Double? = nil
     ) {
         self.title = title
         self.reward_text = reward_text
@@ -104,6 +110,9 @@ struct PromoCampaignCreate: Encodable, Equatable {
         self.card_expiry_days = card_expiry_days
         self.starts_at = starts_at
         self.ends_at = ends_at
+        self.campaign_type = campaign_type
+        self.store_id = store_id
+        self.radius_miles = radius_miles
     }
 }
 
@@ -116,6 +125,7 @@ enum PromoCampaignValidationError: LocalizedError, Equatable {
     case invalidClaimLimit
     case invalidExpiryDays
     case endDateInPast
+    case locationStoreRequired
 
     var errorDescription: String? {
         switch self {
@@ -127,6 +137,7 @@ enum PromoCampaignValidationError: LocalizedError, Equatable {
         case .invalidClaimLimit: return "Claim limit must be a whole number between 1 and 10,000."
         case .invalidExpiryDays: return "Card validity must be a whole number of days between 1 and 365."
         case .endDateInPast: return "The campaign end date must be in the future."
+        case .locationStoreRequired: return "Choose a store for a location campaign."
         }
     }
 }
@@ -139,6 +150,9 @@ struct PromoCampaignDraft: Equatable {
     var expiryDays = "30"
     var hasEndDate = false
     var endDate = Date().addingTimeInterval(86_400)
+    var campaignType = "qr"
+    var storeID: String?
+    var radiusMiles = 5.0
 
     func validated(now: Date = Date()) throws -> PromoCampaignCreate {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -160,6 +174,9 @@ struct PromoCampaignDraft: Equatable {
         if hasEndDate, endDate <= now {
             throw PromoCampaignValidationError.endDateInPast
         }
+        if campaignType == "location" && storeID == nil {
+            throw PromoCampaignValidationError.locationStoreRequired
+        }
 
         let iso = ISO8601DateFormatter()
         return PromoCampaignCreate(
@@ -168,7 +185,10 @@ struct PromoCampaignDraft: Equatable {
             description: description.isEmpty ? nil : description,
             max_claims: claims,
             card_expiry_days: days,
-            ends_at: hasEndDate ? iso.string(from: endDate) : nil
+            ends_at: hasEndDate ? iso.string(from: endDate) : nil,
+            campaign_type: campaignType,
+            store_id: campaignType == "location" ? storeID : nil,
+            radius_miles: campaignType == "location" ? radiusMiles : nil
         )
     }
 }
@@ -192,6 +212,12 @@ struct PromoCampaign: Codable, Identifiable, Hashable {
     let has_design: Bool
     let cancelled_at: String?
     let created_at: String
+    let campaign_type: String?
+    let store_id: String?
+    let store_name: String?
+    let radius_miles: Double?
+    let push_sent_at: String?
+    let push_sent_count: Int?
     let stats: PromoCampaignStats?
 
     static func == (lhs: PromoCampaign, rhs: PromoCampaign) -> Bool { lhs.id == rhs.id }

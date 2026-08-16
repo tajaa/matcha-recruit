@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.tellus.dependencies import require_consumer, require_paid_brand
+from app.tellus.models.promo import CampaignCreate
 from app.tellus.routes._shared import is_managed_object
 from app.tellus.services import promo_service
 from app.tellus.services.promo_service import (
@@ -54,6 +55,30 @@ class TestCampaignTransitions:
 
     def test_cancelled_to_paused_forbidden(self):
         assert can_campaign_transition("cancelled", "paused") is False
+
+
+class TestLocationCampaignModel:
+    def test_location_campaign_requires_store_and_radius(self):
+        with pytest.raises(ValueError):
+            CampaignCreate(title="Nearby", reward_text="Free coffee", max_claims=10, campaign_type="location")
+
+    def test_location_campaign_accepts_ten_mile_radius(self):
+        from uuid import uuid4
+
+        campaign = CampaignCreate(
+            title="Nearby", reward_text="Free coffee", max_claims=10,
+            campaign_type="location", store_id=uuid4(), radius_miles=10,
+        )
+        assert campaign.radius_miles == 10
+
+    def test_location_campaign_rejects_radius_over_ten(self):
+        from uuid import uuid4
+
+        with pytest.raises(ValueError):
+            CampaignCreate(
+                title="Nearby", reward_text="Free coffee", max_claims=10,
+                campaign_type="location", store_id=uuid4(), radius_miles=10.1,
+            )
 
 
 class TestClaimReason:
@@ -244,6 +269,17 @@ class TestAtomicSourceGuards:
         src = inspect.getsource(promo_service.cancel_campaign)
         assert "claim_count -" not in src
         assert "claim_count - " not in src
+
+    def test_location_claim_is_checked_before_card_insert(self):
+        src = inspect.getsource(promo_service.claim_card)
+        assert src.index("_location_claim_allowed") < src.index("INSERT INTO tellus_promo_cards")
+
+    def test_location_push_is_single_send_and_radius_scoped(self):
+        src = inspect.getsource(promo_service.push_campaign)
+        assert "push_sent_at" in src
+        assert "location_updated_at" in src
+        assert "DISTINCT ON (dt.token)" in src
+        assert "MILES_TO_KM" in src
 
 
 class TestBrandGateSweep:

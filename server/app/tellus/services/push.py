@@ -103,6 +103,8 @@ async def register_token(
     token: str,
     platform: str = "ios",
     bundle_id: Optional[str] = None,
+    latitude: Optional[float] = None,
+    longitude: Optional[float] = None,
 ) -> None:
     """Upsert a device token, scoped per (account, token) — not per token alone.
     A bare token-unique upsert lets any account that learns another device's
@@ -113,14 +115,33 @@ async def register_token(
     async with get_connection() as conn:
         await conn.execute(
             """
-            INSERT INTO tellus_device_tokens (account_id, token, platform, bundle_id, last_seen_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO tellus_device_tokens
+                (account_id, token, platform, bundle_id, latitude, longitude,
+                 location_updated_at, last_seen_at)
+            VALUES ($1, $2, $3, $4, $5, $6,
+                    CASE WHEN $5 IS NOT NULL AND $6 IS NOT NULL THEN NOW() END,
+                    NOW())
             ON CONFLICT (account_id, token) DO UPDATE
               SET platform = EXCLUDED.platform,
                   bundle_id = EXCLUDED.bundle_id,
+                  latitude = COALESCE(EXCLUDED.latitude, tellus_device_tokens.latitude),
+                  longitude = COALESCE(EXCLUDED.longitude, tellus_device_tokens.longitude),
+                  location_updated_at = CASE
+                      WHEN EXCLUDED.latitude IS NOT NULL AND EXCLUDED.longitude IS NOT NULL
+                      THEN NOW() ELSE tellus_device_tokens.location_updated_at END,
                   last_seen_at = NOW()
             """,
-            account_id, token, platform, bundle_id,
+            account_id, token, platform, bundle_id, latitude, longitude,
+        )
+
+
+async def update_location(account_id: UUID, token: str, latitude: float, longitude: float) -> None:
+    async with get_connection() as conn:
+        await conn.execute(
+            """UPDATE tellus_device_tokens
+                  SET latitude = $3, longitude = $4, location_updated_at = NOW(), last_seen_at = NOW()
+                WHERE account_id = $1 AND token = $2""",
+            account_id, token, latitude, longitude,
         )
 
 
@@ -143,8 +164,7 @@ async def send_to_accounts(
     """Push an alert to every registered iOS device of the given accounts.
     No-op when APNs is unconfigured or none have devices. Prunes tokens APNs
     reports as permanently invalid."""
-    client = await _get_client()
-    if client is None or not account_ids:
+    if not account_ids or not _is_configured():
         return
 
     async with get_connection() as conn:
@@ -154,7 +174,31 @@ async def send_to_accounts(
                  AND last_seen_at > NOW() - INTERVAL '60 days'""",
             list(account_ids),
         )
-    if not rows:
+    await _send_device_rows(rows, title, body, payload)
+
+
+async def send_to_tokens(
+    tokens: list[str],
+    title: str,
+    body: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    """Send only to an already-filtered set of device tokens."""
+    if not tokens or not _is_configured():
+        return
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT DISTINCT token FROM tellus_device_tokens
+               WHERE token = ANY($1::text[]) AND platform = 'ios'
+                 AND last_seen_at > NOW() - INTERVAL '60 days'""",
+            list(set(tokens)),
+        )
+    await _send_device_rows(rows, title, body, payload)
+
+
+async def _send_device_rows(rows, title: str, body: Optional[str], payload: Optional[dict]) -> None:
+    client = await _get_client()
+    if client is None or not rows:
         return
 
     from aioapns import NotificationRequest, PushType
@@ -197,6 +241,7 @@ def schedule_push(
     reference_id: Optional[str] = None,
     slug: Optional[str] = None,
     name: Optional[str] = None,
+    claim_token: Optional[str] = None,
 ) -> None:
     """Queue (or, outside a request, immediately fire) a push for a
     notification that was just inserted.
@@ -222,8 +267,40 @@ def schedule_push(
         "reference_id": reference_id,
         "slug": slug,
         "name": name,
+        "claim_token": claim_token,
     }
     job = (list(account_ids), title, body, payload)
+    queue = _queue.get()
+    if queue is None:
+        _dispatch(job)
+    else:
+        queue.append(job)
+
+
+def schedule_token_push(
+    tokens: list[str],
+    kind: str,
+    title: str,
+    body: Optional[str] = None,
+    *,
+    reference_type: Optional[str] = None,
+    reference_id: Optional[str] = None,
+    slug: Optional[str] = None,
+    name: Optional[str] = None,
+    claim_token: Optional[str] = None,
+) -> None:
+    """Queue a push to exact device tokens after the request commits."""
+    if kind not in PUSH_KINDS or not tokens or not _is_configured():
+        return
+    payload = {
+        "type": kind,
+        "reference_type": reference_type,
+        "reference_id": reference_id,
+        "slug": slug,
+        "name": name,
+        "claim_token": claim_token,
+    }
+    job = ("tokens", list(set(tokens)), title, body, payload)
     queue = _queue.get()
     if queue is None:
         _dispatch(job)
@@ -234,7 +311,10 @@ def schedule_push(
 def _dispatch(job: tuple) -> None:
     """Spawn the send as a tracked task — `_inflight` holds a strong
     reference so the event loop's weak task refs can't GC it mid-await."""
-    task = asyncio.create_task(_safe_send(*job))
+    if len(job) == 5 and job[0] == "tokens":
+        task = asyncio.create_task(_safe_send_tokens(*job[1:]))
+    else:
+        task = asyncio.create_task(_safe_send(*job))
     _inflight.add(task)
     task.add_done_callback(_inflight.discard)
 
@@ -246,6 +326,15 @@ async def _safe_send(
         await send_to_accounts(account_ids, title, body, payload)
     except Exception as e:  # noqa: BLE001
         logger.warning("Tell-Us APNs push failed: %s", e)
+
+
+async def _safe_send_tokens(
+    tokens: list[str], title: str, body: Optional[str], payload: dict
+) -> None:
+    try:
+        await send_to_tokens(tokens, title, body, payload)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Tell-Us APNs token push failed: %s", e)
 
 
 async def flush_pushes():

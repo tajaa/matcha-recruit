@@ -23,6 +23,9 @@ export const promoApi = {
     card_expiry_days?: number
     starts_at?: string | null
     ends_at?: string | null
+    campaign_type?: 'qr' | 'location'
+    store_id?: string | null
+    radius_miles?: number | null
   }) => tellusApi.post<PromoCampaign>('/promo/campaigns', body),
   getCampaign: (id: string) => tellusApi.get<PromoCampaign>(`/promo/campaigns/${id}`),
   getDesign: (id: string) => tellusApi.get<{ design_json: FlyerDesign | null }>(`/promo/campaigns/${id}/design`),
@@ -33,6 +36,7 @@ export const promoApi = {
     },
   ) => tellusApi.patch<PromoCampaign>(`/promo/campaigns/${id}`, body),
   cancelCampaign: (id: string) => tellusApi.post<{ invalidated_count: number }>(`/promo/campaigns/${id}/cancel`, {}),
+  pushCampaign: (id: string) => tellusApi.post<{ sent_count: number; store_name: string; radius_miles: number }>(`/promo/campaigns/${id}/push`, {}),
   saveDesign: (id: string, design_json: FlyerDesign) =>
     tellusApi.put(`/promo/campaigns/${id}/design`, { design_json }),
   uploadFlyer: (id: string, form: FormData) =>

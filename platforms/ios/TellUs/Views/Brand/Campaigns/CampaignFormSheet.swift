@@ -15,6 +15,31 @@ struct CampaignFormSheet: View {
                     TextField("Title", text: $draft.title)
                     TextField("Reward", text: $draft.rewardText, axis: .vertical)
                     TextField("Description (optional)", text: $draft.description, axis: .vertical)
+                    Picker("Type", selection: $draft.campaignType) {
+                        Text("QR campaign").tag("qr")
+                        Text("Location campaign").tag("location")
+                    }
+                }
+
+                if draft.campaignType == "location" {
+                    Section("Location audience") {
+                        Picker("Store", selection: Binding(
+                            get: { draft.storeID ?? "" },
+                            set: { draft.storeID = $0.isEmpty ? nil : $0 }
+                        )) {
+                            Text("Choose a store").tag("")
+                            ForEach(vm.stores) { store in
+                                Text(store.name).tag(store.id)
+                            }
+                        }
+                        VStack(alignment: .leading) {
+                            Text("Push radius: \(draft.radiusMiles, specifier: "%.1f") miles")
+                            Slider(value: $draft.radiusMiles, in: 1...10, step: 0.5)
+                        }
+                        Text("Only followers with a fresh device location inside this radius can receive and claim the offer.")
+                            .font(.interCaption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Claim settings") {

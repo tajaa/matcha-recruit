@@ -48,6 +48,16 @@ final class PromoService {
         try await client.request(method: "GET", path: "/promo/campaigns/\(id)")
     }
 
+    struct PushResult: Codable {
+        let sent_count: Int
+        let store_name: String
+        let radius_miles: Double
+    }
+
+    func pushCampaign(id: String) async throws -> PushResult {
+        try await client.request(method: "POST", path: "/promo/campaigns/\(id)/push")
+    }
+
     private struct RedeemBody: Encodable {
         let card_token: String
         let store_id: String?

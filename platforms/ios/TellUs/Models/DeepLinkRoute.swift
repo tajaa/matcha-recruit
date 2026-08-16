@@ -13,6 +13,8 @@ enum DeepLinkRoute: Hashable, Identifiable {
     case report(reportId: String)
     /// Brand: open the board-management screen (a reply is awaiting approval).
     case boardManage(slug: String?)
+    /// Consumer: open a promo claim sheet from a campaign push.
+    case promoClaim(token: String)
 
     var id: String {
         switch self {
@@ -20,6 +22,7 @@ enum DeepLinkRoute: Hashable, Identifiable {
         case .dmThread(let id): return "thread-\(id)"
         case .report(let id): return "report-\(id)"
         case .boardManage(let slug): return "board-manage-\(slug ?? "own")"
+        case .promoClaim(let token): return "promo-\(token)"
         }
     }
 
@@ -28,7 +31,12 @@ enum DeepLinkRoute: Hashable, Identifiable {
     static func parse(userInfo: [AnyHashable: Any]) -> DeepLinkRoute? {
         guard let type = userInfo["type"] as? String else { return nil }
         switch type {
-        case "board_post", "promo_campaign":
+        case "promo_campaign":
+            if let token = userInfo["claim_token"] as? String, !token.isEmpty {
+                return .promoClaim(token: token)
+            }
+            fallthrough
+        case "board_post":
             guard let slug = userInfo["slug"] as? String, !slug.isEmpty else { return nil }
             let name = userInfo["name"] as? String ?? slug
             return .boardFeed(slug: slug, name: name)

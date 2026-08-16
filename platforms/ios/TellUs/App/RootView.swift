@@ -47,6 +47,8 @@ private struct DeepLinkDestinationView: View {
                 ReportDetailView(id: reportId)
             case .boardManage(let slug):
                 BoardManageView(brandId: nil, slug: slug ?? appState.account?.brand_slug)
+            case .promoClaim(let token):
+                ClaimSheet(token: token)
             }
         }
         .toolbar {

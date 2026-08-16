@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
-import { Ban, Copy, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
+import { Ban, Copy, MapPin, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { promoApi } from '../../api/promo'
 import { Button, Card, Chip, Empty, ErrorText, Input, Modal, Select, Spinner, Textarea } from '../../components/ui'
@@ -17,7 +17,12 @@ function campaignTone(status: PromoCampaign['status']): string | undefined {
   return undefined
 }
 
-function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (created: PromoCampaign) => void }) {
+function CreateCampaignModal({ open, onClose, onCreated, stores }: {
+  open: boolean
+  onClose: () => void
+  onCreated: (created: PromoCampaign) => void
+  stores: Store[]
+}) {
   const [title, setTitle] = useState('')
   const [rewardText, setRewardText] = useState('')
   const [description, setDescription] = useState('')
@@ -27,11 +32,15 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
   const [maxClaims, setMaxClaims] = useState('50')
   const [expiryDays, setExpiryDays] = useState('30')
   const [endsAt, setEndsAt] = useState('')
+  const [campaignType, setCampaignType] = useState<'qr' | 'location'>('qr')
+  const [storeId, setStoreId] = useState('')
+  const [radiusMiles, setRadiusMiles] = useState(5)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
   function reset() {
-    setTitle(''); setRewardText(''); setDescription(''); setMaxClaims('50'); setExpiryDays('30'); setEndsAt(''); setErr('')
+    setTitle(''); setRewardText(''); setDescription(''); setMaxClaims('50'); setExpiryDays('30'); setEndsAt('')
+    setCampaignType('qr'); setStoreId(''); setRadiusMiles(5); setErr('')
   }
 
   async function submit(e: React.FormEvent) {
@@ -50,6 +59,9 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
         title, reward_text: rewardText, description: description || null,
         max_claims: claims, card_expiry_days: days,
         ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+        campaign_type: campaignType,
+        store_id: campaignType === 'location' ? storeId : null,
+        radius_miles: campaignType === 'location' ? radiusMiles : null,
       })
       reset(); onClose(); onCreated(created)
     } catch (e) {
@@ -66,6 +78,21 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
         <Input label="Reward" required value={rewardText} onChange={(e) => setRewardText(e.target.value)}
           placeholder="What the card is good for, e.g. One free coffee" />
         <Textarea label="Description (optional)" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Select label="Campaign type" value={campaignType} onChange={(e) => setCampaignType(e.target.value as 'qr' | 'location')}
+          options={[{ value: 'qr', label: 'QR campaign' }, { value: 'location', label: 'Location campaign' }]} />
+        {campaignType === 'location' && (
+          <div className="space-y-3 rounded-lg border border-tu-border p-3">
+            <Select label="Store location" value={storeId} onChange={(e) => setStoreId(e.target.value)}
+              options={[{ value: '', label: 'Select a store' }, ...stores.map((s) => ({ value: s.id, label: `${s.name}${s.city ? ` · ${s.city}` : ''}` }))]}
+              required />
+            <label className="block text-sm">
+              <span className="mb-1 block text-tu-dim">Push radius: {radiusMiles} miles</span>
+              <input className="w-full accent-tu-accent" type="range" min={1} max={10} step={0.5}
+                value={radiusMiles} onChange={(e) => setRadiusMiles(Number(e.target.value))} />
+            </label>
+            <p className="text-xs text-tu-faint">Only followers with a fresh device location inside this radius can receive and claim it.</p>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Input label="Claim limit" type="number" min={1} max={10000} value={maxClaims}
             onChange={(e) => setMaxClaims(e.target.value)} />
@@ -74,7 +101,7 @@ function CreateCampaignModal({ open, onClose, onCreated }: { open: boolean; onCl
         </div>
         <Input label="Ends (optional)" type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
         <ErrorText>{err}</ErrorText>
-        <Button type="submit" loading={saving} className="w-full"><Plus className="h-4 w-4" /> Create campaign</Button>
+        <Button type="submit" loading={saving} disabled={campaignType === 'location' && !storeId} className="w-full"><Plus className="h-4 w-4" /> Create campaign</Button>
       </form>
     </Modal>
   )
@@ -114,6 +141,18 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
     }
   }
 
+  async function push() {
+    if (!confirm(`Push this offer to followers within ${campaign.radius_miles} miles of ${campaign.store_name}?`)) return
+    setBusy(true); setErr(''); setResult('')
+    try {
+      const result = await promoApi.pushCampaign(campaign.id)
+      setResult(`Pushed to ${result.sent_count} follower${result.sent_count === 1 ? '' : 's'} with a fresh in-radius location.`)
+      onChanged()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not push campaign')
+    } finally { setBusy(false) }
+  }
+
   const stats = campaign.stats
   return (
     <Card className={campaign.status === 'cancelled' ? 'opacity-60' : ''}>
@@ -126,12 +165,15 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
           <div className="flex items-center gap-2">
             <h3 className="font-semibold">{campaign.title}</h3>
             <Chip tone={campaignTone(campaign.status)}>{campaign.status}</Chip>
+            {campaign.campaign_type === 'location' && <Chip tone="positive"><MapPin className="mr-1 inline h-3 w-3" />location</Chip>}
           </div>
           <p className="text-sm text-tu-dim">{campaign.reward_text}</p>
           <p className="mt-1 text-xs text-tu-faint">
             {campaign.claim_count} / {campaign.max_claims} claimed
             {stats ? ` · ${stats.redeemed} redeemed · ${stats.outstanding} outstanding` : ''}
             {campaign.ends_at ? ` · ends ${new Date(campaign.ends_at).toLocaleString()}` : ''}
+            {campaign.campaign_type === 'location' ? ` · ${campaign.store_name || 'store'} · ${campaign.radius_miles} mi` : ''}
+            {campaign.campaign_type === 'location' && campaign.push_sent_at ? ` · pushed to ${campaign.push_sent_count}` : ''}
           </p>
           </div>
         </div>
@@ -140,6 +182,9 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
             <Button variant="soft" onClick={() => navigate(`/brand/campaigns/${campaign.id}/design`)}>
               <Palette className="h-4 w-4" /> {campaign.has_design ? 'Edit flyer' : 'Design flyer'}
             </Button>
+          )}
+          {campaign.campaign_type === 'location' && campaign.status === 'active' && !campaign.push_sent_at && (
+            <Button variant="soft" loading={busy} onClick={push}><MapPin className="h-4 w-4" /> Push</Button>
           )}
           <Button variant="soft" onClick={() => setShowQr((v) => !v)}><QrCode className="h-4 w-4" /> QR</Button>
           <Button variant="soft" onClick={() => navigator.clipboard.writeText(claimUrl)}><Copy className="h-4 w-4" /></Button>
@@ -280,6 +325,7 @@ function ScannersSection() {
 export default function BrandCampaigns() {
   const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<PromoCampaign[]>([])
+  const [stores, setStores] = useState<Store[]>([])
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
@@ -287,7 +333,11 @@ export default function BrandCampaigns() {
   async function load() {
     setLoading(true); setLoadErr('')
     try {
-      setCampaigns(await promoApi.listCampaigns())
+      const [campaigns, stores] = await Promise.all([
+        promoApi.listCampaigns(),
+        tellusApi.get<Store[]>('/stores'),
+      ])
+      setCampaigns(campaigns); setStores(stores)
     } catch (e) {
       setLoadErr(e instanceof Error ? e.message : 'Could not load campaigns')
     } finally {
@@ -326,6 +376,7 @@ export default function BrandCampaigns() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onCreated={(created) => navigate(`/brand/campaigns/${created.id}/design`)}
+        stores={stores}
       />
     </div>
   )
