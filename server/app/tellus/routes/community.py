@@ -3,6 +3,7 @@ published reviews at /tellus/b/{slug}. Mirrors public_intake.py's hygiene
 (rate limit, no auth) since this is the other unauthenticated surface in the
 app.
 """
+import json
 from typing import Optional
 
 import asyncpg
@@ -36,7 +37,9 @@ async def public_brand_page(
 
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            "SELECT id, name, slug, logo_url, owner_account_id, plan_status, messaging_enabled FROM tellus_brands WHERE slug = $1", slug
+            "SELECT id, name, slug, logo_url, owner_account_id, plan_status, messaging_enabled, "
+            "tagline, description, cover_url, category, website, hours "
+            "FROM tellus_brands WHERE slug = $1", slug
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -48,6 +51,14 @@ async def public_brand_page(
         claimed = brand["owner_account_id"] is not None
         followed = bool(await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM tellus_brand_follows WHERE brand_id = $1 AND consumer_account_id = $2)",
+            brand["id"], viewer_id,
+        )) if viewer_id is not None else False
+        invite_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM tellus_brand_invites WHERE brand_id = $1 LIMIT 500) c",
+            brand["id"],
+        )
+        invited_by_me = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM tellus_brand_invites WHERE brand_id = $1 AND consumer_account_id = $2)",
             brand["id"], viewer_id,
         )) if viewer_id is not None else False
         intake_token = None
@@ -177,6 +188,16 @@ async def public_brand_page(
         messaging_enabled=bool(claimed and brand["messaging_enabled"]),
         stores=[TellusMessagingStore(**dict(s)) for s in stores],
         followed=followed,
+        tagline=brand["tagline"],
+        description=brand["description"],
+        cover_url=brand["cover_url"],
+        category=brand["category"],
+        website=brand["website"],
+        # asyncpg returns JSONB as a raw string unless a codec is registered
+        # on the pool (same trap as routes/admin/_shared.py:decode_audit_rows).
+        hours=json.loads(brand["hours"]) if isinstance(brand["hours"], str) else brand["hours"],
+        invite_count=invite_count or 0,
+        invited_by_me=invited_by_me,
     )
 
 

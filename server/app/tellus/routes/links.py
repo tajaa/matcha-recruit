@@ -4,6 +4,7 @@ All endpoints require a brand account; everything scopes by the caller's
 `brand_id` (never a client-supplied one). Links are the per-store QR tokens that
 drive the public intake flow.
 """
+import json
 import secrets
 from uuid import UUID
 
@@ -23,10 +24,24 @@ from ..models.tellus import (
     TellusStoreCreate,
     TellusStoreUpdate,
 )
+from ..services.discover_service import normalize_brand_category
 from ..services.geo import geocode_location
 from ._shared import delete_managed_object, get_owned_store, is_managed_object
 
 router = APIRouter()
+
+
+def _decode_brand_row(row) -> dict:
+    """asyncpg returns JSONB as a raw string unless a codec is registered on
+    the pool — decode `hours` defensively before constructing TellusBrand
+    (same trap/fix as routes/admin/_shared.py:decode_audit_rows)."""
+    d = dict(row)
+    if isinstance(d.get("hours"), str):
+        try:
+            d["hours"] = json.loads(d["hours"])
+        except ValueError:
+            d["hours"] = None
+    return d
 
 
 def _new_link_token() -> str:
@@ -41,19 +56,52 @@ async def get_brand(account: TellusAccount = Depends(require_brand)):
         row = await conn.fetchrow("SELECT * FROM tellus_brands WHERE id = $1", account.brand_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
-    return TellusBrand(**dict(row))
+    return TellusBrand(**_decode_brand_row(row))
+
+
+# model_fields_set-driven SET clause (same shape as promo_service.update_campaign)
+# so an explicit null on a nullable field actually clears it — COALESCE made
+# that impossible, e.g. a brand could never remove a tagline once set.
+_BRAND_PATCH_COLUMNS = ("name", "reward_mode", "tagline", "description",
+                        "category", "website", "hours")
+_BRAND_NULLABLE_PATCH_COLUMNS = {"tagline", "description", "category", "website", "hours"}
 
 
 @router.patch("/brand", response_model=TellusBrand)
 async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends(require_paid_brand)):
+    if "category" in body.model_fields_set and body.category is not None:
+        normalized = normalize_brand_category(body.category)
+        if normalized is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="Unrecognized category.")
+        body.category = normalized
+
+    sets: list[str] = []
+    values: list = []
+    for col in _BRAND_PATCH_COLUMNS:
+        if col not in body.model_fields_set:
+            continue
+        val = getattr(body, col)
+        if val is None and col not in _BRAND_NULLABLE_PATCH_COLUMNS:
+            continue
+        if col == "hours" and val is not None:
+            val = json.dumps(val)
+        values.append(val)
+        cast = "::jsonb" if col == "hours" else ""
+        sets.append(f"{col} = ${len(values) + 1}{cast}")
+
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """UPDATE tellus_brands
-               SET name = COALESCE($2, name), reward_mode = COALESCE($3, reward_mode), updated_at = NOW()
-               WHERE id = $1 RETURNING *""",
-            account.brand_id, body.name, body.reward_mode,
-        )
-    return TellusBrand(**dict(row))
+        if not sets:
+            row = await conn.fetchrow("SELECT * FROM tellus_brands WHERE id = $1", account.brand_id)
+        else:
+            row = await conn.fetchrow(
+                f"""UPDATE tellus_brands SET {', '.join(sets)}, updated_at = NOW()
+                    WHERE id = $1 RETURNING *""",
+                account.brand_id, *values,
+            )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    return TellusBrand(**_decode_brand_row(row))
 
 
 _LOGO_MAX_BYTES = 2 * 1024 * 1024
@@ -97,7 +145,7 @@ async def upload_brand_logo(
         )
     if old and old != url and is_managed_object(old, _LOGO_PREFIX):
         await delete_managed_object(old)
-    return TellusBrand(**dict(row))
+    return TellusBrand(**_decode_brand_row(row))
 
 
 @router.delete("/brand/logo", response_model=TellusBrand)
@@ -112,7 +160,64 @@ async def delete_brand_logo(account: TellusAccount = Depends(require_paid_brand)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
     if is_managed_object(old, _LOGO_PREFIX):
         await delete_managed_object(old)
-    return TellusBrand(**dict(row))
+    return TellusBrand(**_decode_brand_row(row))
+
+
+_COVER_MAX_BYTES = 4 * 1024 * 1024
+_COVER_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+_COVER_PREFIX = "/tellus/covers/"
+
+
+@router.post("/brand/cover", response_model=TellusBrand)
+async def upload_brand_cover(
+    file: UploadFile = File(...),
+    account: TellusAccount = Depends(require_paid_brand),
+):
+    """Multipart cover-image upload -> public S3 via CloudFront. Same shape as
+    upload_brand_logo — public bucket because cover_url renders on the
+    unauthenticated /b/{slug} page and the Discover feed."""
+    ext = _COVER_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                            detail="Cover image must be a PNG, JPEG, or WebP image.")
+    data = await file.read()
+    if len(data) > _COVER_MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail="Cover image must be 4MB or smaller.")
+
+    storage = get_storage()
+    if not (storage.s3_client and storage.bucket):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Image uploads are not configured.")
+    url = await storage.upload_file(
+        data, f"cover.{ext}", prefix=f"tellus/covers/{account.brand_id}",
+        content_type=file.content_type,
+    )
+
+    async with get_connection() as conn:
+        old = await conn.fetchval("SELECT cover_url FROM tellus_brands WHERE id = $1", account.brand_id)
+        row = await conn.fetchrow(
+            "UPDATE tellus_brands SET cover_url = $2, updated_at = NOW() WHERE id = $1 RETURNING *",
+            account.brand_id, url,
+        )
+    if old and old != url and is_managed_object(old, _COVER_PREFIX):
+        await delete_managed_object(old)
+    return TellusBrand(**_decode_brand_row(row))
+
+
+@router.delete("/brand/cover", response_model=TellusBrand)
+async def delete_brand_cover(account: TellusAccount = Depends(require_paid_brand)):
+    async with get_connection() as conn:
+        old = await conn.fetchval("SELECT cover_url FROM tellus_brands WHERE id = $1", account.brand_id)
+        row = await conn.fetchrow(
+            "UPDATE tellus_brands SET cover_url = NULL, updated_at = NOW() WHERE id = $1 RETURNING *",
+            account.brand_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+    if is_managed_object(old, _COVER_PREFIX):
+        await delete_managed_object(old)
+    return TellusBrand(**_decode_brand_row(row))
 
 
 # ── Stores ────────────────────────────────────────────────────────────────────

@@ -36,7 +36,8 @@ struct DiscoverView: View {
                         DiscoverCard(
                             entry: entry,
                             onFollow: { Task { await vm.toggleFollow(entry) } },
-                            onAddToTellUs: { Task { _ = await vm.addToTellUs(entry) } }
+                            onAddToTellUs: { Task { _ = await vm.addToTellUs(entry) } },
+                            onInvite: { Task { await vm.invite(entry) } }
                         )
                         .task {
                             if entry.id == vm.entries.last?.id { await vm.loadMore() }
@@ -74,5 +75,9 @@ struct DiscoverView: View {
         .task { await vm.onAppear() }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) { ErrorBanner(message: vm.error).padding(.top, 8) }
+        .sheet(item: $vm.shareItem) { item in
+            InviteShareSheet(item: item)
+                .presentationDetents([.height(220)])
+        }
     }
 }

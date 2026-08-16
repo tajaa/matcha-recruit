@@ -136,14 +136,26 @@ class TellusBrand(BaseModel):
     reward_mode: Literal["auto", "manual"] = "auto"
     created_at: datetime
     messaging_enabled: bool = False
+    tagline: Optional[str] = None
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    category: Optional[str] = None
+    website: Optional[str] = None
+    hours: Optional[dict] = None
 
 
 class TellusBrandUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
-    # logo_url is intentionally NOT settable here — POST /brand/logo (multipart
-    # upload to S3) is the only writer, closing the arbitrary-URL-that-doesn't-
-    # render bug the old free-text field had.
+    # logo_url/cover_url are intentionally NOT settable here — POST /brand/logo
+    # and POST /brand/cover (multipart upload to S3) are the only writers,
+    # closing the arbitrary-URL-that-doesn't-render bug the old free-text
+    # logo field had.
     reward_mode: Optional[Literal["auto", "manual"]] = None
+    tagline: Optional[str] = Field(default=None, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    category: Optional[str] = Field(default=None, max_length=40)
+    website: Optional[str] = Field(default=None, max_length=300)
+    hours: Optional[dict] = None
 
 
 class TellusBrandPrompt(BaseModel):
@@ -207,6 +219,10 @@ class TellusDiscoverEntry(BaseModel):
     followed: bool = False
     messaging_enabled: bool = False
     intake_token: Optional[str] = None    # unclaimed tellus rows only
+    tagline: Optional[str] = None         # tellus only
+    cover_url: Optional[str] = None       # tellus only
+    invite_count: int = 0                 # tellus only
+    has_active_deal: bool = False         # tellus only; always False until Phase 2
 
 
 class TellusDiscoverPage(BaseModel):
@@ -214,6 +230,19 @@ class TellusDiscoverPage(BaseModel):
     total: int
     next_offset: Optional[int] = None
     google_attribution: bool = False      # true when any source="google" entry survived
+
+
+class TellusInviteRequest(BaseModel):
+    slug: str = Field(max_length=200)
+
+
+class TellusInviteResponse(BaseModel):
+    ok: bool = True
+    slug: str
+    invite_count: int
+    already_invited: bool
+    share_url: str
+    share_text: str
 
 
 class TellusPlaceCreate(BaseModel):
@@ -688,6 +717,14 @@ class TellusPublicBrandPage(BaseModel):
     messaging_enabled: bool = False
     stores: list["TellusMessagingStore"] = Field(default_factory=list)
     followed: bool = False   # false when unauthenticated — same viewer-scoping as discover/places
+    tagline: Optional[str] = None
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    category: Optional[str] = None
+    website: Optional[str] = None
+    hours: Optional[dict] = None
+    invite_count: int = 0
+    invited_by_me: bool = False   # false when unauthenticated, same as followed
 
 
 class TellusClaimResponse(BaseModel):

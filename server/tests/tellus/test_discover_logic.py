@@ -10,11 +10,18 @@ import pytest
 from pydantic import ValidationError
 
 import app.tellus.routes.discover as discover_route
-from app.tellus.models.tellus import TellusDiscoverEntry
+from app.tellus.models.tellus import (
+    TellusDiscoverEntry,
+    TellusInviteRequest,
+    TellusInviteResponse,
+)
 from app.tellus.services.discover_service import (
+    BRAND_CATEGORIES,
+    GOOGLE_TYPE_LABELS,
     bbox_predicate,
     dedupe_google,
     discover_cache_key,
+    normalize_brand_category,
     normalize_google_type,
 )
 
@@ -89,6 +96,44 @@ class TestBboxPredicate:
         assert "greatest(cos(radians($1)), 0.01)" in sql
 
 
+class TestNormalizeBrandCategory:
+    def test_canonical_label_passes(self):
+        assert normalize_brand_category("Cafe") == "Cafe"
+
+    def test_case_insensitive_match(self):
+        assert normalize_brand_category("cafe") == "Cafe"
+        assert normalize_brand_category("CAFE") == "Cafe"
+
+    def test_unknown_string_is_dropped(self):
+        assert normalize_brand_category("Spaceship Dealer") is None
+
+    def test_non_string_is_dropped(self):
+        assert normalize_brand_category(None) is None
+        assert normalize_brand_category(123) is None
+        assert normalize_brand_category({}) is None
+
+    def test_every_google_label_round_trips(self):
+        """Proves the brand-authored and Google-derived vocabularies can't
+        drift apart into different display strings for the same concept —
+        BRAND_CATEGORIES is derived from GOOGLE_TYPE_LABELS' own values."""
+        for label in set(GOOGLE_TYPE_LABELS.values()):
+            assert normalize_brand_category(label) == label
+            assert label in BRAND_CATEGORIES
+
+
+class TestInviteModels:
+    def test_invite_request_rejects_long_slug(self):
+        with pytest.raises(ValidationError):
+            TellusInviteRequest(slug="x" * 201)
+
+    def test_invite_request_accepts_normal_slug(self):
+        assert TellusInviteRequest(slug="blue-bottle-abc123").slug == "blue-bottle-abc123"
+
+    def test_invite_response_requires_share_fields(self):
+        with pytest.raises(ValidationError):
+            TellusInviteResponse(slug="x", invite_count=1, already_invited=False)
+
+
 class TestDiscoverModels:
     def test_google_entry_needs_no_slug(self):
         entry = TellusDiscoverEntry(source="google", name="Blue Bottle")
@@ -98,6 +143,15 @@ class TestDiscoverModels:
     def test_unknown_source_rejected(self):
         with pytest.raises(ValidationError):
             TellusDiscoverEntry(source="yelp", name="X")
+
+    def test_new_fields_default_safely(self):
+        """Guards the iOS decoder against a missing key from an older server —
+        every Phase-1 addition must default rather than require a value."""
+        entry = TellusDiscoverEntry(source="google", name="Blue Bottle")
+        assert entry.tagline is None
+        assert entry.cover_url is None
+        assert entry.invite_count == 0
+        assert entry.has_active_deal is False
 
 
 class TestDiscoverNeverPersistsGoogle:

@@ -10,6 +10,7 @@ final class BrandDetailViewModel: LoadableVM {
     var followed = false
     var showIntake = false
     var showBoard = false
+    var shareItem: DiscoverShareItem?
 
     init(slug: String) {
         self.slug = slug
@@ -34,6 +35,23 @@ final class BrandDetailViewModel: LoadableVM {
             }
         } catch {
             followed = was
+            if !error.isCancellation { self.error = error.localizedDescription }
+        }
+    }
+
+    func invite() async {
+        guard page != nil else { return }
+        do {
+            let resp = try await DiscoverService.shared.invite(slug: slug)
+            // TellusPublicBrandPage has no per-field mutation (all `let`,
+            // custom decoder) — simplest correct update is a re-fetch rather
+            // than hand-rolling a copy-with. Low-frequency action, so the
+            // extra round trip is not a UX concern.
+            await load()
+            if let url = URL(string: APIClient.shared.webOrigin + resp.share_url) {
+                shareItem = DiscoverShareItem(url: url, text: resp.share_text)
+            }
+        } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
         }
     }

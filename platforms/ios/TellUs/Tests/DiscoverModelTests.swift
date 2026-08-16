@@ -53,4 +53,39 @@ final class DiscoverModelTests: XCTestCase {
         XCTAssertTrue(entry.claimed)
         XCTAssertTrue(entry.has_board)
     }
+
+    /// Proves tolerance of a server response predating the Phase 1 profile/
+    /// invite fields (tagline, cover_url, invite_count, has_active_deal) —
+    /// must decode, not throw, and fall back to safe defaults.
+    func testDecodesOldServerResponseMissingPhase1Fields() throws {
+        let json = """
+        {"source":"tellus","name":"Sightglass Coffee","slug":"sightglass-coffee",
+         "google_place_id":null,"logo_url":null,"city":"Los Angeles","state":"CA",
+         "address":null,"distance_km":1.6,"category_label":null,"rating":4.0,
+         "review_count":1,"rating_count":1,"claimed":true,"has_board":true,
+         "followed":false,"messaging_enabled":false,"intake_token":null}
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(DiscoverEntry.self, from: json)
+        XCTAssertNil(entry.tagline)
+        XCTAssertNil(entry.cover_url)
+        XCTAssertEqual(entry.invite_count, 0)
+        XCTAssertFalse(entry.has_active_deal)
+    }
+
+    func testDecodesEntryWithPhase1FieldsPresent() throws {
+        let json = """
+        {"source":"tellus","name":"Sightglass Coffee","slug":"sightglass-coffee",
+         "google_place_id":null,"logo_url":null,"city":"Los Angeles","state":"CA",
+         "address":null,"distance_km":1.6,"category_label":"Cafe","rating":4.0,
+         "review_count":1,"rating_count":1,"claimed":true,"has_board":true,
+         "followed":false,"messaging_enabled":false,"intake_token":null,
+         "tagline":"Third-wave coffee","cover_url":"https://x/cover.jpg",
+         "invite_count":3,"has_active_deal":true}
+        """.data(using: .utf8)!
+        let entry = try JSONDecoder().decode(DiscoverEntry.self, from: json)
+        XCTAssertEqual(entry.tagline, "Third-wave coffee")
+        XCTAssertEqual(entry.cover_url, "https://x/cover.jpg")
+        XCTAssertEqual(entry.invite_count, 3)
+        XCTAssertTrue(entry.has_active_deal)
+    }
 }

@@ -15,6 +15,7 @@ final class DiscoverViewModel: LoadableVM {
     var locationResolved = false
     var locationDenied = false
     var showsGoogleAttribution = false
+    var shareItem: DiscoverShareItem?
 
     private var coordinate: (lat: Double, lng: Double)?
     private var nextOffset: Int?
@@ -113,6 +114,32 @@ final class DiscoverViewModel: LoadableVM {
         } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
             return nil
+        }
+    }
+
+    /// Google row: materialize first via the existing POST /places (through
+    /// addToTellUs, which already advisory-locks and dedupes server-side),
+    /// then invite the returned slug. No new dedupe logic needed here.
+    func invite(_ entry: DiscoverEntry) async {
+        var slug = entry.slug
+        if slug == nil {
+            slug = await addToTellUs(entry)?.slug
+        }
+        guard let slug, let idx = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+
+        entries[idx].invite_count += 1   // optimistic
+        do {
+            let resp = try await DiscoverService.shared.invite(slug: slug)
+            entries[idx].invite_count = resp.invite_count   // authoritative
+            // share_url from the server is a relative path (e.g. matches the
+            // convention promo claim_url already uses) — prepend webOrigin so
+            // the shared link is absolute outside the app.
+            if let url = URL(string: APIClient.shared.webOrigin + resp.share_url) {
+                shareItem = DiscoverShareItem(url: url, text: resp.share_text)
+            }
+        } catch {
+            entries[idx].invite_count -= 1
+            if !error.isCancellation { self.error = error.localizedDescription }
         }
     }
 }

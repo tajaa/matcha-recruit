@@ -68,6 +68,27 @@ def normalize_google_type(primary_type: Any) -> Optional[str]:
     return GOOGLE_TYPE_LABELS.get(primary_type)
 
 
+# Brand-authored category vocabulary. Sourced from GOOGLE_TYPE_LABELS' own
+# values (not its keys) so a brand-picked category and a Google-derived one
+# always render from the same single vocabulary — no risk of the two lists
+# drifting apart into different display strings for the same concept.
+BRAND_CATEGORIES: tuple[str, ...] = tuple(sorted(set(GOOGLE_TYPE_LABELS.values())))
+
+
+def normalize_brand_category(value: Any) -> Optional[str]:
+    """Brand-authored category -> canonical label, or None. Case-insensitive
+    exact match against BRAND_CATEGORIES; unknown or non-str input is dropped
+    rather than shown — same never-show-an-unvetted-label rule as
+    normalize_google_type."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    for label in BRAND_CATEGORIES:
+        if value.lower() == label.lower():
+            return label
+    return None
+
+
 def dedupe_google(google_rows: list[dict], known_place_ids: Collection[str]) -> list[dict]:
     """Drop Google entries already represented by a Tell-Us brand. Arg order
     mirrors iOS PlacesViewModel.dedupe(_:against:). A row with no place_id

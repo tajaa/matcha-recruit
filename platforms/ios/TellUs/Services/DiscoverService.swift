@@ -1,9 +1,21 @@
 import Foundation
 
+struct DiscoverInviteResponse: Codable {
+    let slug: String
+    let invite_count: Int
+    let already_invited: Bool
+    let share_url: String
+    let share_text: String
+}
+
 final class DiscoverService {
     static let shared = DiscoverService()
     private let client = APIClient.shared
     private init() {}
+
+    func invite(slug: String) async throws -> DiscoverInviteResponse {
+        try await client.request(method: "POST", path: "/discover/invite", body: ["slug": slug])
+    }
 
     func discover(
         lat: Double?, lng: Double?, radiusKm: Double = 15,

@@ -13,12 +13,18 @@ section for the ToS posture this preserves.
 """
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 
 from ...core.services.redis_cache import cache_get, cache_set, check_rate_limit, client_ip, get_redis_cache
 from ...database import get_connection
-from ..dependencies import optional_consumer_account_id
-from ..models.tellus import TellusDiscoverEntry, TellusDiscoverPage
+from ..dependencies import optional_consumer_account_id, require_consumer
+from ..models.tellus import (
+    TellusAccount,
+    TellusDiscoverEntry,
+    TellusDiscoverPage,
+    TellusInviteRequest,
+    TellusInviteResponse,
+)
 from ..services import google_places
 from ..services.discover_service import (
     MAX_RADIUS_KM,
@@ -26,6 +32,7 @@ from ..services.discover_service import (
     bbox_predicate,
     dedupe_google,
     discover_cache_key,
+    normalize_brand_category,
     normalize_google_type,
 )
 from ._shared import escape_like
@@ -53,6 +60,7 @@ def _entry_from_tellus_row(row) -> TellusDiscoverEntry:
         city=row["city"],
         state=row["state"],
         distance_km=round(row["distance_km"], 1) if row["distance_km"] is not None else None,
+        category_label=normalize_brand_category(row["category"]),
         rating=float(row["rating"]) if row["rating"] is not None else None,
         review_count=row["review_count"] or 0,
         rating_count=row["rating_count"] or 0,
@@ -61,6 +69,9 @@ def _entry_from_tellus_row(row) -> TellusDiscoverEntry:
         followed=row["followed"],
         messaging_enabled=bool(row["owner_account_id"] and row["messaging_enabled"]),
         intake_token=row["intake_token"],
+        tagline=row["tagline"],
+        cover_url=row["cover_url"],
+        invite_count=row["invite_count"] or 0,
     )
 
 
@@ -159,13 +170,17 @@ async def discover(
                      ORDER BY st.brand_id, distance_km ASC
                 )
                 SELECT b.slug, b.name, b.logo_url, b.google_place_id, b.messaging_enabled,
-                       b.owner_account_id, n.city, n.state, n.distance_km,
+                       b.owner_account_id, b.tagline, b.cover_url, b.category,
+                       n.city, n.state, n.distance_km,
                        rev.rating, rev.review_count, rev.rating_count,
                        EXISTS (SELECT 1 FROM tellus_boards bd
                                 WHERE bd.brand_id = b.id AND bd.is_active) AS has_board,
                        EXISTS (SELECT 1 FROM tellus_brand_follows f
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
+                       (SELECT COUNT(*) FROM (
+                            SELECT 1 FROM tellus_brand_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                       ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
                               JOIN nearest n2 ON n2.brand_id = b2.id
@@ -212,13 +227,17 @@ async def discover(
 
             sql = f"""
                 SELECT b.slug, b.name, b.logo_url, b.google_place_id, b.messaging_enabled,
-                       b.owner_account_id, n.city, n.state, NULL::float8 AS distance_km,
+                       b.owner_account_id, b.tagline, b.cover_url, b.category,
+                       n.city, n.state, NULL::float8 AS distance_km,
                        rev.rating, rev.review_count, rev.rating_count,
                        EXISTS (SELECT 1 FROM tellus_boards bd
                                 WHERE bd.brand_id = b.id AND bd.is_active) AS has_board,
                        EXISTS (SELECT 1 FROM tellus_brand_follows f
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
+                       (SELECT COUNT(*) FROM (
+                            SELECT 1 FROM tellus_brand_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                       ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
                              WHERE ({city_p}::text IS NULL OR EXISTS
@@ -306,4 +325,54 @@ async def discover(
         total=total,
         next_offset=next_offset,
         google_attribution=len(google_entries) > 0,
+    )
+
+
+# Own bucket — the count is public social proof shown on a listing, so it
+# must not be spammable at the general discover rate.
+_INVITE_RATE_LIMIT_CALLS = 20
+_INVITE_RATE_LIMIT_WINDOW_S = 3600
+
+
+@router.post("/discover/invite", response_model=TellusInviteResponse)
+async def invite_brand(
+    body: TellusInviteRequest,
+    request: Request,
+    account: TellusAccount = Depends(require_consumer),
+) -> TellusInviteResponse:
+    """Fan-initiated "get this business on Tell-Us" invite. require_consumer
+    (not optional_consumer_account_id) because an anonymous invite can't be
+    deduped — the whole point of the unique index on
+    (brand_id, consumer_account_id) is that the count can't be stuffed."""
+    await check_rate_limit(client_ip(request), "tellus_invite",
+                           _INVITE_RATE_LIMIT_CALLS, _INVITE_RATE_LIMIT_WINDOW_S)
+
+    async with get_connection() as conn:
+        brand = await conn.fetchrow(
+            "SELECT id, name, owner_account_id FROM tellus_brands WHERE slug = $1", body.slug
+        )
+        if brand is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
+        if brand["owner_account_id"] is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="This business is already on Tell-Us.")
+
+        result = await conn.execute(
+            """INSERT INTO tellus_brand_invites (brand_id, consumer_account_id)
+               VALUES ($1, $2) ON CONFLICT DO NOTHING""",
+            brand["id"], account.id,
+        )
+        already_invited = result == "INSERT 0 0"
+        invite_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM tellus_brand_invites WHERE brand_id = $1", brand["id"]
+        )
+
+    share_url = f"/tellus/b/{body.slug}?invite=1"
+    share_text = f"{brand['name']} isn't on Tell-Us yet. {invite_count} locals want them on it — this is their page."
+    return TellusInviteResponse(
+        slug=body.slug,
+        invite_count=invite_count,
+        already_invited=already_invited,
+        share_url=share_url,
+        share_text=share_text,
     )
