@@ -62,6 +62,10 @@ struct CampaignDesignerView: View {
                 onSelect: { vm.selectLayer($0); syncTextDraft() },
                 onLayerChange: { layer, commit in
                     vm.apply(vm.document.design.replacingLayer(layer), commit: commit)
+                },
+                onBeginTextEdit: { id in
+                    vm.selectLayer(id)
+                    syncTextDraft()
                 }
             )
             .frame(minHeight: 300, maxHeight: .infinity)

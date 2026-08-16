@@ -25,6 +25,18 @@ enum FlyerLayerDirection {
     case backward
 }
 
+enum FlyerLayerLimits {
+    static let position = -4000.0...4000.0
+    static let rotation = -180.0...180.0
+    static let opacity = 0.05...1.0
+    static let textFontSize = 8.0...400.0
+    static let textWidth = 24.0...4000.0
+    static let shapeWidth = 4.0...4000.0
+    static let shapeHeight = 2.0...4000.0
+    static let boxSide = 8.0...4000.0
+    static let qrSize = 96.0...2000.0
+}
+
 enum FlyerDesignFactory {
     static func blank(preset: String = "flyer_letter") -> FlyerDesign {
         let spec = FlyerArtboardPresets.spec(for: preset) ?? FlyerArtboardPresets.all[0]
@@ -197,11 +209,12 @@ extension DesignLayer {
     }
 
     func withRotation(_ value: Double) -> DesignLayer {
+        let rotation = min(FlyerLayerLimits.rotation.upperBound, max(FlyerLayerLimits.rotation.lowerBound, value))
         switch self {
-        case .text(var layer): layer.rotation = value; return .text(layer)
-        case .image(var layer): layer.rotation = value; return .image(layer)
-        case .sticker(var layer): layer.rotation = value; return .sticker(layer)
-        case .shape(var layer): layer.rotation = value; return .shape(layer)
+        case .text(var layer): layer.rotation = rotation; return .text(layer)
+        case .image(var layer): layer.rotation = rotation; return .image(layer)
+        case .sticker(var layer): layer.rotation = rotation; return .sticker(layer)
+        case .shape(var layer): layer.rotation = rotation; return .shape(layer)
         case .qr: return self
         case .unknown: return self
         }
@@ -219,7 +232,7 @@ extension DesignLayer {
     }
 
     func withOpacity(_ value: Double) -> DesignLayer {
-        let opacity = min(1, max(0.05, value))
+        let opacity = min(FlyerLayerLimits.opacity.upperBound, max(FlyerLayerLimits.opacity.lowerBound, value))
         switch self {
         case .text(var layer): layer.opacity = opacity; return .text(layer)
         case .image(var layer): layer.opacity = opacity; return .image(layer)
@@ -233,23 +246,28 @@ extension DesignLayer {
     func withSize(width: Double, height: Double? = nil) -> DesignLayer {
         switch self {
         case .text(var layer):
-            layer.width = max(24, width)
-            if let height { layer.fontSize = max(8, height / max(0.7, layer.lineHeight)) }
+            layer.width = min(FlyerLayerLimits.textWidth.upperBound, max(FlyerLayerLimits.textWidth.lowerBound, width))
+            if let height {
+                layer.fontSize = min(
+                    FlyerLayerLimits.textFontSize.upperBound,
+                    max(FlyerLayerLimits.textFontSize.lowerBound, height / max(0.7, layer.lineHeight))
+                )
+            }
             return .text(layer)
         case .image(var layer):
-            layer.width = max(8, width)
-            if let height { layer.height = max(8, height) }
+            layer.width = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, width))
+            if let height { layer.height = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, height)) }
             return .image(layer)
         case .sticker(var layer):
-            layer.width = max(8, width)
-            if let height { layer.height = max(8, height) }
+            layer.width = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, width))
+            if let height { layer.height = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, height)) }
             return .sticker(layer)
         case .shape(var layer):
-            layer.width = max(4, width)
-            if let height { layer.height = max(2, height) }
+            layer.width = min(FlyerLayerLimits.shapeWidth.upperBound, max(FlyerLayerLimits.shapeWidth.lowerBound, width))
+            if let height { layer.height = min(FlyerLayerLimits.shapeHeight.upperBound, max(FlyerLayerLimits.shapeHeight.lowerBound, height)) }
             return .shape(layer)
         case .qr(var layer):
-            layer.size = max(96, width)
+            layer.size = min(FlyerLayerLimits.qrSize.upperBound, max(FlyerLayerLimits.qrSize.lowerBound, width))
             return .qr(layer)
         case .unknown: return self
         }

@@ -264,13 +264,27 @@ enum DesignLayer: Codable, Equatable, Identifiable {
     func resized(to size: CGSize) -> DesignLayer {
         switch self {
         case .text(var l):
-            l.width = max(24, size.width)
-            l.fontSize = max(8, l.fontSize * (size.height / max(1, l.fontSize * l.lineHeight)))
+            l.width = min(FlyerLayerLimits.textWidth.upperBound, max(FlyerLayerLimits.textWidth.lowerBound, size.width))
+            l.fontSize = min(
+                FlyerLayerLimits.textFontSize.upperBound,
+                max(FlyerLayerLimits.textFontSize.lowerBound, l.fontSize * (size.height / max(1, l.fontSize * l.lineHeight)))
+            )
             return .text(l)
-        case .image(var l): l.width = max(8, size.width); l.height = max(8, size.height); return .image(l)
-        case .sticker(var l): l.width = max(8, size.width); l.height = max(8, size.height); return .sticker(l)
-        case .shape(var l): l.width = max(4, size.width); l.height = max(2, size.height); return .shape(l)
-        case .qr(var l): l.size = max(96, min(size.width, size.height)); return .qr(l)
+        case .image(var l):
+            l.width = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, size.width))
+            l.height = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, size.height))
+            return .image(l)
+        case .sticker(var l):
+            l.width = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, size.width))
+            l.height = min(FlyerLayerLimits.boxSide.upperBound, max(FlyerLayerLimits.boxSide.lowerBound, size.height))
+            return .sticker(l)
+        case .shape(var l):
+            l.width = min(FlyerLayerLimits.shapeWidth.upperBound, max(FlyerLayerLimits.shapeWidth.lowerBound, size.width))
+            l.height = min(FlyerLayerLimits.shapeHeight.upperBound, max(FlyerLayerLimits.shapeHeight.lowerBound, size.height))
+            return .shape(l)
+        case .qr(var l):
+            l.size = min(FlyerLayerLimits.qrSize.upperBound, max(FlyerLayerLimits.qrSize.lowerBound, min(size.width, size.height)))
+            return .qr(l)
         case .unknown: return self
         }
     }

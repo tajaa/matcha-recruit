@@ -9,6 +9,7 @@ struct FlyerCanvasView: UIViewRepresentable {
     let interactive: Bool
     let onSelect: (String?) -> Void
     let onLayerChange: (DesignLayer, Bool) -> Void
+    let onBeginTextEdit: (String) -> Void
 
     func makeUIView(context: Context) -> FlyerCanvasUIView {
         FlyerCanvasUIView()
@@ -22,12 +23,13 @@ struct FlyerCanvasView: UIViewRepresentable {
             selectedLayerID: selectedLayerID,
             interactive: interactive,
             onSelect: onSelect,
-            onLayerChange: onLayerChange
+            onLayerChange: onLayerChange,
+            onBeginTextEdit: onBeginTextEdit
         )
     }
 }
 
-final class FlyerCanvasUIView: UIView {
+final class FlyerCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var design = FlyerDesignFactory.blank()
     private var claimURL = ""
     private var assets = FlyerRenderAssets.bundled
@@ -35,12 +37,17 @@ final class FlyerCanvasUIView: UIView {
     private var interactive = true
     private var onSelect: ((String?) -> Void)?
     private var onLayerChange: ((DesignLayer, Bool) -> Void)?
+    private var onBeginTextEdit: ((String) -> Void)?
     private var pan: UIPanGestureRecognizer!
+    private var pinch: UIPinchGestureRecognizer!
+    private var rotate: UIRotationGestureRecognizer!
+    private var doubleTap: UITapGestureRecognizer!
     private var dragLayer: DesignLayer?
     private var dragStartOrigin: CGPoint = .zero
     private var didMove = false
     private var resizeLayer: DesignLayer?
     private var resizeHandle: FlyerResizeHandle?
+    private var gestureBaseLayer: DesignLayer?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -49,6 +56,14 @@ final class FlyerCanvasUIView: UIView {
         pan.minimumNumberOfTouches = 1
         pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
+        pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        rotate = UIRotationGestureRecognizer(target: self, action: #selector(handleRotate(_:)))
+        doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        [pinch, rotate, doubleTap].forEach {
+            $0.delegate = self
+            addGestureRecognizer($0)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -62,7 +77,8 @@ final class FlyerCanvasUIView: UIView {
         selectedLayerID: String?,
         interactive: Bool,
         onSelect: @escaping (String?) -> Void,
-        onLayerChange: @escaping (DesignLayer, Bool) -> Void
+        onLayerChange: @escaping (DesignLayer, Bool) -> Void,
+        onBeginTextEdit: @escaping (String) -> Void
     ) {
         self.design = design
         self.claimURL = claimURL
@@ -71,8 +87,17 @@ final class FlyerCanvasUIView: UIView {
         self.interactive = interactive
         self.onSelect = onSelect
         self.onLayerChange = onLayerChange
+        self.onBeginTextEdit = onBeginTextEdit
         pan.isEnabled = interactive
+        pinch.isEnabled = interactive
+        rotate.isEnabled = interactive
+        doubleTap.isEnabled = interactive
         setNeedsDisplay()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        (gestureRecognizer === pinch && otherGestureRecognizer === rotate)
+            || (gestureRecognizer === rotate && otherGestureRecognizer === pinch)
     }
 
     override func draw(_ rect: CGRect) {
@@ -176,6 +201,48 @@ final class FlyerCanvasUIView: UIView {
             resizeLayer = nil
             resizeHandle = nil
         }
+    }
+
+    @objc private func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+        guard interactive, let id = selectedLayerID else { return }
+        switch recognizer.state {
+        case .began:
+            gestureBaseLayer = design.layers.first { $0.id == id && !$0.isLocked }
+        case .changed, .ended:
+            guard let base = gestureBaseLayer else { return }
+            let changed = FlyerCanvasGeometry.scaled(base, by: Double(recognizer.scale))
+            onLayerChange?(changed, recognizer.state == .ended)
+            if recognizer.state == .ended { gestureBaseLayer = nil }
+        default:
+            gestureBaseLayer = nil
+        }
+    }
+
+    @objc private func handleRotate(_ recognizer: UIRotationGestureRecognizer) {
+        guard interactive, let id = selectedLayerID else { return }
+        switch recognizer.state {
+        case .began:
+            let candidate = design.layers.first { $0.id == id && !$0.isLocked }
+            gestureBaseLayer = candidate?.kind == "qr" ? nil : candidate
+        case .changed, .ended:
+            guard let base = gestureBaseLayer else { return }
+            let degrees = base.rotation + Double(recognizer.rotation) * 180 / .pi
+            let changed = base.withRotation(FlyerCanvasGeometry.snapRotation(degrees: degrees))
+            onLayerChange?(changed, recognizer.state == .ended)
+            if recognizer.state == .ended { gestureBaseLayer = nil }
+        default:
+            gestureBaseLayer = nil
+        }
+    }
+
+    @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {
+        guard interactive else { return }
+        let point = pointInArtboard(recognizer.location(in: self))
+        guard let id = FlyerCanvasGeometry.hitTest(at: point, in: design),
+              let layer = design.layers.first(where: { $0.id == id }),
+              case .text = layer else { return }
+        onSelect?(id)
+        onBeginTextEdit?(id)
     }
 
     private func artboardRect(in bounds: CGRect) -> CGRect {

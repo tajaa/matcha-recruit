@@ -119,7 +119,8 @@ struct FlyerAssistantPanel: View {
                                         selectedLayerID: nil,
                                         interactive: false,
                                         onSelect: { _ in },
-                                        onLayerChange: { _, _ in }
+                                        onLayerChange: { _, _ in },
+                                        onBeginTextEdit: { _ in }
                                     )
                                     .frame(width: 100, height: 100)
                                     Text(idea.label).font(.interCaption).lineLimit(1)

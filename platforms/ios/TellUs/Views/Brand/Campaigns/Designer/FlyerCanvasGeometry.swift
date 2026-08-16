@@ -124,6 +124,33 @@ enum FlyerCanvasGeometry {
         return moved.withSize(width: width, height: height)
     }
 
+    /// Scale around the layer centre so a pinch does not make the layer jump.
+    static func scaled(_ layer: DesignLayer, by factor: Double) -> DesignLayer {
+        guard layer.kind != "unknown", factor.isFinite, factor > 0 else { return layer }
+        let center = CGPoint(x: layer.origin.x + layer.box.width / 2, y: layer.origin.y + layer.box.height / 2)
+        let scale = CGFloat(factor)
+        let size: CGSize
+        if layer.kind == "qr" {
+            let side = min(FlyerLayerLimits.qrSize.upperBound, max(FlyerLayerLimits.qrSize.lowerBound, Double(layer.box.width) * factor))
+            size = CGSize(width: CGFloat(side), height: CGFloat(side))
+        } else {
+            size = CGSize(width: layer.box.width * scale, height: layer.box.height * scale)
+        }
+        let changed = layer.resized(to: size)
+        return changed.moved(to: CGPoint(x: center.x - changed.box.width / 2, y: center.y - changed.box.height / 2))
+    }
+
+    static func snapRotation(degrees: Double, detent: Double = 6) -> Double {
+        guard degrees.isFinite, detent >= 0 else { return 0 }
+        var normalized = degrees.truncatingRemainder(dividingBy: 360)
+        if normalized > 180 { normalized -= 360 }
+        if normalized < -180 { normalized += 360 }
+        for target in [0.0, 90.0, -90.0, 180.0, -180.0] where abs(normalized - target) <= detent {
+            return target == -180 ? 180 : target
+        }
+        return normalized
+    }
+
     private static func rotatedPoint(_ point: CGPoint, around origin: CGPoint, radians: CGFloat) -> CGPoint {
         let dx = point.x - origin.x
         let dy = point.y - origin.y
