@@ -30,4 +30,5 @@ struct TellusPublicBrandPage: Codable {
     let state: String?
     let has_board: Bool
     let messaging_enabled: Bool
+    let followed: Bool
 }

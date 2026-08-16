@@ -193,12 +193,22 @@ async def discover(
         else:
             args.append(escape_like(city_filter) if city_filter else None)
             city_p = f"${len(args)}"
+            args.append(state_filter)
+            state_p = f"${len(args)}"
             args.append(viewer_id)
             viewer_p = f"${len(args)}"
             args.append(limit)
             limit_p = f"${len(args)}"
             args.append(offset)
             offset_p = f"${len(args)}"
+
+            # State is matched together with city (not a standalone predicate)
+            # so a bare ?state= without ?city= doesn't force a table scan of
+            # every store row — Discover's UI always sends them together.
+            store_match = (
+                f"st.city ILIKE '%' || {city_p} || '%' "
+                f"AND ({state_p}::text IS NULL OR st.state ILIKE {state_p})"
+            )
 
             sql = f"""
                 SELECT b.slug, b.name, b.logo_url, b.google_place_id, b.messaging_enabled,
@@ -213,13 +223,16 @@ async def discover(
                             SELECT 1 FROM tellus_brands b2
                              WHERE ({city_p}::text IS NULL OR EXISTS
                                     (SELECT 1 FROM tellus_stores st2
-                                      WHERE st2.brand_id = b2.id AND st2.city ILIKE '%' || {city_p} || '%'))
+                                      WHERE st2.brand_id = b2.id AND {store_match.replace('st.', 'st2.')}))
                                {where_extra.replace('b.name', 'b2.name')}
                              LIMIT {_MAX_DEPTH}
                        ) capped) AS total_count
                   FROM tellus_brands b
                   LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
-                                      WHERE brand_id = b.id ORDER BY created_at LIMIT 1) n ON TRUE
+                                      WHERE brand_id = b.id
+                                      ORDER BY ({city_p}::text IS NOT NULL AND city ILIKE '%' || {city_p} || '%') DESC,
+                                               created_at
+                                      LIMIT 1) n ON TRUE
                   LEFT JOIN LATERAL (
                       SELECT ROUND(AVG(r.rating)::numeric, 1) AS rating,
                              COUNT(*) AS review_count,
@@ -234,7 +247,7 @@ async def discover(
                                       ORDER BY created_at LIMIT 1) lk ON TRUE
                  WHERE ({city_p}::text IS NULL OR EXISTS
                         (SELECT 1 FROM tellus_stores st
-                          WHERE st.brand_id = b.id AND st.city ILIKE '%' || {city_p} || '%'))
+                          WHERE st.brand_id = b.id AND {store_match}))
                    {where_extra}
                  ORDER BY rev.review_count DESC, b.name
                  LIMIT {limit_p} OFFSET {offset_p}
@@ -265,7 +278,22 @@ async def discover(
             if google_rows is not None and redis:
                 await cache_set(redis, cache_key, google_rows, ttl=_GOOGLE_CACHE_TTL_S)
         known_ids = {e.google_place_id for e in tellus_entries if e.google_place_id}
-        google_rows = dedupe_google(google_rows or [], known_ids)
+        google_rows = google_rows or []
+        # Dedupe against ALL Tell-Us brands with this place_id, not just this
+        # page's rows — a brand whose stores lack lat/lng (never geocoded, or
+        # a failed re-geocode) is invisible to the bbox filter above but still
+        # has a google_place_id, so without this it renders twice: once as
+        # its own (storeless) Tell-Us card if it ever surfaces, and once as a
+        # bare "Add to Tell-Us" Google card.
+        candidate_ids = [r["place_id"] for r in google_rows if r.get("place_id")]
+        if candidate_ids:
+            async with get_connection() as conn:
+                extra_rows = await conn.fetch(
+                    "SELECT google_place_id FROM tellus_brands WHERE google_place_id = ANY($1::text[])",
+                    candidate_ids,
+                )
+            known_ids |= {r["google_place_id"] for r in extra_rows}
+        google_rows = dedupe_google(google_rows, known_ids)
         google_entries = [_entry_from_google_row(r) for r in google_rows[: limit - len(tellus_entries)]]
 
     entries = tellus_entries + google_entries

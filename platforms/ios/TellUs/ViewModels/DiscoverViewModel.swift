@@ -19,6 +19,11 @@ final class DiscoverViewModel: LoadableVM {
     private var coordinate: (lat: Double, lng: Double)?
     private var nextOffset: Int?
     private var searchTask: Task<Void, Never>?
+    private var isLoadingMore = false
+    // Bumped before every load()/loadMore() request; a response is only
+    // applied if this hasn't moved on since — guards a debounced load()
+    // landing after (or racing) an in-flight loadMore(), and vice versa.
+    private var generation = 0
 
     func onAppear() async {
         guard !locationResolved else { return }
@@ -36,12 +41,15 @@ final class DiscoverViewModel: LoadableVM {
 
     func load() async {
         nextOffset = nil
+        generation += 1
+        let myGeneration = generation
         await withLoad {
             let page = try await DiscoverService.shared.discover(
                 lat: self.coordinate?.lat, lng: self.coordinate?.lng,
                 q: self.query.isEmpty ? nil : self.query, city: nil, state: nil,
                 offset: 0
             )
+            guard myGeneration == self.generation else { return }
             self.entries = page.entries
             self.nextOffset = page.next_offset
             self.showsGoogleAttribution = page.google_attribution
@@ -49,13 +57,17 @@ final class DiscoverViewModel: LoadableVM {
     }
 
     func loadMore() async {
-        guard let offset = nextOffset else { return }
+        guard let offset = nextOffset, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        let myGeneration = generation
         do {
             let page = try await DiscoverService.shared.discover(
                 lat: coordinate?.lat, lng: coordinate?.lng,
                 q: query.isEmpty ? nil : query, city: nil, state: nil,
                 offset: offset
             )
+            guard myGeneration == generation else { return }
             entries.append(contentsOf: page.entries)
             nextOffset = page.next_offset
         } catch {

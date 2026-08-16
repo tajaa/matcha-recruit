@@ -4,7 +4,6 @@ struct DiscoverCard: View {
     let entry: DiscoverEntry
     let onFollow: () -> Void
     let onAddToTellUs: () -> Void
-    @State private var navigateToBrand = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -53,9 +52,6 @@ struct DiscoverCard: View {
             }
         }
         .padding(.vertical, 4)
-        .navigationDestination(isPresented: $navigateToBrand) {
-            if let slug = entry.slug { BrandDetailView(slug: slug) }
-        }
     }
 
     private var placeLine: String? {
@@ -73,13 +69,21 @@ struct DiscoverCard: View {
             case .tellus where entry.claimed:
                 Button(entry.followed ? "Following" : "Follow", action: onFollow)
                     .buttonStyle(.bordered).tint(entry.followed ? TU.textDim : TU.ember)
-                Button(entry.has_board ? "View board" : "See reviews") { navigateToBrand = true }
+                if let slug = entry.slug {
+                    NavigationLink(entry.has_board ? "View board" : "See reviews") {
+                        BrandDetailView(slug: slug)
+                    }
                     .buttonStyle(.bordered).tint(TU.textDim)
+                }
             case .tellus:
                 // Unclaimed — BrandDetailView itself surfaces "Leave feedback"
                 // via the page's own intake_token, not a Follow/board action.
-                Button("Leave feedback") { navigateToBrand = true }
+                if let slug = entry.slug {
+                    NavigationLink("Leave feedback") {
+                        BrandDetailView(slug: slug)
+                    }
                     .buttonStyle(.bordered).tint(TU.textDim)
+                }
             case .google:
                 Button("Add to Tell-Us", action: onAddToTellUs)
                     .buttonStyle(.bordered).tint(TU.ember)

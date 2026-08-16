@@ -19,6 +19,7 @@ final class BrandDetailViewModel: LoadableVM {
         await withLoad {
             let page = try await PublicBrandService.shared.brandDetail(slug: self.slug)
             self.page = page
+            self.followed = page.followed
         }
     }
 

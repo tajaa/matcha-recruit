@@ -37,11 +37,17 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         }
         return await withCheckedContinuation { continuation in
             pendingContinuations.append(continuation)
-            startTimeoutIfNeeded()
             if manager.authorizationStatus == .authorizedWhenInUse
                 || manager.authorizationStatus == .authorizedAlways {
+                // Already resolved (a prior open granted access) — the
+                // permission sheet won't appear, so the 8s budget is purely
+                // "how long is a location fix worth waiting for."
+                startTimeoutIfNeeded()
                 manager.requestLocation()
             }
+            // .notDetermined: no timeout yet — the user may take longer than
+            // 8s to answer the system prompt. locationManagerDidChangeAuthorization
+            // starts the clock once they actually respond.
         }
     }
 
@@ -75,6 +81,7 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
                 return
             }
             guard let self, !self.pendingContinuations.isEmpty else { return }
+            self.startTimeoutIfNeeded()
             self.manager.requestLocation()
         }
     }

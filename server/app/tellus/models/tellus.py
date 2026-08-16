@@ -687,6 +687,7 @@ class TellusPublicBrandPage(BaseModel):
     has_board: bool = False
     messaging_enabled: bool = False
     stores: list["TellusMessagingStore"] = Field(default_factory=list)
+    followed: bool = False   # false when unauthenticated — same viewer-scoping as discover/places
 
 
 class TellusClaimResponse(BaseModel):

@@ -162,24 +162,36 @@ async def create_store(body: TellusStoreCreate, account: TellusAccount = Depends
 async def update_store(
     store_id: UUID, body: TellusStoreUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
+    # Ownership check + geocode happen on their own short connections — the
+    # geocode is an outbound Census HTTP call (up to ~15s) and must never sit
+    # inside a held pool connection (create_store follows the same shape).
     async with get_connection() as conn:
         existing = await get_owned_store(conn, store_id, account.brand_id)
-        # Re-geocode whenever the address-bearing fields change — the old
-        # UPDATE left lat/lng untouched, so editing an address kept stale
-        # coordinates that Discover (TELLUS_DISCOVER_PLAN.md) ranks on.
-        # Geocode the MERGED result, not just the patched fields, since a
-        # zipcode-only edit still needs the existing city/state to resolve.
-        geo = None
-        address_changed = any(
-            getattr(body, f) is not None for f in ("address", "city", "state", "zipcode")
-        )
-        if address_changed:
-            new_city = body.city if body.city is not None else existing["city"]
-            new_state = body.state if body.state is not None else existing["state"]
-            new_zipcode = body.zipcode if body.zipcode is not None else existing["zipcode"]
-            new_address = body.address if body.address is not None else existing["address"]
-            if new_city or new_address:
-                geo = await geocode_location(new_city or "", new_state, new_zipcode, new_address)
+
+    # Re-geocode whenever the address-bearing fields change — the old
+    # UPDATE left lat/lng untouched, so editing an address kept stale
+    # coordinates that Discover (TELLUS_DISCOVER_PLAN.md) ranks on.
+    # Geocode the MERGED result, not just the patched fields, since a
+    # zipcode-only edit still needs the existing city/state to resolve.
+    address_changed = any(
+        getattr(body, f) is not None for f in ("address", "city", "state", "zipcode")
+    )
+    geo = None
+    # Distinct from `geo is not None` below: True whenever the address
+    # changed and was resolvable at all, so a changed-but-unresolvable
+    # address NULLs lat/lng instead of keeping the OLD address's coordinates
+    # (Discover would otherwise rank the store at a place it no longer is).
+    should_write_coords = False
+    if address_changed:
+        new_city = body.city if body.city is not None else existing["city"]
+        new_state = body.state if body.state is not None else existing["state"]
+        new_zipcode = body.zipcode if body.zipcode is not None else existing["zipcode"]
+        new_address = body.address if body.address is not None else existing["address"]
+        if new_city or new_address:
+            should_write_coords = True
+            geo = await geocode_location(new_city or "", new_state, new_zipcode, new_address)
+
+    async with get_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE tellus_stores
                SET name = COALESCE($3, name), address = COALESCE($4, address),
@@ -190,8 +202,10 @@ async def update_store(
                    updated_at = NOW()
                WHERE id = $1 AND brand_id = $2 RETURNING *""",
             store_id, account.brand_id, body.name, body.address, body.city, body.state, body.zipcode,
-            geo is not None, geo["lat"] if geo else None, geo["lng"] if geo else None,
+            should_write_coords, geo["lat"] if geo else None, geo["lng"] if geo else None,
         )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
     return TellusStore(**dict(row))
 
 

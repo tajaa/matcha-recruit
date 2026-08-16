@@ -46,6 +46,10 @@ async def public_brand_page(
         )) and brand["plan_status"] == "active"
 
         claimed = brand["owner_account_id"] is not None
+        followed = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM tellus_brand_follows WHERE brand_id = $1 AND consumer_account_id = $2)",
+            brand["id"], viewer_id,
+        )) if viewer_id is not None else False
         intake_token = None
         if not claimed:
             intake_token = await conn.fetchval(
@@ -172,6 +176,7 @@ async def public_brand_page(
         has_board=has_board,
         messaging_enabled=bool(claimed and brand["messaging_enabled"]),
         stores=[TellusMessagingStore(**dict(s)) for s in stores],
+        followed=followed,
     )
 
 
