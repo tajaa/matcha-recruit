@@ -17,6 +17,7 @@ private enum CampaignSheet: Identifiable {
 struct CampaignsView: View {
     @State private var vm = CampaignsViewModel()
     @State private var sheet: CampaignSheet?
+    @State private var pendingPush: PromoCampaign?
 
     var body: some View {
         Group {
@@ -30,25 +31,7 @@ struct CampaignsView: View {
                 )
             } else {
                 List(vm.campaigns) { campaign in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button { sheet = .qr(campaign) } label: {
-                            CampaignRow(campaign: campaign)
-                        }
-                        .buttonStyle(.plain)
-                        if campaign.campaign_type == "location", campaign.push_sent_at == nil {
-                            Button {
-                                Task { await vm.push(campaign) }
-                            } label: {
-                                Label("Push to in-radius followers", systemImage: "location.fill")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(TU.ember)
-                        } else if campaign.campaign_type == "location", let sent = campaign.push_sent_count {
-                            Text("Pushed to \(sent) follower\(sent == 1 ? "" : "s")")
-                                .font(.interCaption)
-                                .foregroundStyle(TU.textDim)
-                        }
-                    }
+                    CampaignListItem(campaign: campaign, sheet: $sheet, pendingPush: $pendingPush)
                 }
                 .listStyle(.plain)
             }
@@ -76,6 +59,76 @@ struct CampaignsView: View {
             case .qr(let campaign):
                 CampaignQRSheet(campaign: campaign)
             }
+        }
+        .alert(
+            "Push this offer?",
+            isPresented: $pendingPush.isPresented(),
+            presenting: pendingPush,
+            actions: pushAlertActions,
+            message: pushAlertMessage
+        )
+    }
+
+    private func pushAlertActions(_ campaign: PromoCampaign) -> some View {
+        Group {
+            Button("Cancel", role: .cancel) { pendingPush = nil }
+            Button("Push") {
+                let target = campaign
+                pendingPush = nil
+                Task { await vm.push(target) }
+            }
+        }
+    }
+
+    private func pushAlertMessage(_ campaign: PromoCampaign) -> some View {
+        let miles = campaign.radius_miles.map { String(format: "%.1f", $0) } ?? "a few"
+        let store = campaign.store_name ?? "the store"
+        return Text("This sends once to followers within \(miles) miles of \(store). It can't be undone.")
+    }
+}
+
+private extension Binding where Value == PromoCampaign? {
+    func isPresented() -> Binding<Bool> {
+        Binding<Bool>(get: { wrappedValue != nil }, set: { if !$0 { wrappedValue = nil } })
+    }
+}
+
+private struct CampaignListItem: View {
+    let campaign: PromoCampaign
+    @Binding var sheet: CampaignSheet?
+    @Binding var pendingPush: PromoCampaign?
+
+    private var isLocation: Bool { campaign.campaign_type == "location" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Location campaigns are push-only — the claim QR only works for a
+            // follower with a fresh in-radius device token, so no QR/scan
+            // sheet is offered for them.
+            if isLocation {
+                CampaignRow(campaign: campaign)
+            } else {
+                Button { sheet = .qr(campaign) } label: {
+                    CampaignRow(campaign: campaign)
+                }
+                .buttonStyle(.plain)
+            }
+            pushStatus
+        }
+    }
+
+    @ViewBuilder
+    private var pushStatus: some View {
+        if isLocation, campaign.status == "active", campaign.push_sent_at == nil {
+            Button { pendingPush = campaign } label: {
+                Label("Push to in-radius followers", systemImage: "location.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(TU.ember)
+        } else if isLocation, campaign.push_sent_at != nil, let sent = campaign.push_sent_count {
+            Text("Pushed to \(sent) follower\(sent == 1 ? "" : "s")")
+                .font(.interCaption)
+                .foregroundStyle(TU.textDim)
         }
     }
 }

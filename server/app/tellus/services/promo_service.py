@@ -484,22 +484,27 @@ async def push_campaign(conn, brand_id: UUID, campaign_id: UUID) -> dict:
                     SELECT unnest($1::uuid[]), $2, $3, $4, 'promo_campaign', $5""",
                 account_ids, "promo_campaign", brand_title, body, str(campaign_id),
             )
-        await conn.execute(
-            """UPDATE tellus_promo_campaigns
-                  SET push_sent_at = NOW(), push_sent_count = $3, updated_at = NOW()
-                WHERE id = $1 AND brand_id = $2""",
-            campaign_id, brand_id, len(account_ids),
-        )
+            # Only burn the one-shot push when it actually reached someone —
+            # the already_pushed guard above is permanent, so stamping this
+            # on a zero-recipient send would make the campaign unretryable.
+            await conn.execute(
+                """UPDATE tellus_promo_campaigns
+                      SET push_sent_at = NOW(), push_sent_count = $3, updated_at = NOW()
+                    WHERE id = $1 AND brand_id = $2""",
+                campaign_id, brand_id, len(account_ids),
+            )
 
-    from . import push
-    push.schedule_token_push(
-        tokens, "promo_campaign", brand_title, body,
-        reference_type="promo_campaign", reference_id=str(campaign_id),
-        slug=campaign["brand_slug"], name=campaign["brand_name"],
-        claim_token=campaign["claim_token"],
-    )
+    if tokens:
+        from . import push
+        push.schedule_token_push(
+            tokens, "promo_campaign", brand_title, body,
+            reference_type="promo_campaign", reference_id=str(campaign_id),
+            slug=campaign["brand_slug"], name=campaign["brand_name"],
+            claim_token=campaign["claim_token"],
+        )
     return {
         "sent_count": len(account_ids),
+        "pushed": bool(account_ids),
         "store_name": campaign["store_name"],
         "radius_miles": campaign["radius_miles"],
     }

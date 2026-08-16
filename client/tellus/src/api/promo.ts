@@ -36,7 +36,7 @@ export const promoApi = {
     },
   ) => tellusApi.patch<PromoCampaign>(`/promo/campaigns/${id}`, body),
   cancelCampaign: (id: string) => tellusApi.post<{ invalidated_count: number }>(`/promo/campaigns/${id}/cancel`, {}),
-  pushCampaign: (id: string) => tellusApi.post<{ sent_count: number; store_name: string; radius_miles: number }>(`/promo/campaigns/${id}/push`, {}),
+  pushCampaign: (id: string) => tellusApi.post<{ sent_count: number; pushed: boolean; store_name: string; radius_miles: number }>(`/promo/campaigns/${id}/push`, {}),
   saveDesign: (id: string, design_json: FlyerDesign) =>
     tellusApi.put(`/promo/campaigns/${id}/design`, { design_json }),
   uploadFlyer: (id: string, form: FormData) =>

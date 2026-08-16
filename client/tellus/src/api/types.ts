@@ -68,6 +68,12 @@ export interface Brand {
   reward_mode: 'auto' | 'manual'
   created_at: string
   messaging_enabled?: boolean
+  tagline?: string | null
+  description?: string | null
+  cover_url?: string | null
+  category?: string | null
+  website?: string | null
+  hours?: Record<string, string> | null
 }
 
 export interface BrandPrompt {

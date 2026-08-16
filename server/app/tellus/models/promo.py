@@ -87,6 +87,7 @@ class CancelOut(BaseModel):
 
 class PushOut(BaseModel):
     sent_count: int
+    pushed: bool = True
     store_name: str
     radius_miles: float
 

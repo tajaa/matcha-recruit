@@ -114,6 +114,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
   const [err, setErr] = useState('')
   const [result, setResult] = useState('')
   const claimUrl = absoluteUrl(campaign.claim_url)
+  const isLocation = campaign.campaign_type === 'location'
 
   async function togglePause() {
     setBusy(true); setErr('')
@@ -146,7 +147,11 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
     setBusy(true); setErr(''); setResult('')
     try {
       const result = await promoApi.pushCampaign(campaign.id)
-      setResult(`Pushed to ${result.sent_count} follower${result.sent_count === 1 ? '' : 's'} with a fresh in-radius location.`)
+      setResult(
+        result.pushed
+          ? `Pushed to ${result.sent_count} follower${result.sent_count === 1 ? '' : 's'} with a fresh in-radius location.`
+          : `No followers were near ${campaign.store_name || 'the store'} just now — you can try pushing again later.`
+      )
       onChanged()
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not push campaign')
@@ -165,7 +170,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
           <div className="flex items-center gap-2">
             <h3 className="font-semibold">{campaign.title}</h3>
             <Chip tone={campaignTone(campaign.status)}>{campaign.status}</Chip>
-            {campaign.campaign_type === 'location' && <Chip tone="positive"><MapPin className="mr-1 inline h-3 w-3" />location</Chip>}
+            {isLocation && <Chip tone="positive"><MapPin className="mr-1 inline h-3 w-3" />location · push only</Chip>}
           </div>
           <p className="text-sm text-tu-dim">{campaign.reward_text}</p>
           <p className="mt-1 text-xs text-tu-faint">
@@ -186,8 +191,12 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
           {campaign.campaign_type === 'location' && campaign.status === 'active' && !campaign.push_sent_at && (
             <Button variant="soft" loading={busy} onClick={push}><MapPin className="h-4 w-4" /> Push</Button>
           )}
-          <Button variant="soft" onClick={() => setShowQr((v) => !v)}><QrCode className="h-4 w-4" /> QR</Button>
-          <Button variant="soft" onClick={() => navigator.clipboard.writeText(claimUrl)}><Copy className="h-4 w-4" /></Button>
+          {!isLocation && (
+            <>
+              <Button variant="soft" onClick={() => setShowQr((v) => !v)}><QrCode className="h-4 w-4" /> QR</Button>
+              <Button variant="soft" onClick={() => navigator.clipboard.writeText(claimUrl)}><Copy className="h-4 w-4" /></Button>
+            </>
+          )}
           {campaign.status !== 'cancelled' && (
             <Button variant="soft" loading={busy} onClick={togglePause}>
               {campaign.status === 'active' ? <><Pause className="h-4 w-4" /> Pause</> : <><Play className="h-4 w-4" /> Resume</>}
@@ -200,7 +209,7 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
       </div>
       <ErrorText>{err}</ErrorText>
       {result && <p className="mt-2 text-xs text-tu-good">{result}</p>}
-      {showQr && (
+      {showQr && !isLocation && (
         <div className="mt-4 flex flex-col items-center gap-2 border-t border-tu-border pt-4">
           <div className="rounded-xl bg-white p-3"><QRCodeCanvas value={claimUrl} size={160} /></div>
           <p className="break-all text-center text-xs text-tu-faint">{claimUrl}</p>

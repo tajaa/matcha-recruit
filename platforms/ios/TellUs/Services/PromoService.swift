@@ -50,8 +50,20 @@ final class PromoService {
 
     struct PushResult: Codable {
         let sent_count: Int
+        let pushed: Bool
         let store_name: String
         let radius_miles: Double
+
+        // `pushed` predates this decoder on any cached response shape; default
+        // true keeps a stale/partial payload from crashing decode. Synthesized
+        // Decodable does NOT honor property defaults, so this needs a manual init.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            sent_count = try c.decode(Int.self, forKey: .sent_count)
+            pushed = try c.decodeIfPresent(Bool.self, forKey: .pushed) ?? true
+            store_name = try c.decode(String.self, forKey: .store_name)
+            radius_miles = try c.decode(Double.self, forKey: .radius_miles)
+        }
     }
 
     func pushCampaign(id: String) async throws -> PushResult {

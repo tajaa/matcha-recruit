@@ -1,15 +1,39 @@
 """Shared helpers for Tell-Us routes — ownership checks + media URL minting."""
 import contextlib
+import json
 import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
 from ...core.services.storage import get_storage
-from ..models.tellus import TellusReport, TellusReportAnswer, TellusReportMedia
+from ..models.tellus import TellusReport, TellusReportAnswer, TellusReportMedia, normalize_brand_hours
+
+# Social-proof counts are capped so an unbounded COUNT(*) never scans a huge
+# invite table; every read AND write path must use the same cap or the client
+# sees the number snap back after a reload (a raw uncapped COUNT(*) at the
+# write site was the 2026-08 bug — read paths capped, write path didn't).
+INVITE_COUNT_CAP = 500
+INVITE_COUNT_SQL = (
+    "SELECT COUNT(*) FROM (SELECT 1 FROM tellus_brand_fan_invites "
+    f"WHERE brand_id = $1 LIMIT {INVITE_COUNT_CAP}) c"
+)
+
+
+def decode_brand_hours(raw: Any) -> Optional[dict[str, str]]:
+    """asyncpg returns JSONB as a raw string unless a codec is registered on
+    the pool. Decode then run through normalize_brand_hours so a pre-existing
+    bad row (written before validation existed) can't break a public-page
+    decode — same trap/fix as routes/admin/_shared.py:decode_audit_rows."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return None
+    return normalize_brand_hours(raw)
 
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
 _SLUG_MAX_LEN = 60

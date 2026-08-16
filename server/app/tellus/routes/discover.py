@@ -35,7 +35,7 @@ from ..services.discover_service import (
     normalize_brand_category,
     normalize_google_type,
 )
-from ._shared import escape_like
+from ._shared import INVITE_COUNT_CAP, INVITE_COUNT_SQL, escape_like
 
 router = APIRouter()
 
@@ -179,7 +179,7 @@ async def discover(
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
                        (SELECT COUNT(*) FROM (
-                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT {INVITE_COUNT_CAP}
                        ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
@@ -236,7 +236,7 @@ async def discover(
                                 WHERE f.brand_id = b.id AND f.consumer_account_id = {viewer_p}) AS followed,
                        CASE WHEN b.owner_account_id IS NULL THEN lk.token END AS intake_token,
                        (SELECT COUNT(*) FROM (
-                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT 500
+                            SELECT 1 FROM tellus_brand_fan_invites bi WHERE bi.brand_id = b.id LIMIT {INVITE_COUNT_CAP}
                        ) ic) AS invite_count,
                        (SELECT COUNT(*) FROM (
                             SELECT 1 FROM tellus_brands b2
@@ -363,9 +363,7 @@ async def invite_brand(
             brand["id"], account.id,
         )
         already_invited = result == "INSERT 0 0"
-        invite_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM tellus_brand_fan_invites WHERE brand_id = $1", brand["id"]
-        )
+        invite_count = await conn.fetchval(INVITE_COUNT_SQL, brand["id"])
 
     share_url = f"/tellus/b/{body.slug}?invite=1"
     share_text = f"{brand['name']} isn't on Tell-Us yet. {invite_count} locals want them on it — this is their page."

@@ -3,7 +3,6 @@ published reviews at /tellus/b/{slug}. Mirrors public_intake.py's hygiene
 (rate limit, no auth) since this is the other unauthenticated surface in the
 app.
 """
-import json
 from typing import Optional
 
 import asyncpg
@@ -18,7 +17,7 @@ from ..models.tellus import (
 )
 from ..services.admin_audit import record_admin_action
 from ..services.likes_service import hydrate_likes
-from ._shared import _answer_rows_to_models, _media_url
+from ._shared import INVITE_COUNT_SQL, _answer_rows_to_models, _media_url, decode_brand_hours
 from .places import ensure_community_link
 
 router = APIRouter()
@@ -53,10 +52,7 @@ async def public_brand_page(
             "SELECT EXISTS (SELECT 1 FROM tellus_brand_follows WHERE brand_id = $1 AND consumer_account_id = $2)",
             brand["id"], viewer_id,
         )) if viewer_id is not None else False
-        invite_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM tellus_brand_fan_invites WHERE brand_id = $1 LIMIT 500) c",
-            brand["id"],
-        )
+        invite_count = await conn.fetchval(INVITE_COUNT_SQL, brand["id"])
         invited_by_me = bool(await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM tellus_brand_fan_invites WHERE brand_id = $1 AND consumer_account_id = $2)",
             brand["id"], viewer_id,
@@ -193,9 +189,7 @@ async def public_brand_page(
         cover_url=brand["cover_url"],
         category=brand["category"],
         website=brand["website"],
-        # asyncpg returns JSONB as a raw string unless a codec is registered
-        # on the pool (same trap as routes/admin/_shared.py:decode_audit_rows).
-        hours=json.loads(brand["hours"]) if isinstance(brand["hours"], str) else brand["hours"],
+        hours=decode_brand_hours(brand["hours"]),
         invite_count=invite_count or 0,
         invited_by_me=invited_by_me,
     )

@@ -24,9 +24,9 @@ from ..models.tellus import (
     TellusStoreCreate,
     TellusStoreUpdate,
 )
-from ..services.discover_service import normalize_brand_category
+from ..services.discover_service import BRAND_CATEGORIES, normalize_brand_category
 from ..services.geo import geocode_location
-from ._shared import delete_managed_object, get_owned_store, is_managed_object
+from ._shared import decode_brand_hours, delete_managed_object, get_owned_store, is_managed_object
 
 router = APIRouter()
 
@@ -36,11 +36,7 @@ def _decode_brand_row(row) -> dict:
     the pool — decode `hours` defensively before constructing TellusBrand
     (same trap/fix as routes/admin/_shared.py:decode_audit_rows)."""
     d = dict(row)
-    if isinstance(d.get("hours"), str):
-        try:
-            d["hours"] = json.loads(d["hours"])
-        except ValueError:
-            d["hours"] = None
+    d["hours"] = decode_brand_hours(d.get("hours"))
     return d
 
 
@@ -49,6 +45,14 @@ def _new_link_token() -> str:
 
 
 # ── Brand profile ─────────────────────────────────────────────────────────────
+
+@router.get("/brand/categories", response_model=list[str])
+async def list_brand_categories(account: TellusAccount = Depends(require_brand)):
+    """The one canonical vocabulary — update_brand rejects anything
+    normalize_brand_category() doesn't recognize, so the editor must pick
+    from this list rather than free-text."""
+    return list(BRAND_CATEGORIES)
+
 
 @router.get("/brand", response_model=TellusBrand)
 async def get_brand(account: TellusAccount = Depends(require_brand)):

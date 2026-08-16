@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, StringConstraints, model_validator
+from pydantic import BaseModel, EmailStr, Field, StringConstraints, field_validator, model_validator
 
 AccountType = Literal["consumer", "brand"]
 ConsumerTier = Literal["free", "paid"]
@@ -126,6 +126,44 @@ class TellusProfileUpdate(BaseModel):
 
 # ── Brands & stores ───────────────────────────────────────────────────────────
 
+# Matches HoursDisclosure.dayOrder in BrandDetailView.swift and the "hours"
+# grid in the Settings editor — iOS decodes brand hours as a flat
+# [String: String], so any nested value breaks the entire /b/{slug} decode.
+BRAND_HOURS_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def normalize_brand_hours(value: Any) -> Optional[dict[str, str]]:
+    """Coerce a decoded `hours` JSONB value down to a flat day->str map,
+    dropping anything else. Used on READ paths so a pre-existing bad row
+    (written before validation existed) can't 500 the endpoint — the WRITE
+    path is enforced by TellusBrandUpdate.hours below."""
+    if not isinstance(value, dict):
+        return None
+    cleaned = {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str)}
+    return cleaned or None
+
+
+def _validate_brand_hours(v: Optional[dict]) -> Optional[dict[str, str]]:
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        raise ValueError("hours must be an object of day -> string")
+    if len(v) > len(BRAND_HOURS_DAYS):
+        raise ValueError("hours has too many entries")
+    cleaned: dict[str, str] = {}
+    for key, val in v.items():
+        if key not in BRAND_HOURS_DAYS:
+            raise ValueError(f"Unrecognized hours key: {key!r}")
+        if not isinstance(val, str):
+            raise ValueError(f"hours.{key} must be a string")
+        val = val.strip()
+        if len(val) > 40:
+            raise ValueError(f"hours.{key} is too long")
+        if val:
+            cleaned[key] = val
+    return cleaned or None
+
+
 class TellusBrand(BaseModel):
     id: UUID
     owner_account_id: Optional[UUID] = None
@@ -141,7 +179,10 @@ class TellusBrand(BaseModel):
     cover_url: Optional[str] = None
     category: Optional[str] = None
     website: Optional[str] = None
-    hours: Optional[dict] = None
+    # Response side stays permissive-but-flat: a pre-existing bad row must not
+    # 500 the endpoint. Route callers should still run it through
+    # normalize_brand_hours() when decoding raw asyncpg JSONB text.
+    hours: Optional[dict[str, str]] = None
 
 
 class TellusBrandUpdate(BaseModel):
@@ -156,6 +197,32 @@ class TellusBrandUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=40)
     website: Optional[str] = Field(default=None, max_length=300)
     hours: Optional[dict] = None
+
+    @field_validator("hours")
+    @classmethod
+    def _hours_shape(cls, v: Optional[dict]) -> Optional[dict[str, str]]:
+        return _validate_brand_hours(v)
+
+    @field_validator("website")
+    @classmethod
+    def _website_scheme(cls, v: Optional[str]) -> Optional[str]:
+        """Bare host ("acme.test") gets https:// prepended — the common paste.
+        Anything that already declares a scheme must be http(s); this rejects
+        javascript:/data:/custom schemes rather than accidentally legitimizing
+        them by prepending https:// in front (which would just make
+        "https://javascript:alert(1)" — inert, but not the intent)."""
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if "://" in v:
+            if not v.lower().startswith(("http://", "https://")):
+                raise ValueError("Website must be an http(s) URL.")
+            return v
+        if ":" in v.split("/", 1)[0]:
+            raise ValueError("Website must be an http(s) URL.")
+        return f"https://{v}"
 
 
 class TellusBrandPrompt(BaseModel):

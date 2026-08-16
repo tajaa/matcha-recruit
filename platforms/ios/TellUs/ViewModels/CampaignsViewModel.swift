@@ -35,9 +35,11 @@ final class CampaignsViewModel: LoadableVM {
 
     func push(_ campaign: PromoCampaign) async {
         do {
-            _ = try await PromoService.shared.pushCampaign(id: campaign.id)
+            let result = try await PromoService.shared.pushCampaign(id: campaign.id)
             await load()
-            error = nil
+            // A zero-recipient push leaves push_sent_at unset server-side so the
+            // button reappears — surface that explicitly, it isn't a failure.
+            error = result.pushed ? nil : "No followers were near \(campaign.store_name ?? "the store") just now — try again later."
         } catch {
             if !error.isCancellation { self.error = error.localizedDescription }
         }
