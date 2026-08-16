@@ -12,6 +12,10 @@ final class FlyerAssetCatalogTests: XCTestCase {
             XCTAssertEqual(template.design.artboard.w, spec.w, template.id)
             XCTAssertEqual(template.design.artboard.h, spec.h, template.id)
             XCTAssertTrue(template.design.hasUsableQR, template.id)
+            for layer in template.design.layers {
+                guard case .sticker(let sticker) = layer else { continue }
+                XCTAssertNotNil(FlyerAssetCatalog.stickerImageNames[sticker.assetId], template.id)
+            }
         }
     }
 

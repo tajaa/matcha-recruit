@@ -5,7 +5,7 @@
   "palette": { "ink": "#f2e9ff", "paper": "#120d1c", "brand": "#c026d3", "brandSoft": "#e879f9", "accent": "#22d3ee", "muted": "#7c6f91" },
   "layers": [
     { "id": "happy-panel", "type": "shape", "shape": "rect", "x": 36, "y": 36, "width": 1008, "height": 1008, "rotation": 0, "opacity": 1, "fill": "brand", "cornerRadius": 48 },
-    { "id": "happy-cocktail", "type": "sticker", "assetId": "cocktail", "x": 790, "y": 72, "width": 190, "height": 190, "rotation": 10, "opacity": 1 },
+    { "id": "happy-cocktail", "type": "sticker", "assetId": "cocktail.svg", "x": 790, "y": 72, "width": 190, "height": 190, "rotation": 10, "opacity": 1 },
     { "id": "happy-title", "type": "text", "text": "HAPPY HOUR", "x": 95, "y": 190, "width": 890, "rotation": 0, "opacity": 1, "fontFamily": "Arial Black", "fontSize": 100, "fontStyle": "bold", "fill": "ink", "align": "center", "lineHeight": 1.05, "letterSpacing": 2 },
     { "id": "happy-reward", "type": "text", "text": "Two for one tonight", "x": 125, "y": 390, "width": 830, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 54, "fontStyle": "normal", "fill": "ink", "align": "center", "lineHeight": 1.2, "letterSpacing": 0 },
     { "id": "happy-scan", "type": "text", "text": "Scan to claim", "x": 100, "y": 570, "width": 420, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 34, "fontStyle": "normal", "fill": "ink", "align": "center", "lineHeight": 1.2, "letterSpacing": 1 },

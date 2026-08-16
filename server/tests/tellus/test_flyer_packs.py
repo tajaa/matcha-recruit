@@ -63,7 +63,7 @@ def test_template_stickers_are_in_the_catalog():
     for entry in _load(WEB / "templates" / "index.json"):
         design = _load(WEB / "templates" / entry["file"])
         assert all(
-            (layer["assetId"] if layer["assetId"].endswith(".svg") else f'{layer["assetId"]}.svg') in catalog.STICKER_IDS
+            layer["assetId"] in catalog.STICKER_IDS
             for layer in design["layers"] if layer["type"] == "sticker"
         )
 

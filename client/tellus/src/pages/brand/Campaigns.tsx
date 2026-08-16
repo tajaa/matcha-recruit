@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
-import { Ban, Copy, MapPin, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
+import { Ban, Copy, Info, MapPin, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { promoApi } from '../../api/promo'
+import { BrandFeatureWizard } from '../../components/BrandFeatureWizard'
 import { Button, Card, Chip, Empty, ErrorText, Input, Modal, Select, Spinner, Textarea } from '../../components/ui'
+import { useAccount } from '../../hooks/useAccount'
 import type { PromoCampaign, ScannerDevice, Store } from '../../api/types'
 
 function absoluteUrl(path: string) {
@@ -332,12 +334,16 @@ function ScannersSection() {
 }
 
 export default function BrandCampaigns() {
+  const { account } = useAccount()
   const navigate = useNavigate()
   const [campaigns, setCampaigns] = useState<PromoCampaign[]>([])
   const [stores, setStores] = useState<Store[]>([])
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
+
+  const guideKey = account?.id ? `tellus.brand-campaign-guide.v1:${account.id}` : null
 
   async function load() {
     setLoading(true); setLoadErr('')
@@ -354,13 +360,25 @@ export default function BrandCampaigns() {
     }
   }
   useEffect(() => { void load() }, [])
+  useEffect(() => {
+    if (!guideKey || loading) return
+    setGuideOpen(window.localStorage.getItem(guideKey) !== 'done')
+  }, [guideKey, loading])
+
+  function closeGuide() {
+    if (guideKey) window.localStorage.setItem(guideKey, 'done')
+    setGuideOpen(false)
+  }
 
   return (
     <div className="space-y-8">
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="text-lg font-bold">Promo campaigns</h1>
-          <Button onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> New campaign</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="soft" size="sm" onClick={() => setGuideOpen(true)}><Info className="h-4 w-4" /> How it works</Button>
+            <Button onClick={() => setModalOpen(true)}><Plus className="h-4 w-4" /> New campaign</Button>
+          </div>
         </div>
 
         {loading ? <Spinner /> : loadErr ? (
@@ -386,6 +404,12 @@ export default function BrandCampaigns() {
         onClose={() => setModalOpen(false)}
         onCreated={(created) => navigate(`/brand/campaigns/${created.id}/design`)}
         stores={stores}
+      />
+      <BrandFeatureWizard
+        open={guideOpen}
+        onClose={closeGuide}
+        onCreateCampaign={() => { closeGuide(); setModalOpen(true) }}
+        onOpenLocals={() => { closeGuide(); navigate('/brand/board') }}
       />
     </div>
   )

@@ -86,6 +86,16 @@ final class FlyerCanvasGeometryTests: XCTestCase {
         XCTAssertEqual(FlyerCanvasGeometry.resizeHandle(at: corner, layer: layer), .topRight)
     }
 
+    func testResizeTranslationIsConvertedToLayerCoordinates() {
+        let local = FlyerCanvasGeometry.localTranslation(
+            CGSize(width: 70.7107, height: 70.7107),
+            rotation: 45
+        )
+
+        XCTAssertEqual(local.width, 100, accuracy: 0.01)
+        XCTAssertEqual(local.height, 0, accuracy: 0.01)
+    }
+
     func testScaledKeepsLayerCentre() {
         let layer = FlyerDesignFactory.sticker(in: FlyerDesignFactory.blank(), assetID: "star", size: CGSize(width: 120, height: 80))
         let before = CGPoint(x: layer.origin.x + layer.box.width / 2, y: layer.origin.y + layer.box.height / 2)

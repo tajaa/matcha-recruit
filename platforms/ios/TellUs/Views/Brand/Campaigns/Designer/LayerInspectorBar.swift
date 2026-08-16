@@ -10,7 +10,7 @@ struct LayerInspectorBar: View {
     let onDuplicate: () -> Void
     let onReorder: (FlyerLayerDirection) -> Void
     let onUpdate: (DesignLayer) -> Void
-    let onAddLogo: () -> Void
+    let onReplaceLogo: () -> Void
     @Binding var textDraft: String
 
     private let colorTokens = ["ink", "paper", "brand", "brandSoft", "accent", "muted"]
@@ -89,20 +89,25 @@ struct LayerInspectorBar: View {
                 ), in: FlyerLayerLimits.textFontSize, step: 1)
                 swatches(for: layer)
             }
-        case .sticker, .shape:
+        case .sticker:
+            sizeSlider(for: layer)
+        case .shape:
             sizeSlider(for: layer)
             swatches(for: layer)
         case .qr:
             Text("Claim code colors").font(.interCaption).foregroundStyle(.secondary)
             qrSwatches(for: layer)
         case .image:
-            opacitySlider(for: layer)
             if brandLogoAvailable {
-                Button("Replace with brand logo", action: onAddLogo)
+                Button("Replace with brand logo", action: onReplaceLogo)
                     .buttonStyle(.bordered)
             }
         case .unknown:
             EmptyView()
+        }
+
+        if layer.kind != "unknown" {
+            opacitySlider(for: layer)
         }
 
         DisclosureGroup("Precise") {

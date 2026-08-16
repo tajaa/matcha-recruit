@@ -124,6 +124,14 @@ enum FlyerCanvasGeometry {
         return moved.withSize(width: width, height: height)
     }
 
+    static func localTranslation(_ translation: CGSize, rotation: Double) -> CGSize {
+        let radians = -CGFloat(rotation * .pi / 180)
+        return CGSize(
+            width: translation.width * cos(radians) - translation.height * sin(radians),
+            height: translation.width * sin(radians) + translation.height * cos(radians)
+        )
+    }
+
     /// Scale around the layer centre so a pinch does not make the layer jump.
     static func scaled(_ layer: DesignLayer, by factor: Double) -> DesignLayer {
         guard layer.kind != "unknown", factor.isFinite, factor > 0 else { return layer }

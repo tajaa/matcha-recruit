@@ -24,6 +24,8 @@ final class FlyerDesignerViewModel: LoadableVM {
     var palettePresets: [FlyerPalettePreset] = []
     var currentTheme: String?
 
+    var isReady: Bool { isLoaded }
+
     private var autosaveTask: Task<Void, Never>?
     private var isLoaded = false
 
@@ -44,6 +46,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     }
 
     func load() async {
+        isLoaded = false
         isLoading = true
         defer { isLoading = false }
         do {
@@ -105,6 +108,16 @@ final class FlyerDesignerViewModel: LoadableVM {
     func addLogo() {
         guard let logoURL = brand?.logo_url else { return }
         apply(document.design.appending(FlyerDesignFactory.image(in: document.design, source: logoURL, size: CGSize(width: 512, height: 512), slot: "logo")), commit: true)
+    }
+
+    func replaceSelectedWithLogo() {
+        guard let logoURL = brand?.logo_url else { return }
+        updateSelected { selected in
+            guard case .image(var image) = selected else { return selected }
+            image.src = logoURL
+            image.slot = "logo"
+            return .image(image)
+        }
     }
 
     func applyTemplate(_ template: FlyerTemplateAsset) {

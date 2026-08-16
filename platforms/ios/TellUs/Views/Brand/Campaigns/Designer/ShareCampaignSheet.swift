@@ -13,6 +13,10 @@ struct ShareCampaignSheet: View {
         campaign.campaign_type == "location" && campaign.push_sent_at == nil && campaign.status == "active"
     }
 
+    private var canPostToLocals: Bool {
+        campaign.campaign_type != "location"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -22,12 +26,18 @@ struct ShareCampaignSheet: View {
                 }
 
                 Section("Share") {
-                    Button {
-                        Task { await postToLocals() }
-                    } label: {
-                        Label("Post to Locals", systemImage: "person.3.fill")
+                    if canPostToLocals {
+                        Button {
+                            Task { await postToLocals() }
+                        } label: {
+                            Label("Post to Locals", systemImage: "person.3.fill")
+                        }
+                        .disabled(isPosting || isPushing)
+                    } else {
+                        Text("Location campaigns are sent only to nearby followers.")
+                            .font(.interFootnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(isPosting || isPushing)
 
                     if canPushNearby {
                         Button {

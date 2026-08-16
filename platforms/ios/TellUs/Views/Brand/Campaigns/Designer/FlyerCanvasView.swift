@@ -47,7 +47,11 @@ final class FlyerCanvasUIView: UIView, UIGestureRecognizerDelegate {
     private var didMove = false
     private var resizeLayer: DesignLayer?
     private var resizeHandle: FlyerResizeHandle?
-    private var gestureBaseLayer: DesignLayer?
+    private var transformBaseLayer: DesignLayer?
+    private var pinchActive = false
+    private var rotateActive = false
+    private var pinchScale = 1.0
+    private var rotationRadians = 0.0
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -167,10 +171,17 @@ final class FlyerCanvasUIView: UIView, UIGestureRecognizerDelegate {
                     return
                 }
                 let scale = artboardRect(in: bounds).width / CGFloat(design.artboard.w)
+                let canvasTranslation = CGSize(
+                    width: translation.x / max(0.01, scale),
+                    height: translation.y / max(0.01, scale)
+                )
                 let changed = FlyerCanvasGeometry.resized(
                     original,
                     handle: resizeHandle,
-                    translation: CGSize(width: translation.x / max(0.01, scale), height: translation.y / max(0.01, scale))
+                    translation: FlyerCanvasGeometry.localTranslation(
+                        canvasTranslation,
+                        rotation: original.rotation
+                    )
                 )
                 onLayerChange?(changed, recognizer.state == .ended)
                 if recognizer.state == .ended {
@@ -207,14 +218,21 @@ final class FlyerCanvasUIView: UIView, UIGestureRecognizerDelegate {
         guard interactive, let id = selectedLayerID else { return }
         switch recognizer.state {
         case .began:
-            gestureBaseLayer = design.layers.first { $0.id == id && !$0.isLocked }
+            guard let layer = design.layers.first(where: { $0.id == id && !$0.isLocked }) else { return }
+            beginTransform(with: layer)
+            pinchActive = true
+            pinchScale = 1
         case .changed, .ended:
-            guard let base = gestureBaseLayer else { return }
-            let changed = FlyerCanvasGeometry.scaled(base, by: Double(recognizer.scale))
-            onLayerChange?(changed, recognizer.state == .ended)
-            if recognizer.state == .ended { gestureBaseLayer = nil }
+            guard transformBaseLayer != nil, pinchActive else { return }
+            pinchScale = Double(recognizer.scale)
+            if recognizer.state == .ended { pinchActive = false }
+            emitTransform(commit: !pinchActive && !rotateActive)
+        case .cancelled, .failed:
+            pinchActive = false
+            pinchScale = 1
+            resetTransformIfIdle()
         default:
-            gestureBaseLayer = nil
+            break
         }
     }
 
@@ -222,17 +240,48 @@ final class FlyerCanvasUIView: UIView, UIGestureRecognizerDelegate {
         guard interactive, let id = selectedLayerID else { return }
         switch recognizer.state {
         case .began:
-            let candidate = design.layers.first { $0.id == id && !$0.isLocked }
-            gestureBaseLayer = candidate?.kind == "qr" ? nil : candidate
+            guard let layer = design.layers.first(where: { $0.id == id && !$0.isLocked }), layer.kind != "qr" else { return }
+            beginTransform(with: layer)
+            rotateActive = true
+            rotationRadians = 0
         case .changed, .ended:
-            guard let base = gestureBaseLayer else { return }
-            let degrees = base.rotation + Double(recognizer.rotation) * 180 / .pi
-            let changed = base.withRotation(FlyerCanvasGeometry.snapRotation(degrees: degrees))
-            onLayerChange?(changed, recognizer.state == .ended)
-            if recognizer.state == .ended { gestureBaseLayer = nil }
+            guard transformBaseLayer != nil, rotateActive else { return }
+            rotationRadians = Double(recognizer.rotation)
+            if recognizer.state == .ended { rotateActive = false }
+            emitTransform(commit: !pinchActive && !rotateActive)
+        case .cancelled, .failed:
+            rotateActive = false
+            rotationRadians = 0
+            resetTransformIfIdle()
         default:
-            gestureBaseLayer = nil
+            break
         }
+    }
+
+    private func beginTransform(with layer: DesignLayer) {
+        if transformBaseLayer == nil {
+            transformBaseLayer = layer
+            pinchScale = 1
+            rotationRadians = 0
+        }
+    }
+
+    private func emitTransform(commit: Bool) {
+        guard let base = transformBaseLayer else { return }
+        var changed = FlyerCanvasGeometry.scaled(base, by: pinchScale)
+        if base.kind != "qr" {
+            let degrees = base.rotation + rotationRadians * 180 / .pi
+            changed = changed.withRotation(FlyerCanvasGeometry.snapRotation(degrees: degrees))
+        }
+        onLayerChange?(changed, commit)
+        if commit { resetTransformIfIdle() }
+    }
+
+    private func resetTransformIfIdle() {
+        guard !pinchActive && !rotateActive else { return }
+        transformBaseLayer = nil
+        pinchScale = 1
+        rotationRadians = 0
     }
 
     @objc private func handleDoubleTap(_ recognizer: UITapGestureRecognizer) {

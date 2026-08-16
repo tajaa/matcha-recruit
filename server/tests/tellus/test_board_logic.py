@@ -241,6 +241,13 @@ class TestBoardSourceGuards:
         src = inspect.getsource(board.create_post)
         assert 'campaign_id = body.campaign_id if body.kind == "promo" else None' in src
 
+    def test_promo_posts_require_active_qr_campaign(self):
+        from app.tellus.routes import board
+
+        src = inspect.getsource(board.create_post)
+        assert 'campaign_row["status"] != "active"' in src
+        assert 'campaign_row["campaign_type"] != "qr"' in src
+
     def test_list_posts_batches_campaign_lookup(self):
         from app.tellus.routes import board
 

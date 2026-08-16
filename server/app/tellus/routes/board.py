@@ -613,10 +613,14 @@ async def create_post(
                     "FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",
                     body.campaign_id, brand["id"],
                 )
-                if campaign_row is None or campaign_row["status"] == "cancelled":
+                if (
+                    campaign_row is None
+                    or campaign_row["status"] != "active"
+                    or campaign_row["campaign_type"] != "qr"
+                ):
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Pick an active campaign of your own",
+                        detail="Pick an active QR campaign of your own",
                     )
 
             # Only a validated deal listing may attach — an update/event/question

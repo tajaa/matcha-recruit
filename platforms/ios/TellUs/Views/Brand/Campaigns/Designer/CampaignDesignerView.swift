@@ -84,16 +84,19 @@ struct CampaignDesignerView: View {
                 onDuplicate: { vm.duplicateSelected() },
                 onReorder: { vm.reorderSelected($0) },
                 onUpdate: { layer in vm.updateSelected { _ in layer } },
-                onAddLogo: { vm.addLogo() },
+                onReplaceLogo: { vm.replaceSelectedWithLogo() },
                 textDraft: $textDraft
             )
         }
         .onChange(of: vm.selectedLayerID) { _, _ in syncTextDraft() }
         .onChange(of: vm.document.revision) { _, _ in
-            if vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
+            if vm.isReady && vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
+        }
+        .onChange(of: vm.isReady) { _, ready in
+            if ready && vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
         }
         .onAppear {
-            if vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
+            if vm.isReady && vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
         }
         .fullScreenCover(isPresented: $templateGallery) {
             TemplateGalleryView(templates: vm.templates, assets: vm.renderAssets) { template in

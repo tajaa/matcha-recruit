@@ -5,6 +5,7 @@ enum CampaignSheet: Identifiable {
     case qr(PromoCampaign)
     case design(PromoCampaign)
     case share(PromoCampaign)
+    case guide
 
     var id: String {
         switch self {
@@ -16,11 +17,14 @@ enum CampaignSheet: Identifiable {
             return "design-\(campaign.id)"
         case .share(let campaign):
             return "share-\(campaign.id)"
+        case .guide:
+            return "guide"
         }
     }
 }
 
 struct CampaignsView: View {
+    @Environment(AppState.self) private var appState
     @State private var vm = CampaignsViewModel()
     @State private var sheet: CampaignSheet?
     @State private var pendingPush: PromoCampaign?
@@ -50,8 +54,17 @@ struct CampaignsView: View {
                 }
                 .accessibilityLabel("New campaign")
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { sheet = .guide } label: {
+                    Image(systemName: "info.circle")
+                }
+                .accessibilityLabel("How campaigns work")
+            }
         }
-        .task { await vm.load() }
+        .task {
+            await vm.load()
+            showGuideIfNeeded()
+        }
         .refreshable { await vm.load() }
         .overlay(alignment: .top) {
             ErrorBanner(message: vm.error).padding(.top, 8)
@@ -70,6 +83,14 @@ struct CampaignsView: View {
                 }
             case .share(let campaign):
                 ShareCampaignSheet(campaign: campaign, onPostedToLocals: {})
+            case .guide:
+                BrandCampaignGuide(
+                    onCreateCampaign: {
+                        completeGuide()
+                        self.sheet = .create
+                    },
+                    onDone: { completeGuide() }
+                )
             }
         }
         .alert(
@@ -96,6 +117,21 @@ struct CampaignsView: View {
         let miles = campaign.radius_miles.map { String(format: "%.1f", $0) } ?? "a few"
         let store = campaign.store_name ?? "the store"
         return Text("This sends once to followers within \(miles) miles of \(store). It can't be undone.")
+    }
+
+    private var guideKey: String? {
+        guard let accountID = appState.account?.id else { return nil }
+        return "tellus.brand-campaign-guide.v1:\(accountID)"
+    }
+
+    private func showGuideIfNeeded() {
+        guard sheet == nil, let guideKey, !UserDefaults.standard.bool(forKey: guideKey) else { return }
+        sheet = .guide
+    }
+
+    private func completeGuide() {
+        if let guideKey { UserDefaults.standard.set(true, forKey: guideKey) }
+        sheet = nil
     }
 }
 
@@ -204,5 +240,97 @@ private struct CampaignRow: View {
             }
         }
         .padding(.vertical, 6)
+    }
+}
+
+private struct BrandCampaignGuide: View {
+    let onCreateCampaign: () -> Void
+    let onDone: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var stepIndex = 0
+    @State private var didExit = false
+
+    private let steps = [
+        (icon: "ticket.fill", eyebrow: "1 · Build the offer", title: "Start with a campaign", body: "Create a QR campaign for flyers and Locals, or choose a location campaign to reach nearby followers with a one-time push."),
+        (icon: "sparkles", eyebrow: "2 · Make it yours", title: "Design the flyer", body: "Choose a template, palette, stickers, or your logo. Drag, resize, and rotate layers, then export the finished flyer or use it on the campaign."),
+        (icon: "person.3.fill", eyebrow: "3 · Share with regulars", title: "Post QR offers to Locals", body: "Use Share campaign, then Post to Locals. Members see the flyer and can open the claim link from the board."),
+        (icon: "location.fill", eyebrow: "4 · Reach nearby", title: "Push location offers", body: "Location campaigns stay push-only. Send them to followers with a fresh device location inside your configured radius."),
+    ]
+
+    private var current: (icon: String, eyebrow: String, title: String, body: String) { steps[stepIndex] }
+    private var isLast: Bool { stepIndex == steps.count - 1 }
+
+    private func finish() {
+        didExit = true
+        onDone()
+    }
+
+    private func createCampaign() {
+        didExit = true
+        onCreateCampaign()
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                ProgressView(value: Double(stepIndex + 1), total: Double(steps.count))
+                    .tint(TU.ember)
+
+                Image(systemName: current.icon)
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundStyle(TU.ember)
+                    .frame(width: 84, height: 84)
+                    .background(TU.ember.opacity(0.14), in: RoundedRectangle(cornerRadius: 22))
+
+                VStack(spacing: 8) {
+                    Text(current.eyebrow)
+                        .font(TU.eyebrow())
+                        .foregroundStyle(TU.emberHot)
+                    Text(current.title)
+                        .font(.interTitle3.bold())
+                        .multilineTextAlignment(.center)
+                    Text(current.body)
+                        .font(.interBody)
+                        .foregroundStyle(TU.textDim)
+                        .multilineTextAlignment(.center)
+                }
+
+                Spacer()
+
+                HStack(spacing: 10) {
+                    if stepIndex > 0 {
+                        Button("Back") { stepIndex -= 1 }
+                            .buttonStyle(.bordered)
+                    }
+                    Spacer()
+                    if stepIndex == 0 {
+                        Button("Create campaign") { createCampaign() }
+                            .buttonStyle(EmberButtonStyle())
+                    }
+                    Button(isLast ? "Finish" : "Next") {
+                        if isLast {
+                            finish()
+                        } else {
+                            stepIndex += 1
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(TU.ember)
+                }
+            }
+            .padding()
+            .navigationTitle("Campaigns, in four moves")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Skip") { finish(); dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .onDisappear {
+            if !didExit { finish() }
+        }
     }
 }
