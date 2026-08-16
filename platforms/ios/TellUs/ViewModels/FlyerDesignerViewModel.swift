@@ -22,6 +22,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     var exportError: String?
     var flyerImageURL: String?
     var palettePresets: [FlyerPalettePreset] = []
+    var currentTheme: String?
 
     private var autosaveTask: Task<Void, Never>?
     private var isLoaded = false
@@ -59,6 +60,7 @@ final class FlyerDesignerViewModel: LoadableVM {
             )
             document.reset(to: loadedDesign)
             selectedLayerID = nil
+            currentTheme = nil
             isLoaded = true
             error = nil
             saveError = nil
@@ -108,6 +110,7 @@ final class FlyerDesignerViewModel: LoadableVM {
     func applyTemplate(_ template: FlyerTemplateAsset) {
         apply(FlyerDesignFactory.instantiate(template.design, logoURL: brand?.logo_url), commit: true)
         selectedLayerID = nil
+        currentTheme = template.manifest.theme
     }
 
     func deleteSelected() {

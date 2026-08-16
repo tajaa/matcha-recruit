@@ -4,17 +4,26 @@ struct FlyerAssistantPanel: View {
     let campaignID: String
     let currentDesign: () -> FlyerDesign
     let currentSelectedLayer: () -> DesignLayer?
+    let theme: String?
     let assets: FlyerRenderAssets
     let assistant: FlyerAssistantViewModel
     let onDesign: (FlyerDesign) -> Void
     @State private var draft = ""
 
-    private let quickPrompts = [
-        "Make it feel warmer",
-        "Make the headline bigger",
-        "Give it a dark, high-contrast look",
-        "Move the QR to the bottom right",
-    ]
+    static func quickPrompts(theme: String?) -> [String] {
+        switch theme {
+        case "beach-summer":
+            return ["Make it feel like sunset", "Add a wave along the bottom", "Bigger, bolder headline", "Move the QR bottom-right"]
+        case "grand-opening":
+            return ["Make the opening feel bigger", "Add more celebratory energy", "Bigger, bolder headline", "Move the QR bottom-right"]
+        case "holiday-festive":
+            return ["Make it warmer and cozier", "Add a festive accent", "Bigger, bolder headline", "Move the QR bottom-right"]
+        case "happy-hour":
+            return ["Make it feel more electric", "Make the offer pop", "Bigger, bolder headline", "Move the QR bottom-right"]
+        default:
+            return ["Make it feel warmer", "Make the headline bigger", "Give it a dark, high-contrast look", "Move the QR to the bottom right"]
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -63,7 +72,7 @@ struct FlyerAssistantPanel: View {
     private var quickPromptView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack {
-                ForEach(quickPrompts, id: \.self) { prompt in
+                ForEach(Self.quickPrompts(theme: theme), id: \.self) { prompt in
                     Button(prompt) { send(prompt) }
                         .buttonStyle(.bordered)
                         .controlSize(.small)

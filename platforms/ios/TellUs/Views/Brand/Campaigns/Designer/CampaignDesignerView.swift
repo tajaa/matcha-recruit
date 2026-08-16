@@ -8,6 +8,7 @@ struct CampaignDesignerView: View {
     @State private var shareSheet = false
     @State private var assistant: FlyerAssistantViewModel
     @State private var assistantSheet = false
+    @State private var templateGallery = false
 
     init(campaignID: String) {
         _vm = State(initialValue: FlyerDesignerViewModel(campaignID: campaignID))
@@ -72,9 +73,32 @@ struct CampaignDesignerView: View {
             .background(Color(uiColor: .secondarySystemBackground))
 
             Divider()
-            inspector
+            LayerInspectorBar(
+                design: vm.document.design,
+                layers: vm.document.design.layers,
+                selectedLayerID: vm.selectedLayerID,
+                brandLogoAvailable: vm.brand?.logo_url != nil,
+                onSelect: { vm.selectLayer($0) },
+                onDelete: { vm.deleteSelected() },
+                onDuplicate: { vm.duplicateSelected() },
+                onReorder: { vm.reorderSelected($0) },
+                onUpdate: { layer in vm.updateSelected { _ in layer } },
+                onAddLogo: { vm.addLogo() },
+                textDraft: $textDraft
+            )
         }
         .onChange(of: vm.selectedLayerID) { _, _ in syncTextDraft() }
+        .onChange(of: vm.document.revision) { _, _ in
+            if vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
+        }
+        .onAppear {
+            if vm.document.design.layers.isEmpty && !vm.templates.isEmpty { templateGallery = true }
+        }
+        .fullScreenCover(isPresented: $templateGallery) {
+            TemplateGalleryView(templates: vm.templates, assets: vm.renderAssets) { template in
+                vm.applyTemplate(template)
+            }
+        }
         .sheet(isPresented: $exportSheet) {
             FlyerExportSheet(
                 onShare: { dpi in
@@ -99,6 +123,7 @@ struct CampaignDesignerView: View {
                 campaignID: vm.campaignID,
                 currentDesign: { vm.document.design },
                 currentSelectedLayer: { selectedLayer },
+                theme: vm.currentTheme,
                 assets: vm.renderAssets,
                 assistant: assistant,
                 onDesign: { next in
@@ -111,34 +136,27 @@ struct CampaignDesignerView: View {
     private var toolbar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Button { vm.addText() } label: { Label("Text", systemImage: "textformat") }
                 Menu {
+                    Button { vm.addText() } label: { Label("Text", systemImage: "textformat") }
                     Button("Rectangle") { vm.addShape("rect") }
                     Button("Circle") { vm.addShape("circle") }
                     Button("Line") { vm.addShape("line") }
-                } label: {
-                    Label("Shape", systemImage: "square.on.circle")
-                }
-                Button { vm.addQR() } label: { Label("Claim QR", systemImage: "qrcode") }
-                    .disabled(vm.document.design.hasUsableQR)
-                Menu {
-                    ForEach(vm.templates) { template in
-                        Button(template.manifest.name) { vm.applyTemplate(template) }
+                    Button { vm.addQR() } label: { Label("Claim QR", systemImage: "qrcode") }
+                        .disabled(vm.document.design.hasUsableQR)
+                    Menu {
+                        ForEach(FlyerAssetCatalog.stickerImageNames.keys.sorted(), id: \.self) { assetID in
+                            Button(assetID.replacingOccurrences(of: ".svg", with: "")) { vm.addSticker(assetID: assetID) }
+                        }
+                    } label: {
+                        Label("Sticker", systemImage: "sparkles")
                     }
-                } label: {
-                    Label("Templates", systemImage: "rectangle.3.group")
-                }
-                Menu {
-                    ForEach(FlyerAssetCatalog.stickerImageNames.keys.sorted(), id: \.self) { assetID in
-                        Button(assetID.replacingOccurrences(of: ".svg", with: "")) { vm.addSticker(assetID: assetID) }
-                    }
-                } label: {
-                    Label("Stickers", systemImage: "sparkles")
-                }
-                Menu {
                     if vm.brand?.logo_url != nil {
                         Button("Add brand logo") { vm.addLogo() }
                     }
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                Menu {
                     if vm.palettePresets.isEmpty {
                         Text("Palettes load when the designer opens online")
                     } else {
@@ -146,16 +164,14 @@ struct CampaignDesignerView: View {
                             Button(palette.label) { vm.applyPalette(palette.colors) }
                         }
                     }
-                    Menu("Artboard") {
-                        ForEach(FlyerArtboardPresets.all, id: \.preset) { preset in
-                            Button(preset.label) { vm.setArtboard(preset.preset) }
-                        }
+                    ForEach(FlyerArtboardPresets.all, id: \.preset) { preset in
+                        Button(preset.label) { vm.setArtboard(preset.preset) }
                     }
                     Button("Warm paper background") { vm.setBackgroundColor("paper") }
                 } label: {
-                    Label("Brand", systemImage: "paintpalette")
+                    Label("Canvas", systemImage: "paintpalette")
                 }
-                Divider().frame(height: 24)
+                Button { templateGallery = true } label: { Label("Restyle", systemImage: "rectangle.3.group") }
                 Button { vm.undo() } label: { Image(systemName: "arrow.uturn.backward") }
                     .disabled(!vm.document.canUndo)
                 Button { vm.redo() } label: { Image(systemName: "arrow.uturn.forward") }
