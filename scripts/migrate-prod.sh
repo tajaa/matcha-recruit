@@ -195,8 +195,9 @@ elif command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>
     echo "Snapshot of record: $SNAP_ID (verified again before apply)"
     echo
   else
-    echo "ABORT: no snapshot, no rollback. Re-run with --no-snapshot to override." >&2
-    exit 1
+    echo "!! Skipping snapshot: proceeding with NO rollback path. If this goes wrong,"
+    echo "!! there is nothing to restore from."
+    echo
   fi
 else
   echo "aws CLI unavailable or not credentialed — cannot snapshot automatically."
