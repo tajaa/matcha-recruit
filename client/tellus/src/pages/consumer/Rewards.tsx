@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Flame, Sparkles, Star, TrendingUp } from 'lucide-react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { ArrowRight, Flame, Gift, Sparkles, Star, Tag, TrendingUp } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { Card, Spinner } from '../../components/ui'
 import type { BadgeItem, LedgerEntry, PointsBalance } from '../../api/types'
@@ -27,6 +28,19 @@ export default function Rewards() {
 
   return (
     <div className="space-y-6">
+      <div>
+        <h1 className="text-lg font-bold">Rewards</h1>
+        <p className="mt-0.5 text-sm text-tu-dim">Your points, local offers, and reward cards in one place.</p>
+      </div>
+
+      <section className="space-y-2">
+        <h2 className="text-xs font-bold uppercase tracking-wide text-tu-faint">Explore rewards</h2>
+        <div className="overflow-hidden rounded-xl border border-tu-border bg-tu-panel">
+          <RewardLink to="/marketplace" icon={<Gift className="h-4 w-4" />} title="Marketplace" detail="Find local offers to redeem with points." />
+          <RewardLink to="/redemptions" icon={<Tag className="h-4 w-4" />} title="My redemptions" detail="See redeemed offers and active codes." />
+        </div>
+      </section>
+
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="sm:col-span-2">
           <div className="flex items-start justify-between">
@@ -105,5 +119,18 @@ export default function Rewards() {
         </Card>
       </section>
     </div>
+  )
+}
+
+function RewardLink({ to, icon, title, detail }: { to: string; icon: ReactNode; title: string; detail: string }) {
+  return (
+    <Link to={to} className="flex items-center gap-3 border-b border-tu-border px-4 py-3 last:border-b-0 hover:bg-tu-panel2">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-tu-accent/10 text-tu-accent">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold">{title}</span>
+        <span className="block text-xs text-tu-faint">{detail}</span>
+      </span>
+      <ArrowRight className="h-4 w-4 shrink-0 text-tu-faint" />
+    </Link>
   )
 }

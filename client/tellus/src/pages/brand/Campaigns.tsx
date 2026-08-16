@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
-import { Ban, Copy, Info, MapPin, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2 } from 'lucide-react'
+import { Ban, Copy, Info, MapPin, Pause, Palette, Play, Plus, QrCode, ScanLine, Trash2, Users } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
 import { promoApi } from '../../api/promo'
 import { BrandFeatureWizard } from '../../components/BrandFeatureWizard'
@@ -160,6 +160,17 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
     } finally { setBusy(false) }
   }
 
+  async function postToLocals() {
+    if (!confirm('Post this QR offer to your Locals board?')) return
+    setBusy(true); setErr(''); setResult('')
+    try {
+      await promoApi.postToLocals(campaign)
+      setResult('Posted to Locals.')
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not post campaign to Locals')
+    } finally { setBusy(false) }
+  }
+
   const stats = campaign.stats
   return (
     <Card className={campaign.status === 'cancelled' ? 'opacity-60' : ''}>
@@ -192,6 +203,9 @@ function CampaignCard({ campaign, onChanged }: { campaign: PromoCampaign; onChan
           )}
           {campaign.campaign_type === 'location' && campaign.status === 'active' && !campaign.push_sent_at && (
             <Button variant="soft" loading={busy} onClick={push}><MapPin className="h-4 w-4" /> Push</Button>
+          )}
+          {!isLocation && campaign.status === 'active' && (
+            <Button variant="soft" loading={busy} onClick={postToLocals}><Users className="h-4 w-4" /> Post to Locals</Button>
           )}
           {!isLocation && (
             <>
