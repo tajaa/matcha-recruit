@@ -1,8 +1,9 @@
 import SwiftUI
 
-private enum CampaignSheet: Identifiable {
+enum CampaignSheet: Identifiable {
     case create
     case qr(PromoCampaign)
+    case design(PromoCampaign)
 
     var id: String {
         switch self {
@@ -10,6 +11,8 @@ private enum CampaignSheet: Identifiable {
             return "create"
         case .qr(let campaign):
             return "qr-\(campaign.id)"
+        case .design(let campaign):
+            return "design-\(campaign.id)"
         }
     }
 }
@@ -58,6 +61,10 @@ struct CampaignsView: View {
                 }
             case .qr(let campaign):
                 CampaignQRSheet(campaign: campaign)
+            case .design(let campaign):
+                NavigationStack {
+                    CampaignDesignerView(campaignID: campaign.id)
+                }
             }
         }
         .alert(
@@ -113,6 +120,11 @@ private struct CampaignListItem: View {
                 }
                 .buttonStyle(.plain)
             }
+            Button { sheet = .design(campaign) } label: {
+                Label(campaign.has_design ? "Edit flyer" : "Design flyer", systemImage: "paintbrush")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             pushStatus
         }
     }

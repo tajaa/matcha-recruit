@@ -42,6 +42,7 @@
 		232AF41EF442D7724C347033 /* FeedbackFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CF6E718AC0FF710987593E /* FeedbackFilterBar.swift */; };
 		247B5F88FD45913E6E0AB53C /* FlyerAssetCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */; };
 		252F908591A0CDC05FB5FA19 /* TellUsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623E5CFE228337E6B9F79DCA /* TellUsApp.swift */; };
+		25D737E9A15DA9C82D149DAE /* CampaignSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF6BBEA3264446A063F1301A /* CampaignSheetTests.swift */; };
 		25D7A1BA826B0B64F46794C6 /* FlyerAiModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16EBB2347EA8AAB845B6C09 /* FlyerAiModelTests.swift */; };
 		28195C1F2EDD525F7BB8D407 /* BoardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B5499C45CE7127DE10E87A /* BoardService.swift */; };
 		29E89AB949709190DA076ED7 /* RewardsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A1D2E2B31051AE546A75D3E /* RewardsService.swift */; };
@@ -387,6 +388,7 @@
 		AD5F70B6FAE007EBEF4142CC /* PlacesDedupeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesDedupeTests.swift; sourceTree = "<group>"; };
 		AD5FB5884C131FC1C2DA7EB3 /* ReviewModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewModels.swift; sourceTree = "<group>"; };
 		AF4FB3621A4ED5ACA172FEC3 /* CampaignsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignsView.swift; sourceTree = "<group>"; };
+		AF6BBEA3264446A063F1301A /* CampaignSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignSheetTests.swift; sourceTree = "<group>"; };
 		B1149B903446576E2B5DAC6A /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B16EBB2347EA8AAB845B6C09 /* FlyerAiModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAiModelTests.swift; sourceTree = "<group>"; };
 		B173F5A337E4402646C93081 /* FlyerDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesign.swift; sourceTree = "<group>"; };
@@ -987,6 +989,7 @@
 				1682680B6E0A62F94E2D4270 /* BoardManageViewModelTests.swift */,
 				45180DAA413D7A0D7A4FAD4C /* BoardTabLoadStateTests.swift */,
 				1661D002836CE7A23C3F9C71 /* CampaignModelTests.swift */,
+				AF6BBEA3264446A063F1301A /* CampaignSheetTests.swift */,
 				2A10EEAADD1526EED294CAAB /* CommsModelDecodeTests.swift */,
 				0AE90A579771A4CA8C4F4096 /* DiscoverModelTests.swift */,
 				4929B2B7D47AA89B47FE8C73 /* EnumFallbackTests.swift */,
@@ -1132,6 +1135,7 @@
 				49E150EB35D4F344BFF9CC9B /* BoardManageViewModelTests.swift in Sources */,
 				B02E1F008E54C03A30B0DD4E /* BoardTabLoadStateTests.swift in Sources */,
 				BD7BF549837F137B6AB902C5 /* CampaignModelTests.swift in Sources */,
+				25D737E9A15DA9C82D149DAE /* CampaignSheetTests.swift in Sources */,
 				3706AECF40EADD4D29FC2BE5 /* CommsModelDecodeTests.swift in Sources */,
 				B17DB1B9FD651963208EBBD3 /* DiscoverModelTests.swift in Sources */,
 				368F0643A3618D8D45C1ABE0 /* EnumFallbackTests.swift in Sources */,
