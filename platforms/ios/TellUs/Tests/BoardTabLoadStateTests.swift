@@ -83,4 +83,11 @@ final class BoardTabLoadStateTests: XCTestCase {
         state.succeed(.posts)
         XCTAssertTrue(state.hasLoaded(.posts))
     }
+
+    func testEveryTabHasNonEmptyIndexMetadata() {
+        for tab in BoardTab.allCases {
+            XCTAssertFalse(tab.icon.isEmpty, "\(tab) missing icon")
+            XCTAssertFalse(tab.subtitle.isEmpty, "\(tab) missing subtitle")
+        }
+    }
 }
