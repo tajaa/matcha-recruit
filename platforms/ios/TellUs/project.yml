@@ -41,6 +41,13 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Beetlejuse
+        # XcodeGen writes a fully-specified Info.plist itself (see note below)
+        # and falls back to its own built-in defaults ("1.0" / "1") for these
+        # two keys unless explicitly listed here — the literal values in the
+        # base Info.plist file are ignored. Without this, CURRENT_PROJECT_VERSION
+        # bumps in this file never reach the archived binary.
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UIAppFonts:
           - Inter.ttf
         # Required by App Store validation for any app built against the iOS 11+
