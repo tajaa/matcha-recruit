@@ -163,14 +163,34 @@ async def update_store(
     store_id: UUID, body: TellusStoreUpdate, account: TellusAccount = Depends(require_paid_brand)
 ):
     async with get_connection() as conn:
-        await get_owned_store(conn, store_id, account.brand_id)
+        existing = await get_owned_store(conn, store_id, account.brand_id)
+        # Re-geocode whenever the address-bearing fields change — the old
+        # UPDATE left lat/lng untouched, so editing an address kept stale
+        # coordinates that Discover (TELLUS_DISCOVER_PLAN.md) ranks on.
+        # Geocode the MERGED result, not just the patched fields, since a
+        # zipcode-only edit still needs the existing city/state to resolve.
+        geo = None
+        address_changed = any(
+            getattr(body, f) is not None for f in ("address", "city", "state", "zipcode")
+        )
+        if address_changed:
+            new_city = body.city if body.city is not None else existing["city"]
+            new_state = body.state if body.state is not None else existing["state"]
+            new_zipcode = body.zipcode if body.zipcode is not None else existing["zipcode"]
+            new_address = body.address if body.address is not None else existing["address"]
+            if new_city or new_address:
+                geo = await geocode_location(new_city or "", new_state, new_zipcode, new_address)
         row = await conn.fetchrow(
             """UPDATE tellus_stores
                SET name = COALESCE($3, name), address = COALESCE($4, address),
                    city = COALESCE($5, city), state = COALESCE($6, state),
-                   zipcode = COALESCE($7, zipcode), updated_at = NOW()
+                   zipcode = COALESCE($7, zipcode),
+                   lat = CASE WHEN $8 THEN $9 ELSE lat END,
+                   lng = CASE WHEN $8 THEN $10 ELSE lng END,
+                   updated_at = NOW()
                WHERE id = $1 AND brand_id = $2 RETURNING *""",
             store_id, account.brand_id, body.name, body.address, body.city, body.state, body.zipcode,
+            geo is not None, geo["lat"] if geo else None, geo["lng"] if geo else None,
         )
     return TellusStore(**dict(row))
 

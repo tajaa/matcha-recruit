@@ -183,6 +183,39 @@ class TellusFollowedBrand(BaseModel):
     messaging_enabled: bool = False
 
 
+class TellusDiscoverEntry(BaseModel):
+    source: Literal["tellus", "google"]
+    name: str
+    slug: Optional[str] = None            # None for source="google"
+    google_place_id: Optional[str] = None
+    logo_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    address: Optional[str] = None         # google only; tellus rows use city/state
+    distance_km: Optional[float] = None
+    category_label: Optional[str] = None
+    # tellus: our rolling-12-month window. google: GOOGLE'S OWN numbers — the
+    # client must label them separately and never blend them into a Tell-Us
+    # average.
+    rating: Optional[float] = None
+    review_count: int = 0                 # COUNT(*), matches /places/search + /b/{slug}
+    rating_count: int = 0                 # COUNT(rating) — rating is nullable, so this
+                                           # is what decides whether a star shows at all;
+                                           # without it "4.5 (12)" can come off 3 ratings
+    claimed: bool = False
+    has_board: bool = False
+    followed: bool = False
+    messaging_enabled: bool = False
+    intake_token: Optional[str] = None    # unclaimed tellus rows only
+
+
+class TellusDiscoverPage(BaseModel):
+    entries: list[TellusDiscoverEntry]
+    total: int
+    next_offset: Optional[int] = None
+    google_attribution: bool = False      # true when any source="google" entry survived
+
+
 class TellusPlaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     # Optional when google_place_id is set (Place Details supplies it); the

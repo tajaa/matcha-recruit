@@ -26,6 +26,13 @@ _AUTOCOMPLETE_URL = "https://places.googleapis.com/v1/places:autocomplete"
 _DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 _DETAILS_FIELD_MASK = "id,displayName,formattedAddress,addressComponents,location"
 
+_NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+_TEXT_URL = "https://places.googleapis.com/v1/places:searchText"
+_DISCOVER_FIELD_MASK = (
+    "places.id,places.displayName,places.formattedAddress,places.location,"
+    "places.primaryType,places.rating,places.userRatingCount"
+)
+
 
 def _api_key() -> Optional[str]:
     return get_settings().google_maps_api_key
@@ -87,6 +94,104 @@ async def autocomplete(q: str, city: Optional[str] = None, session_token: Option
             return _parse_autocomplete(resp.json())
     except Exception:
         logger.warning("Tell-Us Google Places autocomplete failed for q=%r", q, exc_info=True)
+        return None
+
+
+def _parse_discover(payload: dict[str, Any]) -> list[dict]:
+    """Pure. searchNearby/searchText JSON ->
+    [{place_id, name, address, lat, lng, primary_type, rating, user_rating_count}].
+    Drops entries missing an id or a non-blank displayName.text — same rule
+    _parse_autocomplete applies to placePrediction/name."""
+    out: list[dict] = []
+    for place in payload.get("places", []):
+        place_id = place.get("id")
+        name = (place.get("displayName") or {}).get("text") or ""
+        if not place_id or not name.strip():
+            continue
+        location = place.get("location") or {}
+        out.append({
+            "place_id": place_id,
+            "name": name,
+            "address": place.get("formattedAddress"),
+            "lat": location.get("latitude"),
+            "lng": location.get("longitude"),
+            "primary_type": place.get("primaryType"),
+            "rating": place.get("rating"),
+            "user_rating_count": place.get("userRatingCount"),
+        })
+    return out
+
+
+async def search_nearby(lat: float, lng: float, radius_m: float, max_results: int = 20) -> Optional[list[dict]]:
+    """-> [{place_id, name, address, lat, lng, primary_type, rating,
+    user_rating_count}]. None when no key configured or on any Google/network
+    error (caller must not cache this); [] only for a genuine zero-result
+    search. Never raises. No sessionToken — this is a per-request Nearby
+    Search SKU, unlike autocomplete's session-billed pair with place_details().
+    No includedTypes filter: searchNearby only accepts Table A types and
+    "establishment" (autocomplete's includedPrimaryTypes value) is not one of
+    them — omitting the filter returns all nearby types, which is what a
+    discovery surface wants."""
+    key = _api_key()
+    if not key:
+        return None
+    body: dict[str, Any] = {
+        "maxResultCount": max_results,
+        "locationRestriction": {
+            "circle": {"center": {"latitude": lat, "longitude": lng}, "radius": radius_m}
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                _NEARBY_URL,
+                json=body,
+                headers={
+                    "X-Goog-Api-Key": key,
+                    "X-Goog-FieldMask": _DISCOVER_FIELD_MASK,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            return _parse_discover(resp.json())
+    except Exception:
+        logger.warning("Tell-Us Google Places nearby search failed for lat=%r lng=%r", lat, lng, exc_info=True)
+        return None
+
+
+async def search_text(
+    q: str, lat: Optional[float] = None, lng: Optional[float] = None,
+    radius_m: Optional[float] = None, max_results: int = 20,
+) -> Optional[list[dict]]:
+    """-> [{place_id, name, address, lat, lng, primary_type, rating,
+    user_rating_count}]. Same None/[] contract as search_nearby. locationBias
+    (not locationRestriction) — a text query can legitimately match outside
+    the radius (e.g. a well-known chain name), bias just ranks nearby higher."""
+    key = _api_key()
+    if not key:
+        return None
+    if not q:
+        return []
+    body: dict[str, Any] = {"textQuery": q, "maxResultCount": max_results}
+    if lat is not None and lng is not None and radius_m is not None:
+        body["locationBias"] = {
+            "circle": {"center": {"latitude": lat, "longitude": lng}, "radius": radius_m}
+        }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                _TEXT_URL,
+                json=body,
+                headers={
+                    "X-Goog-Api-Key": key,
+                    "X-Goog-FieldMask": _DISCOVER_FIELD_MASK,
+                    "Content-Type": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            return _parse_discover(resp.json())
+    except Exception:
+        logger.warning("Tell-Us Google Places text search failed for q=%r", q, exc_info=True)
         return None
 
 
