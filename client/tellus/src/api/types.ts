@@ -1072,4 +1072,5 @@ export interface TemplateManifestEntry {
   // null = the picker renders a live miniature of the template document
   // instead of a baked thumbnail, so a template edit can never go stale.
   thumb: string | null
+  theme: string | null
 }

@@ -1,6 +1,10 @@
 [
-  { "id": "bold-offer", "name": "Bold offer", "preset": "flyer_letter", "file": "bold-offer.json", "thumb": null },
-  { "id": "paper-ticket", "name": "Paper ticket", "preset": "flyer_letter", "file": "paper-ticket.json", "thumb": null },
-  { "id": "counter-card", "name": "Counter card", "preset": "reward_card", "file": "counter-card.json", "thumb": null },
-  { "id": "social-drop", "name": "Social drop", "preset": "social_square", "file": "social-drop.json", "thumb": null }
+  { "id": "bold-offer", "name": "Bold offer", "preset": "flyer_letter", "file": "bold-offer.json", "thumb": null, "theme": null },
+  { "id": "paper-ticket", "name": "Paper ticket", "preset": "flyer_letter", "file": "paper-ticket.json", "thumb": null, "theme": null },
+  { "id": "counter-card", "name": "Counter card", "preset": "reward_card", "file": "counter-card.json", "thumb": null, "theme": null },
+  { "id": "social-drop", "name": "Social drop", "preset": "social_square", "file": "social-drop.json", "thumb": null, "theme": null },
+  { "id": "beach-day", "name": "Beach day", "preset": "flyer_letter", "file": "beach-day.json", "thumb": null, "theme": "beach-summer" },
+  { "id": "grand-opening", "name": "Grand opening", "preset": "flyer_letter", "file": "grand-opening.json", "thumb": null, "theme": "grand-opening" },
+  { "id": "festive-night", "name": "Festive night", "preset": "flyer_letter", "file": "festive-night.json", "thumb": null, "theme": "holiday-festive" },
+  { "id": "happy-hour", "name": "Happy hour", "preset": "social_square", "file": "happy-hour.json", "thumb": null, "theme": "happy-hour" }
 ]

@@ -70,6 +70,15 @@ final class FlyerDesignEditorTests: XCTestCase {
         XCTAssertTrue(instantiated.hasUsableQR)
     }
 
+    func testTemplateInstantiationCarriesTemplatePalette() throws {
+        let catalog = FlyerAssetCatalog(bundle: Bundle.main)
+        let template = try XCTUnwrap(catalog.template(id: "beach-day"))
+        let instantiated = FlyerDesignFactory.instantiate(template.design, logoURL: nil)
+
+        XCTAssertEqual(instantiated.palette, template.design.palette)
+        XCTAssertEqual(instantiated.palette?["brand"], "#0e9bbd")
+    }
+
     func testRetargetClampsKnownLayersAndPreservesUnknownLayer() throws {
         var design = FlyerDesignFactory.blank()
         let text = FlyerDesignFactory.text(in: design, text: "Hi")

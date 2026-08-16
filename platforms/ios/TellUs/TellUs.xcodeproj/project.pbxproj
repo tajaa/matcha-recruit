@@ -37,6 +37,7 @@
 		1CBE777E1DBDC073B3BF8354 /* ReportMediaGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC2C30F5FB62DCB21DF28FF /* ReportMediaGallery.swift */; };
 		1D3E72E40253FA6108A276CB /* BrandMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0735099047713E748887B6D7 /* BrandMoreView.swift */; };
 		1E898DB007FA66524AAE9EA7 /* BillingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6DED366EC3A21D6021D6A45 /* BillingViewModel.swift */; };
+		1F428102FEF7E95FA342AC4B /* beach-day.json in Resources */ = {isa = PBXBuildFile; fileRef = C00A6B80764B93938FB075ED /* beach-day.json */; };
 		20DCFB1E446F8C3E1AF24469 /* BrandTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241643204D022959EBDE0B96 /* BrandTabView.swift */; };
 		21971D9F8C5B0EB5BBD10457 /* FlyerExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */; };
 		232AF41EF442D7724C347033 /* FeedbackFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CF6E718AC0FF710987593E /* FeedbackFilterBar.swift */; };
@@ -91,6 +92,7 @@
 		4E32884568216577C8CA8F1C /* RedeemErrorMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5940EF565CAD65C33CC508 /* RedeemErrorMapping.swift */; };
 		4E509260837C865BC6B8CE6F /* ParityModelDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 604BDD602575190A08A2C7EE /* ParityModelDecodeTests.swift */; };
 		4E81C6A1429C832992505C08 /* PublicBrandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B0B7C23B6AB726B957F5815 /* PublicBrandService.swift */; };
+		4F5043F15F82377C7D6B1F7E /* happy-hour.json in Resources */ = {isa = PBXBuildFile; fileRef = E65877A7276C44694889B7C8 /* happy-hour.json */; };
 		50210C73B311B641E66E30A1 /* CampaignsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF4FB3621A4ED5ACA172FEC3 /* CampaignsView.swift */; };
 		54FF359E836B704ECA9FB14B /* BusinessInboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA85C8AA6DD1149D6884D9FA /* BusinessInboxView.swift */; };
 		578FC13096D4D84B1205BC15 /* ModelDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60E1979AAEDEFB2B42223F9A /* ModelDecodeTests.swift */; };
@@ -122,6 +124,7 @@
 		758DB2F05F019D57C9425AF6 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB1C2BC10BBA1BE9934EF176 /* ErrorBanner.swift */; };
 		779D72C86ADCA52B4CB7BE16 /* BillingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63F6737F449A9E6BED4C6B8 /* BillingService.swift */; };
 		77BB793CBC899B52623DE1E2 /* BillingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 812D5CED1DF16EDC69BD364B /* BillingView.swift */; };
+		78563B810EE78617871F20F5 /* festive-night.json in Resources */ = {isa = PBXBuildFile; fileRef = 3296D4C748603C44F3734C37 /* festive-night.json */; };
 		78C1072CA4E56942BD8389A5 /* BrandDetailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64648FE4CAE703AD83010276 /* BrandDetailModels.swift */; };
 		79E97DCDE74D4F0D3725BD7E /* FlyerAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5078EC3E1CA6C851A5E10CB8 /* FlyerAssetCatalog.swift */; };
 		7AC7AD0CF59B8A7379078D22 /* BillingWallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151125289349005300989275 /* BillingWallView.swift */; };
@@ -141,6 +144,7 @@
 		95BBF4F794CFE96BBB97AD0C /* Promo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 293CC8DAE157D1ED94F44F7E /* Promo.swift */; };
 		9646BBBAF7729CCFE6689C6B /* social-drop.json in Resources */ = {isa = PBXBuildFile; fileRef = 82EBCB85B561BF172B3FB9C1 /* social-drop.json */; };
 		982ED00055A4D9FFA2CD43DA /* DmModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D48E1E2F311614994F0B703 /* DmModels.swift */; };
+		990D78AB0358F6FA8507CFBF /* grand-opening.json in Resources */ = {isa = PBXBuildFile; fileRef = 062238266BA81FEC77FBF675 /* grand-opening.json */; };
 		991F70A2215BC41D3A6BE726 /* MediaVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F02C950A92539061E2F85CF /* MediaVideoView.swift */; };
 		999D1E339C3AF6A9077D7B31 /* DiscoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA37DCEA680F8EAD1D0C1F38 /* DiscoverView.swift */; };
 		99A591C70441414C7AFDAFF2 /* MessagesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E904B35F99279EA6917CA6 /* MessagesListView.swift */; };
@@ -244,6 +248,7 @@
 		04B82A8325FAC90B486CD51D /* BrandScanViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandScanViewModel.swift; sourceTree = "<group>"; };
 		04D8925F3FDA7B0468D6CC9B /* RedeemConfirmSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemConfirmSheet.swift; sourceTree = "<group>"; };
 		0538B41A93B05A20E15718A8 /* FlyerDesignerAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignerAssets.swift; sourceTree = "<group>"; };
+		062238266BA81FEC77FBF675 /* grand-opening.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "grand-opening.json"; sourceTree = "<group>"; };
 		0645227825199FB89D56FC68 /* RewardsHomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsHomeViewModel.swift; sourceTree = "<group>"; };
 		07084B891A11097AF6F59213 /* LoadableVM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadableVM.swift; sourceTree = "<group>"; };
 		0735099047713E748887B6D7 /* BrandMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMoreView.swift; sourceTree = "<group>"; };
@@ -285,6 +290,7 @@
 		3122BC2EAFEF5370945130F8 /* LedgerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerViewModel.swift; sourceTree = "<group>"; };
 		3150E63F05FA5D3231B44DFB /* DmThreadViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmThreadViewModel.swift; sourceTree = "<group>"; };
 		318D7FA2077BCA408032F6DA /* BrandDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandDetailView.swift; sourceTree = "<group>"; };
+		3296D4C748603C44F3734C37 /* festive-night.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "festive-night.json"; sourceTree = "<group>"; };
 		339C7200735D5202A1AAA8BC /* FlyerDesignerViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesignerViewModel.swift; sourceTree = "<group>"; };
 		38694E7D294277B629F5ECAA /* LeaderboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardViewModel.swift; sourceTree = "<group>"; };
 		39137A3DF15E7BEAEA7AD9B0 /* MediaPrepareTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaPrepareTests.swift; sourceTree = "<group>"; };
@@ -406,6 +412,7 @@
 		BF4B6C7D6FE42F31F6F24B83 /* LinkFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkFormSheet.swift; sourceTree = "<group>"; };
 		BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerExportTests.swift; sourceTree = "<group>"; };
 		BFFDBE21B733AF628A3609E1 /* PlacesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesViewModel.swift; sourceTree = "<group>"; };
+		C00A6B80764B93938FB075ED /* beach-day.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "beach-day.json"; sourceTree = "<group>"; };
 		C0C908F67BEF84C21B72B389 /* BoardManageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageView.swift; sourceTree = "<group>"; };
 		C12A6DF92066D903F3F352B0 /* PostRepliesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostRepliesView.swift; sourceTree = "<group>"; };
 		C1CAF2D56D1FD4447E2A19BD /* CardWalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardWalletView.swift; sourceTree = "<group>"; };
@@ -434,6 +441,7 @@
 		E0A797503B96D681CFC8BD4F /* IntakeFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntakeFormView.swift; sourceTree = "<group>"; };
 		E0CAFE1BDB35549BEDB0EF1B /* FeedbackComposerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackComposerSheet.swift; sourceTree = "<group>"; };
 		E28366F8AB2B42570CDF5D57 /* BrandListingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandListingsView.swift; sourceTree = "<group>"; };
+		E65877A7276C44694889B7C8 /* happy-hour.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "happy-hour.json"; sourceTree = "<group>"; };
 		EB5940EF565CAD65C33CC508 /* RedeemErrorMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemErrorMapping.swift; sourceTree = "<group>"; };
 		EB6694B2E89D8C438164363A /* BrandListingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandListingsViewModel.swift; sourceTree = "<group>"; };
 		EB851A9824E8ECB7CFE73F1E /* SafeURL.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeURL.swift; sourceTree = "<group>"; };
@@ -481,8 +489,12 @@
 		0F4BD0AF89C33D68672DCE72 /* templates */ = {
 			isa = PBXGroup;
 			children = (
+				C00A6B80764B93938FB075ED /* beach-day.json */,
 				F9C879DC311D048939ADA67F /* bold-offer.json */,
 				3E0A1ED04CD32CCF4A1FB0C6 /* counter-card.json */,
+				3296D4C748603C44F3734C37 /* festive-night.json */,
+				062238266BA81FEC77FBF675 /* grand-opening.json */,
+				E65877A7276C44694889B7C8 /* happy-hour.json */,
 				CAF78A5F92F53542D6061D9C /* index.json */,
 				B44F551DECE185F68C8B3F61 /* paper-ticket.json */,
 				82EBCB85B561BF172B3FB9C1 /* social-drop.json */,
@@ -1115,8 +1127,12 @@
 			files = (
 				CA26B572147010E3330661E6 /* Assets.xcassets in Resources */,
 				5D65AD1AFBDA09B9243CFBAC /* Inter.ttf in Resources */,
+				1F428102FEF7E95FA342AC4B /* beach-day.json in Resources */,
 				380BD927B94D329E1065758B /* bold-offer.json in Resources */,
 				EC5F05247AE8E00E48C615A8 /* counter-card.json in Resources */,
+				78563B810EE78617871F20F5 /* festive-night.json in Resources */,
+				990D78AB0358F6FA8507CFBF /* grand-opening.json in Resources */,
+				4F5043F15F82377C7D6B1F7E /* happy-hour.json in Resources */,
 				4647E39B68D8F62791F15A42 /* index.json in Resources */,
 				2C5D53B25FBEDA29CC3BAC7E /* paper-ticket.json in Resources */,
 				9646BBBAF7729CCFE6689C6B /* social-drop.json in Resources */,

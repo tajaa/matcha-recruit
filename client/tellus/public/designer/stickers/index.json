@@ -6,5 +6,15 @@
   { "id": "tag", "file": "tag.svg", "thumb": "tag.svg", "w": 200, "h": 200 },
   { "id": "coffee-cup", "file": "coffee-cup.svg", "thumb": "coffee-cup.svg", "w": 200, "h": 200 },
   { "id": "heart", "file": "heart.svg", "thumb": "heart.svg", "w": 200, "h": 200 },
-  { "id": "arrow-down", "file": "arrow-down.svg", "thumb": "arrow-down.svg", "w": 200, "h": 200 }
+  { "id": "arrow-down", "file": "arrow-down.svg", "thumb": "arrow-down.svg", "w": 200, "h": 200 },
+  { "id": "sun", "file": "sun.svg", "thumb": "sun.svg", "w": 200, "h": 200 },
+  { "id": "wave", "file": "wave.svg", "thumb": "wave.svg", "w": 200, "h": 200 },
+  { "id": "palm", "file": "palm.svg", "thumb": "palm.svg", "w": 200, "h": 200 },
+  { "id": "ice-cream", "file": "ice-cream.svg", "thumb": "ice-cream.svg", "w": 200, "h": 200 },
+  { "id": "confetti", "file": "confetti.svg", "thumb": "confetti.svg", "w": 200, "h": 200 },
+  { "id": "balloon", "file": "balloon.svg", "thumb": "balloon.svg", "w": 200, "h": 200 },
+  { "id": "snowflake", "file": "snowflake.svg", "thumb": "snowflake.svg", "w": 200, "h": 200 },
+  { "id": "holly", "file": "holly.svg", "thumb": "holly.svg", "w": 200, "h": 200 },
+  { "id": "cocktail", "file": "cocktail.svg", "thumb": "cocktail.svg", "w": 200, "h": 200 },
+  { "id": "moon", "file": "moon.svg", "thumb": "moon.svg", "w": 200, "h": 200 }
 ]

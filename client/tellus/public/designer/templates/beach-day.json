@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "artboard": { "preset": "flyer_letter", "w": 1275, "h": 1650 },
+  "background": { "kind": "color", "color": "paper" },
+  "palette": { "ink": "#0b3a4a", "paper": "#eef7fa", "brand": "#0e9bbd", "brandSoft": "#67c7dc", "accent": "#f4a259", "muted": "#7fa3ae" },
+  "layers": [
+    { "id": "beach-band", "type": "shape", "shape": "rect", "x": 0, "y": 0, "width": 1275, "height": 390, "rotation": 0, "opacity": 1, "fill": "brand", "cornerRadius": 0 },
+    { "id": "beach-sun", "type": "sticker", "assetId": "sun", "x": 76, "y": 58, "width": 190, "height": 190, "rotation": 0, "opacity": 1 },
+    { "id": "beach-wave", "type": "sticker", "assetId": "wave", "x": 895, "y": 188, "width": 260, "height": 260, "rotation": -8, "opacity": 1 },
+    { "id": "beach-title", "type": "text", "text": "SUMMER SPECIAL", "x": 100, "y": 480, "width": 1075, "rotation": 0, "opacity": 1, "fontFamily": "Arial Black", "fontSize": 112, "fontStyle": "bold", "fill": "ink", "align": "center", "lineHeight": 1.05, "letterSpacing": 2 },
+    { "id": "beach-reward", "type": "text", "text": "A little sunshine in every bite", "x": 120, "y": 720, "width": 1035, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 58, "fontStyle": "normal", "fill": "brand", "align": "center", "lineHeight": 1.2, "letterSpacing": 0 },
+    { "id": "beach-scan", "type": "text", "text": "Scan to claim yours", "x": 500, "y": 895, "width": 520, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 36, "fontStyle": "normal", "fill": "muted", "align": "left", "lineHeight": 1.2, "letterSpacing": 1 },
+    { "id": "beach-qrpad", "type": "shape", "shape": "rect", "x": 735, "y": 1010, "width": 460, "height": 460, "rotation": 0, "opacity": 1, "fill": "paper", "cornerRadius": 28 },
+    { "id": "beach-qr", "type": "qr", "x": 765, "y": 1040, "size": 400, "rotation": 0, "opacity": 1, "fg": "ink", "bg": "paper" },
+    { "id": "beach-fine", "type": "text", "text": "Good vibes, while supplies last.", "x": 105, "y": 1510, "width": 1065, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 28, "fontStyle": "normal", "fill": "muted", "align": "center", "lineHeight": 1.3, "letterSpacing": 0 }
+  ]
+}

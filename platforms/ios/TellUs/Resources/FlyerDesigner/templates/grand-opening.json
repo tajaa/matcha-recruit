@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "artboard": { "preset": "flyer_letter", "w": 1275, "h": 1650 },
+  "background": { "kind": "color", "color": "paper" },
+  "palette": { "ink": "#2b1330", "paper": "#fff1e6", "brand": "#ef5d60", "brandSoft": "#f79489", "accent": "#ffb703", "muted": "#a3798f" },
+  "layers": [
+    { "id": "opening-band", "type": "shape", "shape": "rect", "x": 0, "y": 0, "width": 1275, "height": 430, "rotation": 0, "opacity": 1, "fill": "brand", "cornerRadius": 0 },
+    { "id": "opening-burst", "type": "sticker", "assetId": "star-burst", "x": 94, "y": 66, "width": 260, "height": 260, "rotation": -12, "opacity": 1 },
+    { "id": "opening-title", "type": "text", "text": "NOW OPEN", "x": 80, "y": 520, "width": 1115, "rotation": 0, "opacity": 1, "fontFamily": "Arial Black", "fontSize": 138, "fontStyle": "bold", "fill": "brand", "align": "center", "lineHeight": 1.05, "letterSpacing": 3 },
+    { "id": "opening-reward", "type": "text", "text": "Come celebrate with us", "x": 120, "y": 755, "width": 1035, "rotation": 0, "opacity": 1, "fontFamily": "Georgia", "fontSize": 64, "fontStyle": "normal", "fill": "ink", "align": "center", "lineHeight": 1.2, "letterSpacing": 0 },
+    { "id": "opening-rule", "type": "shape", "shape": "line", "x": 488, "y": 880, "width": 300, "height": 6, "rotation": 0, "opacity": 1, "fill": "accent" },
+    { "id": "opening-scan", "type": "text", "text": "Scan for an opening offer", "x": 210, "y": 940, "width": 855, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 38, "fontStyle": "normal", "fill": "muted", "align": "center", "lineHeight": 1.2, "letterSpacing": 1 },
+    { "id": "opening-qrpad", "type": "shape", "shape": "rect", "x": 407, "y": 1030, "width": 460, "height": 460, "rotation": 0, "opacity": 1, "fill": "paper", "cornerRadius": 28 },
+    { "id": "opening-qr", "type": "qr", "x": 437, "y": 1060, "size": 400, "rotation": 0, "opacity": 1, "fg": "ink", "bg": "paper" },
+    { "id": "opening-fine", "type": "text", "text": "New neighbors welcome.", "x": 180, "y": 1530, "width": 915, "rotation": 0, "opacity": 1, "fontFamily": "Helvetica Neue", "fontSize": 28, "fontStyle": "normal", "fill": "muted", "align": "center", "lineHeight": 1.3, "letterSpacing": 0 }
+  ]
+}

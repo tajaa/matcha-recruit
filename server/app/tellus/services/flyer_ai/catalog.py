@@ -110,6 +110,8 @@ FONT_FAMILIES: frozenset[str] = frozenset({
 STICKER_IDS: frozenset[str] = frozenset({
     "star-burst.svg", "star.svg", "sparkle.svg", "ribbon.svg",
     "tag.svg", "coffee-cup.svg", "heart.svg", "arrow-down.svg",
+    "sun.svg", "wave.svg", "palm.svg", "ice-cream.svg", "confetti.svg",
+    "balloon.svg", "snowflake.svg", "holly.svg", "cocktail.svg", "moon.svg",
 })
 
 # Value specs: frozenset = enum, (lo, hi) = numeric range, "color"/"text"/"bool".

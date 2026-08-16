@@ -69,6 +69,42 @@ PALETTES: tuple[PalettePreset, ...] = (
             "brandSoft": "#4b4b4b", "accent": "#000000", "muted": "#8a8a8a",
         },
     ),
+    PalettePreset(
+        key="ocean-breeze",
+        label="Ocean breeze",
+        blurb="sea-glass blue with warm sunlit coral - built for beach days and fresh drinks",
+        colors={
+            "ink": "#0b3a4a", "paper": "#eef7fa", "brand": "#0e9bbd",
+            "brandSoft": "#67c7dc", "accent": "#f4a259", "muted": "#7fa3ae",
+        },
+    ),
+    PalettePreset(
+        key="sunset-strip",
+        label="Sunset strip",
+        blurb="deep plum with coral and gold - a late-afternoon storefront glow",
+        colors={
+            "ink": "#2b1330", "paper": "#fff1e6", "brand": "#ef5d60",
+            "brandSoft": "#f79489", "accent": "#ffb703", "muted": "#a3798f",
+        },
+    ),
+    PalettePreset(
+        key="evergreen-festive",
+        label="Evergreen",
+        blurb="pine ink, warm stock, berry red and holly green for festive offers",
+        colors={
+            "ink": "#0e2a1e", "paper": "#f4f1e8", "brand": "#b3202e",
+            "brandSoft": "#d4626c", "accent": "#1f7a4d", "muted": "#7e8a80",
+        },
+    ),
+    PalettePreset(
+        key="neon-night",
+        label="Neon night",
+        blurb="electric cyan and magenta on midnight stock for after-dark specials",
+        colors={
+            "ink": "#f2e9ff", "paper": "#120d1c", "brand": "#c026d3",
+            "brandSoft": "#e879f9", "accent": "#22d3ee", "muted": "#7c6f91",
+        },
+    ),
 )
 
 PALETTES_BY_KEY: dict[str, PalettePreset] = {p.key: p for p in PALETTES}

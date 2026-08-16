@@ -169,6 +169,7 @@ export function instantiateTemplate(template: FlyerDesign, logoUrl: string | nul
     version: 1,
     artboard: { ...template.artboard },
     background: { ...template.background },
+    ...(template.palette ? { palette: { ...template.palette } } : {}),
     layers,
   }
 }

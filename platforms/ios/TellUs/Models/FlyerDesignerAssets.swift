@@ -6,6 +6,7 @@ struct FlyerTemplateManifestEntry: Codable, Equatable, Identifiable {
     let preset: String
     let file: String
     let thumb: String?
+    let theme: String?
 }
 
 struct FlyerPalettePreset: Codable, Equatable, Identifiable {

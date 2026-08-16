@@ -35,6 +35,16 @@ struct FlyerAssetCatalog {
         "coffee-cup.svg": "sticker-coffee-cup",
         "heart.svg": "sticker-heart",
         "arrow-down.svg": "sticker-arrow-down",
+        "sun.svg": "sticker-sun",
+        "wave.svg": "sticker-wave",
+        "palm.svg": "sticker-palm",
+        "ice-cream.svg": "sticker-ice-cream",
+        "confetti.svg": "sticker-confetti",
+        "balloon.svg": "sticker-balloon",
+        "snowflake.svg": "sticker-snowflake",
+        "holly.svg": "sticker-holly",
+        "cocktail.svg": "sticker-cocktail",
+        "moon.svg": "sticker-moon",
     ]
 
     func templates() throws -> [FlyerTemplateAsset] {
