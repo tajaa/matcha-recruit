@@ -25,6 +25,10 @@ from ..models.tellus import (
     TellusHandleAvailability,
     TellusHandleClaim,
     TellusPersonSummary,
+    TellusPersonBoard,
+    TellusPersonFollowedPlace,
+    TellusPersonProfile,
+    TellusPersonReview,
 )
 from ..services.friends_service import (
     FRIEND_DECLINE_COOLDOWN,
@@ -38,8 +42,10 @@ from ..services.friends_service import (
     assert_not_blocked,
     search_people,
     suggestions,
+    visible_sections,
 )
 from ..services.points_service import notify_account
+from ..services.likes_service import hydrate_likes
 
 router = APIRouter()
 HANDLE_COOLDOWN = FRIEND_DECLINE_COOLDOWN
@@ -470,3 +476,134 @@ async def friend_suggestions(
             if redis:
                 await cache_set(redis, cache_key, ids, ttl=900)
         return [await _person_summary(conn, UUID(str(account_id)), account.id) for account_id in ids[:limit]]
+
+
+async def _person_profile(conn, viewer_id: UUID, subject_id: UUID) -> TellusPersonProfile:
+    subject = await conn.fetchrow(
+        """SELECT a.id, a.display_name, a.handle, a.avatar_url, a.city, a.state,
+                  a.profile_visibility, a.leaderboard_opt_in,
+                  pb.level, pb.lifetime_points, pb.current_streak,
+                  (SELECT COUNT(*) FROM tellus_friendships f WHERE f.account_id = a.id) AS friend_count,
+                  EXISTS (SELECT 1 FROM tellus_friendships f
+                          WHERE f.account_id = $1 AND f.friend_account_id = a.id) AS is_friend,
+                  (SELECT MIN(f.created_at) FROM tellus_friendships f
+                    WHERE f.account_id = $1 AND f.friend_account_id = a.id) AS friends_since
+             FROM tellus_accounts a
+             LEFT JOIN tellus_points_balances pb ON pb.account_id = a.id
+            WHERE a.id = $2 AND a.account_type = 'consumer' AND a.status = 'active'""",
+        viewer_id, subject_id,
+    )
+    if subject is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+    await assert_not_blocked(conn, viewer_id, subject_id)
+    is_self = viewer_id == subject_id
+    is_friend = bool(subject["is_friend"])
+    sections = visible_sections(
+        is_self=is_self,
+        is_friend=is_friend,
+        profile_visibility=subject["profile_visibility"],
+        leaderboard_opt_in=subject["leaderboard_opt_in"],
+    )
+    mutual_count = await conn.fetchval(
+        """SELECT COUNT(*) FROM tellus_friendships mutual
+            WHERE mutual.account_id = $1
+              AND mutual.friend_account_id IN (
+                  SELECT f.friend_account_id FROM tellus_friendships f WHERE f.account_id = $2)""",
+        viewer_id, subject_id,
+    )
+    pending_id = await conn.fetchval(
+        """SELECT id FROM tellus_friend_requests
+            WHERE status = 'pending'
+              AND ((requester_account_id = $1 AND addressee_account_id = $2)
+                OR (requester_account_id = $2 AND addressee_account_id = $1))
+            ORDER BY created_at DESC LIMIT 1""",
+        viewer_id, subject_id,
+    )
+    profile = TellusPersonProfile(
+        account_id=subject["id"],
+        display_name=display_name_for(subject["display_name"], subject["handle"], subject["id"]),
+        handle=subject["handle"], avatar_url=subject["avatar_url"], city=subject["city"], state=subject["state"],
+        level=subject["level"] or 1, lifetime_points=subject["lifetime_points"] or 0,
+        current_streak=subject["current_streak"] or 0, friend_count=subject["friend_count"] or 0,
+        mutual_friend_count=mutual_count or 0, friends_since=subject["friends_since"],
+        is_friend=is_friend, pending_request_id=pending_id, is_you=is_self,
+    )
+    if "points" not in sections:
+        profile.level = 1
+        profile.lifetime_points = 0
+        profile.current_streak = 0
+    if "reviews" in sections:
+        review_rows = await conn.fetch(
+            """SELECT r.id, r.brand_id, b.name AS brand_name, b.slug AS brand_slug,
+                      r.rating, r.title, r.description, r.created_at, r.publish_at
+                 FROM tellus_reports r JOIN tellus_brands b ON b.id = r.brand_id
+                WHERE r.reporter_account_id = $1 AND r.review_state = 'held'
+                  AND r.publish_at <= NOW() AND r.moderation_status = 'visible'
+                ORDER BY r.publish_at DESC, r.id DESC LIMIT 50""",
+            subject_id,
+        )
+        review_ids = [row["id"] for row in review_rows]
+        likes = await hydrate_likes(conn, "report", review_ids, viewer_id)
+        profile.reviews = [
+            TellusPersonReview(
+                **dict(row), like_count=likes.get(row["id"], (0, False))[0],
+                liked_by_me=likes.get(row["id"], (0, False))[1],
+            ) for row in review_rows
+        ]
+    if "followed_places" in sections:
+        rows = await conn.fetch(
+            """SELECT b.slug, b.name, b.logo_url, s.city, s.state
+                 FROM tellus_brand_follows f JOIN tellus_brands b ON b.id = f.brand_id
+                 LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
+                                    WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
+                WHERE f.consumer_account_id = $1 ORDER BY f.created_at DESC LIMIT 100""",
+            subject_id,
+        )
+        profile.followed_places = [TellusPersonFollowedPlace(**dict(row)) for row in rows]
+    if "badges" in sections:
+        rows = await conn.fetch(
+            """SELECT d.key, d.name, d.description, d.icon, d.sort_order, ub.awarded_at
+                 FROM tellus_badge_definitions d
+                 LEFT JOIN tellus_user_badges ub ON ub.badge_key = d.key AND ub.account_id = $1
+                WHERE ub.awarded_at IS NOT NULL ORDER BY d.sort_order, d.key""",
+            subject_id,
+        )
+        profile.badges = [dict(row) for row in rows]
+    if "boards" in sections:
+        rows = await conn.fetch(
+            """SELECT b.slug AS brand_slug, b.name AS brand_name, b.logo_url,
+                      m.decided_at AS joined_at
+                 FROM tellus_board_memberships m
+                 JOIN tellus_boards bo ON bo.id = m.board_id
+                 JOIN tellus_brands b ON b.id = bo.brand_id
+                WHERE m.account_id = $1 AND m.status = 'approved'
+                  AND bo.is_active AND b.plan_status = 'active'
+                ORDER BY m.decided_at DESC""",
+            subject_id,
+        )
+        profile.boards = [TellusPersonBoard(**dict(row)) for row in rows]
+    return profile
+
+
+@router.get("/people/{account_id}", response_model=TellusPersonProfile)
+async def person_profile(
+    account_id: UUID,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    async with get_connection() as conn:
+        return await _person_profile(conn, account.id, account_id)
+
+
+@router.get("/people/by-handle/{handle}", response_model=TellusPersonProfile)
+async def person_profile_by_handle(
+    handle: str,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    async with get_connection() as conn:
+        account_id = await conn.fetchval(
+            "SELECT id FROM tellus_accounts WHERE handle = $1 AND account_type = 'consumer' AND status = 'active'",
+            normalize_handle(handle),
+        )
+        if account_id is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+        return await _person_profile(conn, account.id, account_id)
