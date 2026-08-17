@@ -9,9 +9,8 @@ import XCTest
 /// needed for exactly two of the three raster layer kinds:
 ///   - stickers: Xcode's SVG-asset-catalog compiler bakes a y-up bitmap
 ///   - QR: CoreImage's CIContext.createCGImage output is natively y-up
-/// and must NOT be applied to the `image`/logo layer, whose UIImage always
-/// comes from ImageIO-decoded PNG/JPEG bytes (already top-down) — applying
-/// the flip there re-inverts an already-correct image.
+///   - image/logo layers: raw CGImage drawing uses the same renderer context
+///     coordinates and requires the same normalization.
 final class FlyerRendererOrientationTests: XCTestCase {
     func testStickerLayerRendersUpright() throws {
         // Real sticker-coffee-cup.svg (200x200 viewBox): a filled black
@@ -68,11 +67,10 @@ final class FlyerRendererOrientationTests: XCTestCase {
         XCTAssertNotEqual(br, 1.0, "bottom-right has no finder pattern in a real QR — a Y-flip bug would put one here instead of top-right")
     }
 
-    func testImageLayerIsNotDoubleFlipped() throws {
-        // Regression guard: a plain PNG-decoded logo/image is NOT y-up (it's
-        // a standard ImageIO decode) and must render as-is. This is the
-        // layer kind the flip must NOT touch — pins against reintroducing
-        // the blanket fix that broke this case during development.
+    func testImageLayerRendersUpright() throws {
+        // Regression guard: a plain PNG-decoded logo/image must render with
+        // its source top half at the rendered top, just like other raster
+        // layers drawn through the CGContext path.
         let size = 100
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
