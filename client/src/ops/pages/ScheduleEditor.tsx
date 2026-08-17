@@ -12,6 +12,7 @@ import ScheduleEditorToolbar from '../../components/employees/schedule-editor/Sc
 import ShiftInspector, { type NewShiftDefaults } from '../../components/employees/schedule-editor/ShiftInspector'
 import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGrid'
 import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
+import ScheduleChatPanel from '../../components/employees/schedule-editor/ScheduleChatPanel'
 
 const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v1'
 
@@ -43,6 +44,7 @@ export default function ScheduleEditor() {
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
+  const [chatOpen, setChatOpen] = useState(false)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -142,6 +144,8 @@ export default function ScheduleEditor() {
           onPublish={handlePublish}
           onExit={() => navigate('/ops/schedule')}
           onHelp={() => setGuideOpen(true)}
+          chatOpen={chatOpen}
+          onToggleChat={() => setChatOpen((value) => !value)}
         />
         {editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
@@ -163,6 +167,15 @@ export default function ScheduleEditor() {
                 onUpdate={async (payload) => { if (inspectorShift) await editor.updateShiftDraft(inspectorShift, payload) }}
                 onDelete={async () => { if (inspectorShift && await editor.removeShift(inspectorShift)) { setInspectorShiftId(null); setNewDefaults(null) } }}
                 onClose={() => { setInspectorShiftId(null); setNewDefaults(null) }}
+              />
+            )}
+            {chatOpen && (
+              <ScheduleChatPanel
+                weekStart={weekStart}
+                locationId={null}
+                editPublished={editPublished}
+                onApplied={() => void editor.reload()}
+                onClose={() => setChatOpen(false)}
               />
             )}
           </div>

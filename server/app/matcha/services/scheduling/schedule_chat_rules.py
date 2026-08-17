@@ -76,14 +76,18 @@ class NeedsClarify:
     options: list = field(default_factory=list)  # ≤6, rendered as a dashed list
 
 
-def resolve_week(week_hint: Optional[str], today: date) -> date:
+def resolve_week(
+    week_hint: Optional[str], today: date, week_start: Optional[date] = None,
+) -> date:
     """The SUNDAY that starts the target week — matches
     `shift_compliance._week_window` + the schedule grid's own week-start
     convention, so a proposed shift lands in the same week an admin looking
     at the grid would expect. `'next_week'` is the Sunday strictly after
     today's own week (never today, even when today IS a Sunday);
     `'this_week'`/None is today's own week's Sunday."""
-    this_sunday = today - timedelta(days=sunday_indexed_weekday(today))
+    this_sunday = week_start or (
+        today - timedelta(days=sunday_indexed_weekday(today))
+    )
     if week_hint == "next_week":
         return this_sunday + timedelta(days=7)
     return this_sunday

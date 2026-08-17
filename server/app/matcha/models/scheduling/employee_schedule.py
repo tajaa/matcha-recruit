@@ -248,3 +248,20 @@ class DuplicateShift(BaseModel):
     def _dedupe(self) -> "DuplicateShift":
         self.target_dates = sorted(set(self.target_dates))
         return self
+
+
+class ScheduleChatMessage(BaseModel):
+    """One turn in the schedule editor's staged assistant."""
+
+    message: str = Field(..., min_length=1, max_length=2000)
+    week_start: Optional[date] = None
+    location_id: Optional[UUID] = None
+    edit_published: bool = False
+    existing_proposal_id: Optional[UUID] = None
+
+
+class ScheduleChatApply(BaseModel):
+    """The editor's explicit apply decision."""
+
+    as_draft: bool = True
+    edit_published: bool = False
