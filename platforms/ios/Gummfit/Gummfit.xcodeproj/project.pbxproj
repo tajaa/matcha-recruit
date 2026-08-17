@@ -10,6 +10,8 @@
 		00268464A2985BD918310FC8 /* QLPreviewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B5D29FF7464BD07C2BDAE88 /* QLPreviewRepresentable.swift */; };
 		0069A45DA556C33C1CAB9D80 /* VerifyWaitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912CAC90707FBADBB09EC7CE /* VerifyWaitView.swift */; };
 		009557C03CC91BCACA32435E /* ClientsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6573DBB168D4661699B27ED4 /* ClientsViewModel.swift */; };
+		02CB1940165F04AA11251A77 /* MerlinChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3861158782CB9315A660554 /* MerlinChatViewModel.swift */; };
+		034D556E1748BB614DBCBEE2 /* SchemaFieldInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88B75EB193E3D76ACAB9666A /* SchemaFieldInputs.swift */; };
 		0380B83CC33437EFCBA56210 /* LoadableVM.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2F7CBE58D66AE9D6BA9623A /* LoadableVM.swift */; };
 		04DA7771A5112A0F12F13541 /* ClearablePatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891FD2844E8F690BBF15599A /* ClearablePatchTests.swift */; };
 		071EE60566C1EC90CCDBFF78 /* PagesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1E9FA2EF3EF0C1C4337A370 /* PagesService.swift */; };
@@ -21,16 +23,19 @@
 		0E6EE0834BA39F5D0B12C1E9 /* StockAdjustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F67146512EC8C5CE56F3EB8D /* StockAdjustTests.swift */; };
 		10CBF4320E095D06B3822250 /* GummfitApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 862E63FF63B4E2BD4C8EC372 /* GummfitApp.swift */; };
 		1363CDC3B53CA79AF33B8AE2 /* MerlinService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A02E38A1DA600880C684DEFC /* MerlinService.swift */; };
+		142FF916512951C3092D43CA /* PageEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E994D0F1914E15EBC2B0F7D /* PageEditorView.swift */; };
 		17A00195F554678F66EC81AF /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80FD36F5A95511138519EF82 /* AppState.swift */; };
 		18AB8040422298065D064BD8 /* CreatorTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698D4677602F03453D9207AD /* CreatorTabView.swift */; };
 		198CB02FF358F9653F1C9A51 /* SiteModelDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8DC4532E00D7B2B393764F1 /* SiteModelDecodeTests.swift */; };
 		1BECEEDCD3A171D6A87F1AB0 /* SitesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE744EBA50EE2C3B96035682 /* SitesService.swift */; };
 		1BFE3C65AAA556E8B5591368 /* GummfitButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A960A0A39B82406029658B2 /* GummfitButtonStyle.swift */; };
 		21934AD68BB9C5F1C3C11E14 /* SafeURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F07C9FF9720D18FC6617B541 /* SafeURLTests.swift */; };
+		285E05F222AC5BF0C54D7E9E /* ThemeSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25EB25379A77455FC9FE867D /* ThemeSheet.swift */; };
 		2CE4028D714F4CB15794CFBB /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8F0E5732F8E339929FC05B /* Theme.swift */; };
 		2D3B60754F2893D4170C566E /* OrdersListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B4D3CD01197CEB9C8B391A /* OrdersListViewModel.swift */; };
 		2EBAB1C0F516742CF0D0C444 /* ProductListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AA0B2582400F6838BAD319F /* ProductListView.swift */; };
 		2FA73B6F15DF7B40A44DCD72 /* OwnerDashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 313F3CAAF36FD465475145B0 /* OwnerDashboardViewModel.swift */; };
+		30391D0C96D5413D01CA27B1 /* PreviewWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B9B2588D90FDD2386CA6280 /* PreviewWebView.swift */; };
 		3043F9E0E3839AC36A13F1D0 /* JSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A95A2C426C24800E2AB442 /* JSONValue.swift */; };
 		310F4CFCD947959D80CABD1C /* OfferActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 446D10F34073E11E0633E885 /* OfferActionsTests.swift */; };
 		311BF3D013FB45F11CDB83AE /* OrderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C7498A1BBD7F32A3D1FC872 /* OrderDetailView.swift */; };
@@ -59,6 +64,7 @@
 		4E15D46D2E69F2EFAFF66A65 /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AE69015C7D0F83C90130603 /* Formatters.swift */; };
 		4EFC26A49CA7DB26D9B55A2C /* ShopModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D7C2EF56266C0A17730CD58 /* ShopModels.swift */; };
 		5BF4C4E019F66DACB69FD325 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10AB876AD2EF45D769778E18 /* KeychainHelper.swift */; };
+		5CAFB157E9D268BDC9FA182C /* SetupConciergeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EE90B44CD299C080DD6FFF /* SetupConciergeView.swift */; };
 		5D35EF538601FA260A5CC4B3 /* OrderStatusUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63DA60E1BFE25FF37279EA40 /* OrderStatusUpdateTests.swift */; };
 		5E913B77DDF80F41CFA9D404 /* AssetsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8124D57D3C7349E16BC7A660 /* AssetsService.swift */; };
 		62D3B9AFEB2976E8675AB9A5 /* CrmModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B6CE0B9515AAE3414D9C10 /* CrmModels.swift */; };
@@ -80,6 +86,7 @@
 		827C0D1C89816C332971492B /* MerlinModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B58F2622E85EFC1AF34ADCFA /* MerlinModels.swift */; };
 		829439E164ACFA68D2C228DE /* CollabService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DCA35B9FC5C1F99B496A3D /* CollabService.swift */; };
 		82973C23583EE26945E1D525 /* MerlinOps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3110EF04B59E8D8980EE1757 /* MerlinOps.swift */; };
+		83858C08C0681820A2D73AA8 /* PageEditorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2395A788C7B5ABFA6A41ABD0 /* PageEditorViewModel.swift */; };
 		845D6A49CE166814DF15ECBE /* OrderModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7ED6A3ECC4157B7C47A4A00 /* OrderModels.swift */; };
 		866838039E94EAECE2C8730B /* LocationQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100CB057A57D68C7F18D32D9 /* LocationQuery.swift */; };
 		87C8D84D1834F6B05447EB4D /* ProductFormViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B699C41D158D632C9A4FFD /* ProductFormViewModel.swift */; };
@@ -90,6 +97,7 @@
 		8DA07AFC62436D1571B24E5D /* VenueViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9293C982F93861235D3CDF /* VenueViewModel.swift */; };
 		8F267FB1C770A3AF72621D58 /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33C36082AA0FA86747459318 /* AuthViewModel.swift */; };
 		8F693EDC34BB23669F545F48 /* AvailabilityViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1298918B42FD1CA00AE9DE29 /* AvailabilityViewModel.swift */; };
+		924E1716F2725C8ECA2DC227 /* SectionFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E296B0A002F4E5C0BA06DC83 /* SectionFormView.swift */; };
 		927CD797AA6935799574B132 /* MessagesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACC499C63B3003FD2F48061 /* MessagesService.swift */; };
 		931D6C0F6CD8496B31712C98 /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12AEE40CAC62F365D122AA12 /* HomeViewModel.swift */; };
 		941D6EBE01AAEB1B3E6BCA1F /* MerlinOpsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDAAFE10796DA650BE7DF2E2 /* MerlinOpsTests.swift */; };
@@ -118,10 +126,12 @@
 		BC7DFDDEF7E3AD3EA8F38E1F /* PublishedThemePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = C79966E43FC8A44DA3D9F547 /* PublishedThemePreview.swift */; };
 		BCE01F0045F90B735055B3D5 /* BookingSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8449EB8631A29F9339EC0D5 /* BookingSetupView.swift */; };
 		BED911BCC6D96DDFDB2B3268 /* OfferActionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D042A16223D7480AD4CA6B57 /* OfferActionPolicy.swift */; };
+		BF96D204B964BA571830258C /* DesignInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73E4AE865AF532E81CC53459 /* DesignInspectorView.swift */; };
 		C024020ABEC893E97CA6FAE4 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD05BDEE40BCFA82E4B7451 /* AccountView.swift */; };
 		C1AD766C2CFAC3A0C6789FF8 /* DiscountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEF0CDC93B96BF49082C1F50 /* DiscountsView.swift */; };
 		C388343CBE9631EE3446D050 /* BillingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C7DD357D83820D10F254A38 /* BillingService.swift */; };
 		C5070A7B92EB3F842AD6A9DA /* DirectoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC4F23D1615D86FCBEBD887 /* DirectoryViewModel.swift */; };
+		C740EB2EF6E0F1D96D058557 /* SectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FBA5277C55D8E59AADD530 /* SectionListView.swift */; };
 		CBA4FCD20DBE56358C51F36A /* MoneyFormattingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4DCF63AEE03474D5F26D8C /* MoneyFormattingTests.swift */; };
 		CCC80CBD3EEEC54B268B02AE /* ThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7606A80EE08C99E489929B4B /* ThreadListView.swift */; };
 		CD228D547E973FA4A1FE2482 /* UploadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A110F24F147E26ED817903DE /* UploadService.swift */; };
@@ -137,9 +147,11 @@
 		DCB55F81C7892AEEC374ED6A /* CreatorService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D1FCC2007D1B22140C8A0B /* CreatorService.swift */; };
 		DCD734073C04610058D3111F /* BookingTypesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 727DEE9054987C5C32F8142F /* BookingTypesViewModel.swift */; };
 		DE9B0871F7F5D40CA045C3C9 /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097D6FFB8E0F13EE363D7E3D /* Enums.swift */; };
+		E29EC5F6601F2D7FC0222928 /* MerlinChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0F233A6754B546D9A83C7D9 /* MerlinChatView.swift */; };
 		E3671E14D04E295F96376816 /* BookingTypesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F073FCA05DE15FED7D5D9A /* BookingTypesView.swift */; };
 		E96650A278709D992BF13395 /* StockAdjustSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C228357D039AD92F21ECBA /* StockAdjustSheet.swift */; };
 		EA56B312738D141595CB7A5F /* GummfitInputStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81E94E9EBDDCD8BD6B4637C6 /* GummfitInputStyle.swift */; };
+		EC8206F059DFDCB878349E6F /* SetupMerlinViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAEB6DCDC4A03F00084F3A82 /* SetupMerlinViewModel.swift */; };
 		ECC6FA4991237DFEA1009A17 /* CreatorCollabModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B734972C3915EB484D8F88A /* CreatorCollabModels.swift */; };
 		F05B2F2700AA4CA9E690A11B /* GummfitThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53E59B7BFDE179110A6818EE /* GummfitThemeTests.swift */; };
 		F2F1D08DB61BC2109D38DCF2 /* BookingsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB3ED5EBB72AD8B2D1F9BCA /* BookingsService.swift */; };
@@ -175,12 +187,16 @@
 		163BFC7A0EBB1546A3D25EAE /* InboxRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxRootView.swift; sourceTree = "<group>"; };
 		1C30B34C4F45F0493F177C31 /* OrderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrderListView.swift; sourceTree = "<group>"; };
 		1ED1B245E114CBACE51E47E0 /* ShopModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShopModelDecodeTests.swift; sourceTree = "<group>"; };
+		2395A788C7B5ABFA6A41ABD0 /* PageEditorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageEditorViewModel.swift; sourceTree = "<group>"; };
 		23AD8D25179BA46D90EDEF51 /* DiscountsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscountsViewModel.swift; sourceTree = "<group>"; };
 		256B1DB3FD733D4E5468288D /* EditorSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorSchema.swift; sourceTree = "<group>"; };
+		25EB25379A77455FC9FE867D /* ThemeSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSheet.swift; sourceTree = "<group>"; };
 		27D56E0312DED5A0C8C0BFC4 /* ReviewsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewsViewModel.swift; sourceTree = "<group>"; };
+		2B9B2588D90FDD2386CA6280 /* PreviewWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewWebView.swift; sourceTree = "<group>"; };
 		2C9D1EE732641C9398A94389 /* BookingTypeCreateSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookingTypeCreateSheet.swift; sourceTree = "<group>"; };
 		2E3088D73AABD1DDE475186E /* CatalogRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogRootView.swift; sourceTree = "<group>"; };
 		2EA4C0370186E8A49D777699 /* AvailabilityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvailabilityView.swift; sourceTree = "<group>"; };
+		30EE90B44CD299C080DD6FFF /* SetupConciergeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupConciergeView.swift; sourceTree = "<group>"; };
 		3110EF04B59E8D8980EE1757 /* MerlinOps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerlinOps.swift; sourceTree = "<group>"; };
 		313F3CAAF36FD465475145B0 /* OwnerDashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OwnerDashboardViewModel.swift; sourceTree = "<group>"; };
 		33C36082AA0FA86747459318 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
@@ -198,6 +214,7 @@
 		4B5D29FF7464BD07C2BDAE88 /* QLPreviewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QLPreviewRepresentable.swift; sourceTree = "<group>"; };
 		4BDE7F133FB9A262C5999C96 /* InboxViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxViewModel.swift; sourceTree = "<group>"; };
 		4C9293C982F93861235D3CDF /* VenueViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VenueViewModel.swift; sourceTree = "<group>"; };
+		4E994D0F1914E15EBC2B0F7D /* PageEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageEditorView.swift; sourceTree = "<group>"; };
 		53E59B7BFDE179110A6818EE /* GummfitThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GummfitThemeTests.swift; sourceTree = "<group>"; };
 		54D68D31C01866C59E71DE6B /* ServiceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceCache.swift; sourceTree = "<group>"; };
 		558F448DA614C9251A06F9B9 /* CatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogService.swift; sourceTree = "<group>"; };
@@ -217,6 +234,7 @@
 		717F6329B9C6A63F2765CB05 /* MarketingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketingModels.swift; sourceTree = "<group>"; };
 		727DEE9054987C5C32F8142F /* BookingTypesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookingTypesViewModel.swift; sourceTree = "<group>"; };
 		728FCCC632BBC447E3C9C3FF /* NewThreadSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadSheet.swift; sourceTree = "<group>"; };
+		73E4AE865AF532E81CC53459 /* DesignInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignInspectorView.swift; sourceTree = "<group>"; };
 		7606A80EE08C99E489929B4B /* ThreadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListView.swift; sourceTree = "<group>"; };
 		78C2426B41F52984A8FAD921 /* CatalogListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogListViewModel.swift; sourceTree = "<group>"; };
 		79BF7E95BEB5D02836F0ECFA /* BookingsListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookingsListViewModel.swift; sourceTree = "<group>"; };
@@ -230,6 +248,7 @@
 		81E94E9EBDDCD8BD6B4637C6 /* GummfitInputStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GummfitInputStyle.swift; sourceTree = "<group>"; };
 		84A1A02E22DFB6A2655DE9A5 /* RateRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RateRulesView.swift; sourceTree = "<group>"; };
 		862E63FF63B4E2BD4C8EC372 /* GummfitApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GummfitApp.swift; sourceTree = "<group>"; };
+		88B75EB193E3D76ACAB9666A /* SchemaFieldInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemaFieldInputs.swift; sourceTree = "<group>"; };
 		891FD2844E8F690BBF15599A /* ClearablePatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClearablePatchTests.swift; sourceTree = "<group>"; };
 		893294E7A5DFE8A232C4F85A /* ProductFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductFormView.swift; sourceTree = "<group>"; };
 		8BA4511C79CEB388DE38969C /* ReviewsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewsService.swift; sourceTree = "<group>"; };
@@ -239,6 +258,7 @@
 		8D8C301BB1A86592E1E2ADAC /* MarketingCreatorDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketingCreatorDecodeTests.swift; sourceTree = "<group>"; };
 		912CAC90707FBADBB09EC7CE /* VerifyWaitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyWaitView.swift; sourceTree = "<group>"; };
 		91B4D3CD01197CEB9C8B391A /* OrdersListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrdersListViewModel.swift; sourceTree = "<group>"; };
+		95FBA5277C55D8E59AADD530 /* SectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionListView.swift; sourceTree = "<group>"; };
 		99AD3FF2B2FD70B30FC0100D /* GummfitStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GummfitStatusPill.swift; sourceTree = "<group>"; };
 		9C6C0C176EA8CF6020E828B0 /* UploadModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadModels.swift; sourceTree = "<group>"; };
 		9C7DD357D83820D10F254A38 /* BillingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BillingService.swift; sourceTree = "<group>"; };
@@ -255,6 +275,7 @@
 		ADC85AC611EAEEA3B43A0A65 /* MarketingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketingView.swift; sourceTree = "<group>"; };
 		AEC54C727EE328AEC4BB3CD6 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		AEF0CDC93B96BF49082C1F50 /* DiscountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscountsView.swift; sourceTree = "<group>"; };
+		B0F233A6754B546D9A83C7D9 /* MerlinChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerlinChatView.swift; sourceTree = "<group>"; };
 		B151ADA77FF9C3D496C77095 /* CrmModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrmModelDecodeTests.swift; sourceTree = "<group>"; };
 		B1E9FA2EF3EF0C1C4337A370 /* PagesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PagesService.swift; sourceTree = "<group>"; };
 		B3726BE53990D9B8920EEBA8 /* ImagePrepTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImagePrepTests.swift; sourceTree = "<group>"; };
@@ -276,10 +297,13 @@
 		D80D14410EDF8B8965FBFC8D /* PageModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageModels.swift; sourceTree = "<group>"; };
 		D9F073FCA05DE15FED7D5D9A /* BookingTypesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookingTypesView.swift; sourceTree = "<group>"; };
 		DA48990D6E66D4C03BEE8EED /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		DAEB6DCDC4A03F00084F3A82 /* SetupMerlinViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupMerlinViewModel.swift; sourceTree = "<group>"; };
 		DBFC994632C0CEF6B1FAB7C9 /* VenueModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VenueModels.swift; sourceTree = "<group>"; };
 		DE56B26E3DF198F42A1D299E /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		E296B0A002F4E5C0BA06DC83 /* SectionFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionFormView.swift; sourceTree = "<group>"; };
 		E2B6CE0B9515AAE3414D9C10 /* CrmModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrmModels.swift; sourceTree = "<group>"; };
 		E36918CB195C7D0A3268DD44 /* LocationsStaffView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationsStaffView.swift; sourceTree = "<group>"; };
+		E3861158782CB9315A660554 /* MerlinChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerlinChatViewModel.swift; sourceTree = "<group>"; };
 		E4C9AFD4D9022DE4DDF074F1 /* OwnerTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OwnerTabView.swift; sourceTree = "<group>"; };
 		E64A5B5CEA0A606C6CA56D5F /* MerlinFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MerlinFoundationTests.swift; sourceTree = "<group>"; };
 		E7E452E244BFF3EBFF0791F8 /* GummfitTypography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GummfitTypography.swift; sourceTree = "<group>"; };
@@ -351,6 +375,7 @@
 			isa = PBXGroup;
 			children = (
 				4D7874CB665FC691BC22834B /* Catalog */,
+				1A6FC5620B47D25B34E5466F /* Editor */,
 				D55EDCB7D8FEE81AA02AC2C8 /* Inbox */,
 				A50B426D06179A3E3FE79A33 /* More */,
 				02BC2DD696A17B59B55D2BCF /* Sales */,
@@ -358,8 +383,24 @@
 				4154DB1CC64B803E3D7468A9 /* DirectorySheet.swift */,
 				DE56B26E3DF198F42A1D299E /* HomeView.swift */,
 				E4C9AFD4D9022DE4DDF074F1 /* OwnerTabView.swift */,
+				30EE90B44CD299C080DD6FFF /* SetupConciergeView.swift */,
 			);
 			path = Owner;
+			sourceTree = "<group>";
+		};
+		1A6FC5620B47D25B34E5466F /* Editor */ = {
+			isa = PBXGroup;
+			children = (
+				73E4AE865AF532E81CC53459 /* DesignInspectorView.swift */,
+				B0F233A6754B546D9A83C7D9 /* MerlinChatView.swift */,
+				4E994D0F1914E15EBC2B0F7D /* PageEditorView.swift */,
+				2B9B2588D90FDD2386CA6280 /* PreviewWebView.swift */,
+				88B75EB193E3D76ACAB9666A /* SchemaFieldInputs.swift */,
+				E296B0A002F4E5C0BA06DC83 /* SectionFormView.swift */,
+				95FBA5277C55D8E59AADD530 /* SectionListView.swift */,
+				25EB25379A77455FC9FE867D /* ThemeSheet.swift */,
+			);
+			path = Editor;
 			sourceTree = "<group>";
 		};
 		1E0D274A7D77383BDD77BE65 /* App */ = {
@@ -468,15 +509,18 @@
 				23AD8D25179BA46D90EDEF51 /* DiscountsViewModel.swift */,
 				12AEE40CAC62F365D122AA12 /* HomeViewModel.swift */,
 				4BDE7F133FB9A262C5999C96 /* InboxViewModel.swift */,
+				E3861158782CB9315A660554 /* MerlinChatViewModel.swift */,
 				D042A16223D7480AD4CA6B57 /* OfferActionPolicy.swift */,
 				D3FB0558E4CE0B94AF445BA6 /* OrderDetailViewModel.swift */,
 				91B4D3CD01197CEB9C8B391A /* OrdersListViewModel.swift */,
 				313F3CAAF36FD465475145B0 /* OwnerDashboardViewModel.swift */,
+				2395A788C7B5ABFA6A41ABD0 /* PageEditorViewModel.swift */,
 				A4B699C41D158D632C9A4FFD /* ProductFormViewModel.swift */,
 				ECC82FD3BE71C09C5B9C6ADB /* RateRulesViewModel.swift */,
 				3F45E03C57DF67D9D0B6BD97 /* RequestsQueueViewModel.swift */,
 				27D56E0312DED5A0C8C0BFC4 /* ReviewsViewModel.swift */,
 				ED3E63F486D9186A896935EC /* RiderViewModel.swift */,
+				DAEB6DCDC4A03F00084F3A82 /* SetupMerlinViewModel.swift */,
 				6EBD47B57387CD2D250CE934 /* SitesViewModel.swift */,
 				F18227D837AE048618416BF3 /* StockAdjustViewModel.swift */,
 				6ED65708B526C2B97A27C52B /* ThreadViewModel.swift */,
@@ -737,6 +781,7 @@
 				18AB8040422298065D064BD8 /* CreatorTabView.swift in Sources */,
 				96A5BCA52CEB361D1187CB1C /* CreatorViews.swift in Sources */,
 				62D3B9AFEB2976E8675AB9A5 /* CrmModels.swift in Sources */,
+				BF96D204B964BA571830258C /* DesignInspectorView.swift in Sources */,
 				394A7A33FA88BEBFD775562F /* DirectorySheet.swift in Sources */,
 				C5070A7B92EB3F842AD6A9DA /* DirectoryViewModel.swift in Sources */,
 				C1AD766C2CFAC3A0C6789FF8 /* DiscountsView.swift in Sources */,
@@ -766,6 +811,8 @@
 				7B8C36AD15C34980E01A6255 /* MarketingModels.swift in Sources */,
 				747EB5BBA18349BCCA7010FD /* MarketingService.swift in Sources */,
 				0BF107AE76A3F9E7230EBA3C /* MarketingView.swift in Sources */,
+				E29EC5F6601F2D7FC0222928 /* MerlinChatView.swift in Sources */,
+				02CB1940165F04AA11251A77 /* MerlinChatViewModel.swift in Sources */,
 				827C0D1C89816C332971492B /* MerlinModels.swift in Sources */,
 				82973C23583EE26945E1D525 /* MerlinOps.swift in Sources */,
 				1363CDC3B53CA79AF33B8AE2 /* MerlinService.swift in Sources */,
@@ -780,10 +827,13 @@
 				FDB3CABF7DA390E80D930628 /* OrdersService.swift in Sources */,
 				2FA73B6F15DF7B40A44DCD72 /* OwnerDashboardViewModel.swift in Sources */,
 				7CAD56AF75953BB760065218 /* OwnerTabView.swift in Sources */,
+				142FF916512951C3092D43CA /* PageEditorView.swift in Sources */,
+				83858C08C0681820A2D73AA8 /* PageEditorViewModel.swift in Sources */,
 				BBED99437CEDBF95B03CF777 /* PageModels.swift in Sources */,
 				071EE60566C1EC90CCDBFF78 /* PagesService.swift in Sources */,
 				A91A9DD24E6C50710A599709 /* PlaceholderTab.swift in Sources */,
 				458CCEB90083A15829419127 /* PreviewService.swift in Sources */,
+				30391D0C96D5413D01CA27B1 /* PreviewWebView.swift in Sources */,
 				8B38D06A1E57C9F07BF1A941 /* ProductFormView.swift in Sources */,
 				87C8D84D1834F6B05447EB4D /* ProductFormViewModel.swift in Sources */,
 				2EBAB1C0F516742CF0D0C444 /* ProductListView.swift in Sources */,
@@ -800,7 +850,12 @@
 				B7061EEF16F2801F8C4CF19B /* RootView.swift in Sources */,
 				6F9E3CC7B51A0A1C8244F0B0 /* SafeURL.swift in Sources */,
 				373B0BF7673FD91048B02229 /* SalesRootView.swift in Sources */,
+				034D556E1748BB614DBCBEE2 /* SchemaFieldInputs.swift in Sources */,
+				924E1716F2725C8ECA2DC227 /* SectionFormView.swift in Sources */,
+				C740EB2EF6E0F1D96D058557 /* SectionListView.swift in Sources */,
 				807752488C6664DB8BBBEF06 /* ServiceCache.swift in Sources */,
+				5CAFB157E9D268BDC9FA182C /* SetupConciergeView.swift in Sources */,
+				EC8206F059DFDCB878349E6F /* SetupMerlinViewModel.swift in Sources */,
 				4EFC26A49CA7DB26D9B55A2C /* ShopModels.swift in Sources */,
 				4011ED696D170847B15D5E11 /* SignupView.swift in Sources */,
 				A49FA63DCEDA30B361D41F52 /* SiteModels.swift in Sources */,
@@ -811,6 +866,7 @@
 				0E5FE81EDDEA0E9E41F75E3A /* StockAdjustViewModel.swift in Sources */,
 				2CE4028D714F4CB15794CFBB /* Theme.swift in Sources */,
 				8CCE172788CF52900BEE4C94 /* ThemeModels.swift in Sources */,
+				285E05F222AC5BF0C54D7E9E /* ThemeSheet.swift in Sources */,
 				8B84BBC05B0478D6DE272492 /* ThreadDetailView.swift in Sources */,
 				CCC80CBD3EEEC54B268B02AE /* ThreadListView.swift in Sources */,
 				9F4F887BE6E8BA6C4685D62F /* ThreadViewModel.swift in Sources */,

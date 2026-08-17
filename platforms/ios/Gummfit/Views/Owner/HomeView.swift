@@ -25,6 +25,16 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 20) {
                 ErrorBanner(message: vm.error)
                 siteCard
+                NavigationLink {
+                    SetupConciergeView(site: site)
+                } label: {
+                    Label("Set up your site with Merlin", systemImage: "sparkles")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(GummfitTheme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .gummfitCard()
+                }
+                .buttonStyle(.plain)
                 pendingRequestsSection
                 if site.status == .published {
                     operatingDashboard

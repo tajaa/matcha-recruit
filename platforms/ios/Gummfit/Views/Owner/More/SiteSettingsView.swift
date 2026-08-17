@@ -53,13 +53,15 @@ struct SiteSettingsView: View {
                 Text(themePreset.blurb).gummfitMuted()
                 LabeledContent("Fonts", value: "\(themePreset.headingFont) / \(themePreset.bodyFont)")
                 LabeledContent("Radius", value: themePreset.radius.uppercased())
-                Text("Theme editing and page editing stay on web.").gummfitMuted()
+                NavigationLink("Edit site design") {
+                    PageEditorView(site: site)
+                }
                 NavigationLink("Preview selected theme") {
                     ScrollView { CappePublishedThemePreview(preset: themePreset) }
                 }
             }
             Section("Publishing") {
-                Text("Publishing and page editing stay on web.").gummfitMuted()
+                Text("Publishing stays on web.").gummfitMuted()
                 Link("Open web settings", destination: URL(string: "\(APIClient.shared.webOrigin)/cappe/sites/\(site.slug)/settings")!)
             }
         }
