@@ -14,6 +14,8 @@ from ..models.tellus import (
     TellusFriendRequest,
     TellusFriendRequestCount,
     TellusFriendRequestCreate,
+    TellusBlockCreate,
+    TellusFriendListPage,
     TellusHandleAvailability,
     TellusHandleClaim,
     TellusPersonSummary,
@@ -21,9 +23,13 @@ from ..models.tellus import (
 from ..services.friends_service import (
     FRIEND_DECLINE_COOLDOWN,
     can_request,
+    block_account,
+    create_friendship,
     display_name_for,
     handle_rejection_reason,
     normalize_handle,
+    remove_friendship,
+    assert_not_blocked,
 )
 from ..services.points_service import notify_account
 
@@ -70,14 +76,6 @@ def _request_model(row: Any, person: TellusPersonSummary, viewer_id: UUID) -> Te
         source=row["source"], created_at=row["created_at"], decided_at=row["decided_at"],
         person=person,
         direction="incoming" if row["addressee_account_id"] == viewer_id else "outgoing",
-    )
-
-
-async def _insert_friendship(conn, first: UUID, second: UUID, source: str) -> None:
-    await conn.execute(
-        """INSERT INTO tellus_friendships (account_id, friend_account_id, source)
-           VALUES ($1, $2, $3), ($2, $1, $3) ON CONFLICT DO NOTHING""",
-        first, second, source,
     )
 
 
@@ -196,6 +194,7 @@ async def create_friend_request(
             )
             if target is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+            await assert_not_blocked(conn, account.id, target_id)
             pair_lo, pair_hi = sorted((account.id, target_id))
             await conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -214,7 +213,7 @@ async def create_friend_request(
                     "UPDATE tellus_friend_requests SET status = 'accepted', decided_at = NOW() WHERE id = $1",
                     existing["id"],
                 )
-                await _insert_friendship(conn, account.id, target_id, "request")
+                await create_friendship(conn, account.id, target_id, "request")
                 await notify_account(
                     conn, existing["requester_account_id"], "friend_accepted",
                     "Friend request accepted", "You are now friends.",
@@ -266,7 +265,7 @@ async def accept_friend_request(
             if row is None:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Request is no longer pending")
             requester_id = row["requester_account_id"]
-            await _insert_friendship(conn, account.id, requester_id, "request")
+            await create_friendship(conn, account.id, requester_id, "request")
             actor_name = display_name_for(account.display_name, account.handle, account.id)
             await notify_account(
                 conn, requester_id, "friend_accepted", "Friend request accepted",
@@ -343,3 +342,86 @@ async def friend_request_count(account: TellusAccount = Depends(require_verified
             account.id,
         )
     return TellusFriendRequestCount(incoming=row["incoming"], outgoing=row["outgoing"])
+
+
+@router.get("/me/friends", response_model=TellusFriendListPage)
+async def list_friends(
+    q: str = Query("", max_length=100),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    pattern = f"%{q.strip()}%" if q.strip() else None
+    async with get_connection() as conn:
+        total = await conn.fetchval(
+            """SELECT COUNT(*) FROM tellus_friendships f
+                JOIN tellus_accounts a ON a.id = f.friend_account_id
+               WHERE f.account_id = $1 AND a.status = 'active'
+                 AND ($2::text IS NULL OR a.display_name ILIKE $2 OR a.handle ILIKE $2)""",
+            account.id, pattern,
+        )
+        rows = await conn.fetch(
+            """SELECT f.friend_account_id, f.created_at
+                FROM tellus_friendships f
+                JOIN tellus_accounts a ON a.id = f.friend_account_id
+               WHERE f.account_id = $1 AND a.status = 'active'
+                 AND ($2::text IS NULL OR a.display_name ILIKE $2 OR a.handle ILIKE $2)
+               ORDER BY f.created_at DESC, f.friend_account_id
+               OFFSET $3 LIMIT $4""",
+            account.id, pattern, offset, limit,
+        )
+        entries = [await _person_summary(conn, row["friend_account_id"], account.id) for row in rows]
+    next_offset = offset + len(entries) if offset + len(entries) < total else None
+    return TellusFriendListPage(entries=entries, total=total, next_offset=next_offset)
+
+
+@router.delete("/me/friends/{friend_account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_friend(
+    friend_account_id: UUID,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    async with get_connection() as conn:
+        await remove_friendship(conn, account.id, friend_account_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/me/blocks", status_code=status.HTTP_204_NO_CONTENT)
+async def block_friend(
+    body: TellusBlockCreate,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    if body.account_id == account.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot block yourself")
+    async with get_connection() as conn:
+        target = await conn.fetchval(
+            "SELECT 1 FROM tellus_accounts WHERE id = $1 AND account_type = 'consumer' AND status = 'active'",
+            body.account_id,
+        )
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+        await block_account(conn, account.id, body.account_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/me/blocks", response_model=list[TellusPersonSummary])
+async def list_blocks(account: TellusAccount = Depends(require_verified_consumer)):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT blocked_account_id FROM tellus_account_blocks
+                WHERE blocker_account_id = $1 ORDER BY created_at DESC""",
+            account.id,
+        )
+        return [await _person_summary(conn, row["blocked_account_id"], account.id) for row in rows]
+
+
+@router.delete("/me/blocks/{blocked_account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unblock_account(
+    blocked_account_id: UUID,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM tellus_account_blocks WHERE blocker_account_id = $1 AND blocked_account_id = $2",
+            account.id, blocked_account_id,
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

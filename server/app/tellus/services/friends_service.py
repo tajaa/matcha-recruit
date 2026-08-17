@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
+from .points_service import award_points
+
 
 HANDLE_RE = re.compile(r"^[a-z0-9_]{3,20}$")
 RESERVED_HANDLES = frozenset(
@@ -125,3 +127,67 @@ def decode_cursor(cursor: str) -> Optional[tuple[datetime, UUID]]:
 def display_name_for(display_name: Optional[str], handle: Optional[str], account_id: UUID | str) -> str:
     """Use the product's safe identity fallback; never derive identity from email."""
     return display_name or handle or f"Member-{str(account_id)[:4]}"
+
+
+async def friend_ids(conn, account_id: UUID) -> list[UUID]:
+    rows = await conn.fetch(
+        "SELECT friend_account_id FROM tellus_friendships WHERE account_id = $1",
+        account_id,
+    )
+    return [row["friend_account_id"] for row in rows]
+
+
+async def assert_not_blocked(conn, first: UUID, second: UUID) -> None:
+    blocked = await conn.fetchval(
+        """SELECT 1 FROM tellus_account_blocks
+            WHERE (blocker_account_id = $1 AND blocked_account_id = $2)
+               OR (blocker_account_id = $2 AND blocked_account_id = $1)""",
+        first, second,
+    )
+    if blocked:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+
+
+async def create_friendship(conn, first: UUID, second: UUID, source: str) -> None:
+    """Create both mirror rows and award each account exactly once."""
+    await assert_not_blocked(conn, first, second)
+    await conn.execute(
+        """INSERT INTO tellus_friendships (account_id, friend_account_id, source)
+           VALUES ($1, $2, $3), ($2, $1, $3) ON CONFLICT DO NOTHING""",
+        first, second, source,
+    )
+    reference_id = pair_key(first, second)
+    for account_id in (first, second):
+        await award_points(
+            conn, account_id, "earn_engagement", event_key="friend_added",
+            reference_type="friendship", reference_id=reference_id,
+            description="Added a friend",
+        )
+
+
+async def remove_friendship(conn, first: UUID, second: UUID) -> None:
+    await conn.execute(
+        """DELETE FROM tellus_friendships
+            WHERE (account_id = $1 AND friend_account_id = $2)
+               OR (account_id = $2 AND friend_account_id = $1)""",
+        first, second,
+    )
+
+
+async def block_account(conn, blocker: UUID, blocked: UUID) -> None:
+    """Block an account and atomically remove social state in both directions."""
+    async with conn.transaction():
+        await conn.execute(
+            """INSERT INTO tellus_account_blocks (blocker_account_id, blocked_account_id)
+               VALUES ($1, $2) ON CONFLICT DO NOTHING""",
+            blocker, blocked,
+        )
+        await remove_friendship(conn, blocker, blocked)
+        await conn.execute(
+            """UPDATE tellus_friend_requests SET status = 'cancelled', decided_at = NOW()
+                WHERE status = 'pending'
+                  AND ((requester_account_id = $1 AND addressee_account_id = $2)
+                    OR (requester_account_id = $2 AND addressee_account_id = $1))""",
+            blocker, blocked,
+        )

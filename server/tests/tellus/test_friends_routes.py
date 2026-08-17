@@ -30,3 +30,22 @@ def test_friend_notification_kinds_are_push_allowlisted():
         assert kind in source
         assert kind in PUSH_KINDS
     assert "friend_added" in PUSH_KINDS
+
+
+def test_friendship_service_owns_mirrors_and_ledger_idempotency():
+    from app.tellus.services import friends_service
+
+    source = inspect.getsource(friends_service.create_friendship)
+    assert "ON CONFLICT DO NOTHING" in source
+    assert "pair_key" in source
+    assert "earn_engagement" in source
+    assert "UniqueViolationError" not in source
+
+
+def test_remove_friendship_deletes_both_mirrors_in_one_statement():
+    from app.tellus.services import friends_service
+
+    source = inspect.getsource(friends_service.remove_friendship)
+    assert source.count("DELETE FROM tellus_friendships") == 1
+    assert "account_id = $1 AND friend_account_id = $2" in source
+    assert "account_id = $2 AND friend_account_id = $1" in source
