@@ -35,6 +35,7 @@ struct FriendsHubView: View {
 
     private var friendsList: some View {
         List {
+            NavigationLink("Friend activity") { FriendActivityFeedView() }.listRowBackground(TU.inkRaised)
             if vm.friends.isEmpty { Text("No friends yet.").foregroundStyle(TU.textDim) }
             ForEach(vm.friends) { person in
                 NavigationLink { FriendProfileView(accountId: person.account_id) } label: {
