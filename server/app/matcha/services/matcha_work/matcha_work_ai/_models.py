@@ -26,7 +26,6 @@ PRO_MODEL = FLASH
 _MODEL_ALIASES = {
     "gemini-3-flash-preview": FLASH,
     "gemini-3.6-flash": FLASH,
-    "gemini-3.5-flash-lite": FLASH_LITE,
     "gemini-3.1-flash-lite": FLASH_LITE,
     "gemini-3.1-pro-preview": FLASH,
 }

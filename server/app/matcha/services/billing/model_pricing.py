@@ -39,14 +39,14 @@ MODEL_PRICING: dict[str, dict[str, Decimal]] = {
         "input_per_1m": Decimal("0.10"),
         "output_per_1m": Decimal("0.40"),
     },
-    # Gemini 3.7 Flash Lite — Huume's `lite` (confirm-turn) tier + EMS
-    # classify/ask. Rate mirrors 3.5-flash-lite until Google's 3.7 GA rate is
-    # confirmed. Must match ai_usage.PRICING's row.
+    # Gemini 3.7 Flash Lite — kept for already-logged rows. The active fleet
+    # alias uses 3.5-flash-lite because 3.7-flash-lite is unavailable for the
+    # current API account.
     "gemini-3.7-flash-lite": {
         "input_per_1m": Decimal("0.30"),
         "output_per_1m": Decimal("2.50"),
     },
-    # Gemini 3.5 Flash Lite — kept for already-logged usage rows.
+    # Gemini 3.5 Flash Lite — active fleet cheap tier.
     "gemini-3.5-flash-lite": {
         "input_per_1m": Decimal("0.30"),
         "output_per_1m": Decimal("2.50"),
