@@ -52,3 +52,22 @@ def test_friend_invite_redeem_is_idempotent_for_existing_friendship():
     assert "existing_friendship" in source
     assert "use_count = use_count + 1" in source
     assert source.index("existing_friendship") < source.index("use_count = use_count + 1")
+
+
+def test_handle_requests_respect_discovery_privacy():
+    from app.tellus.routes import friends
+
+    source = _code_only(friends.create_friend_request)
+    assert "AND discoverable" in source
+    assert "profile_visibility <> 'private'" in source
+
+
+def test_social_mutations_hold_the_pair_lock_inside_a_transaction():
+    from app.tellus.routes import friends
+    from app.tellus.services import friends_service
+
+    for name in ("create_friendship", "remove_friendship", "block_account"):
+        source = _code_only(getattr(friends_service, name))
+        assert "async with conn.transaction()" in source
+        assert "lock_pair" in source
+    assert "lock_pair" in _code_only(friends.accept_friend_request)

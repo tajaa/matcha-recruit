@@ -54,6 +54,20 @@ def pair_key(first: UUID | str, second: UUID | str) -> str:
     return ":".join(sorted((str(first), str(second))))
 
 
+async def lock_pair(conn, first: UUID, second: UUID) -> None:
+    """Serialize every social-graph mutation for an account pair.
+
+    The lock must be acquired inside the caller's transaction so it covers the
+    subsequent read/write sequence. All friendship writers and deleters use the
+    same key, which prevents a concurrent block or unfriend from being undone
+    by a later friendship insert.
+    """
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"tellus-friend-pair:{pair_key(first, second)}",
+    )
+
+
 def can_request(
     latest_status: Optional[str],
     decided_at: Optional[datetime],
@@ -281,33 +295,38 @@ async def assert_not_blocked(conn, first: UUID, second: UUID) -> None:
 
 async def create_friendship(conn, first: UUID, second: UUID, source: str) -> None:
     """Create both mirror rows and award each account exactly once."""
-    await assert_not_blocked(conn, first, second)
-    await conn.execute(
-        """INSERT INTO tellus_friendships (account_id, friend_account_id, source)
-           VALUES ($1, $2, $3), ($2, $1, $3) ON CONFLICT DO NOTHING""",
-        first, second, source,
-    )
-    reference_id = pair_key(first, second)
-    for account_id in (first, second):
-        await award_points(
-            conn, account_id, "earn_engagement", event_key="friend_added",
-            reference_type="friendship", reference_id=reference_id,
-            description="Added a friend",
+    async with conn.transaction():
+        await lock_pair(conn, first, second)
+        await assert_not_blocked(conn, first, second)
+        await conn.execute(
+            """INSERT INTO tellus_friendships (account_id, friend_account_id, source)
+               VALUES ($1, $2, $3), ($2, $1, $3) ON CONFLICT DO NOTHING""",
+            first, second, source,
         )
+        reference_id = pair_key(first, second)
+        for account_id in (first, second):
+            await award_points(
+                conn, account_id, "earn_engagement", event_key="friend_added",
+                reference_type="friendship", reference_id=reference_id,
+                description="Added a friend",
+            )
 
 
 async def remove_friendship(conn, first: UUID, second: UUID) -> None:
-    await conn.execute(
-        """DELETE FROM tellus_friendships
-            WHERE (account_id = $1 AND friend_account_id = $2)
-               OR (account_id = $2 AND friend_account_id = $1)""",
-        first, second,
-    )
+    async with conn.transaction():
+        await lock_pair(conn, first, second)
+        await conn.execute(
+            """DELETE FROM tellus_friendships
+                WHERE (account_id = $1 AND friend_account_id = $2)
+                   OR (account_id = $2 AND friend_account_id = $1)""",
+            first, second,
+        )
 
 
 async def block_account(conn, blocker: UUID, blocked: UUID) -> None:
     """Block an account and atomically remove social state in both directions."""
     async with conn.transaction():
+        await lock_pair(conn, blocker, blocked)
         await conn.execute(
             """INSERT INTO tellus_account_blocks (blocker_account_id, blocked_account_id)
                VALUES ($1, $2) ON CONFLICT DO NOTHING""",

@@ -14,6 +14,7 @@ import Intake from './pages/Intake'
 import PublicBrand from './pages/PublicBrand'
 import Places from './pages/Places'
 import Claim from './pages/Claim'
+import FriendInvite from './pages/FriendInvite'
 import Scan from './pages/Scan'
 import CardView from './pages/consumer/CardView'
 
@@ -143,6 +144,7 @@ export default function App() {
       <Route path="/b/:slug" element={<PublicBrand />} />
       <Route path="/places" element={<PlacesRoute />} />
       <Route path="/p/:token" element={<Claim />} />
+      <Route path="/f/:token" element={<FriendInvite />} />
       <Route path="/scan/:deviceToken" element={<Scan />} />
 
       {/* Consumer */}

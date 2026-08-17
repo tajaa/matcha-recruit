@@ -54,6 +54,7 @@ from ..services.friends_service import (
     visible_sections,
     decode_cursor,
     encode_cursor,
+    lock_pair,
 )
 from ..services.points_service import notify_account
 from ..services.likes_service import hydrate_likes
@@ -239,7 +240,8 @@ async def create_friend_request(
             if target_id is None:
                 target_id = await conn.fetchval(
                     "SELECT id FROM tellus_accounts WHERE handle = $1 "
-                    "AND account_type = 'consumer' AND status = 'active'",
+                    "AND account_type = 'consumer' AND status = 'active' "
+                    "AND discoverable AND profile_visibility <> 'private'",
                     normalize_handle(body.handle or ""),
                 )
             if target_id is None or target_id == account.id:
@@ -250,12 +252,9 @@ async def create_friend_request(
             )
             if target is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-            await assert_not_blocked(conn, account.id, target_id)
             pair_lo, pair_hi = sorted((account.id, target_id))
-            await conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
-                f"tellus-friend-pair:{pair_lo}:{pair_hi}",
-            )
+            await lock_pair(conn, account.id, target_id)
+            await assert_not_blocked(conn, account.id, target_id)
             existing = await conn.fetchrow(
                 """SELECT * FROM tellus_friend_requests
                     WHERE pair_lo = $1 AND pair_hi = $2
@@ -318,6 +317,14 @@ async def accept_friend_request(
 ):
     async with get_connection() as conn:
         async with conn.transaction():
+            requester_id = await conn.fetchval(
+                """SELECT requester_account_id FROM tellus_friend_requests
+                    WHERE id = $1 AND addressee_account_id = $2""",
+                request_id, account.id,
+            )
+            if requester_id is None:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Request is no longer pending")
+            await lock_pair(conn, account.id, requester_id)
             row = await conn.fetchrow(
                 """UPDATE tellus_friend_requests
                       SET status = 'accepted', decided_at = NOW()
