@@ -48,7 +48,17 @@ func deepSet(_ target: JSONValue?, _ parts: ArraySlice<String>, _ value: JSONVal
     let rest = parts.dropFirst()
     switch target {
     case .object(var object):
-        guard let child = object[head] else { return (false, nil) }
+        guard let child = object[head] else {
+            if rest.isEmpty {
+                object[head] = value
+                return (true, .object(object))
+            }
+            let emptyChild: JSONValue = Int(rest.first ?? "") == nil ? .object([:]) : .array([])
+            let result = deepSet(emptyChild, rest, value)
+            guard result.ok, let updated = result.value else { return (false, nil) }
+            object[head] = updated
+            return (true, .object(object))
+        }
         let result = deepSet(child, rest, value)
         guard result.ok, let updated = result.value else { return (false, nil) }
         object[head] = updated
@@ -57,7 +67,11 @@ func deepSet(_ target: JSONValue?, _ parts: ArraySlice<String>, _ value: JSONVal
         guard let index = Int(head), index >= 0, index <= array.count else { return (false, nil) }
         if index == array.count {
             guard !rest.isEmpty else { array.append(value); return (true, .array(array)) }
-            return (false, nil)
+            let emptyChild: JSONValue = Int(rest.first ?? "") == nil ? .object([:]) : .array([])
+            let result = deepSet(emptyChild, rest, value)
+            guard result.ok, let updated = result.value else { return (false, nil) }
+            array.append(updated)
+            return (true, .array(array))
         }
         let result = deepSet(array[index], rest, value)
         guard result.ok, let updated = result.value else { return (false, nil) }
