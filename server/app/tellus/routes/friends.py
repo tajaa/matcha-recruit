@@ -1,5 +1,6 @@
 """Tell-Us consumer handles and profile privacy controls."""
 from datetime import datetime, timezone
+import secrets
 from typing import Any
 from uuid import UUID
 
@@ -22,6 +23,9 @@ from ..models.tellus import (
     TellusFriendRequestCreate,
     TellusFriendActivityItem,
     TellusFriendActivityPage,
+    TellusFriendInvite,
+    TellusInvitePreview,
+    TellusInviteRedeemResult,
     TellusBlockCreate,
     TellusFriendListPage,
     TellusHandleAvailability,
@@ -704,3 +708,119 @@ async def friend_activity_feed(
     if has_more and rows:
         next_cursor = encode_cursor(rows[-1]["happened_at"], rows[-1]["item_id"])
     return TellusFriendActivityPage(items=items, next_cursor=next_cursor)
+
+
+def _invite_response(token: str, expires_at) -> TellusFriendInvite:
+    return TellusFriendInvite(
+        token=token,
+        share_url=f"/tellus/f/{token}",
+        share_text="Add me on Tell-Us",
+        expires_at=expires_at,
+    )
+
+
+@router.get("/me/friend-invite", response_model=TellusFriendInvite)
+async def get_friend_invite(account: TellusAccount = Depends(require_verified_consumer)):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                f"tellus-friend-invite:{account.id}",
+            )
+            row = await conn.fetchrow(
+                """SELECT token, expires_at FROM tellus_friend_invites
+                    WHERE account_id = $1 AND revoked_at IS NULL
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    ORDER BY created_at DESC LIMIT 1""",
+                account.id,
+            )
+            if row is None:
+                token = secrets.token_urlsafe(16)
+                row = await conn.fetchrow(
+                    """INSERT INTO tellus_friend_invites (account_id, token)
+                       VALUES ($1, $2) RETURNING token, expires_at""",
+                    account.id, token,
+                )
+    return _invite_response(row["token"], row["expires_at"])
+
+
+@router.post("/me/friend-invite/rotate", response_model=TellusFriendInvite)
+async def rotate_friend_invite(account: TellusAccount = Depends(require_verified_consumer)):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE tellus_friend_invites SET revoked_at = NOW() "
+                "WHERE account_id = $1 AND revoked_at IS NULL",
+                account.id,
+            )
+            token = secrets.token_urlsafe(16)
+            row = await conn.fetchrow(
+                """INSERT INTO tellus_friend_invites (account_id, token)
+                   VALUES ($1, $2) RETURNING token, expires_at""",
+                account.id, token,
+            )
+    return _invite_response(row["token"], row["expires_at"])
+
+
+async def _invite_owner(conn, token: str, viewer_id: UUID):
+    row = await conn.fetchrow(
+        """SELECT i.account_id, i.token, i.expires_at, i.revoked_at, i.max_uses, i.use_count
+             FROM tellus_friend_invites i JOIN tellus_accounts a ON a.id = i.account_id
+            WHERE i.token = $1 AND a.status = 'active' AND a.account_type = 'consumer'""",
+        token,
+    )
+    if row is None or row["revoked_at"] is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    if row["expires_at"] is not None and row["expires_at"] <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    if row["max_uses"] is not None and row["use_count"] >= row["max_uses"]:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    if row["account_id"] == viewer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+    await assert_not_blocked(conn, viewer_id, row["account_id"])
+    return row
+
+
+@router.get("/friends/invite/{token}", response_model=TellusInvitePreview)
+async def preview_friend_invite(
+    token: str,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    async with get_connection() as conn:
+        row = await _invite_owner(conn, token, account.id)
+        return TellusInvitePreview(owner=await _person_summary(conn, row["account_id"], account.id))
+
+
+@router.post("/friends/invite/{token}/redeem", response_model=TellusInviteRedeemResult)
+async def redeem_friend_invite(
+    token: str,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    await check_rate_limit(str(account.id), "tellus_friend_invite_redeem", 30, 3600)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """SELECT i.* FROM tellus_friend_invites i
+                    JOIN tellus_accounts a ON a.id = i.account_id
+                   WHERE i.token = $1 AND a.status = 'active' AND a.account_type = 'consumer'
+                   FOR UPDATE OF i""",
+                token,
+            )
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+            await _invite_owner(conn, token, account.id)
+            await create_friendship(conn, account.id, row["account_id"], "invite_link")
+            await conn.execute(
+                "UPDATE tellus_friend_invites SET use_count = use_count + 1 WHERE id = $1",
+                row["id"],
+            )
+            actor_name = display_name_for(account.display_name, account.handle, account.id)
+            await notify_account(
+                conn, row["account_id"], "friend_added", "New friend added",
+                f"{actor_name} joined from your invite.", reference_type="account",
+                reference_id=str(account.id), slug=account.handle, name=actor_name,
+            )
+            friend = await _person_summary(conn, row["account_id"], account.id)
+    return TellusInviteRedeemResult(
+        friendship={"friend": friend, "created_at": datetime.now(timezone.utc)}
+    )
