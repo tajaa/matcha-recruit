@@ -280,7 +280,11 @@ async def get_board(
             )
             listings_by_id = {r["id"]: r for r in lrows}
 
-        campaign_ids = [r["campaign_id"] for r in rows if r["campaign_id"] is not None]
+        # r["campaign_id"] can KeyError if this connection's cached plan for
+        # "p.*" predates the campaign_id column reaching the DB (a live prod
+        # incident, 2026-08-16) — same defensive idiom serialize_post already
+        # uses below for approved_reply_count/held_reply_count/like_count.
+        campaign_ids = [r["campaign_id"] for r in rows if "campaign_id" in r.keys() and r["campaign_id"] is not None]
         campaigns_by_id = {}
         if campaign_ids:
             crows = await conn.fetch(
@@ -700,7 +704,7 @@ async def update_post(
                 row["listing_id"], brand["id"], account.id,
             )
         campaign_row = None
-        if row["campaign_id"] is not None:
+        if "campaign_id" in row.keys() and row["campaign_id"] is not None:
             campaign_row = await conn.fetchrow(
                 "SELECT id, title, reward_text, flyer_image_url, claim_token, status, campaign_type "
                 "FROM tellus_promo_campaigns WHERE id = $1 AND brand_id = $2",

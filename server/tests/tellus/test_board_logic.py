@@ -254,6 +254,20 @@ class TestBoardSourceGuards:
         src = inspect.getsource(board.get_board)
         assert "ANY($1::uuid[])" in src
 
+    def test_campaign_id_read_guards_against_stale_connection_schema(self):
+        """A pooled asyncpg connection whose prepared plan for "p.*"/"RETURNING *"
+        predates the campaign_id column reaching the DB raises KeyError on a bare
+        r["campaign_id"] (live prod incident, 2026-08-16, board.py:283). Both
+        readers must check "campaign_id" in row.keys() first, same idiom
+        serialize_post already uses for approved_reply_count/held_reply_count."""
+        from app.tellus.routes import board
+
+        get_board_src = inspect.getsource(board.get_board)
+        assert '"campaign_id" in r.keys() and r["campaign_id"] is not None' in get_board_src
+
+        update_post_src = inspect.getsource(board.update_post)
+        assert '"campaign_id" in row.keys() and row["campaign_id"] is not None' in update_post_src
+
 
 class TestPromoPostSerialization:
     def test_serialize_post_embeds_campaign_only_when_attached(self):

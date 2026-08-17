@@ -238,7 +238,7 @@ final class FlyerDesignerViewModel: LoadableVM {
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            if !Task.isCancelled { logoImage = UIImage(data: data) }
+            if !Task.isCancelled { logoImage = UIImage(data: data)?.normalizedUp() }
         } catch {
             logoImage = nil
         }
@@ -277,7 +277,7 @@ final class FlyerDesignerViewModel: LoadableVM {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard !Task.isCancelled, let image = UIImage(data: data) else { return }
-            imageAssets[source] = image
+            imageAssets[source] = image.normalizedUp()
         } catch {
             // A missing optional image should not block editing the rest of the flyer.
         }

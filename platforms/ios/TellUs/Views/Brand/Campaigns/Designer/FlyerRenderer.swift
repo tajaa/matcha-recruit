@@ -91,6 +91,29 @@ enum FlyerRenderer {
         )
     }
 
+    /// Draws a CGImage right-side-up when its underlying pixel data is
+    /// natively y-up (CoreGraphics/CoreImage's native space) rather than the
+    /// standard top-down layout ImageIO produces for a decoded PNG/JPEG.
+    /// CGContext.draw(_:in:) always draws assuming the LATTER, so a y-up
+    /// source renders upside down through it. Confirmed empirically (not
+    /// just from Apple's classic "drawRect: image is upside-down" note,
+    /// which turned out NOT to reproduce for a plain UIKit-decoded raster in
+    /// either context type this renderer uses) to be necessary for:
+    ///   - stickers: Xcode's SVG-asset-catalog compiler bakes a y-up bitmap
+    ///   - the generated QR: CoreImage's CIContext.createCGImage output is
+    ///     natively y-up
+    /// and NOT needed (and actively wrong — it re-flips an already-correct
+    /// image) for the `image`/logo layer, whose UIImage always comes from
+    /// `UIImage(data:)` decoding real PNG/JPEG bytes (FlyerDesignerViewModel),
+    /// i.e. a standard ImageIO-decoded, already-top-down CGImage.
+    private static func drawUpright(_ cgImage: CGImage, in rect: CGRect, context: CGContext) {
+        context.saveGState()
+        context.translateBy(x: 0, y: rect.maxY)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(cgImage, in: CGRect(x: rect.minX, y: 0, width: rect.width, height: rect.height))
+        context.restoreGState()
+    }
+
     private static func draw(_ layer: ImageLayer, assets: FlyerRenderAssets, in context: CGContext) {
         let image = layer.slot == "logo" ? assets.logo : assets.images[layer.src]
         guard let cgImage = image?.cgImage else { return }
@@ -101,7 +124,7 @@ enum FlyerRenderer {
     private static func draw(_ layer: StickerLayer, assets: FlyerRenderAssets, in context: CGContext) {
         guard let image = assets.stickers[layer.assetId], let cgImage = image.cgImage else { return }
         context.interpolationQuality = .high
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: layer.width, height: layer.height))
+        drawUpright(cgImage, in: CGRect(x: 0, y: 0, width: layer.width, height: layer.height), context: context)
     }
 
     private static func draw(_ layer: ShapeLayer, palette: [String: String]?, in context: CGContext) {
@@ -146,7 +169,7 @@ enum FlyerRenderer {
             return
         }
         context.interpolationQuality = .none
-        context.draw(cgImage, in: rect)
+        drawUpright(cgImage, in: rect, context: context)
     }
 
     private static func qrImage(value: String, foreground: UIColor, background: UIColor) -> UIImage? {

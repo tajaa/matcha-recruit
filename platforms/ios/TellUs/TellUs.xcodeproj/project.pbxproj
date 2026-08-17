@@ -40,6 +40,7 @@
 		1F428102FEF7E95FA342AC4B /* beach-day.json in Resources */ = {isa = PBXBuildFile; fileRef = C00A6B80764B93938FB075ED /* beach-day.json */; };
 		20DCFB1E446F8C3E1AF24469 /* BrandTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241643204D022959EBDE0B96 /* BrandTabView.swift */; };
 		21971D9F8C5B0EB5BBD10457 /* FlyerExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */; };
+		82EF7B2152E148FA83F65ABD /* FlyerRendererOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BEF58D4E4E4120AB169C84 /* FlyerRendererOrientationTests.swift */; };
 		232AF41EF442D7724C347033 /* FeedbackFilterBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CF6E718AC0FF710987593E /* FeedbackFilterBar.swift */; };
 		247B5F88FD45913E6E0AB53C /* FlyerAssetCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */; };
 		252F908591A0CDC05FB5FA19 /* TellUsApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 623E5CFE228337E6B9F79DCA /* TellUsApp.swift */; };
@@ -417,6 +418,7 @@
 		BEC2C30F5FB62DCB21DF28FF /* ReportMediaGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportMediaGallery.swift; sourceTree = "<group>"; };
 		BF4B6C7D6FE42F31F6F24B83 /* LinkFormSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkFormSheet.swift; sourceTree = "<group>"; };
 		BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerExportTests.swift; sourceTree = "<group>"; };
+		83BEF58D4E4E4120AB169C84 /* FlyerRendererOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerRendererOrientationTests.swift; sourceTree = "<group>"; };
 		BFFDBE21B733AF628A3609E1 /* PlacesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlacesViewModel.swift; sourceTree = "<group>"; };
 		C00A6B80764B93938FB075ED /* beach-day.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "beach-day.json"; sourceTree = "<group>"; };
 		C0C908F67BEF84C21B72B389 /* BoardManageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardManageView.swift; sourceTree = "<group>"; };
@@ -1021,6 +1023,7 @@
 				BDC8E2E108DB9C9159CA256D /* FlyerDesignEditorTests.swift */,
 				940BC74017D026743E70189E /* FlyerDocumentStoreTests.swift */,
 				BF9E43F387E4E732FB5C9CA4 /* FlyerExportTests.swift */,
+				83BEF58D4E4E4120AB169C84 /* FlyerRendererOrientationTests.swift */,
 				830CB917F2C097015A899752 /* IntakeCanSubmitTests.swift */,
 				A4293E9CCB88B052A3A50541 /* IntakeSubmissionEncodingTests.swift */,
 				43EFA764158C1E7138ABD208 /* IntakeTokenTests.swift */,
@@ -1171,6 +1174,7 @@
 				7D67C88E00D66440A3054C8E /* FlyerDesignEditorTests.swift in Sources */,
 				1162CBC286F1C1D6E6D7C07F /* FlyerDocumentStoreTests.swift in Sources */,
 				21971D9F8C5B0EB5BBD10457 /* FlyerExportTests.swift in Sources */,
+				82EF7B2152E148FA83F65ABD /* FlyerRendererOrientationTests.swift in Sources */,
 				8FBB89AA1D211C613A51EAAD /* IntakeCanSubmitTests.swift in Sources */,
 				D18C5744DED412D2689A2990 /* IntakeSubmissionEncodingTests.swift in Sources */,
 				A83D071F75999630570F6E01 /* IntakeTokenTests.swift in Sources */,
