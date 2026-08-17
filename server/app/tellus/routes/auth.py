@@ -54,7 +54,9 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
     row = await conn.fetchrow(
         """SELECT a.id, a.email, a.display_name, a.account_type, a.status,
                   a.city, a.state, a.leaderboard_opt_in,
-                  a.consumer_tier, a.consumer_tier_expires_at, b.id AS brand_id,
+                  a.consumer_tier, a.consumer_tier_expires_at,
+                  a.handle, a.handle_set_at, a.avatar_url,
+                  a.profile_visibility, a.discoverable, b.id AS brand_id,
                   b.plan_status, b.location_count, b.slug AS brand_slug
            FROM tellus_accounts a
            LEFT JOIN tellus_brands b ON b.owner_account_id = a.id
@@ -66,6 +68,8 @@ async def _load_account(conn, account_id: UUID) -> TellusAccount:
         account_type=row["account_type"], status=row["status"], city=row["city"],
         state=row["state"], leaderboard_opt_in=row["leaderboard_opt_in"], brand_id=row["brand_id"],
         consumer_tier=row["consumer_tier"], consumer_tier_expires_at=row["consumer_tier_expires_at"],
+        handle=row["handle"], handle_set_at=row["handle_set_at"], avatar_url=row["avatar_url"],
+        profile_visibility=row["profile_visibility"], discoverable=row["discoverable"],
         plan_status=row["plan_status"], location_count=row["location_count"],
         brand_slug=row["brand_slug"], is_admin=_is_tellus_admin(row["email"]),
     )
@@ -423,15 +427,24 @@ async def set_location(
 async def update_profile(
     body: TellusProfileUpdate, account: TellusAccount = Depends(require_tellus_account)
 ):
-    """Update display name / leaderboard opt-in."""
+    """Update display name / leaderboard opt-in / friends profile visibility.
+
+    profile_visibility and discoverable are NOT NULL columns with DB
+    defaults, so COALESCE-on-omitted is safe here — there is no "clear this
+    field" case to support (contrast handle, which gets its own POST /me/handle
+    for the 409-on-taken + change-cooldown semantics a COALESCE PATCH can't
+    express)."""
     async with get_connection() as conn:
         await conn.execute(
             """UPDATE tellus_accounts
                SET display_name = COALESCE($2, display_name),
                    leaderboard_opt_in = COALESCE($3, leaderboard_opt_in),
+                   profile_visibility = COALESCE($4, profile_visibility),
+                   discoverable = COALESCE($5, discoverable),
                    updated_at = NOW()
                WHERE id = $1""",
             account.id, body.display_name, body.leaderboard_opt_in,
+            body.profile_visibility, body.discoverable,
         )
         return await _load_account(conn, account.id)
 

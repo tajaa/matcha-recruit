@@ -25,6 +25,15 @@ BoardReplyStatus = Literal["held", "approved", "rejected", "removed"]
 BoardModerationStatus = Literal["visible", "flagged", "removed"]
 BoardMembershipStatus = Literal["pending", "approved", "declined", "removed", "left", "cancelled"]
 ListingVisibility = Literal["public", "board"]
+# ── Friends (tellus_app_28) ──────────────────────────────────────────────────
+ProfileVisibility = Literal["everyone", "friends", "private"]
+FriendRequestStatus = Literal["pending", "accepted", "declined", "cancelled"]
+FriendRequestSource = Literal["search", "handle", "suggestion", "profile", "invite_link"]
+FriendRequestDirection = Literal["incoming", "outgoing"]
+AbuseReportReason = Literal["spam", "harassment", "impersonation", "inappropriate", "other"]
+AbuseReportTargetType = Literal["account", "review", "board_reply"]
+AbuseReportStatus = Literal["open", "reviewing", "actioned", "dismissed"]
+FriendActivityKind = Literal["review", "follow"]
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
@@ -94,6 +103,13 @@ class TellusAccount(BaseModel):
     brand_slug: Optional[str] = None
     # True when the account email is in TELLUS_ADMIN_EMAILS — internal changelog access.
     is_admin: bool = False
+    # Friends (tellus_app_28) — all optional/defaulted so a pre-migration row
+    # (or a stale in-memory model) never fails validation.
+    handle: Optional[str] = None
+    handle_set_at: Optional[datetime] = None
+    avatar_url: Optional[str] = None
+    profile_visibility: ProfileVisibility = "friends"
+    discoverable: bool = True
 
 
 class TellusTokenResponse(BaseModel):
@@ -122,6 +138,195 @@ class TellusLocationUpdate(BaseModel):
 class TellusProfileUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=255)
     leaderboard_opt_in: Optional[bool] = None
+    # Friends (tellus_app_28). NOT NULL columns with defaults on the DB side,
+    # so COALESCE-style "unset means unchanged" is safe here — no clear-a-
+    # field ambiguity to work around (contrast promo_service.update_campaign,
+    # which needs model_fields_set because its columns ARE nullable).
+    profile_visibility: Optional[ProfileVisibility] = None
+    discoverable: Optional[bool] = None
+
+
+# ── Friends (tellus_app_28) ──────────────────────────────────────────────────
+
+class TellusHandleClaim(BaseModel):
+    handle: str = Field(min_length=3, max_length=20)
+
+
+class TellusHandleAvailability(BaseModel):
+    handle: str
+    available: bool
+    # "format" | "reserved" | "taken" — None when available.
+    reason: Optional[str] = None
+
+
+class TellusPersonSummary(BaseModel):
+    """The one person-row shape used by search, suggestions, the friends
+    list, and request rows. Deliberately carries NO email — friend search
+    must never expose one (mirrors the reviewer_name-only rule on
+    TellusPublicReview)."""
+    account_id: UUID
+    display_name: str
+    handle: Optional[str] = None
+    avatar_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    level: int = 1
+    lifetime_points: int = 0
+    mutual_friend_count: int = 0
+    is_friend: bool = False
+    # Set when a request is pending in either direction — lets the client
+    # render Cancel/Accept without a second round trip.
+    pending_request_id: Optional[UUID] = None
+    is_you: bool = False
+
+
+class TellusFriendSuggestion(TellusPersonSummary):
+    pass
+
+
+class TellusFriendListPage(BaseModel):
+    entries: list[TellusPersonSummary]
+    total: int
+    next_offset: Optional[int] = None
+
+
+class TellusFriendRequestCreate(BaseModel):
+    account_id: Optional[UUID] = None
+    handle: Optional[str] = None
+    source: FriendRequestSource = "search"
+    note: Optional[str] = Field(default=None, max_length=280)
+
+    @model_validator(mode="after")
+    def _one_target(self) -> "TellusFriendRequestCreate":
+        if (self.account_id is None) == (self.handle is None):
+            raise ValueError("Provide exactly one of account_id or handle")
+        return self
+
+
+class TellusFriendRequest(BaseModel):
+    id: UUID
+    requester_account_id: UUID
+    addressee_account_id: UUID
+    status: FriendRequestStatus
+    source: FriendRequestSource
+    note: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+    # The OTHER party relative to the caller — populated by the route.
+    person: Optional[TellusPersonSummary] = None
+    direction: Optional[FriendRequestDirection] = None
+
+
+class TellusFriendRequestCount(BaseModel):
+    incoming: int
+    outgoing: int
+
+
+class TellusFriendship(BaseModel):
+    friend: TellusPersonSummary
+    created_at: datetime
+
+
+class TellusPersonReview(BaseModel):
+    """A published review by a profile subject. Distinct from
+    TellusPublicReview — that model carries no account identity by design
+    (reviews can be anonymous on the public brand page); this one only ever
+    appears behind require_verified_consumer + the friends visibility gate."""
+    id: UUID
+    brand_id: UUID
+    brand_name: str
+    brand_slug: Optional[str] = None
+    rating: Optional[int] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    created_at: datetime
+    publish_at: Optional[datetime] = None
+    like_count: int = 0
+    liked_by_me: bool = False
+
+
+class TellusPersonFollowedPlace(BaseModel):
+    slug: str
+    name: str
+    logo_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+
+class TellusPersonBoard(BaseModel):
+    brand_slug: str
+    brand_name: str
+    logo_url: Optional[str] = None
+    joined_at: Optional[datetime] = None
+
+
+class TellusPersonProfile(BaseModel):
+    """Section-gated by friends_service.visible_sections() — an absent
+    section serializes as None (private), never an empty list, so the
+    client can distinguish "hidden" from "has none"."""
+    account_id: UUID
+    display_name: str
+    handle: Optional[str] = None
+    avatar_url: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    level: int = 1
+    lifetime_points: int = 0
+    current_streak: int = 0
+    friend_count: int = 0
+    mutual_friend_count: int = 0
+    friends_since: Optional[datetime] = None
+    is_friend: bool = False
+    pending_request_id: Optional[UUID] = None
+    is_you: bool = False
+    reviews: Optional[list[TellusPersonReview]] = None
+    followed_places: Optional[list[TellusPersonFollowedPlace]] = None
+    badges: Optional[list[dict[str, Any]]] = None
+    boards: Optional[list[TellusPersonBoard]] = None
+
+
+class TellusFriendActivityItem(BaseModel):
+    id: str
+    kind: FriendActivityKind
+    actor: TellusPersonSummary
+    happened_at: datetime
+    brand_id: Optional[UUID] = None
+    brand_name: Optional[str] = None
+    brand_slug: Optional[str] = None
+    rating: Optional[int] = None
+    title: Optional[str] = None
+    body: Optional[str] = None
+    like_count: int = 0
+    liked_by_me: bool = False
+
+
+class TellusFriendActivityPage(BaseModel):
+    items: list[TellusFriendActivityItem]
+    next_cursor: Optional[str] = None
+
+
+class TellusFriendInvite(BaseModel):
+    token: str
+    share_url: str
+    share_text: str
+    expires_at: Optional[datetime] = None
+
+
+class TellusInvitePreview(BaseModel):
+    owner: TellusPersonSummary
+
+
+class TellusInviteRedeemResult(BaseModel):
+    friendship: TellusFriendship
+
+
+class TellusBlockCreate(BaseModel):
+    account_id: UUID
+
+
+class TellusAbuseReportCreate(BaseModel):
+    reason: AbuseReportReason
+    detail: Optional[str] = Field(default=None, max_length=1000)
 
 
 # ── Brands & stores ───────────────────────────────────────────────────────────
