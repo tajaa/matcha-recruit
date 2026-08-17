@@ -26,6 +26,7 @@ final class AppState {
     /// may have more than one business inbox through team membership.
     var inboxBrands: [InboxBrand] = []
     var unreadCount = 0
+    var pendingFriendRequests = 0
     /// Set when the user taps a push; RootView presents the destination as a
     /// full-screen cover and SwiftUI nils it back out on dismissal.
     var pendingDeepLink: DeepLinkRoute?
@@ -131,6 +132,7 @@ final class AppState {
         moderatedBrands = []
         inboxBrands = []
         unreadCount = 0
+        pendingFriendRequests = 0
         pendingDeepLink = nil
         deferredDeepLink = nil
         phase = .loggedOut
@@ -162,6 +164,9 @@ final class AppState {
             while !Task.isCancelled {
                 if let items = try? await NotificationsService.shared.list(unreadOnly: true, limit: 100) {
                     self?.unreadCount = items.count
+                }
+                if let count = try? await FriendsService.shared.requestCount() {
+                    self?.pendingFriendRequests = count.incoming
                 }
                 try? await Task.sleep(for: .seconds(60))
             }

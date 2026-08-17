@@ -20,6 +20,7 @@ struct ConsumerTabView: View {
 
             NavigationStack { MoreView() }
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }
+                .badge(appState.pendingFriendRequests)
         }
     }
 }

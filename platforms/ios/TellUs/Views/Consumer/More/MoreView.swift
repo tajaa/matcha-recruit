@@ -9,6 +9,22 @@ struct MoreView: View {
     var body: some View {
         List {
             Section {
+                NavigationLink {
+                    FriendsHubView()
+                } label: {
+                    HStack {
+                        Text("Friends")
+                        Spacer()
+                        if appState.pendingFriendRequests > 0 {
+                            Text("\(appState.pendingFriendRequests)")
+                                .font(.interCaption)
+                                .foregroundStyle(TU.ink)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(TU.ember, in: Capsule())
+                        }
+                    }
+                }
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
                 NavigationLink("Leaderboard") { LeaderboardView() }
