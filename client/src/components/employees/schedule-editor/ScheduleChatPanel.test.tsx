@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleChatPanel from './ScheduleChatPanel'
 
 const sendScheduleChatMessage = vi.fn()
@@ -16,6 +16,13 @@ vi.mock('../../../api/employees/scheduleChat', () => ({
 vi.mock('../../ui', () => ({ useToast: () => ({ toast }) }))
 
 describe('ScheduleChatPanel', () => {
+  beforeEach(() => {
+    sendScheduleChatMessage.mockReset()
+    applyScheduleChat.mockReset()
+    discardScheduleChat.mockReset()
+    toast.mockReset()
+  })
+
   it('sends a question and applies a draft proposal', async () => {
     sendScheduleChatMessage.mockResolvedValueOnce({
       proposal_id: 'proposal-1', kind: 'proposal', message: 'Here is the draft',
@@ -51,5 +58,31 @@ describe('ScheduleChatPanel', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'North' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'North' }))
     await waitFor(() => expect(sendScheduleChatMessage).toHaveBeenLastCalledWith(expect.objectContaining({ message: 'North', existing_proposal_id: 'proposal-2' })))
+  })
+
+  it('carries a free-text clarification answer into the pending proposal', async () => {
+    sendScheduleChatMessage
+      .mockResolvedValueOnce({
+        proposal_id: 'proposal-days', kind: 'clarify', message: 'Which days should I schedule?',
+        proposal: { clarify_question: 'Which days should I schedule?', clarify_options: [] },
+      })
+      .mockResolvedValueOnce({
+        proposal_id: 'proposal-days', kind: 'proposal', message: 'Here is the schedule',
+        proposal: { shifts: [] },
+      })
+
+    render(<ScheduleChatPanel weekStart="2026-08-16" locationId={null} editPublished={false} onApplied={vi.fn()} onClose={vi.fn()} />)
+    const input = screen.getByPlaceholderText('Try: add an opener Monday')
+    fireEvent.change(input, { target: { value: 'Add three openers' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    await waitFor(() => expect(screen.getByText('Which days should I schedule?')).toBeInTheDocument())
+
+    const answer = screen.getByPlaceholderText('Reply to the question above…')
+    fireEvent.change(answer, { target: { value: 'Thursday through Friday of this week' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    await waitFor(() => expect(sendScheduleChatMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: 'Thursday through Friday of this week',
+      existing_proposal_id: 'proposal-days',
+    })))
   })
 })

@@ -19,6 +19,10 @@ from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from ...models.scheduling.employee_schedule import ScheduleChatApply, ScheduleChatMessage
 from ...services.scheduling import schedule_chat
+from ...services.scheduling.schedule_chat_rules import (
+    resolve_clarify_answer,
+    snapped_to_option,
+)
 from ._shared import require_company_id
 
 router = APIRouter()
@@ -58,7 +62,6 @@ async def schedule_chat_turn(
     company_id = await require_company_id(current_user)
     await check_rate_limit(str(company_id), "editor_schedule_chat", 30, 3600)
 
-    existing = None
     stored_proposal = None
     stored_parse = None
     if body.existing_proposal_id:
@@ -69,18 +72,55 @@ async def schedule_chat_turn(
             stored_proposal = _decode(existing["proposal"])
             stored_parse = _decode(existing["parse"])
 
+    today = date.today()
     original_content = body.message
-    if stored_proposal and stored_parse:
-        original_content = schedule_chat.compose_clarify_followup(stored_proposal, body.message)
+    parsed = None
+    clarify_history: list[dict] = []
 
-    parsed = await schedule_chat.parse_schedule_request(
-        original_content, date.today(), week_start=body.week_start,
-    )
-    if parsed is None and stored_parse:
-        parsed = stored_parse
-        parsed = dict(parsed)
-        parsed["location_hint"] = body.message
+    if stored_proposal and stored_parse:
+        options = stored_proposal.get("clarify_options") or []
+        snapped = resolve_clarify_answer(body.message, options)
+        location_question = (
+            stored_proposal.get("clarify_question")
+            == schedule_chat.LOCATION_CLARIFY_QUESTION
+        )
+        location_answer = location_question and snapped_to_option(snapped, options)
+
+        if location_answer:
+            parsed = dict(stored_parse)
+            parsed["location_hint"] = snapped
+        else:
+            original_content = schedule_chat.compose_clarify_followup(
+                stored_proposal, snapped,
+            )
+            parsed = await schedule_chat.parse_schedule_request(
+                original_content, today, week_start=body.week_start,
+            )
+            if parsed is None and location_question:
+                parsed = dict(stored_parse)
+            if parsed is not None and location_question and not (
+                parsed.get("location_hint") or ""
+            ).strip():
+                parsed["location_hint"] = snapped
+
+        clarify_history = list(stored_proposal.get("clarify_history") or []) + [{
+            "q": stored_proposal.get("clarify_question"),
+            "a": body.message,
+        }]
+        original_content = stored_proposal.get("original_content") or body.message
+    else:
+        parsed = await schedule_chat.parse_schedule_request(
+            original_content, today, week_start=body.week_start,
+        )
+
     if parsed is None:
+        if stored_proposal:
+            return {
+                "proposal_id": body.existing_proposal_id,
+                "kind": "clarify",
+                "message": "I couldn't understand that — could you restate the days, hours, or people?",
+                "proposal": None,
+            }
         return {
             "proposal_id": None, "kind": "unactionable",
             "message": "Ask about coverage, shifts, edits, or reusable templates.",
@@ -97,13 +137,15 @@ async def schedule_chat_turn(
 
         common = dict(
             company_id=company_id, channel_id=None, source_message_id=None,
-            created_by=current_user.id, parsed=parsed, today=date.today(),
+            created_by=current_user.id, parsed=parsed, today=today,
             original_content=original_content, surface="editor",
+            clarify_history=clarify_history,
             existing_proposal_id=body.existing_proposal_id,
         )
-        if parsed.get("action") == "template":
+        original_kind = stored_proposal.get("kind") if stored_proposal else parsed.get("action")
+        if original_kind == "template":
             build = await schedule_chat.build_template_proposal(conn, **common)
-        elif parsed.get("action") == "edit":
+        elif original_kind == "edit":
             statuses = ("draft", "published") if body.edit_published else ("draft",)
             build = await schedule_chat.build_edit_proposal(
                 conn, **common, shift_statuses=statuses,

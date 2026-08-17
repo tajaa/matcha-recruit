@@ -36,18 +36,22 @@ export default function ScheduleChatPanel({ weekStart, locationId, editPublished
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [pendingClarifyId, setPendingClarifyId] = useState<string | null>(null)
 
   async function send(message: string, existingProposalId?: string) {
     const value = message.trim()
     if (!value || busy) return
+    const proposalId = existingProposalId ?? pendingClarifyId ?? undefined
     setInput('')
+    setPendingClarifyId(null)
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'user', text: value }])
     setBusy(true)
     try {
       const turn = await sendScheduleChatMessage({
         message: value, week_start: weekStart, location_id: locationId,
-        edit_published: editPublished, existing_proposal_id: existingProposalId,
+        edit_published: editPublished, existing_proposal_id: proposalId,
       })
+      setPendingClarifyId(turn.kind === 'clarify' && !(turn.proposal?.clarify_options?.length) ? turn.proposal_id : null)
       setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', turn }])
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Could not ask the scheduling assistant', 'error')
@@ -100,7 +104,7 @@ export default function ScheduleChatPanel({ weekStart, locationId, editPublished
         {busy && <div className="flex items-center gap-2 text-[11px] text-zinc-500"><Loader2 className="h-3 w-3 animate-spin" /> Checking the schedule...</div>}
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void send(input) }} className="flex items-center gap-2 border-t border-white/[0.08] p-2">
-        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={busy} placeholder="Try: add an opener Monday" className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-emerald-500/50" />
+        <input value={input} onChange={(event) => setInput(event.target.value)} disabled={busy} placeholder={pendingClarifyId ? 'Reply to the question above…' : 'Try: add an opener Monday'} className="min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-emerald-500/50" />
         <button disabled={busy || !input.trim()} className="rounded-lg bg-emerald-400 p-2 text-zinc-950 disabled:opacity-40" aria-label="Send scheduling question"><Send className="h-3.5 w-3.5" /></button>
       </form>
     </section>
@@ -113,7 +117,11 @@ function TurnCard({ turn, onApply, onDiscard, onClarify }: { turn: ScheduleChatT
   if (turn.kind === 'clarify') return (
     <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.06] p-2 text-xs text-zinc-300">
       <p>{proposal.clarify_question || turn.message}</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">{(proposal.clarify_options || []).map((option) => <button key={option} onClick={() => onClarify(option)} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:border-emerald-500/50">{option}</button>)}</div>
+      {(proposal.clarify_options || []).length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">{(proposal.clarify_options || []).map((option) => <button key={option} onClick={() => onClarify(option)} className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 hover:border-emerald-500/50">{option}</button>)}</div>
+      ) : (
+        <p className="mt-2 text-[11px] text-zinc-500">Type your answer below.</p>
+      )}
     </div>
   )
   return (
