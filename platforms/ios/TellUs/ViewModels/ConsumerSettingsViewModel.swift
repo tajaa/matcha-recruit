@@ -38,11 +38,11 @@ final class ConsumerSettingsViewModel: LoadableVM {
         }
     }
 
-    func saveProfile(appState: AppState, displayName: String, leaderboardOptIn: Bool) async {
+    func saveProfile(appState: AppState, displayName: String) async {
         savedProfile = false
         await withLoad {
             let updated = try await AuthService.shared.updateProfile(
-                ProfileUpdate(display_name: displayName.isEmpty ? nil : displayName, leaderboard_opt_in: leaderboardOptIn)
+                ProfileUpdate(display_name: displayName.isEmpty ? nil : displayName, leaderboard_opt_in: nil)
             )
             appState.account = updated
             savedProfile = true

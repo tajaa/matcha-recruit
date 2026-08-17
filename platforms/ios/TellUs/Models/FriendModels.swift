@@ -104,6 +104,36 @@ struct FriendProfile: Codable {
     let followed_places: [FollowedPlace]?
     let badges: [[String: JSONValue]]?
     let boards: [PersonBoard]?
+
+    private enum CodingKeys: String, CodingKey {
+        case account_id, display_name, handle, avatar_url, city, state, level,
+             lifetime_points, current_streak, friend_count, mutual_friend_count,
+             friends_since, is_friend, pending_request_id, is_you, reviews,
+             followed_places, badges, boards
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        account_id = try c.decode(String.self, forKey: .account_id)
+        display_name = try c.decodeIfPresent(String.self, forKey: .display_name) ?? "Someone"
+        handle = try c.decodeIfPresent(String.self, forKey: .handle)
+        avatar_url = try c.decodeIfPresent(String.self, forKey: .avatar_url)
+        city = try c.decodeIfPresent(String.self, forKey: .city)
+        state = try c.decodeIfPresent(String.self, forKey: .state)
+        level = try c.decodeIfPresent(Int.self, forKey: .level) ?? 1
+        lifetime_points = try c.decodeIfPresent(Int.self, forKey: .lifetime_points) ?? 0
+        current_streak = try c.decodeIfPresent(Int.self, forKey: .current_streak) ?? 0
+        friend_count = try c.decodeIfPresent(Int.self, forKey: .friend_count) ?? 0
+        mutual_friend_count = try c.decodeIfPresent(Int.self, forKey: .mutual_friend_count) ?? 0
+        friends_since = try c.decodeIfPresent(String.self, forKey: .friends_since)
+        is_friend = try c.decodeIfPresent(Bool.self, forKey: .is_friend) ?? false
+        pending_request_id = try c.decodeIfPresent(String.self, forKey: .pending_request_id)
+        is_you = try c.decodeIfPresent(Bool.self, forKey: .is_you) ?? false
+        reviews = try c.decodeIfPresent([PersonReview].self, forKey: .reviews)
+        followed_places = try c.decodeIfPresent([FollowedPlace].self, forKey: .followed_places)
+        badges = try c.decodeIfPresent([[String: JSONValue]].self, forKey: .badges)
+        boards = try c.decodeIfPresent([PersonBoard].self, forKey: .boards)
+    }
 }
 
 struct PersonReview: Codable, Identifiable { let id: String; let brand_id: String; let brand_name: String; let brand_slug: String?; let rating: Int?; let title: String?; let description: String?; let created_at: String; let publish_at: String?; let like_count: Int; let liked_by_me: Bool }

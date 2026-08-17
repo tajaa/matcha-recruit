@@ -39,4 +39,9 @@ final class ScannedTargetTests: XCTestCase {
         XCTAssertNil(intakeToken(from: "https://hey-matcha.com/tellus/p/abc12345"))
         XCTAssertEqual(intakeToken(from: "https://hey-matcha.com/tellus/i/abc12345"), "abc12345")
     }
+
+    func testFriendInvitePath() {
+        XCTAssertEqual(scannedTarget(from: "https://hey-matcha.com/tellus/f/abc12345"), .friendInvite("abc12345"))
+        XCTAssertEqual(scannedTarget(from: "/f/abc12345"), .friendInvite("abc12345"))
+    }
 }

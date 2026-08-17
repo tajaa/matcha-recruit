@@ -16,9 +16,8 @@ struct ConsumerSettingsView: View {
         Form {
             Section("Profile") {
                 TextField("Display name", text: $displayName)
-                Toggle("Show me on the leaderboard", isOn: $leaderboardOptIn)
                 Button("Save profile") {
-                    Task { await vm.saveProfile(appState: appState, displayName: displayName, leaderboardOptIn: leaderboardOptIn) }
+                    Task { await vm.saveProfile(appState: appState, displayName: displayName) }
                 }
                 if vm.savedProfile { Text("Saved.").font(.interFootnote).foregroundStyle(.green) }
             }
@@ -38,6 +37,7 @@ struct ConsumerSettingsView: View {
                     ForEach(ProfileVisibility.allCases.filter { $0 != .unknown }, id: \.self) { value in Text(value.rawValue.capitalized).tag(value) }
                 }
                 Toggle("Let people find me by @handle", isOn: $discoverable)
+                Toggle("Show me on the leaderboard", isOn: $leaderboardOptIn)
                 Button("Save privacy") { Task { await vm.savePrivacy(appState: appState, visibility: visibility, discoverable: discoverable, leaderboardOptIn: leaderboardOptIn) } }
             }
             .listRowBackground(TU.inkRaised)
