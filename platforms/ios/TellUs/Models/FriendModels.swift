@@ -131,6 +131,11 @@ struct FriendActivityPage: Codable {
 }
 
 struct FriendRequestCount: Codable { let incoming: Int; let outgoing: Int }
+struct FriendListPage: Codable { let entries: [FriendSummary]; let total: Int; let next_offset: Int? }
 struct FriendInvite: Codable { let token: String; let share_url: String; let share_text: String; let expires_at: String? }
 struct InvitePreview: Codable { let owner: FriendSummary }
 struct ProfileUpdateFriends: Encodable { let profile_visibility: String?; let discoverable: Bool? }
+struct FriendRequestCreate: Encodable { let account_id: String?; let handle: String?; let source: String }
+struct FriendRequestResult: Codable { let id: String?; let status: String?; let person: FriendSummary?; let friend: FriendSummary? }
+struct TellusHandleClaim: Encodable { let handle: String }
+struct TellusHandleAvailability: Codable { let handle: String; let available: Bool; let reason: String? }

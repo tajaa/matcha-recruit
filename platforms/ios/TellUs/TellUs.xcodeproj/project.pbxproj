@@ -132,6 +132,7 @@
 		7B09EC2A92303F0F3BEF1E3E /* FlyerExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */; };
 		7B8195F7A7A1A118ECCFCB83 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5D559252032C31DB1132DF /* AuthModels.swift */; };
 		7D67C88E00D66440A3054C8E /* FlyerDesignEditorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BDC8E2E108DB9C9159CA256D /* FlyerDesignEditorTests.swift */; };
+		7D8CF5787A8573EF528F00E5 /* FriendsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49717E674CD77E404F2C6F6 /* FriendsService.swift */; };
 		7F3E5642FD93BE8E5B7FB97B /* MarketplaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8277978AD490D97B6612C672 /* MarketplaceView.swift */; };
 		7F944A0C4A18EAD62EA2CEB7 /* FlyerDocumentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8E1992409FE22D8A01E73B /* FlyerDocumentStore.swift */; };
 		830705177D5D3FAD2675C451 /* FriendHandleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24E361DFE64B98BD1F15E19A /* FriendHandleTests.swift */; };
@@ -221,12 +222,14 @@
 		EAC994A95A05C360D00B733E /* BoardManageViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EA11E30321D419A5C987DE8 /* BoardManageViewModel.swift */; };
 		EBA03522665C0ECA504F3B05 /* DiscoverCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82F4ADDB64B52E16FB7407D6 /* DiscoverCard.swift */; };
 		EC5F05247AE8E00E48C615A8 /* counter-card.json in Resources */ = {isa = PBXBuildFile; fileRef = 3E0A1ED04CD32CCF4A1FB0C6 /* counter-card.json */; };
+		EE3B36AFC5F5729A1D973A01 /* Avatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BDB3F8329655949F56AFAB2 /* Avatar.swift */; };
 		F36C5502CA4AAC700FA713F6 /* FlyerCanvasGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D459C7B78BEE039F4494BF /* FlyerCanvasGeometryTests.swift */; };
 		F380118EF682149C3BC00D8A /* FlyerRendererOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FB247F7A9EC333FBB2EFADD /* FlyerRendererOrientationTests.swift */; };
 		F420A397E555A0EDCFB67566 /* CardDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F18AEA1388A2F776A59984E /* CardDetailView.swift */; };
 		F577F1E6931A120B0E40A914 /* TeamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0217582C9EDE8A22711A5F32 /* TeamView.swift */; };
 		F65B65C92A5EAED077ECD83A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43C3A81B953E2B84B5051A11 /* RootView.swift */; };
 		F67340CA5DE3A9E5AB67CFA1 /* FlyerAiModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272008ADD503B94B4FBCA3BE /* FlyerAiModels.swift */; };
+		F68CECB23BA6828D4B3FC739 /* AvatarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 773E6B0695F69A02765B6ED8 /* AvatarTests.swift */; };
 		F8CE68A3285F974D45247FD4 /* ShareCampaignSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A440C8B5F64C24F814AF989F /* ShareCampaignSheet.swift */; };
 		F9554CB17D04F86C02574FB2 /* VerifyWaitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA8ADF5B9D1FE188C86BBCD /* VerifyWaitView.swift */; };
 		FB29B7D6176BE85ACBC041BC /* PushService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF0346DC015F14E88683573B /* PushService.swift */; };
@@ -363,6 +366,7 @@
 		76505E7AA1162E834E83E7A4 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		769EEE79DD3209263DAACE7B /* BoardsListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardsListViewModel.swift; sourceTree = "<group>"; };
 		773C5FCFB2977AE6994D4095 /* FriendModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendModels.swift; sourceTree = "<group>"; };
+		773E6B0695F69A02765B6ED8 /* AvatarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarTests.swift; sourceTree = "<group>"; };
 		78D1FD5B706D42F86DB6C5FD /* HeldRepliesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeldRepliesView.swift; sourceTree = "<group>"; };
 		79CE8E4C26165CC6BE6B7049 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		79E904B35F99279EA6917CA6 /* MessagesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesListView.swift; sourceTree = "<group>"; };
@@ -382,6 +386,7 @@
 		8620888DD950FF04C499C09E /* CampaignQRSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignQRSheet.swift; sourceTree = "<group>"; };
 		8B0B7C23B6AB726B957F5815 /* PublicBrandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PublicBrandService.swift; sourceTree = "<group>"; };
 		8B2DDEC179146C0E41857353 /* PlaceModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModelDecodeTests.swift; sourceTree = "<group>"; };
+		8BDB3F8329655949F56AFAB2 /* Avatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Avatar.swift; sourceTree = "<group>"; };
 		8CEED762EDC2603A0C5951AF /* MarketplaceHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceHomeView.swift; sourceTree = "<group>"; };
 		8D579FD471FB0F79849A687E /* FriendModelDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendModelDecodeTests.swift; sourceTree = "<group>"; };
 		903108A0540AB799AB37A9D2 /* PromoCardsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromoCardsViewModel.swift; sourceTree = "<group>"; };
@@ -450,6 +455,7 @@
 		CE3337A22A71AAAB0228580D /* MediaByteLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaByteLoader.swift; sourceTree = "<group>"; };
 		D0B5499C45CE7127DE10E87A /* BoardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardService.swift; sourceTree = "<group>"; };
 		D31FC130BB26AA2278C864AC /* ListingRedemptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingRedemptionsView.swift; sourceTree = "<group>"; };
+		D49717E674CD77E404F2C6F6 /* FriendsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsService.swift; sourceTree = "<group>"; };
 		D5B12CBD23DCDD3D049765C2 /* CommsComposerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommsComposerSheet.swift; sourceTree = "<group>"; };
 		D7BB64C68ECBFC9E076C645C /* CameraPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPicker.swift; sourceTree = "<group>"; };
 		D8D459C7B78BEE039F4494BF /* FlyerCanvasGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerCanvasGeometryTests.swift; sourceTree = "<group>"; };
@@ -630,6 +636,7 @@
 			children = (
 				28121E3AE0ED99D4BD8E74C5 /* Messages */,
 				498BC6CA7A16D1A186018EC3 /* AsyncMediaImage.swift */,
+				8BDB3F8329655949F56AFAB2 /* Avatar.swift */,
 				D7BB64C68ECBFC9E076C645C /* CameraPicker.swift */,
 				B50526C517FF9773D6EED36D /* Components.swift */,
 				CB1C2BC10BBA1BE9934EF176 /* ErrorBanner.swift */,
@@ -700,6 +707,7 @@
 				5078EC3E1CA6C851A5E10CB8 /* FlyerAssetCatalog.swift */,
 				A36F6E0E7F5C1ED4E9B12059 /* FlyerExportService.swift */,
 				0E1B1A7B7F6DCA640EC6FA0A /* FlyerRenderAssets.swift */,
+				D49717E674CD77E404F2C6F6 /* FriendsService.swift */,
 				0ED611965D6EDD1C547821AE /* GamificationService.swift */,
 				93673FD387EEBCB83F305FD1 /* GoogleSignInService.swift */,
 				CDC7AD1415E7B2708866E7A6 /* IntakeService.swift */,
@@ -1020,6 +1028,7 @@
 			isa = PBXGroup;
 			children = (
 				00718BF85F4562F6013E014F /* AuthErrorMappingTests.swift */,
+				773E6B0695F69A02765B6ED8 /* AvatarTests.swift */,
 				4BCE9D92E43ECCCCD78F9C10 /* BoardFeedViewModelTests.swift */,
 				1682680B6E0A62F94E2D4270 /* BoardManageViewModelTests.swift */,
 				45180DAA413D7A0D7A4FAD4C /* BoardTabLoadStateTests.swift */,
@@ -1174,6 +1183,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1062323E17F8D1EFAACE037E /* AuthErrorMappingTests.swift in Sources */,
+				F68CECB23BA6828D4B3FC739 /* AvatarTests.swift in Sources */,
 				CBAAD688BA51F102BD674274 /* BoardFeedViewModelTests.swift in Sources */,
 				49E150EB35D4F344BFF9CC9B /* BoardManageViewModelTests.swift in Sources */,
 				B02E1F008E54C03A30B0DD4E /* BoardTabLoadStateTests.swift in Sources */,
@@ -1219,6 +1229,7 @@
 				7B8195F7A7A1A118ECCFCB83 /* AuthModels.swift in Sources */,
 				44CF80AB0A951B4C1CC0E0C9 /* AuthService.swift in Sources */,
 				B5C75A3A427BE8DA73D3A5EB /* AuthViewModel.swift in Sources */,
+				EE3B36AFC5F5729A1D973A01 /* Avatar.swift in Sources */,
 				5BC1FEB0D86054E4BE53AAC3 /* BadgesGrid.swift in Sources */,
 				779D72C86ADCA52B4CB7BE16 /* BillingService.swift in Sources */,
 				77BB793CBC899B52623DE1E2 /* BillingView.swift in Sources */,
@@ -1304,6 +1315,7 @@
 				69D2645A62015505CAFC6D82 /* FlyerRenderAssets.swift in Sources */,
 				DAA4D134C479BADC8ECF95A4 /* FlyerRenderer.swift in Sources */,
 				D57763A344A131DD9445FC0D /* FriendModels.swift in Sources */,
+				7D8CF5787A8573EF528F00E5 /* FriendsService.swift in Sources */,
 				5D71E2653709F0018A3BE44C /* GamificationModels.swift in Sources */,
 				10FF78DFF8B06C487F83C793 /* GamificationService.swift in Sources */,
 				DC259F8875606C6800E73DB9 /* GoogleSignInService.swift in Sources */,
