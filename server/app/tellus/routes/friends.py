@@ -20,6 +20,8 @@ from ..models.tellus import (
     TellusFriendRequest,
     TellusFriendRequestCount,
     TellusFriendRequestCreate,
+    TellusFriendActivityItem,
+    TellusFriendActivityPage,
     TellusBlockCreate,
     TellusFriendListPage,
     TellusHandleAvailability,
@@ -43,6 +45,8 @@ from ..services.friends_service import (
     search_people,
     suggestions,
     visible_sections,
+    decode_cursor,
+    encode_cursor,
 )
 from ..services.points_service import notify_account
 from ..services.likes_service import hydrate_likes
@@ -107,7 +111,7 @@ async def handle_available(
     handle: str = Query(..., min_length=1, max_length=100),
     account: TellusAccount = Depends(require_verified_consumer),
 ):
-    """Check a handle without exposing account data or email addresses."""
+    """Check a handle without exposing account data."""
     await check_rate_limit(client_ip(request), "tellus_handle_available", 60, 3600)
     normalized = normalize_handle(handle)
     reason = handle_rejection_reason(normalized)
@@ -607,3 +611,96 @@ async def person_profile_by_handle(
         if account_id is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
         return await _person_profile(conn, account.id, account_id)
+
+
+@router.get("/me/feed", response_model=TellusFriendActivityPage)
+async def friend_activity_feed(
+    request: Request,
+    cursor: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    await check_rate_limit(str(account.id), "tellus_friend_feed", 300, 3600)
+    decoded = decode_cursor(cursor) if cursor else None
+    if cursor and decoded is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid cursor")
+    cursor_time, cursor_id = decoded if decoded else (None, None)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """WITH friends AS (
+                    SELECT f.friend_account_id AS account_id
+                      FROM tellus_friendships f
+                      JOIN tellus_accounts a ON a.id = f.friend_account_id
+                     WHERE f.account_id = $1 AND a.status = 'active'
+                       AND a.account_type = 'consumer'
+                       AND NOT EXISTS (
+                           SELECT 1 FROM tellus_account_blocks b
+                            WHERE (b.blocker_account_id = $1 AND b.blocked_account_id = a.id)
+                               OR (b.blocker_account_id = a.id AND b.blocked_account_id = $1))
+                ), reviews AS (
+                    SELECT 'review_published'::text AS kind, r.id AS item_id,
+                           r.reporter_account_id AS actor_id, r.publish_at AS happened_at,
+                           r.brand_id, b.name AS brand_name, b.slug AS brand_slug,
+                           r.rating, r.title, r.description AS body
+                      FROM tellus_reports r
+                      JOIN friends fr ON fr.account_id = r.reporter_account_id
+                      JOIN tellus_brands b ON b.id = r.brand_id
+                     WHERE r.review_state = 'held' AND r.publish_at <= NOW()
+                       AND r.publish_at >= NOW() - INTERVAL '90 days'
+                       AND r.moderation_status = 'visible'
+                       AND ($2::timestamptz IS NULL OR (r.publish_at, r.id) < ($2, $3))
+                     ORDER BY r.publish_at DESC, r.id DESC LIMIT $4
+                ), follows AS (
+                    SELECT 'place_followed'::text AS kind, bf.brand_id AS item_id,
+                           bf.consumer_account_id AS actor_id, bf.created_at AS happened_at,
+                           bf.brand_id, b.name AS brand_name, b.slug AS brand_slug,
+                           NULL::smallint AS rating, NULL::text AS title, NULL::text AS body
+                      FROM tellus_brand_follows bf
+                      JOIN friends fr ON fr.account_id = bf.consumer_account_id
+                      JOIN tellus_accounts fa ON fa.id = bf.consumer_account_id
+                      JOIN tellus_brands b ON b.id = bf.brand_id
+                     WHERE fa.profile_visibility <> 'private'
+                       AND bf.created_at >= NOW() - INTERVAL '90 days'
+                       AND ($2::timestamptz IS NULL OR (bf.created_at, bf.brand_id) < ($2, $3))
+                     ORDER BY bf.created_at DESC, bf.brand_id DESC LIMIT $4
+                )
+                SELECT * FROM (
+                    SELECT * FROM reviews UNION ALL SELECT * FROM follows
+                ) merged
+                ORDER BY happened_at DESC, item_id DESC LIMIT $4""",
+            account.id, cursor_time, cursor_id, limit + 1,
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        actor_ids = list({row["actor_id"] for row in rows})
+        actor_rows = await conn.fetch(
+            """SELECT a.id AS account_id, a.display_name, a.handle, a.avatar_url,
+                      a.city, a.state, pb.level, pb.lifetime_points
+                 FROM tellus_accounts a LEFT JOIN tellus_points_balances pb ON pb.account_id = a.id
+                WHERE a.id = ANY($1::uuid[])""",
+            actor_ids,
+        ) if actor_ids else []
+        actors = {
+            row["account_id"]: TellusPersonSummary(
+                account_id=row["account_id"],
+                display_name=display_name_for(row["display_name"], row["handle"], row["account_id"]),
+                handle=row["handle"], avatar_url=row["avatar_url"], city=row["city"], state=row["state"],
+                level=row["level"] or 1, lifetime_points=row["lifetime_points"] or 0,
+                is_friend=True,
+            ) for row in actor_rows
+        }
+        review_ids = [row["item_id"] for row in rows if row["kind"] == "review_published"]
+        likes = await hydrate_likes(conn, "report", review_ids, account.id)
+    items = []
+    for row in rows:
+        like_count, liked_by_me = likes.get(row["item_id"], (0, False))
+        items.append(TellusFriendActivityItem(
+            id=f"{row['kind']}:{row['item_id']}", kind=row["kind"], actor=actors[row["actor_id"]],
+            happened_at=row["happened_at"], brand_id=row["brand_id"], brand_name=row["brand_name"],
+            brand_slug=row["brand_slug"], rating=row["rating"], title=row["title"], body=row["body"],
+            like_count=like_count, liked_by_me=liked_by_me,
+        ))
+    next_cursor = None
+    if has_more and rows:
+        next_cursor = encode_cursor(rows[-1]["happened_at"], rows[-1]["item_id"])
+    return TellusFriendActivityPage(items=items, next_cursor=next_cursor)
