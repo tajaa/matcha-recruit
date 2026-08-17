@@ -3,13 +3,18 @@ import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useEditorMock: vi.fn(),
+  useLocationScopeMock: vi.fn(),
 }))
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
+vi.mock('../../hooks/useLocationScope', async () => {
+  const actual = await vi.importActual<typeof import('../../hooks/useLocationScope')>('../../hooks/useLocationScope')
+  return { ...actual, useLocationScope: useLocationScopeMock }
+})
 
 const shift = {
   id: 'shift-1', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z',
@@ -22,11 +27,16 @@ const shift = {
 describe('ScheduleEditor', () => {
   beforeEach(() => {
     useMeMock.mockReturnValue({ hasFeature: () => false })
+    useLocationScopeMock.mockReturnValue({
+      locationId: 'loc1',
+      setLocationId: vi.fn(),
+      locations: [{ id: 'loc1', name: 'Wilshire', city: 'Los Angeles', state: 'CA', is_active: true }],
+      loading: false,
+    })
     useEditorMock.mockReturnValue({
       shifts: [shift],
       roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: 'Manager', department: null }],
       rosterFlags: null,
-      locations: [],
       summary: { total_shifts: 1, published: 0, draft: 1, open_shifts: 1, assigned: 0 },
       loading: false,
       saveState: 'saved',
@@ -46,7 +56,7 @@ describe('ScheduleEditor', () => {
 
   it('renders the roster and seven-day editor grid', () => {
     render(
-      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09']}>
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
         <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
       </MemoryRouter>,
     )
@@ -59,7 +69,7 @@ describe('ScheduleEditor', () => {
 
   it('keeps roster scrolling independent from the schedule grid', () => {
     render(
-      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09']}>
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
         <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
       </MemoryRouter>,
     )

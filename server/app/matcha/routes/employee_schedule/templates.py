@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, time, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
@@ -33,13 +33,20 @@ _TEMPLATE_COLS = (
 
 
 @router.get("/templates")
-async def list_templates(current_user=Depends(require_admin_or_client)):
+async def list_templates(
+    location: UUID = Query(..., description="Business location to scope templates to"),
+    current_user=Depends(require_admin_or_client),
+):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
+        await assert_location_in_company(conn, company_id, location)
+        # location_id IS NULL means a company-wide template (not tied to any
+        # one location) — those stay visible from every location's picker.
         rows = await conn.fetch(
             f"SELECT {_TEMPLATE_COLS} FROM schedule_shift_templates "
-            "WHERE company_id = $1 ORDER BY name ASC",
-            company_id,
+            "WHERE company_id = $1 AND (location_id = $2 OR location_id IS NULL) "
+            "ORDER BY name ASC",
+            company_id, location,
         )
     return {"templates": [serialize_template(r) for r in rows]}
 

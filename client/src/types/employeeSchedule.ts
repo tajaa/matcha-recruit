@@ -76,9 +76,9 @@ export type RosterFlags = Record<string, { overdue_training: number; lapsed_cred
 
 export interface WeekResponse {
   week_start: string
+  location_id: string
   shifts: Shift[]
   roster: RosterEmployee[]
-  locations: ScheduleLocation[]
   roster_flags: RosterFlags | null
   summary: ScheduleSummary
 }

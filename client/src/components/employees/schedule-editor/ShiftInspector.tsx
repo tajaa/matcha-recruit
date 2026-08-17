@@ -2,7 +2,7 @@ import { Check, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import { Card } from '../../ui'
-import type { RosterEmployee, ScheduleLocation, Shift, ShiftPayload } from '../../../types/employeeSchedule'
+import type { RosterEmployee, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, fmtTime } from '../../../types/employeeSchedule'
 
 export type NewShiftDefaults = {
@@ -14,7 +14,11 @@ export type NewShiftDefaults = {
 interface ShiftInspectorProps {
   shift: Shift | null
   defaults: NewShiftDefaults | null
-  locations: ScheduleLocation[]
+  /** The location the editor is scoped to — every shift here belongs to it.
+   *  No location picker: scope is mandatory and set once, above, not
+   *  per-shift (a shift can no longer be moved out of the scoped view). */
+  locationId: string
+  locationName: string
   roster: RosterEmployee[]
   trainingEnabled: boolean
   readOnly: boolean
@@ -35,7 +39,7 @@ function minuteToTime(minute: number) {
   return `${twoDigits(Math.floor(minute / 60) % 24)}:${twoDigits(minute % 60)}`
 }
 
-export default function ShiftInspector({ shift, defaults, locations, roster, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onClose }: ShiftInspectorProps) {
+export default function ShiftInspector({ shift, defaults, locationId, locationName, roster, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onClose }: ShiftInspectorProps) {
   const editing = !!shift
   const defaultDate = defaults?.date ?? shift?.starts_at.slice(0, 10) ?? ''
   const [date, setDate] = useState(defaultDate)
@@ -43,7 +47,6 @@ export default function ShiftInspector({ shift, defaults, locations, roster, tra
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : minuteToTime((defaults?.minute ?? 540) + 480))
   const [role, setRole] = useState(shift?.role ?? '')
   const [department, setDepartment] = useState(shift?.department ?? '')
-  const [locationId, setLocationId] = useState(shift?.location_id ?? '')
   const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
   const [requiredStaff, setRequiredStaff] = useState(String(shift?.required_staff ?? 1))
   const [notes, setNotes] = useState(shift?.notes ?? '')
@@ -104,7 +107,7 @@ export default function ShiftInspector({ shift, defaults, locations, roster, tra
       </div>
       <div className="mt-3 space-y-2">
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Department<input value={department} onChange={(event) => setDepartment(event.target.value)} disabled={readOnly} className={input} /></label>
-        <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<select value={locationId} onChange={(event) => setLocationId(event.target.value)} disabled={readOnly} className={input}><option value="">No location</option>{locations.map((location) => <option key={location.id} value={location.id} disabled={!location.is_active}>{location.name || `${location.city}, ${location.state}`}{!location.is_active ? ' (inactive)' : ''}</option>)}</select></label>
+        <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<div className={`${input} text-zinc-400`}>{locationName}</div></label>
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[10px] uppercase tracking-wide text-zinc-600">Break minutes<input type="number" min="0" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>
           <label className="text-[10px] uppercase tracking-wide text-zinc-600">Staff needed<input type="number" min="1" value={requiredStaff} onChange={(event) => setRequiredStaff(event.target.value)} disabled={readOnly} className={input} /></label>

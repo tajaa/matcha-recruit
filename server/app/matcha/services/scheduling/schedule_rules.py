@@ -100,6 +100,29 @@ def build_patch(
     return ", ".join(fragments), params
 
 
+def unlocated_employee_detail(employee_id: UUID) -> dict:
+    """422 body for scheduling someone with no work location. Deliberately
+    NOT forceable (no ?force=true) — unlike conflict/shift_full/availability,
+    this is missing data, not a judgement call."""
+    return {
+        "code": "employee_has_no_location",
+        "message": "Assign this employee a work location before scheduling them",
+        "employee_id": str(employee_id),
+    }
+
+
+def location_mismatch_detail(employee_id: UUID, employee_location_id, shift_location_id) -> dict:
+    """422 body for scheduling someone at a different location than their
+    own. Also not forceable."""
+    return {
+        "code": "employee_wrong_location",
+        "message": "Employee's work location differs from this shift's location",
+        "employee_id": str(employee_id),
+        "employee_location_id": str(employee_location_id),
+        "shift_location_id": str(shift_location_id),
+    }
+
+
 def conflict_detail(employee_id: UUID, conflicts: list[dict]) -> dict:
     """409 body for a double-booking. `code` is what the frontend keys on to
     offer the force-override prompt."""

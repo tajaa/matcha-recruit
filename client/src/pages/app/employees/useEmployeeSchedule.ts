@@ -9,7 +9,10 @@ import {
 
 export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intelligence'
 
+/** `locationId` is required to fetch a week's shifts — pass `''` while the
+ *  caller is still waiting on the user to pick a location. */
 export function useEmployeeSchedule(
+  locationId: string,
   initialDate?: string,
   initialTab: EmployeeScheduleTab = 'schedule',
 ) {
@@ -28,12 +31,19 @@ export function useEmployeeSchedule(
   const [publishing, setPublishing] = useState(false)
 
   const reload = useCallback(async () => {
-    const w = await fetchWeek(weekStart)
+    if (!locationId) {
+      setShifts([])
+      setRoster([])
+      setRosterFlags(null)
+      setSummary(null)
+      return
+    }
+    const w = await fetchWeek(weekStart, locationId)
     setShifts(w.shifts)
     setRoster(w.roster)
     setRosterFlags(w.roster_flags)
     setSummary(w.summary)
-  }, [weekStart])
+  }, [weekStart, locationId])
 
   useEffect(() => {
     setLoading(true)
@@ -47,7 +57,7 @@ export function useEmployeeSchedule(
   async function publishWeek() {
     setPublishing(true)
     try {
-      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
+      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`, locationId)
       await reload()
     } finally {
       setPublishing(false)

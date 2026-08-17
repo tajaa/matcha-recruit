@@ -7,7 +7,7 @@ import {
 import { Card, useToast } from '../../../components/ui'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
+  assignEmployee, unassignEmployee, fetchShift, fetchTemplates, createTemplate, deleteTemplate,
   generateFromTemplate, fetchRequests, reviewRequest, duplicateShift,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
@@ -23,6 +23,8 @@ import { useEmployeeSchedule } from './useEmployeeSchedule'
 import type { EmployeeScheduleTab } from './useEmployeeSchedule'
 import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
+import LocationPicker from '../../../components/shared/LocationPicker'
+import { useLocationScope } from '../../../hooks/useLocationScope'
 import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
@@ -38,6 +40,7 @@ export default function EmployeeSchedule() {
   const linkedDate = searchParams.get('date') ?? undefined
   const highlightShiftId = searchParams.get('shift') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
+  const { locationId, setLocationId, locations } = useLocationScope()
   const { me, hasFeature, loading: meLoading } = useMe()
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
@@ -57,7 +60,20 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule(linkedDate, initialTab)
+  } = useEmployeeSchedule(locationId, linkedDate, initialTab)
+
+  // A Huume shift pill (work/pages/ChannelView/systemContent.tsx's
+  // `[[shift:<id>:<date>]]` token) links here with ?shift=&date= but no
+  // ?location= — the token predates location scoping. Resolve the shift's
+  // own location once so the pill still lands somewhere useful.
+  useEffect(() => {
+    if (locationId || !highlightShiftId) return
+    let cancelled = false
+    fetchShift(highlightShiftId)
+      .then((s) => { if (!cancelled && s.location_id) setLocationId(s.location_id) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [locationId, highlightShiftId, setLocationId])
 
   useEffect(() => {
     const blockedIntelligence = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
@@ -98,7 +114,8 @@ export default function EmployeeSchedule() {
             <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
           </div>
            <div className="flex shrink-0 items-center gap-2">
-             <Link to={`/ops/schedule/editor?week=${weekStart}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200">Full shift editor</Link>
+             <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
+             <Link to={`/ops/schedule/editor?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200">Full shift editor</Link>
              <ScheduleLawPanel />
            </div>
         </div>
@@ -113,7 +130,7 @@ export default function EmployeeSchedule() {
 
       <div className="min-w-0 space-y-6 p-5">
 
-      {tab === 'schedule' && (
+      {tab === 'schedule' && (locationId ? (
         <>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
@@ -153,18 +170,30 @@ export default function EmployeeSchedule() {
                     onChanged={reload}
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
+                    defaultLocationId={locationId}
                   />
                 ))}
               </div>
             </div>
           )}
         </>
-      )}
+      ) : <PickLocationEmpty hasLocations={locations.length > 0} />)}
 
-      {tab === 'templates' && <TemplatesTab onGenerated={() => { setTab('schedule'); reload() }} />}
+      {tab === 'templates' && (locationId
+        ? <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />
+        : <PickLocationEmpty hasLocations={locations.length > 0} />)}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
+    </div>
+  )
+}
+
+function PickLocationEmpty({ hasLocations }: { hasLocations: boolean }) {
+  return (
+    <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 text-center">
+      <p className="text-sm text-zinc-400">Select a location above to view its schedule.</p>
+      {!hasLocations && <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>}
     </div>
   )
 }
@@ -191,9 +220,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, defaultLocationId }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; defaultLocationId?: string
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -205,7 +234,7 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} defaultLocationId={defaultLocationId} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
@@ -471,9 +500,10 @@ function spanHours(start: string, end: string): number {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
+  defaultLocationId?: string
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -508,6 +538,9 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
+    }
+    if (!editing && defaultLocationId) {
+      payload.location_id = defaultLocationId
     }
     if (!editing && kind === 'training' && requirementId) {
       payload.kind = 'training'
@@ -609,13 +642,21 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
 
 // ---------- Templates tab ----------
 
-function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
+function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGenerated: () => void }) {
   const [templates, setTemplates] = useState<ShiftTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
 
-  const load = useCallback(() => fetchTemplates().then((r) => setTemplates(r.templates)), [])
-  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await fetchTemplates(locationId)
+      setTemplates(r.templates)
+    } finally {
+      setLoading(false)
+    }
+  }, [locationId])
+  useEffect(() => { void load() }, [load])
 
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
@@ -625,9 +666,9 @@ function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
         <h3 className="text-sm font-medium text-zinc-200">Shift templates</h3>
         <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
       </div>
-      {adding && <Card className="p-4"><TemplateForm onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
+      {adding && <Card className="p-4"><TemplateForm defaultLocationId={locationId} onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
       {templates.length === 0 && !adding ? (
-        <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
+        <p className="text-sm text-zinc-600">No templates for this location yet — create one to generate recurring shifts.</p>
       ) : (
         <div className="space-y-2">
           {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} />)}
@@ -689,7 +730,7 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
   )
 }
 
-function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+function TemplateForm({ defaultLocationId, onDone, onCancel }: { defaultLocationId?: string; onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
   const [start, setStart] = useState('09:00')
@@ -707,6 +748,7 @@ function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
     try {
       await createTemplate({
         name: name.trim(), role: role.trim() || null,
+        location_id: defaultLocationId || null,
         start_time: `${start}:00`, end_time: `${end}:00`,
         required_staff: Math.max(1, Math.round(Number(required) || 1)),
         days_of_week: days,

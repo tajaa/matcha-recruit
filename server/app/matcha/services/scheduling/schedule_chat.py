@@ -692,15 +692,19 @@ async def build_proposal(
             pinned_ids.append(str(active[0]["id"]))
         shift["pinned_ids"] = pinned_ids
 
-    # 5. Candidate assembly + ranking per shift window
+    # 5. Candidate assembly + ranking per shift window. Strictly scoped to
+    # this location (no NULL-fallback) — same rule as fetch_roster/
+    # assert_employee_schedulable_at, so a proposal never pins someone the
+    # execute-time REST call would then refuse.
     roster_rows = await conn.fetch(
         """
         SELECT id, first_name, last_name, job_title
         FROM employees
         WHERE org_id = $1 AND COALESCE(employment_status, 'active') <> ALL($2::text[])
+          AND work_location_id = $3
         ORDER BY first_name, last_name, id
         """,
-        company_id, list(INACTIVE_EMPLOYMENT_STATUSES),
+        company_id, list(INACTIVE_EMPLOYMENT_STATUSES), location_id,
     )
     roster = [dict(r) for r in roster_rows]
 

@@ -73,14 +73,23 @@ async def find_coverage_candidates(
         )
         assigned_ids_by_shift.setdefault(r["shift_id"], set()).add(str(r["employee_id"]))
 
+    # A coverage candidate must actually be schedulable at this shift's
+    # location — same strict (no NULL-fallback) rule as fetch_roster/
+    # assert_employee_schedulable_at, so Huume never proposes someone the
+    # REST assignment path would then refuse with employee_has_no_location.
+    roster_params: list[Any] = [company_id, list(INACTIVE_EMPLOYMENT_STATUSES)]
+    roster_where = "org_id = $1 AND COALESCE(employment_status, 'active') <> ALL($2::text[])"
+    if location_id is not None:
+        roster_params.append(location_id)
+        roster_where += f" AND work_location_id = ${len(roster_params)}"
     roster_rows = await conn.fetch(
-        """
+        f"""
         SELECT id, first_name, last_name, job_title
         FROM employees
-        WHERE org_id = $1 AND COALESCE(employment_status, 'active') <> ALL($2::text[])
+        WHERE {roster_where}
         ORDER BY first_name, last_name, id
         """,
-        company_id, list(INACTIVE_EMPLOYMENT_STATUSES),
+        *roster_params,
     )
     roster = [dict(r) for r in roster_rows]
 

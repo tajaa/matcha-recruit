@@ -66,6 +66,30 @@ def test_working_statuses_stay_schedulable():
         assert status not in INACTIVE_EMPLOYMENT_STATUSES
 
 
+# ── location scoping: fetch_shifts is NULL-inclusive, fetch_roster is not ──
+
+_EMPLOYEE_SCHEDULE_SHARED = Path(__file__).resolve().parent.parent.parent / \
+    "app/matcha/routes/employee_schedule/_shared.py"
+
+
+def test_fetch_shifts_and_fetch_roster_location_filters_are_deliberately_asymmetric():
+    # fetch_shifts treats `location_id IS NULL` as "visible everywhere" (a
+    # shift with no location assigned isn't hidden from every location's
+    # view). fetch_roster does the OPPOSITE on purpose — an employee with no
+    # work_location_id must NOT show up just because the filter is lenient,
+    # since "no location -> not schedulable" is the entire point of the
+    # feature (see assert_employee_schedulable_at). Whoever "fixes" this
+    # asymmetry to be consistent breaks one of the two rules — read this
+    # test before doing that.
+    source = _EMPLOYEE_SCHEDULE_SHARED.read_text()
+    shifts_fn = source[source.index("async def fetch_shifts"):source.index("async def fetch_roster")]
+    roster_fn = source[source.index("async def fetch_roster"):]  # last function in the file
+
+    assert "location_id = ${len(params)} OR s.location_id IS NULL" in shifts_fn
+    assert "work_location_id = ${len(params)}" in roster_fn
+    assert "IS NULL" not in roster_fn
+
+
 # ── week bounds + summary ───────────────────────────────────────────────────
 
 def test_week_bounds_is_seven_utc_days():

@@ -47,6 +47,8 @@ export type Employee = {
   employment_status: string | null
   status_changed_at: string | null
   status_reason: string | null
+  work_location_id: string | null
+  work_location_name: string | null
   created_at: string
 }
 

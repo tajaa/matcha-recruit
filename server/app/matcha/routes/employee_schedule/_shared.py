@@ -17,7 +17,8 @@ from fastapi import HTTPException
 from ...dependencies import get_client_company_id
 from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
     INACTIVE_EMPLOYMENT_STATUSES, availability_detail, availability_violations,
-    build_patch, conflict_detail, shift_full_detail, shift_window_on_date,
+    build_patch, conflict_detail, location_mismatch_detail, shift_full_detail,
+    shift_window_on_date, unlocated_employee_detail,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
     _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
@@ -74,6 +75,33 @@ async def assert_employee_in_company(conn, company_id: UUID, employee_id: UUID) 
         )
 
 
+async def assert_employee_schedulable_at(
+    conn, company_id: UUID, employee_id: UUID, location_id: Optional[UUID]
+) -> None:
+    """422 if the employee has no work location, or has one that isn't this
+    shift's. Separate from assert_employee_in_company on purpose:
+    availability.py calls that one too, and editing availability must keep
+    working for a locationless employee — only the write paths that actually
+    assign someone to a shift call this.
+
+    No-ops when location_id is None — a locationless shift stays assignable
+    by anyone, matching fetch_shifts' NULL-inclusive rule.
+    """
+    if location_id is None:
+        return
+    row = await conn.fetchrow(
+        "SELECT work_location_id FROM employees WHERE id = $1 AND org_id = $2",
+        employee_id, company_id,
+    )
+    if not row or row["work_location_id"] is None:
+        raise HTTPException(status_code=422, detail=unlocated_employee_detail(employee_id))
+    if row["work_location_id"] != location_id:
+        raise HTTPException(
+            status_code=422,
+            detail=location_mismatch_detail(employee_id, row["work_location_id"], location_id),
+        )
+
+
 async def assert_location_in_company(
     conn, company_id: UUID, location_id: Optional[UUID]
 ) -> None:
@@ -95,6 +123,7 @@ async def fetch_shifts(
     *,
     status: Optional[str] = None,
     employee_id: Optional[UUID] = None,
+    location_id: Optional[UUID] = None,
     starts_within: bool = False,
 ) -> list[dict]:
     """Shifts overlapping [start, end) for a company, each with its assignments.
@@ -125,6 +154,12 @@ async def fetch_shifts(
             f"EXISTS (SELECT 1 FROM schedule_shift_assignments a2 "
             f"WHERE a2.shift_id = s.id AND a2.employee_id = ${len(params)})"
         )
+    if location_id is not None:
+        params.append(location_id)
+        # location_id IS NULL means a shift with no assigned location (never
+        # cleared, or its location was later deleted) — keep those visible
+        # from every location's view rather than orphaning them entirely.
+        where.append(f"(s.location_id = ${len(params)} OR s.location_id IS NULL)")
 
     shift_rows = await conn.fetch(
         f"""
@@ -368,17 +403,27 @@ def serialize_request(r) -> dict:
     }
 
 
-async def fetch_roster(conn, company_id: UUID) -> list[dict]:
-    """Active employees for the assignment picker."""
+async def fetch_roster(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
+    """Active employees for the assignment picker.
+
+    `location_id` scopes to that location's staff. STRICT — an employee with
+    no work_location_id is deliberately EXCLUDED, not NULL-included the way
+    fetch_shifts treats locationless shifts: an employee not tied to a
+    location cannot be scheduled at all (see assert_employee_schedulable_at).
+    """
+    params: list[Any] = [company_id, list(INACTIVE_EMPLOYMENT_STATUSES)]
+    where = "org_id = $1 AND COALESCE(employment_status, 'active') <> ALL($2::text[])"
+    if location_id is not None:
+        params.append(location_id)
+        where += f" AND work_location_id = ${len(params)}"
     rows = await conn.fetch(
-        """
+        f"""
         SELECT id, first_name, last_name, job_title, department
         FROM employees
-        WHERE org_id = $1
-          AND COALESCE(employment_status, 'active') <> ALL($2::text[])
+        WHERE {where}
         ORDER BY first_name, last_name
         """,
-        company_id, list(INACTIVE_EMPLOYMENT_STATUSES),
+        *params,
     )
     return [
         {
@@ -388,26 +433,4 @@ async def fetch_roster(conn, company_id: UUID) -> list[dict]:
             "department": r["department"],
         }
         for r in rows
-    ]
-
-
-async def fetch_schedule_locations(conn, company_id: UUID) -> list[dict]:
-    rows = await conn.fetch(
-        """
-        SELECT id, name, city, state, is_active
-        FROM business_locations
-        WHERE company_id = $1
-        ORDER BY is_active DESC, name NULLS LAST, city, state
-        """,
-        company_id,
-    )
-    return [
-        {
-            "id": str(row["id"]),
-            "name": row["name"],
-            "city": row["city"],
-            "state": row["state"],
-            "is_active": row["is_active"],
-        }
-        for row in rows
     ]

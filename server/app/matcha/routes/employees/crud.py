@@ -78,6 +78,7 @@ class EmployeeCreateRequest(BaseModel):
     work_city: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    work_location_id: Optional[UUID] = None
     uid: Optional[str] = None  # HR-internal badge / employee number
 
     @model_validator(mode="after")
@@ -119,6 +120,7 @@ class EmployeeUpdateRequest(BaseModel):
     work_city: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    work_location_id: Optional[UUID] = None
 
     @model_validator(mode="after")
     def validate_pay_fields(self):
@@ -161,6 +163,8 @@ class EmployeeListResponse(BaseModel):
     employment_status: Optional[str] = None
     status_changed_at: Optional[datetime] = None
     status_reason: Optional[str] = None
+    work_location_id: Optional[UUID] = None
+    work_location_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -231,6 +235,8 @@ async def list_employees(
     work_state: Optional[str] = Query(None),
     work_city: Optional[str] = Query(None),
     manager_id: Optional[UUID] = Query(None),
+    work_location_id: Optional[str] = Query(
+        None, description="business_locations.id, or 'none' for unassigned/remote"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List all employees for the company."""
@@ -240,6 +246,16 @@ async def list_employees(
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         org_fields_available = await _employee_org_fields_available(conn)
         status_fields_available = await _employee_status_fields_available(conn)
+        location_fields_available = await _column_exists(conn, "employees", "work_location_id")
+        location_select = (
+            "e.work_location_id, bl.name AS work_location_name,"
+            if location_fields_available
+            else "NULL::UUID AS work_location_id, NULL::VARCHAR AS work_location_name,"
+        )
+        location_join = (
+            "LEFT JOIN business_locations bl ON bl.id = e.work_location_id"
+            if location_fields_available else ""
+        )
         compensation_select = (
             "e.pay_classification, e.pay_rate, e.work_city,"
             if compensation_fields_available
@@ -265,6 +281,7 @@ async def list_employees(
                 {compensation_select}
                 {org_select}
                 {status_select}
+                {location_select}
                 m.first_name || ' ' || m.last_name as manager_name,
                 (
                     SELECT status FROM employee_invitations
@@ -273,6 +290,7 @@ async def list_employees(
                 ) as invitation_status
             FROM employees e
             LEFT JOIN employees m ON e.manager_id = m.id
+            {location_join}
             WHERE e.org_id = $1
         """
 
@@ -326,6 +344,14 @@ async def list_employees(
             params.append(manager_id)
             param_num += 1
 
+        if work_location_id and location_fields_available:
+            if work_location_id == "none":
+                base_query += " AND e.work_location_id IS NULL"
+            else:
+                base_query += f" AND e.work_location_id = ${param_num}::uuid"
+                params.append(work_location_id)
+                param_num += 1
+
         base_query += " ORDER BY e.created_at DESC"
 
         rows = await conn.fetch(base_query, *params)
@@ -360,6 +386,8 @@ async def list_employees(
                     employment_status=row["employment_status"],
                     status_changed_at=row["status_changed_at"],
                     status_reason=row["status_reason"],
+                    work_location_id=row["work_location_id"],
+                    work_location_name=row["work_location_name"],
                     created_at=row["created_at"],
                 )
             )
@@ -493,6 +521,14 @@ async def create_employee(
 
         org_fields_available = await _employee_org_fields_available(conn)
 
+        if request.work_location_id is not None:
+            location_row = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+                request.work_location_id, company_id,
+            )
+            if not location_row:
+                raise HTTPException(status_code=404, detail="Location not found")
+
         # Build dynamic INSERT columns/values based on available schema
         insert_cols = [
             "org_id", "email", "personal_email", "first_name", "last_name",
@@ -536,6 +572,10 @@ async def create_employee(
         if request.uid and await _column_exists(conn, "employees", "external_uid"):
             insert_cols.append("external_uid")
             insert_vals.append(request.uid.strip())
+
+        if await _column_exists(conn, "employees", "work_location_id"):
+            insert_cols.append("work_location_id")
+            insert_vals.append(request.work_location_id)
 
         placeholders = ", ".join(f"${i}" for i in range(1, len(insert_vals) + 1))
         col_list = ", ".join(insert_cols)
@@ -938,6 +978,17 @@ async def update_employee(
         if org_fields_available and request.department is not None:
             updates.append(f"department = ${param_num}")
             values.append(request.department.strip() if request.department else None)
+            param_num += 1
+
+        if request.work_location_id is not None and await _column_exists(conn, "employees", "work_location_id"):
+            location_row = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+                request.work_location_id, company_id,
+            )
+            if not location_row:
+                raise HTTPException(status_code=404, detail="Location not found")
+            updates.append(f"work_location_id = ${param_num}")
+            values.append(request.work_location_id)
             param_num += 1
 
         if not updates:

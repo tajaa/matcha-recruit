@@ -12,6 +12,10 @@ import { useEmployees } from '../../../hooks/employees/useEmployees'
 import { typeLabel } from '../../../types/employee'
 import { LABEL } from '../../../components/ui/typography'
 import type { WageGapSummary, FlightRiskWidgetSummary } from '../../../types/dashboard'
+import LocationPicker from '../../../components/shared/LocationPicker'
+import { useLocationScope } from '../../../hooks/useLocationScope'
+
+const UNASSIGNED_LOCATION = { id: 'none', name: 'Unassigned / Remote', city: '', state: '', is_active: true }
 
 export default function Employees() {
   const navigate = useNavigate()
@@ -33,6 +37,10 @@ export default function Employees() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [department, setDepartment] = useState('')
+  // Defaults to the whole company (autoSelectSingle: false) — unlike
+  // scheduling, this page's default view is "everyone", not "pick one".
+  const { locationId, setLocationId, locations } = useLocationScope({ autoSelectSingle: false })
+  const locationOptions = [UNASSIGNED_LOCATION, ...locations]
   const [showBatch, setShowBatch] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
   const [showHRIS, setShowHRIS] = useState(false)
@@ -62,6 +70,7 @@ export default function Employees() {
     status,
     search: debouncedSearch || undefined,
     department: department || undefined,
+    work_location_id: locationId || undefined,
   })
 
   const deptOptions = [
@@ -188,6 +197,7 @@ export default function Employees() {
             className="w-44"
           />
         )}
+        <LocationPicker locations={locationOptions} value={locationId} onChange={setLocationId} allowAll />
         <div className="flex gap-1 w-full sm:w-auto sm:ml-auto overflow-x-auto pb-2 sm:pb-0">
           {(['all', 'active', 'on_leave', 'terminated'] as const).map((s) => (
             <Button
@@ -218,6 +228,7 @@ export default function Employees() {
                   <th className={`px-4 py-3 ${LABEL}`}>Name</th>
                   <th className={`px-4 py-3 ${LABEL}`}>Title</th>
                   <th className={`px-4 py-3 ${LABEL}`}>Department</th>
+                  <th className={`px-4 py-3 ${LABEL}`}>Location</th>
                   <th className={`px-4 py-3 ${LABEL}`}>Type</th>
                   <th className={`px-4 py-3 ${LABEL}`}>Status</th>
                   <th className={`px-4 py-3 ${LABEL}`}>Onboarding</th>
@@ -243,6 +254,7 @@ export default function Employees() {
                       </td>
                       <td className="px-4 py-3">{e.job_title ?? '—'}</td>
                       <td className="px-4 py-3">{e.department ?? '—'}</td>
+                      <td className="px-4 py-3">{e.work_location_name ?? '—'}</td>
                       <td className="px-4 py-3">{typeLabel[e.employment_type ?? ''] ?? '—'}</td>
                       <td className="px-4 py-3">
                         <EmployeeStatusBadge status={e.employment_status} />

@@ -7,19 +7,21 @@ import { useToast } from '../../components/ui'
 import { conflictPrompt } from '../../pages/app/employees/scheduleConflicts'
 import { moveShiftWindow, resizeShiftWindow } from '../../components/employees/schedule-editor/calendarMath'
 import type {
-  AssignmentMoveResponse, RosterEmployee, RosterFlags, ScheduleLocation,
+  AssignmentMoveResponse, RosterEmployee, RosterFlags,
   ScheduleSummary, Shift, ShiftPayload,
 } from '../../types/employeeSchedule'
 import { addDays, errorMessage } from '../../types/employeeSchedule'
 
 export type ScheduleSaveState = 'idle' | 'saving' | 'saved' | 'error'
 
-export function useScheduleEditor(weekStart: string) {
+/** `locationId` is required to fetch a week's shifts (the server won't serve
+ *  one without it) — pass `''` while the caller is still waiting on the user
+ *  to pick a location, and the hook fetches nothing but the location list. */
+export function useScheduleEditor(weekStart: string, locationId: string) {
   const { toast } = useToast()
   const [shifts, setShifts] = useState<Shift[]>([])
   const [roster, setRoster] = useState<RosterEmployee[]>([])
   const [rosterFlags, setRosterFlags] = useState<RosterFlags | null>(null)
-  const [locations, setLocations] = useState<ScheduleLocation[]>([])
   const [summary, setSummary] = useState<ScheduleSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [saveState, setSaveState] = useState<ScheduleSaveState>('idle')
@@ -31,19 +33,26 @@ export function useScheduleEditor(weekStart: string) {
 
   const reload = useCallback(async () => {
     const version = ++requestVersion.current
+    if (!locationId) {
+      setShifts([])
+      setRoster([])
+      setRosterFlags(null)
+      setSummary(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
-      const week = await fetchWeek(weekStart)
+      const week = await fetchWeek(weekStart, locationId)
       if (version !== requestVersion.current) return
       setShifts(week.shifts)
       setRoster(week.roster)
       setRosterFlags(week.roster_flags)
-      setLocations(week.locations ?? [])
       setSummary(week.summary)
     } finally {
       if (version === requestVersion.current) setLoading(false)
     }
-  }, [weekStart])
+  }, [weekStart, locationId])
 
   useEffect(() => {
     void reload()
@@ -199,7 +208,7 @@ export function useScheduleEditor(weekStart: string) {
   const publishWeek = useCallback(async () => {
     setSaveState('saving')
     try {
-      const result = await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
+      const result = await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`, locationId)
       setShifts(result.shifts)
       setSummary(result.summary)
       setSaveState('saved')
@@ -209,10 +218,10 @@ export function useScheduleEditor(weekStart: string) {
       toast(errorMessage(error), 'error')
       throw error
     }
-  }, [toast, weekStart])
+  }, [toast, weekStart, locationId])
 
   return {
-    shifts, roster, rosterFlags, locations, summary, loading, saveState, lastSavedAt, pendingKeys,
+    shifts, roster, rosterFlags, summary, loading, saveState, lastSavedAt, pendingKeys,
     reload, createDraft, updateShiftDraft, moveShift, resizeShift, assignToShift,
     moveEmployee, unassignFromShift, removeShift, publishWeek,
   }

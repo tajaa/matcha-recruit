@@ -120,6 +120,10 @@ class PublishRange(BaseModel):
 
     start: datetime
     end: datetime
+    # Scope to one location, matching whichever location's week the caller is
+    # looking at — omitted publishes across every location (used by the
+    # portal / non-location-scoped callers).
+    location_id: Optional[UUID] = None
 
     _utc = field_validator("start", "end")(_as_utc)
 

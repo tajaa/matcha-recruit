@@ -15,7 +15,7 @@ from ...services.scheduling.shift_writes import (
 )
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
-    assert_employee_in_company, assert_shift_open_for_assignment,
+    assert_employee_in_company, assert_employee_schedulable_at, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
     fetch_locked_shift_pair,
@@ -50,6 +50,7 @@ async def move_employee_assignment(
                 raise HTTPException(status_code=409, detail="Cannot move an assignment to a cancelled shift")
 
             await assert_employee_in_company(conn, company_id, body.employee_id)
+            await assert_employee_schedulable_at(conn, company_id, body.employee_id, target["location_id"])
             assignment = await conn.fetchrow(
                 """
                 SELECT assigned_by
@@ -172,6 +173,7 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
         shift = await fetch_shift_for_write(conn, company_id, shift_id)
         assert_shift_open_for_assignment(shift)
         await assert_employee_in_company(conn, company_id, body.employee_id)
+        await assert_employee_schedulable_at(conn, company_id, body.employee_id, shift["location_id"])
         avail_map = await fetch_availability(conn, company_id, [body.employee_id])
         availability = availability_violations(
             avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],

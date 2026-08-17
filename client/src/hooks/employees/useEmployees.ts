@@ -7,6 +7,7 @@ type Filters = {
   search?: string
   department?: string
   employment_type?: string
+  work_location_id?: string
 }
 
 export function useEmployees(filters: Filters = {}) {
@@ -41,6 +42,7 @@ export function useEmployees(filters: Filters = {}) {
     if (f.search) params.set('search', f.search)
     if (f.department) params.set('department', f.department)
     if (f.employment_type) params.set('employment_type', f.employment_type)
+    if (f.work_location_id) params.set('work_location_id', f.work_location_id)
 
     const qs = params.toString() ? `?${params}` : ''
 
@@ -64,7 +66,7 @@ export function useEmployees(filters: Filters = {}) {
     }
     const t = setTimeout(fetchEmployees, 300)
     return () => clearTimeout(t)
-  }, [fetchEmployees, filters.status, filters.search, filters.department, filters.employment_type])
+  }, [fetchEmployees, filters.status, filters.search, filters.department, filters.employment_type, filters.work_location_id])
 
   const refetch = useCallback(() => {
     fetchEmployees()

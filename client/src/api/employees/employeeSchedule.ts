@@ -7,8 +7,14 @@ import type {
 
 // ---- Admin: shifts + weekly view ----
 
-export function fetchWeek(weekStart: string) {
-  return api.get<WeekResponse>(`/employee-schedule/week?start=${weekStart}`)
+export function fetchWeek(weekStart: string, locationId: string) {
+  return api.get<WeekResponse>(`/employee-schedule/week?start=${weekStart}&location=${locationId}`)
+}
+
+/** For a `?shift=` deep link (the Huume `[[shift:…]]` pill) that carries no
+ *  location — resolves which location to scope the page to. */
+export function fetchShift(shiftId: string) {
+  return api.get<Shift>(`/employee-schedule/shifts/${shiftId}`)
 }
 
 export function createShift(payload: ShiftPayload, force = false) {
@@ -34,9 +40,9 @@ export function publishShift(id: string) {
   return api.post<Shift>(`/employee-schedule/shifts/${id}/publish`, {})
 }
 
-export function publishRange(start: string, end: string) {
+export function publishRange(start: string, end: string, locationId?: string) {
   return api.post<{ published: number; shifts: Shift[]; summary: ScheduleSummary }>(
-    '/employee-schedule/shifts/publish', { start, end },
+    '/employee-schedule/shifts/publish', { start, end, location_id: locationId || null },
   )
 }
 
@@ -103,8 +109,8 @@ export function fetchLocationCompliance(locationId: string) {
 
 // ---- Admin: templates ----
 
-export function fetchTemplates() {
-  return api.get<{ templates: ShiftTemplate[] }>('/employee-schedule/templates')
+export function fetchTemplates(locationId: string) {
+  return api.get<{ templates: ShiftTemplate[] }>(`/employee-schedule/templates?location=${locationId}`)
 }
 
 export function createTemplate(payload: TemplatePayload) {

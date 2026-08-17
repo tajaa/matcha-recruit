@@ -23,10 +23,10 @@ from ...services.scheduling import schedule_compliance, schedule_intelligence
 from ...services.scheduling.shift_writes import create_shift_core
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
-    assert_employee_in_company, assert_location_in_company,
+    assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
-    shift_window_on_date, fetch_schedule_locations,
+    shift_window_on_date,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -39,10 +39,14 @@ router = APIRouter()
 
 
 @router.get("/roster")
-async def get_roster(current_user=Depends(require_admin_or_client)):
+async def get_roster(
+    location: UUID = Query(..., description="Business location to scope the roster to"),
+    current_user=Depends(require_admin_or_client),
+):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        return {"employees": await fetch_roster(conn, company_id)}
+        await assert_location_in_company(conn, company_id, location)
+        return {"employees": await fetch_roster(conn, company_id, location_id=location)}
 
 
 @router.get("/shifts")
@@ -50,32 +54,51 @@ async def list_shifts(
     start: datetime = Query(...),
     end: datetime = Query(...),
     status: str | None = Query(None),
+    location: UUID | None = Query(None),
     current_user=Depends(require_admin_or_client),
 ):
     if end <= start:
         raise HTTPException(status_code=422, detail="end must be after start")
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
-        shifts = await fetch_shifts(conn, company_id, start, end, status=status)
+        await assert_location_in_company(conn, company_id, location)
+        shifts = await fetch_shifts(conn, company_id, start, end, status=status, location_id=location)
     return {"shifts": shifts, "summary": _summarize(shifts)}
+
+
+@router.get("/shifts/{shift_id}")
+async def get_shift(shift_id: UUID, current_user=Depends(require_admin_or_client)):
+    """One shift by id, tenant-scoped. Exists so a `?shift=` deep link that
+    carries no location (the Huume `[[shift:…]]` pill token predates location
+    scoping) can resolve which location to scope the page to."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        shift = await fetch_shift_by_id(conn, company_id, shift_id)
+    if shift is None:
+        raise HTTPException(status_code=404, detail="Shift not found")
+    return shift
 
 
 @router.get("/week")
 async def get_week(
     start: date = Query(..., description="Week start date (YYYY-MM-DD)"),
+    location: UUID = Query(..., description="Business location to scope this week's shifts to"),
     current_user=Depends(require_admin_or_client),
 ):
-    """Weekly grid: the 7 days from `start`, plus the roster for the picker."""
+    """Weekly grid: the 7 days from `start` for ONE location, plus the roster
+    for the picker. `location` is mandatory — callers fetch the location list
+    via GET /locations first and never see cross-location shift data in one
+    response."""
     company_id = await require_company_id(current_user)
     lo, hi = _week_bounds(start)
     async with get_connection() as conn:
+        await assert_location_in_company(conn, company_id, location)
         # starts_within: the grid buckets by start date and publish_range only
         # publishes shifts starting in the window — matching on overlap here
         # would count a shift in the summary that no day column renders and no
         # publish touches.
-        shifts = await fetch_shifts(conn, company_id, lo, hi, starts_within=True)
-        roster = await fetch_roster(conn, company_id)
-        locations = await fetch_schedule_locations(conn, company_id)
+        shifts = await fetch_shifts(conn, company_id, lo, hi, location_id=location, starts_within=True)
+        roster = await fetch_roster(conn, company_id, location_id=location)
 
         features = await get_company_features(company_id, conn=conn)
         training_enabled = bool(features.get("training"))
@@ -102,9 +125,9 @@ async def get_week(
             }
     return {
         "week_start": start.isoformat(),
+        "location_id": str(location),
         "shifts": shifts,
         "roster": roster,
-        "locations": locations,
         "roster_flags": roster_flags,
         "summary": _summarize(shifts),
     }
@@ -180,6 +203,7 @@ async def create_shift(body: ShiftCreate,
         availability_overrides: dict[str, list[dict]] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
+            await assert_employee_schedulable_at(conn, company_id, emp_id, body.location_id)
             avail = availability_violations(
                 avail_map.get(emp_id, {}), body.starts_at, body.ends_at,
             )
@@ -571,9 +595,16 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
 
 @router.post("/shifts/publish")
 async def publish_range(body: PublishRange, current_user=Depends(require_admin_or_client)):
-    """Publish every draft shift starting within [start, end)."""
+    """Publish every draft shift starting within [start, end).
+
+    `location_id`, when given, scopes this to one location (plus shifts with
+    no location set) — matching the location-scoped week the caller is
+    looking at, so "Publish week (N)" doesn't silently publish other
+    locations' drafts too.
+    """
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
+        await assert_location_in_company(conn, company_id, body.location_id)
         async with conn.transaction():
             count = await conn.fetchval(
                 """
@@ -584,16 +615,17 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
                         updated_at = NOW()
                     WHERE company_id = $1 AND status = 'draft'
                       AND starts_at >= $2 AND starts_at < $3
+                      AND ($4::uuid IS NULL OR location_id = $4 OR location_id IS NULL)
                     RETURNING id
                 )
                 SELECT COUNT(*) FROM updated
                 """,
-                company_id, body.start, body.end,
+                company_id, body.start, body.end, body.location_id,
             )
             await log_audit(conn, company_id, "shift", None, current_user.id,
-                            "shift.publish_range", {"count": count})
+                            "shift.publish_range", {"count": count, "location_id": str(body.location_id) if body.location_id else None})
         # Same window semantics as the UPDATE above, so the returned summary
         # counts exactly the shifts this call could have published.
         shifts = await fetch_shifts(conn, company_id, body.start, body.end,
-                                    starts_within=True)
+                                    location_id=body.location_id, starts_within=True)
     return {"published": count, "shifts": shifts, "summary": _summarize(shifts)}

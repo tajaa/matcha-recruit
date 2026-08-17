@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from .companies import router as companies_router
+from .locations import router as locations_router
 from .interviews import router as interviews_router
 from .matcha_work import tutor_sessions_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
@@ -94,6 +95,7 @@ matcha_router = APIRouter()
 
 # Mount sub-routers
 matcha_router.include_router(companies_router, prefix="/companies", tags=["companies"])
+matcha_router.include_router(locations_router, prefix="/locations", tags=["locations"])
 matcha_router.include_router(interviews_router, tags=["interviews"])
 # The /tutor/* session + admin-metrics routes live in matcha_work/tutor_sessions.py
 # (same `interviews` table as the thread-scoped voice tutor) but are mounted HERE,

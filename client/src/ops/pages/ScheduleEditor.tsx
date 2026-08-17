@@ -3,8 +3,10 @@ import { useCallback, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
+import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
+import LocationPicker from '../../components/shared/LocationPicker'
 import { addDays, startOfWeekSunday, toISODate, type Shift } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
@@ -33,10 +35,11 @@ export default function ScheduleEditor() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const weekStart = parseWeek(searchParams.get('week'))
+  const { locationId, setLocationId, locations } = useLocationScope()
   const { hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
-  const editor = useScheduleEditor(weekStart)
+  const editor = useScheduleEditor(weekStart, locationId)
   const [editPublished, setEditPublished] = useState(false)
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [inspectorShiftId, setInspectorShiftId] = useState<string | null>(null)
@@ -53,6 +56,8 @@ export default function ScheduleEditor() {
   const days = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
   const inspectorShift = inspectorShiftId ? editor.shifts.find((shift) => shift.id === inspectorShiftId) ?? null : null
   const inspectorReadOnly = !!inspectorShift && (inspectorShift.status === 'published' && !editPublished || inspectorShift.status === 'cancelled')
+  const currentLocation = locations.find((l) => l.id === locationId)
+  const currentLocationName = currentLocation ? locationLabel(currentLocation) : ''
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -137,17 +142,29 @@ export default function ScheduleEditor() {
           lastSavedAt={editor.lastSavedAt}
           editPublished={editPublished}
           publishing={publishing}
+          locations={locations}
+          locationId={locationId}
+          onChangeLocation={setLocationId}
           onPreviousWeek={() => setWeek(addDays(weekStart, -7))}
           onNextWeek={() => setWeek(addDays(weekStart, 7))}
           onThisWeek={() => setWeek(toISODate(startOfWeekSunday(new Date())))}
           onTogglePublishedEditing={setEditPublished}
           onPublish={handlePublish}
-          onExit={() => navigate('/ops/schedule')}
+          onExit={() => navigate(`/ops/schedule?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`)}
           onHelp={() => setGuideOpen(true)}
           chatOpen={chatOpen}
           onToggleChat={() => setChatOpen((value) => !value)}
         />
-        {editor.loading ? (
+        {!locationId ? (
+          <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
+            <p className="text-sm text-zinc-400">Pick a location to see its schedule.</p>
+            {locations.length > 0 ? (
+              <LocationPicker locations={locations} value="" onChange={setLocationId} />
+            ) : (
+              <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>
+            )}
+          </div>
+        ) : editor.loading ? (
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
@@ -158,7 +175,8 @@ export default function ScheduleEditor() {
                 key={inspectorShift?.id ?? `${newDefaults?.date}-${newDefaults?.minute}`}
                 shift={inspectorShift}
                 defaults={newDefaults}
-                locations={editor.locations}
+                locationId={locationId}
+                locationName={currentLocationName}
                 roster={editor.roster}
                 trainingEnabled={trainingEnabled}
                 readOnly={inspectorReadOnly}
@@ -172,7 +190,7 @@ export default function ScheduleEditor() {
             {chatOpen && (
               <ScheduleChatPanel
                 weekStart={weekStart}
-                locationId={null}
+                locationId={locationId || null}
                 editPublished={editPublished}
                 onApplied={() => void editor.reload()}
                 onClose={() => setChatOpen(false)}

@@ -2,14 +2,16 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useScheduleEditor } from './useScheduleEditor'
 
-const { fetchWeekMock, updateShiftMock, moveAssignmentMock } = vi.hoisted(() => ({
+const { fetchWeekMock, fetchScheduleLocationsMock, updateShiftMock, moveAssignmentMock } = vi.hoisted(() => ({
   fetchWeekMock: vi.fn(),
+  fetchScheduleLocationsMock: vi.fn(),
   updateShiftMock: vi.fn(),
   moveAssignmentMock: vi.fn(),
 }))
 
 vi.mock('../../api/employees/employeeSchedule', () => ({
   fetchWeek: fetchWeekMock,
+  fetchScheduleLocations: fetchScheduleLocationsMock,
   updateShift: updateShiftMock,
   moveAssignment: moveAssignmentMock,
   createShift: vi.fn(),
@@ -30,24 +32,25 @@ const shift = (id: string, assigned: string[] = []) => ({
 describe('useScheduleEditor', () => {
   beforeEach(() => {
     fetchWeekMock.mockResolvedValue({
-      week_start: '2026-08-09', shifts: [shift('s1', ['e1']), shift('s2')],
+      week_start: '2026-08-09', location_id: 'loc1', shifts: [shift('s1', ['e1']), shift('s2')],
       roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: null, department: null }],
-      roster_flags: null, locations: [],
+      roster_flags: null,
       summary: { total_shifts: 2, published: 0, draft: 2, open_shifts: 1, assigned: 1 },
     })
+    fetchScheduleLocationsMock.mockResolvedValue({ locations: [] })
     updateShiftMock.mockResolvedValue(shift('s1', ['e1']))
     moveAssignmentMock.mockResolvedValue({ source_shift: shift('s1'), target_shift: shift('s2', ['e1']) })
   })
 
   it('loads the week payload', async () => {
-    const { result } = renderHook(() => useScheduleEditor('2026-08-09'))
+    const { result } = renderHook(() => useScheduleEditor('2026-08-09', 'loc1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.roster[0].name).toBe('Aisha Rivera')
     expect(result.current.shifts).toHaveLength(2)
   })
 
   it('moves a shift with a preserved duration window', async () => {
-    const { result } = renderHook(() => useScheduleEditor('2026-08-09'))
+    const { result } = renderHook(() => useScheduleEditor('2026-08-09', 'loc1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     await act(async () => { await result.current.moveShift(result.current.shifts[0], '2026-08-10', 600) })
     expect(updateShiftMock).toHaveBeenCalledWith('s1', {
@@ -56,7 +59,7 @@ describe('useScheduleEditor', () => {
   })
 
   it('patches both shifts after an assignment move', async () => {
-    const { result } = renderHook(() => useScheduleEditor('2026-08-09'))
+    const { result } = renderHook(() => useScheduleEditor('2026-08-09', 'loc1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
     await act(async () => { await result.current.moveEmployee('e1', 's1', 's2') })
     expect(moveAssignmentMock).toHaveBeenCalledWith({ employee_id: 'e1', from_shift_id: 's1', to_shift_id: 's2' }, false)
@@ -70,7 +73,7 @@ describe('useScheduleEditor', () => {
     })
     updateShiftMock.mockImplementationOnce(() => firstResponse)
 
-    const { result } = renderHook(() => useScheduleEditor('2026-08-09'))
+    const { result } = renderHook(() => useScheduleEditor('2026-08-09', 'loc1'))
     await waitFor(() => expect(result.current.loading).toBe(false))
 
     let firstMutation: Promise<unknown> = Promise.resolve()

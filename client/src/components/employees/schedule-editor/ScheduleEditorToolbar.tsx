@@ -1,5 +1,7 @@
 import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, Loader2, Save, Send, Sparkles, X } from 'lucide-react'
 import type { ScheduleSaveState, } from '../../../hooks/employees/useScheduleEditor'
+import type { CompanyLocation } from '../../../hooks/useLocationScope'
+import LocationPicker from '../../shared/LocationPicker'
 import type { ScheduleSummary } from '../../../types/employeeSchedule'
 
 interface ScheduleEditorToolbarProps {
@@ -9,6 +11,9 @@ interface ScheduleEditorToolbarProps {
   lastSavedAt: Date | null
   editPublished: boolean
   publishing: boolean
+  locations: CompanyLocation[]
+  locationId: string
+  onChangeLocation(id: string): void
   onPreviousWeek(): void
   onNextWeek(): void
   onThisWeek(): void
@@ -29,6 +34,7 @@ function saveLabel(state: ScheduleSaveState, lastSavedAt: Date | null): string {
 
 export default function ScheduleEditorToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
+  locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
   chatOpen, onToggleChat,
 }: ScheduleEditorToolbarProps) {
@@ -45,6 +51,7 @@ export default function ScheduleEditorToolbar({
         <button onClick={onThisWeek} className="rounded-lg border border-zinc-800 px-2.5 py-1.5 text-xs text-zinc-300 hover:text-zinc-100">This week</button>
         <button onClick={onNextWeek} className="rounded-lg border border-zinc-800 p-1.5 text-zinc-400 hover:text-zinc-100" aria-label="Next week"><ChevronRight className="h-4 w-4" /></button>
         <span className="ml-1 inline-flex items-center gap-1.5 text-xs text-zinc-500"><CalendarDays className="h-3.5 w-3.5" /> Week of {weekStart}</span>
+        <LocationPicker locations={locations} value={locationId} onChange={onChangeLocation} />
         <div className="ml-auto flex items-center gap-2">
           <span className={`hidden items-center gap-1 text-[11px] sm:inline-flex ${saveState === 'error' ? 'text-red-400' : 'text-zinc-500'}`}>
             {saveState === 'saving' ? <Loader2 className="h-3 w-3 animate-spin" /> : saveState === 'saved' ? <Save className="h-3 w-3 text-emerald-400" /> : null}

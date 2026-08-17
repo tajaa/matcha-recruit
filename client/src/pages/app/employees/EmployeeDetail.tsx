@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Badge, Button, Card, Input, Select } from '../../../components/ui'
 import { EmployeeStatusBadge } from '../../../components/employees/EmployeeStatusBadge'
@@ -11,6 +11,8 @@ import { EmployeeTrainingPanel } from '../../../components/employees/EmployeeTra
 import { useEmployeeDetail } from '../../../hooks/employees/useEmployeeDetail'
 import { useMe } from '../../../hooks/useMe'
 import { typeLabel, statusLabel } from '../../../types/employee'
+import { api } from '../../../api/client'
+import { locationLabel, type CompanyLocation } from '../../../hooks/useLocationScope'
 
 const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
 
@@ -66,6 +68,19 @@ export default function EmployeeDetail() {
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
+  const [locations, setLocations] = useState<CompanyLocation[]>([])
+  useEffect(() => {
+    api.get<{ locations: CompanyLocation[] }>('/locations').then((r) => setLocations(r.locations)).catch(() => {})
+  }, [])
+  // Dynamic (fetched) options, so this can't live in the static PROFILE_FIELDS
+  // array above — otherwise the same shape as every other field here.
+  const profileFields: ProfileField[] = [
+    ...PROFILE_FIELDS,
+    {
+      key: 'work_location_id', label: 'Work Location', type: 'select',
+      options: locations.map((l) => ({ value: l.id, label: locationLabel(l) })),
+    },
+  ]
 
   if (loading) return <p className="text-sm text-zinc-500">Loading employee...</p>
   if (error) return <p className="text-sm text-red-400">{error}</p>
@@ -73,7 +88,7 @@ export default function EmployeeDetail() {
 
   function startEditing() {
     const initial: Record<string, string> = {}
-    for (const f of PROFILE_FIELDS) {
+    for (const f of profileFields) {
       initial[f.key] = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
     }
     setDraft(initial)
@@ -89,7 +104,7 @@ export default function EmployeeDetail() {
 
   async function handleSave() {
     const changes: Record<string, string | null> = {}
-    for (const f of PROFILE_FIELDS) {
+    for (const f of profileFields) {
       const original = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
       const edited = (draft[f.key] ?? '').trim()
       if (edited !== original) {
@@ -157,7 +172,7 @@ export default function EmployeeDetail() {
             {tab === 'profile' && (
               <>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                  {PROFILE_FIELDS.map((f) => {
+                  {profileFields.map((f) => {
                     const value = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
                     if (editing) {
                       if (f.type === 'select' && f.options) {
