@@ -19,6 +19,7 @@ const CappeRoutes = lazy(() => import("./cappe/routes")); // Cappe — website b
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
 // pull what they land on (Home + Login stay eager: first paint + funnel).
 const MatchaWorkPage = lazy(() => import("./pages/landing/MatchaWorkPage"));
+const SimpleLanding = lazy(() => import("./pages/landing/SimpleLanding"));
 const ServicesPage = lazy(() => import("./pages/landing/ServicesPage"));
 // Marketing pages restyled closer to /services (originals retired 2026-07-05).
 const SimpleCompliancePage = lazy(
@@ -134,7 +135,8 @@ export default function App() {
         {/* Exact "/" outranks the isCappeHost "/*" splat below, so the apex
             swap has to happen here: on the Cappe domain "/" renders the
             Gummfit landing (CappeRoutes index), everywhere else Matcha Home. */}
-        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
+        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <SimpleLanding />} />
+        <Route path="/old-landing" element={<Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
