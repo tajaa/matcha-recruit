@@ -264,6 +264,18 @@ class TestBoardSourceGuards:
 
         get_board_src = inspect.getsource(board.get_board)
         assert '"campaign_id" in r.keys() and r["campaign_id"] is not None' in get_board_src
+        assert 'campaigns_by_id.get(r["campaign_id"]) if "campaign_id" in r.keys() else None' in get_board_src
+
+        # every non-comment, non-definition line that reads r["campaign_id"] must
+        # guard it on the same line — a third unguarded read (like the one at
+        # board.py:300 before this fix) reintroduces the KeyError this test guards.
+        unguarded = [
+            line for line in get_board_src.splitlines()
+            if 'r["campaign_id"]' in line
+            and not line.strip().startswith("#")
+            and '"campaign_id" in r.keys()' not in line
+        ]
+        assert not unguarded, f"unguarded r['campaign_id'] read(s): {unguarded}"
 
         update_post_src = inspect.getsource(board.update_post)
         assert '"campaign_id" in row.keys() and row["campaign_id"] is not None' in update_post_src

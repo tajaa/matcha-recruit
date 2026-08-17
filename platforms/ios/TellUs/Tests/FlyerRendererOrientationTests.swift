@@ -105,8 +105,9 @@ final class FlyerRendererOrientationTests: XCTestCase {
         guard let data = rendered.cgImage?.dataProvider?.data, let pointer = CFDataGetBytePtr(data) else {
             return XCTFail("couldn't read rendered pixels")
         }
-        XCTAssertGreaterThan(pointer[0], 200, "top-left pixel should be red (the source's top half), not blue (flipped)")
-        XCTAssertLessThan(pointer[2], 50, "top-left pixel should not be blue")
+        // UIGraphicsImageRenderer contexts are 32BGRA: byte 0 = blue, byte 2 = red.
+        XCTAssertGreaterThan(pointer[2], 200, "top-left pixel should be red (the source's top half), not blue (flipped)")
+        XCTAssertLessThan(pointer[0], 50, "top-left pixel should not be blue")
     }
 
     // MARK: - helpers

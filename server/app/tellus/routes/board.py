@@ -297,7 +297,7 @@ async def get_board(
         posts = [
             bs.serialize_post(
                 r, viewer_is_mod=viewer_is_mod, listing_row=listings_by_id.get(r["listing_id"]),
-                campaign_row=campaigns_by_id.get(r["campaign_id"]),
+                campaign_row=campaigns_by_id.get(r["campaign_id"]) if "campaign_id" in r.keys() else None,
             )
             for r in rows
         ]
