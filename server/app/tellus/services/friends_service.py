@@ -227,6 +227,38 @@ async def suggestions(conn, viewer_id: UUID, limit: int) -> list[UUID]:
     return [row["account_id"] for row in rows]
 
 
+async def filter_suggestion_ids(conn, viewer_id: UUID, candidate_ids: list[UUID]) -> list[UUID]:
+    """Re-apply live social/privacy filters to cached suggestion ids.
+
+    The ranking cache is intentionally short-lived, but blocks, requests, and
+    privacy changes must take effect immediately rather than waiting for TTL.
+    """
+    if not candidate_ids:
+        return []
+    rows = await conn.fetch(
+        """SELECT a.id
+              FROM tellus_accounts a
+             WHERE a.id = ANY($2::uuid[])
+               AND a.account_type = 'consumer' AND a.status = 'active'
+               AND a.discoverable AND a.profile_visibility <> 'private'
+               AND NOT EXISTS (
+                   SELECT 1 FROM tellus_account_blocks b
+                    WHERE (b.blocker_account_id = $1 AND b.blocked_account_id = a.id)
+                       OR (b.blocker_account_id = a.id AND b.blocked_account_id = $1))
+               AND NOT EXISTS (
+                   SELECT 1 FROM tellus_friendships f
+                    WHERE f.account_id = $1 AND f.friend_account_id = a.id)
+               AND NOT EXISTS (
+                   SELECT 1 FROM tellus_friend_requests r
+                    WHERE r.status = 'pending'
+                      AND ((r.requester_account_id = $1 AND r.addressee_account_id = a.id)
+                        OR (r.requester_account_id = a.id AND r.addressee_account_id = $1)))
+             ORDER BY array_position($2::uuid[], a.id)""",
+        viewer_id, candidate_ids,
+    )
+    return [row["id"] for row in rows]
+
+
 async def friend_ids(conn, account_id: UUID) -> list[UUID]:
     rows = await conn.fetch(
         "SELECT friend_account_id FROM tellus_friendships WHERE account_id = $1",

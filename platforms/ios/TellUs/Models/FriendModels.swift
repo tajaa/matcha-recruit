@@ -31,8 +31,8 @@ struct FriendSummary: Codable, Identifiable {
     let avatar_url: String?
     let city: String?
     let state: String?
-    let level: Int
-    let lifetime_points: Int
+    let level: Int?
+    let lifetime_points: Int?
     let mutual_friend_count: Int
     var status: FriendshipStatus
     var request_id: String?
@@ -53,8 +53,8 @@ struct FriendSummary: Codable, Identifiable {
         avatar_url = try c.decodeIfPresent(String.self, forKey: .avatar_url)
         city = try c.decodeIfPresent(String.self, forKey: .city)
         state = try c.decodeIfPresent(String.self, forKey: .state)
-        level = try c.decodeIfPresent(Int.self, forKey: .level) ?? 1
-        lifetime_points = try c.decodeIfPresent(Int.self, forKey: .lifetime_points) ?? 0
+        level = c.contains(.level) ? try c.decodeIfPresent(Int.self, forKey: .level) : 1
+        lifetime_points = c.contains(.lifetime_points) ? try c.decodeIfPresent(Int.self, forKey: .lifetime_points) : 0
         mutual_friend_count = try c.decodeIfPresent(Int.self, forKey: .mutual_friend_count) ?? 0
         status = try c.decodeIfPresent(FriendshipStatus.self, forKey: .status) ?? .none
         request_id = try c.decodeIfPresent(String.self, forKey: .request_id)
@@ -63,7 +63,7 @@ struct FriendSummary: Codable, Identifiable {
 
     init(account_id: String, display_name: String = "Someone", handle: String? = nil,
          avatar_url: String? = nil, city: String? = nil, state: String? = nil,
-         level: Int = 1, lifetime_points: Int = 0, mutual_friend_count: Int = 0,
+         level: Int? = 1, lifetime_points: Int? = 0, mutual_friend_count: Int = 0,
          status: FriendshipStatus = .none, request_id: String? = nil, is_you: Bool = false) {
         self.account_id = account_id; self.display_name = display_name; self.handle = handle
         self.avatar_url = avatar_url; self.city = city; self.state = state; self.level = level
@@ -91,24 +91,25 @@ struct FriendProfile: Codable {
     let avatar_url: String?
     let city: String?
     let state: String?
-    let level: Int
-    let lifetime_points: Int
-    let current_streak: Int
+    let level: Int?
+    let lifetime_points: Int?
+    let current_streak: Int?
     let friend_count: Int
     let mutual_friend_count: Int
     let friends_since: String?
     var is_friend: Bool
+    let status: FriendshipStatus
     let pending_request_id: String?
     let is_you: Bool
     let reviews: [PersonReview]?
     let followed_places: [FollowedPlace]?
-    let badges: [[String: JSONValue]]?
+    let badges: [PersonBadge]?
     let boards: [PersonBoard]?
 
     private enum CodingKeys: String, CodingKey {
         case account_id, display_name, handle, avatar_url, city, state, level,
              lifetime_points, current_streak, friend_count, mutual_friend_count,
-             friends_since, is_friend, pending_request_id, is_you, reviews,
+             friends_since, is_friend, status, pending_request_id, is_you, reviews,
              followed_places, badges, boards
     }
 
@@ -120,18 +121,19 @@ struct FriendProfile: Codable {
         avatar_url = try c.decodeIfPresent(String.self, forKey: .avatar_url)
         city = try c.decodeIfPresent(String.self, forKey: .city)
         state = try c.decodeIfPresent(String.self, forKey: .state)
-        level = try c.decodeIfPresent(Int.self, forKey: .level) ?? 1
-        lifetime_points = try c.decodeIfPresent(Int.self, forKey: .lifetime_points) ?? 0
-        current_streak = try c.decodeIfPresent(Int.self, forKey: .current_streak) ?? 0
+        level = c.contains(.level) ? try c.decodeIfPresent(Int.self, forKey: .level) : 1
+        lifetime_points = c.contains(.lifetime_points) ? try c.decodeIfPresent(Int.self, forKey: .lifetime_points) : 0
+        current_streak = c.contains(.current_streak) ? try c.decodeIfPresent(Int.self, forKey: .current_streak) : 0
         friend_count = try c.decodeIfPresent(Int.self, forKey: .friend_count) ?? 0
         mutual_friend_count = try c.decodeIfPresent(Int.self, forKey: .mutual_friend_count) ?? 0
         friends_since = try c.decodeIfPresent(String.self, forKey: .friends_since)
         is_friend = try c.decodeIfPresent(Bool.self, forKey: .is_friend) ?? false
+        status = try c.decodeIfPresent(FriendshipStatus.self, forKey: .status) ?? (is_friend ? .friends : .none)
         pending_request_id = try c.decodeIfPresent(String.self, forKey: .pending_request_id)
         is_you = try c.decodeIfPresent(Bool.self, forKey: .is_you) ?? false
         reviews = try c.decodeIfPresent([PersonReview].self, forKey: .reviews)
         followed_places = try c.decodeIfPresent([FollowedPlace].self, forKey: .followed_places)
-        badges = try c.decodeIfPresent([[String: JSONValue]].self, forKey: .badges)
+        badges = try c.decodeIfPresent([PersonBadge].self, forKey: .badges)
         boards = try c.decodeIfPresent([PersonBoard].self, forKey: .boards)
     }
 }
@@ -139,6 +141,14 @@ struct FriendProfile: Codable {
 struct PersonReview: Codable, Identifiable { let id: String; let brand_id: String; let brand_name: String; let brand_slug: String?; let rating: Int?; let title: String?; let description: String?; let created_at: String; let publish_at: String?; let like_count: Int; let liked_by_me: Bool }
 struct FollowedPlace: Codable, Identifiable { let slug: String; let name: String; let logo_url: String?; let city: String?; let state: String?; var id: String { slug } }
 struct PersonBoard: Codable, Identifiable { let brand_slug: String; let brand_name: String; let logo_url: String?; let joined_at: String?; var id: String { brand_slug } }
+struct PersonBadge: Codable, Identifiable {
+    let key: String
+    let name: String
+    let description: String?
+    let icon: String?
+    let awarded_at: String?
+    var id: String { key }
+}
 
 struct FriendActivityItem: Codable, Identifiable {
     let id: String
@@ -167,5 +177,14 @@ struct InvitePreview: Codable { let owner: FriendSummary }
 struct ProfileUpdateFriends: Encodable { let profile_visibility: String?; let discoverable: Bool? }
 struct FriendRequestCreate: Encodable { let account_id: String?; let handle: String?; let source: String }
 struct FriendRequestResult: Codable { let id: String?; let status: String?; let person: FriendSummary?; let friend: FriendSummary? }
+struct FriendInviteFriendship: Codable { let friend: FriendSummary; let created_at: String }
+struct FriendInviteRedeemResult: Codable { let friendship: FriendInviteFriendship }
+struct FriendReportCreate: Encodable { let reason: String; let detail: String? }
+struct TellusBlockCreate: Encodable { let account_id: String }
 struct TellusHandleClaim: Encodable { let handle: String }
 struct TellusHandleAvailability: Codable { let handle: String; let available: Bool; let reason: String? }
+
+struct TellusPersonReviewPage: Codable {
+    let reviews: [PersonReview]
+    let next_cursor: String?
+}

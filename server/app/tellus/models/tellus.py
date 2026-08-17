@@ -30,6 +30,7 @@ ProfileVisibility = Literal["everyone", "friends", "private"]
 FriendRequestStatus = Literal["pending", "accepted", "declined", "cancelled"]
 FriendRequestSource = Literal["search", "handle", "suggestion", "profile", "invite_link"]
 FriendRequestDirection = Literal["incoming", "outgoing"]
+FriendshipStatus = Literal["none", "pending_out", "pending_in", "friends", "blocked", "blocked_by"]
 AbuseReportReason = Literal["spam", "harassment", "impersonation", "inappropriate", "other"]
 AbuseReportTargetType = Literal["account", "review", "board_reply"]
 AbuseReportStatus = Literal["open", "reviewing", "actioned", "dismissed"]
@@ -175,10 +176,11 @@ class TellusPersonSummary(BaseModel):
     avatar_url: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
-    level: int = 1
-    lifetime_points: int = 0
+    level: Optional[int] = None
+    lifetime_points: Optional[int] = None
     mutual_friend_count: int = 0
     is_friend: bool = False
+    status: FriendshipStatus = "none"
     # Set when a request is pending in either direction — lets the client
     # render Cancel/Accept without a second round trip.
     pending_request_id: Optional[UUID] = None
@@ -273,13 +275,14 @@ class TellusPersonProfile(BaseModel):
     avatar_url: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
-    level: int = 1
-    lifetime_points: int = 0
-    current_streak: int = 0
+    level: Optional[int] = None
+    lifetime_points: Optional[int] = None
+    current_streak: Optional[int] = None
     friend_count: int = 0
     mutual_friend_count: int = 0
     friends_since: Optional[datetime] = None
     is_friend: bool = False
+    status: FriendshipStatus = "none"
     pending_request_id: Optional[UUID] = None
     is_you: bool = False
     reviews: Optional[list[TellusPersonReview]] = None
@@ -305,6 +308,11 @@ class TellusFriendActivityItem(BaseModel):
 
 class TellusFriendActivityPage(BaseModel):
     items: list[TellusFriendActivityItem]
+    next_cursor: Optional[str] = None
+
+
+class TellusPersonReviewPage(BaseModel):
+    reviews: list[TellusPersonReview]
     next_cursor: Optional[str] = None
 
 

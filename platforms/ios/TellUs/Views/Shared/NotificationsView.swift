@@ -16,6 +16,18 @@ struct NotificationsView: View {
                         } label: {
                             notificationRow(item)
                         }
+                    } else if item.kind == "friend_request", let requestID = item.reference_id {
+                        NavigationLink {
+                            FriendsHubView(initialTab: .requests, highlightRequestId: requestID)
+                        } label: {
+                            notificationRow(item)
+                        }
+                    } else if ["friend_accepted", "friend_added"].contains(item.kind), let accountID = item.reference_id {
+                        NavigationLink {
+                            FriendProfileView(accountId: accountID)
+                        } label: {
+                            notificationRow(item)
+                        }
                     } else {
                         notificationRow(item)
                     }
@@ -47,6 +59,8 @@ struct NotificationsView: View {
         case "board_post": return "square.and.pencil"
         case "board_reply_pending", "board_reply_approved": return "bubble.left"
         case "board_team_added": return "person.3"
+        case "friend_request": return "person.badge.plus"
+        case "friend_accepted", "friend_added": return "person.2"
         default: return "bell"
         }
     }

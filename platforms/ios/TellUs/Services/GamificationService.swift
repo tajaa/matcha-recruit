@@ -8,4 +8,8 @@ final class GamificationService {
     func leaderboard() async throws -> [LeaderboardEntry] {
         try await client.request(method: "GET", path: "/leaderboard")
     }
+
+    func friendsLeaderboard() async throws -> [LeaderboardEntry] {
+        try await client.request(method: "GET", path: "/leaderboard/friends")
+    }
 }

@@ -4,8 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from ...database import get_connection
-from ..dependencies import require_consumer
+from ..dependencies import require_consumer, require_verified_consumer
 from ..models.tellus import TellusAccount, TellusBadge, TellusLeaderboardEntry
+from ..services.friends_service import display_name_for
 
 router = APIRouter()
 
@@ -48,6 +49,7 @@ async def leaderboard(
                FROM tellus_points_balances pb
                JOIN tellus_accounts a ON a.id = pb.account_id
                WHERE a.account_type = 'consumer' AND a.leaderboard_opt_in
+                 AND a.profile_visibility = 'everyone'
                  AND ($1::text IS NULL OR lower(a.city) = lower($1))
                ORDER BY pb.lifetime_points DESC, a.created_at ASC
                LIMIT $2""",
@@ -64,3 +66,35 @@ async def leaderboard(
             is_you=r["id"] == account.id,
         ))
     return out
+
+
+@router.get("/leaderboard/friends", response_model=list[TellusLeaderboardEntry])
+async def friends_leaderboard(
+    account: TellusAccount = Depends(require_verified_consumer),
+    limit: int = Query(default=25, ge=1, le=100),
+):
+    """Show opted-in friends without applying the city leaderboard filter."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT a.id, a.display_name, a.handle, pb.lifetime_points, pb.level
+                 FROM tellus_friendships f
+                 JOIN tellus_accounts a ON a.id = f.friend_account_id
+                 JOIN tellus_points_balances pb ON pb.account_id = a.id
+                WHERE f.account_id = $1 AND a.account_type = 'consumer'
+                  AND a.status = 'active' AND a.leaderboard_opt_in
+                  AND a.profile_visibility <> 'private'
+                ORDER BY pb.lifetime_points DESC, a.created_at ASC
+                LIMIT $2""",
+            account.id, limit,
+        )
+    return [
+        TellusLeaderboardEntry(
+            rank=index,
+            account_id=row["id"],
+            display_name=display_name_for(row["display_name"], row["handle"], row["id"]),
+            lifetime_points=row["lifetime_points"],
+            level=row["level"],
+            is_you=False,
+        )
+        for index, row in enumerate(rows, start=1)
+    ]

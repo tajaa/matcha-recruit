@@ -19,6 +19,13 @@ def test_friends_router_is_registered():
     paths = {route.path for route in tellus_router.routes}
     assert "/friends/handle-available" in paths
     assert "/me/handle" in paths
+    assert "/people/{account_id}/reviews" in paths
+
+
+def test_friends_leaderboard_is_registered():
+    from app.tellus.routes import tellus_router
+
+    assert "/leaderboard/friends" in {route.path for route in tellus_router.routes}
 
 
 def test_friend_notification_kinds_are_push_allowlisted():

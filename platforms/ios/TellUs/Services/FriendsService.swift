@@ -81,5 +81,29 @@ final class FriendsService {
     func invite() async throws -> FriendInvite { try await client.request(method: "GET", path: "/me/friend-invite") }
     func rotateInvite() async throws -> FriendInvite { try await client.request(method: "POST", path: "/me/friend-invite/rotate") }
     func invitePreview(token: String) async throws -> InvitePreview { try await client.request(method: "GET", path: "/friends/invite/\(token)") }
-    func redeemInvite(token: String) async throws -> FriendSummary { try await client.request(method: "POST", path: "/friends/invite/\(token)/redeem") }
+    func reviews(accountId: String, cursor: String? = nil, limit: Int = 20) async throws -> TellusPersonReviewPage {
+        let qs = PlacesService.queryString([
+            URLQueryItem(name: "cursor", value: cursor), URLQueryItem(name: "limit", value: String(limit)),
+        ])
+        return try await client.request(method: "GET", path: "/people/\(accountId)/reviews" + qs)
+    }
+
+    func block(accountId: String) async throws {
+        try await client.requestVoid(method: "POST", path: "/me/blocks", body: TellusBlockCreate(account_id: accountId))
+    }
+
+    func unblock(accountId: String) async throws {
+        try await client.requestVoid(method: "DELETE", path: "/me/blocks/\(accountId)")
+    }
+
+    func report(accountId: String, reason: String, detail: String?) async throws {
+        try await client.requestVoid(
+            method: "POST", path: "/people/\(accountId)/report",
+            body: FriendReportCreate(reason: reason, detail: detail)
+        )
+    }
+
+    func redeemInvite(token: String) async throws -> FriendInviteRedeemResult {
+        try await client.request(method: "POST", path: "/friends/invite/\(token)/redeem")
+    }
 }

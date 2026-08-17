@@ -167,8 +167,9 @@ final class AppState {
                 if let items = try? await NotificationsService.shared.list(unreadOnly: true, limit: 100) {
                     self?.unreadCount = items.count
                 }
-                if let count = try? await FriendsService.shared.requestCount() {
-                    self?.pendingFriendRequests = count.incoming
+                if let self, self.phase == .consumer,
+                   let count = try? await FriendsService.shared.requestCount() {
+                    self.pendingFriendRequests = count.incoming
                 }
                 try? await Task.sleep(for: .seconds(60))
             }

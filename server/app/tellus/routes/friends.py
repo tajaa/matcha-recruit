@@ -36,6 +36,7 @@ from ..models.tellus import (
     TellusPersonFollowedPlace,
     TellusPersonProfile,
     TellusPersonReview,
+    TellusPersonReviewPage,
 )
 from ..services.friends_service import (
     FRIEND_DECLINE_COOLDOWN,
@@ -49,6 +50,7 @@ from ..services.friends_service import (
     assert_not_blocked,
     search_people,
     suggestions,
+    filter_suggestion_ids,
     visible_sections,
     decode_cursor,
     encode_cursor,
@@ -65,7 +67,8 @@ async def _person_summary(
 ) -> TellusPersonSummary:
     row = await conn.fetchrow(
         """SELECT a.id AS account_id, a.display_name, a.handle, a.avatar_url,
-                  a.city, a.state, pb.level, pb.lifetime_points,
+                  a.city, a.state, a.profile_visibility, a.leaderboard_opt_in,
+                  pb.level, pb.lifetime_points,
                   EXISTS (SELECT 1 FROM tellus_friendships f
                           WHERE f.account_id = $2 AND f.friend_account_id = a.id) AS is_friend
              FROM tellus_accounts a
@@ -75,22 +78,49 @@ async def _person_summary(
     )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
-    pending_id = await conn.fetchval(
-        """SELECT id FROM tellus_friend_requests
+    pending = await conn.fetchrow(
+        """SELECT id, requester_account_id FROM tellus_friend_requests
             WHERE status = 'pending'
               AND ((requester_account_id = $1 AND addressee_account_id = $2)
                 OR (requester_account_id = $2 AND addressee_account_id = $1))
             ORDER BY created_at DESC LIMIT 1""",
         viewer_id, account_id,
     )
+    blocked_by_me = await conn.fetchval(
+        """SELECT 1 FROM tellus_account_blocks
+            WHERE blocker_account_id = $1 AND blocked_account_id = $2""",
+        viewer_id, account_id,
+    )
+    blocked_me = await conn.fetchval(
+        """SELECT 1 FROM tellus_account_blocks
+            WHERE blocker_account_id = $2 AND blocked_account_id = $1""",
+        viewer_id, account_id,
+    )
+    is_friend = bool(row["is_friend"])
+    if blocked_by_me:
+        relationship_status = "blocked"
+    elif blocked_me:
+        relationship_status = "blocked_by"
+    elif is_friend:
+        relationship_status = "friends"
+    elif pending:
+        relationship_status = "pending_out" if pending["requester_account_id"] == viewer_id else "pending_in"
+    else:
+        relationship_status = "none"
+    sections = frozenset() if (blocked_by_me or blocked_me) else visible_sections(
+        is_self=account_id == viewer_id,
+        is_friend=is_friend,
+        profile_visibility=row["profile_visibility"],
+        leaderboard_opt_in=row["leaderboard_opt_in"],
+    )
     return TellusPersonSummary(
         account_id=row["account_id"],
         display_name=display_name_for(row["display_name"], row["handle"], row["account_id"]),
         handle=row["handle"], avatar_url=row["avatar_url"], city=row["city"], state=row["state"],
-        level=row["level"] if row["level"] is not None else 1,
-        lifetime_points=row["lifetime_points"] if row["lifetime_points"] is not None else 0,
-        is_friend=bool(row["is_friend"]), mutual_friend_count=mutual_friend_count,
-        pending_request_id=pending_id,
+        level=row["level"] if "points" in sections else None,
+        lifetime_points=row["lifetime_points"] if "points" in sections else None,
+        is_friend=is_friend, status=relationship_status, mutual_friend_count=mutual_friend_count,
+        pending_request_id=pending["id"] if pending else None,
         is_you=account_id == viewer_id,
     )
 
@@ -248,11 +278,18 @@ async def create_friend_request(
                 )
                 return JSONResponse(
                     status_code=status.HTTP_200_OK,
-                    content=(await _person_summary(conn, target_id, account.id)).model_dump(mode="json"),
+                    content={
+                        "friend": (await _person_summary(conn, target_id, account.id)).model_dump(mode="json"),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
                 )
+            friendship_exists = await conn.fetchval(
+                "SELECT 1 FROM tellus_friendships WHERE account_id = $1 AND friend_account_id = $2",
+                account.id, target_id,
+            )
             if existing and not can_request(
                 existing["status"], existing["decided_at"], datetime.now(timezone.utc)
-            ):
+            ) and not (existing["status"] == "accepted" and not friendship_exists):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="You cannot send a request yet")
             row = await conn.fetchrow(
                 """INSERT INTO tellus_friend_requests
@@ -461,6 +498,11 @@ async def search_friends(
     account: TellusAccount = Depends(require_verified_consumer),
 ):
     await check_rate_limit(str(account.id), "tellus_friend_search", 60, 60)
+    if len(q.strip()) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Search must contain at least two non-whitespace characters",
+        )
     async with get_connection() as conn:
         rows = await search_people(conn, account.id, q, limit)
         return [
@@ -484,7 +526,14 @@ async def friend_suggestions(
             ids = await suggestions(conn, account.id, 100)
             if redis:
                 await cache_set(redis, cache_key, ids, ttl=900)
-        return [await _person_summary(conn, UUID(str(account_id)), account.id) for account_id in ids[:limit]]
+        candidate_ids = []
+        for account_id in ids:
+            try:
+                candidate_ids.append(UUID(str(account_id)))
+            except (TypeError, ValueError):
+                continue
+        live_ids = await filter_suggestion_ids(conn, account.id, candidate_ids)
+        return [await _person_summary(conn, account_id, account.id) for account_id in live_ids[:limit]]
 
 
 async def _person_profile(conn, viewer_id: UUID, subject_id: UUID) -> TellusPersonProfile:
@@ -528,19 +577,25 @@ async def _person_profile(conn, viewer_id: UUID, subject_id: UUID) -> TellusPers
             ORDER BY created_at DESC LIMIT 1""",
         viewer_id, subject_id,
     )
+    pending_requester = await conn.fetchval(
+        "SELECT requester_account_id FROM tellus_friend_requests WHERE id = $1",
+        pending_id,
+    ) if pending_id else None
+    relationship_status = (
+        "friends" if is_friend else
+        ("pending_out" if pending_requester == viewer_id else "pending_in") if pending_id else "none"
+    )
     profile = TellusPersonProfile(
         account_id=subject["id"],
         display_name=display_name_for(subject["display_name"], subject["handle"], subject["id"]),
         handle=subject["handle"], avatar_url=subject["avatar_url"], city=subject["city"], state=subject["state"],
-        level=subject["level"] or 1, lifetime_points=subject["lifetime_points"] or 0,
-        current_streak=subject["current_streak"] or 0, friend_count=subject["friend_count"] or 0,
+        level=subject["level"] if "points" in sections else None,
+        lifetime_points=subject["lifetime_points"] if "points" in sections else None,
+        current_streak=subject["current_streak"] if "points" in sections else None,
+        friend_count=subject["friend_count"] or 0,
         mutual_friend_count=mutual_count or 0, friends_since=subject["friends_since"],
-        is_friend=is_friend, pending_request_id=pending_id, is_you=is_self,
+        is_friend=is_friend, status=relationship_status, pending_request_id=pending_id, is_you=is_self,
     )
-    if "points" not in sections:
-        profile.level = 1
-        profile.lifetime_points = 0
-        profile.current_streak = 0
     if "reviews" in sections:
         review_rows = await conn.fetch(
             """SELECT r.id, r.brand_id, b.name AS brand_name, b.slug AS brand_slug,
@@ -618,6 +673,61 @@ async def person_profile_by_handle(
         return await _person_profile(conn, account.id, account_id)
 
 
+@router.get("/people/{account_id}/reviews", response_model=TellusPersonReviewPage)
+async def person_reviews(
+    account_id: UUID,
+    cursor: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=50),
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    decoded = decode_cursor(cursor) if cursor else None
+    if cursor and decoded is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid cursor")
+    cursor_time, cursor_id = decoded if decoded else (None, None)
+    async with get_connection() as conn:
+        subject = await conn.fetchrow(
+            """SELECT a.profile_visibility, a.leaderboard_opt_in,
+                      EXISTS (SELECT 1 FROM tellus_friendships f
+                              WHERE f.account_id = $1 AND f.friend_account_id = a.id) AS is_friend
+                 FROM tellus_accounts a
+                WHERE a.id = $2 AND a.account_type = 'consumer' AND a.status = 'active'""",
+            account.id, account_id,
+        )
+        if subject is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+        await assert_not_blocked(conn, account.id, account_id)
+        sections = visible_sections(
+            is_self=account.id == account_id,
+            is_friend=bool(subject["is_friend"]),
+            profile_visibility=subject["profile_visibility"],
+            leaderboard_opt_in=subject["leaderboard_opt_in"],
+        )
+        if "reviews" not in sections:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reviews not found")
+        rows = await conn.fetch(
+            """SELECT r.id, r.brand_id, b.name AS brand_name, b.slug AS brand_slug,
+                      r.rating, r.title, r.description, r.created_at, r.publish_at
+                 FROM tellus_reports r JOIN tellus_brands b ON b.id = r.brand_id
+                WHERE r.reporter_account_id = $1 AND r.review_state = 'held'
+                  AND r.publish_at <= NOW() AND r.moderation_status = 'visible'
+                  AND ($2::timestamptz IS NULL OR (r.publish_at, r.id) < ($2, $3))
+                ORDER BY r.publish_at DESC, r.id DESC LIMIT $4""",
+            account_id, cursor_time, cursor_id, limit + 1,
+        )
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        likes = await hydrate_likes(conn, "report", [row["id"] for row in rows], account.id)
+    reviews = [
+        TellusPersonReview(
+            **dict(row), like_count=likes.get(row["id"], (0, False))[0],
+            liked_by_me=likes.get(row["id"], (0, False))[1],
+        )
+        for row in rows
+    ]
+    next_cursor = encode_cursor(rows[-1]["publish_at"], rows[-1]["id"]) if has_more and rows else None
+    return TellusPersonReviewPage(reviews=reviews, next_cursor=next_cursor)
+
+
 @router.get("/me/feed", response_model=TellusFriendActivityPage)
 async def friend_activity_feed(
     request: Request,
@@ -680,7 +790,8 @@ async def friend_activity_feed(
         actor_ids = list({row["actor_id"] for row in rows})
         actor_rows = await conn.fetch(
             """SELECT a.id AS account_id, a.display_name, a.handle, a.avatar_url,
-                      a.city, a.state, pb.level, pb.lifetime_points
+                      a.city, a.state, a.profile_visibility, a.leaderboard_opt_in,
+                      pb.level, pb.lifetime_points
                  FROM tellus_accounts a LEFT JOIN tellus_points_balances pb ON pb.account_id = a.id
                 WHERE a.id = ANY($1::uuid[])""",
             actor_ids,
@@ -690,8 +801,17 @@ async def friend_activity_feed(
                 account_id=row["account_id"],
                 display_name=display_name_for(row["display_name"], row["handle"], row["account_id"]),
                 handle=row["handle"], avatar_url=row["avatar_url"], city=row["city"], state=row["state"],
-                level=row["level"] or 1, lifetime_points=row["lifetime_points"] or 0,
-                is_friend=True,
+                level=row["level"] if "points" in visible_sections(
+                    is_self=False, is_friend=True,
+                    profile_visibility=row["profile_visibility"],
+                    leaderboard_opt_in=row["leaderboard_opt_in"],
+                ) else None,
+                lifetime_points=row["lifetime_points"] if "points" in visible_sections(
+                    is_self=False, is_friend=True,
+                    profile_visibility=row["profile_visibility"],
+                    leaderboard_opt_in=row["leaderboard_opt_in"],
+                ) else None,
+                is_friend=True, status="friends",
             ) for row in actor_rows
         }
         review_ids = [row["item_id"] for row in rows if row["kind"] == "review_published"]
@@ -775,7 +895,12 @@ async def _invite_owner(conn, token: str, viewer_id: UUID):
     if row["expires_at"] is not None and row["expires_at"] <= datetime.now(timezone.utc):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
     if row["max_uses"] is not None and row["use_count"] >= row["max_uses"]:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+        already_friends = await conn.fetchval(
+            "SELECT 1 FROM tellus_friendships WHERE account_id = $1 AND friend_account_id = $2",
+            viewer_id, row["account_id"],
+        )
+        if not already_friends:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
     if row["account_id"] == viewer_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
     await assert_not_blocked(conn, viewer_id, row["account_id"])
@@ -810,17 +935,22 @@ async def redeem_friend_invite(
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
             await _invite_owner(conn, token, account.id)
-            await create_friendship(conn, account.id, row["account_id"], "invite_link")
-            await conn.execute(
-                "UPDATE tellus_friend_invites SET use_count = use_count + 1 WHERE id = $1",
-                row["id"],
+            existing_friendship = await conn.fetchval(
+                "SELECT 1 FROM tellus_friendships WHERE account_id = $1 AND friend_account_id = $2",
+                account.id, row["account_id"],
             )
-            actor_name = display_name_for(account.display_name, account.handle, account.id)
-            await notify_account(
-                conn, row["account_id"], "friend_added", "New friend added",
-                f"{actor_name} joined from your invite.", reference_type="account",
-                reference_id=str(account.id), slug=account.handle, name=actor_name,
-            )
+            if not existing_friendship:
+                await create_friendship(conn, account.id, row["account_id"], "invite_link")
+                await conn.execute(
+                    "UPDATE tellus_friend_invites SET use_count = use_count + 1 WHERE id = $1",
+                    row["id"],
+                )
+                actor_name = display_name_for(account.display_name, account.handle, account.id)
+                await notify_account(
+                    conn, row["account_id"], "friend_added", "New friend added",
+                    f"{actor_name} joined from your invite.", reference_type="account",
+                    reference_id=str(account.id), slug=account.handle, name=actor_name,
+                )
             friend = await _person_summary(conn, row["account_id"], account.id)
     return TellusInviteRedeemResult(
         friendship={"friend": friend, "created_at": datetime.now(timezone.utc)}

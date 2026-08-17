@@ -32,3 +32,23 @@ def test_feed_uses_keyset_cursor_and_bounded_branch_limits():
     assert "decode_cursor" in source
     assert "ORDER BY r.publish_at DESC, r.id DESC LIMIT $4" in source
     assert "ORDER BY bf.created_at DESC, bf.brand_id DESC LIMIT $4" in source
+
+
+def test_person_summaries_gate_scores_and_cached_suggestions_are_refiltered():
+    from app.tellus.routes import friends
+
+    summary_source = _code_only(friends._person_summary)
+    assert "visible_sections" in summary_source
+    assert '"points" in sections' in summary_source
+
+    suggestions_source = _code_only(friends.friend_suggestions)
+    assert "filter_suggestion_ids" in suggestions_source
+
+
+def test_friend_invite_redeem_is_idempotent_for_existing_friendship():
+    from app.tellus.routes import friends
+
+    source = _code_only(friends.redeem_friend_invite)
+    assert "existing_friendship" in source
+    assert "use_count = use_count + 1" in source
+    assert source.index("existing_friendship") < source.index("use_count = use_count + 1")
