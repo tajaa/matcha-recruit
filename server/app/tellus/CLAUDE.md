@@ -253,6 +253,36 @@ helpers (`tellusPublicGet`/`Post`, `tellusMaybeAuthGet`/`Post`) throw it too, no
 `Scan.tsx` depends on this to tell `already_redeemed` (and its `redeemed_at`/`redeemed_store_name`
 extras) apart from `expired`/`cancelled`/`not_found`; a `.message` string can't be pattern-matched.
 
+## Friends
+
+The consumer social graph is mutual friendship, not one-way following. The
+backend surface lives in `routes/friends.py`; pure rules and the single
+friendship writer/deleter live in `services/friends_service.py`. All friends
+routes require `require_verified_consumer`.
+
+- Friendship rows are mirrored. Only `create_friendship` inserts both rows and
+  only `remove_friendship` deletes them; both use idempotent SQL. The
+  `friend_added` ledger reference is the sorted UUID pair, so unfriend/re-friend
+  cannot award points twice.
+- A declined request blocks for 30 days, unlike board `declined`/`removed`
+  memberships, which permanently block re-request. Cancelled requests never
+  block. Account blocks always win and return 404 rather than confirming that a
+  person exists.
+- Handles are lowercase ASCII `[a-z0-9_]{3,20}`. `tellus*` and `member*` are
+  reserved to prevent product squatting and impersonation of the stable
+  `Member-xxxx` fallback. Search is discoverable, prefix-only, and excludes
+  blocks, friends, and pending requests.
+- `review_published`, `place_followed`, and `friend_added` are notification
+  kinds. Their `slug` is the handle and their `name` is the safe display name;
+  this is also the push deep-link convention. Friend activity is pull-only;
+  there is deliberately no per-review notification fan-out.
+- Profile visibility is one setting (`everyone`/`friends`/`private`) for
+  reviews, followed places, and approved memberships. Hidden sections are
+  `null`. Board profiles additionally require `membership.status='approved'`,
+  `board.is_active`, and `brand.plan_status='active'`.
+- Invite redemption is explicit and auto-friends in one transaction. Unknown,
+  revoked, expired, exhausted, self, and blocked tokens all return 404.
+
 ## Cross-cutting rules
 
 DB safety rules, test-data email domain rules, and deploy rules are in root `CLAUDE.md` — they apply here unchanged, not restated.
