@@ -23,7 +23,6 @@ export default function SimpleLanding() {
     }
 
     if (phase === "holding") {
-      if (lineIndex >= LINES.length - 1) return;
       const t = setTimeout(() => setPhase("erasing"), 0);
       return () => clearTimeout(t);
     }
@@ -33,7 +32,7 @@ export default function SimpleLanding() {
         const t = setTimeout(() => setTyped(typed.slice(0, -1)), ERASE_MS);
         return () => clearTimeout(t);
       }
-      setLineIndex((i) => i + 1);
+      setLineIndex((i) => (i + 1) % LINES.length);
       setPhase("typing");
     }
   }, [phase, typed, lineIndex]);
