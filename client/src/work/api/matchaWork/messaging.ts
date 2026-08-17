@@ -63,11 +63,14 @@ export function sendMessageStream(
     timeout = setTimeout(() => { timedOut = true; ctrl.abort('timeout') }, INACTIVITY_TIMEOUT_MS)
   }
 
-  // A turn is only "settled" once complete or error fires. Anything else that
-  // ends the stream — [DONE] with no result, a drained reader, a proxy cutting
-  // the connection — leaves the composer stuck on "Thinking…" with the input
+  // A turn is only "settled" once complete fires. Huume can emit an error
+  // frame after partial work and then continue to its complete frame, so an
+  // error is provisional until the stream ends. Anything else that ends the
+  // stream — [DONE] with no result, a drained reader, a proxy cutting the
+  // connection — leaves the composer stuck on "Thinking…" with the input
   // disabled, so it must surface as an error rather than as silence.
   let settled = false
+  let streamError: string | null = null
 
   void (async () => {
     try {
@@ -84,17 +87,24 @@ export function sendMessageStream(
             return true
           }
           if (event.type === 'error') {
-            settled = true
-            reportApiError({ endpoint, status: 200, message: `SSE error event: ${event.message}` })
-            callbacks.onError(event.message)
-            return true
+            // Huume may recover from a tool/model failure, persist the work
+            // that completed, and emit `complete` afterward. Keep consuming
+            // so the successful terminal frame can reconcile the optimistic
+            // message in the UI. If no complete frame follows, the saved
+            // message is surfaced below when the stream closes.
+            streamError = event.message
           }
         },
         { signal: ctrl.signal },
       )
       if (!settled && !ctrl.signal.aborted) {
-        reportApiError({ endpoint, status: 200, message: 'SSE stream closed without complete/error event' })
-        callbacks.onError('The response stream ended unexpectedly. Please try again.')
+        if (streamError) {
+          reportApiError({ endpoint, status: 200, message: `SSE error event: ${streamError}` })
+          callbacks.onError(streamError)
+        } else {
+          reportApiError({ endpoint, status: 200, message: 'SSE stream closed without complete/error event' })
+          callbacks.onError('The response stream ended unexpectedly. Please try again.')
+        }
       }
     } catch (e) {
       if (ctrl.signal.aborted) {
