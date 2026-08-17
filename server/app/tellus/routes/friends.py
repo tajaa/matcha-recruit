@@ -6,7 +6,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 
-from ...core.services.redis_cache import check_rate_limit, client_ip
+from ...core.services.redis_cache import (
+    cache_get,
+    cache_set,
+    check_rate_limit,
+    client_ip,
+    get_redis_cache,
+)
 from ...database import get_connection
 from ..dependencies import require_verified_consumer
 from ..models.tellus import (
@@ -30,6 +36,8 @@ from ..services.friends_service import (
     normalize_handle,
     remove_friendship,
     assert_not_blocked,
+    search_people,
+    suggestions,
 )
 from ..services.points_service import notify_account
 
@@ -37,7 +45,9 @@ router = APIRouter()
 HANDLE_COOLDOWN = FRIEND_DECLINE_COOLDOWN
 
 
-async def _person_summary(conn, account_id: UUID, viewer_id: UUID) -> TellusPersonSummary:
+async def _person_summary(
+    conn, account_id: UUID, viewer_id: UUID, mutual_friend_count: int = 0,
+) -> TellusPersonSummary:
     row = await conn.fetchrow(
         """SELECT a.id AS account_id, a.display_name, a.handle, a.avatar_url,
                   a.city, a.state, pb.level, pb.lifetime_points,
@@ -64,7 +74,8 @@ async def _person_summary(conn, account_id: UUID, viewer_id: UUID) -> TellusPers
         handle=row["handle"], avatar_url=row["avatar_url"], city=row["city"], state=row["state"],
         level=row["level"] if row["level"] is not None else 1,
         lifetime_points=row["lifetime_points"] if row["lifetime_points"] is not None else 0,
-        is_friend=bool(row["is_friend"]), pending_request_id=pending_id,
+        is_friend=bool(row["is_friend"]), mutual_friend_count=mutual_friend_count,
+        pending_request_id=pending_id,
         is_you=account_id == viewer_id,
     )
 
@@ -425,3 +436,37 @@ async def unblock_account(
             account.id, blocked_account_id,
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/friends/search", response_model=list[TellusPersonSummary])
+async def search_friends(
+    request: Request,
+    q: str = Query(..., min_length=2, max_length=40),
+    limit: int = Query(20, ge=1, le=50),
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    await check_rate_limit(str(account.id), "tellus_friend_search", 60, 60)
+    async with get_connection() as conn:
+        rows = await search_people(conn, account.id, q, limit)
+        return [
+            await _person_summary(conn, row["account_id"], account.id, row["mutual_friend_count"])
+            for row in rows
+        ]
+
+
+@router.get("/friends/suggestions", response_model=list[TellusPersonSummary])
+async def friend_suggestions(
+    request: Request,
+    limit: int = Query(20, ge=1, le=50),
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    await check_rate_limit(str(account.id), "tellus_friend_suggestions", 60, 3600)
+    redis = get_redis_cache()
+    cache_key = f"tellus:friend-suggestions:{account.id}"
+    ids = await cache_get(redis, cache_key) if redis else None
+    async with get_connection() as conn:
+        if not isinstance(ids, list):
+            ids = await suggestions(conn, account.id, 100)
+            if redis:
+                await cache_set(redis, cache_key, ids, ttl=900)
+        return [await _person_summary(conn, UUID(str(account_id)), account.id) for account_id in ids[:limit]]

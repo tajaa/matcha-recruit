@@ -129,6 +129,104 @@ def display_name_for(display_name: Optional[str], handle: Optional[str], account
     return display_name or handle or f"Member-{str(account_id)[:4]}"
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+async def search_people(conn, viewer_id: UUID, query: str, limit: int) -> list[dict]:
+    """Prefix-search discoverable consumers, excluding social exclusions."""
+    prefix = _escape_like(query.strip().lower())
+    return list(await conn.fetch(
+        """SELECT a.id AS account_id, a.display_name, a.handle, a.avatar_url,
+                  a.city, a.state, pb.level, pb.lifetime_points,
+                  (SELECT COUNT(*) FROM tellus_friendships mutual
+                     WHERE mutual.account_id = $1
+                       AND mutual.friend_account_id IN (
+                           SELECT f.friend_account_id FROM tellus_friendships f
+                            WHERE f.account_id = a.id)) AS mutual_friend_count
+             FROM tellus_accounts a
+             LEFT JOIN tellus_points_balances pb ON pb.account_id = a.id
+            WHERE a.account_type = 'consumer' AND a.status = 'active'
+              AND a.discoverable AND a.profile_visibility <> 'private' AND a.id <> $1
+              AND (a.handle LIKE $2 || '%' ESCAPE '\\'
+                   OR lower(a.display_name) LIKE $2 || '%' ESCAPE '\\')
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_account_blocks b
+                   WHERE (b.blocker_account_id = $1 AND b.blocked_account_id = a.id)
+                      OR (b.blocker_account_id = a.id AND b.blocked_account_id = $1))
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_friendships f
+                   WHERE f.account_id = $1 AND f.friend_account_id = a.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_friend_requests r
+                   WHERE r.status = 'pending'
+                     AND ((r.requester_account_id = $1 AND r.addressee_account_id = a.id)
+                       OR (r.requester_account_id = a.id AND r.addressee_account_id = $1)))
+            ORDER BY (a.handle = $2) DESC,
+                     length(COALESCE(a.handle, a.display_name)), a.created_at
+            LIMIT $3""",
+        viewer_id, prefix, limit,
+    ))
+
+
+async def suggestions(conn, viewer_id: UUID, limit: int) -> list[UUID]:
+    """Rank friends-of-friends, co-followers, co-board members, and city peers."""
+    rows = await conn.fetch(
+        """WITH candidates AS (
+             SELECT f2.friend_account_id AS account_id, COUNT(*) * 3 AS weight
+               FROM tellus_friendships f1
+               JOIN tellus_friendships f2 ON f2.account_id = f1.friend_account_id
+              WHERE f1.account_id = $1 AND f2.friend_account_id <> $1
+              GROUP BY f2.friend_account_id
+             UNION ALL
+             SELECT bf2.consumer_account_id, COUNT(*) * 2
+               FROM tellus_brand_follows bf1
+               JOIN tellus_brand_follows bf2 ON bf2.brand_id = bf1.brand_id
+              WHERE bf1.consumer_account_id = $1 AND bf2.consumer_account_id <> $1
+              GROUP BY bf2.consumer_account_id
+             HAVING COUNT(*) >= 2
+             UNION ALL
+             SELECT bm2.account_id, COUNT(*) * 2
+               FROM tellus_board_memberships bm1
+               JOIN tellus_board_memberships bm2 ON bm2.board_id = bm1.board_id
+              WHERE bm1.account_id = $1 AND bm1.status = 'approved'
+                AND bm2.status = 'approved' AND bm2.account_id <> $1
+              GROUP BY bm2.account_id
+             HAVING COUNT(*) >= 2
+             UNION ALL
+             SELECT a.id, 1
+               FROM tellus_accounts viewer
+               JOIN tellus_accounts a ON a.city IS NOT NULL
+                  AND lower(a.city) = lower(viewer.city)
+                  AND a.state IS NOT DISTINCT FROM viewer.state
+              WHERE viewer.id = $1 AND a.id <> $1
+           ), ranked AS (
+             SELECT account_id, SUM(weight) AS weight
+               FROM candidates GROUP BY account_id
+           )
+           SELECT r.account_id
+             FROM ranked r JOIN tellus_accounts a ON a.id = r.account_id
+            WHERE a.account_type = 'consumer' AND a.status = 'active'
+              AND a.discoverable AND a.profile_visibility <> 'private'
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_account_blocks b
+                   WHERE (b.blocker_account_id = $1 AND b.blocked_account_id = a.id)
+                      OR (b.blocker_account_id = a.id AND b.blocked_account_id = $1))
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_friendships f
+                   WHERE f.account_id = $1 AND f.friend_account_id = a.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM tellus_friend_requests fr
+                   WHERE fr.status = 'pending'
+                     AND ((fr.requester_account_id = $1 AND fr.addressee_account_id = a.id)
+                       OR (fr.requester_account_id = a.id AND fr.addressee_account_id = $1)))
+            ORDER BY r.weight DESC, a.created_at
+            LIMIT $2""",
+        viewer_id, limit,
+    )
+    return [row["account_id"] for row in rows]
+
+
 async def friend_ids(conn, account_id: UUID) -> list[UUID]:
     rows = await conn.fetch(
         "SELECT friend_account_id FROM tellus_friendships WHERE account_id = $1",
