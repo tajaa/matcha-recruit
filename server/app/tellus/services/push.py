@@ -42,9 +42,8 @@ _inflight: set = set()
 
 # Kinds that warrant a push. Points/level/badge/streak notifications fire in
 # immediate response to the user's own in-app action (they are already looking
-# at the screen), so pushing them would be noise. Push only the genuinely async
-# events the product asked for: fan-board posts, campaign starts, reviews,
-# messages, and board-post comments.
+# at the screen), so pushing them would be noise. Push only genuinely async
+# events: board activity, campaigns, reviews, messages, comments, and friends.
 PUSH_KINDS = {
     "board_post",          # consumer: a brand posted to its regulars board
     "promo_campaign",      # consumer: a followed brand started a campaign
@@ -52,6 +51,9 @@ PUSH_KINDS = {
     "dm_message",          # either: a new message (Comms / feedback DM)
     "dm_assignment",       # brand team member: a Comms thread was assigned
     "board_reply_pending", # brand: a member replied to a board post (needs approval)
+    "friend_request",      # consumer: someone sent a friend request
+    "friend_accepted",     # consumer: a request was accepted
+    "friend_added",        # consumer: an invite created a friendship
 }
 
 
