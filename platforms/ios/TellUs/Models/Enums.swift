@@ -77,3 +77,23 @@ enum ListingVisibility: String, Codable {
 enum BoardViewerRole: String, Codable, FallbackDecodable {
     case member, moderator, owner, admin, location_manager, staff, unknown
 }
+
+enum FriendshipStatus: String, Codable, FallbackDecodable {
+    case none, pending_out, pending_in, friends, blocked, blocked_by, unknown
+}
+
+enum FriendActivityKind: String, Codable, FallbackDecodable {
+    case review_published, place_followed, unknown
+}
+
+enum ProfileVisibility: String, Codable, CaseIterable, FallbackDecodable {
+    case everyone, friends, `private`, unknown
+}
+
+enum FriendRequestDirection: String, Codable {
+    case incoming, outgoing
+}
+
+enum FriendReportReason: String, Codable, CaseIterable, FallbackDecodable {
+    case spam, harassment, impersonation, inappropriate, other, unknown
+}

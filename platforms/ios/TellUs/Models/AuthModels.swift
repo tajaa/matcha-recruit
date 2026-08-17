@@ -18,6 +18,11 @@ struct TellusAccount: Codable, Identifiable, Equatable {
     let brand_slug: String?
     /// True when this account's email is in TELLUS_ADMIN_EMAILS.
     let is_admin: Bool
+    let handle: String?
+    let handle_set_at: String?
+    let avatar_url: String?
+    let profile_visibility: String?
+    let discoverable: Bool?
 
     var isActiveBrand: Bool { account_type == .brand && plan_status == .active }
 }
@@ -79,6 +84,8 @@ struct ResendRequest: Encodable {
 struct ProfileUpdate: Encodable {
     let display_name: String?
     let leaderboard_opt_in: Bool?
+    var profile_visibility: String? = nil
+    var discoverable: Bool? = nil
 }
 
 /// Consumer's own city update (POST /me/location) — distinct from the
