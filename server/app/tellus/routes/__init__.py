@@ -18,6 +18,7 @@ from .dms import router as dms_router
 from .feedback import router as feedback_router
 from .flyer_ai import router as flyer_ai_router
 from .discover import router as discover_router
+from .friends import router as friends_router
 from .gamification import router as gamification_router
 from .grants import router as grants_router
 from .likes import router as likes_router
@@ -59,6 +60,7 @@ tellus_router.include_router(rewards_router)
 tellus_router.include_router(marketplace_router)
 tellus_router.include_router(gamification_router)
 tellus_router.include_router(my_reviews_router)
+tellus_router.include_router(friends_router)
 
 # Brand-authenticated (require_brand per-route).
 tellus_router.include_router(links_router)
