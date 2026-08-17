@@ -14,7 +14,7 @@ import { ReceiptList } from '../components/landing/ReceiptList'
 import { PunchCard } from '../components/landing/PunchCard'
 import { RegularsBoard } from '../components/landing/RegularsBoard'
 import { VoidTicket } from '../components/landing/VoidTicket'
-import { StudioRegisterIllustration } from '../components/landing/LandingArtwork'
+import { StudioRegisterIllustration, StudioShopScene } from '../components/landing/LandingArtwork'
 
 const REVEAL = {
   initial: { opacity: 0, y: 24 },
@@ -92,7 +92,10 @@ export default function Landing() {
             <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-tu-faint lg:justify-start"><ShieldCheck className="h-3.5 w-3.5" /> Free for consumers, always.</p>
             <p className="mt-2 text-xs lg:text-left"><Link to="/places" className="text-tu-accent hover:underline">Rate any place — no account needed →</Link></p>
           </div>
-          <HeroTicket />
+          <div className="relative mx-auto w-full max-w-lg">
+            <div className="relative z-10"><HeroTicket /></div>
+            <StudioShopScene className="relative z-0 -mt-10 w-full opacity-95" />
+          </div>
         </div>
       </section>
 
