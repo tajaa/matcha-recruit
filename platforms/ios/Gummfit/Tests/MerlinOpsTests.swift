@@ -108,6 +108,28 @@ final class MerlinOpsTests: XCTestCase {
         XCTAssertEqual(result.tempIdMap["new-1"], result.blocks[1]._k)
     }
 
+    func testAddBlockFallsBackToValidatedTypeWithoutSchema() {
+        let result = applyMerlinOps(
+            blocks: [], theme: [:],
+            ops: [.addBlock(type: "faq", at: 0, content: ["heading": .string("Questions")], design: nil, preset: nil, id: nil)],
+            schema: nil
+        )
+        XCTAssertTrue(result.results[0].ok)
+        XCTAssertEqual(result.blocks[0].type, "faq")
+        XCTAssertEqual(result.blocks[0].fields["heading"]?.stringValue, "Questions")
+    }
+
+    func testPresetUsesOfflineThemeFallbackWithoutSchema() {
+        let result = applyMerlinOps(
+            blocks: [], theme: ["colors": .object(["brand": .string("#old")])],
+            ops: [.setTheme(key: "preset", value: .string("noir"))], schema: nil
+        )
+        XCTAssertTrue(result.results[0].ok)
+        XCTAssertEqual(result.theme["preset"]?.stringValue, "noir")
+        XCTAssertEqual(result.theme["mode"]?.stringValue, "dark")
+        XCTAssertEqual(result.theme["colors"]?.objectValue?["brand"]?.stringValue, "#A3E635")
+    }
+
     func testMoveToSameIndexIsNoOp() {
         let source = block(["type": .string("hero")])
         let result = applyMerlinOps(blocks: [source], theme: [:], ops: [.moveBlock(block: "b1", to: 0)], schema: nil)
@@ -131,6 +153,30 @@ final class MerlinOpsTests: XCTestCase {
         XCTAssertEqual(colors["brand"]?.stringValue, "#0f0")
         XCTAssertEqual(colors["accent"]?.stringValue, "#0f0")
         XCTAssertEqual(colors["brandText"]?.stringValue, "#fff")
+    }
+
+    func testThemePathPreservesAllSegments() {
+        let result = applyMerlinOps(
+            blocks: [], theme: ["style": .object([:])],
+            ops: [.setTheme(key: "style.card.radius", value: .string("lg"))], schema: nil
+        )
+        let style = result.theme["style"]?.objectValue ?? [:]
+        XCTAssertEqual(style["card.radius"]?.stringValue, "lg")
+        XCTAssertNil(style["card"])
+    }
+
+    func testNumericSegmentIntoObjectIsRefused() {
+        let source = block(["type": .string("hero"), "settings": .object(["existing": .string("value")])])
+        XCTAssertNil(applyFieldPath(block: source, path: "settings.0.title", value: .string("bad")))
+    }
+
+    func testGenerateImageIsNotReportedAsAppliedBySynchronousFold() {
+        let result = applyMerlinOps(
+            blocks: [block(["type": .string("hero")])], theme: [:],
+            ops: [.generateImage(block: "b1", field: "image", background: false, prompt: "photo", aspect: nil, imageSize: nil)], schema: nil
+        )
+        XCTAssertFalse(result.results[0].ok)
+        XCTAssertFalse(result.changed)
     }
 
     func testCanvasAddRespectsLimitAndCanvasUpdateCannotChangeIdentity() {

@@ -74,14 +74,16 @@ final class MerlinService {
         body: any Encodable,
         onFrame: @escaping (CappeMerlinFrame) -> Void
     ) async throws {
+        var receivedTerminalFrame = false
         try await APIClient.shared.streamSSE(path: path, body: body) { data in
             guard let frame = try? JSONDecoder().decode(CappeMerlinFrame.self, from: data) else {
                 return false
             }
             onFrame(frame)
-            if case .result = frame { return true }
-            if case .setupResult = frame { return true }
+            if case .result = frame { receivedTerminalFrame = true; return true }
+            if case .setupResult = frame { receivedTerminalFrame = true; return true }
             return false
         }
+        guard receivedTerminalFrame else { throw APIError.noData }
     }
 }

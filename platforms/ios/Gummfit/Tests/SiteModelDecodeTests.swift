@@ -109,12 +109,19 @@ final class DirectoryUpdateEncodeTests: XCTestCase {
 }
 
 final class SiteUpdateEncodeTests: XCTestCase {
+    func testUnsetClearableSettingsAreOmitted() throws {
+        let update = CappeSiteUpdate(name: "Bakery", subdomain: nil, timezone: "UTC", tax_label: nil, shipping_label: nil, status: nil, tax_rate_bps: nil, shipping_flat_cents: nil, is_multi_location: nil)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(update)) as? [String: Any])
+        XCTAssertNil(object["receipt_prefix"])
+        XCTAssertNil(object["shipping_free_threshold_cents"])
+    }
+
     func testClearableSettingsEncodeExplicitNulls() throws {
         let update = CappeSiteUpdate(
             name: "Bakery", subdomain: nil, timezone: "UTC", tax_label: nil,
-            shipping_label: nil, receipt_prefix: nil, status: nil,
+            shipping_label: nil, receipt_prefix: .clear, status: nil,
             tax_rate_bps: nil, shipping_flat_cents: nil,
-            shipping_free_threshold_cents: nil, is_multi_location: nil
+            shipping_free_threshold_cents: .clear, is_multi_location: nil
         )
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(update)) as? [String: Any])
         XCTAssertTrue(object["receipt_prefix"] is NSNull)

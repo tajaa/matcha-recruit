@@ -43,6 +43,24 @@ final class MerlinFoundationTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(CappePage.self, from: Data(unknown.utf8)).status, .unknown)
     }
 
+    func testKeylessDecodedBlocksReceiveStableDistinctKeys() throws {
+        let json = #"{"id":"p1","site_id":"s1","title":"Home","slug":"home","content":{"blocks":[{"type":"hero"},{"type":"faq"}]},"sort_order":0,"status":"draft","created_at":"now","updated_at":"now"}"#
+        let page = try JSONDecoder().decode(CappePage.self, from: Data(json.utf8))
+        let keys = page.blocks.map(\._k)
+        XCTAssertEqual(keys.count, 2)
+        XCTAssertTrue(keys.allSatisfy { !$0.isEmpty })
+        XCTAssertEqual(Set(keys).count, 2)
+        XCTAssertEqual(page.blocks.map(\.id), keys)
+    }
+
+    func testJSONValueNumericConversionsAreSafeAndNSNumberAware() {
+        XCTAssertEqual(JSONValue.number(1e30).intValue, Int.max)
+        XCTAssertEqual(JSONValue.number(-1e30).intValue, Int.min)
+        XCTAssertEqual(JSONValue.from(NSNumber(value: 1)).doubleValue, 1)
+        XCTAssertNil(JSONValue.from(NSNumber(value: 1)).boolValue)
+        XCTAssertEqual(JSONValue.from(NSNumber(value: true)).boolValue, true)
+    }
+
     func testUnknownMerlinFrameDoesNotThrow() throws {
         let frame = try JSONDecoder().decode(CappeMerlinFrame.self, from: Data(#"{"type":"future","data":{}}"#.utf8))
         if case .unknown = frame { } else { XCTFail("Expected unknown frame") }

@@ -401,6 +401,23 @@ def test_schema_is_json_serializable():
     assert schema["themePresets"][0]["config"]
 
 
+def test_schema_describes_nested_list_fields_and_select_options():
+    from app.cappe.services.merlin.ops import build_merlin_schema
+
+    schema = build_merlin_schema()
+    span = schema["blocks"]["bento"]["fields"]["items"]["item"]["span"]
+    assert span["options"] == [
+        {"value": "normal", "label": "Normal"},
+        {"value": "tall", "label": "Tall"},
+        {"value": "wide", "label": "Wide (full row)"},
+    ]
+    nested = schema["blocks"]["menu"]["fields"]["sections"]["item"]["items"]
+    assert nested["kind"] == "list"
+    assert nested["item"]["name"]["kind"] == "text"
+    assert nested["newItem"] == {"name": "", "price": ""}
+    assert nested["addLabel"] == "Add item"
+
+
 # --- mobile placement gets the same bounds check as desktop -------------------
 
 _MOBILE_CANVAS = {

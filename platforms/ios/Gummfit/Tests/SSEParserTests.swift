@@ -76,4 +76,20 @@ final class SSEParserTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testMerlinServiceFailsWhenNoTerminalFrameArrives() async {
+        StubURLProtocol.chunks = [Data("data: not-json\n".utf8)]
+        let body = CappeMerlinChatRequest(
+            page_id: "p1", conversation_id: nil, message: "hello", history: [], blocks: [],
+            theme: [:], model_tier: "auto", selected_block: nil, selection: nil, attachments: []
+        )
+        do {
+            try await MerlinService.shared.agent(siteId: "s1", body) { _ in }
+            XCTFail("Expected a missing terminal frame error")
+        } catch APIError.noData {
+            // Expected: malformed/intermediate frames cannot make a turn succeed.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }

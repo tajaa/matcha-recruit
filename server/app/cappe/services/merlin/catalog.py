@@ -154,6 +154,11 @@ SELECT_OPTION_LABELS: dict[str, dict[str, dict[str, str]]] = {
     "bento": {"span": {"normal": "Normal", "wide": "Wide (full row)", "tall": "Tall"}},
 }
 
+# Select fields inside list rows are separate from top-level block fields.
+LIST_SELECT_OPTIONS: dict[str, dict[str, dict[str, frozenset[str]]]] = {
+    "bento": {"items": {"span": frozenset({"normal", "wide", "tall"})}},
+}
+
 # ``item`` describes one level of list rows. Nested list fields are represented
 # as kind="list" and can be extended with the same shape by native clients.
 BLOCK_LIST_ITEM_FIELDS: dict[str, dict[str, dict[str, str]]] = {
@@ -182,6 +187,22 @@ BLOCK_LIST_ITEM_LABELS: dict[str, dict[str, dict[str, str]]] = {
     "faq": {"items": {"q": "Question", "a": "Answer"}},
     "bento": {"items": {"icon": "Icon / emoji", "title": "Title", "body": "Body", "image": "Background image", "span": "Size"}},
     "credentials": {"items": {"title": "Title / certification", "issuer": "Issuing body", "year": "Year", "detail": "Detail (optional)"}},
+}
+
+# Recursive metadata for list fields nested inside a list row. Keep this
+# separate from BLOCK_LIST_ITEM_FIELDS so the existing validation catalog stays
+# flat while GET /merlin/schema can describe arbitrary native form depth.
+BLOCK_LIST_NESTED_ITEM_FIELDS: dict[str, dict[str, dict[str, dict[str, str]]]] = {
+    "menu": {"sections": {"items": {"name": "text", "description": "text", "price": "text"}}},
+}
+BLOCK_LIST_NESTED_ITEM_LABELS: dict[str, dict[str, dict[str, dict[str, str]]]] = {
+    "menu": {"sections": {"items": {"name": "Name", "description": "Description", "price": "Price"}}},
+}
+BLOCK_LIST_NESTED_ITEM_DEFAULTS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
+    "menu": {"sections": {"items": {"name": "", "price": ""}}},
+}
+BLOCK_LIST_NESTED_ITEM_ADD_LABELS: dict[str, dict[str, dict[str, str]]] = {
+    "menu": {"sections": {"items": "Add item"}},
 }
 
 BLOCK_LIST_ITEM_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {

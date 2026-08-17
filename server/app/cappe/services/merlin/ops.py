@@ -942,6 +942,10 @@ def build_merlin_schema() -> dict[str, Any]:
         BLOCK_LIST_ITEM_DEFAULTS,
         BLOCK_LIST_ITEM_FIELDS,
         BLOCK_LIST_ITEM_LABELS,
+        BLOCK_LIST_NESTED_ITEM_ADD_LABELS,
+        BLOCK_LIST_NESTED_ITEM_DEFAULTS,
+        BLOCK_LIST_NESTED_ITEM_FIELDS,
+        BLOCK_LIST_NESTED_ITEM_LABELS,
         BLOCK_LABELS,
         BLOCK_ORDER,
         CANVAS_ELEMENT_KINDS,
@@ -949,10 +953,35 @@ def build_merlin_schema() -> dict[str, Any]:
         CANVAS_MAX_ELEMENTS,
         CANVAS_MOBILE_GRID_COLS,
         SELECT_OPTION_LABELS,
+        LIST_SELECT_OPTIONS,
         THEME_KEY_PREFIXES,
         THEME_KEYS,
         THEME_MODE_VALUES,
     )
+
+    def _list_item_json(btype: str, field: str, item_fields: dict[str, str]) -> dict[str, Any]:
+        labels = BLOCK_LIST_ITEM_LABELS.get(btype, {}).get(field, {})
+        out: dict[str, Any] = {}
+        for sub, sub_kind in item_fields.items():
+            entry: dict[str, Any] = {"kind": sub_kind, "label": labels.get(sub, sub)}
+            options = LIST_SELECT_OPTIONS.get(btype, {}).get(field, {}).get(sub)
+            if options is not None:
+                option_labels = SELECT_OPTION_LABELS.get(btype, {}).get(sub, {})
+                entry["options"] = [
+                    {"value": value, "label": option_labels.get(value, value)}
+                    for value in sorted(options)
+                ]
+            if sub_kind == "list":
+                nested_fields = BLOCK_LIST_NESTED_ITEM_FIELDS.get(btype, {}).get(field, {}).get(sub, {})
+                nested_labels = BLOCK_LIST_NESTED_ITEM_LABELS.get(btype, {}).get(field, {}).get(sub, {})
+                entry["item"] = {
+                    nested: {"kind": nested_kind, "label": nested_labels.get(nested, nested)}
+                    for nested, nested_kind in nested_fields.items()
+                }
+                entry["newItem"] = BLOCK_LIST_NESTED_ITEM_DEFAULTS.get(btype, {}).get(field, {}).get(sub, {})
+                entry["addLabel"] = BLOCK_LIST_NESTED_ITEM_ADD_LABELS.get(btype, {}).get(field, {}).get(sub, "Add item")
+            out[sub] = entry
+        return out
 
     def _field_json(btype: str, name: str, kind: str) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -969,11 +998,7 @@ def build_merlin_schema() -> dict[str, Any]:
             ]
         if kind == "list":
             item_kinds = BLOCK_LIST_ITEM_FIELDS.get(btype, {}).get(name, {})
-            item_labels = BLOCK_LIST_ITEM_LABELS.get(btype, {}).get(name, {})
-            out["item"] = {
-                sub: {"kind": sub_kind, "label": item_labels.get(sub, sub)}
-                for sub, sub_kind in item_kinds.items()
-            }
+            out["item"] = _list_item_json(btype, name, item_kinds)
             out["newItem"] = BLOCK_LIST_ITEM_DEFAULTS.get(btype, {}).get(name, {})
             out["addLabel"] = BLOCK_LIST_ADD_LABELS.get(btype, {}).get(name, "Add item")
         return out

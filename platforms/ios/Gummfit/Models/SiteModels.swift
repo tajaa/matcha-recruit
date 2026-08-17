@@ -45,11 +45,13 @@ struct CappeSiteCreate: Encodable {
     let is_multi_location: Bool = false
 }
 struct CappeSiteUpdate: Encodable {
-    var name, subdomain, timezone, tax_label, shipping_label, receipt_prefix: String?
+    var name, subdomain, timezone, tax_label, shipping_label: String?
+    var receipt_prefix: Clearable<String> = .unset
     var status: String?
     var theme_config: [String: JSONValue]? = nil
     var meta_config: [String: JSONValue]? = nil
-    var tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents: Int?
+    var tax_rate_bps, shipping_flat_cents: Int?
+    var shipping_free_threshold_cents: Clearable<Int> = .unset
     var is_multi_location: Bool?
 
     private enum CodingKeys: String, CodingKey {
@@ -64,14 +66,13 @@ struct CappeSiteUpdate: Encodable {
         try container.encodeIfPresent(timezone, forKey: .timezone)
         try container.encodeIfPresent(tax_label, forKey: .tax_label)
         try container.encodeIfPresent(shipping_label, forKey: .shipping_label)
-        try container.encode(receipt_prefix, forKey: .receipt_prefix)
+        try receipt_prefix.encode(to: &container, forKey: .receipt_prefix)
         try container.encodeIfPresent(status, forKey: .status)
         try container.encodeIfPresent(theme_config, forKey: .theme_config)
         try container.encodeIfPresent(meta_config, forKey: .meta_config)
         try container.encodeIfPresent(tax_rate_bps, forKey: .tax_rate_bps)
         try container.encodeIfPresent(shipping_flat_cents, forKey: .shipping_flat_cents)
-        // The API uses an explicit null to clear these optional settings.
-        try container.encode(shipping_free_threshold_cents, forKey: .shipping_free_threshold_cents)
+        try shipping_free_threshold_cents.encode(to: &container, forKey: .shipping_free_threshold_cents)
         try container.encodeIfPresent(is_multi_location, forKey: .is_multi_location)
     }
 }

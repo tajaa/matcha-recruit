@@ -75,5 +75,5 @@ struct SiteSettingsView: View {
         .gummfitListBackground()
         .gummfitScreenChrome()
     }
-    private func save() async { do { _ = try await SitesService.shared.update(siteId: site.id, CappeSiteUpdate(name: name, subdomain: subdomain.isEmpty ? nil : subdomain, timezone: timezone, tax_label: taxLabel.isEmpty ? nil : taxLabel, shipping_label: nil, receipt_prefix: receiptPrefix.isEmpty ? nil : receiptPrefix, status: nil, tax_rate_bps: Int(taxRate), shipping_flat_cents: Int(shippingFlat), shipping_free_threshold_cents: Int(freeShipping), is_multi_location: nil)); dismiss() } catch { self.error = error.localizedDescription } }
+    private func save() async { do { _ = try await SitesService.shared.update(siteId: site.id, CappeSiteUpdate(name: name, subdomain: subdomain.isEmpty ? nil : subdomain, timezone: timezone, tax_label: taxLabel.isEmpty ? nil : taxLabel, shipping_label: nil, receipt_prefix: receiptPrefix.isEmpty ? .clear : .value(receiptPrefix), status: nil, tax_rate_bps: Int(taxRate), shipping_flat_cents: Int(shippingFlat), shipping_free_threshold_cents: freeShipping.isEmpty ? .clear : .value(Int(freeShipping) ?? 0), is_multi_location: nil)); dismiss() } catch { self.error = error.localizedDescription } }
 }

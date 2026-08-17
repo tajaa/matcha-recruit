@@ -19,18 +19,27 @@ enum JSONValue: Codable, Hashable {
 extension JSONValue {
     var stringValue: String? { if case .string(let value) = self { return value }; return nil }
     var doubleValue: Double? { if case .number(let value) = self { return value }; return nil }
-    var intValue: Int? { doubleValue.map(Int.init) }
+    var intValue: Int? {
+        guard let value = doubleValue, value.isFinite else { return nil }
+        if value >= Double(Int.max) { return Int.max }
+        if value <= Double(Int.min) { return Int.min }
+        return Int(value)
+    }
     var boolValue: Bool? { if case .bool(let value) = self { return value }; return nil }
     var objectValue: [String: JSONValue]? { if case .object(let value) = self { return value }; return nil }
     var arrayValue: [JSONValue]? { if case .array(let value) = self { return value }; return nil }
     var isNull: Bool { if case .null = self { return true }; return false }
 
     static func from(_ any: Any) -> JSONValue {
+        if let number = any as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return .bool(number.boolValue)
+            }
+            return .number(number.doubleValue)
+        }
         switch any {
         case is NSNull:
             return .null
-        case let value as Bool:
-            return .bool(value)
         case let value as String:
             return .string(value)
         case let value as Int:

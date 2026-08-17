@@ -63,18 +63,27 @@ struct MerlinApplyResult {
 }
 
 func deepSet(_ target: JSONValue?, _ parts: ArraySlice<String>, _ value: JSONValue) -> (ok: Bool, value: JSONValue?) {
-    guard let target else { return (false, nil) }
     guard let head = parts.first else { return (true, value) }
     let rest = parts.dropFirst()
+    let isIndex = !head.isEmpty && head.allSatisfy(\.isNumber)
+    guard let target else {
+        guard !isIndex else { return (false, nil) }
+        guard rest.isEmpty else {
+            let result = deepSet(nil, rest, value)
+            guard result.ok, let updated = result.value else { return (false, nil) }
+            return (true, .object([head: updated]))
+        }
+        return (true, .object([head: value]))
+    }
     switch target {
     case .object(var object):
+        guard !isIndex else { return (false, nil) }
         guard let child = object[head] else {
             if rest.isEmpty {
                 object[head] = value
                 return (true, .object(object))
             }
-            let emptyChild: JSONValue = Int(rest.first ?? "") == nil ? .object([:]) : .array([])
-            let result = deepSet(emptyChild, rest, value)
+            let result = deepSet(nil, rest, value)
             guard result.ok, let updated = result.value else { return (false, nil) }
             object[head] = updated
             return (true, .object(object))
@@ -84,11 +93,10 @@ func deepSet(_ target: JSONValue?, _ parts: ArraySlice<String>, _ value: JSONVal
         object[head] = updated
         return (true, .object(object))
     case .array(var array):
-        guard let index = Int(head), index >= 0, index <= array.count else { return (false, nil) }
+        guard isIndex, let index = Int(head), index >= 0, index <= array.count else { return (false, nil) }
         if index == array.count {
             guard !rest.isEmpty else { array.append(value); return (true, .array(array)) }
-            let emptyChild: JSONValue = Int(rest.first ?? "") == nil ? .object([:]) : .array([])
-            let result = deepSet(emptyChild, rest, value)
+            let result = deepSet(nil, rest, value)
             guard result.ok, let updated = result.value else { return (false, nil) }
             array.append(updated)
             return (true, .array(array))
@@ -129,8 +137,9 @@ func contrastText(_ hex: String) -> String {
 func applyThemeOp(_ theme: [String: JSONValue], key: String, value: JSONValue, schema: CappeEditorSchema?) -> [String: JSONValue]? {
     var result = theme
     if key == "preset" {
-        guard let id = value.stringValue, let preset = schema?.preset(id) else { return nil }
-        result = preset.config
+        guard let id = value.stringValue,
+              let config = schema?.preset(id)?.config ?? fallbackThemeConfig(id) else { return nil }
+        result = config
         result["preset"] = .string(id)
         return result
     }
@@ -149,15 +158,15 @@ func applyThemeOp(_ theme: [String: JSONValue], key: String, value: JSONValue, s
         if value.isNull { result.removeValue(forKey: head) } else { result[head] = value }
         return result
     }
+    let subkey = parts.dropFirst().joined(separator: ".")
     var group = result[head]?.objectValue ?? [:]
-    if value.isNull { group.removeValue(forKey: parts[1]) } else { group[parts[1]] = value }
+    if value.isNull { group.removeValue(forKey: subkey) } else { group[subkey] = value }
     result[head] = .object(group)
     if key == "colors.brand", let color = value.stringValue {
         group["accent"] = value
         group["brandText"] = .string(contrastText(color))
         result[head] = .object(group)
     }
-    if key == "mode" { return result }
     return result
 }
 
@@ -223,11 +232,8 @@ func applyMerlinOps(blocks: [CappeBlock], theme: [String: JSONValue], ops: [Merl
                 results.append(.init(ok: true, summary: "Styled \(touched) section\(touched == 1 ? "" : "s")"))
             }
         case let .addBlock(type, at, content, design, preset, id):
-            guard let schemaBlock = schema?.blocks[type] else {
-                skip("Skipped — unknown block type \"\(type)\"")
-                continue
-            }
-            var newBlock = CappeBlock.make(fromSchemaDefault: schemaBlock.make)
+            let schemaBlock = schema?.blocks[type]
+            var newBlock = CappeBlock(fields: schemaBlock?.make ?? ["type": .string(type)]).withKey()
             if let content {
                 for (field, value) in content where !RESERVED_PATH_KEYS.contains(field) { newBlock.fields[field] = value }
             }
@@ -238,7 +244,7 @@ func applyMerlinOps(blocks: [CappeBlock], theme: [String: JSONValue], ops: [Merl
             blocks.insert(newBlock, at: min(max(0, at), blocks.count))
             changed = true
             let suffix = preset.map { " (\($0))" } ?? ""
-            results.append(.init(ok: true, summary: "Added \(schemaBlock.label)\(suffix)"))
+            results.append(.init(ok: true, summary: "Added \(schemaBlock?.label ?? type)\(suffix)"))
         case let .setTheme(key, value):
             guard let updated = applyThemeOp(theme, key: key, value: value, schema: schema) else { skip("Skipped — unknown theme preset"); continue }
             theme = updated; changed = true; results.append(.init(ok: true, summary: "Updated theme"))
@@ -280,7 +286,7 @@ func applyMerlinOps(blocks: [CappeBlock], theme: [String: JSONValue], ops: [Merl
             elements.removeAll { $0["id"]?.stringValue == elementID }
             blocks[index].fields["elements"] = .array(elements.map { .object($0) })
             changed = true; results.append(.init(ok: true, summary: "Removed element from canvas"))
-        case .generateImage: results.append(.init(ok: true, summary: "Image generation queued"))
+        case .generateImage: skip("Skipped — image generation requires the async image service")
         case .unrecognized: skip("Skipped — unrecognized op")
         }
     }
