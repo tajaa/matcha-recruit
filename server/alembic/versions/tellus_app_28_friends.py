@@ -263,7 +263,8 @@ def downgrade() -> None:
     survive — reference_id is a bare TEXT column with no FK — so points
     history stays intact. Handles are dropped, which frees every claimed
     name; a re-upgrade cannot restore who had which."""
-    op.execute("DELETE FROM tellus_earning_rules WHERE event_key = 'friend_added'")
+    # The seed is shared configuration and may have predated this migration;
+    # there is no ownership marker that makes deleting it safe on downgrade.
     op.execute("DROP INDEX IF EXISTS ix_tellus_reports_author_published")
     op.execute("DROP TABLE IF EXISTS tellus_friend_invites")
     op.execute("DROP TABLE IF EXISTS tellus_abuse_reports")

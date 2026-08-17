@@ -33,7 +33,7 @@ FriendRequestDirection = Literal["incoming", "outgoing"]
 AbuseReportReason = Literal["spam", "harassment", "impersonation", "inappropriate", "other"]
 AbuseReportTargetType = Literal["account", "review", "board_reply"]
 AbuseReportStatus = Literal["open", "reviewing", "actioned", "dismissed"]
-FriendActivityKind = Literal["review", "follow"]
+FriendActivityKind = Literal["review_published", "place_followed"]
 
 
 # ── Auth ────────────────────────────────────────────────────────────────────
@@ -151,6 +151,11 @@ class TellusProfileUpdate(BaseModel):
 class TellusHandleClaim(BaseModel):
     handle: str = Field(min_length=3, max_length=20)
 
+    @field_validator("handle")
+    @classmethod
+    def _normalize(cls, value: str) -> str:
+        return value.strip().lower()
+
 
 class TellusHandleAvailability(BaseModel):
     handle: str
@@ -194,7 +199,6 @@ class TellusFriendRequestCreate(BaseModel):
     account_id: Optional[UUID] = None
     handle: Optional[str] = None
     source: FriendRequestSource = "search"
-    note: Optional[str] = Field(default=None, max_length=280)
 
     @model_validator(mode="after")
     def _one_target(self) -> "TellusFriendRequestCreate":
@@ -209,7 +213,6 @@ class TellusFriendRequest(BaseModel):
     addressee_account_id: UUID
     status: FriendRequestStatus
     source: FriendRequestSource
-    note: Optional[str] = None
     created_at: datetime
     decided_at: Optional[datetime] = None
     # The OTHER party relative to the caller — populated by the route.

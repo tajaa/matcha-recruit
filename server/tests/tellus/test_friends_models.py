@@ -119,7 +119,7 @@ def test_friendship_and_activity_item_shapes():
     assert friendship.friend.account_id == person.account_id
 
     item = TellusFriendActivityItem(
-        id="review:1", kind="review", actor=person, happened_at="2026-01-01T00:00:00Z"
+        id="review:1", kind="review_published", actor=person, happened_at="2026-01-01T00:00:00Z"
     )
-    assert item.kind == "review"
+    assert item.kind == "review_published"
     assert item.rating is None
