@@ -1,8 +1,21 @@
 import SwiftUI
 
+private enum FriendsSheet: Identifiable {
+    case guide
+    case invite
+
+    var id: String {
+        switch self {
+        case .guide: return "guide"
+        case .invite: return "invite"
+        }
+    }
+}
+
 struct FriendsHubView: View {
+    @Environment(AppState.self) private var appState
     @State private var vm: FriendsHubViewModel
-    @State private var showInvite = false
+    @State private var sheet: FriendsSheet?
     private let highlightRequestId: String?
 
     init(initialTab: FriendsTab = .friends, highlightRequestId: String? = nil) {
@@ -27,17 +40,59 @@ struct FriendsHubView: View {
         }
         .themedScreen()
         .navigationTitle("Friends")
-        .task { await vm.load() }
+        .task {
+            await vm.load()
+            showGuideIfNeeded()
+        }
         .refreshable { await vm.load() }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showInvite = true } label: { Image(systemName: "qrcode") }
+                Button { sheet = .invite } label: { Image(systemName: "qrcode") }
+                    .accessibilityLabel("Share friend invite")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { sheet = .guide } label: { Image(systemName: "info.circle") }
+                    .accessibilityLabel("How Friends works")
             }
         }
-        .sheet(isPresented: $showInvite) { FriendInviteSheet() }
+        .sheet(item: $sheet) { sheet in
+            switch sheet {
+            case .guide:
+                FriendsGuideView(
+                    onFindFriends: {
+                        completeGuide()
+                        vm.tab = .find
+                    },
+                    onInvite: {
+                        completeGuide()
+                        DispatchQueue.main.async { self.sheet = .invite }
+                    },
+                    onDone: { completeGuide() }
+                )
+            case .invite:
+                FriendInviteSheet()
+            }
+        }
         .overlay(alignment: .top) {
             if let error = vm.error { ErrorBanner(message: error).padding(.top, 8) }
         }
+    }
+
+    private var guideKey: String? {
+        guard let accountID = appState.account?.id else { return nil }
+        return "tellus.consumer-friends-guide.v1:\(accountID)"
+    }
+
+    private func showGuideIfNeeded() {
+        guard highlightRequestId == nil,
+              let guideKey,
+              !UserDefaults.standard.bool(forKey: guideKey) else { return }
+        sheet = .guide
+    }
+
+    private func completeGuide() {
+        if let guideKey { UserDefaults.standard.set(true, forKey: guideKey) }
+        sheet = nil
     }
 
     private var friendsList: some View {

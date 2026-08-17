@@ -248,6 +248,7 @@
 		FD611BDC3DBE330F1E273614 /* MembersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF626FAAAF99449A1BDC6E49 /* MembersView.swift */; };
 		FD667EA6CE17C06CCB9A7CD9 /* FeedbackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1F3C8CACC67245C0E6B16D0 /* FeedbackModels.swift */; };
 		FE1972638E35B527449D6066 /* ReviewsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A578F89613997948D8E4A18 /* ReviewsService.swift */; };
+		FF3498AD8523D64A25CEF769 /* FriendsGuideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40829A62178AA5B93387A89 /* FriendsGuideView.swift */; };
 		FFD476C54A851D35D236DFBC /* LedgerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA4879239FF2BB4FBC9675F /* LedgerView.swift */; };
 /* End PBXBuildFile section */
 
@@ -440,6 +441,7 @@
 		B173F5A337E4402646C93081 /* FlyerDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerDesign.swift; sourceTree = "<group>"; };
 		B1F3C8CACC67245C0E6B16D0 /* FeedbackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackModels.swift; sourceTree = "<group>"; };
 		B35D6E29B729AB8C1AA05C60 /* CampaignDesignerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignDesignerView.swift; sourceTree = "<group>"; };
+		B40829A62178AA5B93387A89 /* FriendsGuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsGuideView.swift; sourceTree = "<group>"; };
 		B44F551DECE185F68C8B3F61 /* paper-ticket.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "paper-ticket.json"; sourceTree = "<group>"; };
 		B50526C517FF9773D6EED36D /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		B5230B1664F4ACC10CEB088D /* RewardsHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RewardsHomeView.swift; sourceTree = "<group>"; };
@@ -878,6 +880,7 @@
 				4E4B43183C7765A82B5AB6CF /* FriendProfileView.swift */,
 				8C8916FA88375674E9BBFA9F /* FriendReportSheet.swift */,
 				094771711E5FAFE5479A0E1F /* FriendSearchView.swift */,
+				B40829A62178AA5B93387A89 /* FriendsGuideView.swift */,
 				75FFFBE00D8C25E71169674C /* FriendsHubView.swift */,
 			);
 			path = Friends;
@@ -1360,6 +1363,7 @@
 				3D13B83BF91D7BCCB63D6E3C /* FriendReportSheet.swift in Sources */,
 				ED5E613E33C7D0F6EE448E32 /* FriendSearchView.swift in Sources */,
 				DED4CFDC97F2E8A79146435E /* FriendsFeedViewModel.swift in Sources */,
+				FF3498AD8523D64A25CEF769 /* FriendsGuideView.swift in Sources */,
 				E4BD4510F6CF022B0B2DA34A /* FriendsHubView.swift in Sources */,
 				B79B5ED1EE7E529F8B78BB50 /* FriendsHubViewModel.swift in Sources */,
 				7D8CF5787A8573EF528F00E5 /* FriendsService.swift in Sources */,
