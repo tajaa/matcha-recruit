@@ -26,6 +26,7 @@ from ..models.tellus import (
     TellusFriendInvite,
     TellusInvitePreview,
     TellusInviteRedeemResult,
+    TellusAbuseReportCreate,
     TellusBlockCreate,
     TellusFriendListPage,
     TellusHandleAvailability,
@@ -824,3 +825,32 @@ async def redeem_friend_invite(
     return TellusInviteRedeemResult(
         friendship={"friend": friend, "created_at": datetime.now(timezone.utc)}
     )
+
+
+@router.post("/people/{account_id}/report", status_code=status.HTTP_202_ACCEPTED)
+async def report_person(
+    account_id: UUID,
+    body: TellusAbuseReportCreate,
+    request: Request,
+    account: TellusAccount = Depends(require_verified_consumer),
+):
+    await check_rate_limit(str(account.id), "tellus_abuse_report", 10, 3600)
+    if account_id == account.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot report yourself")
+    async with get_connection() as conn:
+        await assert_not_blocked(conn, account.id, account_id)
+        exists = await conn.fetchval(
+            "SELECT 1 FROM tellus_accounts WHERE id = $1 AND account_type = 'consumer' AND status = 'active'",
+            account_id,
+        )
+        if not exists:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person not found")
+        await conn.execute(
+            """INSERT INTO tellus_abuse_reports
+               (reporter_account_id, subject_account_id, reason, detail)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (reporter_account_id, subject_account_id)
+               WHERE status IN ('open', 'reviewing') DO NOTHING""",
+            account.id, account_id, body.reason, body.detail,
+        )
+    return {"accepted": True}

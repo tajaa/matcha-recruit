@@ -320,3 +320,53 @@ async def update_consumer_tier(
         "consumer_tier": row["consumer_tier"],
         "consumer_tier_expires_at": row["consumer_tier_expires_at"],
     }
+
+
+@router.get("/admin/accounts/{account_id}/social")
+async def get_account_social(account_id: UUID):
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM tellus_accounts WHERE id = $1", account_id)
+        if not exists:
+            raise HTTPException(404, "Account not found")
+        friends = await conn.fetch(
+            """SELECT f.friend_account_id AS account_id, a.display_name, a.handle, f.created_at
+                 FROM tellus_friendships f JOIN tellus_accounts a ON a.id = f.friend_account_id
+                WHERE f.account_id = $1 ORDER BY f.created_at DESC""",
+            account_id,
+        )
+        requests = await conn.fetch(
+            """SELECT id, requester_account_id, addressee_account_id, status, created_at, decided_at
+                 FROM tellus_friend_requests
+                WHERE requester_account_id = $1 OR addressee_account_id = $1
+                ORDER BY created_at DESC LIMIT 50""",
+            account_id,
+        )
+        blocks = await conn.fetch(
+            """SELECT blocker_account_id, blocked_account_id, created_at
+                 FROM tellus_account_blocks
+                WHERE blocker_account_id = $1 OR blocked_account_id = $1
+                ORDER BY created_at DESC""",
+            account_id,
+        )
+    return {"friends": [dict(row) for row in friends], "requests": [dict(row) for row in requests], "blocks": [dict(row) for row in blocks]}
+
+
+@router.post("/admin/accounts/{account_id}/clear-handle")
+async def clear_account_handle(
+    account_id: UUID,
+    admin: TellusAccount = Depends(require_tellus_admin),
+):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """UPDATE tellus_accounts SET handle = NULL, handle_set_at = NULL, updated_at = NOW()
+                    WHERE id = $1 RETURNING handle""",
+                account_id,
+            )
+            if row is None:
+                raise HTTPException(404, "Account not found")
+            await record_admin_action(
+                conn, admin, "account.handle_clear", "account", account_id,
+                {"reason": "admin impersonation takedown"},
+            )
+    return {"handle": None}

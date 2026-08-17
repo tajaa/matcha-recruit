@@ -156,6 +156,11 @@ class TellusAdminModerationUpdate(BaseModel):
     note: Optional[str] = Field(None, max_length=500)
 
 
+class TellusAdminAbuseReportUpdate(BaseModel):
+    status: Literal["open", "reviewing", "actioned", "dismissed"]
+    resolution_note: Optional[str] = Field(None, max_length=1000)
+
+
 class TellusAdminDmThreadSummary(BaseModel):
     id: UUID
     report_id: Optional[UUID] = None

@@ -20,10 +20,86 @@ from ...models.admin import (
     TellusAdminBoardReplyStatusUpdate,
     TellusAdminDmThreadSummary,
     TellusAdminModerationUpdate,
+    TellusAdminAbuseReportUpdate,
 )
 from ._shared import report_filter_sql
 
 router = APIRouter(dependencies=[Depends(require_tellus_admin)])
+
+
+@router.get("/admin/abuse-reports")
+async def list_abuse_reports(
+    report_status: Optional[Literal["open", "reviewing", "actioned", "dismissed"]] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    clauses = ["1 = 1"]
+    params = []
+    if report_status:
+        clauses.append(f"r.status = ${len(params) + 1}")
+        params.append(report_status)
+    where = " AND ".join(clauses)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""SELECT r.*, reporter.display_name AS reporter_name,
+                       subject.display_name AS subject_name
+                  FROM tellus_abuse_reports r
+                  JOIN tellus_accounts reporter ON reporter.id = r.reporter_account_id
+                  JOIN tellus_accounts subject ON subject.id = r.subject_account_id
+                 WHERE {where} ORDER BY r.created_at DESC
+                 LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+            *params, limit, offset,
+        )
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM tellus_abuse_reports r WHERE {where}", *params)
+    return {"items": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/admin/abuse-reports/{report_id}")
+async def get_abuse_report(report_id: UUID):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT r.*, reporter.display_name AS reporter_name, subject.display_name AS subject_name
+                 FROM tellus_abuse_reports r
+                 JOIN tellus_accounts reporter ON reporter.id = r.reporter_account_id
+                 JOIN tellus_accounts subject ON subject.id = r.subject_account_id
+                WHERE r.id = $1""",
+            report_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Abuse report not found")
+    return dict(row)
+
+
+@router.patch("/admin/abuse-reports/{report_id}")
+async def update_abuse_report(
+    report_id: UUID,
+    body: TellusAdminAbuseReportUpdate,
+    admin: TellusAccount = Depends(require_tellus_admin),
+):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            old = await conn.fetchrow(
+                "SELECT status FROM tellus_abuse_reports WHERE id = $1 FOR UPDATE", report_id,
+            )
+            if old is None:
+                raise HTTPException(404, "Abuse report not found")
+            row = await conn.fetchrow(
+                """UPDATE tellus_abuse_reports
+                      SET status = $2,
+                          resolution_note = $3,
+                          resolved_at = CASE WHEN $2 IN ('actioned', 'dismissed') THEN NOW() ELSE NULL END,
+                          resolved_by = CASE WHEN $2 IN ('actioned', 'dismissed') THEN $4 ELSE NULL END
+                    WHERE id = $1 RETURNING *""",
+                report_id, body.status, body.resolution_note, admin.id,
+            )
+            action = "abuse_report.dismiss" if body.status == "dismissed" else (
+                "abuse_report.action" if body.status == "actioned" else "abuse_report.review"
+            )
+            await record_admin_action(
+                conn, admin, action, "abuse_report", report_id,
+                {"from": old["status"], "to": body.status, "resolution_note": body.resolution_note},
+            )
+    return dict(row)
 
 
 @router.get("/admin/reports")
