@@ -1,8 +1,10 @@
 # Gummfit iOS
 
-Native operate-only companion for Gummfit site owners and creators. Page
-editing, billing purchase, domain setup, and payout onboarding remain web
-handoffs by design.
+Native operate-only companion for Gummfit site owners and creators. The Merlin
+page-editor foundation (schema, models, reducer, preview/API services, and
+streaming) is included; the full editor UI and Canvas freeform mode are still
+web handoffs. Billing purchase, domain setup, and payout onboarding also remain
+web-only.
 
 ## Build and test
 

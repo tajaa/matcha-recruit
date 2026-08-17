@@ -128,8 +128,7 @@ class APIClient {
     /// `baseURL` with any trailing slashes and a trailing "/api/cappe" path
     /// segment stripped — suffix-anchored, because a global string replace
     /// corrupts api-subdomain hosts. Used to derive `webOrigin` for handoffs
-    /// to the web app (page editor, billing, domains — features not built
-    /// natively; see GUMMFIT_IOS_APP_PLAN.md's out-of-scope list).
+    /// to web-only Cappe surfaces.
     private var apiOrigin: String {
         var origin = baseURL
         while origin.hasSuffix("/") { origin = String(origin.dropLast()) }
@@ -139,7 +138,8 @@ class APIClient {
 
     /// Web-app origin for browser handoffs. A localhost base is the FastAPI
     /// backend, which serves no /cappe SPA route, so dev builds fall back to
-    /// the prod web app.
+    /// the prod web app. Current handoffs cover billing, domains, payouts, and
+    /// the portions of site editing not yet wired into the native UI.
     var webOrigin: String {
         let origin = apiOrigin
         if !origin.contains("127.0.0.1") && !origin.contains("localhost") {
@@ -168,7 +168,7 @@ class APIClient {
     /// Set by AppState to handle logout on a definitive 401/403. There is no
     /// `onPaymentRequired` wall equivalent — Cappe's only runtime 402 is the
     /// booking-rider plan gate, handled inline as a per-screen upsell alert,
-    /// not a global app phase (see GUMMFIT_IOS_APP_PLAN.md §5/§7).
+    /// not a global app phase.
     ///
     /// Written once from @MainActor (AppState.init) and read from background
     /// executors inside `failAfterRefreshFailure` — same non-atomic-Optional

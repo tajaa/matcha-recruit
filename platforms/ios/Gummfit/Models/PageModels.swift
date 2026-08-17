@@ -97,11 +97,11 @@ struct CappeBlock: Codable, Identifiable, Hashable {
 
     func cloned() -> CappeBlock {
         var copy = self.withKey()
-        if var design = copy.fields["_design"]?.objectValue,
-           var anchor = design["anchor"]?.objectValue {
-            anchor.removeValue(forKey: "id")
-            design["anchor"] = .object(anchor)
-            copy.fields["_design"] = .object(design)
+        if let design = copy.fields["_design"]?.objectValue,
+           design["anchor"]?.objectValue?["id"]?.stringValue != nil {
+            var withoutAnchor = design
+            withoutAnchor.removeValue(forKey: "anchor")
+            copy.fields["_design"] = .object(withoutAnchor)
         }
         if var elements = copy.fields["elements"]?.arrayValue {
             elements = elements.map { element in

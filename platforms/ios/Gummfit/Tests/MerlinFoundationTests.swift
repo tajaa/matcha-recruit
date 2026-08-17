@@ -20,6 +20,29 @@ final class MerlinFoundationTests: XCTestCase {
         XCTAssertEqual(object.count, 1)
     }
 
+    func testCanvasIntegerRoundTripsAsAnIntegralJSONNumber() throws {
+        let block = CappeBlock(fields: [
+            "type": .string("canvas"),
+            "elements": .array([.object(["id": .string("e1"), "kind": .string("text"), "d": .object(["x": .number(3)])])]),
+        ])
+        let encoded = try JSONEncoder().encode(block)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let elements = try XCTUnwrap(object["elements"] as? [[String: Any]])
+        let d = try XCTUnwrap(elements[0]["d"] as? [String: Any])
+        XCTAssertEqual(d["x"] as? Double, 3)
+        XCTAssertFalse(String(data: encoded, encoding: .utf8)?.contains("3.0") ?? true)
+    }
+
+    func testPageStatusAndEmptyContentDecode() throws {
+        let json = #"{"id":"p1","site_id":"s1","title":"Home","slug":"home","content":{},"sort_order":0,"status":"archived","created_at":"now","updated_at":"now"}"#
+        let page = try JSONDecoder().decode(CappePage.self, from: Data(json.utf8))
+        XCTAssertEqual(page.status, .archived)
+        XCTAssertTrue(page.blocks.isEmpty)
+
+        let unknown = json.replacingOccurrences(of: "archived", with: "future")
+        XCTAssertEqual(try JSONDecoder().decode(CappePage.self, from: Data(unknown.utf8)).status, .unknown)
+    }
+
     func testUnknownMerlinFrameDoesNotThrow() throws {
         let frame = try JSONDecoder().decode(CappeMerlinFrame.self, from: Data(#"{"type":"future","data":{}}"#.utf8))
         if case .unknown = frame { } else { XCTFail("Expected unknown frame") }
@@ -31,6 +54,14 @@ final class MerlinFoundationTests: XCTestCase {
         guard case .result(let result) = frame else { return XCTFail("Expected result frame") }
         XCTAssertEqual(result.message, "Done")
         XCTAssertEqual(result.message_id, "m1")
+    }
+
+    func testStoredMessageUnappliedRequiresOpsWithoutResults() throws {
+        let base = #"{"id":"m1","role":"assistant","content":"Done","attachments":null,"tier":"lite","created_at":"now"}"#
+        let unapplied = base.replacingOccurrences(of: "\"attachments\":null", with: "\"attachments\":null,\"ops\":[]")
+        let applied = unapplied.replacingOccurrences(of: "\"ops\":[]", with: "\"ops\":[],\"results\":[]")
+        XCTAssertTrue(try JSONDecoder().decode(CappeMerlinStoredMessage.self, from: Data(unapplied.utf8)).isUnapplied)
+        XCTAssertFalse(try JSONDecoder().decode(CappeMerlinStoredMessage.self, from: Data(applied.utf8)).isUnapplied)
     }
 
     func testSchemaDecodesListAndThemeMetadata() throws {

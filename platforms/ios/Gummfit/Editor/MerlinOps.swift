@@ -4,7 +4,7 @@ enum MerlinOp {
     case setField(block: String, path: String, value: JSONValue)
     case setDesign(block: String, group: String, key: String, value: JSONValue)
     case setDesignBulk(blocks: [String], design: [String: [String: JSONValue]])
-    case addBlock(type: String, at: Int, content: [String: JSONValue]?, design: [String: JSONValue]?, preset: String?, id: String?)
+    case addBlock(type: String, at: Int, content: [String: JSONValue]?, design: [String: [String: JSONValue]]?, preset: String?, id: String?)
     case duplicateBlock(block: String, at: Int?, id: String?)
     case removeBlock(block: String)
     case moveBlock(block: String, to: Int)
@@ -21,13 +21,33 @@ enum MerlinOp {
             return
         }
         let string = { (key: String) in object[key]?.stringValue ?? "" }
+        let objectValue = { (key: String) in object[key]?.objectValue }
+        let stringArray = { (key: String) -> [String]? in object[key]?.arrayValue?.compactMap(\.stringValue) }
         switch name {
         case "set_field": self = .setField(block: string("block"), path: string("path"), value: object["value"] ?? .null)
         case "set_design": self = .setDesign(block: string("block"), group: string("group"), key: string("key"), value: object["value"] ?? .null)
+        case "set_design_bulk":
+            guard let blocks = stringArray("blocks"), let rawDesign = objectValue("design") else { self = .unrecognized; return }
+            let design = rawDesign.reduce(into: [String: [String: JSONValue]]()) { result, entry in
+                if let group = entry.value.objectValue { result[entry.key] = group }
+            }
+            self = .setDesignBulk(blocks: blocks, design: design)
+        case "add_block":
+            let design = objectValue("design")?.reduce(into: [String: [String: JSONValue]]()) { result, entry in
+                if let group = entry.value.objectValue { result[entry.key] = group }
+            }
+            self = .addBlock(type: string("type"), at: object["at"]?.intValue ?? 0, content: objectValue("content"), design: design, preset: object["preset"]?.stringValue, id: object["id"]?.stringValue)
         case "remove_block": self = .removeBlock(block: string("block"))
         case "move_block": self = .moveBlock(block: string("block"), to: object["to"]?.intValue ?? 0)
         case "set_theme": self = .setTheme(key: string("key"), value: object["value"] ?? .null)
         case "duplicate_block": self = .duplicateBlock(block: string("block"), at: object["at"]?.intValue, id: object["id"]?.stringValue)
+        case "canvas_add":
+            guard let element = objectValue("element") else { self = .unrecognized; return }
+            self = .canvasAdd(block: string("block"), element: element)
+        case "canvas_update":
+            guard let patch = objectValue("patch") else { self = .unrecognized; return }
+            self = .canvasUpdate(block: string("block"), el: string("el"), patch: patch)
+        case "canvas_remove": self = .canvasRemove(block: string("block"), el: string("el"))
         case "generate_image": self = .generateImage(block: string("block"), field: object["field"]?.stringValue, background: object["background"]?.boolValue ?? false, prompt: string("prompt"), aspect: object["aspect"]?.stringValue, imageSize: object["image_size"]?.stringValue)
         default: self = .unrecognized
         }
@@ -86,7 +106,7 @@ let RESERVED_PATH_KEYS: Set<String> = ["_k", "id", "type", "_design"]
 
 func applyFieldPath(block: CappeBlock, path: String, value: JSONValue) -> CappeBlock? {
     let parts = path.split(separator: ".").map(String.init)
-    guard let head = parts.first, !RESERVED_PATH_KEYS.contains(head) else { return nil }
+    guard let head = parts.first, !head.isEmpty, !RESERVED_PATH_KEYS.contains(head) else { return nil }
     var copy = block
     if parts.count == 1 {
         copy.fields[head] = value
@@ -114,6 +134,15 @@ func applyThemeOp(_ theme: [String: JSONValue], key: String, value: JSONValue, s
         result["preset"] = .string(id)
         return result
     }
+    if key == "mode", let mode = value.stringValue, (mode == "light" || mode == "dark"), theme["mode"]?.stringValue != mode {
+        var colors = result["colors"]?.objectValue ?? [:]
+        for surfaceKey in ["bg", "surface", "text", "muted", "border"] {
+            colors.removeValue(forKey: surfaceKey)
+        }
+        result["mode"] = value
+        result["colors"] = .object(colors)
+        return result
+    }
     let parts = key.split(separator: ".").map(String.init)
     guard let head = parts.first else { return nil }
     if parts.count == 1 {
@@ -139,25 +168,120 @@ func applyMerlinOps(blocks: [CappeBlock], theme: [String: JSONValue], ops: [Merl
     var tempIdMap: [String: String] = [:]
     var changed = false
     func key(_ value: String) -> String { tempIdMap[value] ?? value }
+    func index(of block: String) -> Int? { blocks.firstIndex { $0._k == key(block) } }
+    func skip(_ summary: String) { results.append(.init(ok: false, summary: summary)) }
+    func designBag(_ block: CappeBlock) -> [String: JSONValue] { block.fields["_design"]?.objectValue ?? [:] }
+    func canvasElements(_ block: CappeBlock) -> [[String: JSONValue]] {
+        (block.fields["elements"]?.arrayValue ?? []).compactMap(\.objectValue)
+    }
+    func canvasY(_ elements: [[String: JSONValue]]) -> Double {
+        elements.reduce(0) { current, element in
+            let d = element["d"]?.objectValue ?? [:]
+            return max(current, (d["y"]?.doubleValue ?? 0) + (d["h"]?.doubleValue ?? 1))
+        }
+    }
     for op in ops {
         switch op {
         case let .setField(block, path, value):
-            guard let index = blocks.firstIndex(where: { $0._k == key(block) }), let updated = applyFieldPath(block: blocks[index], path: path, value: value) else { results.append(.init(ok: false, summary: "Skipped — section no longer exists")); continue }
+            guard let index = index(of: block) else { skip("Skipped — section no longer exists"); continue }
+            guard let updated = applyFieldPath(block: blocks[index], path: path, value: value) else {
+                skip("Skipped — \"\(path)\" doesn't match this section's shape")
+                continue
+            }
             blocks[index] = updated; changed = true; results.append(.init(ok: true, summary: "Updated \(path)"))
+        case let .setDesign(block, group, designKey, value):
+            guard let index = index(of: block) else { skip("Skipped — section no longer exists"); continue }
+            if let schema, schema.design[group]?[designKey] == nil {
+                skip("Skipped — unknown design setting \"\(group).\(designKey)\"")
+                continue
+            }
+            var design = designBag(blocks[index])
+            var groupValues = design[group]?.objectValue ?? [:]
+            if value.isNull || value.stringValue == "" { groupValues.removeValue(forKey: designKey) }
+            else { groupValues[designKey] = value }
+            design[group] = .object(groupValues)
+            blocks[index].fields["_design"] = .object(design)
+            changed = true
+            results.append(.init(ok: true, summary: "Updated \(group).\(designKey)"))
+        case let .setDesignBulk(targets, design):
+            let targetKeys = Set(targets.map(key))
+            var touched = 0
+            for index in blocks.indices where targetKeys.contains(blocks[index]._k) {
+                var merged = designBag(blocks[index])
+                for (group, values) in design {
+                    var groupValues = merged[group]?.objectValue ?? [:]
+                    for (designKey, value) in values { groupValues[designKey] = value }
+                    merged[group] = .object(groupValues)
+                }
+                blocks[index].fields["_design"] = .object(merged)
+                touched += 1
+            }
+            if touched == 0 {
+                skip("Skipped — none of the targeted sections exist")
+            } else {
+                changed = true
+                results.append(.init(ok: true, summary: "Styled \(touched) section\(touched == 1 ? "" : "s")"))
+            }
+        case let .addBlock(type, at, content, design, preset, id):
+            guard let schemaBlock = schema?.blocks[type] else {
+                skip("Skipped — unknown block type \"\(type)\"")
+                continue
+            }
+            var newBlock = CappeBlock.make(fromSchemaDefault: schemaBlock.make)
+            if let content {
+                for (field, value) in content where !RESERVED_PATH_KEYS.contains(field) { newBlock.fields[field] = value }
+            }
+            newBlock.fields["type"] = .string(type)
+            newBlock = newBlock.withKey()
+            if let design, !design.isEmpty { newBlock.fields["_design"] = .object(design.mapValues { .object($0) }) }
+            if let id { tempIdMap[id] = newBlock._k }
+            blocks.insert(newBlock, at: min(max(0, at), blocks.count))
+            changed = true
+            let suffix = preset.map { " (\($0))" } ?? ""
+            results.append(.init(ok: true, summary: "Added \(schemaBlock.label)\(suffix)"))
         case let .setTheme(key, value):
-            guard let updated = applyThemeOp(theme, key: key, value: value, schema: schema) else { results.append(.init(ok: false, summary: "Skipped — unknown theme preset")); continue }
+            guard let updated = applyThemeOp(theme, key: key, value: value, schema: schema) else { skip("Skipped — unknown theme preset"); continue }
             theme = updated; changed = true; results.append(.init(ok: true, summary: "Updated theme"))
         case let .removeBlock(block):
-            guard let index = blocks.firstIndex(where: { $0._k == key(block) }) else { results.append(.init(ok: false, summary: "Skipped — section no longer exists")); continue }
+            guard let index = index(of: block) else { skip("Skipped — section no longer exists"); continue }
             blocks.remove(at: index); changed = true; results.append(.init(ok: true, summary: "Removed section"))
         case let .moveBlock(block, to):
-            guard let from = blocks.firstIndex(where: { $0._k == key(block) }) else { results.append(.init(ok: false, summary: "Skipped — section no longer exists")); continue }
-            let item = blocks.remove(at: from); blocks.insert(item, at: min(max(0, to), blocks.count)); changed = true; results.append(.init(ok: true, summary: "Moved section"))
+            guard let from = index(of: block) else { skip("Skipped — section no longer exists"); continue }
+            let destination = min(max(0, to), blocks.count - 1)
+            if destination == from { results.append(.init(ok: true, summary: "Section already in place")); continue }
+            let item = blocks.remove(at: from); blocks.insert(item, at: destination); changed = true; results.append(.init(ok: true, summary: "Moved section"))
         case let .duplicateBlock(block, at, id):
-            guard let source = blocks.first(where: { $0._k == key(block) }) else { results.append(.init(ok: false, summary: "Skipped — section no longer exists")); continue }
-            let clone = source.cloned(); let cloneKey = id ?? clone._k; tempIdMap[cloneKey] = clone._k; blocks.insert(clone, at: min(max(0, at ?? (blocks.firstIndex(where: { $0._k == key(block) })! + 1)), blocks.count)); changed = true; results.append(.init(ok: true, summary: "Duplicated section"))
+            guard let sourceIndex = index(of: block) else { skip("Skipped — section no longer exists"); continue }
+            let clone = blocks[sourceIndex].cloned()
+            if let id { tempIdMap[id] = clone._k }
+            blocks.insert(clone, at: min(max(0, at ?? (sourceIndex + 1)), blocks.count)); changed = true; results.append(.init(ok: true, summary: "Duplicated section"))
+        case let .canvasAdd(block, element):
+            guard let index = index(of: block), blocks[index].type == "canvas" else { skip("Skipped — canvas section not found"); continue }
+            var elements = canvasElements(blocks[index])
+            guard elements.count < 200 else { skip("Skipped — canvas is full"); continue }
+            guard let kind = element["kind"]?.stringValue, ["heading", "text", "image", "button"].contains(kind) else { skip("Skipped — unknown canvas element kind"); continue }
+            var newElement: [String: JSONValue] = ["id": .string(String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))), "kind": .string(kind)]
+            for field in ["text", "src", "alt", "href", "style"] where element[field] != nil { newElement[field] = element[field] }
+            newElement["d"] = element["d"] ?? .object(["x": .number(1), "y": .number(canvasY(elements)), "w": .number(8), "h": .number(2)])
+            elements.append(newElement)
+            blocks[index].fields["elements"] = .array(elements.map { .object($0) })
+            changed = true; results.append(.init(ok: true, summary: "Added element to canvas"))
+        case let .canvasUpdate(block, elementID, patch):
+            guard let index = index(of: block), blocks[index].type == "canvas" else { skip("Skipped — canvas section not found"); continue }
+            var elements = canvasElements(blocks[index])
+            guard let elementIndex = elements.firstIndex(where: { $0["id"]?.stringValue == elementID }) else { skip("Skipped — element no longer exists"); continue }
+            for (field, value) in patch where field != "id" && field != "kind" { elements[elementIndex][field] = value }
+            blocks[index].fields["elements"] = .array(elements.map { .object($0) })
+            changed = true; results.append(.init(ok: true, summary: "Updated canvas element"))
+        case let .canvasRemove(block, elementID):
+            guard let index = index(of: block), blocks[index].type == "canvas" else { skip("Skipped — canvas section not found"); continue }
+            var elements = canvasElements(blocks[index])
+            guard elements.contains(where: { $0["id"]?.stringValue == elementID }) else { skip("Skipped — element no longer exists"); continue }
+            elements.removeAll { $0["id"]?.stringValue == elementID }
+            blocks[index].fields["elements"] = .array(elements.map { .object($0) })
+            changed = true; results.append(.init(ok: true, summary: "Removed element from canvas"))
         case .generateImage: results.append(.init(ok: true, summary: "Image generation queued"))
-        default: results.append(.init(ok: false, summary: "Skipped — unsupported op"))
+        case .unrecognized: skip("Skipped — unrecognized op")
         }
     }
     return MerlinApplyResult(blocks: blocks, theme: theme, results: results, tempIdMap: tempIdMap, changed: changed)

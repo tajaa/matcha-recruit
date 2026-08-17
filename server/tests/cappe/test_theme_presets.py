@@ -1,15 +1,15 @@
 """theme_presets.py is a hand-maintained server mirror of the client's
-CAPPE_THEMES (cappeThemes.ts) — the AI-facing subset (id/name/blurb/premium/
-mode), so Merlin can be theme-aware without moving client-rendering concerns
-(swatch, the full theme_config `config` object) server-side. Drift is silent in
-both directions: an id only the client knows can never be suggested by the
-model to a preset it's unaware of, and an id only the server knows is offered
-in the prompt but `applyThemeOp` will silently skip it client-side.
+CAPPE_THEMES (cappeThemes.ts), including the full render config and swatch for
+native clients. Drift is silent in both directions: an id only the client knows
+can never be suggested by the model to a preset it's unaware of, and an id only
+the server knows is offered in the prompt but `applyThemeOp` will silently skip
+it client-side.
 
 Pure — no DB, no app boot, no Gemini:
   ./venv/bin/python -m pytest tests/cappe/test_theme_presets.py -q
 """
 import os
+import json
 import pathlib
 import re
 
@@ -40,6 +40,44 @@ def _client_preset_blocks() -> list[str]:
     `swatch`/`config` objects close at 4-space indent, so they don't match)."""
     source = _client_source()
     return re.findall(r"\{\n\s*id: '[a-z]+',.*?\n  \},", source, re.S)
+
+
+def _balanced_object(source: str, start: int) -> str:
+    """Return one TS object literal, including nested objects."""
+    depth = 0
+    quote = None
+    escaped = False
+    for index in range(start, len(source)):
+        char = source[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    raise AssertionError("unterminated TypeScript object")
+
+
+def _client_config(block: str) -> dict:
+    marker = block.index("config:")
+    start = block.index("{", marker)
+    raw = _balanced_object(block, start)
+    raw = re.sub(r"//[^\n]*", "", raw)
+    raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+    raw = re.sub(r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)", r'\1"\2"\3', raw)
+    raw = raw.replace("'", '"')
+    raw = re.sub(r",\s*([}\]])", r"\1", raw)
+    return json.loads(raw)
 
 
 def test_theme_preset_ids_match_client():
@@ -97,6 +135,13 @@ def test_font_pairing_ids_match_client():
 def test_preset_configs_are_populated_for_non_web_clients():
     assert all(p.config for p in THEME_PRESETS)
     assert all(set(p.swatch) == {"bg", "surface", "brand", "text"} for p in THEME_PRESETS)
+
+
+def test_preset_configs_match_client():
+    """Top-level and nested config drift changes the rendered palette/fonts."""
+    blocks = {re.search(r"id: '([a-z]+)'", b).group(1): b for b in _client_preset_blocks()}
+    for preset in THEME_PRESETS:
+        assert _client_config(blocks[preset.id]) == preset.config, f"{preset.id}: config drift"
 
 
 # --- set_theme preset validation ----------------------------------------------

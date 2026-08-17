@@ -1,9 +1,8 @@
 import SwiftUI
 
 /// First-site (blocking, no dismiss) or additional-site (sheet, dismissable)
-/// — `isFirstSite` only changes chrome, not behavior. No page editor (plan
-/// §"No page editor") — creation always yields a blank site; editing content
-/// stays on web.
+/// — `isFirstSite` only changes chrome, not behavior. Creation yields a blank
+/// site; the native page editor is wired separately.
 struct CreateSiteView: View {
     var isFirstSite: Bool = false
 

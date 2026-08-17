@@ -140,8 +140,6 @@ BLOCK_FIELD_LABELS: dict[str, dict[str, str]] = {
 
 BLOCK_FIELD_PLACEHOLDERS: dict[str, dict[str, str]] = {
     "hero": {"ctaHref": "/p/contact or https://…"},
-    "pricing": {"plans.price": "$24", "plans.period": "/mo"},
-    "stats": {"items.value": "500+"},
     "map": {"address": "Defaults to your business address in Settings", "lat": "e.g. 37.7749", "lng": "e.g. -122.4194"},
     "contact": {"formSlug": "contact — create it in the Forms tab"},
 }
