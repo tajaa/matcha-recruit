@@ -259,6 +259,60 @@ class APIClient {
         _ = try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized)
     }
 
+    /// Endpoints that answer `text/html` rather than JSON. The preview shares
+    /// requestData's auth-refresh and maintenance-retry behavior.
+    func requestHTML(method: String, path: String, body: (any Encodable)? = nil) async throws -> String {
+        let data = try await requestData(method: method, path: path, body: body)
+        guard let html = String(data: data, encoding: .utf8) else { throw APIError.noData }
+        return html
+    }
+
+    /// POST-based SSE. URLSession has no EventSource equivalent, and
+    /// EventSource is GET-only. Invalid JSON is deliberately left to the frame
+    /// consumer so one malformed frame cannot terminate the stream.
+    func streamSSE(
+        path: String,
+        body: any Encodable,
+        onFrame: @escaping (Data) -> Bool
+    ) async throws {
+        try await AuthService.shared.ensureFreshToken(minTTL: 60)
+        guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 300
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try encoder.encode(body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.noData }
+        guard (200...299).contains(http.statusCode) else {
+            var buffer = Data()
+            for try await byte in bytes {
+                buffer.append(byte)
+                if buffer.count > 8192 { break }
+            }
+            throw APIError.httpError(
+                http.statusCode,
+                _extractErrorMessage(from: buffer) ?? "HTTP \(http.statusCode)"
+            )
+        }
+
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = line.dropFirst(6).trimmingCharacters(in: .whitespacesAndNewlines)
+            if payload.isEmpty { continue }
+            if payload == "[DONE]" { return }
+            if onFrame(Data(payload.utf8)) { return }
+        }
+    }
+
     func requestData(
         method: String,
         path: String,

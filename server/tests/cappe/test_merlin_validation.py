@@ -9,7 +9,20 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 from app.cappe.services.merlin.turn import validate_ops  # noqa: E402
-from app.cappe.services.merlin.catalog import CANVAS_MAX_ELEMENTS, MAX_OPS_PER_TURN  # noqa: E402
+from app.cappe.services.merlin.catalog import (  # noqa: E402
+    BLOCK_DEFAULTS,
+    BLOCK_FIELDS,
+    BLOCK_FIELD_LABELS,
+    BLOCK_LIST_ITEM_FIELDS,
+    BLOCK_ORDER,
+    BLOCK_TYPES,
+    LIST_KINDS,
+    MAX_OPS_PER_TURN,
+    SELECT_OPTION_LABELS,
+    SELECT_OPTIONS,
+    TEXT_KINDS,
+    CANVAS_MAX_ELEMENTS,
+)
 
 _HERO = {"id": "b1", "type": "hero", "heading": "Old", "subheading": "Sub"}
 _CANVAS = {
@@ -332,6 +345,60 @@ def test_server_catalog_matches_client_block_schemas():
         f"catalog drift — client-only: {sorted(client_types - set(BLOCK_TYPES))}, "
         f"server-only: {sorted(set(BLOCK_TYPES) - client_types)}"
     )
+
+
+def test_block_defaults_cover_every_block_type():
+    assert set(BLOCK_DEFAULTS) == set(BLOCK_TYPES)
+    assert all(default["type"] == btype for btype, default in BLOCK_DEFAULTS.items())
+
+
+def test_every_list_field_has_an_item_schema():
+    for btype, fields in BLOCK_FIELDS.items():
+        for name, kind in fields.items():
+            if kind == "list":
+                assert BLOCK_LIST_ITEM_FIELDS.get(btype, {}).get(name), (btype, name)
+
+
+def test_list_item_sub_kinds_are_known():
+    known = LIST_KINDS | TEXT_KINDS | {"bool"}
+    for fields in BLOCK_LIST_ITEM_FIELDS.values():
+        for item_fields in fields.values():
+            assert set(item_fields.values()) <= known
+
+
+def test_block_field_labels_cover_every_field():
+    for btype, fields in BLOCK_FIELDS.items():
+        assert set(BLOCK_FIELD_LABELS.get(btype, {})) >= set(fields)
+
+
+def test_block_order_matches_client():
+    import pathlib
+    import re
+
+    schemas = pathlib.Path(__file__).resolve().parents[2] / (
+        "../client/src/cappe/pages/site/PageEditor/blockSchemas.ts"
+    )
+    source = schemas.resolve().read_text()
+    order = re.search(r"export const BLOCK_ORDER = \[(.*?)\]", source, re.S)
+    client_order = re.findall(r"'([a-z]+)'", order.group(1))
+    assert list(BLOCK_ORDER) == client_order
+
+
+def test_select_option_labels_cover_every_option():
+    for btype, fields in SELECT_OPTIONS.items():
+        for name, options in fields.items():
+            assert set(SELECT_OPTION_LABELS[btype][name]) == set(options)
+
+
+def test_schema_is_json_serializable():
+    import json
+
+    from app.cappe.services.merlin.ops import build_merlin_schema
+
+    schema = build_merlin_schema()
+    json.dumps(schema)
+    assert schema["blocks"]["features"]["fields"]["items"]["item"]["title"]["kind"] == "text"
+    assert schema["themePresets"][0]["config"]
 
 
 # --- mobile placement gets the same bounds check as desktop -------------------

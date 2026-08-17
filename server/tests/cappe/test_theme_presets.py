@@ -20,6 +20,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 from app.cappe.services.merlin.ops import _v_set_theme, ValidationCtx  # noqa: E402
 from app.cappe.services.theme_presets import (  # noqa: E402
     FONT_PAIRINGS,
+    FONT_PAIRING_LIST,
     PRESET_IDS,
     THEME_PRESETS,
 )
@@ -83,6 +84,19 @@ def test_font_pairings_match_client():
     assert client_pairs == list(FONT_PAIRINGS), (
         f"font pairing drift — client: {client_pairs}, server: {list(FONT_PAIRINGS)}"
     )
+
+
+def test_font_pairing_ids_match_client():
+    source = _client_source()
+    match = re.search(r"export const FONT_PAIRINGS.*?= \[(.*?)\n\]", source, re.S)
+    assert match, "couldn't find FONT_PAIRINGS in cappeThemes.ts"
+    client_ids = set(re.findall(r"id: '([^']+)'", match.group(1)))
+    assert client_ids == {pairing.id for pairing in FONT_PAIRING_LIST}
+
+
+def test_preset_configs_are_populated_for_non_web_clients():
+    assert all(p.config for p in THEME_PRESETS)
+    assert all(set(p.swatch) == {"bg", "surface", "brand", "text"} for p in THEME_PRESETS)
 
 
 # --- set_theme preset validation ----------------------------------------------

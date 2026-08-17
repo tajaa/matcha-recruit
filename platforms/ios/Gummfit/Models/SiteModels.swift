@@ -38,8 +38,7 @@ struct CappeSite: Codable, Identifiable, Equatable {
     }
 }
 
-/// Mirrors CappeSiteCreate (server/app/cappe/models/sites.py:44-49). No page
-/// editor in this app (plan §"No page editor") — always a blank site.
+/// Mirrors CappeSiteCreate (server/app/cappe/models/sites.py:44-49).
 struct CappeSiteCreate: Encodable {
     let name: String
     let source_type: String = "blank"
@@ -48,11 +47,13 @@ struct CappeSiteCreate: Encodable {
 struct CappeSiteUpdate: Encodable {
     var name, subdomain, timezone, tax_label, shipping_label, receipt_prefix: String?
     var status: String?
+    var theme_config: [String: JSONValue]? = nil
+    var meta_config: [String: JSONValue]? = nil
     var tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents: Int?
     var is_multi_location: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case name, subdomain, timezone, tax_label, shipping_label, receipt_prefix, status
+        case name, subdomain, timezone, tax_label, shipping_label, receipt_prefix, status, theme_config, meta_config
         case tax_rate_bps, shipping_flat_cents, shipping_free_threshold_cents, is_multi_location
     }
 
@@ -65,6 +66,8 @@ struct CappeSiteUpdate: Encodable {
         try container.encodeIfPresent(shipping_label, forKey: .shipping_label)
         try container.encode(receipt_prefix, forKey: .receipt_prefix)
         try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(theme_config, forKey: .theme_config)
+        try container.encodeIfPresent(meta_config, forKey: .meta_config)
         try container.encodeIfPresent(tax_rate_bps, forKey: .tax_rate_bps)
         try container.encodeIfPresent(shipping_flat_cents, forKey: .shipping_flat_cents)
         // The API uses an explicit null to clear these optional settings.

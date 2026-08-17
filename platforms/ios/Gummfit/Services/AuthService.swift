@@ -75,6 +75,27 @@ final class AuthService {
         return try await task.value
     }
 
+    /// Refreshes a token that will expire during a long-running stream. A
+    /// malformed JWT is ignored; the stream's own HTTP response remains the
+    /// authoritative failure in that case.
+    func ensureFreshToken(minTTL: TimeInterval) async throws {
+        guard let token = client.accessToken else { return }
+        let pieces = token.split(separator: ".")
+        guard pieces.count >= 2 else { return }
+
+        var encodedPayload = String(pieces[1])
+        encodedPayload += String(repeating: "=", count: (4 - encodedPayload.count % 4) % 4)
+        encodedPayload = encodedPayload.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        guard let payloadData = Data(base64Encoded: encodedPayload),
+              let payload = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any],
+              let exp = payload["exp"] as? NSNumber else { return }
+
+        if exp.doubleValue - Date().timeIntervalSince1970 < minTTL {
+            _ = try await refresh()
+        }
+    }
+
     /// Resolves to nil on any failure (no stored refresh token, or a
     /// definitive rejection) — NEVER deletes keychain on a network failure;
     /// only `_isAuthRejection` paths inside APIClient do that.

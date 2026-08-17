@@ -24,6 +24,7 @@ targets:
     sources:
       - path: App
       - path: Models
+      - path: Editor
       - path: Services
       - path: ViewModels
       - path: Views

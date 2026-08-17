@@ -51,7 +51,7 @@ from .catalog import (
 
 from ..section_presets import PRESETS_BY_KEY, SECTION_PRESETS
 from ..style_recipes import RECIPES_BY_KEY, STYLE_RECIPES
-from ..theme_presets import PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
+from ..theme_presets import FONT_PAIRING_LIST, PRESET_IDS, THEME_PRESETS, font_pairings_text, preset_catalog_text
 
 _HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
@@ -935,31 +935,65 @@ def build_merlin_schema() -> dict[str, Any]:
     """Assemble the full Merlin schema from the registries + catalog. Pure and
     JSON-serializable."""
     from .catalog import (
+        BLOCK_DEFAULTS,
+        BLOCK_FIELD_LABELS,
+        BLOCK_FIELD_PLACEHOLDERS,
+        BLOCK_LIST_ADD_LABELS,
+        BLOCK_LIST_ITEM_DEFAULTS,
+        BLOCK_LIST_ITEM_FIELDS,
+        BLOCK_LIST_ITEM_LABELS,
         BLOCK_LABELS,
+        BLOCK_ORDER,
         CANVAS_ELEMENT_KINDS,
         CANVAS_GRID_COLS,
         CANVAS_MAX_ELEMENTS,
         CANVAS_MOBILE_GRID_COLS,
+        SELECT_OPTION_LABELS,
         THEME_KEY_PREFIXES,
         THEME_KEYS,
         THEME_MODE_VALUES,
     )
 
+    def _field_json(btype: str, name: str, kind: str) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "kind": kind,
+            "label": BLOCK_FIELD_LABELS.get(btype, {}).get(name, name),
+        }
+        if placeholder := BLOCK_FIELD_PLACEHOLDERS.get(btype, {}).get(name):
+            out["placeholder"] = placeholder
+        if name in SELECT_OPTIONS.get(btype, {}):
+            labels = SELECT_OPTION_LABELS.get(btype, {}).get(name, {})
+            out["options"] = [
+                {"value": value, "label": labels.get(value, value)}
+                for value in sorted(SELECT_OPTIONS[btype][name])
+            ]
+        if kind == "list":
+            item_kinds = BLOCK_LIST_ITEM_FIELDS.get(btype, {}).get(name, {})
+            item_labels = BLOCK_LIST_ITEM_LABELS.get(btype, {}).get(name, {})
+            out["item"] = {
+                sub: {"kind": sub_kind, "label": item_labels.get(sub, sub)}
+                for sub, sub_kind in item_kinds.items()
+            }
+            out["newItem"] = BLOCK_LIST_ITEM_DEFAULTS.get(btype, {}).get(name, {})
+            out["addLabel"] = BLOCK_LIST_ADD_LABELS.get(btype, {}).get(name, "Add item")
+        return out
+
     blocks: dict[str, Any] = {}
     for btype in sorted(BLOCK_TYPES):
         fields = BLOCK_FIELDS.get(btype, {})
-        opts = SELECT_OPTIONS.get(btype, {})
         blocks[btype] = {
             "label": BLOCK_LABELS.get(btype, btype),
             "fields": {
-                name: {"kind": kind, **({"options": sorted(opts[name])} if name in opts else {})}
+                name: _field_json(btype, name, kind)
                 for name, kind in sorted(fields.items())
             },
+            "make": BLOCK_DEFAULTS.get(btype, {"type": btype}),
         }
 
     return {
         "ops": [{"name": op.name, "shape": op.prompt_shape} for op in MERLIN_OPS],
         "blocks": blocks,
+        "blockOrder": list(BLOCK_ORDER),
         "design": {
             group: {key: _spec_json(spec) for key, spec in sorted(keys.items())}
             for group, keys in sorted(DESIGN_GROUPS.items())
@@ -974,8 +1008,15 @@ def build_merlin_schema() -> dict[str, Any]:
             for p in SECTION_PRESETS
         ],
         "themePresets": [
-            {"id": p.id, "name": p.name, "blurb": p.blurb, "premium": p.premium, "mode": p.mode}
+            {
+                "id": p.id, "name": p.name, "blurb": p.blurb, "premium": p.premium, "mode": p.mode,
+                "config": p.config, "swatch": p.swatch,
+            }
             for p in THEME_PRESETS
+        ],
+        "fontPairings": [
+            {"id": p.id, "label": p.label, "heading": p.heading, "body": p.body}
+            for p in FONT_PAIRING_LIST
         ],
         "styleRecipes": [
             {"key": r.key, "label": r.label, "blurb": r.blurb} for r in STYLE_RECIPES

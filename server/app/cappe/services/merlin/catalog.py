@@ -88,7 +88,7 @@ COLUMN_BLOCK_TYPES: frozenset[str] = frozenset({
     "features", "gallery", "pricing", "testimonial", "stats", "credentials", "reviews", "menu",
 })
 
-# Human labels, for the prompt only (mirrors BLOCK_SCHEMAS[type].label).
+# Human labels, for the prompt and non-web editor clients.
 BLOCK_LABELS: dict[str, str] = {
     "hero": "Hero", "features": "Features", "gallery": "Gallery", "pricing": "Pricing",
     "testimonial": "Testimonials", "cta": "Call to action", "menu": "Menu",
@@ -98,6 +98,146 @@ BLOCK_LABELS: dict[str, str] = {
     "contact": "Contact form", "store": "Store (products)", "booking": "Booking widget",
     "newsletter": "Newsletter signup", "canvas": "Blank / Freeform",
 }
+
+# Field labels and editor metadata mirror the frontend's ``F(...)`` definitions.
+# The server emits these through GET /merlin/schema so native clients do not need
+# another hand-maintained copy of the block editor vocabulary.
+BLOCK_FIELD_LABELS: dict[str, dict[str, str]] = {
+    "hero": {
+        "eyebrow": "Eyebrow (small label)", "heading": "Heading", "subheading": "Subheading",
+        "style": "Layout", "image": "Hero photo — adds a full-bleed background",
+        "video": "Hero video — premium, autoplay full-bleed background",
+        "align": "Text align (image layout)", "overlay": "Photo overlay (image layout)",
+        "height": "Height (image layout)", "cta": "Button label", "ctaHref": "Button link",
+        "cta2": "Second button label", "cta2Href": "Second button link",
+    },
+    "features": {"heading": "Section heading", "subheading": "Section subheading", "items": "Items"},
+    "gallery": {"heading": "Section heading", "images": "Images"},
+    "pricing": {"heading": "Section heading", "plans": "Plans"},
+    "testimonial": {"heading": "Section heading", "items": "Quotes"},
+    "cta": {"heading": "Heading", "subheading": "Subheading", "cta": "Button label", "ctaHref": "Button link"},
+    "menu": {"heading": "Section heading", "sections": "Sections"},
+    "posts": {"heading": "Section heading", "items": "Posts"},
+    "stats": {"heading": "Section heading", "subheading": "Section subheading", "items": "Stats"},
+    "logos": {"heading": "Eyebrow label", "items": "Logos"},
+    "faq": {"heading": "Section heading", "subheading": "Section subheading", "items": "Questions"},
+    "bento": {"heading": "Section heading", "subheading": "Section subheading", "items": "Cells"},
+    "split": {
+        "eyebrow": "Eyebrow (small label)", "heading": "Heading", "body": "Body", "image": "Image",
+        "bullets": "Bullet points", "cta": "Button label", "ctaHref": "Button link", "reverse": "Image on right",
+    },
+    "credentials": {"heading": "Section heading", "subheading": "Section subheading", "items": "Credentials"},
+    "reviews": {"heading": "Section heading", "subheading": "Section subheading", "allowSubmissions": "Let visitors leave a review"},
+    "map": {"heading": "Heading", "address": "Address", "lat": "Latitude (optional — adds a map)", "lng": "Longitude (optional)"},
+    "hours": {"heading": "Section heading", "subheading": "Subheading"},
+    "text": {"heading": "Heading", "body": "Body"},
+    "contact": {"heading": "Heading", "subheading": "Subheading", "fields": "Form fields", "formSlug": "Submit to form (slug)"},
+    "store": {"heading": "Section heading", "subheading": "Section subheading"},
+    "booking": {"heading": "Section heading", "subheading": "Section subheading"},
+    "newsletter": {"heading": "Section heading", "subheading": "Section subheading"},
+    "canvas": {},
+}
+
+BLOCK_FIELD_PLACEHOLDERS: dict[str, dict[str, str]] = {
+    "hero": {"ctaHref": "/p/contact or https://…"},
+    "pricing": {"plans.price": "$24", "plans.period": "/mo"},
+    "stats": {"items.value": "500+"},
+    "map": {"address": "Defaults to your business address in Settings", "lat": "e.g. 37.7749", "lng": "e.g. -122.4194"},
+    "contact": {"formSlug": "contact — create it in the Forms tab"},
+}
+
+SELECT_OPTION_LABELS: dict[str, dict[str, dict[str, str]]] = {
+    "hero": {
+        "style": {"centered": "Centered", "split": "Split (with image)", "image": "Full image background", "minimal": "Minimal"},
+        "align": {"center": "Center", "left": "Left"},
+        "overlay": {"light": "Light", "medium": "Medium", "dark": "Dark"},
+        "height": {"tall": "Tall", "full": "Full screen"},
+    },
+    "bento": {"span": {"normal": "Normal", "wide": "Wide (full row)", "tall": "Tall"}},
+}
+
+# ``item`` describes one level of list rows. Nested list fields are represented
+# as kind="list" and can be extended with the same shape by native clients.
+BLOCK_LIST_ITEM_FIELDS: dict[str, dict[str, dict[str, str]]] = {
+    "features": {"items": {"icon": "text", "title": "text", "body": "textarea"}},
+    "gallery": {"images": {"url": "image", "caption": "text"}},
+    "pricing": {"plans": {"name": "text", "price": "text", "period": "text", "features": "strlist", "cta": "text", "ctaHref": "text", "highlighted": "bool"}},
+    "testimonial": {"items": {"quote": "textarea", "author": "text", "role": "text"}},
+    "menu": {"sections": {"name": "text", "items": "list"}},
+    "posts": {"items": {"date": "text", "title": "text", "excerpt": "textarea", "slug": "text"}},
+    "stats": {"items": {"value": "text", "label": "text"}},
+    "logos": {"items": {"name": "text", "image": "image"}},
+    "faq": {"items": {"q": "text", "a": "textarea"}},
+    "bento": {"items": {"icon": "text", "title": "text", "body": "textarea", "image": "image", "span": "select"}},
+    "credentials": {"items": {"title": "text", "issuer": "text", "year": "text", "detail": "textarea"}},
+}
+
+BLOCK_LIST_ITEM_LABELS: dict[str, dict[str, dict[str, str]]] = {
+    "features": {"items": {"icon": "Icon / emoji", "title": "Title", "body": "Body"}},
+    "gallery": {"images": {"url": "Image", "caption": "Caption"}},
+    "pricing": {"plans": {"name": "Name", "price": "Price", "period": "Period", "features": "Features", "cta": "Button label", "ctaHref": "Button link", "highlighted": "Highlight as popular"}},
+    "testimonial": {"items": {"quote": "Quote", "author": "Author", "role": "Role / company"}},
+    "menu": {"sections": {"name": "Section name", "items": "Items"}},
+    "posts": {"items": {"date": "Date", "title": "Title", "excerpt": "Excerpt", "slug": "Links to page slug"}},
+    "stats": {"items": {"value": "Number", "label": "Label"}},
+    "logos": {"items": {"name": "Name (used if no image)", "image": "Logo image"}},
+    "faq": {"items": {"q": "Question", "a": "Answer"}},
+    "bento": {"items": {"icon": "Icon / emoji", "title": "Title", "body": "Body", "image": "Background image", "span": "Size"}},
+    "credentials": {"items": {"title": "Title / certification", "issuer": "Issuing body", "year": "Year", "detail": "Detail (optional)"}},
+}
+
+BLOCK_LIST_ITEM_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
+    "features": {"items": {"title": "", "body": ""}},
+    "gallery": {"images": {"url": ""}},
+    "pricing": {"plans": {"name": "", "price": "", "features": []}},
+    "testimonial": {"items": {"quote": "", "author": ""}},
+    "menu": {"sections": {"name": "", "items": []}},
+    "posts": {"items": {"title": "", "excerpt": ""}},
+    "stats": {"items": {"value": "", "label": ""}},
+    "logos": {"items": {"name": ""}},
+    "faq": {"items": {"q": "", "a": ""}},
+    "bento": {"items": {"title": "", "body": ""}},
+    "credentials": {"items": {"title": "", "issuer": "", "year": ""}},
+}
+
+BLOCK_LIST_ADD_LABELS: dict[str, dict[str, str]] = {
+    "features": {"items": "Add feature"}, "gallery": {"images": "Add image"},
+    "pricing": {"plans": "Add plan"}, "testimonial": {"items": "Add quote"},
+    "menu": {"sections": "Add section"}, "posts": {"items": "Add post"},
+    "stats": {"items": "Add stat"}, "logos": {"items": "Add logo"},
+    "faq": {"items": "Add question"}, "bento": {"items": "Add cell"},
+    "credentials": {"items": "Add credential"},
+}
+
+BLOCK_DEFAULTS: dict[str, dict[str, Any]] = {
+    "hero": {"type": "hero", "heading": "Your headline", "subheading": "A sentence of supporting copy.", "cta": "Get started", "style": "centered"},
+    "features": {"type": "features", "heading": "What I do", "items": [{"icon": "✦", "title": "Feature one", "body": "Short description."}, {"icon": "◆", "title": "Feature two", "body": "Short description."}, {"icon": "▲", "title": "Feature three", "body": "Short description."}]},
+    "gallery": {"type": "gallery", "heading": "Gallery", "images": []},
+    "pricing": {"type": "pricing", "heading": "Pricing", "plans": [{"name": "Basic", "price": "$0", "period": "/mo", "features": ["Feature"], "cta": "Choose"}]},
+    "testimonial": {"type": "testimonial", "items": [{"quote": "", "author": ""}]},
+    "cta": {"type": "cta", "heading": "Ready to start?", "cta": "Get started"},
+    "menu": {"type": "menu", "heading": "Menu", "sections": [{"name": "Section", "items": [{"name": "", "price": ""}]}]},
+    "posts": {"type": "posts", "items": [{"title": "", "excerpt": ""}]},
+    "stats": {"type": "stats", "items": [{"value": "500+", "label": "Happy clients"}, {"value": "10 yrs", "label": "Experience"}, {"value": "98%", "label": "Would recommend"}]},
+    "logos": {"type": "logos", "heading": "Trusted by", "items": [{"name": "Acme"}, {"name": "Globex"}, {"name": "Initech"}]},
+    "faq": {"type": "faq", "heading": "Frequently asked", "items": [{"q": "How does it work?", "a": "Explain it here in a sentence or two."}]},
+    "bento": {"type": "bento", "heading": "Highlights", "items": [{"title": "Big idea", "body": "Your standout point.", "span": "wide"}, {"title": "Detail one", "body": "Supporting detail."}, {"title": "Detail two", "body": "Supporting detail."}]},
+    "split": {"type": "split", "heading": "A focused feature", "body": "Describe one thing in depth, with an image alongside.", "bullets": ["Benefit one", "Benefit two"]},
+    "credentials": {"type": "credentials", "heading": "Certifications & qualifications", "items": [{"title": "Certified Personal Trainer", "issuer": "NASM", "year": "2021"}, {"title": "CPR & First Aid", "issuer": "Red Cross", "year": "2024"}]},
+    "reviews": {"type": "reviews", "heading": "What clients say", "allowSubmissions": True},
+    "map": {"type": "map", "heading": "Find us"}, "hours": {"type": "hours", "heading": "Hours"},
+    "text": {"type": "text", "body": "Write something here."},
+    "contact": {"type": "contact", "heading": "Get in touch", "fields": ["name", "email", "message"]},
+    "store": {"type": "store", "heading": "Shop"}, "booking": {"type": "booking", "heading": "Book a session"},
+    "newsletter": {"type": "newsletter", "heading": "Subscribe"},
+    "canvas": {"type": "canvas", "grid": {"cols": 24, "rowH": 24, "rows": 30}, "mobile": {"cols": 8, "rowH": 24, "rows": 60}, "elements": [{"kind": "heading", "text": "", "d": {"x": 1, "y": 2, "w": 12, "h": 3}}]},
+}
+
+BLOCK_ORDER: tuple[str, ...] = (
+    "hero", "features", "split", "bento", "stats", "credentials", "logos", "gallery", "pricing",
+    "testimonial", "reviews", "faq", "cta", "store", "booking", "menu", "hours", "map", "posts",
+    "text", "contact", "newsletter", "canvas",
+)
 
 # theme_config top-level keys Merlin may set. `type`/`style`/`premium` and
 # `colors.brandGradient` are premium-only (see design_gate.py) but Merlin is
