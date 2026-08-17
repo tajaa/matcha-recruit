@@ -8,6 +8,9 @@ struct ConsumerSettingsView: View {
     @State private var city = ""
     @State private var state = ""
     @State private var zipcode = ""
+    @State private var handle = ""
+    @State private var visibility: ProfileVisibility = .friends
+    @State private var discoverable = true
 
     var body: some View {
         Form {
@@ -18,6 +21,24 @@ struct ConsumerSettingsView: View {
                     Task { await vm.saveProfile(appState: appState, displayName: displayName, leaderboardOptIn: leaderboardOptIn) }
                 }
                 if vm.savedProfile { Text("Saved.").font(.interFootnote).foregroundStyle(.green) }
+            }
+            .listRowBackground(TU.inkRaised)
+
+            Section("Handle") {
+                TextField("@handle", text: $handle).textInputAutocapitalization(.never)
+                if vm.handleState == .available { Text("Available").foregroundStyle(.green) }
+                if vm.handleState == .taken { Text("Taken").foregroundStyle(.red) }
+                Button("Check availability") { Task { await vm.checkHandle(handle) } }
+                Button("Claim handle") { Task { await vm.claimHandle(appState: appState, handle: handle) } }
+            }
+            .listRowBackground(TU.inkRaised)
+
+            Section("Privacy") {
+                Picker("Profile visibility", selection: $visibility) {
+                    ForEach(ProfileVisibility.allCases.filter { $0 != .unknown }, id: \.self) { value in Text(value.rawValue.capitalized).tag(value) }
+                }
+                Toggle("Let people find me by @handle", isOn: $discoverable)
+                Button("Save privacy") { Task { await vm.savePrivacy(appState: appState, visibility: visibility, discoverable: discoverable, leaderboardOptIn: leaderboardOptIn) } }
             }
             .listRowBackground(TU.inkRaised)
 
@@ -42,6 +63,9 @@ struct ConsumerSettingsView: View {
         .onAppear {
             displayName = appState.account?.display_name ?? ""
             leaderboardOptIn = appState.account?.leaderboard_opt_in ?? false
+            handle = appState.account?.handle ?? ""
+            visibility = ProfileVisibility(rawValue: appState.account?.profile_visibility ?? "friends") ?? .friends
+            discoverable = appState.account?.discoverable ?? true
             city = appState.account?.city ?? ""
             state = appState.account?.state ?? ""
         }

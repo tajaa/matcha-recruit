@@ -15,6 +15,9 @@ enum DeepLinkRoute: Hashable, Identifiable {
     case boardManage(slug: String?)
     /// Consumer: open a promo claim sheet from a campaign push.
     case promoClaim(token: String)
+    case friendRequests(highlightRequestId: String)
+    case friendProfile(accountId: String, name: String)
+    case friendInvite(token: String)
 
     var id: String {
         switch self {
@@ -23,6 +26,9 @@ enum DeepLinkRoute: Hashable, Identifiable {
         case .report(let id): return "report-\(id)"
         case .boardManage(let slug): return "board-manage-\(slug ?? "own")"
         case .promoClaim(let token): return "promo-\(token)"
+        case .friendRequests(let id): return "friend-requests-\(id)"
+        case .friendProfile(let id, _): return "friend-profile-\(id)"
+        case .friendInvite(let token): return "friend-invite-\(token)"
         }
     }
 
@@ -48,6 +54,12 @@ enum DeepLinkRoute: Hashable, Identifiable {
             return .report(reportId: id)
         case "board_reply_pending":
             return .boardManage(slug: userInfo["slug"] as? String)
+        case "friend_request":
+            guard let id = userInfo["reference_id"] as? String else { return nil }
+            return .friendRequests(highlightRequestId: id)
+        case "friend_accepted", "friend_added":
+            guard let id = userInfo["reference_id"] as? String else { return nil }
+            return .friendProfile(accountId: id, name: userInfo["name"] as? String ?? "Friend")
         default:
             return nil
         }

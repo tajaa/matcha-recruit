@@ -86,7 +86,7 @@ enum FriendActivityKind: String, Codable, FallbackDecodable {
     case review_published, place_followed, unknown
 }
 
-enum ProfileVisibility: String, Codable, CaseIterable, FallbackDecodable {
+enum ProfileVisibility: String, Codable, CaseIterable, Hashable, FallbackDecodable {
     case everyone, friends, `private`, unknown
 }
 

@@ -7,10 +7,11 @@ import VisionKit
 enum ScannedTarget: Equatable, Hashable {
     case intake(String)
     case promoClaim(String)
+    case friendInvite(String)
 
     var token: String {
         switch self {
-        case .intake(let t), .promoClaim(let t): return t
+        case .intake(let t), .promoClaim(let t), .friendInvite(let t): return t
         }
     }
 }
@@ -24,6 +25,9 @@ func scannedTarget(from raw: String) -> ScannedTarget? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     if let url = URL(string: trimmed) {
         let components = url.pathComponents
+        if let i = components.lastIndex(of: "f"), components.indices.contains(i + 1) {
+            return .friendInvite(components[i + 1])
+        }
         // Search from the END: a host or an earlier path segment could
         // legitimately be "p" (e.g. /p/p/{token} is unlikely, but /tellus/p/…
         // sitting under a path that also contains "i" is not).
@@ -93,6 +97,8 @@ struct ScanView: View {
                 IntakeLoaderView(token: token)
             case .promoClaim(let token):
                 ClaimSheet(token: token)
+            case .friendInvite(let token):
+                FriendInviteRedeemView(token: token)
             }
         }
     }

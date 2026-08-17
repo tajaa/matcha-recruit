@@ -54,8 +54,10 @@ final class AppState {
             Task { @MainActor in
                 guard let self else { return }
                 switch self.phase {
-                case .consumer, .brand:
+                case .consumer:
                     self.pendingDeepLink = route
+                case .brand:
+                    if case .friendRequests = route {} else if case .friendProfile = route {} else if case .friendInvite = route {} else { self.pendingDeepLink = route }
                 default:
                     self.deferredDeepLink = route
                 }
