@@ -81,4 +81,5 @@ export interface ScheduleChatApplyResponse {
   ok: boolean
   text: string
   shift_ids: string[]
+  week_template_id?: string | null
 }

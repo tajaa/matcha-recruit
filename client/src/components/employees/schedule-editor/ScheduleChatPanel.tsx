@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Bot, Loader2, Send, Sparkles, X } from 'lucide-react'
 import { useToast } from '../../ui'
 import { applyScheduleChat, discardScheduleChat, sendScheduleChatMessage } from '../../../api/employees/scheduleChat'
@@ -100,7 +101,19 @@ export default function ScheduleChatPanel({ weekStart, locationId, editPublished
           <div key={message.id} className={message.role === 'user' ? 'ml-8 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200' : 'mr-3'}>
             {message.role === 'assistant' && <Bot className="mb-1 h-3.5 w-3.5 text-emerald-300" />}
             {message.text && <p className="text-xs leading-5 text-zinc-300">{message.text}</p>}
-            {message.result && <p className="text-xs leading-5 text-emerald-300">{message.result.text}</p>}
+            {message.result && (
+              <div>
+                <p className="text-xs leading-5 text-emerald-300">{message.result.text}</p>
+                {message.result.week_template_id && (
+                  <Link
+                    to={`/ops/schedule?tab=templates&template=${message.result.week_template_id}`}
+                    className="mt-1 inline-block text-[11px] text-emerald-400 underline decoration-emerald-400/40 hover:text-emerald-300"
+                  >
+                    View template →
+                  </Link>
+                )}
+              </div>
+            )}
             {message.turn && <TurnCard turn={message.turn} onApply={() => void apply(message.turn!)} onDiscard={() => void discard(message.turn!)} onClarify={(answer) => void send(answer, message.turn!.proposal_id ?? undefined)} />}
           </div>
         ))}

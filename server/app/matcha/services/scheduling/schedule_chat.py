@@ -960,24 +960,43 @@ async def build_proposal(
 # removal has already happened, so neither person reads as double-booked
 # against the shift they're about to leave.
 
-async def _match_single_employee(conn, company_id: UUID, name_hint: str) -> dict:
+async def _match_single_employee(
+    conn, company_id: UUID, name_hint: str, location_id: Optional[UUID] = None,
+) -> dict:
     """Resolve a name hint to exactly one active employee.
-    -> {"employee": row} | {"ambiguous": [display names]} | {"none": reason}"""
+    -> {"employee": row} | {"ambiguous": [display names]} | {"none": reason}
+
+    A bare first name ("swap Aisha's shift") is common and shouldn't force a
+    clarify round just because the COMPANY has two Aishas at different
+    stores — when `location_id` is given, try that location's roster first.
+    A unique match there resolves immediately with no last-name prompt; if
+    nobody by that name works at this location (or no location is known),
+    fall back to a company-wide search, which is where a genuine ambiguity
+    (two Aishas at the SAME location) still produces the last-name-bearing
+    `ambiguous` list for the caller to clarify with."""
     like = f"%{name_hint}%"
-    rows = await conn.fetch(
+
+    async def _search(*, scoped: bool) -> list:
+        query = """
+            SELECT id, first_name, last_name, employment_status
+            FROM employees
+            WHERE org_id = $1
+              AND (first_name ILIKE $2 OR last_name ILIKE $2
+                   OR (first_name || ' ' || last_name) ILIKE $2)
         """
-        SELECT id, first_name, last_name, employment_status
-        FROM employees
-        WHERE org_id = $1
-          AND (first_name ILIKE $2 OR last_name ILIKE $2
-               OR (first_name || ' ' || last_name) ILIKE $2)
-        """,
-        company_id, like,
-    )
-    active = [
-        r for r in rows
-        if (r["employment_status"] or "active") not in INACTIVE_EMPLOYMENT_STATUSES
-    ]
+        params: list = [company_id, like]
+        if scoped:
+            query += " AND work_location_id = $3"
+            params.append(location_id)
+        rows = await conn.fetch(query, *params)
+        return [
+            r for r in rows
+            if (r["employment_status"] or "active") not in INACTIVE_EMPLOYMENT_STATUSES
+        ]
+
+    active = await _search(scoped=location_id is not None)
+    if location_id is not None and not active:
+        active = await _search(scoped=False)
     if not active:
         return {"none": f"Who's {name_hint}? I couldn't find them on the roster."}
     if len(active) > 1:
@@ -1086,6 +1105,7 @@ async def build_edit_proposal(
     surface: str = "channel", shift_statuses: tuple[str, ...] = ("published",),
     clarify_history: Optional[list[dict]] = None,
     existing_proposal_id: Optional[UUID] = None,
+    editor_location_id: Optional[UUID] = None,
 ) -> ProposalBuild:
     """Resolve every edit_request into a concrete op against a real shift +
     real employee ids, with a build-time advisory preview (never blocking —
@@ -1113,14 +1133,21 @@ async def build_edit_proposal(
         )
         return ProposalBuild(kind="clarify", proposal_id=pid, pill_text=clarify_text(question, options or []))
 
-    # Channel-bound location narrows the search; unscoped searches company-wide
-    # (edits skip the create flow's location-clarify round — employee/date/role
-    # hints are usually enough to disambiguate a single existing shift).
+    # Channel-bound location narrows the search; the editor surface passes its
+    # own selected location the same way. Unscoped (neither given) searches
+    # company-wide (edits skip the create flow's location-clarify round —
+    # employee/date/role hints are usually enough to disambiguate a single
+    # existing shift). This also feeds _match_single_employee below, so a
+    # bare first name unique to the current location resolves without a
+    # last-name clarify even when the company has a same-named employee
+    # elsewhere.
     location_id = None
     if channel_id is not None:
         location_id = await conn.fetchval(
             "SELECT location_id FROM channels WHERE id = $1", channel_id,
         )
+    elif editor_location_id is not None:
+        location_id = editor_location_id
 
     ops: list[dict] = []
     for req in parsed["edit_requests"]:
@@ -1148,7 +1175,7 @@ async def build_edit_proposal(
         to_employee_name: Optional[str] = None
 
         if req.get("target_employee_name"):
-            m = await _match_single_employee(conn, company_id, req["target_employee_name"])
+            m = await _match_single_employee(conn, company_id, req["target_employee_name"], location_id)
             if "none" in m:
                 return await _clarify(m["none"])
             if "ambiguous" in m:
@@ -1157,7 +1184,7 @@ async def build_edit_proposal(
             from_employee_name = f"{m['employee']['first_name']} {m['employee']['last_name']}"
 
         if req.get("to_employee_name"):
-            m = await _match_single_employee(conn, company_id, req["to_employee_name"])
+            m = await _match_single_employee(conn, company_id, req["to_employee_name"], location_id)
             if "none" in m:
                 return await _clarify(m["none"])
             if "ambiguous" in m:
@@ -1223,7 +1250,7 @@ async def build_edit_proposal(
         if kind == "swap":
             second_emp_id = None
             if req.get("second_employee_name"):
-                m = await _match_single_employee(conn, company_id, req["second_employee_name"])
+                m = await _match_single_employee(conn, company_id, req["second_employee_name"], location_id)
                 if "none" in m:
                     return await _clarify(m["none"])
                 if "ambiguous" in m:
@@ -1502,9 +1529,11 @@ async def execute_template_proposal(
         )
         await conn.execute(
             """UPDATE schedule_chat_proposals
-               SET status='confirmed', confirmed_by=$1, confirmed_at=NOW(), updated_at=NOW()
+               SET status='confirmed', confirmed_by=$1, confirmed_at=NOW(), updated_at=NOW(),
+                   proposal = proposal || $3::jsonb
                WHERE id=$2""",
             confirmed_by, proposal_row["id"],
+            json.dumps({"created_week_template_id": str(tpl["id"])}),
         )
     return template_result_text(week_template)
 

@@ -152,7 +152,7 @@ async def schedule_chat_turn(
         elif original_kind == "edit":
             statuses = ("draft", "published") if body.edit_published else ("draft",)
             build = await schedule_chat.build_edit_proposal(
-                conn, **common, shift_statuses=statuses,
+                conn, **common, shift_statuses=statuses, editor_location_id=body.location_id,
             )
         else:
             build = await schedule_chat.build_proposal(
@@ -176,9 +176,14 @@ async def schedule_chat_apply(
         proposal = _decode(row["proposal"])
         features = await get_company_features(company_id, conn=conn)
         proposal_row = {**dict(row), "proposal": proposal}
+        week_template_id = None
         if proposal.get("kind") == "template":
             text = await schedule_chat.execute_template_proposal(
                 conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
+            )
+            week_template_id = await conn.fetchval(
+                "SELECT proposal->>'created_week_template_id' FROM schedule_chat_proposals WHERE id=$1",
+                proposal_id,
             )
         elif proposal.get("kind") == "apply_template":
             text = await schedule_chat.execute_apply_template_proposal(
@@ -198,7 +203,10 @@ async def schedule_chat_apply(
             "SELECT created_shift_ids FROM schedule_chat_proposals WHERE id=$1",
             proposal_id,
         )
-    return {"ok": True, "text": text, "shift_ids": [str(i) for i in (shift_ids or [])]}
+    return {
+        "ok": True, "text": text, "shift_ids": [str(i) for i in (shift_ids or [])],
+        "week_template_id": week_template_id,
+    }
 
 
 @router.post("/chat/{proposal_id}/discard")

@@ -41,6 +41,7 @@ export default function EmployeeSchedule() {
   const [searchParams, setSearchParams] = useSearchParams()
   const linkedDate = searchParams.get('date') ?? undefined
   const highlightShiftId = searchParams.get('shift') ?? undefined
+  const highlightTemplateId = searchParams.get('template') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
   const { locationId, setLocationId, locations } = useLocationScope()
   const { me, hasFeature, loading: meLoading } = useMe()
@@ -182,7 +183,7 @@ export default function EmployeeSchedule() {
       ) : <PickLocationEmpty hasLocations={locations.length > 0} />)}
 
       {tab === 'templates' && (locationId
-        ? <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />
+        ? <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} highlightTemplateId={highlightTemplateId} />
         : <PickLocationEmpty hasLocations={locations.length > 0} />)}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
@@ -651,7 +652,7 @@ function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }:
 // whole week is produced — and can be re-produced for a similar week — in
 // one action instead of one generate call per shift definition.
 
-function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGenerated: () => void }) {
+function TemplatesTab({ locationId, onGenerated, highlightTemplateId }: { locationId: string; onGenerated: () => void; highlightTemplateId?: string }) {
   const [weekTemplates, setWeekTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [creatingNew, setCreatingNew] = useState(false)
@@ -680,16 +681,53 @@ function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGener
         <p className="text-sm text-zinc-600">No week templates for this location yet — build one (e.g. "Standard Week") to generate a full week of shifts in one action.</p>
       ) : (
         <div className="space-y-2">
-          {weekTemplates.map((t) => <WeekTemplateCard key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} />)}
+          {weekTemplates.map((t) => (
+            <WeekTemplateCard
+              key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated}
+              autoHighlight={t.id === highlightTemplateId}
+            />
+          ))}
         </div>
       )}
     </div>
   )
 }
 
-function WeekTemplateCard({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void }) {
+const BLOCK_DOTS = ['bg-emerald-400', 'bg-sky-400', 'bg-amber-400', 'bg-fuchsia-400', 'bg-orange-400', 'bg-cyan-400']
+
+/** Sun-Sat strip so a manager can see AT A GLANCE which blocks cover which
+ * days of the work week, instead of reading a flat list and reconstructing
+ * the overlap in their head. Read-only — editing stays on TemplateBlockRow.
+ * Deliberately minimal: a day label + one dot-and-time line per block, no
+ * boxes or borders — the flat list below already carries names/staff/roles. */
+function TemplateWeekPreview({ blocks }: { blocks: TemplateBlock[] }) {
+  if (!blocks.length) return null
+  const dotByBlockId = new Map(blocks.map((b, i) => [b.id, BLOCK_DOTS[i % BLOCK_DOTS.length]]))
+  return (
+    <div className="grid grid-cols-7 gap-1 text-[10px]">
+      {WEEKDAY_LABELS.map((label, day) => {
+        const dayBlocks = blocks.filter((b) => b.days_of_week.includes(day))
+        return (
+          <div key={day} className="px-0.5">
+            <div className="font-medium uppercase tracking-wide text-zinc-600">{label}</div>
+            <div className="mt-0.5 space-y-0.5">
+              {dayBlocks.map((b) => (
+                <div key={b.id} className="flex items-center gap-1 text-zinc-400">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotByBlockId.get(b.id)}`} />
+                  <span className="truncate">{fmtTime(`2000-01-01T${b.start_time}Z`)}–{fmtTime(`2000-01-01T${b.end_time}Z`)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function WeekTemplateCard({ tpl, onChanged, onGenerated, autoHighlight }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void; autoHighlight?: boolean }) {
   const { toast } = useToast()
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(!!autoHighlight)
   const [addingBlock, setAddingBlock] = useState(false)
   const [busy, setBusy] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
@@ -697,6 +735,11 @@ function WeekTemplateCard({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; 
   const [from, setFrom] = useState(today)
   const [to, setTo] = useState(addDays(today, 6))
   const [genBusy, setGenBusy] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (autoHighlight) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [autoHighlight])
 
   const totalShiftsPerRun = tpl.blocks.reduce((n, b) => n + b.days_of_week.length, 0)
   const canGenerate = tpl.blocks.some((b) => b.days_of_week.length > 0)
@@ -720,20 +763,20 @@ function WeekTemplateCard({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; 
   }
 
   return (
-    <Card className="p-3">
-      <div className="flex items-center gap-3 flex-wrap">
-        <button onClick={() => setExpanded((v) => !v)} className="text-zinc-500 hover:text-zinc-200 p-0.5">
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+    <Card ref={cardRef} className={`border-transparent bg-zinc-900/40 p-2.5 shadow-none transition-shadow ${autoHighlight ? 'ring-2 ring-emerald-500/60' : ''}`}>
+      <div className="flex items-center gap-2.5 flex-wrap">
+        <button onClick={() => setExpanded((v) => !v)} className="text-zinc-600 hover:text-zinc-200 p-0.5">
+          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
         <div className="flex-1 min-w-0">
           <div className="text-sm text-zinc-200">{tpl.name}</div>
-          <div className="text-[11px] text-zinc-500">
+          <div className="text-[11px] text-zinc-600">
             {tpl.blocks.length} block{tpl.blocks.length === 1 ? '' : 's'}
             {' · '}~{totalShiftsPerRun} shift{totalShiftsPerRun === 1 ? '' : 's'} per week
           </div>
         </div>
         <button onClick={() => setGenOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Sparkles className="h-3.5 w-3.5" /> Generate</button>
-        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
+        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
       {genOpen && (
         <div className="mt-3 flex items-end gap-2 flex-wrap border-t border-zinc-800 pt-3">
@@ -743,18 +786,21 @@ function WeekTemplateCard({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; 
         </div>
       )}
       {expanded && (
-        <div className="mt-3 space-y-2 border-t border-zinc-800 pt-3">
+        <div className="mt-2.5 space-y-2 border-t border-zinc-800/70 pt-2.5">
+          {tpl.blocks.length > 0 && <TemplateWeekPreview blocks={tpl.blocks} />}
           {tpl.blocks.length === 0 && !addingBlock && (
             <p className="text-xs text-zinc-600">No blocks yet — add the first shift definition for this week.</p>
           )}
+          <div className="space-y-1.5">
           {tpl.blocks.map((b) => (
             <TemplateBlockRow key={b.id} block={b} weekTemplateId={tpl.id} onChanged={onChanged} />
           ))}
           {addingBlock ? (
             <TemplateBlockForm weekTemplateId={tpl.id} onDone={() => { setAddingBlock(false); onChanged() }} onCancel={() => setAddingBlock(false)} />
           ) : (
-            <button onClick={() => setAddingBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800"><Plus className="h-3.5 w-3.5" /> Add block</button>
+            <button onClick={() => setAddingBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800/70"><Plus className="h-3.5 w-3.5" /> Add block</button>
           )}
+          </div>
         </div>
       )}
     </Card>
@@ -775,10 +821,10 @@ function TemplateBlockRow({ block, weekTemplateId, onChanged }: { block: Templat
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-zinc-800 px-2.5 py-1.5">
+    <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 px-2.5 py-1">
       <div className="flex-1 min-w-0">
         <div className="text-sm text-zinc-200">{block.name}</div>
-        <div className="text-[11px] text-zinc-500">
+        <div className="text-[11px] text-zinc-600">
           {fmtTime(`2000-01-01T${block.start_time}Z`)}–{fmtTime(`2000-01-01T${block.end_time}Z`)}
           {block.role ? ` · ${block.role}` : ''} · {block.required_staff} staff
           {' · '}{block.days_of_week.length ? block.days_of_week.map((d) => WEEKDAY_LABELS[d]).join(' ') : 'no days set'}
