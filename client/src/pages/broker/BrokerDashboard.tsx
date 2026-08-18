@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Users, AlertTriangle, Building2, Gauge, Loader2, AlertCircle } from 'lucide-react'
 import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker/dashboard'
+import { useToast } from '../../components/ui'
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
 import { PageHeader } from '../../components/broker/PageHeader'
 import { KpiTile } from '../../components/broker/KpiTile'
@@ -25,6 +26,7 @@ export default function BrokerDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [outreach, setOutreach] = useState<{ id: string; name: string } | null>(null)
+  const { toast } = useToast()
 
   useEffect(() => {
     Promise.allSettled([
@@ -116,7 +118,7 @@ export default function BrokerDashboard() {
                       : c
                   ),
                 }))
-              })
+              }).catch(() => toast('Could not update the renewal date', 'error'))
             }}
           />
         </div>

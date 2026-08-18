@@ -133,9 +133,14 @@ export function ClientTable({ companies, wcByCompany, onOutreach, onSetRenewal }
                       <input
                         type="date"
                         autoFocus
-                        defaultValue={c.renewal_date ?? ''}
+                        // Blank, not the derived coverage-line date — prefilling it would
+                        // let an open/close-with-no-edit silently write it as a broker
+                        // override and stop it tracking the coverage line.
+                        defaultValue={c.renewal_date_source === 'broker' ? c.renewal_date ?? '' : ''}
                         onBlur={(e) => {
                           setEditingRenewal(null)
+                          const original = c.renewal_date_source === 'broker' ? c.renewal_date ?? '' : ''
+                          if (e.target.value === original) return   // no-op: don't write on a plain open/close
                           onSetRenewal?.(c.company_id, e.target.value || null)
                         }}
                         onKeyDown={(e) => {

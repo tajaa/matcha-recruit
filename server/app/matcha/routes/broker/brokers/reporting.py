@@ -121,7 +121,6 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                     c.id as company_id,
                     c.name as company_name,
                     l.status as link_status,
-                    l.renewal_date as renewal_date,
                     COALESCE(s.status, 'none') as setup_status,
                     COALESCE(ps.active_policy_count, 0) as active_policy_count,
                     COALESCE(ps.pending_signatures, 0) as pending_signatures,
@@ -170,21 +169,27 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
 
         # Fallback renewal source: a company with no broker-set renewal_date but
         # a Limit Adequacy coverage line shows that line's expiry instead of "—".
-        # Separate query so a missing company_coverage_lines table can't take down
-        # either portfolio-query variant above.
-        cov_rows = await conn.fetch(
-            """
-            SELECT ccl.company_id, MIN(ccl.expiry_date) AS min_expiry
-            FROM company_coverage_lines ccl
-            JOIN broker_company_links l ON l.company_id = ccl.company_id
-            WHERE l.broker_id = $1
-              AND l.status <> 'terminated'
-              AND ccl.expiry_date IS NOT NULL
-            GROUP BY ccl.company_id
-            """,
-            membership["broker_id"],
-        )
-        derived_renewals = {str(r["company_id"]): r["min_expiry"] for r in cov_rows}
+        # Separate query, and its own try/except, so a fresh DB missing either
+        # company_coverage_lines (only created by migration limadq01, not in
+        # database/bootstrap/) or broker_company_links.renewal_date (migration
+        # brokerrenew01, if not yet applied) degrades to "no derived dates"
+        # instead of 500ing the whole portfolio endpoint.
+        try:
+            cov_rows = await conn.fetch(
+                """
+                SELECT ccl.company_id, MIN(ccl.expiry_date) AS min_expiry
+                FROM company_coverage_lines ccl
+                JOIN broker_company_links l ON l.company_id = ccl.company_id
+                WHERE l.broker_id = $1
+                  AND l.status <> 'terminated'
+                  AND ccl.expiry_date IS NOT NULL
+                GROUP BY ccl.company_id
+                """,
+                membership["broker_id"],
+            )
+            derived_renewals = {str(r["company_id"]): r["min_expiry"] for r in cov_rows}
+        except Exception:
+            derived_renewals = {}
 
     company_metrics = []
     healthy_count = 0
@@ -215,8 +220,11 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
         else:
             risk_signal = "watch"
 
+        # .get() not row[...] — the has_pre_term fallback query (no renewal_date
+        # column, for a DB where brokerrenew01 hasn't been applied yet) doesn't
+        # select it at all.
         renewal_iso, renewal_source = _resolve_renewal(
-            row["renewal_date"], derived_renewals.get(str(row["company_id"])),
+            row.get("renewal_date"), derived_renewals.get(str(row["company_id"])),
         )
 
         metrics = {
