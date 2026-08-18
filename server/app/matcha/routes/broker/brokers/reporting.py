@@ -236,6 +236,9 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
             "open_action_items": open_action_items,
             "active_employee_count": int(row["active_employees"] or 0),
             "risk_signal": risk_signal,
+            "open_incidents": open_incidents,
+            "pending_signatures": pending_signatures,
+            "active_policy_count": active_policy_count,
             "renewal_date": renewal_iso,
             "renewal_date_source": renewal_source,
         }

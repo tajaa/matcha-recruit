@@ -25,6 +25,29 @@ const riskLabels: Record<string, string> = {
 type SortKey = 'account' | 'renewal'
 type SortDir = 'asc' | 'desc'
 
+/** Explains why a client is flagged at_risk — mirrors the two-branch condition in
+ *  reporting.py / client_setups.py: open_action_items >= 5, or compliance < 75%
+ *  (only when there are active policies to measure). */
+function atRiskReason(c: BrokerCompanyMetric): string {
+  const reasons: string[] = []
+  const openIncidents = c.open_incidents ?? 0
+  const pendingSignatures = c.pending_signatures ?? 0
+  const hasPolicyData = (c.active_policy_count ?? 0) > 0
+
+  if (openIncidents > 0) {
+    reasons.push(`${openIncidents} open incident${openIncidents === 1 ? '' : 's'}`)
+  }
+  if (pendingSignatures > 0) {
+    reasons.push(`${pendingSignatures} pending signature${pendingSignatures === 1 ? '' : 's'}`)
+  }
+  if (hasPolicyData && c.policy_compliance_rate < 75) {
+    reasons.push(`${c.policy_compliance_rate.toFixed(0)}% policy compliance`)
+  }
+
+  if (!reasons.length) return 'Flagged at risk.'
+  return `At risk: ${reasons.join(', ')}.`
+}
+
 interface ClientTableProps {
   companies: BrokerCompanyMetric[]
   /** Per-company WC metrics (TRIR / DART / premium), keyed by company_id.
@@ -125,6 +148,11 @@ export function ClientTable({ companies, wcByCompany, onOutreach, onSetRenewal }
                     <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
                       <span className={`h-2 w-2 rounded-full ${riskColors[c.risk_signal] ?? 'bg-zinc-600'}`} />
                       {riskLabels[c.risk_signal] ?? c.risk_signal}
+                      {c.risk_signal === 'at_risk' && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <HelpHint text={atRiskReason(c)} />
+                        </span>
+                      )}
                     </span>
                   </td>
                   {/* Renewal: countdown badge + date, click-to-edit */}

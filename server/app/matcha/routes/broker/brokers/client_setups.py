@@ -766,6 +766,9 @@ async def get_broker_company_detail(
             "policy_compliance_rate": compliance_rate,
             "open_action_items": open_action_items,
             "risk_signal": risk_signal,
+            "open_incidents": open_incidents,
+            "pending_signatures": pending_signatures,
+            "active_policy_count": active_policy_count,
         }
 
         # ── 2. Compliance locations ──────────────────────────────────

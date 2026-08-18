@@ -150,6 +150,9 @@ export interface BrokerCompanyMetric {
   open_action_items: number
   active_employee_count: number
   risk_signal: 'healthy' | 'at_risk' | 'watch'
+  open_incidents?: number
+  pending_signatures?: number
+  active_policy_count?: number
   pre_term_checks?: number
   avg_separation_risk?: number
   separation_override_rate?: number
