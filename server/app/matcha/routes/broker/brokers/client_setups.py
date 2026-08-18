@@ -702,6 +702,32 @@ async def get_broker_company_detail(
         if not header:
             raise HTTPException(status_code=404, detail="Company not found")
 
+        # Keep this separate from the header query above: its broad fallback
+        # turns any schema error into a 404, while renewal is optional on older
+        # databases until brokerrenew01/limadq01 have been applied.
+        try:
+            explicit_renewal = await conn.fetchval(
+                "SELECT renewal_date FROM broker_company_links "
+                "WHERE broker_id = $1 AND company_id = $2 AND status <> 'terminated'",
+                broker_id,
+                company_id,
+            )
+        except Exception:
+            explicit_renewal = None
+
+        try:
+            derived_renewal = await conn.fetchval(
+                "SELECT MIN(expiry_date) FROM company_coverage_lines "
+                "WHERE company_id = $1 AND expiry_date IS NOT NULL",
+                company_id,
+            )
+        except Exception:
+            derived_renewal = None
+        renewal_date, renewal_date_source = _resolve_renewal(
+            explicit_renewal,
+            derived_renewal,
+        )
+
         try:
             active_employee_count = await conn.fetchval(
                 "SELECT COUNT(*)::int FROM employees WHERE org_id = $1 AND termination_date IS NULL",
@@ -769,6 +795,8 @@ async def get_broker_company_detail(
             "open_incidents": open_incidents,
             "pending_signatures": pending_signatures,
             "active_policy_count": active_policy_count,
+            "renewal_date": renewal_date,
+            "renewal_date_source": renewal_date_source,
         }
 
         # ── 2. Compliance locations ──────────────────────────────────

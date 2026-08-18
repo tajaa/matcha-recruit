@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, FileText, Shield, AlertTriangle, Users, Loader2, AlertCircle } from 'lucide-react'
-import { StatCard } from '../../../components/dashboard'
+import { ArrowLeft, Clock, AlertTriangle, Users, Loader2, AlertCircle, type LucideIcon } from 'lucide-react'
 import {
   fetchBrokerClientDetail, downloadTenantSubmission, fetchTenantCoverageGap,
   fetchTenantSubmissionPreview, fetchTenantSubmissionNotes, saveTenantSubmissionNotes,
@@ -9,9 +8,10 @@ import {
 } from '../../../api/broker/broker'
 import { SubmissionPanel } from '../../../components/broker/SubmissionPanel'
 import { IRPremiumImpactCard } from '../../../components/ir/risk/IRPremiumImpactCard'
+import { RenewalPill } from '../../../components/broker/RenewalPill'
+import { daysUntilDate, fmtDate } from '../../../utils/broker/brokerFormat'
 import type { BrokerClientDetailResponse, WcClientDetailResponse } from '../../../types/broker'
 import { riskColors, riskLabels } from './shared'
-import { OverviewTab } from './OverviewTab'
 import { PoliciesTab } from './PoliciesTab'
 import { IRERTab } from './IRERTab'
 import { WcTab } from './WcTab'
@@ -28,21 +28,36 @@ export { LossRatioTab } from './LossRatioTab'
 export { LossTriangleTab } from './LossTriangleTab'
 export type { LossDevApi } from './LossTriangleTab'
 
-type Tab = 'overview' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'insurance' | 'pilot'
+function SummaryCard({ label, icon: Icon, value, sub, urgent }: {
+  label: string
+  icon: LucideIcon
+  value: ReactNode
+  sub?: ReactNode
+  urgent?: boolean
+}) {
+  return (
+    <div className={`relative overflow-hidden rounded-xl border bg-zinc-900/60 p-5 ${
+      urgent ? 'ring-1 ring-red-500/30 border-red-900/40' : 'border-zinc-800/60'
+    }`}>
+      <Icon className="absolute -top-1.5 -right-1.5 h-16 w-16 text-zinc-800/30" />
+      <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</p>
+      <div className="mt-1.5 min-h-9 flex items-center text-2xl font-semibold text-zinc-100 tabular-nums">
+        {value}
+      </div>
+      {sub && <div className="text-[11px] text-zinc-500 mt-1">{sub}</div>}
+    </div>
+  )
+}
+
+type Tab = 'wc' | 'loss_analysis' | 'epl_controls' | 'claims' | 'coverage_limits' | 'submission' | 'pilot'
 
 const tabs: { key: Tab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'policies', label: 'Policies & Handbooks' },
-  { key: 'ir_er', label: 'IR / ER' },
   { key: 'wc', label: "Workers' Comp" },
-  { key: 'loss_dev', label: 'Loss Triangle' },
-  { key: 'loss_ratio', label: 'Loss Ratio' },
-  { key: 'epl', label: 'EPL Readiness' },
-  { key: 'controls', label: 'Controls' },
-  { key: 'limits', label: 'Limits' },
-  { key: 'defense', label: 'Shared' },
+  { key: 'loss_analysis', label: 'Loss Analysis' },
+  { key: 'epl_controls', label: 'EPL & Controls' },
+  { key: 'claims', label: 'Claims' },
+  { key: 'coverage_limits', label: 'Coverage & Limits' },
   { key: 'submission', label: 'Submission' },
-  { key: 'insurance', label: 'Insurance' },
   { key: 'pilot', label: 'Pilot' },
 ]
 
@@ -52,7 +67,7 @@ export default function BrokerClientDetail() {
   const [wcDetail, setWcDetail] = useState<WcClientDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const [activeTab, setActiveTab] = useState<Tab>('wc')
 
   useEffect(() => {
     if (!companyId) return
@@ -114,17 +129,32 @@ export default function BrokerClientDetail() {
         </span>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Employees" value={company.active_employee_count} icon={Users} />
-        <StatCard label="Compliance" value={`${Math.round(company.policy_compliance_rate)}%`} icon={Shield} />
-        <StatCard
-          label="Open Actions"
-          value={company.open_action_items}
-          icon={AlertTriangle}
-          urgent={company.open_action_items > 0}
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <SummaryCard
+          label="Headcount & Locations"
+          icon={Users}
+          value={company.active_employee_count}
+          sub={`${compliance.total_locations} active location${compliance.total_locations === 1 ? '' : 's'}`}
         />
-        <StatCard label="Active Policies" value={policies.total_active} icon={FileText} />
+        <SummaryCard
+          label="Days to Renewal"
+          icon={Clock}
+          value={
+            <RenewalPill
+              days={daysUntilDate(company.renewal_date)}
+              derived={company.renewal_date_source === 'coverage'}
+            />
+          }
+          sub={company.renewal_date ? fmtDate(company.renewal_date) : 'No renewal date on file'}
+        />
+        <SummaryCard
+          label="Active Open Exposure"
+          icon={AlertTriangle}
+          value={`${ir_summary.total_open} incidents · ${er_summary.total_open} ER`}
+          sub="active open exposure"
+          urgent={ir_summary.total_open + er_summary.total_open > 0}
+        />
       </div>
 
       {/* Premium impact estimate — headline WC renewal-premium signal, mirrored
@@ -134,12 +164,12 @@ export default function BrokerClientDetail() {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-zinc-800">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-800">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors ${
+            className={`shrink-0 px-4 py-2.5 text-sm font-medium transition-colors ${
               activeTab === t.key
                 ? 'text-zinc-100 border-b-2 border-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300'
@@ -151,30 +181,36 @@ export default function BrokerClientDetail() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'overview' && (
-        <OverviewTab
-          compliance={compliance}
-          policies={policies}
-          ir={ir_summary}
-          er={er_summary}
-          onboardingStage={company.onboarding_stage}
-        />
-      )}
-      {activeTab === 'policies' && <PoliciesTab policies={policies} handbooks={handbooks} />}
-      {activeTab === 'ir_er' && <IRERTab ir={ir_summary} er={er_summary} />}
       {activeTab === 'wc' && companyId && <WcTab companyId={companyId} />}
-      {activeTab === 'loss_dev' && companyId && <LossTriangleTab companyId={companyId} />}
-      {activeTab === 'loss_ratio' && companyId && (
-        <LossRatioTab
-          subjectId={companyId}
-          fetchData={() => fetchClientLossRatio(companyId)}
-          savePremium={(b) => recordClientLossPremium(companyId, b)}
-        />
+      {activeTab === 'loss_analysis' && companyId && (
+        <div className="space-y-4">
+          <LossTriangleTab companyId={companyId} />
+          <LossRatioTab
+            subjectId={companyId}
+            fetchData={() => fetchClientLossRatio(companyId)}
+            savePremium={(b) => recordClientLossPremium(companyId, b)}
+          />
+        </div>
       )}
-      {activeTab === 'epl' && companyId && <EplTab companyId={companyId} />}
-      {activeTab === 'controls' && companyId && <ControlsTab companyId={companyId} />}
-      {activeTab === 'limits' && companyId && <LimitsTab companyId={companyId} />}
-      {activeTab === 'defense' && companyId && <DefenseTab companyId={companyId} />}
+      {activeTab === 'epl_controls' && companyId && (
+        <div className="space-y-4">
+          <EplTab companyId={companyId} />
+          <ControlsTab companyId={companyId} />
+        </div>
+      )}
+      {activeTab === 'claims' && (
+        <div className="space-y-4">
+          <IRERTab ir={ir_summary} er={er_summary} />
+          {companyId && <DefenseTab companyId={companyId} />}
+        </div>
+      )}
+      {activeTab === 'coverage_limits' && companyId && (
+        <div className="space-y-4">
+          <InsuranceTab companyId={companyId} />
+          <PoliciesTab policies={policies} handbooks={handbooks} />
+          <LimitsTab companyId={companyId} />
+        </div>
+      )}
       {activeTab === 'submission' && companyId && (
         <SubmissionPanel
           onDownload={() => downloadTenantSubmission(companyId)}
@@ -184,7 +220,6 @@ export default function BrokerClientDetail() {
           saveNotes={(n) => saveTenantSubmissionNotes(companyId, n)}
         />
       )}
-      {activeTab === 'insurance' && companyId && <InsuranceTab companyId={companyId} />}
       {activeTab === 'pilot' && companyId && <PilotTab subjectKind="company" subjectId={companyId} />}
     </div>
   )

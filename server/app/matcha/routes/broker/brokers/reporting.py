@@ -304,11 +304,14 @@ async def set_client_renewal_date(
         )
         if updated.split()[-1] == "0":
             raise HTTPException(status_code=404, detail="Linked client not found")
-        derived = await conn.fetchval(
-            "SELECT MIN(expiry_date) FROM company_coverage_lines "
-            "WHERE company_id = $1 AND expiry_date IS NOT NULL",
-            company_id,
-        )
+        try:
+            derived = await conn.fetchval(
+                "SELECT MIN(expiry_date) FROM company_coverage_lines "
+                "WHERE company_id = $1 AND expiry_date IS NOT NULL",
+                company_id,
+            )
+        except Exception:
+            derived = None
     renewal_iso, renewal_source = _resolve_renewal(body.renewal_date, derived)
     return {"renewal_date": renewal_iso, "renewal_date_source": renewal_source}
 

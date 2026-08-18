@@ -267,6 +267,11 @@ export interface BrokerClientCompany {
   policy_compliance_rate: number
   open_action_items: number
   risk_signal: 'healthy' | 'watch' | 'at_risk'
+  open_incidents: number
+  pending_signatures: number
+  active_policy_count: number
+  renewal_date?: string | null
+  renewal_date_source?: 'broker' | 'coverage' | null
 }
 
 export interface BrokerClientLocation {
