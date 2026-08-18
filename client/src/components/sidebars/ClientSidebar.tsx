@@ -3,7 +3,7 @@ import {
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
   GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck, Gauge, HeartPulse, FileCheck, Car, Link2, Activity,
-  Coins, FileSignature, CalendarClock, Radio,
+  Coins, FileSignature, CalendarClock, Radio, HardHat,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import SidebarShell from './SidebarShell'
@@ -73,6 +73,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/ir/risk-insights', icon: TrendingUp, label: 'Risk Insights', feature: 'incidents' },
       { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs', feature: 'incidents' },
       { to: '/app/ir/magic-links', icon: Link2, label: 'Magic Links', feature: 'incidents' },
+      { to: '/app/safety-meetings', icon: HardHat, label: 'Safety Meetings', feature: 'safety_meetings' },
       { to: '/app/locations', icon: MapPin, label: 'Locations', feature: 'incidents' },
       { to: '/app/er-copilot', icon: Scale, label: 'ER Copilot' },
       { to: '/app/risk-assessment', icon: BarChart2, label: 'Risk Assessment' },

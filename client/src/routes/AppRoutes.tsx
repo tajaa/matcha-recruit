@@ -58,6 +58,9 @@ import GrievanceDetail from '../pages/app/labor/GrievanceDetail'
 import Training from '../pages/app/training/Training'
 import TrainingDetail from '../pages/app/training/TrainingDetail'
 import { LegacyOpsRedirect } from '../work/pages/LegacySurfaceRedirect'
+import SafetyMeetings from '../pages/app/safety-meetings/SafetyMeetings'
+import SafetyMeetingRecord from '../pages/app/safety-meetings/SafetyMeetingRecord'
+import SafetyMeetingDetail from '../pages/app/safety-meetings/SafetyMeetingDetail'
 
 export default function AppRoutes() {
   return (
@@ -87,6 +90,9 @@ export default function AppRoutes() {
         <Route path="ir/osha" element={<FeatureGate feature="incidents" label="OSHA Logs"><FeatureGate anyOf={['osha_logs', 'osha_export']} label="OSHA Logs"><OshaLogs /></FeatureGate></FeatureGate>} />
         <Route path="ir/people/:personId" element={<FeatureGate feature="incidents" label="Incidents"><IRPersonDetail /></FeatureGate>} />
         <Route path="ir/:incidentId" element={<FeatureGate feature="incidents" label="Incidents"><IRDetail /></FeatureGate>} />
+        <Route path="safety-meetings" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetings /></FeatureGate>} />
+        <Route path="safety-meetings/:meetingId/record" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetingRecord /></FeatureGate>} />
+        <Route path="safety-meetings/:meetingId" element={<FeatureGate feature="safety_meetings" label="Safety Meetings"><SafetyMeetingDetail /></FeatureGate>} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />

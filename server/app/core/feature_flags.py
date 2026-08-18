@@ -364,6 +364,17 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # POS sales / PMIX intake. Requires the inventory surface, but is not
     # bundled: admins explicitly enable it for a company.
     "sales_intake": False,
+    # Safety meetings (toolbox talks) — record a safety meeting in-app: chunked
+    # mic audio (the shared WAV-via-AudioWorklet stack) uploads ~1-minute
+    # segments as the meeting runs, each transcribed by Gemini immediately;
+    # "End meeting" compiles a structured summary (topics, action items,
+    # attendees) that the safety manager REVIEWS and edits, then signs off with
+    # a typed name + timestamp (signing locks the record). Raw audio is
+    # retained in the private S3 bucket alongside the signed transcript +
+    # summary as the durable compliance artifact. Gates the /safety-meetings
+    # router + the /app/safety-meetings pages. Default off; admin-toggle;
+    # NOT in any tier overlay.
+    "safety_meetings": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
