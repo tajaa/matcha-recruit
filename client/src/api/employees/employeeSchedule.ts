@@ -3,12 +3,40 @@ import type {
   Shift, ShiftPayload, WeekResponse, ScheduleSummary,
   WeekTemplate, WeekTemplatePayload, TemplateBlock, BlockPayload, ScheduleRequest,
   AssignmentMovePayload, AssignmentMoveResponse,
+  ScheduleJob, JobPayload, RosterEmployee,
 } from '../../types/employeeSchedule'
 
 // ---- Admin: shifts + weekly view ----
 
 export function fetchWeek(weekStart: string, locationId: string) {
   return api.get<WeekResponse>(`/employee-schedule/week?start=${weekStart}&location=${locationId}`)
+}
+
+export function fetchRoster(locationId: string) {
+  return api.get<{ employees: RosterEmployee[] }>(`/employee-schedule/roster?location=${locationId}`)
+}
+
+export function fetchJobs(locationId?: string) {
+  const query = locationId ? `?location=${locationId}` : ''
+  return api.get<{ jobs: ScheduleJob[] }>(`/employee-schedule/jobs${query}`)
+}
+
+export function createJob(payload: JobPayload) {
+  return api.post<ScheduleJob>('/employee-schedule/jobs', payload)
+}
+
+export function updateJob(id: string, payload: JobPayload) {
+  return api.put<ScheduleJob>(`/employee-schedule/jobs/${id}`, payload)
+}
+
+export function deleteJob(id: string) {
+  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/jobs/${id}`)
+}
+
+export function replaceJobEmployees(jobId: string, employeeIds: string[]) {
+  return api.put<{ job_id: string; employee_ids: string[] }>(
+    `/employee-schedule/jobs/${jobId}/employees`, { employee_ids: employeeIds },
+  )
 }
 
 /** For a `?shift=` deep link (the Huume `[[shift:…]]` pill) that carries no

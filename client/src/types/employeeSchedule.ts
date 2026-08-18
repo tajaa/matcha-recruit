@@ -31,6 +31,7 @@ export interface Shift {
   status: ShiftStatus
   kind: ShiftKind
   training_requirement_id: string | null
+  job_id: string | null
   published_at: string | null
   assignments: ShiftAssignment[]
 }
@@ -48,6 +49,24 @@ export interface RosterEmployee {
   name: string
   job_title: string | null
   department: string | null
+  job_ids: string[]
+}
+
+export type ScheduleJob = {
+  id: string
+  name: string
+  location_id: string | null
+  color: string | null
+  notes: string | null
+  employee_ids: string[]
+}
+
+export type JobPayload = {
+  name?: string
+  location_id?: string | null
+  color?: string | null
+  notes?: string | null
+  employee_ids?: string[]
 }
 
 export interface ScheduleLocation {
@@ -97,6 +116,7 @@ export interface ShiftPayload {
   status?: ShiftStatus
   kind?: ShiftKind
   training_requirement_id?: string | null
+  job_id?: string | null
 }
 
 export interface TemplateBlock {
@@ -113,6 +133,7 @@ export interface TemplateBlock {
   days_of_week: number[]
   color: string | null
   notes: string | null
+  job_id: string | null
 }
 
 export interface WeekTemplate {
@@ -135,6 +156,7 @@ export interface BlockPayload {
   days_of_week?: number[]
   color?: string | null
   notes?: string | null
+  job_id?: string | null
 }
 
 export interface WeekTemplatePayload {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, X,
+  BarChart2, BriefcaseBusiness, CalendarDays, HelpCircle, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
@@ -11,11 +11,12 @@ import {
   fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
   addTemplateBlock, updateTemplateBlock, deleteTemplateBlock, generateFromWeekTemplate,
   fetchRequests, reviewRequest, duplicateShift,
+  fetchJobs,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, WeekTemplate, TemplateBlock, BlockPayload, ScheduleRequest, ShiftPayload, RosterFlags,
+  Shift, RosterEmployee, ScheduleJob, WeekTemplate, TemplateBlock, BlockPayload, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
@@ -25,6 +26,8 @@ import { useEmployeeSchedule } from './useEmployeeSchedule'
 import type { EmployeeScheduleTab } from './useEmployeeSchedule'
 import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
+import ScheduleJobsTab from '../../../components/employees/schedule-editor/ScheduleJobsTab'
+import ScheduleEditorGuide from '../../../components/employees/schedule-editor/ScheduleEditorGuide'
 import LocationPicker from '../../../components/shared/LocationPicker'
 import { useLocationScope } from '../../../hooks/useLocationScope'
 import { useMe } from '../../../hooks/useMe'
@@ -46,6 +49,8 @@ export default function EmployeeSchedule() {
   const { locationId, setLocationId, locations } = useLocationScope()
   const { me, hasFeature, loading: meLoading } = useMe()
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
+  const [jobs, setJobs] = useState<ScheduleJob[]>([])
+  const [guideOpen, setGuideOpen] = useState(false)
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
     : requestedTab
@@ -64,6 +69,20 @@ export default function EmployeeSchedule() {
     publishWeek,
     days,
   } = useEmployeeSchedule(locationId, linkedDate, initialTab)
+
+  const reloadJobs = useCallback(async () => {
+    if (!locationId) {
+      setJobs([])
+      return
+    }
+    try {
+      const response = await fetchJobs(locationId)
+      setJobs(response.jobs)
+    } catch {
+      setJobs([])
+    }
+  }, [locationId])
+  useEffect(() => { void reloadJobs() }, [reloadJobs])
 
   // A Huume shift pill (work/pages/ChannelView/systemContent.tsx's
   // `[[shift:<id>:<date>]]` token) links here with ?shift=&date= but no
@@ -119,6 +138,7 @@ export default function EmployeeSchedule() {
            <div className="flex shrink-0 items-center gap-2">
              <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
              <Link to={`/ops/schedule/editor?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200">Full shift editor</Link>
+             <button onClick={() => setGuideOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-sm text-zinc-400 hover:text-zinc-100" aria-label="Open scheduling guide"><HelpCircle className="h-4 w-4" /> Guide</button>
              <ScheduleLawPanel />
            </div>
         </div>
@@ -127,6 +147,7 @@ export default function EmployeeSchedule() {
       <div className="flex items-center gap-1 border-b border-white/[0.06] px-5">
         <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
         <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
+        <TabButton active={tab === 'jobs'} onClick={() => setTab('jobs')} icon={<BriefcaseBusiness className="h-4 w-4" />}>Jobs</TabButton>
         <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
         {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
       </div>
@@ -174,6 +195,7 @@ export default function EmployeeSchedule() {
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
                     defaultLocationId={locationId}
+                    jobs={jobs}
                   />
                 ))}
               </div>
@@ -183,11 +205,13 @@ export default function EmployeeSchedule() {
       ) : <PickLocationEmpty hasLocations={locations.length > 0} />)}
 
       {tab === 'templates' && (locationId
-        ? <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} highlightTemplateId={highlightTemplateId} />
+        ? <TemplatesTab locationId={locationId} jobs={jobs} onGenerated={() => { setTab('schedule'); reload() }} highlightTemplateId={highlightTemplateId} />
         : <PickLocationEmpty hasLocations={locations.length > 0} />)}
+      {tab === 'jobs' && (locationId ? <ScheduleJobsTab locationId={locationId} onJobsChanged={reloadJobs} /> : <PickLocationEmpty hasLocations={locations.length > 0} />)}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
+      <ScheduleEditorGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
     </div>
   )
 }
@@ -202,7 +226,7 @@ function PickLocationEmpty({ hasLocations }: { hasLocations: boolean }) {
 }
 
 function parseScheduleTab(value: string | null): EmployeeScheduleTab {
-  if (value === 'templates' || value === 'requests' || value === 'intelligence') return value
+  if (value === 'templates' || value === 'jobs' || value === 'requests' || value === 'intelligence') return value
   return 'schedule'
 }
 
@@ -223,9 +247,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, defaultLocationId }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, defaultLocationId, jobs }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; defaultLocationId?: string
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; defaultLocationId?: string; jobs: ScheduleJob[]
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -237,14 +261,14 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} defaultLocationId={defaultLocationId} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} defaultLocationId={defaultLocationId} jobs={jobs} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
           <ShiftCard
             key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
-            onPatch={onPatch} onChanged={onChanged}
+            onPatch={onPatch} onChanged={onChanged} jobs={jobs}
             highlighted={s.id === highlightShiftId}
             weekDays={weekDays}
           />
@@ -254,9 +278,9 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays, jobs }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]; jobs: ScheduleJob[]
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
@@ -355,7 +379,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         <ShiftForm
           day={shift.starts_at.slice(0, 10)}
           shift={shift}
-          onSaved={(s) => { onPatch(s); setEditing(false) }}
+          onSaved={(s) => { onPatch(s); setEditing(false) }} jobs={jobs}
           onCancel={() => setEditing(false)}
         />
       </div>
@@ -503,10 +527,11 @@ function spanHours(start: string, end: string): number {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
   defaultLocationId?: string
+  jobs: ScheduleJob[]
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -518,6 +543,7 @@ function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }:
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
   const [role, setRole] = useState(shift?.role ?? '')
+  const [jobId, setJobId] = useState(shift?.job_id ?? '')
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
@@ -540,6 +566,7 @@ function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }:
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
+      job_id: jobId || null,
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
     }
     if (!editing && defaultLocationId) {
@@ -599,6 +626,13 @@ function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }:
         <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Job <span className="text-zinc-600 normal-case">(optional)</span></span>
+        <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={`${inputCls} mt-0.5`}>
+          <option value="">No job — anyone can be assigned</option>
+          {jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
+        </select>
+      </label>
+      <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">End</span>
         <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
@@ -652,7 +686,7 @@ function ShiftForm({ day, shift, defaultLocationId, onDone, onSaved, onCancel }:
 // whole week is produced — and can be re-produced for a similar week — in
 // one action instead of one generate call per shift definition.
 
-function TemplatesTab({ locationId, onGenerated, highlightTemplateId }: { locationId: string; onGenerated: () => void; highlightTemplateId?: string }) {
+function TemplatesTab({ locationId, jobs, onGenerated, highlightTemplateId }: { locationId: string; jobs: ScheduleJob[]; onGenerated: () => void; highlightTemplateId?: string }) {
   const [weekTemplates, setWeekTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [creatingNew, setCreatingNew] = useState(false)
@@ -676,14 +710,14 @@ function TemplatesTab({ locationId, onGenerated, highlightTemplateId }: { locati
         <h3 className="text-sm font-medium text-zinc-200">Week templates</h3>
         <button onClick={() => setCreatingNew((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New week template</button>
       </div>
-      {creatingNew && <Card className="p-4"><WeekTemplateForm defaultLocationId={locationId} onDone={() => { setCreatingNew(false); load() }} onCancel={() => setCreatingNew(false)} /></Card>}
+      {creatingNew && <Card className="p-4"><WeekTemplateForm defaultLocationId={locationId} jobs={jobs} onDone={() => { setCreatingNew(false); load() }} onCancel={() => setCreatingNew(false)} /></Card>}
       {weekTemplates.length === 0 && !creatingNew ? (
         <p className="text-sm text-zinc-600">No week templates for this location yet — build one (e.g. "Standard Week") to generate a full week of shifts in one action.</p>
       ) : (
         <div className="space-y-2">
           {weekTemplates.map((t) => (
             <WeekTemplateCard
-              key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated}
+              key={t.id} tpl={t} jobs={jobs} onChanged={load} onGenerated={onGenerated}
               autoHighlight={t.id === highlightTemplateId}
             />
           ))}
@@ -725,7 +759,7 @@ function TemplateWeekPreview({ blocks }: { blocks: TemplateBlock[] }) {
   )
 }
 
-function WeekTemplateCard({ tpl, onChanged, onGenerated, autoHighlight }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void; autoHighlight?: boolean }) {
+function WeekTemplateCard({ tpl, jobs, onChanged, onGenerated, autoHighlight }: { tpl: WeekTemplate; jobs: ScheduleJob[]; onChanged: () => void; onGenerated: () => void; autoHighlight?: boolean }) {
   const { toast } = useToast()
   const [expanded, setExpanded] = useState(!!autoHighlight)
   const [addingBlock, setAddingBlock] = useState(false)
@@ -793,10 +827,10 @@ function WeekTemplateCard({ tpl, onChanged, onGenerated, autoHighlight }: { tpl:
           )}
           <div className="space-y-1.5">
           {tpl.blocks.map((b) => (
-            <TemplateBlockRow key={b.id} block={b} weekTemplateId={tpl.id} onChanged={onChanged} />
+            <TemplateBlockRow key={b.id} block={b} jobs={jobs} weekTemplateId={tpl.id} onChanged={onChanged} />
           ))}
           {addingBlock ? (
-            <TemplateBlockForm weekTemplateId={tpl.id} onDone={() => { setAddingBlock(false); onChanged() }} onCancel={() => setAddingBlock(false)} />
+            <TemplateBlockForm weekTemplateId={tpl.id} jobs={jobs} onDone={() => { setAddingBlock(false); onChanged() }} onCancel={() => setAddingBlock(false)} />
           ) : (
             <button onClick={() => setAddingBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800/70"><Plus className="h-3.5 w-3.5" /> Add block</button>
           )}
@@ -807,7 +841,7 @@ function WeekTemplateCard({ tpl, onChanged, onGenerated, autoHighlight }: { tpl:
   )
 }
 
-function TemplateBlockRow({ block, weekTemplateId, onChanged }: { block: TemplateBlock; weekTemplateId: string; onChanged: () => void }) {
+function TemplateBlockRow({ block, jobs, weekTemplateId, onChanged }: { block: TemplateBlock; jobs: ScheduleJob[]; weekTemplateId: string; onChanged: () => void }) {
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -817,7 +851,7 @@ function TemplateBlockRow({ block, weekTemplateId, onChanged }: { block: Templat
   }
 
   if (editing) {
-    return <TemplateBlockForm weekTemplateId={weekTemplateId} initial={block} onDone={() => { setEditing(false); onChanged() }} onCancel={() => setEditing(false)} />
+    return <TemplateBlockForm weekTemplateId={weekTemplateId} jobs={jobs} initial={block} onDone={() => { setEditing(false); onChanged() }} onCancel={() => setEditing(false)} />
   }
 
   return (
@@ -836,8 +870,9 @@ function TemplateBlockRow({ block, weekTemplateId, onChanged }: { block: Templat
   )
 }
 
-function TemplateBlockForm({ weekTemplateId, initial, onStage, onDone, onCancel }: {
+function TemplateBlockForm({ weekTemplateId, jobs, initial, onStage, onDone, onCancel }: {
   weekTemplateId?: string
+  jobs: ScheduleJob[]
   initial?: TemplateBlock
   onStage?: (b: BlockPayload) => void
   onDone?: () => void
@@ -845,6 +880,7 @@ function TemplateBlockForm({ weekTemplateId, initial, onStage, onDone, onCancel 
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [role, setRole] = useState(initial?.role ?? '')
+  const [jobId, setJobId] = useState(initial?.job_id ?? '')
   const [start, setStart] = useState(initial ? initial.start_time.slice(0, 5) : '09:00')
   const [end, setEnd] = useState(initial ? initial.end_time.slice(0, 5) : '17:00')
   const [required, setRequired] = useState(String(initial?.required_staff ?? 1))
@@ -858,6 +894,7 @@ function TemplateBlockForm({ weekTemplateId, initial, onStage, onDone, onCancel 
     if (!name.trim()) return
     const payload: BlockPayload = {
       name: name.trim(), role: role.trim() || null,
+      job_id: jobId || null,
       start_time: `${start}:00`, end_time: `${end}:00`,
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
       days_of_week: days,
@@ -880,6 +917,7 @@ function TemplateBlockForm({ weekTemplateId, initial, onStage, onDone, onCancel 
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-1`} /></label>
       </div>
       <label className="block max-w-[120px]"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
+      <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Job</span><select value={jobId} onChange={(e) => setJobId(e.target.value)} className={`${inputCls} mt-1`}><option value="">No job — anyone</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
       <div>
         <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
         <div className="flex gap-1 mt-1">
@@ -896,7 +934,7 @@ function TemplateBlockForm({ weekTemplateId, initial, onStage, onDone, onCancel 
   )
 }
 
-function WeekTemplateForm({ defaultLocationId, onDone, onCancel }: { defaultLocationId?: string; onDone: () => void; onCancel: () => void }) {
+function WeekTemplateForm({ defaultLocationId, jobs, onDone, onCancel }: { defaultLocationId?: string; jobs: ScheduleJob[]; onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
   const [stagedBlocks, setStagedBlocks] = useState<BlockPayload[]>([])
@@ -937,7 +975,7 @@ function WeekTemplateForm({ defaultLocationId, onDone, onCancel }: { defaultLoca
         </div>
       )}
       {addingStagedBlock ? (
-        <TemplateBlockForm onStage={(b) => { setStagedBlocks((prev) => [...prev, b]); setAddingStagedBlock(false) }} onCancel={() => setAddingStagedBlock(false)} />
+        <TemplateBlockForm jobs={jobs} onStage={(b) => { setStagedBlocks((prev) => [...prev, b]); setAddingStagedBlock(false) }} onCancel={() => setAddingStagedBlock(false)} />
       ) : (
         <button onClick={() => setAddingStagedBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800"><Plus className="h-3.5 w-3.5" /> Add block</button>
       )}

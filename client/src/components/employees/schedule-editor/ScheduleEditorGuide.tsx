@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, MousePointer2, Send, Users, X } from 'lucide-react'
+import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutTemplate, MousePointer2, Send, Tag, Users, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Modal } from '../../ui'
 
@@ -17,21 +17,49 @@ type GuideStep = {
 
 const STEPS: GuideStep[] = [
   {
-    eyebrow: '01 / Build a draft',
+    eyebrow: '01 / Define the work',
+    title: 'Create jobs before you build shifts',
+    body: 'Open the Jobs tab and add the work areas your location schedules, such as Box Office, Concessions, or Ushers. Jobs are the labels that make qualification rules possible; role and department remain optional free-text context.',
+    icon: BriefcaseBusiness,
+    detail: <span>Start with a separate job for each area where the qualified roster is different.</span>,
+  },
+  {
+    eyebrow: '02 / Set the roster',
+    title: 'Choose who is qualified',
+    body: 'Expand a job, check the employees who are qualified, and save the roster. Everyone stays visible in the schedule, including people who are not checked.',
+    icon: ClipboardCheck,
+    detail: <span>The server is the source of truth. The amber marker in the roster is only a preview of the assignment check.</span>,
+  },
+  {
+    eyebrow: '03 / Attach the work',
+    title: 'Choose a job on the shift',
+    body: 'When you create or edit a shift, choose its Job. You can also choose a Job on a template block so every generated shift inherits the same qualification rule.',
+    icon: Tag,
+    detail: <span>Leaving Job empty keeps the shift ungated, so existing shifts and general-purpose work remain unchanged.</span>,
+  },
+  {
+    eyebrow: '04 / Repeat the pattern',
+    title: 'Generate a qualified week',
+    body: 'Use Templates to define recurring blocks, attach each block to a job, and generate draft shifts across a date range. Review the generated week before publishing.',
+    icon: LayoutTemplate,
+    detail: <span>Generated shifts carry the block job automatically; you do not need to reselect it for every date.</span>,
+  },
+  {
+    eyebrow: '05 / Build a draft',
     title: 'Start with the empty grid',
     body: 'Click any time slot to create a draft shift, or drag an employee from the roster onto an empty slot to create a shift with that person already assigned.',
     icon: MousePointer2,
     detail: <span>Draft changes save automatically. Nothing is visible to employees until you publish.</span>,
   },
   {
-    eyebrow: '02 / Staff it',
+    eyebrow: '06 / Staff it',
     title: 'Place people where they belong',
     body: 'Drag a roster person onto a shift to assign them. Drag an assignment chip to another shift to move them, or click a person and then a shift if you prefer not to drag.',
     icon: Users,
-    detail: <span>Conflicts, availability, staffing limits, and scheduling-law checks still apply.</span>,
+    detail: <span>Conflicts, availability, staffing limits, and scheduling-law checks still apply. An unqualified assignment can be overridden deliberately and is audit-logged.</span>,
   },
   {
-    eyebrow: '03 / Review and publish',
+    eyebrow: '07 / Review and publish',
     title: 'Review the week before it goes live',
     body: 'Click any shift to edit its exact time, role, location, staffing, break, and notes. When the draft looks right, use Publish in the top bar.',
     icon: Send,

@@ -41,6 +41,14 @@ describe('conflictPrompt', () => {
     expect(prompt).toContain('Schedule anyway?')
   })
 
+  it('returns qualification override copy', () => {
+    const prompt = conflictPrompt(err409({
+      code: 'not_qualified_for_job', message: 'Not on the qualified list for Box Office',
+    }))
+    expect(prompt).toContain('Not on the qualified list for Box Office')
+    expect(prompt).toContain('Assign anyway?')
+  })
+
   it('returns null for a 422', () => {
     const err = new ApiError('block', 422, { detail: { code: 'schedule_compliance_block' } })
     expect(conflictPrompt(err)).toBeNull()

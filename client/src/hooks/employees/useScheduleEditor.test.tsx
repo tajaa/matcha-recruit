@@ -26,14 +26,14 @@ const shift = (id: string, assigned: string[] = []) => ({
   assignments: assigned.map((employee_id) => ({ employee_id, name: employee_id, job_title: null, status: 'assigned' as const })),
   role: null, department: null, location_id: null, template_id: null, series_id: null,
   break_minutes: 30, required_staff: 1, color: null, notes: null, status: 'draft' as const,
-  kind: 'work' as const, training_requirement_id: null, published_at: null,
+  kind: 'work' as const, training_requirement_id: null, job_id: null, published_at: null,
 })
 
 describe('useScheduleEditor', () => {
   beforeEach(() => {
     fetchWeekMock.mockResolvedValue({
       week_start: '2026-08-09', location_id: 'loc1', shifts: [shift('s1', ['e1']), shift('s2')],
-      roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: null, department: null }],
+      roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: null, department: null, job_ids: [] }],
       roster_flags: null,
       summary: { total_shifts: 2, published: 0, draft: 2, open_shifts: 1, assigned: 1 },
     })

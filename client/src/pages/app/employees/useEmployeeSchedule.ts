@@ -7,7 +7,7 @@ import {
   toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 
-export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intelligence'
+export type EmployeeScheduleTab = 'schedule' | 'templates' | 'jobs' | 'requests' | 'intelligence'
 
 /** `locationId` is required to fetch a week's shifts — pass `''` while the
  *  caller is still waiting on the user to pick a location. */

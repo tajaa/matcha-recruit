@@ -5,7 +5,7 @@ import type { Shift } from '../../../types/employeeSchedule'
 const shift = (id: string, starts_at: string, ends_at: string): Shift => ({
   id, starts_at, ends_at, assignments: [], role: null, department: null, location_id: null,
   template_id: null, series_id: null, break_minutes: 0, required_staff: 1, color: null,
-  notes: null, status: 'draft', kind: 'work', training_requirement_id: null, published_at: null,
+  notes: null, status: 'draft', kind: 'work', training_requirement_id: null, job_id: null, published_at: null,
 })
 
 describe('schedule editor calendar math', () => {

@@ -2,7 +2,7 @@ import { Check, Loader2, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import { Card } from '../../ui'
-import type { RosterEmployee, Shift, ShiftPayload } from '../../../types/employeeSchedule'
+import type { RosterEmployee, ScheduleJob, Shift, ShiftPayload } from '../../../types/employeeSchedule'
 import { addDays, fmtTime } from '../../../types/employeeSchedule'
 
 export type NewShiftDefaults = {
@@ -20,6 +20,7 @@ interface ShiftInspectorProps {
   locationId: string
   locationName: string
   roster: RosterEmployee[]
+  jobs: ScheduleJob[]
   trainingEnabled: boolean
   readOnly: boolean
   saving: boolean
@@ -39,13 +40,14 @@ function minuteToTime(minute: number) {
   return `${twoDigits(Math.floor(minute / 60) % 24)}:${twoDigits(minute % 60)}`
 }
 
-export default function ShiftInspector({ shift, defaults, locationId, locationName, roster, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onClose }: ShiftInspectorProps) {
+export default function ShiftInspector({ shift, defaults, locationId, locationName, roster, jobs, trainingEnabled, readOnly, saving, onCreate, onUpdate, onDelete, onClose }: ShiftInspectorProps) {
   const editing = !!shift
   const defaultDate = defaults?.date ?? shift?.starts_at.slice(0, 10) ?? ''
   const [date, setDate] = useState(defaultDate)
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : minuteToTime(defaults?.minute ?? 540))
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : minuteToTime((defaults?.minute ?? 540) + 480))
   const [role, setRole] = useState(shift?.role ?? '')
+  const [jobId, setJobId] = useState(shift?.job_id ?? '')
   const [department, setDepartment] = useState(shift?.department ?? '')
   const [breakMinutes, setBreakMinutes] = useState(String(shift?.break_minutes ?? 0))
   const [requiredStaff, setRequiredStaff] = useState(String(shift?.required_staff ?? 1))
@@ -70,6 +72,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       starts_at: `${date}T${start}:00Z`,
       ends_at: `${endDate}T${end}:00Z`,
       role: role.trim() || null,
+      job_id: jobId || null,
       department: department.trim() || null,
       location_id: locationId || null,
       break_minutes: Math.max(0, Math.round(Number(breakMinutes) || 0)),
@@ -107,6 +110,7 @@ export default function ShiftInspector({ shift, defaults, locationId, locationNa
       </div>
       <div className="mt-3 space-y-2">
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Department<input value={department} onChange={(event) => setDepartment(event.target.value)} disabled={readOnly} className={input} /></label>
+        <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Job<select value={jobId} onChange={(event) => setJobId(event.target.value)} disabled={readOnly} className={input}><option value="">No job — anyone can be assigned</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
         <label className="block text-[10px] uppercase tracking-wide text-zinc-600">Location<div className={`${input} text-zinc-400`}>{locationName}</div></label>
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[10px] uppercase tracking-wide text-zinc-600">Break minutes<input type="number" min="0" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} disabled={readOnly} className={input} /></label>

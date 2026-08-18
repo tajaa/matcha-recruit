@@ -46,5 +46,8 @@ export function conflictPrompt(err: unknown): string | null {
     const lines = (detail.violations ?? []).map((v) => `• ${v.message}`)
     return `Outside this employee's logged availability:\n${lines.join('\n')}\n\nSchedule anyway?`
   }
+  if (detail?.code === 'not_qualified_for_job') {
+    return `${detail.message ?? 'This employee is not qualified for the selected job.'}\n\nAssign anyway?`
+  }
   return null
 }

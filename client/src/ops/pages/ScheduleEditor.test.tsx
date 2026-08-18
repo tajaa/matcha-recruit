@@ -20,7 +20,7 @@ const shift = {
   id: 'shift-1', starts_at: '2026-08-09T09:00:00Z', ends_at: '2026-08-09T17:00:00Z',
   assignments: [], role: 'Opener', department: null, location_id: null,
   template_id: null, series_id: null, break_minutes: 30, required_staff: 1,
-  color: null, notes: null, status: 'draft', kind: 'work', training_requirement_id: null,
+  color: null, notes: null, status: 'draft', kind: 'work', training_requirement_id: null, job_id: null,
   published_at: null,
 }
 
@@ -35,7 +35,7 @@ describe('ScheduleEditor', () => {
     })
     useEditorMock.mockReturnValue({
       shifts: [shift],
-      roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: 'Manager', department: null }],
+      roster: [{ id: 'e1', name: 'Aisha Rivera', job_title: 'Manager', department: null, job_ids: [] }],
       rosterFlags: null,
       summary: { total_shifts: 1, published: 0, draft: 1, open_shifts: 1, assigned: 0 },
       loading: false,

@@ -1,13 +1,14 @@
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useLocationScope, locationLabel } from '../../hooks/useLocationScope'
 import { useScheduleEditor } from '../../hooks/employees/useScheduleEditor'
 import { useToast } from '../../components/ui'
+import { fetchJobs } from '../../api/employees/employeeSchedule'
 import LocationPicker from '../../components/shared/LocationPicker'
-import { addDays, startOfWeekSunday, toISODate, type Shift } from '../../types/employeeSchedule'
+import { addDays, startOfWeekSunday, toISODate, type ScheduleJob, type Shift } from '../../types/employeeSchedule'
 import { resolveScheduleDrop, type ScheduleDragData, type ScheduleDropData } from '../../components/employees/schedule-editor/drag'
 import RosterPanel from '../../components/employees/schedule-editor/RosterPanel'
 import ScheduleEditorToolbar from '../../components/employees/schedule-editor/ScheduleEditorToolbar'
@@ -16,7 +17,7 @@ import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGri
 import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
 import ScheduleChatPanel from '../../components/employees/schedule-editor/ScheduleChatPanel'
 
-const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v1'
+const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v2'
 
 function hasSeenGuide(): boolean {
   try {
@@ -48,6 +49,7 @@ export default function ScheduleEditor() {
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
   const [chatOpen, setChatOpen] = useState(false)
+  const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
@@ -58,6 +60,14 @@ export default function ScheduleEditor() {
   const inspectorReadOnly = !!inspectorShift && (inspectorShift.status === 'published' && !editPublished || inspectorShift.status === 'cancelled')
   const currentLocation = locations.find((l) => l.id === locationId)
   const currentLocationName = currentLocation ? locationLabel(currentLocation) : ''
+
+  useEffect(() => {
+    if (!locationId) {
+      setJobs([])
+      return
+    }
+    fetchJobs(locationId).then((response) => setJobs(response.jobs)).catch(() => setJobs([]))
+  }, [locationId])
 
   const setWeek = useCallback((next: string) => {
     setSearchParams((current) => {
@@ -168,7 +178,7 @@ export default function ScheduleEditor() {
           <div className="flex min-h-[500px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-            <RosterPanel roster={editor.roster} rosterFlags={editor.rosterFlags} selectedEmployeeId={selectedEmployeeId} onSelectEmployee={setSelectedEmployeeId} />
+            <RosterPanel roster={editor.roster} rosterFlags={editor.rosterFlags} selectedEmployeeId={selectedEmployeeId} onSelectEmployee={setSelectedEmployeeId} requiredJobId={inspectorShift?.job_id} />
             <WeekTimeGrid days={days} shifts={editor.shifts} pendingKeys={editor.pendingKeys} editPublished={editPublished} selectedEmployeeId={selectedEmployeeId} onCreateAt={(date, minute, employeeId) => openNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })} onOpenShift={openShift} onAssignSelected={(shift) => { if (selectedEmployeeId && canMutate(shift)) void editor.assignToShift(shift, selectedEmployeeId) }} onResizeShift={(shift, endMinute) => { if (canMutate(shift)) void editor.resizeShift(shift, endMinute) }} />
             {(inspectorShift || newDefaults) && (
               <ShiftInspector
@@ -178,6 +188,7 @@ export default function ScheduleEditor() {
                 locationId={locationId}
                 locationName={currentLocationName}
                 roster={editor.roster}
+                jobs={jobs}
                 trainingEnabled={trainingEnabled}
                 readOnly={inspectorReadOnly}
                 saving={!!(inspectorShift && editor.pendingKeys.has(`shift:${inspectorShift.id}`))}
