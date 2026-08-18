@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from app.core.feature_flags import merge_company_features
 from app.matcha.services.inventory import sales_commit, sales_mailbox, sales_mappings, sales_parse
 from app.matcha.services.matcha_work.gmail_service import GmailMailboxService
 
@@ -25,10 +26,17 @@ async def _run() -> dict:
             logger.warning("sales_intake_poll: POS intake Gmail is not configured")
             return {"processed": 0, "drafts": 0, "skipped": 0, "configured": False}
         source_rows = await conn.fetch(
-            "SELECT *, lower(from_address) AS normalized_from_address "
-            "FROM inventory_sales_sources WHERE is_active=TRUE"
+            "SELECT s.*, lower(s.from_address) AS normalized_from_address, "
+            "c.enabled_features, c.signup_source "
+            "FROM inventory_sales_sources s "
+            "JOIN companies c ON c.id=s.company_id "
+            "WHERE s.is_active=TRUE AND c.deleted_at IS NULL"
         )
-        sources = {row["normalized_from_address"]: row for row in source_rows}
+        sources = {}
+        for row in source_rows:
+            features = merge_company_features(row["enabled_features"], row["signup_source"])
+            if features.get("sales_intake") and features.get("inventory"):
+                sources[row["normalized_from_address"]] = row
         for message in await mailbox.fetch_unread():
             source = sources.get(sales_mailbox.sender_address(message.get("from", "")))
             if source is None:

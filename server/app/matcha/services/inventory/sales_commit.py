@@ -52,6 +52,26 @@ async def commit_sales_import(
     business_date, source: str, filename: Optional[str], gmail_message_id: Optional[str],
     force: bool, lines: list[dict], note: Optional[str] = None, raw: Optional[dict] = None,
 ) -> dict:
+    business_date = _date_value(business_date)
+    existing_import = None
+    if gmail_message_id:
+        existing_import = await conn.fetchrow(
+            "SELECT id, status, location_id, business_date FROM inventory_sales_imports "
+            "WHERE company_id=$1 AND gmail_message_id=$2",
+            company_id, gmail_message_id,
+        )
+        if existing_import and existing_import["status"] == "committed":
+            return {"import_id": existing_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
+                    "items_affected": 0, "errors": [], "duplicate": True}
+        if existing_import and existing_import["status"] != "draft":
+            raise ValueError("Sales import was already discarded.")
+        if existing_import:
+            # Mailbox drafts retain the source's store even when reviewed from
+            # the unfiltered Inventory page.
+            location_id = existing_import["location_id"]
+            if business_date is None:
+                business_date = existing_import["business_date"]
+
     if location_id is not None:
         owned = await conn.fetchval(
             "SELECT 1 FROM business_locations WHERE id=$1 AND company_id=$2 "
@@ -60,7 +80,6 @@ async def commit_sales_import(
         )
         if not owned:
             raise ValueError("location not found")
-    business_date = _date_value(business_date)
     if business_date and not force:
         duplicate = await conn.fetchval(
             """
@@ -74,28 +93,36 @@ async def commit_sales_import(
             raise DuplicateSalesPeriodError(
                 f"Sales for {business_date.isoformat()} already exist — commit anyway?"
             )
-    if gmail_message_id:
-        existing = await conn.fetchval(
-            "SELECT id FROM inventory_sales_imports WHERE company_id=$1 AND gmail_message_id=$2",
-            company_id, gmail_message_id,
-        )
-        if existing:
-            return {"import_id": existing, "total": 0, "mapped": 0, "unmapped": 0,
-                    "items_affected": 0, "errors": [], "duplicate": True}
 
-    import_row = await conn.fetchrow(
-        """
-        INSERT INTO inventory_sales_imports
-            (company_id, location_id, source, status, business_date, filename,
-             gmail_message_id, raw, uploaded_by, line_count, note)
-        VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id
-        """,
-        company_id, location_id, source, business_date, filename, gmail_message_id,
-        json.dumps(raw, default=str) if raw is not None else None,
-        user_id, len(lines), note,
-    )
-    import_id = import_row["id"]
+    raw_json = json.dumps(raw, default=str) if raw is not None else None
+    if existing_import:
+        import_id = existing_import["id"]
+        await conn.execute(
+            """
+            UPDATE inventory_sales_imports
+            SET source=$2, business_date=$3, filename=$4, raw=COALESCE($5, raw),
+                uploaded_by=COALESCE($6, uploaded_by), line_count=$7,
+                note=COALESCE($8, note)
+            WHERE id=$1
+            """,
+            import_id, source, business_date, filename, raw_json, user_id, len(lines), note,
+        )
+        # A mailbox draft already has its first-pass lines; replace them with
+        # the manager's reviewed submission before committing.
+        await conn.execute("DELETE FROM inventory_sales_lines WHERE import_id=$1", import_id)
+    else:
+        import_row = await conn.fetchrow(
+            """
+            INSERT INTO inventory_sales_imports
+                (company_id, location_id, source, status, business_date, filename,
+                 gmail_message_id, raw, uploaded_by, line_count, note)
+            VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+            """,
+            company_id, location_id, source, business_date, filename, gmail_message_id,
+            raw_json, user_id, len(lines), note,
+        )
+        import_id = import_row["id"]
 
     normalized_lines = []
     mapped = 0
@@ -173,8 +200,10 @@ async def commit_sales_import(
         for component in line["components"]:
             item_id = component["item_id"]
             owned = await conn.fetchval(
-                "SELECT 1 FROM inventory_items WHERE id=$1 AND company_id=$2 AND archived_at IS NULL",
-                item_id, company_id,
+                "SELECT 1 FROM inventory_items "
+                "WHERE id=$1 AND company_id=$2 AND archived_at IS NULL "
+                "AND (location_id IS NULL OR location_id IS NOT DISTINCT FROM $3)",
+                item_id, company_id, location_id,
             )
             if not owned:
                 errors.append({"item": line["sold_name"], "error": "mapped item not found"})

@@ -102,7 +102,9 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     if (!line) return
     try {
       await upsertSalesMapping({ sold_name: line.sold_name, kind: 'ignore', location_id: locationId, components: [] })
-      updateLine(index, { ignored: true, status: 'ignored', commitError: undefined })
+      updateLine(index, {
+        ignored: true, status: 'ignored', mapping_id: null, selectedItemId: '', commitError: undefined,
+      })
     } catch {
       toast('Failed to save the ignore mapping', 'error')
     }
@@ -191,12 +193,12 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
                 {line.ignored ? (
                   <div className="flex items-center justify-between text-xs text-amber-400">
                     <span>Ignored by mapping</span>
-                    <button type="button" onClick={() => updateLine(index, { ignored: false, status: 'unmapped' })} className="hover:underline">Undo</button>
+                    <button type="button" onClick={() => updateLine(index, { ignored: false, status: 'unmapped', mapping_id: null, selectedItemId: '' })} className="hover:underline">Undo</button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <Select options={itemOptions} value={line.selectedItemId} onChange={(event) => updateLine(index, { selectedItemId: event.target.value, status: event.target.value ? 'mapped' : 'unmapped' })} placeholder="Map to stock item…" className="flex-1" />
-                    <input type="number" min={0.0001} step="any" value={line.quantityPerSale} onChange={(event) => updateLine(index, { quantityPerSale: Number(event.target.value) })} className="w-20 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm" aria-label="Stock units per sale" />
+                    <Select options={itemOptions} value={line.selectedItemId} onChange={(event) => updateLine(index, { selectedItemId: event.target.value, mapping_id: null, status: event.target.value ? 'mapped' : 'unmapped' })} placeholder="Map to stock item…" className="flex-1" />
+                    <input type="number" min={0.0001} step="any" value={line.quantityPerSale} onChange={(event) => updateLine(index, { quantityPerSale: Number(event.target.value), mapping_id: null })} className="w-20 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm" aria-label="Stock units per sale" />
                     <button type="button" onClick={() => void markIgnored(index)} className="text-xs text-amber-400 hover:underline">Ignore</button>
                     <button type="button" onClick={() => void createAndMap(index)} className="text-xs text-emerald-400 hover:underline">New item</button>
                   </div>

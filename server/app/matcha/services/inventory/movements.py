@@ -157,7 +157,8 @@ async def record_movements(
         elif kind == "in" and quantity is not None:
             delta = abs(float(quantity))
         elif kind == "sale" and quantity is not None:
-            delta = -abs(float(quantity))
+            # A negative POS quantity is a refund and puts stock back.
+            delta = -float(quantity)
 
         if sales_import_id is not None:
             row = await conn.fetchrow(

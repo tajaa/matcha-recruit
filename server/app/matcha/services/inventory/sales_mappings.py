@@ -43,6 +43,17 @@ async def upsert_mapping(
     if kind == "ignore" and components:
         raise ValueError("ignore mappings cannot have components")
 
+    for component in components:
+        item_id = component.get("item_id")
+        owned = await conn.fetchval(
+            "SELECT 1 FROM inventory_items "
+            "WHERE id=$1 AND company_id=$2 AND archived_at IS NULL "
+            "AND (location_id IS NULL OR location_id IS NOT DISTINCT FROM $3)",
+            item_id, company_id, location_id,
+        )
+        if not owned:
+            raise ValueError("mapping item not found or outside location")
+
     normalized = normalize_name(sold_name)
     async with conn.transaction():
         mapping = await conn.fetchrow(
@@ -85,9 +96,10 @@ async def upsert_mapping(
                     (mapping_id, item_id, quantity_per_sale, unit)
                 SELECT $1, id, $3, $4 FROM inventory_items
                 WHERE id=$2 AND company_id=$5 AND archived_at IS NULL
+                  AND (location_id IS NULL OR location_id IS NOT DISTINCT FROM $6)
                 """,
                 mapping["id"], component["item_id"], component["quantity_per_sale"],
-                component.get("unit"), company_id,
+                component.get("unit"), company_id, location_id,
             )
         rows = await conn.fetch(
             "SELECT * FROM inventory_sales_mapping_lines WHERE mapping_id=$1 ORDER BY created_at",
@@ -100,7 +112,9 @@ async def upsert_mapping(
 
 async def resolve_sold_lines(conn, *, company_id: UUID, location_id: Optional[UUID], lines: list[dict]) -> list[dict]:
     mappings = await list_mappings(conn, company_id, location_id)
-    catalog = await movements_service.list_item_names_for_audit(conn, company_id, location_id)
+    # Sales without a location must resolve only company-wide items; the audit
+    # catalog intentionally widens None to every store, which is unsafe here.
+    catalog = await movements_service.list_item_names(conn, company_id, location_id)
     resolved = []
     for line in lines:
         sold_name = line.get("item_name") or line.get("sold_name") or ""

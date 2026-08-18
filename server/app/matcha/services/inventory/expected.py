@@ -19,7 +19,7 @@ async def expected_breakdown(conn, company_id: UUID, item_ids: list[UUID], locat
         ), buckets AS (
             SELECT m.item_id,
                    SUM(CASE WHEN m.kind='in' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS received,
-                   SUM(CASE WHEN m.kind='sale' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS sold,
+                   SUM(CASE WHEN m.kind='sale' THEN -COALESCE(m.quantity_delta,0) ELSE 0 END) AS sold,
                    SUM(CASE WHEN m.kind='out' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS manual_out,
                    SUM(CASE WHEN m.kind='stockout' THEN 1 ELSE 0 END) AS stockouts
             FROM inventory_movements m
