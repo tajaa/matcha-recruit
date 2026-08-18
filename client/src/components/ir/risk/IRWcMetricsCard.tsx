@@ -158,15 +158,15 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
 
       <MetricStrip cols="grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         {/* TRIR */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
+        <div className="bg-zinc-900 p-4 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> TRIR
             <HelpTooltip text={`Total Recordable Incident Rate per 100 FTEs. OSHA standard: (recordable × 200,000) / hours worked. ${benchLabel} median ≈ ${trirMedian}.`} />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(trir, trirMedian)}`}>
+          <div className={`text-2xl font-light font-mono mt-1.5 ${rateTone(trir, trirMedian)}`}>
             {trir === null ? '—' : trir.toFixed(2)}
           </div>
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1.5 font-mono">
             {trir === null ? 'needs headcount' : `vs ${trirMedian} median`}
           </div>
           {trir !== null && (
@@ -174,19 +174,19 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {rateLabel(trir, trirMedian)}
             </div>
           )}
-          <div className="mt-2"><DeltaPill pct={metrics.prior.trir_delta_pct} /></div>
+          <div className="mt-1.5"><DeltaPill pct={metrics.prior.trir_delta_pct} /></div>
         </div>
 
         {/* DART */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
+        <div className="bg-zinc-900 p-4 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> DART
             <HelpTooltip text={`Days Away, Restricted, or Transferred rate. Same formula as TRIR but only lost-time cases. ${benchLabel} median ≈ ${dartMedian}.`} />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(dart_rate, dartMedian)}`}>
+          <div className={`text-2xl font-light font-mono mt-1.5 ${rateTone(dart_rate, dartMedian)}`}>
             {dart_rate === null ? '—' : dart_rate.toFixed(2)}
           </div>
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1.5 font-mono">
             {dart_rate === null ? 'needs headcount' : `vs ${dartMedian} median`}
           </div>
           {dart_rate !== null && (
@@ -194,19 +194,19 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {rateLabel(dart_rate, dartMedian)}
             </div>
           )}
-          <div className="mt-2"><DeltaPill pct={metrics.prior.dart_delta_pct} /></div>
+          <div className="mt-1.5"><DeltaPill pct={metrics.prior.dart_delta_pct} /></div>
         </div>
 
         {/* Lost days */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
+        <div className="bg-zinc-900 p-4 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Calendar className="w-3 h-3" /> Lost Days
             <HelpTooltip text="Total days away from work across all OSHA-recordable incidents in this period. High totals push severity component of E-Mod up." />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${lost_days > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
+          <div className={`text-2xl font-light font-mono mt-1.5 ${lost_days > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
             {lost_days}
           </div>
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1.5 font-mono">
             +{metrics.restricted_days} restricted
           </div>
           {deaths > 0 && (
@@ -214,11 +214,11 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {deaths} fatality{deaths === 1 ? '' : 's'}
             </div>
           )}
-          <div className="mt-2"><DeltaPill pct={metrics.prior.lost_days_delta_pct} /></div>
+          <div className="mt-1.5"><DeltaPill pct={metrics.prior.lost_days_delta_pct} /></div>
         </div>
 
         {/* Claims-free streak */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
+        <div className="bg-zinc-900 p-4 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Heart className="w-3 h-3" /> Claims-Free Streak
             <HelpTooltip text="Days since the last OSHA-recordable incident (any time). Long streaks support an E-Mod credit case at renewal." />
@@ -227,10 +227,10 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
             const s = streakDisplay(days_since_last_recordable)
             return (
               <>
-                <div className={`text-4xl font-light font-mono mt-2 ${streakTone(days_since_last_recordable)}`}>
+                <div className={`text-2xl font-light font-mono mt-1.5 ${streakTone(days_since_last_recordable)}`}>
                   {s.value}
                 </div>
-                <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1.5 font-mono">
                   {s.unit}
                 </div>
               </>

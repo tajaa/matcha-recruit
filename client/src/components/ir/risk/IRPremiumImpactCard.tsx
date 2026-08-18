@@ -34,13 +34,13 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
   const swingPts = Math.abs(mod_swing) * 100  // mod_swing 0.18 → 18 points
 
   return (
-    <div className={`rounded-2xl border p-6 ${bgTone}`}>
+    <div className={`rounded-2xl border p-5 ${bgTone}`}>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-start gap-4 min-w-0">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
             isIncrease ? 'bg-red-500/10' : isDecrease ? 'bg-emerald-500/10' : 'bg-zinc-800'
           }`}>
-            <Icon className={`w-5 h-5 ${tone}`} />
+            <Icon className={`w-4 h-4 ${tone}`} />
           </div>
           <div className="min-w-0">
             <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -48,12 +48,12 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
               Premium Impact Estimate
             </div>
             <div className="mt-1.5 flex items-baseline gap-2 flex-wrap">
-              <span className={`text-3xl font-light font-mono ${tone}`}>
+              <span className={`text-2xl font-light font-mono ${tone}`}>
                 {isIncrease ? '+' : isDecrease ? '−' : ''}{fmtMoney(Math.abs(annual_impact_dollars))}
               </span>
               <span className="text-xs text-zinc-500">/ year directional</span>
             </div>
-            <p className="text-[12px] text-zinc-400 mt-2 leading-relaxed">
+            <p className="text-[12px] text-zinc-400 mt-1.5 leading-relaxed">
               {isIncrease && (
                 <>Underperforming sector TRIR projects a <strong className="text-red-400">~{swingPts.toFixed(0)}% increase</strong> in annual incurred loss costs, raising renewal rates. Projected added cost: <strong className="text-red-400">{fmtMoney(annual_impact_dollars)}/yr</strong>.</>
               )}
@@ -64,7 +64,7 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
                 <>TRIR sits at the sector median — neutral mod posture going into renewal.</>
               )}
             </p>
-            <p className="text-[10px] text-zinc-600 mt-3 leading-relaxed">
+            <p className="text-[10px] text-zinc-600 mt-2 leading-relaxed">
               Calculated on {fmtMoney(base_premium_estimate)}/yr base premium. {isIncrease
                 ? 'Higher incident rates increase expected loss frequency, driving carrier rate increases and future E-Mod debits.'
                 : 'Lower incident rates directly reduce expected loss frequency, driving carrier rate reductions and future E-Mod credits.'} <strong>Not a quote</strong> — confirm with your broker.
