@@ -1711,7 +1711,7 @@ async def execute_apply_template_proposal(
 
     blocks = await conn.fetch(
         """SELECT id, name, role, department, location_id, start_time, end_time, break_minutes,
-                  required_staff, days_of_week, color, notes
+                  required_staff, days_of_week, color, notes, job_id
            FROM schedule_shift_templates WHERE week_template_id = $1""",
         week_template_id,
     )

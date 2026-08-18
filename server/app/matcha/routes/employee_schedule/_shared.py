@@ -115,6 +115,19 @@ async def assert_location_in_company(
         raise HTTPException(status_code=404, detail="Location not found")
 
 
+async def assert_job_in_company(
+    conn, company_id: UUID, job_id: Optional[UUID]
+) -> None:
+    if job_id is None:
+        return
+    row = await conn.fetchrow(
+        "SELECT 1 FROM schedule_jobs WHERE id = $1 AND company_id = $2",
+        job_id, company_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+
 async def fetch_shifts(
     conn,
     company_id: UUID,

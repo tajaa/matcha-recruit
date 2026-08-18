@@ -15,6 +15,7 @@ from .week_templates import router as _week_templates_router
 from .requests import router as _requests_router
 from .availability import router as _availability_router
 from .chat import router as _chat_router
+from .jobs import router as _jobs_router
 
 router = APIRouter()
 router.include_router(_shifts_router)
@@ -23,6 +24,7 @@ router.include_router(_week_templates_router)
 router.include_router(_requests_router)
 router.include_router(_availability_router)
 router.include_router(_chat_router)
+router.include_router(_jobs_router)
 
 # Sibling router — own prefix (/schedule-intelligence) + its own single-flag
 # gate (schedule_intelligence, not employee_schedule), mounted separately in

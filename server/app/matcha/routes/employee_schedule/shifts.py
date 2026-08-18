@@ -24,6 +24,7 @@ from ...services.scheduling.shift_writes import create_shift_core
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
+    assert_job_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
     shift_window_on_date, check_job_qualification, raise_not_qualified,
@@ -167,6 +168,7 @@ async def create_shift(body: ShiftCreate,
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
+        await assert_job_in_company(conn, company_id, body.job_id)
         training_requirement = None
         if body.kind == "training":
             features = await get_company_features(company_id, conn=conn)
@@ -386,6 +388,8 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
             return await fetch_shift_by_id(conn, company_id, shift_id)
         if "location_id" in patch:
             await assert_location_in_company(conn, company_id, patch["location_id"])
+        if "job_id" in patch:
+            await assert_job_in_company(conn, company_id, patch["job_id"])
 
         new_status = patch.get("status", existing["status"])
         # Cancelled is terminal for publication — POST /publish already refuses it

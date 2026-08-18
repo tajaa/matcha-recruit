@@ -30,7 +30,7 @@ from ...services.scheduling.schedule_rules import build_patch
 from ...services.scheduling.shift_writes import generate_week_template_shifts
 from ._shared import (
     require_company_id, log_audit, serialize_week_template, serialize_block,
-    fetch_shifts, assert_location_in_company,
+    fetch_shifts, assert_location_in_company, assert_job_in_company,
 )
 
 router = APIRouter()
@@ -38,7 +38,7 @@ router = APIRouter()
 _WEEK_COLS = "id, name, location_id, color, notes"
 _BLOCK_COLS = (
     "id, week_template_id, name, role, department, location_id, start_time, "
-    "end_time, break_minutes, required_staff, days_of_week, color, notes"
+    "end_time, break_minutes, required_staff, days_of_week, color, notes, job_id"
 )
 
 
@@ -180,6 +180,7 @@ async def update_block(week_template_id: UUID, block_id: UUID, body: BlockUpdate
         patch["days_of_week"] = json.dumps(sorted(set(patch["days_of_week"])))
     async with get_connection() as conn:
         await _fetch_week_template_or_404(conn, company_id, week_template_id)
+        await assert_job_in_company(conn, company_id, patch.get("job_id"))
         if not patch:
             row = await conn.fetchrow(
                 f"SELECT {_BLOCK_COLS} FROM schedule_shift_templates "
@@ -276,17 +277,18 @@ async def _fetch_blocks(conn, week_template_id: UUID) -> list[dict]:
 
 
 async def _insert_block(conn, company_id: UUID, week_template_id: UUID, location_id, body: BlockCreate, actor_id):
+    await assert_job_in_company(conn, company_id, body.job_id)
     row = await conn.fetchrow(
         f"""
         INSERT INTO schedule_shift_templates
             (company_id, week_template_id, name, role, department, location_id,
              start_time, end_time, break_minutes, required_staff, days_of_week,
-             color, notes, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)
+             color, notes, created_by, job_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15)
         RETURNING {_BLOCK_COLS}
         """,
         company_id, week_template_id, body.name.strip(), body.role, body.department, location_id,
         body.start_time, body.end_time, body.break_minutes, body.required_staff,
-        json.dumps(sorted(set(body.days_of_week))), body.color, body.notes, actor_id,
+        json.dumps(sorted(set(body.days_of_week))), body.color, body.notes, actor_id, body.job_id,
     )
     return serialize_block(row)

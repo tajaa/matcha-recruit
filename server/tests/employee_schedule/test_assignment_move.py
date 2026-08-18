@@ -41,6 +41,7 @@ def _shift(shift_id: UUID, *, published=False, required_staff=1):
         "role": "Cashier",
         "kind": "training",
         "training_requirement_id": None,
+        "job_id": None,
         "published_at": starts_at if published else None,
     }
 
@@ -126,6 +127,7 @@ class _Connection:
             "status": shift["status"],
             "kind": shift["kind"],
             "training_requirement_id": None,
+            "job_id": None,
             "published_at": shift["published_at"].isoformat().replace("+00:00", "Z") if shift["published_at"] else None,
             "assignments": [
                 {
