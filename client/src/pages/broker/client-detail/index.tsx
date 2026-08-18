@@ -87,7 +87,7 @@ export default function BrokerClientDetail() {
     )
   }
 
-  const { company, compliance, policies, ir_summary, er_summary, handbooks } = data
+  const { company, policies, ir_summary, er_summary, handbooks } = data
 
   return (
     <div className="space-y-6">
