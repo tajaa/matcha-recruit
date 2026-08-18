@@ -1,0 +1,38 @@
+"""Multi-block week-template generation — pure arithmetic, no DB.
+
+generate_from_week_template (routes/employee_schedule/week_templates.py) loops
+every block through template_windows and unions the results under one
+series_id. These tests pin the per-block window math the route relies on:
+disjoint weekday coverage across blocks, a block with no weekdays configured
+producing zero windows (the route `continue`s rather than 422ing), and an
+overnight block rolling to the next day alongside a same-day block — a
+theatre's "Standard Week" needs all three at once.
+"""
+
+from datetime import date, time
+
+from app.matcha.services.scheduling.schedule_rules import template_windows
+
+
+def test_two_blocks_cover_disjoint_weekdays():
+    # Standard Week: Box Office Mon-Fri 9-22, Weekend Crew Sat+Sun 9-23.
+    # One 7-day range must produce 5 + 2 = 7 windows, none overlapping days.
+    weekday_starts, _ = template_windows(date(2026, 7, 12), date(2026, 7, 18), {1, 2, 3, 4, 5}, time(9), time(22))
+    weekend_starts, _ = template_windows(date(2026, 7, 12), date(2026, 7, 18), {0, 6}, time(9), time(23))
+    assert len(weekday_starts) == 5 and len(weekend_starts) == 2
+    assert not {s.date() for s in weekday_starts} & {s.date() for s in weekend_starts}
+
+
+def test_block_with_no_weekdays_yields_nothing():
+    # The route `continue`s on an empty day_set — an empty mask is zero
+    # windows, not an error.
+    assert template_windows(date(2026, 7, 12), date(2026, 7, 18), set(), time(9), time(17)) == ([], [])
+
+
+def test_overnight_block_alongside_a_day_block():
+    # A theatre's late block (22:00-02:00) rolls to the next day while the day
+    # block does not — both can live in the same week template.
+    _, day_ends = template_windows(date(2026, 7, 13), date(2026, 7, 13), {1}, time(9), time(17))
+    late_starts, late_ends = template_windows(date(2026, 7, 13), date(2026, 7, 13), {1}, time(22), time(2))
+    assert day_ends[0].date() == date(2026, 7, 13)
+    assert late_ends[0].date() == date(2026, 7, 14) and late_ends[0] > late_starts[0]

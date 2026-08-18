@@ -1,7 +1,7 @@
 import { api } from '../client'
 import type {
   Shift, ShiftPayload, WeekResponse, ScheduleSummary,
-  ShiftTemplate, TemplatePayload, ScheduleRequest,
+  WeekTemplate, WeekTemplatePayload, TemplateBlock, BlockPayload, ScheduleRequest,
   AssignmentMovePayload, AssignmentMoveResponse,
 } from '../../types/employeeSchedule'
 
@@ -107,31 +107,44 @@ export function fetchLocationCompliance(locationId: string) {
   return api.get<LocationComplianceResponse>(`/employee-schedule/compliance/location/${locationId}`)
 }
 
-// ---- Admin: templates ----
+// ---- Admin: week templates ----
 
-export function fetchTemplates(locationId: string) {
-  return api.get<{ templates: ShiftTemplate[] }>(`/employee-schedule/templates?location=${locationId}`)
+export function fetchWeekTemplates(locationId: string) {
+  return api.get<{ week_templates: WeekTemplate[] }>(`/employee-schedule/week-templates?location=${locationId}`)
 }
 
-export function createTemplate(payload: TemplatePayload) {
-  return api.post<ShiftTemplate>('/employee-schedule/templates', payload)
+export function createWeekTemplate(payload: WeekTemplatePayload) {
+  return api.post<WeekTemplate>('/employee-schedule/week-templates', payload)
+}
+
+/** True PATCH on parent fields only — blocks are managed via their own endpoints. */
+export function updateWeekTemplate(id: string, payload: Partial<WeekTemplatePayload>) {
+  return api.put<WeekTemplate>(`/employee-schedule/week-templates/${id}`, payload)
+}
+
+export function deleteWeekTemplate(id: string) {
+  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/week-templates/${id}`)
+}
+
+export function addTemplateBlock(weekTemplateId: string, payload: BlockPayload) {
+  return api.post<TemplateBlock>(`/employee-schedule/week-templates/${weekTemplateId}/blocks`, payload)
 }
 
 /** True PATCH, like updateShift. */
-export function updateTemplate(id: string, payload: Partial<TemplatePayload>) {
-  return api.put<ShiftTemplate>(`/employee-schedule/templates/${id}`, payload)
+export function updateTemplateBlock(weekTemplateId: string, blockId: string, payload: Partial<BlockPayload>) {
+  return api.put<TemplateBlock>(`/employee-schedule/week-templates/${weekTemplateId}/blocks/${blockId}`, payload)
 }
 
-export function deleteTemplate(id: string) {
-  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/templates/${id}`)
+export function deleteTemplateBlock(weekTemplateId: string, blockId: string) {
+  return api.delete<{ ok: boolean; id: string }>(`/employee-schedule/week-templates/${weekTemplateId}/blocks/${blockId}`)
 }
 
-export function generateFromTemplate(id: string, startDate: string, endDate: string) {
+export function generateFromWeekTemplate(weekTemplateId: string, startDate: string, endDate: string) {
   return api.post<{
     created: number; series_id: string; shifts: Shift[]
     compliance_warnings?: { check: string; severity: string; message: string; statute?: string | null }[]
   }>(
-    `/employee-schedule/templates/${id}/generate`, { start_date: startDate, end_date: endDate },
+    `/employee-schedule/week-templates/${weekTemplateId}/generate`, { start_date: startDate, end_date: endDate },
   )
 }
 

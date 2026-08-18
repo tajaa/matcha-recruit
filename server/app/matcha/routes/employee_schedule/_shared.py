@@ -360,7 +360,10 @@ def _display_name(first: Optional[str], last: Optional[str]) -> str:
     return name or "Unnamed"
 
 
-def serialize_template(r) -> dict:
+def serialize_block(r) -> dict:
+    """A schedule_shift_templates row — standalone (week_template_id is None,
+    the shape schedule_chat.py still writes directly) or a week template's
+    child block."""
     days = r["days_of_week"]
     if isinstance(days, str):
         try:
@@ -369,6 +372,7 @@ def serialize_template(r) -> dict:
             days = []
     return {
         "id": str(r["id"]),
+        "week_template_id": str(r["week_template_id"]) if r["week_template_id"] else None,
         "name": r["name"],
         "role": r["role"],
         "department": r["department"],
@@ -380,6 +384,17 @@ def serialize_template(r) -> dict:
         "days_of_week": days if isinstance(days, list) else [],
         "color": r["color"],
         "notes": r["notes"],
+    }
+
+
+def serialize_week_template(r, blocks: list[dict]) -> dict:
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "location_id": str(r["location_id"]) if r["location_id"] else None,
+        "color": r["color"],
+        "notes": r["notes"],
+        "blocks": blocks,
     }
 
 

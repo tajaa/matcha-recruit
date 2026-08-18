@@ -15,12 +15,16 @@ from app.matcha.models.scheduling.employee_schedule import (
     AvailabilityReplace,
     AvailabilityWindow,
     AssignmentMove,
+    BlockCreate,
+    BlockUpdate,
     DuplicateShift,
-    GenerateFromTemplate,
+    GenerateFromWeekTemplate,
     PublishRange,
     ScheduleRequestCreate,
     ShiftCreate,
     ShiftUpdate,
+    WeekTemplateCreate,
+    WeekTemplateUpdate,
 )
 
 AWARE = datetime(2026, 7, 13, 9, tzinfo=timezone.utc)
@@ -119,21 +123,65 @@ def test_shift_update_checks_window_only_when_both_sent():
     assert ShiftUpdate(ends_at=AWARE_END).ends_at == AWARE_END
 
 
-# ── template generation ─────────────────────────────────────────────────────
+# ── week template generation ────────────────────────────────────────────────
 
-def test_generate_rejects_backwards_range():
+def test_week_generate_rejects_backwards_range():
     with pytest.raises(ValidationError):
-        GenerateFromTemplate(start_date=date(2026, 7, 20), end_date=date(2026, 7, 13))
+        GenerateFromWeekTemplate(start_date=date(2026, 7, 20), end_date=date(2026, 7, 13))
 
 
-def test_generate_caps_the_span():
+def test_week_generate_caps_the_span():
     with pytest.raises(ValidationError):
-        GenerateFromTemplate(start_date=date(2026, 1, 1), end_date=date(2027, 1, 1))
+        GenerateFromWeekTemplate(start_date=date(2026, 1, 1), end_date=date(2027, 1, 1))
 
 
-def test_generate_accepts_a_single_day():
-    body = GenerateFromTemplate(start_date=date(2026, 7, 13), end_date=date(2026, 7, 13))
+def test_week_generate_accepts_a_single_day():
+    body = GenerateFromWeekTemplate(start_date=date(2026, 7, 13), end_date=date(2026, 7, 13))
     assert body.start_date == body.end_date
+
+
+def test_block_create_defaults():
+    blk = BlockCreate(name="Box Office", start_time=time(9), end_time=time(22), days_of_week=[1, 2, 3, 4, 5])
+    assert blk.required_staff == 1 and blk.break_minutes == 0 and blk.role is None
+
+
+def test_block_create_has_no_location_field():
+    # Location lives on the parent week template and is mirrored down by the
+    # route — a block payload that could set it independently would let the
+    # two diverge, and every read path assumes they cannot.
+    assert "location_id" not in BlockCreate.model_fields
+
+
+def test_block_update_is_a_true_patch():
+    assert BlockUpdate(role="Usher").model_dump(exclude_unset=True) == {"role": "Usher"}
+    assert BlockUpdate(role=None).model_dump(exclude_unset=True) == {"role": None}
+    assert BlockUpdate().model_dump(exclude_unset=True) == {}
+
+
+def test_week_template_create_accepts_inline_blocks():
+    tpl = WeekTemplateCreate(name="Standard Week", blocks=[
+        BlockCreate(name="Box Office", start_time=time(9), end_time=time(22), days_of_week=[1, 2, 3, 4, 5]),
+        BlockCreate(name="Weekend Crew", start_time=time(9), end_time=time(23), days_of_week=[0, 6]),
+    ])
+    assert len(tpl.blocks) == 2
+
+
+def test_week_template_create_allows_no_blocks():
+    # A container saved first, blocks added later from the card.
+    assert WeekTemplateCreate(name="Christmas Week").blocks == []
+
+
+def test_week_template_create_caps_block_count():
+    with pytest.raises(ValidationError):
+        WeekTemplateCreate(name="Silly", blocks=[
+            BlockCreate(name=f"B{i}", start_time=time(9), end_time=time(17), days_of_week=[1])
+            for i in range(41)
+        ])
+
+
+def test_week_template_update_is_a_true_patch():
+    assert WeekTemplateUpdate(name="Renamed").model_dump(exclude_unset=True) == {"name": "Renamed"}
+    assert WeekTemplateUpdate(location_id=None).model_dump(exclude_unset=True) == {"location_id": None}
 
 
 # ── employee requests ───────────────────────────────────────────────────────
@@ -166,12 +214,6 @@ def test_valid_unavailable_request():
     )
     assert body.shift_id is None
 
-
-def test_template_create_requires_a_time_window():
-    from app.matcha.models.scheduling.employee_schedule import TemplateCreate
-
-    tpl = TemplateCreate(name="Day", start_time=time(9), end_time=time(17), days_of_week=[1, 3])
-    assert tpl.required_staff == 1 and tpl.break_minutes == 0
 
 
 # ── training-as-shift (kind) ─────────────────────────────────────────────────

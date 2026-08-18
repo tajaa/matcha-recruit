@@ -2,8 +2,8 @@
 
 Shift scheduling over the existing roster: shift CRUD + publish + weekly view
 (shifts.py, owns the aggregate paths), employee assignment (assignments.py),
-reusable templates + recurrence generation (templates.py), and admin review of
-employee swap/unavailability requests (requests.py). Mounted at
+week templates + recurrence generation (week_templates.py), and admin review
+of employee swap/unavailability requests (requests.py). Mounted at
 `/employee-schedule` in routes/__init__.py behind require_feature.
 """
 
@@ -11,7 +11,7 @@ from fastapi import APIRouter
 
 from .shifts import router as _shifts_router
 from .assignments import router as _assignments_router
-from .templates import router as _templates_router
+from .week_templates import router as _week_templates_router
 from .requests import router as _requests_router
 from .availability import router as _availability_router
 from .chat import router as _chat_router
@@ -19,7 +19,7 @@ from .chat import router as _chat_router
 router = APIRouter()
 router.include_router(_shifts_router)
 router.include_router(_assignments_router)
-router.include_router(_templates_router)
+router.include_router(_week_templates_router)
 router.include_router(_requests_router)
 router.include_router(_availability_router)
 router.include_router(_chat_router)

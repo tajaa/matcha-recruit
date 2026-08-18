@@ -99,8 +99,9 @@ export interface ShiftPayload {
   training_requirement_id?: string | null
 }
 
-export interface ShiftTemplate {
+export interface TemplateBlock {
   id: string
+  week_template_id: string | null
   name: string
   role: string | null
   department: string | null
@@ -114,11 +115,19 @@ export interface ShiftTemplate {
   notes: string | null
 }
 
-export interface TemplatePayload {
+export interface WeekTemplate {
+  id: string
+  name: string
+  location_id: string | null
+  color: string | null
+  notes: string | null
+  blocks: TemplateBlock[]
+}
+
+export interface BlockPayload {
   name?: string
   role?: string | null
   department?: string | null
-  location_id?: string | null
   start_time?: string
   end_time?: string
   break_minutes?: number
@@ -126,6 +135,14 @@ export interface TemplatePayload {
   days_of_week?: number[]
   color?: string | null
   notes?: string | null
+}
+
+export interface WeekTemplatePayload {
+  name?: string
+  location_id?: string | null
+  color?: string | null
+  notes?: string | null
+  blocks?: BlockPayload[]
 }
 
 export interface ScheduleRequest {

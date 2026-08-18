@@ -134,11 +134,13 @@ class PublishRange(BaseModel):
         return self
 
 
-class TemplateCreate(BaseModel):
+class BlockCreate(BaseModel):
+    """One shift-block inside a week template. Same shape as a standalone
+    template minus location_id (inherited from the parent, never diverges)."""
+
     name: str = Field(..., min_length=1, max_length=150)
     role: Optional[str] = Field(None, max_length=150)
     department: Optional[str] = Field(None, max_length=100)
-    location_id: Optional[UUID] = None
     start_time: time
     end_time: time
     break_minutes: int = Field(0, ge=0, le=1440)
@@ -148,11 +150,12 @@ class TemplateCreate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
 
 
-class TemplateUpdate(BaseModel):
+class BlockUpdate(BaseModel):
+    """True PATCH — same fields as BlockCreate, all optional."""
+
     name: Optional[str] = Field(None, min_length=1, max_length=150)
     role: Optional[str] = Field(None, max_length=150)
     department: Optional[str] = Field(None, max_length=100)
-    location_id: Optional[UUID] = None
     start_time: Optional[time] = None
     end_time: Optional[time] = None
     break_minutes: Optional[int] = Field(None, ge=0, le=1440)
@@ -162,19 +165,42 @@ class TemplateUpdate(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
 
 
-class GenerateFromTemplate(BaseModel):
-    """Materialize concrete shifts from a template across a date range.
+class WeekTemplateCreate(BaseModel):
+    """A named, reusable week of shift blocks. Location is set once here and
+    inherited by every block (block-level location_id is a DB implementation
+    detail, not exposed on this payload)."""
 
-    Every date in [start_date, end_date] whose weekday is in the template's
-    days_of_week gets one draft shift. Overnight templates (end_time <=
-    start_time) roll ends_at to the next calendar day.
+    name: str = Field(..., min_length=1, max_length=150)
+    location_id: Optional[UUID] = None
+    color: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=2000)
+    blocks: list[BlockCreate] = Field(default_factory=list, max_length=40)
+
+
+class WeekTemplateUpdate(BaseModel):
+    """True PATCH on the parent's own fields only — blocks are managed via
+    their own add/update/delete endpoints, not by resubmitting the list."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    location_id: Optional[UUID] = None
+    color: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+class GenerateFromWeekTemplate(BaseModel):
+    """Materialize concrete shifts from every block in a week template across
+    a date range, all sharing one series_id.
+
+    Every date in [start_date, end_date] whose weekday is in a block's
+    days_of_week gets one draft shift from that block. Overnight blocks
+    (end_time <= start_time) roll ends_at to the next calendar day.
     """
 
     start_date: date
     end_date: date
 
     @model_validator(mode="after")
-    def _check_range(self) -> "GenerateFromTemplate":
+    def _check_range(self) -> "GenerateFromWeekTemplate":
         if self.end_date < self.start_date:
             raise ValueError("end_date must be on or after start_date")
         if (self.end_date - self.start_date).days > 186:
