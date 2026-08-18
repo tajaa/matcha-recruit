@@ -26,7 +26,7 @@ from ._shared import (
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
-    shift_window_on_date,
+    shift_window_on_date, check_job_qualification, raise_not_qualified,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -201,12 +201,14 @@ async def create_shift(body: ShiftCreate,
 
         forced: dict[str, list[dict]] = {}
         availability_overrides: dict[str, list[dict]] = {}
+        qualification_overrides: dict[str, dict] = {}
         for emp_id in body.employee_ids:
             await assert_employee_in_company(conn, company_id, emp_id)
             await assert_employee_schedulable_at(conn, company_id, emp_id, body.location_id)
             avail = availability_violations(
                 avail_map.get(emp_id, {}), body.starts_at, body.ends_at,
             )
+            unqualified = await check_job_qualification(conn, company_id, emp_id, body.job_id)
             if not force:
                 conflicts = await find_conflicts(
                     conn, company_id, emp_id, body.starts_at, body.ends_at,
@@ -215,8 +217,12 @@ async def create_shift(body: ShiftCreate,
                     raise_conflict(emp_id, conflicts)
                 if avail:
                     raise_outside_availability(emp_id, avail)
+                if unqualified:
+                    raise_not_qualified(unqualified)
             if avail:
                 availability_overrides[str(emp_id)] = avail
+            if unqualified:
+                qualification_overrides[str(emp_id)] = unqualified
             violations = await check_shift_compliance(
                 conn, company_id, location_id=body.location_id,
                 starts_at=body.starts_at, ends_at=body.ends_at,
@@ -243,7 +249,7 @@ async def create_shift(body: ShiftCreate,
                 location_id=body.location_id, role=body.role, department=body.department,
                 starts_at=body.starts_at, ends_at=body.ends_at,
                 break_minutes=body.break_minutes, required_staff=body.required_staff,
-                color=body.color, notes=body.notes, kind=body.kind,
+                color=body.color, notes=body.notes, kind=body.kind, job_id=body.job_id,
                 training_requirement=dict(training_requirement) if training_requirement else None,
                 training_requirement_id=body.training_requirement_id,
                 employee_ids=body.employee_ids, created_by=current_user.id,
@@ -256,6 +262,10 @@ async def create_shift(body: ShiftCreate,
                 await log_availability_override(
                     conn, company_id, shift_id, current_user.id, UUID(emp_id), avail,
                 )
+            for emp_id, detail in qualification_overrides.items():
+                await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
+                                "assignment.qualification_override",
+                                {"employee_id": emp_id, **detail})
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -324,12 +334,14 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                 for eid in employee_ids:
                     conflicts = await find_conflicts(conn, company_id, eid, new_start, new_end)
                     avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
-                    if conflicts or avail:
+                    unqualified = await check_job_qualification(conn, company_id, eid, src["job_id"])
+                    if conflicts or avail or unqualified:
                         dropped.append({
                             "date": d.isoformat(), "employee_id": str(eid),
                             "name": names.get(str(eid), ""),
                             "reason": "outside their logged availability" if avail
-                                      else "already scheduled during this time",
+                                      else "already scheduled during this time" if conflicts
+                                      else unqualified["message"],
                         })
                         continue
                     surviving.append(eid)
@@ -338,7 +350,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                     location_id=src["location_id"], role=src["role"], department=src["department"],
                     starts_at=new_start, ends_at=new_end,
                     break_minutes=src["break_minutes"], required_staff=src["required_staff"],
-                    color=src["color"], notes=src["notes"], kind=src["kind"],
+                    color=src["color"], notes=src["notes"], kind=src["kind"], job_id=src["job_id"],
                     training_requirement=training_requirement,
                     training_requirement_id=src["training_requirement_id"],
                     employee_ids=surviving, created_by=current_user.id, status="draft",

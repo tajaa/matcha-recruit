@@ -17,8 +17,8 @@ from fastapi import HTTPException
 from ...dependencies import get_client_company_id
 from ...services.scheduling.schedule_rules import (  # re-exported for the route modules
     INACTIVE_EMPLOYMENT_STATUSES, availability_detail, availability_violations,
-    build_patch, conflict_detail, location_mismatch_detail, shift_full_detail,
-    shift_window_on_date, unlocated_employee_detail,
+    build_patch, conflict_detail, job_qualification_detail, location_mismatch_detail,
+    shift_full_detail, shift_window_on_date, unlocated_employee_detail,
 )
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
     _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
@@ -27,7 +27,7 @@ from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported 
 _SHIFT_COLS = (
     "id, company_id, location_id, template_id, series_id, role, department, "
     "starts_at, ends_at, break_minutes, required_staff, color, notes, status, "
-    "kind, training_requirement_id, published_at, created_at, updated_at"
+    "kind, training_requirement_id, job_id, published_at, created_at, updated_at"
 )
 
 # The one request-with-context projection, shared by the admin review router and
@@ -249,18 +249,54 @@ def raise_outside_availability(employee_id: UUID, violations: list[dict]) -> Non
     raise HTTPException(status_code=409, detail=availability_detail(employee_id, violations))
 
 
+async def check_job_qualification(conn, company_id: UUID, employee_id: UUID, job_id) -> Optional[dict]:
+    """None when the shift carries no job (ungated — every pre-empsched04
+    shift, or any shift with no job picked) or the employee is on that job's
+    qualified list. Otherwise the 409 detail dict, for the caller to raise
+    (unforced) or force past + audit (same pattern as availability_violations
+    below — compute once, decide what to do with it at the call site).
+
+    A dangling job_id (the job itself was deleted between read and write, or
+    never existed) degrades to ungated rather than a hard error — deleting a
+    job SET NULLs its shifts' job_id at the DB level, so this only matters for
+    a stale in-flight request."""
+    if job_id is None:
+        return None
+    row = await conn.fetchrow(
+        """
+        SELECT j.name,
+               EXISTS (
+                   SELECT 1 FROM schedule_job_employees je
+                   WHERE je.job_id = j.id AND je.employee_id = $3
+               ) AS qualified
+        FROM schedule_jobs j WHERE j.id = $1 AND j.company_id = $2
+        """,
+        job_id, company_id, employee_id,
+    )
+    if row is None or row["qualified"]:
+        return None
+    return job_qualification_detail(employee_id, job_id, row["name"])
+
+
+def raise_not_qualified(detail: dict) -> None:
+    """409 the frontend can force through, same shape as raise_conflict."""
+    raise HTTPException(status_code=409, detail=detail)
+
+
 async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     """The single read every assignment path takes before mutating a shift.
 
     Carries the window (conflict check), the status (a cancelled shift takes no
     assignments), the staffing counts (headcount cap), and the role/kind/
-    training_requirement_id (training-lapse gate + scheduled-role rules +
-    training-as-shift assignment). 404s if the shift isn't this company's.
+    training_requirement_id/job_id (training-lapse gate + scheduled-role
+    rules + training-as-shift assignment + job-qualification gate). 404s if
+    the shift isn't this company's.
     """
     row = await conn.fetchrow(
         """
         SELECT s.starts_at, s.ends_at, s.status, s.required_staff,
-               s.location_id, s.break_minutes, s.role, s.kind, s.training_requirement_id,
+               s.location_id, s.break_minutes, s.role, s.kind,
+               s.training_requirement_id, s.job_id,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s
@@ -279,7 +315,7 @@ async def fetch_locked_shift_pair(conn, company_id: UUID, first_id: UUID, second
         """
         SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
                s.location_id, s.break_minutes, s.role, s.kind,
-               s.training_requirement_id, s.published_at,
+               s.training_requirement_id, s.job_id, s.published_at,
                (SELECT COUNT(*) FROM schedule_shift_assignments a
                 WHERE a.shift_id = s.id) AS assigned_count
         FROM schedule_shifts s
@@ -350,6 +386,7 @@ def _shift_row_to_dict(r) -> dict:
         "status": r["status"],
         "kind": r["kind"],
         "training_requirement_id": str(r["training_requirement_id"]) if r["training_requirement_id"] else None,
+        "job_id": str(r["job_id"]) if r["job_id"] else None,
         "published_at": _iso(r["published_at"]),
         "assignments": [],
     }
@@ -384,6 +421,7 @@ def serialize_block(r) -> dict:
         "days_of_week": days if isinstance(days, list) else [],
         "color": r["color"],
         "notes": r["notes"],
+        "job_id": str(r["job_id"]) if r["job_id"] else None,
     }
 
 
@@ -395,6 +433,17 @@ def serialize_week_template(r, blocks: list[dict]) -> dict:
         "color": r["color"],
         "notes": r["notes"],
         "blocks": blocks,
+    }
+
+
+def serialize_job(r, employee_ids: list[str]) -> dict:
+    return {
+        "id": str(r["id"]),
+        "name": r["name"],
+        "location_id": str(r["location_id"]) if r["location_id"] else None,
+        "color": r["color"],
+        "notes": r["notes"],
+        "employee_ids": employee_ids,
     }
 
 
@@ -440,12 +489,25 @@ async def fetch_roster(conn, company_id: UUID, location_id: Optional[UUID] = Non
         """,
         *params,
     )
+    job_ids_by_employee: dict[str, list[str]] = {}
+    if rows:
+        job_rows = await conn.fetch(
+            """
+            SELECT je.employee_id, je.job_id
+            FROM schedule_job_employees je
+            WHERE je.company_id = $1 AND je.employee_id = ANY($2::uuid[])
+            """,
+            company_id, [r["id"] for r in rows],
+        )
+        for jr in job_rows:
+            job_ids_by_employee.setdefault(str(jr["employee_id"]), []).append(str(jr["job_id"]))
     return [
         {
             "id": str(r["id"]),
             "name": _display_name(r["first_name"], r["last_name"]),
             "job_title": r["job_title"],
             "department": r["department"],
+            "job_ids": job_ids_by_employee.get(str(r["id"]), []),
         }
         for r in rows
     ]

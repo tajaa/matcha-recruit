@@ -18,7 +18,7 @@ from ._shared import (
     assert_employee_in_company, assert_employee_schedulable_at, assert_shift_open_for_assignment,
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
-    fetch_locked_shift_pair,
+    fetch_locked_shift_pair, check_job_qualification, raise_not_qualified,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
@@ -101,6 +101,9 @@ async def move_employee_assignment(
             )
             if target_availability and not force:
                 raise_outside_availability(body.employee_id, target_availability)
+            unqualified = await check_job_qualification(conn, company_id, body.employee_id, target["job_id"])
+            if unqualified and not force:
+                raise_not_qualified(unqualified)
 
             if source["published_at"] is not None:
                 source_violations = await _fair_workweek_advisories(
@@ -157,6 +160,10 @@ async def move_employee_assignment(
                     current_user.id, "assignment.compliance_override",
                     {"employee_id": str(body.employee_id), "violations": source_violations + target_violations},
                 )
+            if unqualified:  # forced past the qualification gate — record the override
+                await log_audit(conn, company_id, "assignment", body.to_shift_id, current_user.id,
+                                 "assignment.qualification_override",
+                                 {"employee_id": str(body.employee_id), **unqualified})
 
         return {
             "source_shift": await fetch_shift_by_id(conn, company_id, body.from_shift_id),
@@ -178,6 +185,7 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
         availability = availability_violations(
             avail_map[body.employee_id], shift["starts_at"], shift["ends_at"],
         )
+        unqualified = await check_job_qualification(conn, company_id, body.employee_id, shift["job_id"])
         if not force:
             conflicts = await find_conflicts(
                 conn, company_id, body.employee_id,
@@ -190,6 +198,8 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 raise_shift_full(shift["assigned_count"], shift["required_staff"])
             if availability:
                 raise_outside_availability(body.employee_id, availability)
+            if unqualified:
+                raise_not_qualified(unqualified)
         # Compliance runs regardless of force — a minor-hour BLOCK (422) can't be
         # overridden, advisories (409) can.
         violations = await check_shift_compliance(
@@ -228,6 +238,10 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                     conn, company_id, shift_id, current_user.id,
                     body.employee_id, availability,
                 )
+            if unqualified:  # forced past the qualification gate — record the override
+                await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
+                                 "assignment.qualification_override",
+                                 {"employee_id": str(body.employee_id), **unqualified})
             if shift["kind"] == "training" and shift["training_requirement_id"] is not None:
                 requirement = await conn.fetchrow(
                     "SELECT id, title, training_type, frequency_months "

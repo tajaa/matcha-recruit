@@ -170,6 +170,7 @@ async def create_shift_core(
     notes: Optional[str] = None,
     kind: str = "work",
     template_id: Optional[UUID] = None,
+    job_id: Optional[UUID] = None,
     training_requirement: Optional[dict] = None,
     training_requirement_id: Optional[UUID] = None,
     employee_ids: list[UUID],
@@ -198,14 +199,14 @@ async def create_shift_core(
         INSERT INTO schedule_shifts
             (company_id, location_id, role, department, starts_at, ends_at,
              break_minutes, required_staff, color, notes, kind, template_id,
-             training_requirement_id, created_by, status, published_at)
+             training_requirement_id, created_by, status, published_at, job_id)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::varchar,
-                CASE WHEN $15::varchar = 'published' THEN NOW() END)
+                CASE WHEN $15::varchar = 'published' THEN NOW() END, $16)
         RETURNING id
         """,
         company_id, location_id, role, department, starts_at, ends_at,
         break_minutes, required_staff, color, notes, kind, template_id,
-        training_requirement_id, created_by, status,
+        training_requirement_id, created_by, status, job_id,
     )
     for emp_id in dict.fromkeys(employee_ids):
         await conn.execute(
@@ -495,10 +496,12 @@ async def generate_week_template_shifts(
 
     `blocks` are `schedule_shift_templates` rows (the `_BLOCK_COLS` shape:
     id/role/department/location_id/start_time/end_time/break_minutes/
-    required_staff/days_of_week/color/notes). A block with no weekdays
-    configured is silently skipped, not a 422 — one misconfigured block
-    shouldn't block the others. Caller owns the tenant guard and wraps this
-    in `async with conn.transaction():`; this only writes.
+    required_staff/days_of_week/color/notes/job_id). A block with no
+    weekdays configured is silently skipped, not a 422 — one misconfigured
+    block shouldn't block the others. Caller owns the tenant guard and wraps
+    this in `async with conn.transaction():`; this only writes. Every shift
+    generated from a block inherits that block's job_id, so a job set on
+    "Box Office" once carries into every generated week.
     """
     from .schedule_rules import template_windows
     from .shift_compliance import check_shift_compliance
@@ -545,15 +548,15 @@ async def generate_week_template_shifts(
             INSERT INTO schedule_shifts
                 (company_id, location_id, template_id, series_id, role,
                  department, starts_at, ends_at, break_minutes,
-                 required_staff, color, notes, created_by)
-            SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, $9,$10,$11,$12,$13
+                 required_staff, color, notes, created_by, job_id)
+            SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, $9,$10,$11,$12,$13,$14
             FROM unnest($7::timestamptz[], $8::timestamptz[])
                  AS w(starts_at, ends_at)
             RETURNING id
             """,
             company_id, blk["location_id"], blk["id"], series_id, blk["role"],
             blk["department"], starts, ends, blk["break_minutes"],
-            blk["required_staff"], blk["color"], blk["notes"], created_by,
+            blk["required_staff"], blk["color"], blk["notes"], created_by, blk["job_id"],
         )
         shift_ids.extend(r["id"] for r in rows)
         per_block.append({"block_id": str(blk["id"]), "name": blk["name"], "count": len(starts)})

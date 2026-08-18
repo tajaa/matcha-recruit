@@ -48,6 +48,10 @@ class ShiftCreate(BaseModel):
     required_staff: int = Field(1, ge=1, le=99)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
+    # Which job this shift is (Box Office, Concessions, ...) — None means
+    # ungated, anyone can be assigned. Enforced (forceable) at assignment
+    # time, not here.
+    job_id: Optional[UUID] = None
     # Employees to assign up front (optional).
     employee_ids: list[UUID] = Field(default_factory=list)
     # 'training' ties the shift to a training_requirement — assigning an
@@ -86,6 +90,7 @@ class ShiftUpdate(BaseModel):
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
     status: Optional[ShiftStatus] = None
+    job_id: Optional[UUID] = None
 
     _utc = field_validator("starts_at", "ends_at")(_as_utc)
 
@@ -148,6 +153,7 @@ class BlockCreate(BaseModel):
     days_of_week: list[Weekday] = Field(default_factory=list)
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
+    job_id: Optional[UUID] = None
 
 
 class BlockUpdate(BaseModel):
@@ -163,6 +169,36 @@ class BlockUpdate(BaseModel):
     days_of_week: Optional[list[Weekday]] = None
     color: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
+    job_id: Optional[UUID] = None
+
+
+class JobCreate(BaseModel):
+    """A job employees can be qualified for (Box Office, Concessions,
+    Ushers, ...). Shifts/blocks point at a job via job_id; assignment is
+    gated (forceable) to employees on that job's qualified list."""
+
+    name: str = Field(..., min_length=1, max_length=150)
+    location_id: Optional[UUID] = None
+    color: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=2000)
+    employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
+
+
+class JobUpdate(BaseModel):
+    """True PATCH on the job itself — the qualified list has its own
+    replace endpoint (PUT /jobs/{id}/employees), not resubmitted here."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=150)
+    location_id: Optional[UUID] = None
+    color: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+class JobEmployeesReplace(BaseModel):
+    """Whole-list replace — the UI is a checkbox roster, so a diffing
+    add/remove pair would just re-derive this on the client anyway."""
+
+    employee_ids: list[UUID] = Field(default_factory=list, max_length=500)
 
 
 class WeekTemplateCreate(BaseModel):

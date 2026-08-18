@@ -199,6 +199,20 @@ def availability_detail(employee_id: UUID, violations: list[dict]) -> dict:
     }
 
 
+def job_qualification_detail(employee_id: UUID, job_id: UUID, job_name: str) -> dict:
+    """409 body for assigning someone not on a job's qualified list —
+    forceable, same shape family as conflict_detail/shift_full_detail/
+    availability_detail. Not a 422: this is a staffing judgement call, not a
+    statutory bright line."""
+    return {
+        "code": "not_qualified_for_job",
+        "message": f"Not on the qualified list for {job_name}",
+        "employee_id": str(employee_id),
+        "job_id": str(job_id),
+        "job_name": job_name,
+    }
+
+
 def shift_window_on_date(starts_at: datetime, ends_at: datetime, target: date) -> tuple[datetime, datetime]:
     """The same shift window re-anchored to `target`: preserves time-of-day
     and duration, so an overnight shift keeps its +1-day end. Pure day
