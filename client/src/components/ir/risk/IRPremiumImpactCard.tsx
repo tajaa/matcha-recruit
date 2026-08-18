@@ -32,12 +32,6 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
   const Icon = isIncrease ? TrendingUp : isDecrease ? TrendingDown : DollarSign
 
   const swingPts = Math.abs(mod_swing) * 100  // mod_swing 0.18 → 18 points
-  // metrics.trir === 0 is a real (and the best possible) TRIR value, not a
-  // "no data" sentinel — a truthy check on trir would silently drop the
-  // sector-median comparison for exactly the tenant with zero recordables.
-  const ratio = metrics.benchmark && metrics.trir != null
-    ? (metrics.trir / metrics.benchmark.trir).toFixed(2)
-    : null
 
   return (
     <div className={`rounded-2xl border p-6 ${bgTone}`}>
@@ -61,17 +55,19 @@ export function IRPremiumImpactCard({ metrics }: { metrics: PremiumImpactMetrics
             </div>
             <p className="text-[12px] text-zinc-400 mt-2 leading-relaxed">
               {isIncrease && (
-                <>Current TRIR trend points to a <strong className="text-red-400">~{swingPts.toFixed(0)}pt mod increase</strong> on next renewal{ratio && ` (you're at ${ratio}× the sector median)`}. Estimated extra premium: <strong className="text-red-400">{fmtMoney(annual_impact_dollars)}/yr</strong>.</>
+                <>Underperforming sector TRIR projects a <strong className="text-red-400">~{swingPts.toFixed(0)}% increase</strong> in annual incurred loss costs, raising renewal rates. Projected added cost: <strong className="text-red-400">{fmtMoney(annual_impact_dollars)}/yr</strong>.</>
               )}
               {isDecrease && (
-                <>Below-median TRIR supports a <strong className="text-emerald-400">~{swingPts.toFixed(0)}pt mod credit</strong> case at renewal{ratio && ` (you're at ${ratio}× the sector median)`}. Potential premium savings: <strong className="text-emerald-400">{fmtMoney(Math.abs(annual_impact_dollars))}/yr</strong>.</>
+                <>Outperforming sector TRIR projects a <strong className="text-emerald-400">~{swingPts.toFixed(0)}% reduction</strong> in annual incurred loss costs, supporting lower renewal rates. Projected savings: <strong className="text-emerald-400">{fmtMoney(Math.abs(annual_impact_dollars))}/yr</strong>.</>
               )}
               {!isIncrease && !isDecrease && (
                 <>TRIR sits at the sector median — neutral mod posture going into renewal.</>
               )}
             </p>
             <p className="text-[10px] text-zinc-600 mt-3 leading-relaxed">
-              Base premium estimate: {fmtMoney(base_premium_estimate)}/yr ({metrics.headcount} FTE × sector avg). Mod sensitivity: 10pts per 1.0× TRIR deviation. <strong>Not a quote.</strong> Confirm with your broker — actual impact depends on NCCI class, payroll, state, carrier rate tables, and 3-year experience period.
+              Calculated on {fmtMoney(base_premium_estimate)}/yr base premium. {isIncrease
+                ? 'Higher incident rates increase expected loss frequency, driving carrier rate increases and future E-Mod debits.'
+                : 'Lower incident rates directly reduce expected loss frequency, driving carrier rate reductions and future E-Mod credits.'} <strong>Not a quote</strong> — confirm with your broker.
             </p>
           </div>
         </div>
