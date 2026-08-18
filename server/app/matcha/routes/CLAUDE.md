@@ -27,7 +27,6 @@ Loose single-file routers sit at top level; related ones are collected into **gr
 | `employee_lifecycle/accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `employee_lifecycle/discipline.py` | `/discipline` | Progressive discipline workflow + signatures + HR-approval workflow (pending-approval queue, approve/deny), letter templates CRUD, HR-approver designation (`clients.is_hr_approver`) — see root CLAUDE.md's Discipline module entry |
 | `risk_assessment.py` | `/risk-assessment` | Risk-assessment dashboard data (849 lines) |
-| `safety_meetings.py` | `/safety-meetings` | Chunked toolbox-talk transcription, Gemini summary, manager review, private audio retention, and typed-name sign-off; `require_feature("safety_meetings")` |
 | `pilots/analysis.py` | `/analysis-pilot` | Analysis Pilot — general-purpose bring-your-own-data analysis in a chat UI (upload CSV/XLSX/PDF → deterministic `services/analysis_packs` metrics incl. volatility/risk, financial, insurance, inventory, general stats → grounded SSE chat with highlight-to-chat + proposed extraction corrections → analyst PDF). Company-scoped; `require_feature("analysis_pilot")` |
 | `employee_lifecycle/pre_termination.py` | `/pre-termination` | Pre-term review packets (985 lines) |
 | `employee_lifecycle/separation.py` | `/separation` | Separation agreement workflow |
