@@ -57,3 +57,11 @@ def test_custom_product_accepts_the_complete_voice_audit_chain():
         "inventory": True,
         "inventory_voice": True,
     }
+
+
+def test_sales_intake_is_off_and_requires_inventory():
+    assert DEFAULT_COMPANY_FEATURES["sales_intake"] is False
+    assert FEATURE_REQUIRES["sales_intake"] == ("inventory",)
+    features = dict(DEFAULT_COMPANY_FEATURES)
+    features["sales_intake"] = True
+    assert feature_dependency_violations(features) == {"sales_intake": ("inventory",)}

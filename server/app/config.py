@@ -146,6 +146,9 @@ class Settings:
     gmail_token_path: str = "agent/workspace/token.json"
     gmail_from_email: str = ""
     gmail_from_name: str = "Matcha Recruit"
+    pos_intake_gmail_refresh_token: Optional[str] = None
+    pos_intake_gmail_client_id: Optional[str] = None
+    pos_intake_gmail_client_secret: Optional[str] = None
     app_base_url: str = "http://localhost:5173"
     contact_email: str = "aaron@hey-matcha.com"
     # Recipient for real-time server/client error alerts. Empty string disables alerts.
@@ -369,6 +372,9 @@ def load_settings() -> Settings:
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),
         gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", ""),
         gmail_from_name=os.getenv("GMAIL_FROM_NAME", "Matcha Recruit"),
+        pos_intake_gmail_refresh_token=os.getenv("POS_INTAKE_GMAIL_REFRESH_TOKEN"),
+        pos_intake_gmail_client_id=os.getenv("POS_INTAKE_GMAIL_CLIENT_ID"),
+        pos_intake_gmail_client_secret=os.getenv("POS_INTAKE_GMAIL_CLIENT_SECRET"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         contact_email=os.getenv("CONTACT_EMAIL", "aaron@hey-matcha.com"),
         error_alert_email=os.getenv("ERROR_ALERT_EMAIL", "aaron@hey-matcha.com"),

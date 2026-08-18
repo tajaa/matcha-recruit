@@ -361,6 +361,9 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # writes (same invariant as ir_voice_intake). Default off; admin-toggle;
     # NOT bundled.
     "inventory_voice": False,
+    # POS sales / PMIX intake. Requires the inventory surface, but is not
+    # bundled: admins explicitly enable it for a company.
+    "sales_intake": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -767,6 +770,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "ems": ("matcha_ops",),
     "inventory": ("matcha_ops",),
     "inventory_voice": ("inventory",),
+    "sales_intake": ("inventory",),
     "employee_schedule": ("matcha_ops",),
     "schedule_intelligence": ("matcha_ops", "employee_schedule"),
     "matcha_ops_calls_all_members": ("matcha_ops",),

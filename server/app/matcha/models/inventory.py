@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-MovementKind = Literal["out", "in", "stockout", "adjust"]
+MovementKind = Literal["out", "in", "stockout", "adjust", "sale"]
 OrderStatus = Literal["queued", "ordered", "received", "cancelled"]
 
 
@@ -26,6 +26,7 @@ class InventoryItemOut(BaseModel):
     unit: Optional[str] = None
     current_quantity: Optional[Decimal] = None
     low_stock_threshold: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = None
     auto_created: bool
     archived_at: Optional[datetime] = None
     location_id: Optional[UUID] = None
@@ -40,6 +41,7 @@ class InventoryItemCreate(BaseModel):
     unit: Optional[str] = None
     current_quantity: Optional[Decimal] = None
     low_stock_threshold: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = Field(default=None, ge=0)
     location_id: Optional[UUID] = None
 
 
@@ -47,6 +49,7 @@ class InventoryItemPatch(BaseModel):
     name: Optional[str] = None
     unit: Optional[str] = None
     low_stock_threshold: Optional[Decimal] = None
+    unit_cost: Optional[Decimal] = Field(default=None, ge=0)
     set_quantity: Optional[Decimal] = None
     archived: Optional[bool] = None
 
@@ -124,6 +127,80 @@ class AuditCommitResult(BaseModel):
     applied: int
     failed: int
     errors: list[dict]                   # [{row, item, error}]
+    variance: Optional[dict] = None
+
+
+class SalesMappingComponent(BaseModel):
+    item_id: UUID
+    quantity_per_sale: float = Field(gt=0)
+    unit: Optional[str] = None
+
+
+class SalesMappingUpsert(BaseModel):
+    sold_name: str = Field(min_length=1, max_length=200)
+    kind: Literal["direct", "recipe", "ignore"]
+    components: list[SalesMappingComponent] = Field(default_factory=list)
+    location_id: Optional[UUID] = None
+
+
+class SalesSourceUpsert(BaseModel):
+    from_address: str = Field(min_length=3, max_length=320)
+    subject_match: Optional[str] = Field(default=None, max_length=200)
+    location_id: Optional[UUID] = None
+
+
+class SalesLine(BaseModel):
+    sold_name: str = Field(min_length=1, max_length=200)
+    quantity: float
+    gross_sales: Optional[float] = None
+    mapping_id: Optional[UUID] = None
+    item_id: Optional[UUID] = None
+    quantity_per_sale: Optional[float] = Field(default=None, gt=0)
+    components: list[SalesMappingComponent] = Field(default_factory=list)
+    new_mapping: Optional[SalesMappingUpsert] = None
+    status: Literal["mapped", "unmapped", "ignored"] = "unmapped"
+
+
+class SalesCommit(BaseModel):
+    location_id: Optional[UUID] = None
+    business_date: Optional[str] = None
+    source: Literal["upload", "email"] = "upload"
+    filename: Optional[str] = None
+    gmail_message_id: Optional[str] = None
+    force: bool = False
+    lines: list[SalesLine]
+
+
+class SalesCommitResult(BaseModel):
+    import_id: UUID
+    total: int
+    mapped: int
+    unmapped: int
+    items_affected: int
+    errors: list[dict]
+
+
+class AuditSheetRow(BaseModel):
+    item: InventoryItemOut
+    expected: Optional[Decimal] = None
+    baseline: Optional[Decimal] = None
+    baseline_at: Optional[datetime] = None
+    received: Decimal = Decimal("0")
+    sold: Decimal = Decimal("0")
+    manual_out: Decimal = Decimal("0")
+    stockouts: Decimal = Decimal("0")
+
+
+class AuditRunOut(BaseModel):
+    id: UUID
+    company_id: UUID
+    location_id: Optional[UUID] = None
+    committed_by: Optional[UUID] = None
+    committed_at: datetime
+    note: Optional[str] = None
+    line_count: int
+    variance_units: Optional[Decimal] = None
+    variance_value: Optional[Decimal] = None
 
 
 class VoiceCountLine(BaseModel):

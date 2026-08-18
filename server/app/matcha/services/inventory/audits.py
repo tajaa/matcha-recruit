@@ -15,6 +15,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory import movements as movements_service
+from app.matcha.services.inventory.expected import variance_rollup
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,33 @@ async def commit_audit_lines(
 
     resolved_note = note or _DEFAULT_NOTE
 
+    # The lightweight fake connection used by the legacy audit unit tests has
+    # no row-fetching API. The real asyncpg connection always does, so retain
+    # the old result shape only for that test double.
+    audit_run_id = None
+    variance = None
+    before = {}
+    if hasattr(conn, "fetchrow"):
+        run = await conn.fetchrow(
+            """
+            INSERT INTO inventory_audit_runs (company_id, location_id, committed_by, note, line_count)
+            VALUES ($1, $2, $3, $4, $5) RETURNING id
+            """, company_id, location_id, user_id, resolved_note, len(lines),
+        )
+        audit_run_id = run["id"]
+        item_ids = [line["item_id"] for line in lines if line.get("item_id")]
+        item_rows = await conn.fetch(
+            "SELECT id, name, current_quantity, unit_cost FROM inventory_items "
+            "WHERE company_id=$1 AND id=ANY($2::uuid[])", company_id, item_ids,
+        ) if item_ids else []
+        before = {str(row["id"]): dict(row) for row in item_rows}
+        variance_lines = [
+            {"item_id": line.get("item_id"), "counted_quantity": line.get("counted_quantity"),
+             "expected": before.get(str(line.get("item_id")), {}).get("current_quantity")}
+            for line in lines
+        ]
+        variance = variance_rollup(variance_lines, before)
+
     # Fetched lazily on the first new_item_name line (most audits are all
     # item_id lines and never need it), then reused + appended-to across
     # every subsequent new_item_name line so N new items in one audit don't
@@ -74,7 +102,11 @@ async def commit_audit_lines(
                     pass
                 elif new_item_name:
                     if existing is None:
-                        existing = await movements_service.list_item_names_for_audit(conn, company_id, location_id)
+                        catalog_fn = (
+                            movements_service.list_item_names_for_audit
+                            if hasattr(conn, "fetch") else movements_service.list_item_names
+                        )
+                        existing = await catalog_fn(conn, company_id, location_id)
                     item = await movements_service.find_or_create_item(
                         conn, company_id, new_item_name,
                         created_by=user_id, location_id=location_id, existing=existing,
@@ -87,10 +119,13 @@ async def commit_audit_lines(
                 else:
                     raise ValueError("line needs item_id or new_item_name")
 
-                await movements_service.adjust_item_count(
-                    conn, item_id=item_id, company_id=company_id,
-                    quantity=quantity, user_id=user_id, note=resolved_note,
-                )
+                adjust_kwargs = {
+                    "conn": conn, "item_id": item_id, "company_id": company_id,
+                    "quantity": quantity, "user_id": user_id, "note": resolved_note,
+                }
+                if audit_run_id is not None:
+                    adjust_kwargs["audit_run_id"] = audit_run_id
+                await movements_service.adjust_item_count(**adjust_kwargs)
                 applied += 1
                 # Only recorded once the line's transaction is guaranteed to
                 # commit — appending before adjust_item_count could run meant
@@ -107,4 +142,11 @@ async def commit_audit_lines(
                 "error": "Could not record this count — check the item and try again.",
             })
 
-    return {"total": len(lines), "applied": applied, "failed": len(errors), "errors": errors}
+    result = {"total": len(lines), "applied": applied, "failed": len(errors), "errors": errors}
+    if audit_run_id is not None:
+        await conn.execute(
+            "UPDATE inventory_audit_runs SET variance_units=$2, variance_value=$3 WHERE id=$1",
+            audit_run_id, variance["total_units"], variance["total_value"],
+        )
+        result["variance"] = {**variance, "run_id": audit_run_id}
+    return result

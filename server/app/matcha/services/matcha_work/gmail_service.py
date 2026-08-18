@@ -216,7 +216,20 @@ class GmailService:
             "from": headers.get("from", "unknown"),
             "date": headers.get("date", ""),
             "body": body,
+            "attachments": self._extract_attachments(data.get("payload", {})),
         }
+
+    async def get_attachment(self, msg_id: str, attachment_id: str) -> bytes:
+        data = await self._gmail_get(
+            f"/users/me/messages/{msg_id}/attachments/{attachment_id}"
+        )
+        encoded = data.get("data") or ""
+        return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+
+    async def mark_read(self, msg_id: str) -> dict:
+        return await self._gmail_post(
+            f"/users/me/messages/{msg_id}/modify", {"removeLabelIds": ["UNREAD"]}
+        )
 
     async def create_draft(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
         for field_name, value in [("to", to), ("subject", subject)]:
@@ -294,3 +307,45 @@ class GmailService:
             return re.sub(r"\s+", " ", text).strip()
 
         return "(no readable body)"
+
+    def _extract_attachments(self, payload: dict) -> list[dict]:
+        attachments = []
+        for part in payload.get("parts", []):
+            body = part.get("body") or {}
+            filename = part.get("filename")
+            if filename and body.get("attachmentId"):
+                attachments.append({
+                    "filename": filename[:255],
+                    "mime_type": part.get("mimeType", "application/octet-stream"),
+                    "attachment_id": body["attachmentId"],
+                })
+            attachments.extend(self._extract_attachments(part))
+        return attachments
+
+
+class GmailMailboxService(GmailService):
+    """Gmail client for the platform POS intake inbox.
+
+    Unlike the per-user service, this token is configured at the platform
+    level and is never loaded from a tenant or employee row.
+    """
+
+    def __init__(self):
+        super().__init__(UUID(int=0))
+        from app.config import get_settings
+        settings = get_settings()
+        self._token_data = {
+            "token": None,
+            "refresh_token": settings.pos_intake_gmail_refresh_token,
+            "client_id": settings.pos_intake_gmail_client_id,
+            "client_secret": settings.pos_intake_gmail_client_secret,
+            "scopes": GMAIL_SCOPES,
+        }
+        self._loaded = True
+
+    async def load_token(self):
+        return None
+
+    async def save_token(self, token_data: dict):
+        self._token_data = token_data
+        self._loaded = True

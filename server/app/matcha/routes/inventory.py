@@ -21,12 +21,17 @@ from app.matcha.models.inventory import (
     AuditCommit, AuditCommitResult, InventoryItemCreate, InventoryItemOut, InventoryItemPatch,
     ItemListResponse, MovementListResponse, MovementOut, OrderAction, OrderCreate,
     OrderListResponse, OrderOut, ReceiptCommit, ReceiptCommitResult, VoiceCountDraft,
+    SalesCommit, SalesCommitResult, SalesMappingUpsert, SalesSourceUpsert,
 )
 from app.matcha.services._shared.uploads import read_wav_or_400
 from app.matcha.services.inventory import audits as audits_service
 from app.matcha.services.inventory import movements as movements_service
 from app.matcha.services.inventory import orders as orders_service
 from app.matcha.services.inventory import receipts as receipts_service
+from app.matcha.services.inventory import sales_commit as sales_commit_service
+from app.matcha.services.inventory import sales_mappings as sales_mappings_service
+from app.matcha.services.inventory import sales_parse as sales_parse_service
+from app.matcha.services.inventory import expected as expected_service
 from app.matcha.services.inventory import voice_audit
 from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
@@ -36,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 _RECEIPT_MAX_BYTES = 15 * 1024 * 1024
 _RECEIPT_EXT_OK = (".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp")
+_SALES_MAX_BYTES = 15 * 1024 * 1024
+_SALES_EXT_OK = (".csv", ".pdf", ".png", ".jpg", ".jpeg", ".webp")
 
 
 @router.get("/items", response_model=ItemListResponse)
@@ -81,6 +88,7 @@ async def create_item(body: InventoryItemCreate, company_id: UUID = Depends(get_
             row = await movements_service.create_item_checked(
                 conn, company_id=company_id, name=body.name, unit=body.unit,
                 current_quantity=body.current_quantity, low_stock_threshold=body.low_stock_threshold,
+                unit_cost=body.unit_cost,
                 location_id=body.location_id, created_by=user.id,
             )
         except ValueError as exc:
@@ -106,9 +114,13 @@ async def get_item(item_id: UUID, company_id: UUID = Depends(get_client_company_
             "SELECT * FROM inventory_movements WHERE item_id = $1 ORDER BY created_at DESC LIMIT 50",
             item_id,
         )
+        expected_rows = await expected_service.expected_breakdown(
+            conn, company_id, [item_id], item["location_id"],
+        )
     return {
         "item": InventoryItemOut(**dict(item)),
         "movements": [MovementOut(**dict(m)) for m in movement_rows],
+        "expected": expected_rows[0] if expected_rows else None,
     }
 
 
@@ -148,6 +160,9 @@ async def patch_item(item_id: UUID, body: InventoryItemPatch,
         if body.low_stock_threshold is not None:
             values.append(body.low_stock_threshold)
             fields.append(f"low_stock_threshold = ${len(values) + 1}")
+        if body.unit_cost is not None:
+            values.append(body.unit_cost)
+            fields.append(f"unit_cost = ${len(values) + 1}")
         if body.archived is not None:
             fields.append("archived_at = %s" % ("NOW()" if body.archived else "NULL"))
 
@@ -294,6 +309,285 @@ async def commit_audit(body: AuditCommit, company_id: UUID = Depends(get_client_
                 raise
             raise HTTPException(404, "Location not found.")
     return AuditCommitResult(**result)
+
+
+@router.get("/audit/sheet")
+async def audit_sheet(
+    location_id: Optional[UUID] = Query(None),
+    company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT it.*, bl.name AS location_name
+            FROM inventory_items it
+            LEFT JOIN business_locations bl ON bl.id=it.location_id
+            WHERE it.company_id=$1 AND it.archived_at IS NULL
+              AND ($2::uuid IS NULL OR it.location_id IS NULL OR it.location_id=$2)
+            ORDER BY it.name
+            """, company_id, location_id,
+        )
+        breakdown = await expected_service.expected_breakdown(
+            conn, company_id, [row["id"] for row in rows], location_id,
+        )
+    by_id = {str(row["item_id"]): row for row in breakdown}
+    return [{"item": InventoryItemOut(**dict(item)), **{
+        key: by_id.get(str(item["id"]), {}).get(key)
+        for key in ("expected", "baseline", "baseline_at", "received", "sold", "manual_out", "stockouts")
+    }} for item in rows]
+
+
+@router.get("/audit/runs")
+async def list_audit_runs(
+    limit: int = Query(50, le=200), company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM inventory_audit_runs WHERE company_id=$1 "
+            "ORDER BY committed_at DESC, id DESC LIMIT $2", company_id, limit,
+        )
+    return {"runs": [dict(row) for row in rows]}
+
+
+@router.get("/audit/runs/{run_id}")
+async def get_audit_run(
+    run_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM inventory_audit_runs WHERE id=$1 AND company_id=$2", run_id, company_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Audit run not found.")
+    return dict(row)
+
+
+@router.get("/sales/template")
+async def sales_template(
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=["item_name", "quantity", "gross_sales", "business_date"])
+    writer.writeheader()
+    writer.writerow({"item_name": "Latte", "quantity": "12", "gross_sales": "54.00", "business_date": "2026-08-16"})
+    return StreamingResponse(
+        io.BytesIO(out.getvalue().encode()), media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=inventory_sales_template.csv"},
+    )
+
+
+@router.post("/sales/parse")
+async def parse_sales_route(
+    file: UploadFile = File(...), location_id: Optional[UUID] = Query(None),
+    current_user=Depends(require_admin_or_client),
+    _gate=Depends(require_feature("sales_intake")),
+):
+    name = (file.filename or "").lower()
+    if not name.endswith(_SALES_EXT_OK):
+        if name.endswith((".xlsx", ".xls")):
+            raise HTTPException(400, "Export the spreadsheet as CSV first — .xlsx isn't supported.")
+        raise HTTPException(400, "Upload a CSV, PDF, or photo of the sales export.")
+    user_key = f"user:{current_user.id}"
+    await check_rate_limit(user_key, "sales_parse_burst", 5, 60)
+    await check_rate_limit(user_key, "sales_parse", 40, 3600)
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(400, "No company associated with this account")
+    await check_rate_limit(str(company_id), "sales_parse_co", 120, 3600)
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > _SALES_MAX_BYTES:
+        raise HTTPException(413, "File too large (max 15MB)")
+    draft = await sales_parse_service.parse_sales_file(data, file.content_type or "", file.filename or "")
+    async with get_connection() as conn:
+        draft["lines"] = await sales_mappings_service.resolve_sold_lines(
+            conn, company_id=company_id, location_id=location_id, lines=draft["lines"],
+        )
+    return draft
+
+
+@router.post("/sales/commit", response_model=SalesCommitResult)
+async def commit_sales_route(
+    body: SalesCommit, company_id: UUID = Depends(get_client_company_id),
+    user=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    if not body.lines:
+        raise HTTPException(400, "No sales lines to commit.")
+    if len(body.lines) > sales_commit_service.MAX_LINES:
+        raise HTTPException(413, f"Too many lines (max {sales_commit_service.MAX_LINES}).")
+    async with get_connection() as conn:
+        try:
+            result = await sales_commit_service.commit_sales_import(
+                conn, company_id=company_id, user_id=user.id, location_id=body.location_id,
+                business_date=body.business_date, source=body.source, filename=body.filename,
+                gmail_message_id=body.gmail_message_id, force=body.force,
+                lines=[line.model_dump() for line in body.lines],
+            )
+        except ValueError as exc:
+            if str(exc) == "location not found":
+                raise HTTPException(404, "Location not found.")
+            raise HTTPException(400, str(exc))
+        except sales_commit_service.DuplicateSalesPeriodError as exc:
+            raise HTTPException(409, detail={"code": "duplicate_sales_period", "message": str(exc)})
+    return SalesCommitResult(**result)
+
+
+@router.get("/sales/imports")
+async def list_sales_imports(
+    status: Optional[str] = Query(None), company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        if status:
+            rows = await conn.fetch(
+                "SELECT * FROM inventory_sales_imports WHERE company_id=$1 AND status=$2 "
+                "ORDER BY created_at DESC", company_id, status,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM inventory_sales_imports WHERE company_id=$1 ORDER BY created_at DESC", company_id,
+            )
+    return {"imports": [dict(row) for row in rows]}
+
+
+@router.get("/sales/imports/{import_id}")
+async def get_sales_import(
+    import_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM inventory_sales_imports WHERE id=$1 AND company_id=$2", import_id, company_id,
+        )
+        lines = await conn.fetch(
+            "SELECT * FROM inventory_sales_lines WHERE import_id=$1 ORDER BY id", import_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Sales import not found.")
+    return {**dict(row), "lines": [dict(line) for line in lines]}
+
+
+@router.delete("/sales/imports/{import_id}")
+async def discard_sales_import(
+    import_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "UPDATE inventory_sales_imports SET status='discarded' "
+            "WHERE id=$1 AND company_id=$2 AND status='draft' RETURNING id", import_id, company_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Draft sales import not found.")
+    return {"id": row["id"], "status": "discarded"}
+
+
+@router.get("/sales/mappings")
+async def list_sales_mappings(
+    location_id: Optional[UUID] = Query(None), company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        mappings = await sales_mappings_service.list_mappings(conn, company_id, location_id)
+    return {"mappings": mappings}
+
+
+@router.post("/sales/mappings")
+async def upsert_sales_mapping(
+    body: SalesMappingUpsert, company_id: UUID = Depends(get_client_company_id),
+    user=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        try:
+            mapping = await sales_mappings_service.upsert_mapping(
+                conn, company_id=company_id, location_id=body.location_id,
+                sold_name=body.sold_name, kind=body.kind,
+                components=[component.model_dump() for component in body.components],
+                created_by=user.id,
+            )
+        except ValueError as exc:
+            if str(exc) == "location not found":
+                raise HTTPException(404, "Location not found.")
+            raise HTTPException(400, str(exc))
+    return mapping
+
+
+@router.delete("/sales/mappings/{mapping_id}")
+async def delete_sales_mapping(
+    mapping_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "DELETE FROM inventory_sales_mappings WHERE id=$1 AND company_id=$2 RETURNING id",
+            mapping_id, company_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Sales mapping not found.")
+    return {"id": row["id"], "deleted": True}
+
+
+@router.get("/sales/sources")
+async def list_sales_sources(
+    company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM inventory_sales_sources WHERE company_id=$1 ORDER BY from_address",
+            company_id,
+        )
+    return {"sources": [dict(row) for row in rows]}
+
+
+@router.post("/sales/sources")
+async def create_sales_source(
+    body: SalesSourceUpsert, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    address = body.from_address.strip().lower()
+    async with get_connection() as conn:
+        if body.location_id is not None:
+            owned = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id=$1 AND company_id=$2 "
+                "AND is_active IS NOT FALSE AND is_company_wide=FALSE",
+                body.location_id, company_id,
+            )
+            if not owned:
+                raise HTTPException(404, "Location not found.")
+        existing = await conn.fetchval(
+            "SELECT id FROM inventory_sales_sources WHERE lower(from_address)=$1", address,
+        )
+        if existing:
+            raise HTTPException(409, "That sender is already registered.")
+        row = await conn.fetchrow(
+            """
+            INSERT INTO inventory_sales_sources
+                (company_id, location_id, from_address, subject_match)
+            VALUES ($1, $2, $3, $4) RETURNING *
+            """, company_id, body.location_id, address, body.subject_match,
+        )
+    return dict(row)
+
+
+@router.delete("/sales/sources/{source_id}")
+async def delete_sales_source(
+    source_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "DELETE FROM inventory_sales_sources WHERE id=$1 AND company_id=$2 RETURNING id",
+            source_id, company_id,
+        )
+    if row is None:
+        raise HTTPException(404, "Sales source not found.")
+    return {"id": row["id"], "deleted": True}
 
 
 @router.post("/audit/voice-parse", response_model=VoiceCountDraft)

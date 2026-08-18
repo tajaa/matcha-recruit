@@ -88,7 +88,7 @@ async def find_or_create_item(
 
 async def create_item_checked(
     conn, *, company_id: UUID, name: str, unit: Optional[str] = None,
-    current_quantity=None, low_stock_threshold=None, location_id: Optional[UUID] = None,
+    current_quantity=None, low_stock_threshold=None, unit_cost=None, location_id: Optional[UUID] = None,
     created_by: Optional[UUID] = None,
 ) -> dict:
     """Shared item-create writer — REST route and the Huume chat tool both
@@ -113,12 +113,12 @@ async def create_item_checked(
         raise ValueError("duplicate item")
     row = await conn.fetchrow(
         """
-        INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
-                                     low_stock_threshold, created_by, location_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *
+            INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
+                                      low_stock_threshold, unit_cost, created_by, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *
         """,
         company_id, name, normalized, unit, current_quantity,
-        low_stock_threshold, created_by, location_id,
+        low_stock_threshold, unit_cost, created_by, location_id,
     )
     return dict(row)
 
@@ -140,6 +140,7 @@ async def archive_item(conn, *, company_id: UUID, item_id: UUID) -> Optional[dic
 async def record_movements(
     conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
     recorded_by: Optional[UUID], kind: str, lines: list[dict], narrative: str, note: Optional[str],
+    sales_import_id: Optional[UUID] = None, audit_run_id: Optional[UUID] = None,
 ) -> list[dict]:
     """lines: [{item_id, quantity (Decimal|None), estimated (bool)}]. kind
     applies to every line in this call (movement handler calls this once
@@ -155,19 +156,37 @@ async def record_movements(
             delta = -abs(float(quantity))
         elif kind == "in" and quantity is not None:
             delta = abs(float(quantity))
+        elif kind == "sale" and quantity is not None:
+            delta = -abs(float(quantity))
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO inventory_movements (
-                company_id, item_id, channel_id, source_message_id, recorded_by,
-                kind, quantity, quantity_delta, quantity_estimated, note, narrative
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            ON CONFLICT (source_message_id, item_id) WHERE source_message_id IS NOT NULL DO NOTHING
-            RETURNING *
-            """,
-            company_id, line["item_id"], channel_id, source_message_id, recorded_by,
-            kind, quantity, delta, estimated, note, narrative,
-        )
+        if sales_import_id is not None:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO inventory_movements (
+                    company_id, item_id, channel_id, source_message_id, recorded_by,
+                    kind, quantity, quantity_delta, quantity_estimated, note, narrative,
+                    sales_import_id, audit_run_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                ON CONFLICT (sales_import_id, item_id) WHERE sales_import_id IS NOT NULL DO NOTHING
+                RETURNING *
+                """,
+                company_id, line["item_id"], channel_id, source_message_id, recorded_by,
+                kind, quantity, delta, estimated, note, narrative, sales_import_id, audit_run_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO inventory_movements (
+                    company_id, item_id, channel_id, source_message_id, recorded_by,
+                    kind, quantity, quantity_delta, quantity_estimated, note, narrative,
+                    audit_run_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (source_message_id, item_id) WHERE source_message_id IS NOT NULL DO NOTHING
+                RETURNING *
+                """,
+                company_id, line["item_id"], channel_id, source_message_id, recorded_by,
+                kind, quantity, delta, estimated, note, narrative, audit_run_id,
+            )
         if row is None:
             continue
         inserted.append(dict(row))
@@ -228,6 +247,7 @@ async def amend_movement_quantity(conn, *, movement_id: UUID, quantity, user_id:
 
 async def adjust_item_count(
     conn, *, item_id: UUID, company_id: UUID, quantity, user_id: UUID, note: Optional[str] = None,
+    audit_run_id: Optional[UUID] = None,
 ) -> dict:
     """The ONLY set-count path — never write inventory_items.current_quantity
     directly from a route handler."""
@@ -248,10 +268,10 @@ async def adjust_item_count(
     row = await conn.fetchrow(
         """
         INSERT INTO inventory_movements (
-            company_id, item_id, recorded_by, kind, quantity, quantity_delta, note, narrative
-        ) VALUES ($1, $2, $3, 'adjust', $4, $5, $6, 'Manual count adjustment')
+            company_id, item_id, recorded_by, kind, quantity, quantity_delta, note, narrative, audit_run_id
+        ) VALUES ($1, $2, $3, 'adjust', $4, $5, $6, 'Manual count adjustment', $7)
         RETURNING *
         """,
-        company_id, item_id, user_id, new_qty, delta, note,
+        company_id, item_id, user_id, new_qty, delta, note, audit_run_id,
     )
     return dict(row)

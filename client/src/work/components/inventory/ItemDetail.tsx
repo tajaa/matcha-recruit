@@ -4,22 +4,27 @@ import { Loader2 } from 'lucide-react'
 import { Button, Input, useToast } from '../../../components/ui'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { getItem, patchItem, type InventoryItem, type InventoryMovement } from '../../api/inventory'
+import { useMe } from '../../../hooks/useMe'
 
 export default function ItemDetail({ itemId }: { itemId: string }) {
   const navigate = useNavigate()
   const base = useWorkBase()
   const { toast } = useToast()
+  const { hasFeature } = useMe()
+  const canSales = hasFeature('sales_intake')
   const [item, setItem] = useState<InventoryItem | null>(null)
   const [movements, setMovements] = useState<InventoryMovement[]>([])
+  const [expected, setExpected] = useState<Awaited<ReturnType<typeof getItem>>['expected']>(null)
   const [loading, setLoading] = useState(true)
   const [countInput, setCountInput] = useState('')
 
   const load = () => {
     setLoading(true)
     getItem(itemId)
-      .then(({ item: it, movements: mv }) => {
+      .then(({ item: it, movements: mv, expected: breakdown }) => {
         setItem(it)
         setMovements(mv)
+        setExpected(breakdown ?? null)
         setCountInput(it.current_quantity !== null ? String(it.current_quantity) : '')
       })
       .catch(() => toast('Failed to load item', 'error'))
@@ -78,6 +83,22 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
         <Input label="Set count" value={countInput} onChange={(e) => setCountInput(e.target.value)} />
         <Button onClick={handleAdjust}>Update</Button>
       </div>
+
+      {canSales && expected && (
+        <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+          <h3 className="text-sm font-medium">Expected vs last count</h3>
+          <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            <div><p className="text-xs text-zinc-500">Expected now</p><p className="text-lg">{expected.expected ?? '?'} {item.unit ?? ''}</p></div>
+            <div><p className="text-xs text-zinc-500">Last counted</p><p className="text-lg">{expected.baseline ?? '?'} {expected.baseline_at ? `· ${new Date(expected.baseline_at).toLocaleDateString()}` : ''}</p></div>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-500">
+            <span>Received {expected.received}</span>
+            <span>Sold {expected.sold}</span>
+            <span>Used {expected.manual_out}</span>
+            <span>Stockouts {expected.stockouts}</span>
+          </div>
+        </div>
+      )}
 
       <div>
         <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Movement ledger</h3>

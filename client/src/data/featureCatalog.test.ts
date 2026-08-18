@@ -21,6 +21,15 @@ describe('inventory voice feature', () => {
   })
 })
 
+describe('sales intake feature', () => {
+  it('is available and requires inventory', () => {
+    const ops = FEATURE_GROUPS.find((group) => group.label === 'Matcha Ops')
+    expect(ops?.features.sales_intake).toContain('Sales Intake')
+    expect(FEATURE_KEYS).toContain('sales_intake')
+    expect(FEATURE_REQUIRES.sales_intake).toEqual(['inventory'])
+  })
+})
+
 describe('applyFeatureToggle', () => {
   it('enables the complete prerequisite chain', () => {
     expect(applyFeatureToggle({}, 'inventory_voice', true)).toMatchObject({
@@ -37,6 +46,7 @@ describe('applyFeatureToggle', () => {
       matcha_ops: true,
       inventory: false,
       inventory_voice: false,
+      sales_intake: false,
     })
   })
 

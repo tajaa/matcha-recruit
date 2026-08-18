@@ -28,6 +28,7 @@ OPS_FEATURES = frozenset({
     "ems",
     "inventory",
     "inventory_voice",
+    "sales_intake",
     "employee_schedule",
     "schedule_intelligence",
     "werk_lite",

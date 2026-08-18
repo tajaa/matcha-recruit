@@ -29,7 +29,7 @@ def suggest_order(movements: list[dict], now: datetime) -> dict | None:
     cutoff = now.timestamp() - LOOKBACK_DAYS * 86400
     in_window = [m for m in movements if m["created_at"].timestamp() >= cutoff]
 
-    outs = [m for m in in_window if m["kind"] == "out" and m["quantity"] is not None]
+    outs = [m for m in in_window if m["kind"] in ("out", "sale") and m["quantity"] is not None]
     stockouts = [m for m in in_window if m["kind"] == "stockout"]
     receipts = [m for m in in_window if m["kind"] == "in" and m["quantity"] is not None]
 

@@ -7,8 +7,8 @@ import { useMe } from '../../hooks/useMe'
 import { useVoiceDictation } from '../../hooks/useVoiceDictation'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import {
-  commitAudit, listItems, parseAuditVoice,
-  type AuditCommitLine, type InventoryItem, type VoiceCountLine,
+  commitAudit, getAuditSheet, listItems, parseAuditVoice,
+  type AuditCommitLine, type AuditSheetRow, type InventoryItem, type VoiceCountLine,
 } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 
@@ -39,8 +39,10 @@ export default function InventoryAudit() {
   const { toast } = useToast()
   const { hasFeature } = useMe()
   const canDictate = hasFeature('inventory_voice')
+  const canSales = hasFeature('sales_intake')
 
   const [items, setItems] = useState<InventoryItem[]>([])
+  const [sheetRows, setSheetRows] = useState<AuditSheetRow[]>([])
   const [locations, setLocations] = useState<ChannelLocation[]>([])
   const [locFilter, setLocFilter] = useState<'all' | 'none' | string>('all')
   const [search, setSearch] = useState('')
@@ -55,14 +57,21 @@ export default function InventoryAudit() {
   const [transcribing, setTranscribing] = useState(false)
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
   const [unmatched, setUnmatched] = useState<VoiceCountLine[]>([])
+  const [lastVariance, setLastVariance] = useState<NonNullable<Awaited<ReturnType<typeof commitAudit>>['variance']> | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
-    listItems()
-      .then((res) => setItems(res.items))
+    const request = canSales ? getAuditSheet().then((rows) => {
+      setSheetRows(rows)
+      setItems(rows.map((row) => row.item))
+    }) : listItems().then((res) => {
+      setSheetRows([])
+      setItems(res.items)
+    })
+    request
       .catch(() => toast('Failed to load inventory', 'error'))
       .finally(() => setLoading(false))
-  }, [toast])
+  }, [canSales, toast])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -81,6 +90,11 @@ export default function InventoryAudit() {
     }
     return list
   }, [items, locFilter, search])
+
+  const expectedById = useMemo(
+    () => new Map(sheetRows.map((row) => [row.item.id, row])),
+    [sheetRows],
+  )
 
   const touchedCount = Object.values(edits).filter((v) => parseCountValue(v) !== null).length + newLines.length
 
@@ -158,6 +172,7 @@ export default function InventoryAudit() {
     setSaving(true)
     try {
       const result = await commitAudit({ location_id: locationId ?? null, lines })
+      if (result.variance) setLastVariance(result.variance)
       const failedRows = new Set(result.errors.map((e) => e.row))
       const failedItemIds = new Set<string>()
       const failedNewIndexes = new Set<number>()
@@ -288,7 +303,9 @@ export default function InventoryAudit() {
               <tr>
                 <th className="px-4 py-2 font-medium">Item</th>
                 <th className="px-4 py-2 font-medium">System count</th>
+                {canSales && <th className="px-4 py-2 font-medium">Expected</th>}
                 <th className="px-4 py-2 font-medium">Counted</th>
+                {canSales && <th className="px-4 py-2 font-medium">Variance</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -296,6 +313,10 @@ export default function InventoryAudit() {
                 const value = edits[item.id] ?? ''
                 const touched = value !== ''
                 const voiced = fromVoice.has(item.id)
+                const sheetRow = expectedById.get(item.id)
+                const expected = sheetRow?.expected ?? item.current_quantity
+                const counted = parseCountValue(value)
+                const variance = expected != null && counted != null ? counted - Number(expected) : null
                 return (
                   <tr key={item.id} className={touched ? 'bg-emerald-500/5' : undefined}>
                     <td className="px-4 py-2">
@@ -305,6 +326,9 @@ export default function InventoryAudit() {
                     <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
                       {item.current_quantity ?? '?'}{item.unit ? ` ${item.unit}` : ''}
                     </td>
+                    {canSales && <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400">
+                      {expected ?? '?'}{item.unit ? ` ${item.unit}` : ''}
+                    </td>}
                     <td className="px-4 py-2">
                       <input
                         inputMode="decimal"
@@ -318,11 +342,27 @@ export default function InventoryAudit() {
                         } bg-white dark:bg-zinc-900`}
                       />
                     </td>
+                    {canSales && <td className={`px-4 py-2 text-right ${
+                      variance == null ? 'text-zinc-500' : variance < 0 ? 'text-red-400' : variance > 0 ? 'text-emerald-400' : 'text-zinc-500'
+                    }`}>
+                      {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance}`}
+                      {variance != null && item.unit_cost != null ? ` ($${(variance * Number(item.unit_cost)).toFixed(2)})` : ''}
+                    </td>}
                   </tr>
                 )
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {canSales && lastVariance && (
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] p-4 text-sm">
+          <p className="font-medium text-emerald-300">Audit variance saved</p>
+          <p className="mt-1 text-zinc-300">Total units: {lastVariance.total_units}</p>
+          {lastVariance.total_value != null && <p className="text-zinc-300">Total value: ${Number(lastVariance.total_value).toFixed(2)}</p>}
+          {lastVariance.biggest_short[0] && <p className="mt-2 text-red-300">Biggest short: {lastVariance.biggest_short[0].name} ({lastVariance.biggest_short[0].units})</p>}
+          {lastVariance.biggest_over[0] && <p className="text-emerald-300">Biggest over: {lastVariance.biggest_over[0].name} (+{lastVariance.biggest_over[0].units})</p>}
         </div>
       )}
 
