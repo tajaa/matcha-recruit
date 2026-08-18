@@ -153,6 +153,8 @@ export interface BrokerCompanyMetric {
   pre_term_checks?: number
   avg_separation_risk?: number
   separation_override_rate?: number
+  renewal_date?: string | null
+  renewal_date_source?: 'broker' | 'coverage' | null
 }
 
 export interface BrokerPortfolioResponse {

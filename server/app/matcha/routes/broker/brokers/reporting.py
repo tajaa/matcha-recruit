@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -47,6 +47,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                     c.id AS company_id,
                     c.name AS company_name,
                     l.status AS link_status,
+                    l.renewal_date AS renewal_date,
                     COALESCE(s.status, 'none') AS setup_status,
                     COALESCE(ps.active_policy_count, 0) AS active_policy_count,
                     COALESCE(ps.pending_signatures, 0) AS pending_signatures,
@@ -120,6 +121,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                     c.id as company_id,
                     c.name as company_name,
                     l.status as link_status,
+                    l.renewal_date as renewal_date,
                     COALESCE(s.status, 'none') as setup_status,
                     COALESCE(ps.active_policy_count, 0) as active_policy_count,
                     COALESCE(ps.pending_signatures, 0) as pending_signatures,
@@ -166,6 +168,24 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                 membership["broker_id"],
             )
 
+        # Fallback renewal source: a company with no broker-set renewal_date but
+        # a Limit Adequacy coverage line shows that line's expiry instead of "—".
+        # Separate query so a missing company_coverage_lines table can't take down
+        # either portfolio-query variant above.
+        cov_rows = await conn.fetch(
+            """
+            SELECT ccl.company_id, MIN(ccl.expiry_date) AS min_expiry
+            FROM company_coverage_lines ccl
+            JOIN broker_company_links l ON l.company_id = ccl.company_id
+            WHERE l.broker_id = $1
+              AND l.status <> 'terminated'
+              AND ccl.expiry_date IS NOT NULL
+            GROUP BY ccl.company_id
+            """,
+            membership["broker_id"],
+        )
+        derived_renewals = {str(r["company_id"]): r["min_expiry"] for r in cov_rows}
+
     company_metrics = []
     healthy_count = 0
     at_risk_count = 0
@@ -195,6 +215,10 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
         else:
             risk_signal = "watch"
 
+        renewal_iso, renewal_source = _resolve_renewal(
+            row["renewal_date"], derived_renewals.get(str(row["company_id"])),
+        )
+
         metrics = {
             "company_id": str(row["company_id"]),
             "company_name": row["company_name"],
@@ -204,6 +228,8 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
             "open_action_items": open_action_items,
             "active_employee_count": int(row["active_employees"] or 0),
             "risk_signal": risk_signal,
+            "renewal_date": renewal_iso,
+            "renewal_date_source": renewal_source,
         }
         if has_pre_term:
             metrics["pre_term_checks"] = int(row.get("total_checks") or 0)
@@ -241,6 +267,41 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
             "note": "Broker portfolio reporting is intentionally aggregated for privacy and minimum necessary access.",
         },
     }
+
+
+class RenewalDateUpdate(BaseModel):
+    renewal_date: Optional[date] = None   # null clears the broker override
+
+
+@router.put("/reporting/portfolio/{company_id}/renewal")
+async def set_client_renewal_date(
+    company_id: UUID,
+    body: RenewalDateUpdate,
+    current_user: CurrentUser = Depends(require_broker),
+):
+    """Set (or clear) the broker's renewal date for one linked client."""
+    async with get_connection() as conn:
+        membership = await _get_broker_membership(conn, user_id=current_user.id)
+        _assert_can_manage_clients(membership)
+        updated = await conn.execute(
+            """
+            UPDATE broker_company_links
+            SET renewal_date = $3, updated_at = NOW()
+            WHERE broker_id = $1 AND company_id = $2 AND status <> 'terminated'
+            """,
+            membership["broker_id"], company_id, body.renewal_date,
+        )
+        if updated.split()[-1] == "0":
+            raise HTTPException(status_code=404, detail="Linked client not found")
+        derived = await conn.fetchval(
+            "SELECT MIN(expiry_date) FROM company_coverage_lines "
+            "WHERE company_id = $1 AND expiry_date IS NOT NULL",
+            company_id,
+        )
+    renewal_iso, renewal_source = _resolve_renewal(body.renewal_date, derived)
+    return {"renewal_date": renewal_iso, "renewal_date_source": renewal_source}
+
+
 @router.get("/referred-clients")
 async def list_referred_clients(current_user: CurrentUser = Depends(require_broker)):
     """List all companies that came through this broker's referral link or client setup flow."""

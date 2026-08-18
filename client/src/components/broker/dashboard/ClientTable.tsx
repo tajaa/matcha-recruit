@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, ChevronUp, ChevronDown } from 'lucide-react'
 import { DeltaPill } from '../DeltaPill'
+import { RenewalPill } from '../RenewalPill'
 import { HelpHint } from '../HelpHint'
 import { LABEL } from '../../ui/typography'
-import { fmtMoney } from '../../../utils/broker/brokerFormat'
+import { fmtMoney, fmtDate, daysUntilDate, compareRenewal } from '../../../utils/broker/brokerFormat'
 import type { BrokerCompanyMetric, WcPortfolioRow } from '../../../types/broker'
 
 const PANEL = 'rounded-2xl border border-white/[0.06] bg-zinc-950 p-5'
@@ -20,6 +22,9 @@ const riskLabels: Record<string, string> = {
   at_risk: 'At Risk',
 }
 
+type SortKey = 'account' | 'renewal'
+type SortDir = 'asc' | 'desc'
+
 interface ClientTableProps {
   companies: BrokerCompanyMetric[]
   /** Per-company WC metrics (TRIR / DART / premium), keyed by company_id.
@@ -27,10 +32,26 @@ interface ClientTableProps {
   wcByCompany?: Map<string, WcPortfolioRow>
   /** Opens the consultative outreach drawer for a client. */
   onOutreach?: (companyId: string, companyName: string) => void
+  /** Persist a broker-set renewal date. null clears it back to the derived fallback. */
+  onSetRenewal?: (companyId: string, date: string | null) => void
 }
 
-export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableProps) {
+export function ClientTable({ companies, wcByCompany, onOutreach, onSetRenewal }: ClientTableProps) {
   const navigate = useNavigate()
+  const [sortKey, setSortKey] = useState<SortKey>('account')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [editingRenewal, setEditingRenewal] = useState<string | null>(null)
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <ChevronUp size={10} className="text-zinc-700" />
+    return sortDir === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+  }
+
   if (companies.length === 0) {
     return (
       <div className={PANEL}>
@@ -40,6 +61,12 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
     )
   }
 
+  const rows = [...companies].sort((a, b) => {
+    if (sortKey === 'renewal') return compareRenewal(a.renewal_date, b.renewal_date, sortDir)
+    const cmp = a.company_name.localeCompare(b.company_name)
+    return sortDir === 'desc' ? -cmp : cmp
+  })
+
   return (
     <div className={PANEL}>
       <h3 className={`${LABEL} mb-4`}>Accounts</h3>
@@ -48,18 +75,27 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-white/[0.06]">
-              <th className={`pb-2 pr-4 ${LABEL}`}>Account</th>
+              <th className={`pb-2 pr-4 ${LABEL}`}>
+                <button type="button" onClick={() => toggleSort('account')} className="inline-flex items-center gap-1 hover:text-zinc-300">
+                  Account <SortIcon col="account" />
+                </button>
+              </th>
               <th className={`pb-2 pr-4 ${LABEL}`}>Status</th>
+              <th className={`pb-2 pr-4 ${LABEL}`}>
+                <button type="button" onClick={() => toggleSort('renewal')} className="inline-flex items-center gap-1 hover:text-zinc-300">
+                  Renewal <SortIcon col="renewal" />
+                </button>
+              </th>
               <th className={`pb-2 pr-4 text-right ${LABEL}`}>FTE</th>
-              <th className={`pb-2 pr-4 text-right ${LABEL}`}>TRIR</th>
-              <th className={`pb-2 pr-4 text-right ${LABEL}`}>DART</th>
+              <th className={`pb-2 pr-4 text-right ${LABEL}`}>TRIR / DART</th>
               <th className={`pb-2 text-right ${LABEL}`}>Premium Δ</th>
             </tr>
           </thead>
           <tbody>
-            {companies.map((c) => {
+            {rows.map((c) => {
               const wc = wcByCompany?.get(c.company_id)
               const trirRatio = wc?.benchmark && wc?.trir ? `${(wc.trir / wc.benchmark.trir).toFixed(1)}×` : null
+              const isEditingRenewal = editingRenewal === c.company_id
               return (
                 <tr
                   key={c.company_id}
@@ -91,24 +127,55 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
                       {riskLabels[c.risk_signal] ?? c.risk_signal}
                     </span>
                   </td>
+                  {/* Renewal: countdown badge + date, click-to-edit */}
+                  <td className="py-2.5 pr-4" onClick={(e) => e.stopPropagation()}>
+                    {isEditingRenewal ? (
+                      <input
+                        type="date"
+                        autoFocus
+                        defaultValue={c.renewal_date ?? ''}
+                        onBlur={(e) => {
+                          setEditingRenewal(null)
+                          onSetRenewal?.(c.company_id, e.target.value || null)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                          if (e.key === 'Escape') setEditingRenewal(null)
+                        }}
+                        className="bg-zinc-900 border border-white/10 rounded px-1.5 py-0.5 text-[11px] text-zinc-200"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onSetRenewal && setEditingRenewal(c.company_id)}
+                        className="text-left"
+                      >
+                        <RenewalPill
+                          days={daysUntilDate(c.renewal_date)}
+                          derived={c.renewal_date_source === 'coverage'}
+                        />
+                        {c.renewal_date && (
+                          <div className="text-[9px] text-zinc-600 font-mono">{fmtDate(c.renewal_date)}</div>
+                        )}
+                      </button>
+                    )}
+                  </td>
                   <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums">
                     {wc?.headcount ?? c.active_employee_count}
                   </td>
-                  {/* TRIR: value + ×bench + delta */}
+                  {/* TRIR / DART: value + ×bench + delta */}
                   <td className="py-2.5 pr-4 text-right">
                     {wc?.trir != null ? (
                       <>
-                        <div className="font-mono text-[13px] text-zinc-100 tabular-nums">{wc.trir.toFixed(2)}</div>
+                        <div className="font-mono text-[13px] text-zinc-100 tabular-nums">
+                          {wc.trir.toFixed(2)} / {wc.dart_rate != null ? wc.dart_rate.toFixed(2) : '—'}
+                        </div>
                         {trirRatio && <div className="text-[9px] text-zinc-600 font-mono">{trirRatio} bench</div>}
                         <DeltaPill pct={wc.trir_delta_pct} />
                       </>
                     ) : (
                       <span className="text-zinc-700">—</span>
                     )}
-                  </td>
-                  {/* DART */}
-                  <td className="py-2.5 pr-4 text-right font-mono text-[13px] text-zinc-300 tabular-nums">
-                    {wc?.dart_rate != null ? wc.dart_rate.toFixed(2) : <span className="text-zinc-700">—</span>}
                   </td>
                   {/* Premium trajectory (directional $) */}
                   <td className="py-2.5 text-right">

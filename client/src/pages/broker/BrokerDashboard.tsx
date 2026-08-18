@@ -5,7 +5,7 @@ import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer
 import { PageHeader } from '../../components/broker/PageHeader'
 import { KpiTile } from '../../components/broker/KpiTile'
 import { RiskPosturePanel } from '../../components/broker/RiskPosturePanel'
-import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker/broker'
+import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio, setClientRenewalDate } from '../../api/broker/broker'
 import { fetchRiskIndexPortfolio } from '../../api/risk/riskIndex'
 import type { RiskIndexPortfolio } from '../../types/riskIndex'
 import type {
@@ -106,6 +106,18 @@ export default function BrokerDashboard() {
             companies={portfolio?.companies ?? []}
             wcByCompany={wcByCompany}
             onOutreach={(id, name) => setOutreach({ id, name })}
+            onSetRenewal={(id, date) => {
+              setClientRenewalDate(id, date).then((res) => {
+                setPortfolio((p) => p && ({
+                  ...p,
+                  companies: p.companies.map((c) =>
+                    c.company_id === id
+                      ? { ...c, renewal_date: res.renewal_date, renewal_date_source: res.renewal_date_source }
+                      : c
+                  ),
+                }))
+              })
+            }}
           />
         </div>
         <div className="space-y-4">

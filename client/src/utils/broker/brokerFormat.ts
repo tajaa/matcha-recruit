@@ -49,3 +49,43 @@ export function streakLabel(days: number | null | undefined): string {
   if (days < 730) return `${Math.floor(days / 30)}mo`
   return `${(days / 365).toFixed(1)}y`
 }
+
+export type RenewalBand = 'expired' | 'critical' | 'warning' | 'normal' | 'unknown'
+
+/** Whole days from today to an ISO date (YYYY-MM-DD). Negative = already past.
+ *  `today` is injectable for tests. */
+export function daysUntilDate(iso: string | null | undefined, today: Date = new Date()): number | null {
+  if (!iso) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!m) return null
+  // Built from parts at LOCAL midnight. `new Date("2027-07-09")` is UTC midnight,
+  // which lands on the previous day west of Greenwich and makes the countdown
+  // off by one — same trap utils/dateFormat.ts's formatDateOnly avoids.
+  const target = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  if (Number.isNaN(target.getTime())) return null
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  // round, not ceil: both ends are local midnight so the quotient is whole except
+  // across a DST transition, where it can be off by an hour.
+  return Math.round((target.getTime() - base.getTime()) / 86_400_000)
+}
+
+/** Ticket thresholds: critical <60d, warning 60-90d, normal >90d. */
+export function renewalBand(days: number | null): RenewalBand {
+  if (days === null) return 'unknown'
+  if (days < 0) return 'expired'
+  if (days < 60) return 'critical'
+  if (days <= 90) return 'warning'
+  return 'normal'
+}
+
+/** Renewal-column comparator. Rows with no date sort LAST in both directions —
+ *  an unpopulated book must not bury the accounts that do have a date. */
+export function compareRenewal(
+  a: string | null | undefined, b: string | null | undefined, dir: 'asc' | 'desc',
+): number {
+  if (!a && !b) return 0
+  if (!a) return 1
+  if (!b) return -1
+  const cmp = a < b ? -1 : a > b ? 1 : 0   // ISO YYYY-MM-DD sorts lexically
+  return dir === 'desc' ? -cmp : cmp
+}

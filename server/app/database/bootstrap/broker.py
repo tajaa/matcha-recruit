@@ -71,6 +71,7 @@ async def create_broker(conn):
                 activated_at TIMESTAMPTZ,
                 terminated_at TIMESTAMPTZ,
                 grace_until TIMESTAMPTZ,
+                renewal_date DATE,
                 post_termination_mode VARCHAR(30)
                     CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed')),
                 transition_state VARCHAR(20) DEFAULT 'none'

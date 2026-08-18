@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -45,6 +45,7 @@ __all__ = [
     "_expire_stale_setups",
     "_fmt_token_row",
     "_committed_seats",
+    "_resolve_renewal",
 ]
 
 
@@ -354,3 +355,19 @@ async def _committed_seats(conn, broker_id) -> int:
         """,
         broker_id,
     ) or 0)
+
+
+def _resolve_renewal(
+    explicit: Optional[date], derived: Optional[date],
+) -> tuple[Optional[str], Optional[str]]:
+    """Renewal date for a linked client -> (iso_date, source).
+
+    `explicit` is broker_company_links.renewal_date (the broker's own answer,
+    always wins — including when a coverage line disagrees). `derived` is
+    MIN(company_coverage_lines.expiry_date) for the company. source is
+    "broker" | "coverage" | None so the UI can mark an inferred date.
+    """
+    chosen = explicit or derived
+    if chosen is None:
+        return None, None
+    return chosen.isoformat(), ("broker" if explicit else "coverage")

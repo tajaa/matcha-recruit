@@ -48,6 +48,12 @@ export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')
 }
 
+export function setClientRenewalDate(companyId: string, renewal_date: string | null) {
+  return api.put<{ renewal_date: string | null; renewal_date_source: 'broker' | 'coverage' | null }>(
+    `/brokers/reporting/portfolio/${companyId}/renewal`, { renewal_date },
+  )
+}
+
 // --- WC portfolio (per-client TRIR / DART / premium) ---
 
 export function fetchWcPortfolio() {
