@@ -29,11 +29,7 @@ final class GummfitStatusPillTests: XCTestCase {
     }
 
     func testUnknownThemeFallsBackToClean() {
-        let config = CappeThemeConfig(
-            preset: "future", mode: nil, fonts: nil, font: nil, radius: nil,
-            heroStyle: nil, navStyle: nil, primaryColor: nil, colors: nil,
-            premium: nil, fancy: nil
-        )
+        let config = CappeThemeConfig(raw: ["preset": .string("future")])
         XCTAssertEqual(CappePublishedThemeCatalog.resolved(for: config).id, "clean")
     }
 }

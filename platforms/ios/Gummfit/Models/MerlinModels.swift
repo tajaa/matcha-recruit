@@ -107,6 +107,8 @@ struct CappeSetupResult: Decodable {
     let steps: [CappeMerlinStep]?
     let results: [JSONValue]?
     let readiness: [String: JSONValue]?
+    let conversation_id: String?
+    let message_id: String?
 }
 
 struct CappeMerlinRejection: Codable {

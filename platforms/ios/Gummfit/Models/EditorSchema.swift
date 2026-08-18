@@ -141,6 +141,44 @@ struct CappeEditorSchema: Codable {
     }
 }
 
+extension CappeEditorSchema {
+    /// One `_design` value's shape as exported by the server registry
+    /// (services/merlin/ops.py:_spec_json). The op validator
+    /// (ops.py:_design_value_error) type-checks against the same registry, so a
+    /// control MUST emit the matching JSON type — a string is only correct for
+    /// `text` and `color`.
+    enum DesignSpec: Equatable {
+        case enumValues([String])
+        case range(Double, Double)
+        case bool
+        case color([String])
+        case text
+        case gradient
+        case unknown
+
+        init(_ value: JSONValue?) {
+            guard let object = value?.objectValue else { self = .unknown; return }
+            if let values = object["enum"]?.arrayValue {
+                self = .enumValues(values.compactMap(\.stringValue))
+            } else if let lo = object["min"]?.doubleValue, let hi = object["max"]?.doubleValue {
+                self = .range(lo, hi)
+            } else {
+                switch object["kind"]?.stringValue {
+                case "bool": self = .bool
+                case "color": self = .color(object["tokens"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+                case "text": self = .text
+                case "gradient": self = .gradient
+                default: self = .unknown
+                }
+            }
+        }
+    }
+
+    func designSpec(group: String, key: String) -> DesignSpec {
+        DesignSpec(design[group]?[key])
+    }
+}
+
 func fallbackThemeConfig(_ id: String) -> [String: JSONValue]? {
     guard let preset = CappePublishedThemeCatalog.presets.first(where: { $0.id == id }) else { return nil }
     let centeredNav = ["noir", "studio", "bloom", "press"].contains(id)

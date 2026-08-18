@@ -14,6 +14,7 @@ struct CappeSite: Codable, Identifiable, Equatable {
     let status: SiteStatus
     let timezone: String?
     let theme_config: CappeThemeConfig?
+    let meta_config: [String: JSONValue]?
     let is_multi_location: Bool
     let tax_rate_bps: Int?
     let tax_label: String?

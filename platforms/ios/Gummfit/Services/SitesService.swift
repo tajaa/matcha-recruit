@@ -12,8 +12,8 @@ final class SitesService {
         try await APIClient.shared.request(method: "GET", path: "/sites")
     }
 
-    /// Creates the site's blank starting page. The native page editor UI is
-    /// still being wired separately from this CRUD service.
+    /// Creates the site's blank starting page. Page editing is a separate
+    /// native flow reached from Site settings.
     func create(name: String) async throws -> CappeSite {
         try await APIClient.shared.request(method: "POST", path: "/sites", body: CappeSiteCreate(name: name))
     }
