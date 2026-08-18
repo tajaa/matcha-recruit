@@ -12,10 +12,8 @@ import { IRPremiumImpactCard } from '../../../components/ir/risk/IRPremiumImpact
 import type { BrokerClientDetailResponse, WcClientDetailResponse } from '../../../types/broker'
 import { riskColors, riskLabels } from './shared'
 import { OverviewTab } from './OverviewTab'
-import { ComplianceTab } from './ComplianceTab'
 import { PoliciesTab } from './PoliciesTab'
 import { IRERTab } from './IRERTab'
-import { ActivityTab } from './ActivityTab'
 import { WcTab } from './WcTab'
 import { LossTriangleTab } from './LossTriangleTab'
 import { LossRatioTab } from './LossRatioTab'
@@ -30,11 +28,10 @@ export { LossRatioTab } from './LossRatioTab'
 export { LossTriangleTab } from './LossTriangleTab'
 export type { LossDevApi } from './LossTriangleTab'
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'insurance' | 'pilot' | 'activity'
+type Tab = 'overview' | 'policies' | 'ir_er' | 'wc' | 'loss_dev' | 'loss_ratio' | 'epl' | 'controls' | 'limits' | 'defense' | 'submission' | 'insurance' | 'pilot'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  { key: 'compliance', label: 'Compliance' },
   { key: 'policies', label: 'Policies & Handbooks' },
   { key: 'ir_er', label: 'IR / ER' },
   { key: 'wc', label: "Workers' Comp" },
@@ -47,7 +44,6 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'submission', label: 'Submission' },
   { key: 'insurance', label: 'Insurance' },
   { key: 'pilot', label: 'Pilot' },
-  { key: 'activity', label: 'Activity' },
 ]
 
 export default function BrokerClientDetail() {
@@ -91,7 +87,7 @@ export default function BrokerClientDetail() {
     )
   }
 
-  const { company, compliance, policies, ir_summary, er_summary, handbooks, recent_activity } = data
+  const { company, compliance, policies, ir_summary, er_summary, handbooks } = data
 
   return (
     <div className="space-y-6">
@@ -164,7 +160,6 @@ export default function BrokerClientDetail() {
           onboardingStage={company.onboarding_stage}
         />
       )}
-      {activeTab === 'compliance' && <ComplianceTab compliance={compliance} />}
       {activeTab === 'policies' && <PoliciesTab policies={policies} handbooks={handbooks} />}
       {activeTab === 'ir_er' && <IRERTab ir={ir_summary} er={er_summary} />}
       {activeTab === 'wc' && companyId && <WcTab companyId={companyId} />}
@@ -191,7 +186,6 @@ export default function BrokerClientDetail() {
       )}
       {activeTab === 'insurance' && companyId && <InsuranceTab companyId={companyId} />}
       {activeTab === 'pilot' && companyId && <PilotTab subjectKind="company" subjectId={companyId} />}
-      {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
     </div>
   )
 }
