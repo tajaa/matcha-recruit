@@ -6,6 +6,7 @@ export type ChunkedRecorderStatus = 'idle' | 'recording' | 'denied' | 'error'
 type Options = {
   chunkSeconds?: number
   maxDurationSeconds?: number
+  initialChunkIndex?: number
   onChunk: (blob: Blob, index: number) => void | Promise<void>
   onMaxDuration?: () => void
 }
@@ -19,6 +20,7 @@ type Options = {
 export function useChunkedVoiceRecorder({
   chunkSeconds = 60,
   maxDurationSeconds = 3600,
+  initialChunkIndex = 0,
   onChunk,
   onMaxDuration,
 }: Options) {
@@ -30,13 +32,18 @@ export function useChunkedVoiceRecorder({
   const ctxRef = useRef<AudioContext | null>(null)
   const nodeRef = useRef<AudioWorkletNode | null>(null)
   const framesRef = useRef<ArrayBuffer[]>([])
-  const chunkIndexRef = useRef(0)
+  const chunkIndexRef = useRef(initialChunkIndex)
   const timerRef = useRef<number | null>(null)
   const maxFiredRef = useRef(false)
   const stoppingRef = useRef(false)
 
   useEffect(() => { onChunkRef.current = onChunk }, [onChunk])
   useEffect(() => { onMaxRef.current = onMaxDuration }, [onMaxDuration])
+  useEffect(() => {
+    if (status === 'idle') {
+      chunkIndexRef.current = Math.max(chunkIndexRef.current, initialChunkIndex)
+    }
+  }, [initialChunkIndex, status])
 
   const cleanup = useCallback(() => {
     if (timerRef.current !== null) {
@@ -64,7 +71,6 @@ export function useChunkedVoiceRecorder({
   const start = useCallback(async () => {
     if (status === 'recording') return
     framesRef.current = []
-    chunkIndexRef.current = 0
     maxFiredRef.current = false
     stoppingRef.current = false
     setElapsedSeconds(0)

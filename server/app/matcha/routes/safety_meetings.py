@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -30,6 +30,7 @@ from app.matcha.services.safety_meetings.transcription import transcribe_meeting
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+MAX_MEETING_DURATION = timedelta(hours=1)
 
 
 def _json_value(value: Any, fallback: Any) -> Any:
@@ -57,12 +58,13 @@ def _row_to_out(row: Any) -> SafetyMeetingOut:
     return SafetyMeetingOut(**data)
 
 
-async def _get_meeting(conn, meeting_id: UUID, company_id: UUID):
+async def _get_meeting(conn, meeting_id: UUID, company_id: UUID, *, for_update: bool = False):
+    lock_clause = " FOR UPDATE OF sm" if for_update else ""
     row = await conn.fetchrow(
-        """SELECT sm.*, bl.name AS location_name
+        f"""SELECT sm.*, bl.name AS location_name
            FROM safety_meetings sm
            LEFT JOIN business_locations bl ON bl.id = sm.location_id
-           WHERE sm.id = $1 AND sm.company_id = $2""",
+           WHERE sm.id = $1 AND sm.company_id = $2{lock_clause}""",
         meeting_id,
         company_id,
     )
@@ -185,6 +187,8 @@ async def upload_chunk(
         row = await _get_meeting(conn, meeting_id, company_id)
         if row["status"] != "recording":
             raise HTTPException(status_code=409, detail="This meeting is no longer recording.")
+        if datetime.now(timezone.utc) - row["started_at"] >= MAX_MEETING_DURATION:
+            raise HTTPException(status_code=409, detail="The one-hour recording limit has been reached.")
 
     audio = await read_wav_or_400(file)
     audio_path = None
@@ -215,6 +219,8 @@ async def upload_chunk(
             row = await _get_meeting(conn, meeting_id, company_id, for_update=True)
             if row["status"] != "recording":
                 raise HTTPException(status_code=409, detail="This meeting is no longer recording.")
+            if datetime.now(timezone.utc) - row["started_at"] >= MAX_MEETING_DURATION:
+                raise HTTPException(status_code=409, detail="The one-hour recording limit has been reached.")
             segments = _segments(row)
             segments = [item for item in segments if item["idx"] != chunk_index]
             segments.append({
@@ -302,7 +308,7 @@ async def update_meeting(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with this account")
     values = body.model_dump(exclude_unset=True)
-    if "title" in values:
+    if "title" in values and values["title"] is not None:
         values["title"] = values["title"].strip()
     if "topic" in values and values["topic"] is not None:
         values["topic"] = values["topic"].strip() or None

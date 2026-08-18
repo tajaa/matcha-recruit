@@ -7,7 +7,7 @@ best-effort and deliberately falls back to manager review on model failure.
 
 from app.matcha.services.safety_meetings.summary import _coerce_summary
 from app.matcha.services.safety_meetings.transcription import _coerce_transcript
-from app.matcha.models.safety_meetings import SafetyMeetingCreate
+from app.matcha.models.safety_meetings import SafetyMeetingCreate, SafetyMeetingUpdate
 
 
 def test_transcript_coercer_trims_blank_and_non_string_values():
@@ -25,6 +25,15 @@ def test_meeting_title_cannot_be_blank():
         pass
     else:
         raise AssertionError("blank titles must be rejected")
+
+
+def test_review_title_cannot_be_explicitly_null():
+    try:
+        SafetyMeetingUpdate(title=None)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("review titles must not accept null")
 
 
 def test_summary_coercer_returns_canonical_empty_shape():

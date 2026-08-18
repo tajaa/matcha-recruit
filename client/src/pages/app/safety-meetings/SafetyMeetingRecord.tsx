@@ -15,6 +15,7 @@ export default function SafetyMeetingRecord() {
   const navigate = useNavigate()
   const [meeting, setMeeting] = useState<SafetyMeeting | null>(null)
   const [segments, setSegments] = useState<Record<number, string>>({})
+  const [initialChunkIndex, setInitialChunkIndex] = useState(0)
   const [uploading, setUploading] = useState(0)
   const [finishing, setFinishing] = useState(false)
   const [error, setError] = useState('')
@@ -28,6 +29,10 @@ export default function SafetyMeetingRecord() {
       }
       setMeeting(record)
       setSegments(Object.fromEntries(record.transcript_segments.map((segment) => [segment.idx, segment.text])))
+      setInitialChunkIndex(record.transcript_segments.reduce(
+        (next, segment) => Math.max(next, segment.idx + 1),
+        0,
+      ))
     }).catch((err) => setError(err instanceof Error ? err.message : 'Could not load this meeting.'))
   }, [meetingId, navigate])
 
@@ -46,10 +51,15 @@ export default function SafetyMeetingRecord() {
     chunkSeconds: 60,
     maxDurationSeconds: 3600,
     onChunk,
-    onMaxDuration: () => setError('The one-hour recording limit was reached. End the meeting to review the record.'),
+    initialChunkIndex,
+    onMaxDuration: () => {
+      setError('The one-hour recording limit was reached. Finishing the meeting...')
+      void endMeeting()
+    },
   })
 
   const endMeeting = async () => {
+    if (finishing) return
     setFinishing(true)
     setError('')
     try {

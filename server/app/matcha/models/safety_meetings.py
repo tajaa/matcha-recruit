@@ -79,11 +79,11 @@ class SafetyMeetingUpdate(BaseModel):
         lambda v: None if v is None else _clean_str_list(v, max_items=MAX_LIST_ITEMS, max_chars=200)
     )
 
-    @field_validator("title")
+    @field_validator("title", mode="before")
     @classmethod
     def _title_not_blank(cls, value: Optional[str]) -> Optional[str]:
         if value is None:
-            return None
+            raise ValueError("title cannot be null")
         value = " ".join(value.split())
         if not value:
             raise ValueError("title is required")
