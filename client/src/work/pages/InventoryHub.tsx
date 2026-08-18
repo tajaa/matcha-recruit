@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ClipboardCheck, Loader2, Upload, Wrench } from 'lucide-react'
+import { BookOpen, ClipboardCheck, Loader2, Upload, Wrench } from 'lucide-react'
 import { Button, Input, useToast } from '../../components/ui'
 import ItemTable from '../components/inventory/ItemTable'
 import ItemDetail from '../components/inventory/ItemDetail'
@@ -8,6 +8,7 @@ import OrderQueue from '../components/inventory/OrderQueue'
 import ReceiveDeliveryModal from '../components/inventory/ReceiveDeliveryModal'
 import SalesImportModal from '../components/inventory/SalesImportModal'
 import SalesMappingsPanel from '../components/inventory/SalesMappingsPanel'
+import SalesIntakeWizard from '../components/inventory/SalesIntakeWizard'
 import { createItem, listItems, listOrders, listSalesImports, type InventoryItem, type InventoryOrder } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
@@ -18,7 +19,7 @@ export default function InventoryHub() {
   const navigate = useNavigate()
   const base = useWorkBase()
   const { toast } = useToast()
-  const { hasFeature } = useMe()
+  const { hasFeature, me } = useMe()
   const canSales = hasFeature('sales_intake')
   const [items, setItems] = useState<InventoryItem[]>([])
   const [orders, setOrders] = useState<InventoryOrder[]>([])
@@ -33,6 +34,7 @@ export default function InventoryHub() {
   const [mappingsOpen, setMappingsOpen] = useState(false)
   const [draftCount, setDraftCount] = useState(0)
   const [reviewImportId, setReviewImportId] = useState<string | null>(null)
+  const [salesWizardOpen, setSalesWizardOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -148,6 +150,19 @@ export default function InventoryHub() {
       {canSales && <Button variant="ghost" onClick={() => setMappingsOpen((open) => !open)}>
         <Wrench className="mr-1.5 inline h-3.5 w-3.5" /> {mappingsOpen ? 'Hide mappings' : 'Manage mappings'}
       </Button>}
+      {canSales && <Button variant="ghost" onClick={() => setSalesWizardOpen(true)}>
+        <BookOpen className="mr-1.5 inline h-3.5 w-3.5" /> Learn sales intake
+      </Button>}
+      {canSales && <SalesIntakeWizard
+        open={salesWizardOpen}
+        companyKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'}
+        onClose={() => setSalesWizardOpen(false)}
+        onAction={(action) => {
+          if (action === 'mappings') setMappingsOpen(true)
+          if (action === 'import') { setReviewImportId(null); setSalesOpen(true) }
+          if (action === 'audit') navigate(`${base}/inventory/audit`)
+        }}
+      />}
       {canSales && mappingsOpen && <SalesMappingsPanel
         items={visibleItems}
         locationId={locFilter !== 'all' && locFilter !== 'none' ? locFilter : undefined}
