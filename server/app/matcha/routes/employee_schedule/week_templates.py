@@ -16,7 +16,7 @@ left NULL (standalone, legacy shape); see the empsched03 migration.
 
 import json
 from datetime import datetime, timedelta, time, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -26,12 +26,12 @@ from app.matcha.models.scheduling.employee_schedule import (
     WeekTemplateCreate, WeekTemplateUpdate, BlockCreate, BlockUpdate,
     GenerateFromWeekTemplate,
 )
-from ...services.scheduling.schedule_rules import build_patch, template_windows
+from ...services.scheduling.schedule_rules import build_patch
+from ...services.scheduling.shift_writes import generate_week_template_shifts
 from ._shared import (
     require_company_id, log_audit, serialize_week_template, serialize_block,
     fetch_shifts, assert_location_in_company,
 )
-from ._compliance import check_shift_compliance
 
 router = APIRouter()
 
@@ -226,7 +226,9 @@ async def delete_block(week_template_id: UUID, block_id: UUID, current_user=Depe
 @router.post("/week-templates/{week_template_id}/generate")
 async def generate_from_week_template(week_template_id: UUID, body: GenerateFromWeekTemplate,
                                       current_user=Depends(require_admin_or_client)):
-    """Materialize draft shifts for every block, all sharing one series_id."""
+    """Materialize draft shifts for every block, all sharing one series_id.
+    Delegates to shift_writes.generate_week_template_shifts — the chat "apply
+    a week template" confirm flow shares this exact writer."""
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         await _fetch_week_template_or_404(conn, company_id, week_template_id)
@@ -237,71 +239,21 @@ async def generate_from_week_template(week_template_id: UUID, body: GenerateFrom
         if not blocks:
             raise HTTPException(status_code=422, detail="Week template has no blocks — add at least one")
 
-        series_id = uuid4()
-        total_created = 0
-        compliance_warnings: list[dict] = []
-
         async with conn.transaction():
-            for blk in blocks:
-                days = blk["days_of_week"]
-                if isinstance(days, str):
-                    try:
-                        days = json.loads(days)
-                    except json.JSONDecodeError:
-                        days = []
-                day_set = set(days or [])
-                if not day_set:
-                    continue  # a block with no weekdays configured is silently skipped, not a
-                              # 422 — one misconfigured block shouldn't block the other blocks
-
-                starts, ends = template_windows(
-                    body.start_date, body.end_date, day_set, blk["start_time"], blk["end_time"],
-                )
-                if not starts:
-                    continue
-                total_created += len(starts)
-
-                # One compliance check per block (not per shift, not once for
-                # the whole template) — each block can have a different time
-                # window/break/role, so its advisories differ; all shifts
-                # generated from the SAME block share the same intrinsic
-                # advisories.
-                compliance_warnings.extend(
-                    await check_shift_compliance(
-                        conn, company_id, location_id=blk["location_id"],
-                        starts_at=starts[0], ends_at=ends[0],
-                        break_minutes=blk["break_minutes"] or 0, shift_kind="work",
-                    )
-                )
-
-                # Same set-based unnest INSERT as the old generate_from_template,
-                # looped per block: O(blocks) awaited round trips (a week
-                # template has ~3-8 blocks), not O(shifts).
-                await conn.execute(
-                    """
-                    INSERT INTO schedule_shifts
-                        (company_id, location_id, template_id, series_id, role,
-                         department, starts_at, ends_at, break_minutes,
-                         required_staff, color, notes, created_by)
-                    SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, $9,$10,$11,$12,$13
-                    FROM unnest($7::timestamptz[], $8::timestamptz[])
-                         AS w(starts_at, ends_at)
-                    """,
-                    company_id, blk["location_id"], blk["id"], series_id, blk["role"],
-                    blk["department"], starts, ends, blk["break_minutes"],
-                    blk["required_staff"], blk["color"], blk["notes"], current_user.id,
-                )
-
+            result = await generate_week_template_shifts(
+                conn, company_id, blocks=blocks, start_date=body.start_date,
+                end_date=body.end_date, created_by=current_user.id,
+            )
             await log_audit(conn, company_id, "week_template", week_template_id, current_user.id,
                             "week_template.generate",
-                            {"series_id": str(series_id), "created": total_created,
+                            {"series_id": str(result["series_id"]), "created": result["created"],
                              "blocks": len(blocks)})
 
         lo = datetime.combine(body.start_date, time.min, tzinfo=timezone.utc)
         hi = datetime.combine(body.end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
         shifts = await fetch_shifts(conn, company_id, lo, hi)
-    return {"created": total_created, "series_id": str(series_id), "shifts": shifts,
-            "compliance_warnings": compliance_warnings}
+    return {"created": result["created"], "series_id": str(result["series_id"]), "shifts": shifts,
+            "compliance_warnings": result["compliance_warnings"]}
 
 
 async def _fetch_week_template_or_404(conn, company_id: UUID, week_template_id: UUID):

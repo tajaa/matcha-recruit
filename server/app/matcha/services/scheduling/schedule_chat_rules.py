@@ -391,6 +391,30 @@ def match_template(
     return None
 
 
+def match_week_template(hint: Optional[str], templates: list[dict]) -> Optional[dict]:
+    """Name-only sibling of match_template: exact case-insensitive name, then
+    name-token stem overlap, deterministic ties broken by (name, id). A week
+    template has no role field to fall back on."""
+    effective_hint = (hint or "").strip()
+    if not effective_hint or not templates:
+        return None
+    hint_lower = effective_hint.lower()
+    hint_stems = _stems(effective_hint)
+
+    def _sort_key(t: dict):
+        return (t.get("name") or "", str(t.get("id")))
+
+    exact = [t for t in templates if (t.get("name") or "").strip().lower() == hint_lower]
+    if exact:
+        return sorted(exact, key=_sort_key)[0]
+
+    name_matches = [t for t in templates if hint_stems & _stems(t.get("name"))]
+    if name_matches:
+        return sorted(name_matches, key=_sort_key)[0]
+
+    return None
+
+
 def build_adhoc_spec(label: str, start_time, end_time, role: Optional[str]) -> dict:
     """When no template matched but the manager (or the model's parse) gave
     explicit times. `break_minutes=0` deliberately — the §512 meal-break

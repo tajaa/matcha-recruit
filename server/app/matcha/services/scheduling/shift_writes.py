@@ -32,14 +32,20 @@ These are callers-own-the-checks writers, same posture as
 caller (route handler or `schedule_chat`'s proposal builder/executor) —
 the core only performs the write + audit once the caller has decided to
 proceed.
+
+`generate_week_template_shifts` (2026-08-17) is the last unshared writer:
+`routes/employee_schedule/week_templates.py`'s per-block generate loop,
+lifted so `schedule_chat.py`'s "apply a week template" confirm flow stamps
+out a week identically to the Templates-tab Generate button. Caller owns
+the tenant guard and the transaction.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 def _iso(value: Any) -> Optional[str]:
@@ -474,3 +480,85 @@ async def cancel_shift_core(
                         "was_published": was_published,
                         **(audit_details or {}),
                     })
+
+
+async def generate_week_template_shifts(
+    conn,
+    company_id: UUID,
+    *,
+    blocks: list,
+    start_date: date,
+    end_date: date,
+    created_by: UUID,
+) -> dict:
+    """Materialize draft shifts for every block under ONE series_id.
+
+    `blocks` are `schedule_shift_templates` rows (the `_BLOCK_COLS` shape:
+    id/role/department/location_id/start_time/end_time/break_minutes/
+    required_staff/days_of_week/color/notes). A block with no weekdays
+    configured is silently skipped, not a 422 — one misconfigured block
+    shouldn't block the others. Caller owns the tenant guard and wraps this
+    in `async with conn.transaction():`; this only writes.
+    """
+    from .schedule_rules import template_windows
+    from .shift_compliance import check_shift_compliance
+
+    series_id = uuid4()
+    total_created = 0
+    shift_ids: list[UUID] = []
+    compliance_warnings: list[dict] = []
+    per_block: list[dict] = []
+
+    for blk in blocks:
+        days = blk["days_of_week"]
+        if isinstance(days, str):
+            try:
+                days = json.loads(days)
+            except json.JSONDecodeError:
+                days = []
+        day_set = set(days or [])
+        if not day_set:
+            continue
+
+        starts, ends = template_windows(
+            start_date, end_date, day_set, blk["start_time"], blk["end_time"],
+        )
+        if not starts:
+            continue
+        total_created += len(starts)
+
+        # One compliance check per block (not per shift, not once for the
+        # whole template) — each block can have a different time
+        # window/break/role, so its advisories differ; all shifts
+        # generated from the SAME block share the same intrinsic
+        # advisories.
+        compliance_warnings.extend(
+            await check_shift_compliance(
+                conn, company_id, location_id=blk["location_id"],
+                starts_at=starts[0], ends_at=ends[0],
+                break_minutes=blk["break_minutes"] or 0, shift_kind="work",
+            )
+        )
+
+        rows = await conn.fetch(
+            """
+            INSERT INTO schedule_shifts
+                (company_id, location_id, template_id, series_id, role,
+                 department, starts_at, ends_at, break_minutes,
+                 required_staff, color, notes, created_by)
+            SELECT $1,$2,$3,$4,$5,$6, w.starts_at, w.ends_at, $9,$10,$11,$12,$13
+            FROM unnest($7::timestamptz[], $8::timestamptz[])
+                 AS w(starts_at, ends_at)
+            RETURNING id
+            """,
+            company_id, blk["location_id"], blk["id"], series_id, blk["role"],
+            blk["department"], starts, ends, blk["break_minutes"],
+            blk["required_staff"], blk["color"], blk["notes"], created_by,
+        )
+        shift_ids.extend(r["id"] for r in rows)
+        per_block.append({"block_id": str(blk["id"]), "name": blk["name"], "count": len(starts)})
+
+    return {
+        "series_id": series_id, "created": total_created, "shift_ids": shift_ids,
+        "compliance_warnings": compliance_warnings, "per_block": per_block,
+    }

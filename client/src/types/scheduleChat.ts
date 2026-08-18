@@ -31,24 +31,42 @@ export interface ScheduleChatOp {
   ok?: boolean
 }
 
-export interface ScheduleChatTemplate {
+export interface ScheduleChatTemplateBlock {
   name: string
   role: string | null
-  location_name?: string | null
   start_time: string
   end_time: string
   required_staff: number
   days_of_week: number[]
 }
 
+export interface ScheduleChatWeekTemplate {
+  name: string
+  location_name?: string | null
+  blocks: ScheduleChatTemplateBlock[]
+}
+
+export interface ScheduleChatApplyPreviewBlock {
+  name: string
+  start_time: string
+  end_time: string
+  days: number
+  shifts: number
+}
+
 export interface ScheduleChatProposal {
-  kind?: 'edit' | 'template'
+  kind?: 'edit' | 'template' | 'apply_template'
   ack?: string
   clarify_question?: string | null
   clarify_options?: string[]
   shifts?: ScheduleChatShift[]
   ops?: ScheduleChatOp[]
-  template?: ScheduleChatTemplate
+  week_template?: ScheduleChatWeekTemplate
+  week_template_name?: string
+  start_date?: string
+  end_date?: string
+  total_shifts?: number
+  blocks_preview?: ScheduleChatApplyPreviewBlock[]
 }
 
 export interface ScheduleChatTurnResponse {

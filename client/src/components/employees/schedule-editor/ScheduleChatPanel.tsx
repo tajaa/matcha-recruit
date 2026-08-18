@@ -22,8 +22,11 @@ interface ChatMessage {
 }
 
 function proposalSummary(proposal: ScheduleChatProposal): string {
-  if (proposal.kind === 'template' && proposal.template) {
-    return `Template: ${proposal.template.name}, ${proposal.template.start_time}-${proposal.template.end_time}`
+  if (proposal.kind === 'template' && proposal.week_template) {
+    return `Week template: ${proposal.week_template.name} (${proposal.week_template.blocks.length} block${proposal.week_template.blocks.length === 1 ? '' : 's'})`
+  }
+  if (proposal.kind === 'apply_template') {
+    return `Apply ${proposal.week_template_name}: ${proposal.total_shifts} shift${proposal.total_shifts === 1 ? '' : 's'}, ${proposal.start_date}–${proposal.end_date}`
   }
   if (proposal.ops?.length) return `${proposal.ops.length} schedule change${proposal.ops.length === 1 ? '' : 's'}`
   return `${proposal.shifts?.length ?? 0} shift${proposal.shifts?.length === 1 ? '' : 's'}`
@@ -32,7 +35,7 @@ function proposalSummary(proposal: ScheduleChatProposal): string {
 export default function ScheduleChatPanel({ weekStart, locationId, editPublished, onApplied, onClose }: ScheduleChatPanelProps) {
   const { toast } = useToast()
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: 'welcome', role: 'assistant', text: 'Ask about coverage, test a schedule idea, edit a draft, or make a reusable template.' },
+    { id: 'welcome', role: 'assistant', text: 'Ask about coverage, test a schedule idea, edit a draft, save a reusable week, or apply one you already saved.' },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -129,7 +132,8 @@ function TurnCard({ turn, onApply, onDiscard, onClarify }: { turn: ScheduleChatT
       <p className="font-medium text-zinc-200">{turn.message || proposalSummary(proposal)}</p>
       {proposal.shifts?.map((shift) => <div key={`${shift.starts_at}-${shift.label}`} className="mt-2 border-t border-white/[0.06] pt-2"><div className="flex justify-between"><span>{shift.label}</span><span>{fmtTime(shift.starts_at)}-{fmtTime(shift.ends_at)}</span></div><div className="text-[11px] text-zinc-500">{shift.assignees.map((a) => a.name).join(', ') || `${shift.open_slots} open`}</div></div>)}
       {proposal.ops?.map((op, index) => <div key={`${op.kind}-${index}`} className="mt-2 text-[11px] text-zinc-400">{op.kind}: {op.from_employee_name || ''}{op.to_employee_name ? ` -> ${op.to_employee_name}` : ''}</div>)}
-      {proposal.template && <div className="mt-2 text-[11px] text-zinc-400">{proposal.template.name}: {proposal.template.start_time}-{proposal.template.end_time}, {proposal.template.required_staff} staff</div>}
+      {proposal.week_template?.blocks.map((block) => <div key={block.name} className="mt-2 border-t border-white/[0.06] pt-2 text-[11px] text-zinc-400">{block.name}: {block.start_time}-{block.end_time}, {block.required_staff} staff, {block.days_of_week.length} days</div>)}
+      {proposal.blocks_preview?.map((block) => <div key={block.name} className="mt-2 border-t border-white/[0.06] pt-2 text-[11px] text-zinc-400">{block.name}: {block.start_time}-{block.end_time}, {block.shifts} shifts</div>)}
       <div className="mt-3 flex gap-2"><button onClick={onApply} className="rounded bg-emerald-400 px-2.5 py-1 text-[11px] font-medium text-zinc-950">Add as draft</button><button onClick={onDiscard} className="rounded border border-zinc-700 px-2.5 py-1 text-[11px] text-zinc-400">Discard</button></div>
     </div>
   )

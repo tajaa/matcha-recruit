@@ -9,7 +9,7 @@ overnight block rolling to the next day alongside a same-day block — a
 theatre's "Standard Week" needs all three at once.
 """
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 from app.matcha.services.scheduling.schedule_rules import template_windows
 
@@ -36,3 +36,14 @@ def test_overnight_block_alongside_a_day_block():
     late_starts, late_ends = template_windows(date(2026, 7, 13), date(2026, 7, 13), {1}, time(22), time(2))
     assert day_ends[0].date() == date(2026, 7, 13)
     assert late_ends[0].date() == date(2026, 7, 14) and late_ends[0] > late_starts[0]
+
+
+def test_apply_range_spans_requested_weeks():
+    # The chat "apply" flow multiplies weeks into the end date
+    # (start + 7*weeks - 1 days) before calling template_windows — a
+    # Mon-Fri block over 2 requested weeks must yield 10 windows, not 5.
+    start = date(2026, 7, 12)  # a Sunday
+    weeks = 2
+    end = start + timedelta(days=7 * weeks - 1)
+    starts, _ = template_windows(start, end, {1, 2, 3, 4, 5}, time(9), time(17))
+    assert len(starts) == 10

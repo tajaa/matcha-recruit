@@ -123,7 +123,7 @@ async def schedule_chat_turn(
             }
         return {
             "proposal_id": None, "kind": "unactionable",
-            "message": "Ask about coverage, shifts, edits, or reusable templates.",
+            "message": "Ask about coverage, shifts, edits, week templates, or applying a saved week.",
             "proposal": None,
         }
 
@@ -145,6 +145,10 @@ async def schedule_chat_turn(
         original_kind = stored_proposal.get("kind") if stored_proposal else parsed.get("action")
         if original_kind == "template":
             build = await schedule_chat.build_template_proposal(conn, **common)
+        elif original_kind == "apply_template":
+            build = await schedule_chat.build_apply_template_proposal(
+                conn, **common, week_start=body.week_start,
+            )
         elif original_kind == "edit":
             statuses = ("draft", "published") if body.edit_published else ("draft",)
             build = await schedule_chat.build_edit_proposal(
@@ -174,6 +178,10 @@ async def schedule_chat_apply(
         proposal_row = {**dict(row), "proposal": proposal}
         if proposal.get("kind") == "template":
             text = await schedule_chat.execute_template_proposal(
+                conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
+            )
+        elif proposal.get("kind") == "apply_template":
+            text = await schedule_chat.execute_apply_template_proposal(
                 conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
             )
         elif proposal.get("kind") == "edit":

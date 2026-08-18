@@ -52,6 +52,7 @@ from .schedule_chat_rules import (
     build_adhoc_spec,
     match_location,
     match_template,
+    match_week_template,
     parse_time_hint,
     rank_candidates,
     resolve_dates,
@@ -66,8 +67,8 @@ from .schedule_rules import (
 from .shift_compliance import _approved_db_rules, _fair_workweek_advisories, _week_hours, check_shift_compliance
 from .shift_writes import (
     apply_assignment_core, cancel_shift_core, create_shift_core, fetch_availability,
-    find_conflicts, log_audit, remove_assignment_core, removal_audit_details,
-    restore_assignment_raw, retime_shift_core,
+    find_conflicts, generate_week_template_shifts, log_audit, remove_assignment_core,
+    removal_audit_details, restore_assignment_raw, retime_shift_core,
 )
 
 logger = logging.getLogger(__name__)
@@ -134,8 +135,15 @@ def _build_parse_prompt(
         "First decide the ACTION: \"create\" if they want NEW shifts added to "
         "the schedule, or \"edit\" if they want to change shifts that "
         "already exist — reassigning who's on a shift, swapping shifts, "
-        "moving a shift's time, or cancelling one. Choose \"template\" only "
-        "when they want to save a reusable shift template, not create dated shifts.\n"
+        "moving a shift's time, or cancelling one. Choose \"template\" when "
+        "they want to SAVE a reusable week of shifts — a week template is a "
+        "named week (\"Standard Week\", \"Christmas Week\") made of one or "
+        "more blocks, each block being a group of shifts that share hours "
+        "and weekdays. Even a single-shift request (\"save a closer "
+        "template, 5pm to 11pm weekdays\") is one block inside a named "
+        "week. Choose \"apply_template\" when they want to USE a week "
+        "template they already saved to fill real dates (\"run Standard "
+        "Week next week\", \"use Christmas Week for the week of Dec 22\").\n"
         "For a swap, pick the form that matches what they named:\n"
         "- They named TWO PEOPLE (\"give Cara's shift to Casey and Casey's "
         "to Cara\") -> TWO \"reassign\" edits, one per person losing a shift.\n"
@@ -151,7 +159,7 @@ def _build_parse_prompt(
         "like a teammate replying in chat, <=140 chars — never restate "
         "dates, weekdays, or times, the structured preview below it is the "
         "authority on those), "
-        '"action": "create"|"edit", '
+        '"action": "create"|"edit"|"template"|"apply_template", '
         '"location_hint": str|null (the store/location they named, in '
         "their own words), "
         '"week_hint": "next_week"|"this_week"|null, '
@@ -203,11 +211,19 @@ def _build_parse_prompt(
         'gave no clock time — "push it back an hour" = 60, "start 30 '
         'minutes earlier" = -30; leave the new_* fields null in that case)'
         '}] (only for action="edit", max 4), '
-        '"template_request": {"name": str (required reusable template name), '
-        '"role": str|null, "start_time": str|null (HH:MM), '
-        '"end_time": str|null (HH:MM), "weekdays": [str] (weekday names), '
-        '"count": int (default 1), "location_hint": str|null} '
+        '"template_request": {"name": str (required — the WEEK template '
+        'name, e.g. "Standard Week"), "location_hint": str|null, "blocks": '
+        '[{"name": str (what this group is called, e.g. "Box Office", '
+        '"Weekend Crew" — reuse the week name if they only described one '
+        'group), "role": str|null, "start_time": str|null (HH:MM 24h), '
+        '"end_time": str|null (HH:MM 24h), "weekdays": [str] (weekday '
+        'names), "count": int (default 1)}] (1-12 blocks)} '
         '(only for action="template"), '
+        '"apply_request": {"template_hint": str (required — the saved week '
+        'template they named), "location_hint": str|null, "start_date": '
+        'str|null (ISO YYYY-MM-DD ONLY if they named an exact date), '
+        '"weeks": int (default 1, how many consecutive weeks to fill)} '
+        '(only for action="apply_template"), '
         '"note": str|null}'
     )
 
@@ -258,12 +274,13 @@ def _coerce_shift_request(raw) -> Optional[dict]:
     }
 
 
-def _coerce_template_request(raw) -> Optional[dict]:
+def _coerce_template_block(raw, *, default_name: str) -> Optional[dict]:
+    """One block inside a week template. Times/weekdays may come back empty —
+    build_template_proposal clarifies per block rather than dropping it, so
+    an under-specified block must survive coercion."""
     if not isinstance(raw, dict):
         return None
-    name = str(raw.get("name") or "").strip()[:150]
-    if not name:
-        return None
+    name = str(raw.get("name") or "").strip()[:150] or default_name
     weekdays = raw.get("weekdays")
     weekdays = [str(w).strip().lower()[:12] for w in weekdays][:7] if isinstance(weekdays, list) else []
     try:
@@ -277,7 +294,75 @@ def _coerce_template_request(raw) -> Optional[dict]:
         "end_time": _coerce_time(raw.get("end_time")),
         "weekdays": weekdays,
         "count": max(1, min(99, count)),
+    }
+
+
+_MAX_TEMPLATE_BLOCKS = 12
+
+
+def _coerce_template_request(raw) -> Optional[dict]:
+    """Returns {"name", "location_hint", "blocks": [...]}.
+
+    Accepts the flat pre-week shape too (start_time/end_time/weekdays/count/
+    role at the top level, no "blocks" key) and wraps it as a single block —
+    the model still emits it for a simple one-shift ask ("save a closer
+    template, 5pm to 11pm weekdays"), and that request should land as a
+    1-block week rather than being rejected.
+    """
+    if not isinstance(raw, dict):
+        return None
+    name = str(raw.get("name") or "").strip()[:150]
+    if not name:
+        return None
+    location_hint = str(raw.get("location_hint"))[:200] if raw.get("location_hint") else None
+
+    raw_blocks = raw.get("blocks")
+    blocks = []
+    if isinstance(raw_blocks, list):
+        for b in raw_blocks[:_MAX_TEMPLATE_BLOCKS]:
+            coerced = _coerce_template_block(b, default_name=name)
+            if coerced:
+                blocks.append(coerced)
+
+    if not blocks and any(
+        raw.get(k) for k in ("start_time", "end_time", "weekdays", "count", "role")
+    ):
+        flat_block = _coerce_template_block(raw, default_name=name)
+        if flat_block:
+            blocks = [flat_block]
+
+    return {"name": name, "location_hint": location_hint, "blocks": blocks}
+
+
+_MAX_APPLY_WEEKS = 8
+
+
+def _coerce_apply_request(raw) -> Optional[dict]:
+    """{"template_hint", "location_hint", "start_date", "weeks"}; None when
+    no template was named — an apply with nothing to apply is not
+    actionable."""
+    if not isinstance(raw, dict):
+        return None
+    template_hint = str(raw.get("template_hint") or "").strip()[:150]
+    if not template_hint:
+        return None
+    start_date = raw.get("start_date")
+    if isinstance(start_date, str):
+        try:
+            date.fromisoformat(start_date)
+        except ValueError:
+            start_date = None
+    else:
+        start_date = None
+    try:
+        weeks = int(raw.get("weeks") or 1)
+    except (TypeError, ValueError):
+        weeks = 1
+    return {
+        "template_hint": template_hint,
         "location_hint": str(raw.get("location_hint"))[:200] if raw.get("location_hint") else None,
+        "start_date": start_date,
+        "weeks": max(1, min(_MAX_APPLY_WEEKS, weeks)),
     }
 
 
@@ -401,7 +486,7 @@ def _parse_schedule_json(raw: str) -> dict:
         week_hint = None
 
     action = data.get("action")
-    action = action if action in ("create", "edit", "template") else "create"
+    action = action if action in ("create", "edit", "template", "apply_template") else "create"
 
     shift_requests = []
     raw_requests = data.get("shift_requests")
@@ -420,14 +505,17 @@ def _parse_schedule_json(raw: str) -> dict:
                 edit_requests.append(coerced)
 
     template_request = _coerce_template_request(data.get("template_request"))
+    apply_request = _coerce_apply_request(data.get("apply_request"))
 
     effective_action = (
         "template" if action == "template" and template_request
+        else "apply_template" if action == "apply_template" and apply_request
         else "edit" if action == "edit" and edit_requests
         else "create"
     )
     actionable = bool(data.get("actionable")) and (
         bool(template_request) if action == "template"
+        else bool(apply_request) if action == "apply_template"
         else bool(shift_requests) if action == "create"
         else bool(edit_requests)
     )
@@ -441,6 +529,7 @@ def _parse_schedule_json(raw: str) -> dict:
         "shift_requests": shift_requests,
         "edit_requests": edit_requests,
         "template_request": template_request,
+        "apply_request": apply_request,
         "note": str(data.get("note"))[:300] if data.get("note") else None,
     }
 
@@ -1268,6 +1357,32 @@ _TEMPLATE_WEEKDAYS = {
 }
 
 
+def _weekday_indices(names: list[str]) -> list[int]:
+    return sorted({
+        _TEMPLATE_WEEKDAYS[w.strip().lower()]
+        for w in names or []
+        if w.strip().lower() in _TEMPLATE_WEEKDAYS
+    })
+
+
+def _legacy_week_template(flat: dict) -> dict:
+    """Wraps a pre-deploy proposal doc (one flat template, the old
+    `proposal['template']` shape) as a 1-block week — a proposal built
+    before this change and confirmed after it must not KeyError."""
+    return {
+        "name": flat["name"], "location_id": flat["location_id"],
+        "location_name": flat.get("location_name"), "color": flat.get("color"),
+        "notes": flat.get("notes"),
+        "blocks": [{
+            "name": flat["name"], "role": flat.get("role"), "department": flat.get("department"),
+            "start_time": flat["start_time"], "end_time": flat["end_time"],
+            "break_minutes": flat.get("break_minutes", 0),
+            "required_staff": flat["required_staff"], "days_of_week": flat["days_of_week"],
+            "color": flat.get("color"), "notes": flat.get("notes"),
+        }],
+    }
+
+
 async def build_template_proposal(
     conn, *, company_id: UUID, channel_id: Optional[UUID],
     source_message_id: Optional[UUID], created_by: UUID, parsed: dict,
@@ -1275,7 +1390,8 @@ async def build_template_proposal(
     clarify_history: Optional[list[dict]] = None,
     existing_proposal_id: Optional[UUID] = None,
 ) -> ProposalBuild:
-    """Build a confirmable template definition without writing the template."""
+    """Build a confirmable WEEK template (one or more blocks) without
+    writing it."""
     request = parsed.get("template_request") or {}
     clarify_history = clarify_history or []
 
@@ -1309,33 +1425,35 @@ async def build_template_proposal(
         ]
         return await _clarify("Which location should this template use?", options)
 
-    start_time = request.get("start_time")
-    end_time = request.get("end_time")
-    if not start_time or not end_time:
-        return await _clarify("What start and end times should the template use?")
-
-    days = sorted({
-        _TEMPLATE_WEEKDAYS[w.strip().lower()]
-        for w in request.get("weekdays") or []
-        if w.strip().lower() in _TEMPLATE_WEEKDAYS
-    })
-    if not days:
-        return await _clarify("Which weekdays should this template run on?")
+    blocks = request.get("blocks") or []
+    if not blocks:
+        return await _clarify(
+            "What shifts should this week template include? Tell me the "
+            "hours and days for each one."
+        )
+    for blk in blocks:
+        if not blk["start_time"] or not blk["end_time"]:
+            return await _clarify(f"What start and end times should the {blk['name']} block use?")
+        if not _weekday_indices(blk["weekdays"]):
+            return await _clarify(f"Which weekdays should the {blk['name']} block run on?")
 
     location = matched[0]
-    template = {
-        "name": request["name"], "role": request.get("role"),
-        "department": None, "location_id": str(location["id"]),
-        "location_name": location.get("name"), "start_time": start_time,
-        "end_time": end_time, "break_minutes": 0,
-        "required_staff": request.get("count") or 1, "days_of_week": days,
-        "color": None, "notes": None,
+    week_template = {
+        "name": request["name"], "location_id": str(location["id"]),
+        "location_name": location.get("name"), "color": None, "notes": None,
+        "blocks": [{
+            "name": blk["name"], "role": blk.get("role"), "department": None,
+            "start_time": blk["start_time"], "end_time": blk["end_time"],
+            "break_minutes": 0, "required_staff": blk.get("count") or 1,
+            "days_of_week": _weekday_indices(blk["weekdays"]),
+            "color": None, "notes": None,
+        } for blk in blocks],
     }
     proposal_doc = {
         "kind": "template", "surface": surface,
         "original_content": original_content, "ack": parsed.get("ack") or "",
         "clarify_question": None, "clarify_options": [],
-        "clarify_history": clarify_history, "template": template,
+        "clarify_history": clarify_history, "week_template": week_template,
     }
     pid = await _persist_proposal(
         conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
@@ -1352,26 +1470,35 @@ async def execute_template_proposal(
     proposal = proposal_row["proposal"]
     if isinstance(proposal, str):
         proposal = json.loads(proposal)
-    template = proposal["template"]
-    days = json.dumps(template["days_of_week"])
+    week_template = proposal.get("week_template") or _legacy_week_template(proposal["template"])
     async with conn.transaction():
-        row = await conn.fetchrow(
-            """INSERT INTO schedule_shift_templates
-                (company_id, name, role, department, location_id, start_time,
-                 end_time, break_minutes, required_staff, days_of_week, color,
-                 notes, created_by)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+        tpl = await conn.fetchrow(
+            """INSERT INTO schedule_week_templates
+                (company_id, name, location_id, color, notes, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6)
                RETURNING id""",
-            proposal_row["company_id"], template["name"], template.get("role"),
-            template.get("department"), UUID(template["location_id"]),
-            time.fromisoformat(template["start_time"]),
-            time.fromisoformat(template["end_time"]), template.get("break_minutes", 0),
-            template["required_staff"], days, template.get("color"),
-            template.get("notes"), confirmed_by,
+            proposal_row["company_id"], week_template["name"],
+            UUID(week_template["location_id"]), week_template.get("color"),
+            week_template.get("notes"), confirmed_by,
         )
+        for blk in week_template["blocks"]:
+            await conn.execute(
+                """INSERT INTO schedule_shift_templates
+                    (company_id, week_template_id, name, role, department, location_id,
+                     start_time, end_time, break_minutes, required_staff, days_of_week,
+                     color, notes, created_by)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)""",
+                proposal_row["company_id"], tpl["id"], blk["name"], blk.get("role"),
+                blk.get("department"), UUID(week_template["location_id"]),
+                time.fromisoformat(blk["start_time"]), time.fromisoformat(blk["end_time"]),
+                blk.get("break_minutes", 0), blk["required_staff"],
+                json.dumps(blk["days_of_week"]), blk.get("color"), blk.get("notes"), confirmed_by,
+            )
         await log_audit(
-            conn, proposal_row["company_id"], "template", row["id"], confirmed_by,
-            "template.create", {"name": template["name"], "source": "editor_chat"},
+            conn, proposal_row["company_id"], "week_template", tpl["id"], confirmed_by,
+            "week_template.create",
+            {"name": week_template["name"], "blocks": len(week_template["blocks"]),
+             "source": "editor_chat"},
         )
         await conn.execute(
             """UPDATE schedule_chat_proposals
@@ -1379,21 +1506,235 @@ async def execute_template_proposal(
                WHERE id=$2""",
             confirmed_by, proposal_row["id"],
         )
-    return template_result_text(template)
+    return template_result_text(week_template)
 
 
 def template_proposal_text(proposal: dict) -> str:
-    template = proposal["template"]
-    days = ", ".join(str(d) for d in template["days_of_week"])
-    return (
-        f"Create template **{template['name']}**: {template['start_time']}–"
-        f"{template['end_time']}, {template['required_staff']} staff, "
-        f"weekdays [{days}]."
+    week_template = proposal["week_template"]
+    lines = [f"Create week template **{week_template['name']}** "
+             f"({len(week_template['blocks'])} block(s)):"]
+    for blk in week_template["blocks"]:
+        lines.append(
+            f"- {blk['name']} {blk['start_time']}–{blk['end_time']}, "
+            f"{blk['required_staff']} staff, {len(blk['days_of_week'])} days"
+        )
+    return "\n".join(lines)
+
+
+def template_result_text(week_template: dict) -> str:
+    return f"Created week template **{week_template['name']}** with {len(week_template['blocks'])} block(s)."
+
+
+# ── Apply-week-template proposals ────────────────────────────────────────
+
+async def build_apply_template_proposal(
+    conn, *, company_id: UUID, channel_id: Optional[UUID],
+    source_message_id: Optional[UUID], created_by: UUID, parsed: dict,
+    today: date, original_content: str, surface: str = "channel",
+    clarify_history: Optional[list[dict]] = None,
+    existing_proposal_id: Optional[UUID] = None,
+    week_start: Optional[date] = None,
+) -> ProposalBuild:
+    """Resolve a saved week template + a date range into a confirmable
+    preview, without writing any shifts — generation happens at confirm via
+    shift_writes.generate_week_template_shifts, the same writer the
+    Templates-tab Generate button uses."""
+    request = parsed.get("apply_request") or {}
+    clarify_history = clarify_history or []
+
+    async def _clarify(question: str, options: Optional[list[str]] = None) -> ProposalBuild:
+        proposal_doc = {
+            "kind": "apply_template", "surface": surface,
+            "original_content": original_content,
+            "ack": parsed.get("ack") or "",
+            "clarify_question": question, "clarify_options": options or [],
+            "clarify_history": clarify_history,
+        }
+        pid = await _persist_proposal(
+            conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+            source_message_id=source_message_id, created_by=created_by,
+            status="clarifying", proposal=proposal_doc, parsed=parsed,
+            clarify_rounds=len(clarify_history),
+        )
+        return ProposalBuild("clarify", pid, clarify_text(question, options or []))
+
+    locations = [dict(r) for r in await conn.fetch(
+        """SELECT id, name, address, city, state, zipcode FROM business_locations
+           WHERE company_id = $1 AND is_active IS NOT FALSE ORDER BY name, id""",
+        company_id,
+    )]
+    matched = match_location(request.get("location_hint"), locations)
+    if len(matched) != 1:
+        options = [
+            f"{l.get('name') or l.get('address') or 'Unnamed'}"
+            + (f" ({l.get('city')})" if l.get("city") else "")
+            for l in (matched or locations)[:6]
+        ]
+        return await _clarify("Which location should this template use?", options)
+    location = matched[0]
+    location_id = UUID(str(location["id"]))
+
+    week_tpl_rows = await conn.fetch(
+        "SELECT id, name, location_id FROM schedule_week_templates WHERE company_id = $1",
+        company_id,
     )
+    templates = [
+        dict(r) for r in week_tpl_rows
+        if r["location_id"] is None or str(r["location_id"]) == str(location_id)
+    ]
+    if not templates:
+        return await _clarify(
+            "You don't have a saved week template yet — tell me the name "
+            "and the shifts and I'll build one."
+        )
+    tpl = match_week_template(request.get("template_hint"), templates)
+    if not tpl:
+        return await _clarify(
+            "Which saved week template should I use?", [t["name"] for t in templates][:6],
+        )
+
+    block_rows = await conn.fetch(
+        """SELECT id, name, role, location_id, start_time, end_time, break_minutes,
+                  required_staff, days_of_week
+           FROM schedule_shift_templates WHERE week_template_id = $1""",
+        tpl["id"],
+    )
+    if not block_rows:
+        return await _clarify(f"{tpl['name']} has no shifts in it yet — what should it include?")
+
+    start_date_str = request.get("start_date")
+    start = date.fromisoformat(start_date_str) if start_date_str else resolve_week(
+        parsed.get("week_hint"), today, week_start,
+    )
+    weeks = request.get("weeks") or 1
+    end = start + timedelta(days=7 * weeks - 1)
+
+    total_shifts = 0
+    blocks_preview: list[dict] = []
+    for blk in block_rows:
+        days_field = blk["days_of_week"]
+        if isinstance(days_field, str):
+            try:
+                days_field = json.loads(days_field)
+            except json.JSONDecodeError:
+                days_field = []
+        day_set = {int(d) for d in (days_field or []) if 0 <= int(d) <= 6}
+        if not day_set:
+            continue
+        starts, _ = template_windows(start, end, day_set, blk["start_time"], blk["end_time"])
+        if not starts:
+            continue
+        total_shifts += len(starts)
+        blocks_preview.append({
+            "name": blk["name"], "start_time": blk["start_time"].isoformat(),
+            "end_time": blk["end_time"].isoformat(), "days": len(day_set),
+            "shifts": len(starts),
+        })
+
+    if total_shifts == 0:
+        return await _clarify(
+            f"{tpl['name']}'s blocks don't cover any day in that range — "
+            "want a different date range?"
+        )
+
+    proposal_doc = {
+        "kind": "apply_template", "surface": surface,
+        "original_content": original_content, "ack": parsed.get("ack") or "",
+        "clarify_question": None, "clarify_options": [],
+        "clarify_history": clarify_history,
+        "week_template_id": str(tpl["id"]), "week_template_name": tpl["name"],
+        "location_id": str(location_id), "location_name": location.get("name"),
+        "start_date": start.isoformat(), "end_date": end.isoformat(),
+        "total_shifts": total_shifts, "blocks_preview": blocks_preview,
+    }
+    pid = await _persist_proposal(
+        conn, existing_proposal_id, company_id=company_id, channel_id=channel_id,
+        source_message_id=source_message_id, created_by=created_by,
+        status="proposed", proposal=proposal_doc, parsed=parsed,
+        clarify_rounds=len(clarify_history),
+    )
+    return ProposalBuild("proposal", pid, apply_template_proposal_text(proposal_doc))
 
 
-def template_result_text(template: dict) -> str:
-    return f"Created template **{template['name']}**."
+async def execute_apply_template_proposal(
+    conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
+) -> str:
+    """Re-fetches the template's blocks by id rather than trusting the
+    proposal doc — the proposal may be hours old and the template edited or
+    deleted meanwhile."""
+    proposal = proposal_row["proposal"]
+    if isinstance(proposal, str):
+        proposal = json.loads(proposal)
+    week_template_id = UUID(proposal["week_template_id"])
+    name = proposal["week_template_name"]
+    company_id = proposal_row["company_id"]
+
+    tpl = await conn.fetchrow(
+        "SELECT id FROM schedule_week_templates WHERE id = $1 AND company_id = $2",
+        week_template_id, company_id,
+    )
+    if not tpl:
+        await conn.execute(
+            "UPDATE schedule_chat_proposals SET status='cancelled', updated_at=NOW() WHERE id=$1",
+            proposal_row["id"],
+        )
+        return f"{name} no longer exists."
+
+    blocks = await conn.fetch(
+        """SELECT id, name, role, department, location_id, start_time, end_time, break_minutes,
+                  required_staff, days_of_week, color, notes
+           FROM schedule_shift_templates WHERE week_template_id = $1""",
+        week_template_id,
+    )
+    if not blocks:
+        return f"{name} has no shifts in it any more — nothing to apply."
+
+    start_date = date.fromisoformat(proposal["start_date"])
+    end_date = date.fromisoformat(proposal["end_date"])
+
+    async with conn.transaction():
+        result = await generate_week_template_shifts(
+            conn, company_id, blocks=blocks, start_date=start_date, end_date=end_date,
+            created_by=confirmed_by,
+        )
+        await log_audit(
+            conn, company_id, "week_template", week_template_id, confirmed_by,
+            "week_template.generate",
+            {"series_id": str(result["series_id"]), "created": result["created"],
+             "blocks": len(blocks), "source": "editor_chat"},
+        )
+        await conn.execute(
+            """UPDATE schedule_chat_proposals
+               SET status='confirmed', created_shift_ids=$1, confirmed_by=$2,
+                   confirmed_at=NOW(), updated_at=NOW()
+               WHERE id=$3""",
+            result["shift_ids"], confirmed_by, proposal_row["id"],
+        )
+    return apply_template_result_text(result, name, start_date, end_date)
+
+
+def apply_template_proposal_text(proposal: dict) -> str:
+    lines = [
+        f"Apply **{proposal['week_template_name']}** {proposal['start_date']}–"
+        f"{proposal['end_date']}: {proposal['total_shifts']} shifts."
+    ]
+    for blk in proposal["blocks_preview"]:
+        lines.append(f"- {blk['name']} {blk['start_time']}–{blk['end_time']}, {blk['shifts']} shifts")
+    return "\n".join(lines)
+
+
+def apply_template_result_text(result: dict, name: str, start_date: date, end_date: date) -> str:
+    text = (
+        f"Filled {start_date.isoformat()}–{end_date.isoformat()} from "
+        f"**{name}** — {result['created']} shifts created."
+    )
+    warnings = result.get("compliance_warnings") or []
+    if warnings:
+        text += "\n" + "\n".join(
+            f"- {w['message']}" + (f" ({w['statute']})" if w.get("statute") else "")
+            for w in warnings
+        )
+    return text
 
 
 # ── Confirm / cancel / clarify-answer reply ──────────────────────────────

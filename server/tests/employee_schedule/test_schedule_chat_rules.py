@@ -15,6 +15,7 @@ from app.matcha.services.scheduling.schedule_chat_rules import (
     build_adhoc_spec,
     match_location,
     match_template,
+    match_week_template,
     parse_confirm_reply,
     parse_time_hint,
     rank_candidates,
@@ -285,6 +286,30 @@ class TestMatchTemplate:
 
     def test_no_templates_returns_none(self):
         assert match_template("opener", None, []) is None
+
+
+WEEK_TEMPLATES = [
+    {"id": "w1", "name": "Standard Week"},
+    {"id": "w2", "name": "Christmas Week"},
+]
+
+
+class TestMatchWeekTemplate:
+    def test_exact_name(self):
+        assert match_week_template("Standard Week", WEEK_TEMPLATES)["id"] == "w1"
+
+    def test_by_stem(self):
+        assert match_week_template("christmas", WEEK_TEMPLATES)["id"] == "w2"
+
+    def test_no_match_returns_none(self):
+        assert match_week_template("dishwasher", WEEK_TEMPLATES) is None
+
+    def test_tie_break_is_deterministic(self):
+        templates = [
+            {"id": "b", "name": "Opening Week"},
+            {"id": "a", "name": "Opening Week"},
+        ]
+        assert match_week_template("opening", templates)["id"] == "a"
 
 
 class TestBuildAdhocSpec:
