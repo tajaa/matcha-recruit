@@ -49,6 +49,11 @@ final class MerlinChatViewModel: LoadableVM {
         let selectedBlock: String? = editor.selection.flatMap { selection in
             editor.blocks.indices.contains(selection.block) ? editor.blocks[selection.block]._k : nil
         }
+        messages.append(CappeMerlinStoredMessage(
+            id: "local-user-\(UUID().uuidString)", role: "user", content: message,
+            results: nil, steps: nil, attachments: nil, ops: nil, tier: nil,
+            created_at: ISO8601DateFormatter().string(from: Date())
+        ))
         let body = CappeMerlinChatRequest(
             page_id: editor.pageId, conversation_id: conversationId,
             message: message, history: Array(history), blocks: editor.blocks,
@@ -66,14 +71,23 @@ final class MerlinChatViewModel: LoadableVM {
                     if let id = result.conversation_id { conversationId = id }
                     let ops = result.ops.map(MerlinOp.init)
                     let applied = editor.apply(ops: ops)
+                    let combined = applied.results + result.rejected.map { CappeMerlinOpResult(ok: false, summary: $0.reason) }
+                    messages.append(CappeMerlinStoredMessage(
+                        id: result.message_id ?? "local-assistant-\(UUID().uuidString)",
+                        role: "assistant", content: result.message,
+                        results: combined, steps: result.steps, attachments: nil,
+                        ops: nil, tier: result.tier,
+                        created_at: ISO8601DateFormatter().string(from: Date())
+                    ))
+                    liveSteps = []
                     if let id = result.message_id {
-                        Task { try? await MerlinService.shared.reportResults(messageId: id, applied.results) }
+                        Task { try? await MerlinService.shared.reportResults(messageId: id, combined) }
                     }
                 default: break
                 }
             }
         } catch {
-            if !error.isCancellation { self.error = error.localizedDescription }
+            if !error.isCancellation && self.error == nil { self.error = error.localizedDescription }
         }
     }
 }

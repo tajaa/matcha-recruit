@@ -20,8 +20,16 @@ final class PageEditorViewModel: LoadableVM {
     var selection: CzSelection?
     private var history: EditorHistory?
     private var previewTask: Task<Void, Never>?
+    private var savedTheme: [String: JSONValue]
+    private var savedMeta: [String: JSONValue]
+    private(set) var themeDirty = false
+    private(set) var metaDirty = false
 
-    init(site: CappeSite) { self.site = site }
+    init(site: CappeSite) {
+        self.site = site
+        self.savedTheme = site.theme_config?.raw ?? [:]
+        self.savedMeta = site.meta_config ?? [:]
+    }
 
     func load() async {
         await withLoad {
@@ -43,15 +51,11 @@ final class PageEditorViewModel: LoadableVM {
         title = page.title
         status = page.status
         blocks = page.blocks
-        theme = site.theme_config.map { config in
-            var result: [String: JSONValue] = [:]
-            if let preset = config.preset { result["preset"] = .string(preset) }
-            if let mode = config.mode { result["mode"] = .string(mode) }
-            if let radius = config.radius { result["radius"] = .string(radius) }
-            if let colors = config.colors { result["colors"] = .object(colors.mapValues { .string($0) }) }
-            return result
-        } ?? [:]
+        theme = savedTheme
+        meta = savedMeta
         isDirty = false
+        themeDirty = false
+        metaDirty = false
     }
 
     func setField(blockKey: String, path: String, value: JSONValue) {
@@ -76,7 +80,7 @@ final class PageEditorViewModel: LoadableVM {
 
     func moveBlocks(from offsets: IndexSet, to destination: Int) {
         guard let source = offsets.first, blocks.indices.contains(source) else { return }
-        let target = min(max(0, destination), max(0, blocks.count - 1))
+        let target = merlinMoveDestination(from: source, to: destination, count: blocks.count)
         _ = apply(ops: [.moveBlock(block: blocks[source]._k, to: target)])
     }
 
@@ -85,9 +89,11 @@ final class PageEditorViewModel: LoadableVM {
     @discardableResult
     func apply(ops: [MerlinOp]) -> MerlinApplyResult {
         history?.checkpoint()
+        let before = theme
         let result = applyMerlinOps(blocks: blocks, theme: theme, ops: ops, schema: schema)
         blocks = result.blocks
         theme = result.theme
+        if result.theme != before { themeDirty = true }
         if result.changed { record() }
         return result
     }
@@ -96,7 +102,11 @@ final class PageEditorViewModel: LoadableVM {
     func redo() { if let snapshot = history?.redo() { restore(snapshot) } }
 
     func save() async {
-        guard !pageId.isEmpty, status.isWritable else { return }
+        guard !pageId.isEmpty else { return }
+        guard status.isWritable else {
+            error = "This page's status can't be saved from the app."
+            return
+        }
         await withLoad {
             let content: [String: JSONValue] = ["blocks": .array(blocks.map { .object($0.strippingKey().fields) })]
             _ = try await PagesService.shared.update(
@@ -104,6 +114,18 @@ final class PageEditorViewModel: LoadableVM {
                 pageId: pageId,
                 CappePageUpdate(title: title, slug: nil, content: content, sort_order: nil, status: status.rawValue)
             )
+            // Theme + promos live on the SITE, not the page — mirrors the web
+            // editor's second PUT (PageEditor/index.tsx:331-338).
+            if themeDirty || metaDirty {
+                _ = try await SitesService.shared.update(
+                    siteId: site.id,
+                    CappeSiteUpdate(theme_config: themeDirty ? theme : nil, meta_config: metaDirty ? meta : nil)
+                )
+                savedTheme = theme
+                savedMeta = meta
+                themeDirty = false
+                metaDirty = false
+            }
             isDirty = false
         }
     }
@@ -159,6 +181,7 @@ final class PageEditorViewModel: LoadableVM {
         theme = snapshot.theme
         meta = snapshot.meta
         isDirty = true
+        themeDirty = true
         Task { await refreshPreview() }
     }
 }

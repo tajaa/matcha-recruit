@@ -75,15 +75,21 @@ final class MerlinService {
         onFrame: @escaping (CappeMerlinFrame) -> Void
     ) async throws {
         var receivedTerminalFrame = false
+        var receivedErrorFrame = false
         try await APIClient.shared.streamSSE(path: path, body: body) { data in
             guard let frame = try? JSONDecoder().decode(CappeMerlinFrame.self, from: data) else {
                 return false
             }
             onFrame(frame)
+            // A server-sent `error` frame IS a terminal outcome: the stream ends
+            // with [DONE] and no result (agent_stream.py / setup_agent.py). The
+            // caller already surfaced that actionable message — throwing .noData
+            // here would replace it with a generic "No data".
+            if case .error = frame { receivedErrorFrame = true; return false }
             if case .result = frame { receivedTerminalFrame = true; return true }
             if case .setupResult = frame { receivedTerminalFrame = true; return true }
             return false
         }
-        guard receivedTerminalFrame else { throw APIError.noData }
+        guard receivedTerminalFrame || receivedErrorFrame else { throw APIError.noData }
     }
 }

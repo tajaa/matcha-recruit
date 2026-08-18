@@ -54,6 +54,14 @@ enum MerlinOp {
     }
 }
 
+/// SwiftUI `.onMove` supplies an insert-before index computed BEFORE the row is
+/// removed; `MerlinOp.moveBlock` removes first, then inserts. Shift a downward
+/// move by one to convert between the two conventions.
+func merlinMoveDestination(from source: Int, to destination: Int, count: Int) -> Int {
+    let adjusted = destination > source ? destination - 1 : destination
+    return min(max(0, adjusted), max(0, count - 1))
+}
+
 struct MerlinApplyResult {
     var blocks: [CappeBlock]
     var theme: [String: JSONValue]

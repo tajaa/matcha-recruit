@@ -214,6 +214,22 @@ final class MerlinOpsTests: XCTestCase {
         }
     }
 
+    func testOnMoveDestinationConvertsDownwardDrag() {
+        XCTAssertEqual(merlinMoveDestination(from: 0, to: 2, count: 3), 1)
+        XCTAssertEqual(merlinMoveDestination(from: 2, to: 0, count: 3), 0)
+        XCTAssertEqual(merlinMoveDestination(from: 0, to: 3, count: 3), 2)
+        XCTAssertEqual(merlinMoveDestination(from: 1, to: 1, count: 3), 1)
+    }
+
+    func testMoveBlockDownProducesExpectedOrder() {
+        let a = CappeBlock(fields: ["type": .string("hero")]).withKey("a")
+        let b = CappeBlock(fields: ["type": .string("hero")]).withKey("b")
+        let c = CappeBlock(fields: ["type": .string("hero")]).withKey("c")
+        let target = merlinMoveDestination(from: 0, to: 2, count: 3)
+        let result = applyMerlinOps(blocks: [a, b, c], theme: [:], ops: [.moveBlock(block: "a", to: target)], schema: nil)
+        XCTAssertEqual(result.blocks.map(\._k), ["b", "a", "c"])
+    }
+
     func testDuplicateCreatesFreshKeysAndCanvasElementIds() {
         let source = block([
             "type": .string("canvas"),

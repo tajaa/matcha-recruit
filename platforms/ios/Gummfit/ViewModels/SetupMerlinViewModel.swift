@@ -60,6 +60,11 @@ final class SetupMerlinViewModel: LoadableVM {
     private func performSend(_ message: String) async {
         isLoading = true; error = nil
         defer { isLoading = false }
+        messages.append(CappeMerlinStoredMessage(
+            id: "local-user-\(UUID().uuidString)", role: "user", content: message,
+            results: nil, steps: nil, attachments: nil, ops: nil, tier: nil,
+            created_at: ISO8601DateFormatter().string(from: Date())
+        ))
         do {
             try await MerlinService.shared.setupAgent(siteId: siteId, CappeMerlinSetupRequest(conversation_id: conversationId, message: message)) { [weak self] frame in
                 guard let self else { return }
@@ -67,13 +72,22 @@ final class SetupMerlinViewModel: LoadableVM {
                 case .stagedAction(let action): upsert(action)
                 case .result(let result):
                     if let id = result.conversation_id { conversationId = id }
-                case .setupResult(let result): readiness = result.readiness ?? [:]
+                case .setupResult(let result):
+                    if let id = result.conversation_id { conversationId = id }
+                    readiness = result.readiness ?? [:]
+                    messages.append(CappeMerlinStoredMessage(
+                        id: result.message_id ?? "local-assistant-\(UUID().uuidString)",
+                        role: "assistant", content: result.message,
+                        results: nil, steps: result.steps, attachments: nil,
+                        ops: nil, tier: result.tier,
+                        created_at: ISO8601DateFormatter().string(from: Date())
+                    ))
                 case .error(let value): error = value
                 default: break
                 }
             }
         } catch {
-            if !error.isCancellation { self.error = error.localizedDescription }
+            if !error.isCancellation && self.error == nil { self.error = error.localizedDescription }
         }
     }
 

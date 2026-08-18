@@ -96,6 +96,43 @@ final class MerlinFoundationTests: XCTestCase {
         XCTAssertEqual(schema.blocks["features"]?.fields["items"]?.item?["title"]?.kind, "text")
         XCTAssertEqual(schema.preset("clean")?.config["mode"]?.stringValue, "light")
     }
+
+    func testSetupResultFrameCarriesConversationId() throws {
+        let json = #"{"type":"result","data":{"message":"ok","tier":"auto","readiness":{},"conversation_id":"c1","message_id":"m1"}}"#
+        let frame = try JSONDecoder().decode(CappeMerlinFrame.self, from: Data(json.utf8))
+        guard case .setupResult(let result) = frame else {
+            XCTFail("Expected .setupResult, got \(frame)")
+            return
+        }
+        XCTAssertEqual(result.conversation_id, "c1")
+        XCTAssertEqual(result.message_id, "m1")
+    }
+
+    func testDesignSpecParsesRegistryShapes() {
+        XCTAssertEqual(
+            CappeEditorSchema.DesignSpec(.object(["enum": .array([.string("fade"), .string("zoom")])])),
+            .enumValues(["fade", "zoom"])
+        )
+        XCTAssertEqual(
+            CappeEditorSchema.DesignSpec(.object(["min": .number(0), "max": .number(2000)])),
+            .range(0, 2000)
+        )
+        XCTAssertEqual(CappeEditorSchema.DesignSpec(.object(["kind": .string("bool")])), .bool)
+        XCTAssertEqual(
+            CappeEditorSchema.DesignSpec(.object(["kind": .string("color"), "tokens": .array([.string("brand")])])),
+            .color(["brand"])
+        )
+        XCTAssertEqual(CappeEditorSchema.DesignSpec(.object(["kind": .string("text")])), .text)
+        XCTAssertEqual(
+            CappeEditorSchema.DesignSpec(.object([
+                "kind": .string("gradient"),
+                "stops": .object(["min": .number(2), "max": .number(3)]),
+                "angle": .object(["min": .number(0), "max": .number(360)]),
+            ])),
+            .gradient
+        )
+        XCTAssertEqual(CappeEditorSchema.DesignSpec(nil), .unknown)
+    }
 }
 
 @MainActor

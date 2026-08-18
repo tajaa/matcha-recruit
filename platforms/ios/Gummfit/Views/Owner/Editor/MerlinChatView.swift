@@ -33,7 +33,9 @@ struct MerlinChatView: View {
                 TextField("Ask Merlin…", text: $vm.draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
-                Button { Task { await vm.send() } } label: { Image(systemName: vm.isLoading ? "stop.fill" : "arrow.up.circle.fill").font(.title2) }
+                Button {
+                    if vm.isLoading { vm.cancel() } else { Task { await vm.send() } }
+                } label: { Image(systemName: vm.isLoading ? "stop.fill" : "arrow.up.circle.fill").font(.title2) }
                     .foregroundStyle(GummfitTheme.accent)
                     .disabled(vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !vm.isLoading)
             }

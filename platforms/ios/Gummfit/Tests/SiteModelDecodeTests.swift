@@ -53,7 +53,7 @@ final class SiteModelDecodeTests: XCTestCase {
           "theme_config": {
             "preset": "editorial", "mode": "light",
             "fonts": {"heading": "Fraunces", "body": "Inter"},
-            "radius": "md", "colors": {"brand": "#B4532A"}
+            "radius": "md", "colors": {"brand": "#B4532A"}, "heroStyle": "split"
           },
           "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"
         }
@@ -63,6 +63,55 @@ final class SiteModelDecodeTests: XCTestCase {
         XCTAssertEqual(site.theme_config?.fonts?.heading, "Fraunces")
         XCTAssertEqual(site.theme_config?.colors?["brand"], "#B4532A")
         XCTAssertEqual(CappePublishedThemeCatalog.resolved(for: site.theme_config).id, "editorial")
+        // Proves the raw payload is kept in full, not projected to a handful
+        // of typed accessors — heroStyle has no dedicated property.
+        XCTAssertEqual(site.theme_config?.raw["heroStyle"]?.stringValue, "split")
+    }
+
+    func testThemeConfigRoundTripsUnknownKeys() throws {
+        let json = """
+        {"style": {"spacing": "cozy"}, "type": {"tracking": "tight"},
+         "colors": {"brand": "#B4532A", "brandGradient": {"angle": 135, "stops": ["#111", "#eee"]}}}
+        """
+        let config = try JSONDecoder().decode(CappeThemeConfig.self, from: Data(json.utf8))
+        let reencoded = try JSONEncoder().encode(config)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: reencoded) as? [String: Any])
+        XCTAssertNotNil(object["style"])
+        XCTAssertNotNil(object["type"])
+        let colors = try XCTUnwrap(object["colors"] as? [String: Any])
+        XCTAssertNotNil(colors["brandGradient"])
+    }
+
+    func testThemeConfigWithGradientColorsDecodes() throws {
+        let json = """
+        {"colors": {"brand": "#B4532A", "brandGradient": {"angle": 135, "stops": ["#111", "#eee"]}}}
+        """
+        let config = try JSONDecoder().decode(CappeThemeConfig.self, from: Data(json.utf8))
+        XCTAssertEqual(config.colors?["brand"], "#B4532A")
+    }
+
+    func testSiteDecodesMetaConfig() throws {
+        let withMeta = """
+        {
+          "id": "site-1", "account_id": "acct-1", "name": "Cara's Bakery",
+          "slug": "caras-bakery", "source_type": "blank", "status": "published",
+          "is_multi_location": false, "meta_config": {"promo": {"enabled": true}},
+          "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"
+        }
+        """
+        let site = try JSONDecoder().decode(CappeSite.self, from: Data(withMeta.utf8))
+        XCTAssertEqual(site.meta_config?["promo"]?.objectValue?["enabled"]?.boolValue, true)
+
+        let withoutMeta = """
+        {
+          "id": "site-1", "account_id": "acct-1", "name": "Cara's Bakery",
+          "slug": "caras-bakery", "source_type": "blank", "status": "published",
+          "is_multi_location": false,
+          "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"
+        }
+        """
+        let site2 = try JSONDecoder().decode(CappeSite.self, from: Data(withoutMeta.utf8))
+        XCTAssertNil(site2.meta_config)
     }
 
     func testReadinessDecodes() throws {

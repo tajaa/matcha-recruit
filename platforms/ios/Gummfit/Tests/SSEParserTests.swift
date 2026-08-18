@@ -77,6 +77,25 @@ final class SSEParserTests: XCTestCase {
         }
     }
 
+    func testErrorFrameIsTerminalAndPreservesItsMessage() async throws {
+        let errorLine = #"data: {"type":"error","message":"Merlin is at capacity right now (hourly limit reached). Try again shortly."}"# + "\n"
+        StubURLProtocol.chunks = [
+            Data(errorLine.utf8),
+            Data("data: [DONE]".utf8),
+        ]
+        let body = CappeMerlinChatRequest(
+            page_id: "p1", conversation_id: nil, message: "hello", history: [], blocks: [],
+            theme: [:], model_tier: "auto", selected_block: nil, selection: nil, attachments: []
+        )
+        var captured: CappeMerlinFrame?
+        try await MerlinService.shared.agent(siteId: "s1", body) { frame in captured = frame }
+        guard case .error(let message) = captured else {
+            XCTFail("Expected .error frame, got \(String(describing: captured))")
+            return
+        }
+        XCTAssertEqual(message, "Merlin is at capacity right now (hourly limit reached). Try again shortly.")
+    }
+
     func testMerlinServiceFailsWhenNoTerminalFrameArrives() async {
         StubURLProtocol.chunks = [Data("data: not-json\n".utf8)]
         let body = CappeMerlinChatRequest(

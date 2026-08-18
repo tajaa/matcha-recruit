@@ -6,17 +6,31 @@ struct CappeThemeFonts: Codable, Equatable {
 }
 
 struct CappeThemeConfig: Codable, Equatable {
-    let preset: String?
-    let mode: String?
-    let fonts: CappeThemeFonts?
-    let font: String?
-    let radius: String?
-    let heroStyle: String?
-    let navStyle: String?
-    let primaryColor: String?
-    let colors: [String: String]?
-    let premium: Bool?
-    let fancy: Bool?
+    /// The whole server object, verbatim. The typed accessors below are a
+    /// convenience view — a decode -> encode round trip is lossless, so the
+    /// editor can PUT back keys iOS has no UI for (style, type,
+    /// colors.brandGradient, …) instead of erasing them. The web editor holds
+    /// the same raw object (client/src/cappe/pages/site/PageEditor/index.tsx:217).
+    let raw: [String: JSONValue]
+
+    init(raw: [String: JSONValue]) { self.raw = raw }
+    init(from decoder: Decoder) throws { raw = try [String: JSONValue](from: decoder) }
+    func encode(to encoder: Encoder) throws { try raw.encode(to: encoder) }
+
+    var preset: String? { raw["preset"]?.stringValue }
+    var mode: String? { raw["mode"]?.stringValue }
+    var font: String? { raw["font"]?.stringValue }
+    var radius: String? { raw["radius"]?.stringValue }
+    var heroStyle: String? { raw["heroStyle"]?.stringValue }
+    var navStyle: String? { raw["navStyle"]?.stringValue }
+    var primaryColor: String? { raw["primaryColor"]?.stringValue }
+    var premium: Bool? { raw["premium"]?.boolValue }
+    var fancy: Bool? { raw["fancy"]?.boolValue }
+    var colors: [String: String]? { raw["colors"]?.objectValue?.compactMapValues(\.stringValue) }
+    var fonts: CappeThemeFonts? {
+        guard let o = raw["fonts"]?.objectValue else { return nil }
+        return CappeThemeFonts(heading: o["heading"]?.stringValue, body: o["body"]?.stringValue)
+    }
 }
 
 struct CappeThemeSwatch: Equatable {
