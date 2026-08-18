@@ -59,17 +59,16 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
     prior_start = period_start - timedelta(days=period_days)
     quarter_start = as_of - timedelta(days=730)  # 8 quarters back
 
-    profile = await conn.fetchrow(
-        """
-        SELECT comp.industry, hp.headcount
-        FROM companies comp
-        LEFT JOIN company_handbook_profiles hp ON hp.company_id = comp.id
-        WHERE comp.id = $1
-        """,
+    industry = await conn.fetchval("SELECT industry FROM companies WHERE id = $1", company_id)
+    # Live active-employee count, not company_handbook_profiles.headcount — that
+    # column is a self-declared Stripe billing figure set at registration
+    # (stripe_service.py prices Lite/X off it directly) and goes stale the
+    # moment real headcount drifts. Matches _batch_active_headcounts' single-
+    # location branch so company-wide and per-location TRIR agree.
+    headcount = await conn.fetchval(
+        "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
         company_id,
-    )
-    industry = profile["industry"] if profile else None
-    headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
+    ) or 0
 
     # Current + prior period totals.
     rows = await conn.fetch(
