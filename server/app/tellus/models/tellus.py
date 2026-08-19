@@ -997,6 +997,7 @@ class TellusPublicBrandPage(BaseModel):
     # a "Show older reviews" toggle from this; they never count toward avg_rating.
     older_count: int = 0
     has_board: bool = False
+    has_loyalty: bool = False
     messaging_enabled: bool = False
     stores: list["TellusMessagingStore"] = Field(default_factory=list)
     followed: bool = False   # false when unauthenticated — same viewer-scoping as discover/places

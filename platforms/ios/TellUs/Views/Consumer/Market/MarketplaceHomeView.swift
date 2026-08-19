@@ -25,13 +25,14 @@ struct MarketplaceHomeView: View {
 }
 
 private enum RewardsSection: String, CaseIterable, Identifiable {
-    case overview, marketplace, cards, redemptions
+    case overview, brandLoyalty, marketplace, cards, redemptions
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .overview: return "Overview"
+        case .brandLoyalty: return "Brand loyalty"
         case .marketplace: return "Marketplace"
         case .cards: return "Reward cards"
         case .redemptions: return "Redemptions"
@@ -41,6 +42,7 @@ private enum RewardsSection: String, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .overview: return "Points, badges, and recent activity"
+        case .brandLoyalty: return "Separate rewards at businesses you visit"
         case .marketplace: return "Find local offers to redeem"
         case .cards: return "Open your active promo cards"
         case .redemptions: return "See your redeemed offers"
@@ -50,6 +52,7 @@ private enum RewardsSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .overview: return "chart.bar.xaxis"
+        case .brandLoyalty: return "sparkles"
         case .marketplace: return "gift"
         case .cards: return "ticket"
         case .redemptions: return "clock.arrow.circlepath"
@@ -83,6 +86,7 @@ private struct RewardsSectionScreen: View {
         Group {
             switch section {
             case .overview: RewardsHomeView()
+            case .brandLoyalty: LoyaltyHomeView()
             case .marketplace: MarketplaceView()
             case .cards: CardWalletView()
             case .redemptions: RedemptionsView()

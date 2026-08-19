@@ -2,6 +2,169 @@
 
 export type AccountType = 'consumer' | 'brand'
 
+export type LoyaltyProgramStatus = 'draft' | 'active' | 'paused'
+export type LoyaltyCounterMode = 'visit' | 'purchase'
+export type LoyaltyEventKey = 'visit' | 'purchase' | 'review' | 'board_reply' | 'follow' | 'social_post'
+export type LoyaltyTierKey = 'bronze' | 'silver' | 'gold'
+export type BrandCapability =
+  | 'brand.update' | 'billing.manage' | 'team.manage' | 'stores.manage'
+  | 'board.manage' | 'feedback.read' | 'feedback.manage' | 'comms.read'
+  | 'comms.reply' | 'comms.assign' | 'comms.settings' | 'promos.manage'
+  | 'scanners.manage' | 'rewards.manage' | 'redemptions.redeem'
+
+export type BusinessStoreGrant = {
+  id: string
+  name: string
+  city: string | null
+  state: string | null
+  status: 'active' | 'archived'
+}
+
+export type BusinessMembership = {
+  id: string
+  brand_id: string
+  brand_name: string
+  brand_slug: string
+  plan_status: BrandPlanStatus
+  role: 'owner' | 'admin' | 'location_manager' | 'staff'
+  status: 'active' | 'suspended' | 'revoked'
+  all_stores: boolean
+  stores: BusinessStoreGrant[]
+  capabilities: BrandCapability[]
+}
+
+export type LoyaltyEarningRule = {
+  event_key: LoyaltyEventKey
+  award_type: 'fixed' | 'per_dollar'
+  fixed_points: number | null
+  points_per_dollar: number | null
+  min_purchase_cents: number | null
+  max_points_per_event: number | null
+  daily_cap: number | null
+  cooldown_seconds: number | null
+  is_active: boolean
+}
+
+export type LoyaltyTier = {
+  tier_key: LoyaltyTierKey
+  threshold_points: number
+  benefits: string | null
+}
+
+export type LoyaltyBalance = {
+  points_balance: number
+  lifetime_points: number
+  tier_key: LoyaltyTierKey
+}
+
+export type LoyaltyReward = {
+  id: string
+  brand_id: string
+  title: string
+  description: string | null
+  terms: string | null
+  points_cost: number
+  redemption_expiry_days: number
+  active_from: string | null
+  active_to: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type LoyaltyProgram = {
+  brand_id: string
+  brand_name: string
+  brand_slug: string
+  name: string
+  point_singular: string
+  point_plural: string
+  terms: string | null
+  status: LoyaltyProgramStatus
+  counter_mode: LoyaltyCounterMode
+  rules: LoyaltyEarningRule[]
+  tiers: LoyaltyTier[]
+  balance?: LoyaltyBalance | null
+  rewards: LoyaltyReward[]
+}
+
+export type LoyaltyProgramSummary = {
+  brand_id: string
+  brand_name: string
+  brand_slug: string
+  name: string
+  point_plural: string
+  status: LoyaltyProgramStatus
+  points_balance: number
+  lifetime_points: number
+  tier_key: LoyaltyTierKey
+}
+
+export type LoyaltyMemberQr = {
+  token: string
+  qr_payload: string
+  expires_at: string
+}
+
+export type LoyaltyLedgerEntry = {
+  id: string
+  delta: number
+  balance_after: number
+  reason: string
+  event_key: LoyaltyEventKey | null
+  reference_type: string
+  reference_id: string
+  source_store_id: string | null
+  purchase_amount_cents: number | null
+  description: string | null
+  created_at: string
+}
+
+export type LoyaltyRedemption = {
+  id: string
+  brand_id: string
+  brand_name: string
+  brand_slug: string
+  reward_title: string
+  points_spent: number
+  status: 'issued' | 'redeemed'
+  effective_status: 'issued' | 'redeemed' | 'expired'
+  token: string
+  qr_payload: string
+  issued_at: string
+  expires_at: string
+  redeemed_at: string | null
+}
+
+export type LoyaltyEarnResult = {
+  awarded: boolean
+  points: number
+  points_balance: number
+  lifetime_points: number
+  tier_key: LoyaltyTierKey
+  result_code: 'awarded' | 'cooldown' | 'daily_cap' | 'below_minimum' | 'inactive'
+}
+
+export type LoyaltyRedeemResult = {
+  reward_title: string
+  redeemed_at: string
+  store_name: string
+}
+
+export type LoyaltySocialSubmission = {
+  id: string
+  brand_id: string
+  account_id: string
+  platform: 'instagram' | 'tiktok' | 'youtube' | 'facebook' | 'x' | 'other'
+  post_url: string
+  canonical_url: string
+  note: string | null
+  status: 'pending' | 'approved' | 'rejected' | 'withdrawn'
+  decision_note: string | null
+  awarded_points: number
+  created_at: string
+}
+
 export type BrandPlanStatus = 'pending' | 'active' | 'past_due' | 'canceled'
 
 // 'published' is derived server-side (held + past its 48h hold) — it never
@@ -369,6 +532,7 @@ export interface PublicBrandPage {
   state: string | null
   older_count: number
   has_board: boolean
+  has_loyalty: boolean
   messaging_enabled: boolean
   stores: MessagingStore[]
 }

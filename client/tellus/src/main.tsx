@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { AccountProvider } from './hooks/useAccount'
+import { BusinessProvider } from './hooks/useBusinesses'
 import './index.css'
 
 // basename='/tellus' — the app is served at /tellus/ by the shared nginx
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter basename="/tellus">
       <AccountProvider>
-        <App />
+        <BusinessProvider>
+          <App />
+        </BusinessProvider>
       </AccountProvider>
     </BrowserRouter>
   </StrictMode>,

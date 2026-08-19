@@ -15,6 +15,7 @@ interface NavItem {
 
 const CONSUMER_NAV: NavItem[] = [
   { to: '/', label: 'Rewards', icon: Award, end: true },
+  { to: '/loyalty', label: 'Brand loyalty', icon: Star },
   { to: '/marketplace', label: 'Marketplace', icon: Gift },
   { to: '/redemptions', label: 'Redemptions', icon: Tag },
   { to: '/my-reviews', label: 'My reviews', icon: Star },
@@ -96,7 +97,10 @@ export function Layout({ children }: { children: ReactNode }) {
         ...CONSUMER_NAV.slice(7),
       ]
     : CONSUMER_NAV
-  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? BRAND_NAV : (commsBrands.length ? [...consumerNav.slice(0, 7), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(7)] : consumerNav)
+  const brandNav = isBrand && account?.brand_id
+    ? [...BRAND_NAV.slice(0, 1), { to: `/brand/${account.brand_id}/loyalty`, label: 'Loyalty', icon: Star }, ...BRAND_NAV.slice(1)]
+    : BRAND_NAV
+  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? brandNav : (commsBrands.length ? [...consumerNav.slice(0, 7), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(7)] : consumerNav)
   const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
 
   useEffect(() => {

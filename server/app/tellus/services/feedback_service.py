@@ -16,6 +16,7 @@ from typing import Optional
 from uuid import UUID
 
 from .points_service import award_points, notify_account
+from .loyalty_service import award_event as award_loyalty_event
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,20 @@ async def create_report(
         points_awarded = 0
         if identified and not manual:
             points_awarded = await award_for_report(conn, dict(report))
+
+        # Brand loyalty is a separate economy from the global feedback points.
+        # Public identified reviews earn at submission time only.
+        if identified and public_review:
+            await award_loyalty_event(
+                conn,
+                brand_id=brand_id,
+                account_id=reporter_account_id,
+                event_key="review",
+                reference_type="report",
+                reference_id=f"report:{report_id}",
+                source_store_id=store_id,
+                description="Public review submitted",
+            )
 
         store_name = None
         if store_id is not None:

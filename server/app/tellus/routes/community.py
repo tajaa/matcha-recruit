@@ -46,6 +46,13 @@ async def public_brand_page(
         has_board = bool(await conn.fetchval(
             "SELECT EXISTS (SELECT 1 FROM tellus_boards WHERE brand_id = $1 AND is_active)", brand["id"],
         )) and brand["plan_status"] == "active"
+        has_loyalty = bool(await conn.fetchval(
+            """SELECT EXISTS (
+                     SELECT 1 FROM tellus_loyalty_programs
+                      WHERE brand_id = $1 AND status = 'active'
+                 )""",
+            brand["id"],
+        )) and brand["plan_status"] == "active"
 
         claimed = brand["owner_account_id"] is not None
         followed = bool(await conn.fetchval(
@@ -181,6 +188,7 @@ async def public_brand_page(
         state=store["state"] if store else None,
         older_count=older_count,
         has_board=has_board,
+        has_loyalty=has_loyalty,
         messaging_enabled=bool(claimed and brand["messaging_enabled"]),
         stores=[TellusMessagingStore(**dict(s)) for s in stores],
         followed=followed,

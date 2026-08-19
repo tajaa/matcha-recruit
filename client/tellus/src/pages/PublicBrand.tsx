@@ -257,6 +257,18 @@ export default function PublicBrand() {
         {page.claimed && !page.messaging_enabled && <p className="mt-3 text-xs text-tu-faint">This business isn’t accepting Comms messages on Tell-Us.</p>}
         {!page.claimed && <p className="mt-3 text-xs text-tu-faint">Messaging will be available when this business claims its page.</p>}
 
+        {page.has_loyalty && (
+          <div className="mt-4 rounded-xl border border-tu-accent/30 bg-tu-accent/5 p-4 text-left">
+            <p className="text-sm font-semibold text-tu-accent">Join this business's loyalty program</p>
+            <p className="mt-1 text-xs text-tu-dim">Earn separate points here when you visit, purchase, or participate.</p>
+            {account?.account_type === 'consumer' ? (
+              <Link to="/loyalty" className="mt-3 inline-flex rounded-lg bg-tu-accent px-3 py-2 text-xs font-semibold text-black">Open brand loyalty</Link>
+            ) : (
+              <Link to={'/login?returnTo=' + encodeURIComponent('/b/' + slug)} className="mt-3 inline-flex rounded-lg border border-tu-accent px-3 py-2 text-xs font-semibold text-tu-accent">Log in to join</Link>
+            )}
+          </div>
+        )}
+
         {page.has_board && (
           <div className="mt-3">
             {!account && (

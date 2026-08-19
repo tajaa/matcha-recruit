@@ -15,6 +15,7 @@ from ..models.tellus import TellusAccount, TellusBoardPost, TellusBoardPostCampa
 from .access_service import assert_capability, find_brand_access
 from .marketplace_service import serialize_listing
 from .points_service import award_points, notify_account
+from .loyalty_service import award_event as award_loyalty_event
 
 BOARD_PAUSED_DETAIL = "This board is paused."     # plan lapsed / is_active=false → 409
 
@@ -253,6 +254,14 @@ async def approve_reply_and_award(
     if row is None:
         return None
 
+    brand_id = await conn.fetchval(
+        """SELECT bo.brand_id
+             FROM tellus_board_posts bp
+             JOIN tellus_boards bo ON bo.id = bp.board_id
+            WHERE bp.id = $1""",
+        row["post_id"],
+    )
+
     # award_points opens its own conn.transaction() → SAVEPOINT here; its
     # ON CONFLICT DO NOTHING idempotency means a reject→re-approve (via the
     # admin force path) can never double-credit. NEVER catch
@@ -263,12 +272,25 @@ async def approve_reply_and_award(
         reference_id=str(reply_id), description="Board reply approved",
         bypass_cooldown=True,
     )
+    await award_loyalty_event(
+        conn,
+        brand_id=brand_id,
+        account_id=row["author_account_id"],
+        event_key="board_reply",
+        reference_type="board_reply",
+        reference_id=f"board_reply:{reply_id}",
+        actor_account_id=actor_id,
+        description="Board reply approved",
+        bypass_cooldown=True,
+    )
     await notify_account(
         conn, row["author_account_id"], "board_reply_approved", "Your reply was approved",
         "Your reply on the regulars board was approved.",
         reference_type="board_post", reference_id=str(row["post_id"]),
     )
-    return dict(row)
+    result = dict(row)
+    result["brand_id"] = brand_id
+    return result
 
 
 def serialize_post(row, *, viewer_is_mod: bool, listing_row=None, campaign_row=None) -> TellusBoardPost:

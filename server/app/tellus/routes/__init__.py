@@ -23,6 +23,8 @@ from .gamification import router as gamification_router
 from .grants import router as grants_router
 from .likes import router as likes_router
 from .links import router as links_router
+from .loyalty import router as loyalty_router
+from .loyalty_public import router as loyalty_public_router
 from .marketplace import router as marketplace_router
 from .my_reviews import router as my_reviews_router
 from .places import router as places_router
@@ -51,6 +53,7 @@ async def tellus_health():
 tellus_router.include_router(auth_router)
 tellus_router.include_router(public_intake_router)
 tellus_router.include_router(promo_public_router)
+tellus_router.include_router(loyalty_public_router)
 tellus_router.include_router(community_router)
 tellus_router.include_router(places_router)
 tellus_router.include_router(discover_router)
@@ -78,6 +81,7 @@ tellus_router.include_router(likes_router)
 # Mixed-role: brand campaign/scanner CRUD (require_paid_brand) + consumer
 # card reads (require_consumer), per-endpoint.
 tellus_router.include_router(promo_router)
+tellus_router.include_router(loyalty_router)
 
 # Push device-token registration (any authenticated Tell-Us account).
 tellus_router.include_router(push_router)

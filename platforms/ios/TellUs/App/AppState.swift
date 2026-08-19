@@ -25,6 +25,7 @@ final class AppState {
     /// Brands where this account can answer Comms conversations. Consumers
     /// may have more than one business inbox through team membership.
     var inboxBrands: [InboxBrand] = []
+    var businessMemberships: [BusinessMembership] = []
     var unreadCount = 0
     var pendingFriendRequests = 0
     /// Set when the user taps a push; RootView presents the destination as a
@@ -80,11 +81,13 @@ final class AppState {
             phase = account.plan_status == .active ? .brand : .brandWall
             moderatedBrands = []
             inboxBrands = []
+            businessMemberships = []
         } else {
             phase = .consumer
             Task { [weak self] in
                 self?.moderatedBrands = (try? await BoardManageService.shared.moderatedBrands()) ?? []
                 self?.inboxBrands = (try? await DmService.shared.inboxBrands()) ?? []
+                self?.businessMemberships = (try? await BusinessAccessService.shared.memberships()) ?? []
             }
         }
         startPolling()
@@ -133,6 +136,7 @@ final class AppState {
         account = nil
         moderatedBrands = []
         inboxBrands = []
+        businessMemberships = []
         unreadCount = 0
         pendingFriendRequests = 0
         pendingDeepLink = nil

@@ -28,6 +28,7 @@ from ..models.tellus import (
 )
 from ..models.tellus import TellusAccount
 from ..services import google_places
+from ..services import loyalty_service
 from ._shared import escape_like, slugify
 
 router = APIRouter()
@@ -170,7 +171,7 @@ async def list_signed_up_places(
 async def follow_place(slug: str, account: TellusAccount = Depends(require_verified_consumer)):
     async with get_connection() as conn:
         brand = await conn.fetchrow(
-            """SELECT b.slug, b.name, b.logo_url, b.messaging_enabled, s.city, s.state
+            """SELECT b.id, b.slug, b.name, b.logo_url, b.messaging_enabled, s.city, s.state
                FROM tellus_brands b
                LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores
                                   WHERE brand_id = b.id ORDER BY created_at LIMIT 1) s ON TRUE
@@ -179,12 +180,23 @@ async def follow_place(slug: str, account: TellusAccount = Depends(require_verif
         )
         if brand is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Business not found")
-        await conn.execute(
+        inserted = await conn.fetchrow(
             """INSERT INTO tellus_brand_follows (consumer_account_id, brand_id)
                SELECT $1, id FROM tellus_brands WHERE slug = $2
-               ON CONFLICT DO NOTHING""",
+               ON CONFLICT DO NOTHING
+               RETURNING brand_id""",
             account.id, slug,
         )
+        if inserted is not None:
+            await loyalty_service.award_event(
+                conn,
+                brand_id=inserted["brand_id"],
+                account_id=account.id,
+                event_key="follow",
+                reference_type="brand_follow",
+                reference_id=f"brand_follow:{inserted['brand_id']}",
+                description="Followed a business",
+            )
     return TellusFollowedBrand(**dict(brand))
 
 

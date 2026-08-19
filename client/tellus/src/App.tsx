@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { useAccount } from './hooks/useAccount'
 import { Layout } from './components/Layout'
 import { Spinner } from './components/ui'
@@ -17,6 +17,10 @@ import Claim from './pages/Claim'
 import FriendInvite from './pages/FriendInvite'
 import Scan from './pages/Scan'
 import CardView from './pages/consumer/CardView'
+import Loyalty from './pages/consumer/Loyalty'
+import LoyaltyBrand from './pages/consumer/LoyaltyBrand'
+import MemberCard from './pages/consumer/MemberCard'
+import LoyaltyRedemption from './pages/consumer/LoyaltyRedemption'
 
 import Rewards from './pages/consumer/Rewards'
 import Marketplace from './pages/consumer/Marketplace'
@@ -35,6 +39,10 @@ import BrandCampaigns from './pages/brand/Campaigns'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 import BrandBoard from './pages/brand/Board'
+import LoyaltyBuilder from './pages/brand/LoyaltyBuilder'
+import LoyaltyCounter from './pages/brand/LoyaltyCounter'
+import { useBusinesses } from './hooks/useBusinesses'
+import type { BrandCapability } from './api/types'
 
 // Konva + the designer tree are ~200KB of the bundle and only a brand that is
 // actually laying out a flyer ever needs them — keep them out of first paint
@@ -103,6 +111,19 @@ function CommsProtected({ children }: { children: React.ReactNode }) {
   return <Layout>{children}</Layout>
 }
 
+function BusinessCapabilityProtected({
+  children, capability, bare = false,
+}: { children: React.ReactNode; capability: BrandCapability; bare?: boolean }) {
+  const { account, loading: accountLoading } = useAccount()
+  const { loading: businessesLoading, can } = useBusinesses()
+  const { brandId } = useParams()
+  const location = useLocation()
+  if (accountLoading || businessesLoading) return <div className="min-h-screen bg-tu-bg"><Spinner /></div>
+  if (!account) return <Navigate to={'/login?returnTo=' + encodeURIComponent(location.pathname)} replace />
+  if (!brandId || !can(brandId, capability)) return <Navigate to="/" replace />
+  return bare ? <>{children}</> : <Layout>{children}</Layout>
+}
+
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const { account, loading } = useAccount()
   const location = useLocation()
@@ -158,6 +179,10 @@ export default function App() {
       <Route path="/leaderboard" element={<Protected requireType="consumer"><Leaderboard /></Protected>} />
       <Route path="/settings" element={<Protected requireType="consumer"><ConsumerSettings /></Protected>} />
       <Route path="/card/:cardToken" element={<Protected requireType="consumer" bare><CardView /></Protected>} />
+      <Route path="/loyalty" element={<Protected requireType="consumer"><Loyalty /></Protected>} />
+      <Route path="/loyalty/:brandId" element={<Protected requireType="consumer"><LoyaltyBrand /></Protected>} />
+      <Route path="/loyalty/:brandId/card" element={<Protected requireType="consumer" bare><MemberCard /></Protected>} />
+      <Route path="/loyalty/redemptions/:token" element={<Protected requireType="consumer" bare><LoyaltyRedemption /></Protected>} />
 
       {/* Brand */}
       <Route path="/brand/billing" element={<Protected requireType="brand" allowUnpaid><BrandBilling /></Protected>} />
@@ -176,6 +201,8 @@ export default function App() {
       } />
       <Route path="/brand/board" element={<Protected requireType="brand" allowConsumerModerator><BrandBoard /></Protected>} />
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
+      <Route path="/brand/:brandId/loyalty" element={<BusinessCapabilityProtected capability="rewards.manage"><LoyaltyBuilder /></BusinessCapabilityProtected>} />
+      <Route path="/brand/:brandId/counter" element={<BusinessCapabilityProtected capability="redemptions.redeem"><LoyaltyCounter /></BusinessCapabilityProtected>} />
 
       {/* Internal admin */}
       <Route path="/admin/accounts" element={<AdminOnly><AdminAccounts /></AdminOnly>} />
