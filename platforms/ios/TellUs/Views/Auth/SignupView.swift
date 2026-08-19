@@ -3,10 +3,16 @@ import GoogleSignInSwift
 
 struct SignupView: View {
     @Environment(AppState.self) private var appState
-    @State private var vm = AuthViewModel()
+    @State private var vm: AuthViewModel
     @FocusState private var focusedField: Field?
 
     private enum Field { case email, password, displayName, brandName, locationCount, city, state }
+
+    init(initialAccountType: AccountType = .consumer) {
+        let vm = AuthViewModel()
+        vm.accountType = initialAccountType
+        _vm = State(initialValue: vm)
+    }
 
     private var canSubmit: Bool {
         !vm.email.isEmpty && vm.password.count >= 8 && !vm.isLoading

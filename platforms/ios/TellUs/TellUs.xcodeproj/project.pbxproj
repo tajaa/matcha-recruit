@@ -121,6 +121,7 @@
 		6B810CAC73A3A548B4ED2106 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = DFB037C699D050E52D93B522 /* GoogleSignIn */; };
 		6D7C7343DE331B59E152DF97 /* FlyerDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B173F5A337E4402646C93081 /* FlyerDesign.swift */; };
 		6E641333A36CCCA3BB190A84 /* CommsComposerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B12CBD23DCDD3D049765C2 /* CommsComposerSheet.swift */; };
+		70FBCD28C541A2D1CFD27F4C /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D16E844B3659D9BF028B69C /* WelcomeView.swift */; };
 		710FAEE59FBACC2D3DB479BA /* CampaignDesignerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35D6E29B729AB8C1AA05C60 /* CampaignDesignerView.swift */; };
 		7149377CE11CD3B873C52C60 /* NotificationsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7579BE36B7660D6C65F72532 /* NotificationsViewModel.swift */; };
 		71B01DAEB08CDD50666170B0 /* BoardFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB680B484B3D224C4107A83 /* BoardFeedView.swift */; };
@@ -376,6 +377,7 @@
 		6A578F89613997948D8E4A18 /* ReviewsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewsService.swift; sourceTree = "<group>"; };
 		6CABBDB4EDC995FE6D7337FD /* LeaderboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeaderboardView.swift; sourceTree = "<group>"; };
 		6CB680B484B3D224C4107A83 /* BoardFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardFeedView.swift; sourceTree = "<group>"; };
+		6D16E844B3659D9BF028B69C /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		6DDC5E26B0A192079086E1DD /* FlyerAssetCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerAssetCatalogTests.swift; sourceTree = "<group>"; };
 		6FB247F7A9EC333FBB2EFADD /* FlyerRendererOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlyerRendererOrientationTests.swift; sourceTree = "<group>"; };
 		6FB596F39CE01A1C51B3A5E9 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
@@ -1007,6 +1009,7 @@
 				0380EB70DA824F7877DEA8E7 /* ResetPasswordView.swift */,
 				697A30237CD4D0B911795C35 /* SignupView.swift */,
 				CDA8ADF5B9D1FE188C86BBCD /* VerifyWaitView.swift */,
+				6D16E844B3659D9BF028B69C /* WelcomeView.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -1484,6 +1487,7 @@
 				9E5C0F949C59D813E0FE27DB /* TemplateGalleryView.swift in Sources */,
 				3FF06B8B5A212DF0E49BAFB7 /* Theme.swift in Sources */,
 				F9554CB17D04F86C02574FB2 /* VerifyWaitView.swift in Sources */,
+				70FBCD28C541A2D1CFD27F4C /* WelcomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

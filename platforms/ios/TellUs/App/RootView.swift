@@ -9,7 +9,7 @@ struct RootView: View {
             case .restoring:
                 SplashView()
             case .loggedOut:
-                NavigationStack { LoginView() }
+                NavigationStack { WelcomeView() }
             case .verifyPending(let email):
                 NavigationStack { VerifyWaitView(email: email) }
             case .consumer:
