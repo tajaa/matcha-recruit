@@ -97,10 +97,11 @@ async def admin_list_creators(status_filter: Optional[str] = None):
                        'audit_status', s.audit_status, 'audited_at', s.audited_at,
                        'audit_note', s.audit_note
                    ) ORDER BY s.sort_order) FILTER (WHERE s.id IS NOT NULL), '[]') AS socials
-              FROM cappe_creator_profiles p
-              JOIN cappe_accounts a ON a.id = p.account_id
+              FROM cappe_accounts a
+              LEFT JOIN cappe_creator_profiles p ON p.account_id = a.id
               LEFT JOIN cappe_creator_socials s ON s.profile_id = p.id
-             WHERE ($1::text IS NULL OR p.status = $1)
+             WHERE a.account_type = 'creator'
+               AND ($1::text IS NULL OR p.status = $1)
              GROUP BY p.id, a.id, a.email, a.name, a.status
              ORDER BY (p.status = 'pending_review') DESC, p.submitted_at DESC NULLS LAST, p.created_at DESC
             """,

@@ -129,7 +129,7 @@ export default function Cappe() {
 
   const creatorsCount = useMemo(() => accounts.filter((account) => account.account_type === 'creator').length, [accounts])
   const brands = useMemo(() => accounts.filter((account) => account.account_type === 'business'), [accounts])
-  const websiteAccounts = useMemo(() => accounts.filter((account) => account.account_type !== 'creator'), [accounts])
+  const websiteAccounts = useMemo(() => accounts.filter((account) => account.account_type !== 'creator' || account.sites.length > 0), [accounts])
 
   const filteredWebsites = useMemo(() => websiteAccounts.filter((account) => {
     if (plan !== 'all' && account.plan !== plan) return false
