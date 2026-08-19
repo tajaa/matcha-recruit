@@ -25,12 +25,12 @@ final class LoyaltyService {
         try await client.request(method: "GET", path: "/me/loyalty/redemptions")
     }
 
-    func issueRedemption(brandID: String, rewardID: String) async throws -> LoyaltyRedemption {
+    func issueRedemption(brandID: String, rewardID: String, clientRequestID: String) async throws -> LoyaltyRedemption {
         struct Body: Encodable { let reward_id: String; let client_request_id: String }
         return try await client.request(
             method: "POST",
             path: "/me/loyalty/programs/\(brandID)/redemptions",
-            body: Body(reward_id: rewardID, client_request_id: UUID().uuidString)
+            body: Body(reward_id: rewardID, client_request_id: clientRequestID)
         )
     }
 

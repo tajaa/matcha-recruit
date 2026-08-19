@@ -3,10 +3,11 @@ import SwiftUI
 struct LoyaltyHomeView: View {
     @State private var programs: [LoyaltyProgramSummary] = []
     @State private var error: String?
+    @State private var loaded = false
 
     var body: some View {
         Group {
-            if programs.isEmpty, error == nil {
+            if !loaded {
                 ProgressView()
             } else if programs.isEmpty {
                 EmptyState(icon: "sparkles", title: "No brand programs yet", hint: error)
@@ -37,6 +38,7 @@ struct LoyaltyHomeView: View {
     private func load() async {
         do { programs = try await LoyaltyService.shared.programs(); error = nil }
         catch { if !error.isCancellation { self.error = error.localizedDescription } }
+        loaded = true
     }
 }
 
@@ -45,6 +47,8 @@ struct LoyaltyBrandView: View {
     @State private var program: LoyaltyProgram?
     @State private var qr: LoyaltyMemberQR?
     @State private var error: String?
+    @State private var redeemingRewardID: String?
+    @State private var requestIDs: [String: String] = [:]
 
     var body: some View {
         Group {
@@ -67,8 +71,9 @@ struct LoyaltyBrandView: View {
                             HStack {
                                 VStack(alignment: .leading) { Text(reward.title); Text("\(reward.points_cost) points").font(.interCaption).foregroundStyle(TU.ember) }
                                 Spacer()
-                                Button("Redeem") { Task { await redeem(reward) } }
+                                Button(redeemingRewardID == reward.id ? "Redeeming…" : "Redeem") { Task { await redeem(reward) } }
                                     .buttonStyle(.borderedProminent).tint(TU.ember)
+                                    .disabled(redeemingRewardID != nil)
                             }
                         }
                     }
@@ -92,7 +97,19 @@ struct LoyaltyBrandView: View {
     }
 
     private func redeem(_ reward: LoyaltyReward) async {
-        do { _ = try await LoyaltyService.shared.issueRedemption(brandID: brandID, rewardID: reward.id); await load() }
+        guard redeemingRewardID == nil else { return }
+        let requestID = requestIDs[reward.id] ?? {
+            let id = UUID().uuidString
+            requestIDs[reward.id] = id
+            return id
+        }()
+        redeemingRewardID = reward.id
+        defer { redeemingRewardID = nil }
+        do {
+            _ = try await LoyaltyService.shared.issueRedemption(brandID: brandID, rewardID: reward.id, clientRequestID: requestID)
+            requestIDs.removeValue(forKey: reward.id)
+            await load()
+        }
         catch { if !error.isCancellation { self.error = error.localizedDescription } }
     }
 }
@@ -101,6 +118,7 @@ struct MemberCardView: View {
     let brandID: String
     @State private var qr: LoyaltyMemberQR?
     @State private var error: String?
+    @State private var secondsRemaining: Int = 0
 
     var body: some View {
         Group {
@@ -110,7 +128,7 @@ struct MemberCardView: View {
                     QRCodeView(content: qr.qr_payload)
                         .padding(20).background(.white, in: RoundedRectangle(cornerRadius: 18))
                         .frame(maxWidth: 320)
-                    Text("Refreshes automatically").font(.interCaption).foregroundStyle(TU.textDim)
+                    Text("Refreshes in \(secondsRemaining)s").font(.interCaption).foregroundStyle(TU.textDim)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let error {
@@ -119,7 +137,21 @@ struct MemberCardView: View {
         }
         .themedContainer()
         .navigationTitle("Member card")
-        .task { await refresh() }
+        .task { await runRefreshLoop() }
+    }
+
+    private func runRefreshLoop() async {
+        await refresh()
+        while !Task.isCancelled {
+            guard let expiresAt = qr.flatMap({ Formatters.date(from: $0.expires_at) }) else { return }
+            let remaining = max(0, Int(expiresAt.timeIntervalSinceNow))
+            secondsRemaining = remaining
+            if remaining <= 0 {
+                await refresh()
+                continue
+            }
+            do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
+        }
     }
 
     private func refresh() async {

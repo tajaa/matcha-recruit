@@ -165,6 +165,17 @@ async def _current_balance(conn, brand_id: UUID, account_id: UUID) -> dict:
     return _row_dict(row) if row else {"points_balance": 0, "lifetime_points": 0}
 
 
+async def _inactive_result(conn, brand_id: UUID, account_id: UUID) -> dict:
+    balance = await _current_balance(conn, brand_id, account_id)
+    lifetime_points = balance.get("lifetime_points", 0)
+    return {
+        **_empty_result(),
+        "points_balance": balance.get("points_balance", 0),
+        "lifetime_points": lifetime_points,
+        "tier_key": await _tier_for_balance(conn, brand_id, lifetime_points),
+    }
+
+
 async def _tier_for_balance(conn, brand_id: UUID, lifetime_points: int) -> str:
     rows = await conn.fetch(
         "SELECT tier_key, threshold_points FROM tellus_loyalty_tiers "
@@ -202,7 +213,7 @@ async def award_event(
             brand_id,
         )
         if program is None or program["status"] != "active" or program["plan_status"] != "active":
-            return _empty_result()
+            return await _inactive_result(conn, brand_id, account_id)
 
         rule = await conn.fetchrow(
             """SELECT award_type, fixed_points, points_per_dollar,
@@ -214,7 +225,7 @@ async def award_event(
             event_key,
         )
         if rule is None or not rule["is_active"]:
-            return _empty_result()
+            return await _inactive_result(conn, brand_id, account_id)
 
         await conn.execute(
             """INSERT INTO tellus_loyalty_balances (brand_id, account_id)
@@ -392,16 +403,14 @@ async def mint_member_qr(conn, *, brand_id: UUID, account_id: UUID) -> dict:
             raise LoyaltyError(404, "not_found", "Loyalty program not found.")
         if program["status"] != "active" or program["plan_status"] != "active":
             raise LoyaltyError(409, "inactive", "This loyalty program is not currently active.")
-        await conn.execute(
-            """DELETE FROM tellus_loyalty_member_qr_sessions
-                WHERE brand_id = $1 AND account_id = $2 AND consumed_at IS NULL""",
-            brand_id,
-            account_id,
-        )
         row = await conn.fetchrow(
             """INSERT INTO tellus_loyalty_member_qr_sessions
                    (brand_id, account_id, token_hash, expires_at)
                VALUES ($1, $2, $3, NOW() + interval '60 seconds')
+               ON CONFLICT (brand_id, account_id) WHERE consumed_at IS NULL
+               DO UPDATE SET token_hash = EXCLUDED.token_hash,
+                              expires_at = EXCLUDED.expires_at,
+                              created_at = NOW()
                RETURNING expires_at""",
             brand_id,
             account_id,
@@ -631,15 +640,20 @@ async def issue_redemption(
 ) -> dict:
     async with conn.transaction():
         existing = await conn.fetchrow(
-            """SELECT * FROM tellus_loyalty_redemptions
-                WHERE brand_id = $1 AND account_id = $2 AND client_request_id = $3""",
+            """SELECT r.*, b.name AS brand_name
+                 FROM tellus_loyalty_redemptions r
+                 JOIN tellus_brands b ON b.id = r.brand_id
+                WHERE r.brand_id = $1 AND r.account_id = $2 AND r.client_request_id = $3""",
             brand_id, account_id, client_request_id,
         )
         if existing is not None:
-            return _row_dict(existing)
+            item = _row_dict(existing)
+            item["effective_status"] = effective_redemption_status(item["status"], item["expires_at"])
+            item["qr_payload"] = f"TU-LR1:{item['token']}"
+            return item
 
         program = await conn.fetchrow(
-            """SELECT p.status, b.plan_status
+            """SELECT p.status, b.plan_status, b.name AS brand_name
                  FROM tellus_loyalty_programs p JOIN tellus_brands b ON b.id = p.brand_id
                 WHERE p.brand_id = $1 FOR UPDATE OF p""",
             brand_id,
@@ -690,7 +704,11 @@ async def issue_redemption(
                 WHERE brand_id = $1 AND account_id = $2""",
             brand_id, account_id, new_balance,
         )
-        return _row_dict(redemption)
+        item = _row_dict(redemption)
+        item["brand_name"] = program["brand_name"]
+        item["effective_status"] = effective_redemption_status(item["status"], item["expires_at"])
+        item["qr_payload"] = f"TU-LR1:{item['token']}"
+        return item
 
 
 async def redeem_reward(conn, *, brand, store, raw_redemption_token: str) -> dict:
@@ -719,6 +737,17 @@ async def submit_social_post(
     account_id: UUID,
     data: LoyaltySocialSubmissionCreate,
 ) -> dict:
+    program = await conn.fetchrow(
+        """SELECT p.status, b.plan_status
+             FROM tellus_loyalty_programs p JOIN tellus_brands b ON b.id = p.brand_id
+            WHERE p.brand_id = $1""",
+        brand_id,
+    )
+    if program is None:
+        raise LoyaltyError(404, "not_found", "This brand does not have a loyalty program.")
+    if program["status"] != "active" or program["plan_status"] != "active":
+        raise LoyaltyError(409, "inactive", "This loyalty program is not currently active.")
+
     canonical = canonicalize_social_url(data.platform, data.post_url)
     row = await conn.fetchrow(
         """INSERT INTO tellus_loyalty_social_submissions

@@ -92,15 +92,15 @@ export function Layout({ children }: { children: ReactNode }) {
   // right after the existing /boards entry.
   const consumerNav = moderatesBoard
     ? [
-        ...CONSUMER_NAV.slice(0, 7),
+        ...CONSUMER_NAV.slice(0, 8),
         { to: '/brand/board', label: 'Regulars', icon: Users },
-        ...CONSUMER_NAV.slice(7),
+        ...CONSUMER_NAV.slice(8),
       ]
     : CONSUMER_NAV
   const brandNav = isBrand && account?.brand_id
     ? [...BRAND_NAV.slice(0, 1), { to: `/brand/${account.brand_id}/loyalty`, label: 'Loyalty', icon: Star }, ...BRAND_NAV.slice(1)]
     : BRAND_NAV
-  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? brandNav : (commsBrands.length ? [...consumerNav.slice(0, 7), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(7)] : consumerNav)
+  const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? brandNav : (commsBrands.length ? [...consumerNav.slice(0, 8), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(8)] : consumerNav)
   const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav
 
   useEffect(() => {

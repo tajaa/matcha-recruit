@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CreditCard, Gift, QrCode } from 'lucide-react'
 import { loyaltyApi } from '../../api/loyalty'
@@ -10,20 +10,35 @@ export default function LoyaltyBrand() {
   const [program, setProgram] = useState<LoyaltyProgram | null>(null)
   const [ledger, setLedger] = useState<LoyaltyLedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
+  const [redeemingId, setRedeemingId] = useState<string | null>(null)
+  const requestIdsRef = useRef(new Map<string, string>())
   useEffect(() => {
+    setLoadError('')
     Promise.all([loyaltyApi.getProgram(brandId), loyaltyApi.listLedger(brandId, 20)])
       .then(([nextProgram, nextLedger]) => { setProgram(nextProgram); setLedger(nextLedger) })
+      .catch((error) => setLoadError(error instanceof Error ? error.message : 'Could not load this loyalty program.'))
       .finally(() => setLoading(false))
   }, [brandId])
   async function redeem(rewardId: string) {
+    if (redeemingId) return
+    let requestId = requestIdsRef.current.get(rewardId)
+    if (!requestId) {
+      requestId = crypto.randomUUID()
+      requestIdsRef.current.set(rewardId, requestId)
+    }
     setMessage('')
+    setRedeemingId(rewardId)
     try {
-      await loyaltyApi.issueRedemption(brandId, rewardId, crypto.randomUUID())
+      await loyaltyApi.issueRedemption(brandId, rewardId, requestId)
+      requestIdsRef.current.delete(rewardId)
       setMessage('Reward issued. Open your redemptions to show it at the counter.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Could not issue reward.') }
+    finally { setRedeemingId(null) }
   }
-  if (loading || !program) return <Spinner />
+  if (loading) return <Spinner />
+  if (loadError || !program) return <Empty>{loadError || 'Could not load this loyalty program.'}</Empty>
   const balance = program.balance
   return (
     <div className="space-y-6">
@@ -38,7 +53,7 @@ export default function LoyaltyBrand() {
         <p className="mt-2 text-xs text-tu-faint">{balance?.lifetime_points.toLocaleString() ?? 0} lifetime {program.point_plural}</p>
       </Card>
       <section><h2 className="mb-3 flex items-center gap-2 text-sm font-bold"><Gift className="h-4 w-4 text-tu-accent" /> Rewards</h2>
-        {program.rewards.length === 0 ? <Empty>No rewards published yet.</Empty> : <div className="grid gap-3 sm:grid-cols-2">{program.rewards.map((reward) => <Card key={reward.id}><p className="font-semibold">{reward.title}</p><p className="mt-1 text-sm text-tu-dim">{reward.description}</p><div className="mt-4 flex items-center justify-between"><span className="text-sm font-bold text-tu-accent">{reward.points_cost} points</span><Button size="sm" onClick={() => void redeem(reward.id)} disabled={(balance?.points_balance ?? 0) < reward.points_cost}>Redeem</Button></div></Card>)}</div>}
+        {program.rewards.length === 0 ? <Empty>No rewards published yet.</Empty> : <div className="grid gap-3 sm:grid-cols-2">{program.rewards.map((reward) => <Card key={reward.id}><p className="font-semibold">{reward.title}</p><p className="mt-1 text-sm text-tu-dim">{reward.description}</p><div className="mt-4 flex items-center justify-between"><span className="text-sm font-bold text-tu-accent">{reward.points_cost} points</span><Button size="sm" onClick={() => void redeem(reward.id)} disabled={(balance?.points_balance ?? 0) < reward.points_cost || redeemingId !== null}>{redeemingId === reward.id ? 'Redeeming…' : 'Redeem'}</Button></div></Card>)}</div>}
       </section>
       <section><h2 className="mb-3 flex items-center gap-2 text-sm font-bold"><CreditCard className="h-4 w-4 text-tu-accent" /> Activity</h2><Card className="p-0">{ledger.length === 0 ? <p className="p-5 text-sm text-tu-faint">No brand activity yet.</p> : <ul className="divide-y divide-tu-border">{ledger.map((entry) => <li key={entry.id} className="flex justify-between px-5 py-3 text-sm"><span className="text-tu-dim">{entry.description ?? entry.reason}</span><span className={entry.delta > 0 ? 'font-semibold text-tu-good' : 'font-semibold text-tu-bad'}>{entry.delta > 0 ? '+' : ''}{entry.delta}</span></li>)}</ul>}</Card></section>
     </div>

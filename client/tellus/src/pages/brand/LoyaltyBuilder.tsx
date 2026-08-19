@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Check, Plus, Save } from 'lucide-react'
 import { ApiError } from '../../api/tellusClient'
 import { loyaltyApi } from '../../api/loyalty'
-import { Button, Card, ErrorText, Input, Select, Spinner, Textarea } from '../../components/ui'
+import { Button, Card, Empty, ErrorText, Input, Select, Spinner, Textarea } from '../../components/ui'
 import type { LoyaltyCounterMode, LoyaltyEventKey, LoyaltyProgram } from '../../api/types'
 
 const EVENTS: LoyaltyEventKey[] = ['visit', 'purchase', 'review', 'board_reply', 'follow', 'social_post']
@@ -80,7 +80,7 @@ export default function LoyaltyBuilder() {
     finally { setBusy(false) }
   }
 
-  if (!program) return <Spinner />
+  if (!program) return error ? <Empty>{error}</Empty> : <Spinner />
   return (
     <div className="space-y-6">
       <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-tu-accent">Brand loyalty</p><h1 className="mt-2 text-2xl font-black">Build your program</h1><p className="mt-1 text-sm text-tu-dim">Set the rules customers see at the counter and in the app.</p></div>
