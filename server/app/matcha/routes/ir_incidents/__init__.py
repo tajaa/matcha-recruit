@@ -82,6 +82,9 @@ router.include_router(_claims_readiness_router)
 from .voice import router as _voice_router
 router.include_router(_voice_router)
 
+from .chat_intake import router as _chat_intake_router
+router.include_router(_chat_intake_router)
+
 from .broker_sharing import router as _broker_sharing_router
 router.include_router(_broker_sharing_router)
 

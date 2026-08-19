@@ -159,6 +159,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # only POST /ir/incidents/voice/parse + the "Dictate" button (stacks on the
     # incidents gate). Default off; admin-toggle; NOT in any tier overlay.
     "ir_voice_intake": False,
+    # Conversational "chat instead of the wizard" incident intake — one short
+    # question at a time, one Gemini flash-lite call per turn
+    # (services/ir/ir_chat_intake.py). Lands the user on the create wizard's
+    # review step to confirm/edit before submitting, same invariant as
+    # ir_voice_intake — never auto-creates the incident. Gates only
+    # POST /ir/incidents/chat/turn + the chat entry button (stacks on the
+    # incidents gate). Default off; admin-toggle; NOT bundled.
+    "ir_chat_intake": False,
     # Scheduled handbook-freshness monitoring ("handbook watch"). Gates ONLY the
     # per-company sweep in the handbook_freshness Celery worker (+ its alert
     # emails) — the manual POST /handbooks/{id}/freshness-check stays free with

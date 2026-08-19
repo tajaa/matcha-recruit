@@ -85,6 +85,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
     label: 'AI Pilots',
     features: {
       ir_voice_intake: 'IR Voice Intake (dictate on create + magic-link forms)',
+      ir_chat_intake: 'IR Chat Intake (conversational AI fills the report)',
       legal_defense: 'Legal Pilot (AI litigation-evidence packets)',
       handbook_pilot: 'Handbook Pilot (AI handbook/policy generation)',
       analysis_pilot: 'Analysis Pilot (general data-analysis chat — CSV/XLSX/PDF, deterministic metrics)',

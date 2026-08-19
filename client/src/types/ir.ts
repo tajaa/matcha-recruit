@@ -81,6 +81,22 @@ export type VoicePrefill = {
   available: boolean
   model: string
 }
+export type ChatIntakeFields = {
+  reported_by_name: string | null
+  occurred_at_text: string | null
+  location_id: string | null
+  description: string | null
+  witnesses: { name: string }[]
+}
+export type ChatIntakeMessage = { role: 'assistant' | 'user'; content: string }
+export type ChatIntakeTurnResponse = {
+  assistant_message: string
+  fields: ChatIntakeFields
+  complete: boolean
+  turn_count: number
+  error?: boolean
+}
+
 export type IRDocumentType = 'photo' | 'form' | 'statement' | 'other'
 
 // ── Core models ──
