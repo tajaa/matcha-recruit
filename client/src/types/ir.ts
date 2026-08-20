@@ -97,6 +97,25 @@ export type ChatIntakeTurnResponse = {
   error?: boolean
 }
 
+export type PublicChatIntakeMessage = { role: 'assistant' | 'user'; content: string }
+export type PublicChatIntakeFields = {
+  reported_by_name: string | null
+  occurred_at_text: string | null
+  location: string | null
+  description: string | null
+  witnesses: { name: string }[]
+  involved_parties: string | null
+  contact_info: string | null
+  corrective_actions: string | null
+}
+export type PublicChatIntakeTurnResponse = {
+  assistant_message: string
+  fields: PublicChatIntakeFields
+  complete: boolean
+  turn_count: number
+  error: boolean
+}
+
 export type IRDocumentType = 'photo' | 'form' | 'statement' | 'other'
 
 // ── Core models ──

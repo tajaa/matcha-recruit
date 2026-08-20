@@ -3,8 +3,10 @@ import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin, Paperclip, X } from 'lucide-react'
 import { IRPersonMultiSelect } from '../../components/ir/IRPersonMultiSelect'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
+import { IRPublicChatIntake } from '../../components/ir/IRPublicChatIntake'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 import { API_BASE } from '../../api/client'
+import type { PublicChatIntakeFields } from '../../types/ir'
 const inputCls =
   'mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700'
 
@@ -15,11 +17,12 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024
 const ACCEPT = '.jpg,.jpeg,.png,.gif,.pdf,.txt,.doc,.docx'
 
-type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submitted' | 'error'
+type Stage = 'validating' | 'invalid' | 'used' | 'chat' | 'form' | 'submitting' | 'submitted' | 'error'
 
 type IntakeInfo = {
   company_name: string | null
   voice_enabled?: boolean
+  chat_enabled?: boolean
   location: { id: string | null; name: string | null; label: string }
 }
 
@@ -31,6 +34,7 @@ type IntakeInfo = {
 export default function LocationIntake() {
   const { token } = useParams<{ token: string }>()
   const [stage, setStage] = useState<Stage>('validating')
+  const [chatMode, setChatMode] = useState(false)
   const [info, setInfo] = useState<IntakeInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -80,7 +84,8 @@ export default function LocationIntake() {
         if (res.ok) {
           const data = (await res.json().catch(() => null)) as IntakeInfo | null
           setInfo(data)
-          setStage('form')
+          setChatMode(Boolean(data?.chat_enabled))
+          setStage(data?.chat_enabled ? 'chat' : 'form')
           return
         }
         if (res.status === 410) {
@@ -92,12 +97,16 @@ export default function LocationIntake() {
       .catch(() => setStage('invalid'))
   }, [token])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!reportedByName.trim() || description.trim().length < 10) return
+  async function submitReport(fields?: PublicChatIntakeFields) {
+    const nextName = fields?.reported_by_name ?? reportedByName
+    const nextDescription = fields?.description ?? description
+    if (!nextName.trim() || nextDescription.trim().length < 10) return
     setStage('submitting')
     setError(null)
     try {
+      const nextOccurredAt = fields?.occurred_at_text ?? occurredAt
+      const nextWitnesses = fields ? fields.witnesses.map((w) => w.name) : witnesses
+      const nextStepsValue = fields?.corrective_actions ?? nextSteps
       // Multipart: the report itself rides as a JSON `payload` field so the
       // server-side model keeps its shape, with attachments alongside it. One
       // request — the incident and its files land together or not at all.
@@ -105,11 +114,11 @@ export default function LocationIntake() {
       fd.append(
         'payload',
         JSON.stringify({
-          description: description.trim(),
-          reported_by_name: reportedByName.trim(),
-          occurred_at: occurredAt.trim() || null,
-          witnesses,
-          corrective_actions: nextSteps.trim() || null,
+          description: nextDescription.trim(),
+          reported_by_name: nextName.trim(),
+          occurred_at: nextOccurredAt.trim() || null,
+          witnesses: nextWitnesses,
+          corrective_actions: nextStepsValue.trim() || null,
           internal_ref: honeypot,
           ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
@@ -128,6 +137,11 @@ export default function LocationIntake() {
       setError('Network error. Please try again.')
       setStage('error')
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await submitReport()
   }
 
   if (stage === 'validating') {
@@ -164,6 +178,31 @@ export default function LocationIntake() {
         <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
         <h1 className="text-lg font-semibold text-zinc-100 mb-2">Report submitted</h1>
         <p className="text-sm text-zinc-400">Your report has been received. Thank you.</p>
+      </Shell>
+    )
+  }
+
+  if (chatMode) {
+    return (
+      <Shell wide>
+        <IRPublicChatIntake
+          kind="intake"
+          token={token ?? ''}
+          companyName={info?.company_name}
+          locationLabel={info?.location.label}
+          submitting={stage === 'submitting'}
+          submitError={error}
+          onSubmit={(fields) => { void submitReport(fields) }}
+          reviewExtras={
+            <div>
+              <span className="text-xs uppercase tracking-wide text-zinc-400">Photos or documents <span className="ml-1 normal-case tracking-normal text-zinc-600">(optional)</span></span>
+              <span className="block text-[11px] text-zinc-500">Up to {MAX_FILES} files, {MAX_FILE_BYTES / (1024 * 1024)} MB each.</span>
+              {files.length < MAX_FILES && <label className="mt-2 flex cursor-pointer items-center justify-center gap-2 rounded border border-dashed border-zinc-800 px-3 py-3 transition-colors hover:border-zinc-700"><Paperclip className="h-4 w-4 text-zinc-500" /><span className="text-sm text-zinc-400">Add photos or documents</span><input type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} /></label>}
+              {files.length > 0 && <ul className="mt-2 divide-y divide-zinc-800/60 rounded border border-zinc-800">{files.map((f) => <li key={`${f.name}-${f.size}`} className="flex items-center justify-between gap-3 px-3 py-2"><span className="truncate text-sm text-zinc-300">{f.name}</span><button type="button" aria-label={`Remove ${f.name}`} onClick={() => { setFileError(null); setFiles((prev) => prev.filter((p) => p !== f)) }} className="text-zinc-600 hover:text-red-400"><X className="h-3.5 w-3.5" /></button></li>)}</ul>}
+              {fileError && <p className="mt-2 text-sm text-red-400">{fileError}</p>}
+            </div>
+          }
+        />
       </Shell>
     )
   }

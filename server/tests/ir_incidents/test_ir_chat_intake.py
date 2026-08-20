@@ -8,8 +8,11 @@ exercised by a manual dev smoke, same posture as test_ir_voice_parser.py.
 
 from app.matcha.services.ir.ir_chat_intake import (
     MAX_WITNESSES,
+    _build_public_turn_prompt,
     _coerce_chat_fields,
+    _coerce_public_chat_fields,
     _is_complete,
+    _public_chat_is_complete,
     _required_fields,
 )
 
@@ -118,3 +121,63 @@ def test_is_complete_waives_location_when_no_locations_on_file():
         "witnesses": [],
     }
     assert _is_complete(fields, []) is True
+
+
+def test_public_anonymous_chat_requires_only_description():
+    fields = _coerce_public_chat_fields(
+        {"description": "A box fell from a shelf."},
+        {},
+        intake_kind="anonymous",
+    )
+    assert _public_chat_is_complete(fields, intake_kind="anonymous") is True
+    assert fields["reported_by_name"] is None
+
+
+def test_public_location_chat_requires_reporter_and_description():
+    fields = _coerce_public_chat_fields(
+        {"description": "A box fell from a shelf."},
+        {},
+        intake_kind="location",
+    )
+    assert _public_chat_is_complete(fields, intake_kind="location") is False
+    fields = _coerce_public_chat_fields(
+        {"reported_by_name": "Jane Doe", "description": "A box fell from a shelf."},
+        fields,
+        intake_kind="location",
+    )
+    assert _public_chat_is_complete(fields, intake_kind="location") is True
+
+
+def test_public_location_chat_never_accepts_location_or_location_id():
+    fields = _coerce_public_chat_fields(
+        {"location": "Back room", "location_id": "not-client-controlled", "description": "A box fell."},
+        {},
+        intake_kind="location",
+    )
+    assert fields["location"] is None
+    assert "location_id" not in fields
+
+
+def test_public_chat_preserves_known_fields_and_deduplicates_witnesses():
+    known = {
+        "reported_by_name": "Jane Doe",
+        "description": "A box fell.",
+        "witnesses": [{"name": "Bob Smith"}],
+    }
+    fields = _coerce_public_chat_fields(
+        {"reported_by_name": "", "witnesses": [{"name": " bob smith "}, {"name": "Sam Lee"}]},
+        known,
+        intake_kind="location",
+    )
+    assert fields["reported_by_name"] == "Jane Doe"
+    assert fields["description"] == "A box fell."
+    assert fields["witnesses"] == [{"name": "Bob Smith"}, {"name": "Sam Lee"}]
+
+
+def test_public_chat_prompt_does_not_request_anonymous_identity():
+    prompt = _build_public_turn_prompt(
+        [{"role": "assistant", "content": "Tell me what happened."}],
+        {},
+        intake_kind="anonymous",
+    )
+    assert "Do not ask for the reporter's name" in prompt

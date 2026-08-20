@@ -248,7 +248,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `driver_risk` | ❌ | Driver/fleet MVR scoring (shared `mvr_reviews` table) → fleet grade + insurer PDF. NOT bundled. → `server/app/matcha/services/insurance/CLAUDE.md` |
 | `property` | ❌ | Commercial property — SOV/COPE grading, TIV/ITV, geocoded cat perils. NOT bundled. → `server/app/matcha/services/property/CLAUDE.md` |
 | `ir_voice_intake` | ❌ | Voice dictation on the IR create form — Gemini prefills fields, user reviews before submit. NOT bundled. → `server/app/matcha/routes/ir_incidents/CLAUDE.md` |
-| `ir_chat_intake` | ❌ | Conversational "chat instead of the wizard" IR intake — one Gemini flash-lite call per turn asks a question, fills fields, lands on the create wizard's review step. NOT bundled. → `server/app/matcha/routes/ir_incidents/CLAUDE.md` |
+| `ir_chat_intake` | ❌ | Conversational IR intake for authenticated reports and public magic links — one Gemini flash-lite call per turn asks a question, fills fields, lands on an editable review step, and never auto-submits. NOT bundled. → `server/app/matcha/routes/ir_incidents/CLAUDE.md` |
 | `handbook_watch` | ❌ | Scheduled handbook-freshness sweeps + alerts (manual check stays free with `handbooks`). Lite-family paid add-on. → `server/app/workers/CLAUDE.md` |
 | `legal_defense` | ❌ | Legal Pilot — grounded legal-matter chat, citation-gated defense-memo PDF + evidence ZIP. Routes `/legal-pilot/*`. NOT bundled. → `server/app/matcha/services/pilots/CLAUDE.md` |
 | `handbook_pilot` | ❌ | Handbook Pilot — grounded drafting of sections/policies, citation-gated, promotes into real tables. In `matcha_x` overlay + Pro. → `server/app/matcha/services/pilots/CLAUDE.md` |

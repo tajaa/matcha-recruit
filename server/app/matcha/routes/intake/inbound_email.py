@@ -21,7 +21,14 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 from ....database import get_connection
 from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.core.services.storage import get_storage
+from app.matcha.models.ir.chat_intake import (
+    MAX_PUBLIC_CHAT_BODY_BYTES,
+    MAX_PUBLIC_CHAT_MESSAGES,
+    PublicChatIntakeTurnRequest,
+    PublicChatIntakeTurnResponse,
+)
 from app.matcha.models.ir.incident import Witness
+from app.matcha.services.ir.ir_chat_intake import next_public_turn
 from app.matcha.services.ir.ir_voice_parser import parse_voice_incident
 from ..ir_incidents import (
     MAX_INTAKE_FILES,
@@ -86,6 +93,32 @@ async def _voice_parse_budget(ip: str, token: str, company_id: str) -> None:
     all of a company's links, regardless of how many IPs the attacker rotates."""
     await check_rate_limit(token, "ir_voice_parse_link", 15, 3600)
     await check_rate_limit(company_id, "ir_voice_parse_co", 120, 3600)
+
+
+async def _public_chat_budget(token: str, company_id: str, kind: str) -> None:
+    """Bound Gemini turns after the route's pre-lookup IP limits run."""
+    await check_rate_limit(token, f"ir_{kind}_chat_link", 36, 3600)
+    await check_rate_limit(company_id, f"ir_{kind}_chat_company", 180, 3600)
+
+
+async def _read_public_chat_turn(request: Request) -> PublicChatIntakeTurnRequest:
+    """Apply the same 8 KiB boundary the Cappe public AI endpoints use.
+
+    FastAPI would otherwise parse the full body before Pydantic's per-field
+    limits run. These public token links do not sit behind Cappe's CloudFront
+    WAF, so the application must own the body ceiling.
+    """
+    raw = await request.body()
+    if len(raw) > MAX_PUBLIC_CHAT_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Chat message is too large")
+    try:
+        payload = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=422, detail="Malformed chat message")
+    try:
+        return PublicChatIntakeTurnRequest.model_validate(payload)
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors())
 
 
 # ---------------------------------------------------------------------------
@@ -164,8 +197,51 @@ async def validate_report_token(token: str):
         )
     if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
-    voice_enabled = bool(_features_dict(row["enabled_features"]).get("ir_voice_intake", False))
-    return {"valid": True, "voice_enabled": voice_enabled}
+    features = _features_dict(row["enabled_features"])
+    return {
+        "valid": True,
+        "voice_enabled": bool(features.get("ir_voice_intake", False)),
+        "chat_enabled": bool(features.get("ir_chat_intake", False)),
+    }
+
+
+@router.post("/report/{token}/chat/turn", response_model=PublicChatIntakeTurnResponse)
+async def anonymous_report_chat_turn(token: str, request: Request):
+    """One token-scoped chat turn for an anonymous incident report.
+
+    The token is the only public capability. The transcript remains in the
+    browser and this endpoint never writes an incident.
+    """
+    body = await _read_public_chat_turn(request)
+    ip = client_ip(request)
+    await check_rate_limit(ip, "ir_report_chat_burst", 6, 60)
+    await check_rate_limit(ip, "ir_report_chat_ip", 24, 3600)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, enabled_features FROM companies WHERE report_email_token = $1", token,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    features = _features_dict(row["enabled_features"])
+    if not _public_intake_allowed(features):
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    if not features.get("ir_chat_intake", False):
+        raise HTTPException(status_code=403, detail="AI chat is not enabled for this reporting link")
+    await _public_chat_budget(token, str(row["id"]), "report")
+    turn_count = len(body.transcript)
+    if turn_count >= MAX_PUBLIC_CHAT_MESSAGES:
+        return PublicChatIntakeTurnResponse(
+            assistant_message="Let's review what you have.",
+            fields=body.known_fields,
+            complete=True,
+            turn_count=turn_count,
+        )
+    result = await next_public_turn(
+        [message.model_dump() for message in body.transcript],
+        body.known_fields.model_dump(),
+        intake_kind="anonymous",
+    )
+    return PublicChatIntakeTurnResponse(**result, turn_count=turn_count)
 
 
 @router.post("/report/{token}")
@@ -381,11 +457,12 @@ async def validate_location_intake_token(token: str):
                 "SELECT name, city, state FROM business_locations WHERE id = $1",
                 row["location_id"],
             )
-    voice_enabled = bool(_features_dict(features).get("ir_voice_intake", False))
+    public_features = _features_dict(features)
     return {
         "valid": True,
         "company_name": row["company_name"],
-        "voice_enabled": voice_enabled,
+        "voice_enabled": bool(public_features.get("ir_voice_intake", False)),
+        "chat_enabled": bool(public_features.get("ir_chat_intake", False)),
         "location": {
             "id": str(row["location_id"]) if row["location_id"] else None,
             "name": loc["name"] if loc else None,
@@ -396,6 +473,49 @@ async def validate_location_intake_token(token: str):
             ),
         },
     }
+
+
+@router.post("/intake/{token}/chat/turn", response_model=PublicChatIntakeTurnResponse)
+async def location_report_chat_turn(token: str, request: Request):
+    """One token-scoped chat turn for a location-locked incident report."""
+    body = await _read_public_chat_turn(request)
+    ip = client_ip(request)
+    await check_rate_limit(ip, "ir_intake_chat_burst", 6, 60)
+    await check_rate_limit(ip, "ir_intake_chat_ip", 24, 3600)
+    async with get_connection() as conn:
+        link = await conn.fetchrow(
+            """
+            SELECT rl.is_active, rl.expires_at, rl.max_uses, rl.use_count,
+                   c.id AS company_id, c.enabled_features
+            FROM ir_report_links rl
+            JOIN companies c ON c.id = rl.company_id
+            WHERE rl.token = $1
+            """,
+            token,
+        )
+    if not link:
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    features = _features_dict(link["enabled_features"])
+    if not _public_intake_allowed(features):
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    _check_link_usable(link)
+    if not features.get("ir_chat_intake", False):
+        raise HTTPException(status_code=403, detail="AI chat is not enabled for this reporting link")
+    await _public_chat_budget(token, str(link["company_id"]), "intake")
+    turn_count = len(body.transcript)
+    if turn_count >= MAX_PUBLIC_CHAT_MESSAGES:
+        return PublicChatIntakeTurnResponse(
+            assistant_message="Let's review what you have.",
+            fields=body.known_fields,
+            complete=True,
+            turn_count=turn_count,
+        )
+    result = await next_public_turn(
+        [message.model_dump() for message in body.transcript],
+        body.known_fields.model_dump(),
+        intake_kind="location",
+    )
+    return PublicChatIntakeTurnResponse(**result, turn_count=turn_count)
 
 
 async def _parse_intake_body(

@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, ShieldCheck } from 'lucide-react'
 import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
+import { IRPublicChatIntake } from '../../components/ir/IRPublicChatIntake'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 import { API_BASE } from '../../api/client'
-type Stage = 'validating' | 'invalid' | 'form' | 'submitting' | 'submitted' | 'error'
+import type { PublicChatIntakeFields } from '../../types/ir'
+type Stage = 'validating' | 'invalid' | 'chat' | 'form' | 'submitting' | 'submitted' | 'error'
 
 export default function AnonymousReport() {
   const { token } = useParams<{ token: string }>()
   const [stage, setStage] = useState<Stage>('validating')
+  const [chatMode, setChatMode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [description, setDescription] = useState('')
   const [occurredAt, setOccurredAt] = useState('')
@@ -30,9 +33,10 @@ export default function AnonymousReport() {
     fetch(`${API_BASE}/report/${token}`)
       .then(async (res) => {
         if (res.ok) {
-          const data = (await res.json().catch(() => null)) as { voice_enabled?: boolean } | null
+          const data = (await res.json().catch(() => null)) as { voice_enabled?: boolean; chat_enabled?: boolean } | null
           setVoiceEnabled(Boolean(data?.voice_enabled))
-          setStage('form')
+          setChatMode(Boolean(data?.chat_enabled))
+          setStage(data?.chat_enabled ? 'chat' : 'form')
           return
         }
         setStage('invalid')
@@ -40,21 +44,25 @@ export default function AnonymousReport() {
       .catch(() => setStage('invalid'))
   }, [token])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (description.trim().length < 10) return
+  async function submitReport(fields?: PublicChatIntakeFields) {
+    const nextDescription = fields?.description ?? description
+    if (nextDescription.trim().length < 10) return
     setStage('submitting')
     setError(null)
     try {
+      const nextOccurredAt = fields?.occurred_at_text ?? occurredAt
+      const nextLocation = fields?.location ?? location
+      const nextInvolved = fields?.involved_parties ?? involvedParties
+      const nextContact = fields?.contact_info ?? contactInfo
       const res = await fetch(`${API_BASE}/report/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          description: description.trim(),
-          occurred_at: occurredAt.trim() || null,
-          location: location.trim() || null,
-          involved_parties: involvedParties.trim() || null,
-          contact_info: contactInfo.trim() || null,
+          description: nextDescription.trim(),
+          occurred_at: nextOccurredAt.trim() || null,
+          location: nextLocation.trim() || null,
+          involved_parties: nextInvolved.trim() || null,
+          contact_info: nextContact.trim() || null,
           internal_ref: honeypot,
           ...(voiceTranscript ? { voice_transcript: voiceTranscript } : {}),
         }),
@@ -70,6 +78,11 @@ export default function AnonymousReport() {
       setError('Network error. Please try again.')
       setStage('error')
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    await submitReport()
   }
 
   if (stage === 'validating') {
@@ -96,6 +109,20 @@ export default function AnonymousReport() {
         <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
         <h1 className="text-lg font-semibold text-zinc-100 mb-2">Report submitted</h1>
         <p className="text-sm text-zinc-400">Your report has been received. Thank you.</p>
+      </Shell>
+    )
+  }
+
+  if (chatMode) {
+    return (
+      <Shell wide>
+        <IRPublicChatIntake
+          kind="report"
+          token={token ?? ''}
+          submitting={stage === 'submitting'}
+          submitError={error}
+          onSubmit={(fields) => { void submitReport(fields) }}
+        />
       </Shell>
     )
   }

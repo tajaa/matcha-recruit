@@ -10,7 +10,7 @@ unchanged with error=True so the UI can offer "finish in the form".
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 from google.genai import types
 
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 CHAT_TURN_TIMEOUT = 20
 MAX_TURNS = 12
 MAX_WITNESSES = 20
+PublicIntakeKind = Literal["anonymous", "location"]
 
 REQUIRED_FIELDS = ("reported_by_name", "occurred_at_text", "location_id", "description")
 
@@ -188,5 +189,155 @@ async def next_turn(transcript: list[dict], known_fields: dict, *, location_opti
         "assistant_message": assistant_message,
         "fields": fields,
         "complete": _is_complete(fields, location_options),
+        "error": False,
+    }
+
+
+def _public_required_fields(intake_kind: PublicIntakeKind) -> tuple[str, ...]:
+    return ("description",) if intake_kind == "anonymous" else ("reported_by_name", "description")
+
+
+def _public_optional_fields(intake_kind: PublicIntakeKind) -> tuple[str, ...]:
+    if intake_kind == "anonymous":
+        return ("occurred_at_text", "location", "involved_parties", "contact_info")
+    return ("occurred_at_text", "witnesses", "corrective_actions")
+
+
+def _build_public_turn_prompt(
+    transcript: list[dict], known: dict, *, intake_kind: PublicIntakeKind,
+) -> str:
+    required = _public_required_fields(intake_kind)
+    optional = _public_optional_fields(intake_kind)
+    if intake_kind == "anonymous":
+        context = (
+            "This is an anonymous report. Do not ask for the reporter's name. "
+            "Location, involved parties, and follow-up contact are optional."
+        )
+    else:
+        context = (
+            "This report link is already locked to its location. Do not ask where it happened, "
+            "do not mention location identifiers, and never return a location_id."
+        )
+    known_lines = []
+    for key in (
+        "reported_by_name", "occurred_at_text", "location", "description",
+        "witnesses", "involved_parties", "contact_info", "corrective_actions",
+    ):
+        value = known.get(key)
+        if value:
+            known_lines.append(f"- {key}: {value}")
+    known_text = "\n".join(known_lines) or "(nothing yet)"
+    return f"""You are a friendly assistant collecting a workplace incident report through a
+short, private conversation. Ask one short question at a time. Never invent facts,
+never give legal advice, and never say that a report has been submitted.
+
+{context}
+Required before review: {", ".join(required)}.
+Optional fields: {", ".join(optional)}. Ask about each optional field at most once,
+but do not block review when it is skipped. Never ask for an already-known field.
+
+KNOWN FIELDS:
+{known_text}
+
+CONVERSATION SO FAR:
+{_render_transcript(transcript)}
+
+Return ONLY valid JSON with exactly these keys:
+{{"assistant_message": "<next short question, or a short review prompt>",
+  "reported_by_name": "<string or null>",
+  "occurred_at_text": "<string or null>",
+  "location": "<string or null>",
+  "description": "<string or null>",
+  "witnesses": [{{"name": "<string>"}}],
+  "involved_parties": "<string or null>",
+  "contact_info": "<string or null>",
+  "corrective_actions": "<string or null>"}}
+Do not include markdown fences."""
+
+
+def _coerce_public_chat_fields(raw: dict, known: dict, *, intake_kind: PublicIntakeKind) -> dict:
+    """Merge model output over a public draft without accepting irrelevant fields."""
+    limits = {
+        "reported_by_name": 255,
+        "occurred_at_text": 255,
+        "location": 255,
+        "description": 10_000,
+        "involved_parties": 2_000,
+        "contact_info": 255,
+        "corrective_actions": 10_000,
+    }
+    allowed = set(_public_required_fields(intake_kind)) | set(_public_optional_fields(intake_kind))
+    merged = dict(known)
+    for key, limit in limits.items():
+        if key not in allowed:
+            merged[key] = None
+            continue
+        value = raw.get(key)
+        if isinstance(value, str) and (cleaned := value.strip()):
+            merged[key] = cleaned[:limit]
+        else:
+            merged.setdefault(key, None)
+
+    if "witnesses" in allowed:
+        existing = list(known.get("witnesses") or [])
+        seen = {w.get("name", "").strip().lower() for w in existing if isinstance(w, dict)}
+        for witness in raw.get("witnesses") or []:
+            name = witness.get("name") if isinstance(witness, dict) else witness
+            if not isinstance(name, str) or not (cleaned := name.strip()[:255]):
+                continue
+            if cleaned.lower() not in seen:
+                existing.append({"name": cleaned})
+                seen.add(cleaned.lower())
+        merged["witnesses"] = existing[:50]
+    else:
+        merged["witnesses"] = []
+    return merged
+
+
+def _public_chat_is_complete(fields: dict, *, intake_kind: PublicIntakeKind) -> bool:
+    return all(fields.get(key) for key in _public_required_fields(intake_kind))
+
+
+async def next_public_turn(
+    transcript: list[dict], known_fields: dict, *, intake_kind: PublicIntakeKind,
+) -> dict:
+    """One bounded Gemini turn for a public token intake; never persists data."""
+    client = genai_env_client()
+    config = types.GenerateContentConfig(
+        temperature=0.2,
+        response_mime_type="application/json",
+        safety_settings=_VOICE_PARSE_SAFETY_SETTINGS,
+    )
+    try:
+        response = await asyncio.wait_for(
+            client.aio.models.generate_content(
+                model=GEMINI_FLASH_LITE,
+                contents=[_build_public_turn_prompt(transcript, known_fields, intake_kind=intake_kind)],
+                config=config,
+            ),
+            timeout=CHAT_TURN_TIMEOUT,
+        )
+        payload = json.loads((getattr(response, "text", None) or "").strip())
+    except Exception as exc:
+        logger.warning("Public IR chat intake turn failed: %s", exc)
+        return {
+            "assistant_message": "Sorry, having trouble right now. You can review what you have.",
+            "fields": known_fields,
+            "complete": False,
+            "error": True,
+        }
+
+    fields = _coerce_public_chat_fields(
+        payload if isinstance(payload, dict) else {}, known_fields, intake_kind=intake_kind,
+    )
+    assistant_message = payload.get("assistant_message") if isinstance(payload, dict) else None
+    assistant_message = (
+        assistant_message.strip() if isinstance(assistant_message, str) and assistant_message.strip()
+        else "Got it."
+    )
+    return {
+        "assistant_message": assistant_message[:600],
+        "fields": fields,
+        "complete": _public_chat_is_complete(fields, intake_kind=intake_kind),
         "error": False,
     }
