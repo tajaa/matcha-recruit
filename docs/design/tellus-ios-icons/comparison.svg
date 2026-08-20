@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1600 720">
+  <rect width="1600" height="720" fill="#100C16"/>
+  <text x="800" y="70" fill="#FFF0D2" font-family="Arial, sans-serif" font-size="32" font-weight="700" text-anchor="middle">BEETLEJUSE / IOS ICON STUDIES</text>
+  <text x="800" y="108" fill="#B9A7E8" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" letter-spacing="3">PASTEL DIA DE LOS MUERTOS DIRECTIONS</text>
+  <image x="70" y="150" width="440" height="440" preserveAspectRatio="xMidYMid meet" xlink:href="marigold-beetle.svg"/>
+  <image x="580" y="150" width="440" height="440" preserveAspectRatio="xMidYMid meet" xlink:href="calavera-shell.svg"/>
+  <image x="1090" y="150" width="440" height="440" preserveAspectRatio="xMidYMid meet" xlink:href="papel-picado-beetle.svg"/>
+  <g fill="#FFF0D2" font-family="Arial, sans-serif" font-size="18" text-anchor="middle">
+    <text x="290" y="640">01 / MARIGOLD BEETLE</text>
+    <text x="800" y="640">02 / CALAVERA SHELL</text>
+    <text x="1310" y="640">03 / PAPEL PICADO</text>
+  </g>
+</svg>
