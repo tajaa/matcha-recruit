@@ -38,7 +38,8 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
   const [draft, setDraft] = useState<SalesDraft | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [filename, setFilename] = useState<string | null>(null)
-  const [source, setSource] = useState<'upload' | 'email'>('upload')
+  const [source, setSource] = useState<'upload' | 'email' | 'square' | 'toast'>('upload')
+  const [loadedImportId, setLoadedImportId] = useState<string | null>(null)
   const [gmailMessageId, setGmailMessageId] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -53,8 +54,9 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
         const rawLines = (result.raw?.lines ?? result.lines) as SalesLine[]
         setDraft({ business_date: result.business_date, lines: rawLines, available: rawLines.length > 0 })
         setLines(rawLines.map(toDraftLine))
+        setLoadedImportId(result.id)
         setFilename(result.filename)
-        setSource(result.source === 'email' ? 'email' : 'upload')
+        setSource(result.source)
         setGmailMessageId(result.gmail_message_id ?? null)
       })
       .catch(() => toast('Failed to load the sales draft', 'error'))
@@ -63,6 +65,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
   function reset() {
     setDraft(null)
     setLines([])
+    setLoadedImportId(null)
     setFilename(null)
     setSource('upload')
     setGmailMessageId(null)
@@ -81,6 +84,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     setFilename(file.name)
     try {
       const result = await parseSales(file, locationId)
+      setLoadedImportId(null)
       setSource('upload')
       setGmailMessageId(null)
       setDraft(result)
@@ -131,6 +135,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     setCommitting(true)
     try {
       const result = await commitSales({
+        import_id: loadedImportId,
         location_id: locationId,
         business_date: draft.business_date,
         source,

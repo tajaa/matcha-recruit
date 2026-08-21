@@ -102,12 +102,14 @@ def upgrade():
 def downgrade():
     op.execute("DELETE FROM scheduler_settings WHERE task_key='pos_sales_sync'")
     op.execute("DROP INDEX IF EXISTS uniq_inventory_sales_imports_external_batch")
+    op.execute("ALTER TABLE inventory_sales_imports DROP COLUMN IF EXISTS connection_id")
+    op.execute("ALTER TABLE inventory_sales_imports DROP COLUMN IF EXISTS external_batch_id")
     op.execute("DROP TABLE IF EXISTS inventory_pos_sync_runs")
     op.execute("DROP TABLE IF EXISTS inventory_pos_mapping_keys")
     op.execute("DROP TABLE IF EXISTS inventory_pos_location_bindings")
     op.execute("DROP TABLE IF EXISTS inventory_pos_connections")
-    op.execute("ALTER TABLE inventory_sales_imports DROP COLUMN IF EXISTS connection_id")
-    op.execute("ALTER TABLE inventory_sales_imports DROP COLUMN IF EXISTS external_batch_id")
+    # Preserve imported sales rows while restoring the pre-POS source domain.
+    op.execute("UPDATE inventory_sales_imports SET source='upload' WHERE source IN ('square', 'toast')")
     op.execute("ALTER TABLE inventory_sales_imports DROP CONSTRAINT IF EXISTS inventory_sales_imports_source_check")
     op.execute("""
         ALTER TABLE inventory_sales_imports ADD CONSTRAINT inventory_sales_imports_source_check

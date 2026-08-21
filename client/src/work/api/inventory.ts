@@ -307,6 +307,7 @@ export function parseSales(file: File, locationId?: string) {
 }
 
 export function commitSales(body: {
+  import_id?: string | null
   location_id?: string | null
   business_date?: string | null
   source?: 'upload' | 'email' | 'square' | 'toast'

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -6,6 +6,7 @@ import pytest
 from app.matcha.services.inventory.pos import provider_for
 from app.matcha.services.inventory.pos.square import SquareProvider
 from app.matcha.services.inventory.pos.sync import _credentials
+from app.workers.tasks.pos_sales_sync import previous_completed_business_date
 
 
 class FakeSquare(SquareProvider):
@@ -115,3 +116,11 @@ def test_unknown_pos_provider_does_not_claim_to_be_implemented():
 def test_pos_credentials_are_decrypted_before_provider_use():
     credentials = _credentials({"access_token": "plain-token", "refresh_token": None})
     assert credentials == {"access_token": "plain-token", "refresh_token": None}
+
+
+def test_scheduled_sync_uses_each_binding_timezone_for_yesterday():
+    now = datetime(2026, 8, 22, 0, 30, tzinfo=timezone.utc)
+
+    assert previous_completed_business_date("America/Los_Angeles", now) == date(2026, 8, 20)
+    assert previous_completed_business_date("Asia/Tokyo", now) == date(2026, 8, 21)
+    assert previous_completed_business_date("not/a-timezone", now) == date(2026, 8, 21)

@@ -162,6 +162,7 @@ class SalesLine(BaseModel):
 
 
 class SalesCommit(BaseModel):
+    import_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
     business_date: Optional[str] = None
     source: Literal["upload", "email", "square", "toast"] = "upload"

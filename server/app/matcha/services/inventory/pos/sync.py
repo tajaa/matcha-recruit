@@ -7,6 +7,7 @@ from uuid import UUID
 
 from app.core.services.secret_crypto import decrypt_secret, encrypt_secret
 from app.matcha.services.inventory import sales_commit
+from app.matcha.services.inventory.sales_commit import DuplicateSalesPeriodError
 from . import provider_for
 
 
@@ -35,28 +36,53 @@ async def _sync_one_connection(
     connection,
     start_date: date,
     end_date: date,
+    binding_id: Optional[UUID] = None,
 ) -> dict:
     connection_id = connection["id"]
     company_id = connection["company_id"]
     provider_name = connection["provider"]
     provider = provider_for(provider_name)
     credentials = _credentials(_object(connection["secrets"]))
-    bindings = await conn.fetch(
-        """SELECT * FROM inventory_pos_location_bindings
-           WHERE connection_id=$1 AND company_id=$2 ORDER BY id""",
-        connection_id,
-        company_id,
-    )
+    if binding_id is None:
+        bindings = await conn.fetch(
+            """SELECT * FROM inventory_pos_location_bindings
+               WHERE connection_id=$1 AND company_id=$2 ORDER BY id""",
+            connection_id,
+            company_id,
+        )
+    else:
+        bindings = await conn.fetch(
+            """SELECT * FROM inventory_pos_location_bindings
+               WHERE id=$1 AND connection_id=$2 AND company_id=$3""",
+            binding_id,
+            connection_id,
+            company_id,
+        )
     if not bindings:
         raise ValueError("Connect at least one POS location before syncing")
     mapping_rows = await conn.fetch(
-        """SELECT external_item_id, mapping_id
-           FROM inventory_pos_mapping_keys
-           WHERE connection_id=$1 AND company_id=$2""",
+        """SELECT k.external_item_id, k.mapping_id, m.kind,
+                  COALESCE(jsonb_agg(jsonb_build_object(
+                      'item_id', l.item_id,
+                      'quantity_per_sale', l.quantity_per_sale,
+                      'unit', l.unit
+                  ) ORDER BY l.created_at) FILTER (WHERE l.id IS NOT NULL), '[]'::jsonb) AS components
+           FROM inventory_pos_mapping_keys k
+           JOIN inventory_sales_mappings m ON m.id=k.mapping_id
+           LEFT JOIN inventory_sales_mapping_lines l ON l.mapping_id=m.id
+           WHERE k.connection_id=$1 AND k.company_id=$2
+           GROUP BY k.external_item_id, k.mapping_id, m.kind""",
         connection_id,
         company_id,
     )
-    mapping_by_external_id = {row["external_item_id"]: row["mapping_id"] for row in mapping_rows}
+    mapping_by_external_id = {
+        row["external_item_id"]: {
+            "mapping_id": row["mapping_id"],
+            "kind": row["kind"],
+            "components": row["components"] or [],
+        }
+        for row in mapping_rows
+    }
     run = await conn.fetchrow(
         """
         INSERT INTO inventory_pos_sync_runs (connection_id, company_id, start_date, end_date)
@@ -67,7 +93,14 @@ async def _sync_one_connection(
         start_date,
         end_date,
     )
-    result = {"sync_run_id": run["id"], "days_seen": 0, "imports_created": 0, "drafts_created": 0, "unmapped_lines": 0}
+    result = {
+        "sync_run_id": run["id"],
+        "days_seen": 0,
+        "imports_created": 0,
+        "drafts_created": 0,
+        "duplicates_skipped": 0,
+        "unmapped_lines": 0,
+    }
     try:
         for binding in bindings:
             days = await provider.fetch_finalized_sales(
@@ -81,30 +114,39 @@ async def _sync_one_connection(
                 result["days_seen"] += 1
                 lines = []
                 for line in day.lines:
-                    mapping_id = mapping_by_external_id.get(line.external_item_id)
+                    mapping = mapping_by_external_id.get(line.external_item_id)
+                    mapping_id = mapping["mapping_id"] if mapping else None
                     lines.append({
                         "sold_name": line.name,
                         "quantity": float(line.quantity),
                         "gross_sales": float(line.gross_sales) if line.gross_sales is not None else None,
                         "mapping_id": mapping_id,
-                        "status": "mapped" if mapping_id else "unmapped",
+                        "components": mapping["components"] if mapping else [],
+                        "status": (
+                            "ignored" if mapping and mapping["kind"] == "ignore"
+                            else "mapped" if mapping_id else "unmapped"
+                        ),
                     })
-                committed = await sales_commit.commit_sales_import(
-                    conn,
-                    company_id=company_id,
-                    user_id=None,
-                    location_id=binding["location_id"],
-                    business_date=day.business_date,
-                    source=provider_name,
-                    filename=f"{provider_name}:{day.external_batch_id}",
-                    gmail_message_id=None,
-                    force=False,
-                    lines=lines,
-                    note=f"{provider_name.title()} finalized sales sync",
-                    raw={"external_batch_id": day.external_batch_id, "lines": lines},
-                    connection_id=connection_id,
-                    external_batch_id=day.external_batch_id,
-                )
+                try:
+                    committed = await sales_commit.commit_sales_import(
+                        conn,
+                        company_id=company_id,
+                        user_id=None,
+                        location_id=binding["location_id"],
+                        business_date=day.business_date,
+                        source=provider_name,
+                        filename=f"{provider_name}:{day.external_batch_id}",
+                        gmail_message_id=None,
+                        force=False,
+                        lines=lines,
+                        note=f"{provider_name.title()} finalized sales sync",
+                        raw={"external_batch_id": day.external_batch_id, "lines": lines},
+                        connection_id=connection_id,
+                        external_batch_id=day.external_batch_id,
+                    )
+                except DuplicateSalesPeriodError:
+                    result["duplicates_skipped"] += 1
+                    continue
                 if committed.get("duplicate"):
                     continue
                 if committed.get("unmapped"):
@@ -151,7 +193,15 @@ async def _sync_one_connection(
     return result
 
 
-async def sync_pos_connection(conn, *, connection_id: UUID, company_id: UUID, start_date: date, end_date: date) -> dict:
+async def sync_pos_connection(
+    conn,
+    *,
+    connection_id: UUID,
+    company_id: UUID,
+    start_date: date,
+    end_date: date,
+    binding_id: Optional[UUID] = None,
+) -> dict:
     if end_date < start_date:
         raise ValueError("end_date must be on or after start_date")
     if (end_date - start_date).days > 31:
@@ -169,4 +219,5 @@ async def sync_pos_connection(conn, *, connection_id: UUID, company_id: UUID, st
         connection=connection,
         start_date=start_date,
         end_date=end_date,
+        binding_id=binding_id,
     )

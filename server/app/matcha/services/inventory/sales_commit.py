@@ -51,22 +51,45 @@ async def commit_sales_import(
     conn, *, company_id: UUID, user_id: Optional[UUID], location_id: Optional[UUID],
     business_date, source: str, filename: Optional[str], gmail_message_id: Optional[str],
     force: bool, lines: list[dict], note: Optional[str] = None, raw: Optional[dict] = None,
+    import_id: Optional[UUID] = None,
     connection_id: Optional[UUID] = None, external_batch_id: Optional[str] = None,
 ) -> dict:
     business_date = _date_value(business_date)
     existing_import = None
-    if gmail_message_id:
+    if import_id:
         existing_import = await conn.fetchrow(
-            "SELECT id, status, location_id, business_date FROM inventory_sales_imports "
-            "WHERE company_id=$1 AND gmail_message_id=$2",
+            "SELECT id, status, location_id, business_date, source, connection_id, external_batch_id "
+            "FROM inventory_sales_imports WHERE id=$1 AND company_id=$2",
+            import_id, company_id,
+        )
+        if existing_import is None:
+            raise ValueError("sales import not found")
+        if existing_import["status"] == "committed":
+            return {"import_id": existing_import["id"], "total": 0, "mapped": 0,
+                    "unmapped": 0, "items_affected": 0, "errors": [], "duplicate": True}
+        if existing_import["status"] != "draft":
+            raise ValueError("Sales import was already discarded.")
+        source = existing_import["source"]
+        location_id = existing_import["location_id"]
+        if business_date is None:
+            business_date = existing_import["business_date"]
+        connection_id = connection_id or existing_import["connection_id"]
+        external_batch_id = external_batch_id or existing_import["external_batch_id"]
+    if gmail_message_id:
+        gmail_import = await conn.fetchrow(
+            "SELECT id, status, location_id, business_date, connection_id, external_batch_id "
+            "FROM inventory_sales_imports WHERE company_id=$1 AND gmail_message_id=$2",
             company_id, gmail_message_id,
         )
-        if existing_import and existing_import["status"] == "committed":
-            return {"import_id": existing_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
+        if existing_import and gmail_import and existing_import["id"] != gmail_import["id"]:
+            raise ValueError("Sales import identity does not match the email draft.")
+        if gmail_import and gmail_import["status"] == "committed":
+            return {"import_id": gmail_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
                     "items_affected": 0, "errors": [], "duplicate": True}
-        if existing_import and existing_import["status"] != "draft":
+        if gmail_import and gmail_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
-        if existing_import:
+        if gmail_import:
+            existing_import = gmail_import
             # Mailbox drafts retain the source's store even when reviewed from
             # the unfiltered Inventory page.
             location_id = existing_import["location_id"]
@@ -74,20 +97,23 @@ async def commit_sales_import(
                 business_date = existing_import["business_date"]
 
     if connection_id and external_batch_id:
-        existing_import = await conn.fetchrow(
+        batch_import = await conn.fetchrow(
             "SELECT id, status, location_id, business_date FROM inventory_sales_imports "
             "WHERE company_id=$1 AND connection_id=$2 AND external_batch_id=$3",
             company_id, connection_id, external_batch_id,
         )
-        if existing_import and existing_import["status"] == "committed":
-            return {"import_id": existing_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
+        if batch_import and batch_import["status"] == "committed":
+            return {"import_id": batch_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
                     "items_affected": 0, "errors": [], "duplicate": True}
-        if existing_import and existing_import["status"] != "draft":
+        if batch_import and batch_import["status"] != "draft":
             raise ValueError("Sales import was already discarded.")
-        if existing_import:
-            location_id = existing_import["location_id"]
+        if batch_import:
+            if existing_import and existing_import["id"] != batch_import["id"]:
+                raise ValueError("Sales import identity does not match the POS batch.")
+            existing_import = batch_import
+            location_id = batch_import["location_id"]
             if business_date is None:
-                business_date = existing_import["business_date"]
+                business_date = batch_import["business_date"]
 
     if location_id is not None:
         owned = await conn.fetchval(
