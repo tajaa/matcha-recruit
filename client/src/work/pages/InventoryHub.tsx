@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Search,
   Sparkles,
+  TrendingUp,
   Upload,
   Wrench,
 } from 'lucide-react'
@@ -185,6 +186,9 @@ export default function InventoryHub() {
           <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/inventory/audit`)}>
             <ClipboardCheck className="mr-1.5 inline h-3.5 w-3.5" /> Audit stock
           </Button>
+          {hasFeature('inventory_forecasting') && <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/inventory/forecast`)}>
+            <TrendingUp className="mr-1.5 inline h-3.5 w-3.5" /> Forecast demand
+          </Button>}
           {canSales && <Button variant="secondary" size="sm" onClick={() => { setReviewImportId(null); setSalesOpen(true) }}>
             <Upload className="mr-1.5 inline h-3.5 w-3.5" /> Import sales
           </Button>}

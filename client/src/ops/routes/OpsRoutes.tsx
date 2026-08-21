@@ -6,6 +6,7 @@ import ChannelView from '../../work/pages/ChannelView'
 import EventsHub from '../../work/pages/EventsHub'
 import InventoryAudit from '../../work/pages/InventoryAudit'
 import InventoryHub from '../../work/pages/InventoryHub'
+import InventoryForecast from '../../work/pages/InventoryForecast'
 import ProtocolPage from '../../work/pages/ProtocolPage'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import EmployeeSchedule from '../../pages/app/employees/EmployeeSchedule'
@@ -48,6 +49,7 @@ export default function OpsRoutes() {
             >
               <Route path="inventory" element={<InventoryHub />} />
               <Route path="inventory/audit" element={<InventoryAudit />} />
+              <Route path="inventory/forecast" element={<FeatureGate feature="inventory_forecasting" label="Inventory Forecasting" allowPlatformAdmin><InventoryForecast /></FeatureGate>} />
               <Route path="inventory/:itemId" element={<InventoryHub />} />
             </Route>
             <Route
