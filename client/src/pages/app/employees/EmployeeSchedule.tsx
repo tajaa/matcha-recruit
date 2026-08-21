@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import {
@@ -23,9 +23,11 @@ import { useEmployeeSchedule } from './useEmployeeSchedule'
 import type { EmployeeScheduleTab } from './useEmployeeSchedule'
 import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
+import ScheduleHelperWizard from '../../../components/employees/onboarding/ScheduleHelperWizard'
 import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
+const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -39,6 +41,9 @@ export default function EmployeeSchedule() {
   const highlightShiftId = searchParams.get('shift') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
   const { me, hasFeature, loading: meLoading } = useMe()
+  const [guideOpen, setGuideOpen] = useState(() => {
+    try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
+  })
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
@@ -82,6 +87,11 @@ export default function EmployeeSchedule() {
     }, { replace: true })
   }
 
+  function closeGuide() {
+    try { window.localStorage.setItem(SCHEDULE_GUIDE_STORAGE_KEY, 'seen') } catch { /* best effort */ }
+    setGuideOpen(false)
+  }
+
   return (
     // Same page frame as Compliance/Dashboard/Onboarding/Company/OSHA Logs.
     // Tab STYLE kept as-is (icon + label, underline) rather than switched to
@@ -90,14 +100,19 @@ export default function EmployeeSchedule() {
     // Button-pills were. Only the shell + tab band placement change.
     <div className="min-w-0 overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       <div className="border-b border-white/[0.06] px-5 py-4">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-light tracking-tight text-zinc-50 flex items-center gap-2">
               <CalendarDays className="h-5 w-5 text-zinc-500" /> Employee Schedule
             </h1>
             <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
           </div>
-          <ScheduleLawPanel />
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setGuideOpen(true)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-2 rounded-lg border border-zinc-700" aria-label="Open scheduling guide">
+              <CircleHelp className="h-4 w-4" /> How scheduling works
+            </button>
+            <ScheduleLawPanel />
+          </div>
         </div>
       </div>
 
@@ -162,6 +177,7 @@ export default function EmployeeSchedule() {
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
+      <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />
     </div>
   )
 }
