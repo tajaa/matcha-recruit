@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Button, Select, useToast } from '../../../components/ui'
+import { InventoryHelpButton } from './InventoryHelp'
 import {
   listSalesMappings, upsertSalesMapping,
   type InventoryItem, type SalesMapping,
 } from '../../api/inventory'
 
-export default function SalesMappingsPanel({ items, locationId }: { items: InventoryItem[]; locationId?: string }) {
+export default function SalesMappingsPanel({ items, locationId, onHelp }: { items: InventoryItem[]; locationId?: string; onHelp?: () => void }) {
   const { toast } = useToast()
   const [mappings, setMappings] = useState<SalesMapping[]>([])
   const [soldName, setSoldName] = useState('')
@@ -40,23 +41,26 @@ export default function SalesMappingsPanel({ items, locationId }: { items: Inven
   }
 
   return (
-    <div className="space-y-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-      <div>
-        <h3 className="font-medium">Sales mappings</h3>
-        <p className="text-xs text-zinc-500">Map a POS sold name to the stock units it depletes. Recipes can be added here later without changing the import format.</p>
+    <div className="space-y-3 rounded-xl border border-w-line bg-w-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-w-text">Sales mappings</h3>
+          <p className="mt-1 text-xs text-w-dim">Map a POS sold name to the stock units it depletes. Recipes can be added here later without changing the import format.</p>
+        </div>
+        {onHelp && <InventoryHelpButton onClick={onHelp} />}
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label className="min-w-44 text-xs text-zinc-500">Sold name<input value={soldName} onChange={(event) => setSoldName(event.target.value)} placeholder="Cookie 6-pack" className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" /></label>
-        <label className="min-w-48 text-xs text-zinc-500">Stock item<Select options={items.map((item) => ({ value: item.id, label: item.name }))} value={itemId} onChange={(event) => setItemId(event.target.value)} placeholder="Choose item…" className="mt-1" /></label>
-        <label className="w-24 text-xs text-zinc-500">Units/sale<input type="number" min={0.0001} step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900" /></label>
+        <label className="min-w-44 text-xs text-w-dim">Sold name<input value={soldName} onChange={(event) => setSoldName(event.target.value)} placeholder="Cookie 6-pack" className="mt-1 w-full rounded-lg border border-w-line bg-w-surface2 px-2 py-2 text-sm text-w-text placeholder:text-w-faint" /></label>
+        <label className="min-w-48 text-xs text-w-dim">Stock item<Select options={items.map((item) => ({ value: item.id, label: item.name }))} value={itemId} onChange={(event) => setItemId(event.target.value)} placeholder="Choose item…" className="mt-1" /></label>
+        <label className="w-24 text-xs text-w-dim">Units/sale<input type="number" min={0.0001} step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} className="mt-1 w-full rounded-lg border border-w-line bg-w-surface2 px-2 py-2 text-sm text-w-text" /></label>
         <Button onClick={() => void save()} disabled={saving || !soldName.trim() || !itemId}>Add mapping</Button>
       </div>
       {mappings.length > 0 && (
-        <div className="divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+        <div className="divide-y divide-w-line text-sm">
           {mappings.map((mapping) => (
             <div key={mapping.id} className="flex items-center justify-between py-2">
-              <span>{mapping.sold_name}</span>
-              <span className="text-zinc-500">{mapping.kind === 'ignore' ? 'ignored' : mapping.components.map((component) => `${items.find((item) => item.id === component.item_id)?.name ?? 'item'} × ${component.quantity_per_sale}`).join(', ')}</span>
+              <span className="text-w-text">{mapping.sold_name}</span>
+              <span className="text-w-dim">{mapping.kind === 'ignore' ? 'ignored' : mapping.components.map((component) => `${items.find((item) => item.id === component.item_id)?.name ?? 'item'} × ${component.quantity_per_sale}`).join(', ')}</span>
             </div>
           ))}
         </div>
