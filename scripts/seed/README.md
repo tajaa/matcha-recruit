@@ -54,3 +54,8 @@ Rules (the runner enforces 1–2, you enforce the rest):
   status, roster + eligibility exceptions, renewal-risk radar). Undo:
   `benefits_sunset_dental.undo.sql`. Linted by
   `server/tests/seed_packs/test_benefits_sunset_dental_pack.py`.
+- `sunset_dental_inventory.sql` — Sunset Smile Dental Group inventory demo
+  (22 Wilshire-scoped catalog items, opening counts, usage/receipt/stockout
+  history, and order lifecycle examples). Undo:
+  `sunset_dental_inventory.undo.sql`. Linted by
+  `server/tests/seed_packs/test_sunset_dental_inventory_pack.py`.
