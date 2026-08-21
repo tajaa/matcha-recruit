@@ -573,6 +573,25 @@ class ProposalBuild:
     pill_text: str
 
 
+class ProposalExecutionClaimError(RuntimeError):
+    """Another confirmation already claimed this proposal."""
+
+
+async def _claim_proposal_execution(conn, proposal_id: UUID) -> None:
+    """Serialize confirmations inside the executor's write transaction."""
+    status = await conn.fetchval(
+        """
+        SELECT status
+        FROM schedule_chat_proposals
+        WHERE id = $1
+        FOR UPDATE
+        """,
+        proposal_id,
+    )
+    if status != "proposed":
+        raise ProposalExecutionClaimError("That proposal is already being applied or is no longer available.")
+
+
 async def _persist_proposal(
     conn, existing_id: Optional[UUID], *, company_id: UUID, channel_id: Optional[UUID],
     source_message_id: Optional[UUID], created_by: UUID, status: str,
@@ -1499,6 +1518,7 @@ async def execute_template_proposal(
         proposal = json.loads(proposal)
     week_template = proposal.get("week_template") or _legacy_week_template(proposal["template"])
     async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
         tpl = await conn.fetchrow(
             """INSERT INTO schedule_week_templates
                 (company_id, name, location_id, color, notes, created_by)
@@ -1722,6 +1742,7 @@ async def execute_apply_template_proposal(
     end_date = date.fromisoformat(proposal["end_date"])
 
     async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
         result = await generate_week_template_shifts(
             conn, company_id, blocks=blocks, start_date=start_date, end_date=end_date,
             created_by=confirmed_by,
@@ -1835,6 +1856,7 @@ async def execute_proposal(
         avail_map = await fetch_availability(conn, company_id, list(dict.fromkeys(all_employee_ids)))
 
     async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
         for shift in proposal["shifts"]:
             starts_at = datetime.fromisoformat(shift["starts_at"])
             ends_at = datetime.fromisoformat(shift["ends_at"])
@@ -1956,6 +1978,7 @@ async def execute_edit_proposal(
             )
 
     async with conn.transaction():
+        await _claim_proposal_execution(conn, proposal_row["id"])
         removed: dict[int, dict] = {}
         for idx, op in enumerate(ops):
             if op["kind"] in ("reassign", "unassign") and op.get("from_employee_id"):

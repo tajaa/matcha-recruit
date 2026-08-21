@@ -23,8 +23,13 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
   const framesRef = useRef<ArrayBuffer[]>([])
   const timerRef = useRef<number | null>(null)
   const maxFiredRef = useRef(false)
+  const mountedRef = useRef(true)
+  const startPendingRef = useRef(false)
+  const startGenerationRef = useRef(0)
 
   const cleanup = useCallback(() => {
+    startGenerationRef.current += 1
+    startPendingRef.current = false
     if (timerRef.current !== null) { clearInterval(timerRef.current); timerRef.current = null }
     try { nodeRef.current?.disconnect() } catch { /* noop */ }
     nodeRef.current = null
@@ -34,7 +39,13 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
     ctxRef.current = null
   }, [])
 
-  useEffect(() => cleanup, [cleanup]) // tear down on unmount
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      cleanup()
+    }
+  }, [cleanup])
 
   // Fires onMaxDuration exactly once per recording (maxFiredRef reset in
   // start()) — doing this as a side effect from elapsedSeconds instead of
@@ -49,6 +60,9 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
   }, [elapsedSeconds, maxDur])
 
   const start = useCallback(async () => {
+    if (startPendingRef.current || nodeRef.current) return
+    startPendingRef.current = true
+    const generation = ++startGenerationRef.current
     framesRef.current = []
     maxFiredRef.current = false
     setElapsedSeconds(0)
@@ -56,10 +70,19 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       })
+      if (!mountedRef.current || generation !== startGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
       const ctx = new AudioContext({ sampleRate: 48000 })
       ctxRef.current = ctx
       await ctx.audioWorklet.addModule('/worklets/pcm-capture-processor.js')
+      if (!mountedRef.current || generation !== startGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        await ctx.close().catch(() => { /* noop */ })
+        return
+      }
 
       const source = ctx.createMediaStreamSource(stream)
       const node = new AudioWorkletNode(ctx, 'pcm-capture-processor')
@@ -76,17 +99,21 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
       timerRef.current = window.setInterval(() => {
         setElapsedSeconds((prev) => prev + 1)
       }, 1000)
+      startPendingRef.current = false
     } catch (err) {
       const denied = err instanceof DOMException && (err.name === 'NotAllowedError' || err.name === 'SecurityError')
-      setStatus(denied ? 'denied' : 'error')
+      if (mountedRef.current && generation === startGenerationRef.current) setStatus(denied ? 'denied' : 'error')
       cleanup()
     }
-  }, [maxDur, cleanup])
+  }, [cleanup])
 
   // Stop recording, flush the worklet's partial tail, and assemble the WAV.
   const stop = useCallback(async (): Promise<Blob | null> => {
     const node = nodeRef.current
-    if (!node) { setStatus('idle'); return null }
+    if (!node) {
+      if (mountedRef.current) setStatus('idle')
+      return null
+    }
     return new Promise<Blob | null>((resolve) => {
       node.port.postMessage('flush')
       // give the flushed tail one tick to arrive before we tear down
@@ -94,6 +121,10 @@ export function useVoiceDictation(opts: { maxDurationSeconds?: number; onMaxDura
         const frames = framesRef.current
         framesRef.current = []
         cleanup()
+        if (!mountedRef.current) {
+          resolve(null)
+          return
+        }
         setStatus('idle')
         resolve(frames.length ? pcmFramesToWavBlob(frames, 16000) : null)
       }, 80)

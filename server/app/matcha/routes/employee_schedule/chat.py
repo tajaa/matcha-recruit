@@ -11,15 +11,21 @@ import json
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.services.redis_cache import check_rate_limit
 from app.core.feature_flags import get_company_features
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from ...models.scheduling.employee_schedule import ScheduleChatApply, ScheduleChatMessage
-from ...services.scheduling import schedule_chat
+from ...models.scheduling.employee_schedule import (
+    ScheduleChatApply,
+    ScheduleChatMessage,
+    ScheduleVoiceTranscript,
+)
+from ...services._shared.uploads import read_wav_or_400
+from ...services.scheduling import schedule_chat, schedule_voice
 from ...services.scheduling.schedule_chat_rules import (
+    parse_confirm_reply,
     resolve_clarify_answer,
     snapped_to_option,
 )
@@ -41,6 +47,36 @@ def _response(row, build: schedule_chat.ProposalBuild) -> dict:
         "proposal": proposal,
         "pill_text": build.pill_text,
     }
+
+
+@router.post("/chat/voice-transcribe", response_model=ScheduleVoiceTranscript)
+async def transcribe_schedule_voice(
+    file: UploadFile = File(...),
+    current_user=Depends(require_admin_or_client),
+) -> ScheduleVoiceTranscript:
+    """Transcribe one push-to-talk turn; scheduling still runs through /chat."""
+    company_id = await require_company_id(current_user)
+    user_key = f"user:{current_user.id}"
+    await check_rate_limit(user_key, "schedule_voice_parse_burst", 5, 60)
+    await check_rate_limit(user_key, "schedule_voice_parse", 30, 3600)
+    await check_rate_limit(str(company_id), "schedule_voice_parse_co", 120, 3600)
+
+    audio = await read_wav_or_400(file, max_bytes=schedule_voice.MAX_AUDIO_BYTES)
+    try:
+        schedule_voice.validate_schedule_wav(audio)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    parsed = await schedule_voice.transcribe_schedule_request(
+        audio,
+        "audio/wav",
+    )
+    transcript = parsed["transcript"]
+    return ScheduleVoiceTranscript(
+        available=parsed["available"],
+        transcript=transcript,
+        command=parse_confirm_reply(transcript or ""),
+        model=parsed["model"],
+    )
 
 
 async def _load_proposal(conn, company_id: UUID, proposal_id: UUID):
@@ -177,28 +213,31 @@ async def schedule_chat_apply(
         features = await get_company_features(company_id, conn=conn)
         proposal_row = {**dict(row), "proposal": proposal}
         week_template_id = None
-        if proposal.get("kind") == "template":
-            text = await schedule_chat.execute_template_proposal(
-                conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
-            )
-            week_template_id = await conn.fetchval(
-                "SELECT proposal->>'created_week_template_id' FROM schedule_chat_proposals WHERE id=$1",
-                proposal_id,
-            )
-        elif proposal.get("kind") == "apply_template":
-            text = await schedule_chat.execute_apply_template_proposal(
-                conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
-            )
-        elif proposal.get("kind") == "edit":
-            text = await schedule_chat.execute_edit_proposal(
-                conn, proposal_row=proposal_row, confirmed_by=current_user.id,
-                features=features, edit_published=body.edit_published,
-            )
-        else:
-            text = await schedule_chat.execute_proposal(
-                conn, proposal_row=proposal_row, confirmed_by=current_user.id,
-                features=features, create_status="draft" if body.as_draft else "published",
-            )
+        try:
+            if proposal.get("kind") == "template":
+                text = await schedule_chat.execute_template_proposal(
+                    conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
+                )
+                week_template_id = await conn.fetchval(
+                    "SELECT proposal->>'created_week_template_id' FROM schedule_chat_proposals WHERE id=$1",
+                    proposal_id,
+                )
+            elif proposal.get("kind") == "apply_template":
+                text = await schedule_chat.execute_apply_template_proposal(
+                    conn, proposal_row=proposal_row, confirmed_by=current_user.id, features=features,
+                )
+            elif proposal.get("kind") == "edit":
+                text = await schedule_chat.execute_edit_proposal(
+                    conn, proposal_row=proposal_row, confirmed_by=current_user.id,
+                    features=features, edit_published=body.edit_published,
+                )
+            else:
+                text = await schedule_chat.execute_proposal(
+                    conn, proposal_row=proposal_row, confirmed_by=current_user.id,
+                    features=features, create_status="draft" if body.as_draft else "published",
+                )
+        except schedule_chat.ProposalExecutionClaimError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         shift_ids = await conn.fetchval(
             "SELECT created_shift_ids FROM schedule_chat_proposals WHERE id=$1",
             proposal_id,

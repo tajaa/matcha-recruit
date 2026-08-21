@@ -1,5 +1,5 @@
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
@@ -26,7 +26,10 @@ const shift = {
 
 describe('ScheduleEditor', () => {
   beforeEach(() => {
-    useMeMock.mockReturnValue({ hasFeature: () => false })
+    useMeMock.mockReturnValue({
+      me: { profile: { name: 'Jamie Rivera' } },
+      hasFeature: () => false,
+    })
     useLocationScopeMock.mockReturnValue({
       locationId: 'loc1',
       setLocationId: vi.fn(),
@@ -78,5 +81,39 @@ describe('ScheduleEditor', () => {
 
     expect(roster).toHaveClass('lg:h-full')
     expect(employeeList).toHaveClass('overflow-y-auto')
+  })
+
+  it('opens the personalized Huume schedule assistant', () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+
+    expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
+    expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
+  })
+
+  it('resets the assistant conversation when the schedule scope changes', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    fireEvent.change(screen.getByPlaceholderText('Try: add an opener Monday'), {
+      target: { value: "Hey Huume, let's make schedules" },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    expect(screen.getByText(/What should we do with the week of 2026-08-09/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next week' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText(/What should we do with the week of 2026-08-09/)).not.toBeInTheDocument()
+    })
+    expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
   })
 })

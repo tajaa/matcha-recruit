@@ -331,3 +331,12 @@ class ScheduleChatApply(BaseModel):
 
     as_draft: bool = True
     edit_published: bool = False
+
+
+class ScheduleVoiceTranscript(BaseModel):
+    """Verbatim voice turn plus deterministic confirm/cancel classification."""
+
+    available: bool
+    transcript: Optional[str] = None
+    command: Literal["confirm", "cancel", "other"] = "other"
+    model: Optional[str] = None

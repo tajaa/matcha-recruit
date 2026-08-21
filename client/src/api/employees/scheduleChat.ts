@@ -1,5 +1,9 @@
 import { api } from '../client'
-import type { ScheduleChatApplyResponse, ScheduleChatTurnResponse } from '../../types/scheduleChat'
+import type {
+  ScheduleChatApplyResponse,
+  ScheduleChatTurnResponse,
+  ScheduleVoiceTranscript,
+} from '../../types/scheduleChat'
 
 export function sendScheduleChatMessage(body: {
   message: string
@@ -20,4 +24,10 @@ export function applyScheduleChat(proposalId: string, body: {
 
 export function discardScheduleChat(proposalId: string) {
   return api.post<{ ok: boolean }>(`/employee-schedule/chat/${proposalId}/discard`)
+}
+
+export function transcribeScheduleVoice(wav: Blob) {
+  const form = new FormData()
+  form.append('file', wav, 'schedule-request.wav')
+  return api.upload<ScheduleVoiceTranscript>('/employee-schedule/chat/voice-transcribe', form)
 }

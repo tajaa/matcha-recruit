@@ -37,7 +37,7 @@ export default function ScheduleEditor() {
   const [searchParams, setSearchParams] = useSearchParams()
   const weekStart = parseWeek(searchParams.get('week'))
   const { locationId, setLocationId, locations } = useLocationScope()
-  const { hasFeature } = useMe()
+  const { me, hasFeature } = useMe()
   const { toast } = useToast()
   const trainingEnabled = hasFeature('training')
   const editor = useScheduleEditor(weekStart, locationId)
@@ -60,6 +60,7 @@ export default function ScheduleEditor() {
   const inspectorReadOnly = !!inspectorShift && (inspectorShift.status === 'published' && !editPublished || inspectorShift.status === 'cancelled')
   const currentLocation = locations.find((l) => l.id === locationId)
   const currentLocationName = currentLocation ? locationLabel(currentLocation) : ''
+  const firstName = me?.profile?.name.trim().split(/\s+/)[0] || 'there'
 
   useEffect(() => {
     if (!locationId) {
@@ -200,8 +201,11 @@ export default function ScheduleEditor() {
             )}
             {chatOpen && (
               <ScheduleChatPanel
+                key={`${weekStart}:${locationId}`}
+                firstName={firstName}
                 weekStart={weekStart}
                 locationId={locationId || null}
+                locationName={currentLocationName}
                 editPublished={editPublished}
                 onApplied={() => void editor.reload()}
                 onClose={() => setChatOpen(false)}

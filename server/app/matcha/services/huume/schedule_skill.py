@@ -195,8 +195,11 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
             schedule_chat.execute_edit_proposal if proposal.get("kind") == "edit"
             else schedule_chat.execute_proposal
         )
-        text = await executor(
-            conn, proposal_row={**dict(row), "proposal": proposal},
-            confirmed_by=actor_user_id, features=features,
-        )
+        try:
+            text = await executor(
+                conn, proposal_row={**dict(row), "proposal": proposal},
+                confirmed_by=actor_user_id, features=features,
+            )
+        except schedule_chat.ProposalExecutionClaimError as exc:
+            return {"status": "error", "message": str(exc)}
     return {"status": "created", "message": text, "record_id": proposal_id, "bg_tasks": []}
