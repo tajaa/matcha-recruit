@@ -51,6 +51,7 @@ async def commit_sales_import(
     conn, *, company_id: UUID, user_id: Optional[UUID], location_id: Optional[UUID],
     business_date, source: str, filename: Optional[str], gmail_message_id: Optional[str],
     force: bool, lines: list[dict], note: Optional[str] = None, raw: Optional[dict] = None,
+    connection_id: Optional[UUID] = None, external_batch_id: Optional[str] = None,
 ) -> dict:
     business_date = _date_value(business_date)
     existing_import = None
@@ -68,6 +69,22 @@ async def commit_sales_import(
         if existing_import:
             # Mailbox drafts retain the source's store even when reviewed from
             # the unfiltered Inventory page.
+            location_id = existing_import["location_id"]
+            if business_date is None:
+                business_date = existing_import["business_date"]
+
+    if connection_id and external_batch_id:
+        existing_import = await conn.fetchrow(
+            "SELECT id, status, location_id, business_date FROM inventory_sales_imports "
+            "WHERE company_id=$1 AND connection_id=$2 AND external_batch_id=$3",
+            company_id, connection_id, external_batch_id,
+        )
+        if existing_import and existing_import["status"] == "committed":
+            return {"import_id": existing_import["id"], "total": 0, "mapped": 0, "unmapped": 0,
+                    "items_affected": 0, "errors": [], "duplicate": True}
+        if existing_import and existing_import["status"] != "draft":
+            raise ValueError("Sales import was already discarded.")
+        if existing_import:
             location_id = existing_import["location_id"]
             if business_date is None:
                 business_date = existing_import["business_date"]
@@ -102,10 +119,12 @@ async def commit_sales_import(
             UPDATE inventory_sales_imports
             SET source=$2, business_date=$3, filename=$4, raw=COALESCE($5, raw),
                 uploaded_by=COALESCE($6, uploaded_by), line_count=$7,
-                note=COALESCE($8, note)
+                note=COALESCE($8, note), connection_id=COALESCE($9, connection_id),
+                external_batch_id=COALESCE($10, external_batch_id)
             WHERE id=$1
             """,
             import_id, source, business_date, filename, raw_json, user_id, len(lines), note,
+            connection_id, external_batch_id,
         )
         # A mailbox draft already has its first-pass lines; replace them with
         # the manager's reviewed submission before committing.
@@ -115,12 +134,12 @@ async def commit_sales_import(
             """
             INSERT INTO inventory_sales_imports
                 (company_id, location_id, source, status, business_date, filename,
-                 gmail_message_id, raw, uploaded_by, line_count, note)
-            VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10)
+                 gmail_message_id, connection_id, external_batch_id, raw, uploaded_by, line_count, note)
+            VALUES ($1, $2, $3, 'draft', $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             """,
             company_id, location_id, source, business_date, filename, gmail_message_id,
-            raw_json, user_id, len(lines), note,
+            connection_id, external_batch_id, raw_json, user_id, len(lines), note,
         )
         import_id = import_row["id"]
 

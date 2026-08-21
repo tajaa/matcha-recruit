@@ -54,7 +54,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
         setDraft({ business_date: result.business_date, lines: rawLines, available: rawLines.length > 0 })
         setLines(rawLines.map(toDraftLine))
         setFilename(result.filename)
-        setSource(result.source)
+        setSource(result.source === 'email' ? 'email' : 'upload')
         setGmailMessageId(result.gmail_message_id ?? null)
       })
       .catch(() => toast('Failed to load the sales draft', 'error'))

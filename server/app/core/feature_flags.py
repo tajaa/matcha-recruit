@@ -372,6 +372,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # POS sales / PMIX intake. Requires the inventory surface, but is not
     # bundled: admins explicitly enable it for a company.
     "sales_intake": False,
+    # Deterministic demand projection and advisory replenishment calculations
+    # over committed sales imports. Requires both Inventory and Sales Intake;
+    # it never creates or approves an order.
+    "inventory_forecasting": False,
     # Safety meetings (toolbox talks) — record a safety meeting in-app: chunked
     # mic audio (the shared WAV-via-AudioWorklet stack) uploads ~1-minute
     # segments as the meeting runs, each transcribed by Gemini immediately;
@@ -790,6 +794,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "inventory": ("matcha_ops",),
     "inventory_voice": ("inventory",),
     "sales_intake": ("inventory",),
+    "inventory_forecasting": ("inventory", "sales_intake"),
     "employee_schedule": ("matcha_ops",),
     "schedule_intelligence": ("matcha_ops", "employee_schedule"),
     "matcha_ops_calls_all_members": ("matcha_ops",),

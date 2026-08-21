@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
@@ -164,7 +164,7 @@ class SalesLine(BaseModel):
 class SalesCommit(BaseModel):
     location_id: Optional[UUID] = None
     business_date: Optional[str] = None
-    source: Literal["upload", "email"] = "upload"
+    source: Literal["upload", "email", "square", "toast"] = "upload"
     filename: Optional[str] = None
     gmail_message_id: Optional[str] = None
     force: bool = False
@@ -217,3 +217,60 @@ class VoiceCountDraft(BaseModel):
     transcript: Optional[str] = None
     model: Optional[str] = None
     lines: list[VoiceCountLine]
+
+
+class ForecastOverrideInput(BaseModel):
+    week_start: date
+    demand_multiplier: Decimal = Field(ge=Decimal("0.5"), le=Decimal("2.0"))
+    reason: str = Field(min_length=1, max_length=500)
+    source: Literal["manual", "ai_accepted"] = "manual"
+    confidence: Optional[Literal["low", "medium", "high"]] = None
+
+
+class ForecastSettingsUpsert(BaseModel):
+    location_id: Optional[UUID] = None
+    horizon_days: int = Field(default=56, ge=14, le=90)
+    history_days: int = Field(default=90, ge=28, le=365)
+    default_lead_time_days: int = Field(default=7, ge=0, le=180)
+    default_safety_stock_days: int = Field(default=7, ge=0, le=180)
+    timezone: str = Field(default="America/Los_Angeles", min_length=1, max_length=80)
+
+
+class ForecastRuleUpsert(BaseModel):
+    lead_time_days: int = Field(ge=0, le=180)
+    safety_stock_days: int = Field(ge=0, le=180)
+    case_pack_quantity: Decimal = Field(gt=0)
+    minimum_order_quantity: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class ForecastPreviewRequest(BaseModel):
+    location_id: Optional[UUID] = None
+    forecast_start: Optional[date] = None
+    overrides: list[ForecastOverrideInput] = Field(default_factory=list, max_length=12)
+
+
+class ForecastRunCreate(ForecastPreviewRequest):
+    pass
+
+
+class ForecastAIDraftRequest(BaseModel):
+    location_id: Optional[UUID] = None
+    horizon_start: Optional[date] = None
+    manager_context: str = Field(min_length=1, max_length=4000)
+
+
+class POSLocationBindingUpsert(BaseModel):
+    external_location_id: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1, max_length=200)
+    timezone: str = Field(default="UTC", min_length=1, max_length=80)
+    location_id: UUID
+
+
+class POSSalesSyncRequest(BaseModel):
+    start_date: date
+    end_date: date
+
+
+class POSMappingUpsert(BaseModel):
+    external_item_id: str = Field(min_length=1, max_length=200)
+    mapping_id: UUID

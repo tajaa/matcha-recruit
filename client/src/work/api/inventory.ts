@@ -309,7 +309,7 @@ export function parseSales(file: File, locationId?: string) {
 export function commitSales(body: {
   location_id?: string | null
   business_date?: string | null
-  source?: 'upload' | 'email'
+  source?: 'upload' | 'email' | 'square' | 'toast'
   filename?: string | null
   gmail_message_id?: string | null
   force?: boolean
@@ -326,7 +326,7 @@ export interface SalesImport {
   id: string
   company_id: string
   location_id: string | null
-  source: 'upload' | 'email'
+  source: 'upload' | 'email' | 'square' | 'toast'
   status: 'draft' | 'committed' | 'discarded'
   gmail_message_id?: string | null
   business_date: string | null
@@ -397,6 +397,59 @@ export function deleteSalesSource(sourceId: string) {
   return api.delete<{ id: string; deleted: boolean }>(`/inventory/sales/sources/${sourceId}`)
 }
 
+// ── POS connections ──
+
+export type POSConnection = {
+  id: string
+  provider: 'square' | 'toast'
+  status: 'connected' | 'error' | 'disconnected'
+  environment: string | null
+  last_sync_at: string | null
+  last_error: string | null
+  updated_at: string
+  has_credentials: boolean
+}
+
+export function listPOSConnections() {
+  return api.get<{ connections: POSConnection[] }>('/inventory/sales/connections')
+}
+
+export function authorizeSquare() {
+  return api.get<{ oauth_url: string }>('/inventory/sales/connections/authorize')
+}
+
+export function listPOSLocations(connectionId: string) {
+  return api.get<{ locations: { external_location_id: string; name: string; timezone: string; status?: string; location_id: string | null }[] }>(`/inventory/sales/connections/${connectionId}/locations`)
+}
+
+export function listPOSCatalog(connectionId: string) {
+  return api.get<{ items: { external_item_id: string; name: string; sku: string | null }[] }>(`/inventory/sales/connections/${connectionId}/catalog`)
+}
+
+export function bindPOSLocation(connectionId: string, body: { external_location_id: string; name: string; timezone: string; location_id: string }) {
+  return api.put(`/inventory/sales/connections/${connectionId}/locations`, body)
+}
+
+export function mapPOSItem(connectionId: string, body: { external_item_id: string; mapping_id: string }) {
+  return api.put(`/inventory/sales/connections/${connectionId}/mappings`, body)
+}
+
+export function listPOSMappings(connectionId: string) {
+  return api.get<{ mappings: { external_item_id: string; mapping_id: string; sold_name: string }[] }>(`/inventory/sales/connections/${connectionId}/mappings`)
+}
+
+export function syncPOSConnection(connectionId: string, body: { start_date: string; end_date: string }) {
+  return api.post<POSSyncResult>(`/inventory/sales/connections/${connectionId}/sync`, body)
+}
+
+export type POSSyncResult = {
+  sync_run_id: string
+  days_seen: number
+  imports_created: number
+  drafts_created: number
+  unmapped_lines: number
+}
+
 export interface VoiceCountLine {
   item_name: string
   quantity: number
@@ -418,4 +471,122 @@ export function parseAuditVoice(wav: Blob, locationId?: string) {
   form.append('file', wav, 'counts.wav')
   const qs = locationId ? `?location_id=${locationId}` : ''
   return api.upload<VoiceCountDraft>(`/inventory/audit/voice-parse${qs}`, form)
+}
+
+// ── Forecasting ──
+
+export type ForecastStatus = 'ready' | 'count_required' | 'no_demand' | 'insufficient_history'
+
+export type ForecastSettings = {
+  id?: string
+  company_id?: string
+  location_id: string | null
+  horizon_days: number
+  history_days: number
+  default_lead_time_days: number
+  default_safety_stock_days: number
+  timezone: string
+  configured: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+export type ForecastOverride = {
+  week_start: string
+  demand_multiplier: number
+  reason: string
+  source?: 'manual' | 'ai_accepted'
+  confidence?: 'low' | 'medium' | 'high' | null
+}
+
+export type ForecastAIDraft = {
+  available: boolean
+  model: string
+  adjustments: ForecastOverride[]
+  risks: string[]
+  data_gaps: string[]
+}
+
+export type ForecastLine = {
+  id?: string
+  item_id: string
+  name: string
+  unit: string | null
+  location_id: string | null
+  current_quantity: number | null
+  unit_cost: number | null
+  status: ForecastStatus
+  confidence: 'low' | 'medium' | 'high'
+  history_nonzero_days: number
+  on_order_quantity: number
+  projected_demand: number
+  average_daily_demand: number
+  lead_demand: number
+  safety_demand: number
+  target_quantity: number
+  suggested_quantity: number | null
+  runout_date: string | null
+  order_by_date: string | null
+  daily_demand?: (number | string)[]
+}
+
+export type ForecastRun = {
+  id: string
+  company_id: string
+  location_id: string | null
+  forecast_start: string
+  forecast_end: string
+  history_start: string
+  settings_snapshot: Record<string, unknown>
+  override_count: number
+  created_at: string
+  lines: ForecastLine[]
+}
+
+type ForecastRequest = {
+  location_id?: string | null
+  forecast_start?: string
+  overrides?: ForecastOverride[]
+}
+
+export function getForecastSettings(locationId?: string) {
+  const qs = locationId ? `?location_id=${locationId}` : ''
+  return api.get<ForecastSettings>(`/inventory/forecast/settings${qs}`)
+}
+
+export function putForecastSettings(body: Omit<ForecastSettings, 'id' | 'company_id' | 'configured' | 'created_at' | 'updated_at'>) {
+  return api.put<ForecastSettings>('/inventory/forecast/settings', body)
+}
+
+export function listForecastRules(locationId?: string) {
+  const qs = locationId ? `?location_id=${locationId}` : ''
+  return api.get<{ rules: Record<string, unknown>[] }>(`/inventory/forecast/replenishment-rules${qs}`)
+}
+
+export function previewForecast(body: ForecastRequest) {
+  return api.post<{
+    forecast_start: string
+    forecast_end: string
+    history_start: string
+    settings: ForecastSettings
+    overrides: ForecastOverride[]
+    lines: ForecastLine[]
+  }>('/inventory/forecast/preview', body)
+}
+
+export function createForecastRun(body: ForecastRequest) {
+  return api.post<ForecastRun>('/inventory/forecast/runs', body)
+}
+
+export function draftForecastAdjustments(body: { location_id?: string | null; horizon_start?: string; manager_context: string }) {
+  return api.post<ForecastAIDraft>('/inventory/forecast/ai-draft', body)
+}
+
+export function getLatestForecastRun(locationId?: string) {
+  const qs = locationId ? `?location_id=${locationId}` : ''
+  return api.get<ForecastRun | null>(`/inventory/forecast/runs/latest${qs}`)
+}
+
+export function getForecastRun(runId: string) {
+  return api.get<ForecastRun>(`/inventory/forecast/runs/${runId}`)
 }

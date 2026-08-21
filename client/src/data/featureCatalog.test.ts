@@ -47,6 +47,7 @@ describe('applyFeatureToggle', () => {
       inventory: false,
       inventory_voice: false,
       sales_intake: false,
+      inventory_forecasting: false,
     })
   })
 
@@ -62,6 +63,16 @@ describe('applyFeatureToggle', () => {
        inventory_voice: false,
        ems: false,
        werk_lite: false,
+    })
+  })
+
+  it('requires inventory and sales intake', () => {
+    expect(FEATURE_REQUIRES.inventory_forecasting).toEqual(['inventory', 'sales_intake'])
+    expect(applyFeatureToggle({}, 'inventory_forecasting', true)).toMatchObject({
+      matcha_ops: true,
+      inventory: true,
+      sales_intake: true,
+      inventory_forecasting: true,
     })
   })
 })
