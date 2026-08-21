@@ -28,6 +28,7 @@ from .leave import router as _leave_router; router.include_router(_leave_router)
 from .incidents import router as _incidents_router; router.include_router(_incidents_router)
 from .credentials import router as _credentials_router; router.include_router(_credentials_router)
 from .oig import router as _oig_router; router.include_router(_oig_router)
+from .work_permits import router as _work_permits_router; router.include_router(_work_permits_router)
 
 __all__ = [
     "router",

@@ -1,36 +1,54 @@
 """Manager decisions for expired schedule-blocking requirements."""
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
-from ...dependencies import require_admin_or_client
+from ...dependencies import require_company_member
 from ...models.scheduling.employee_schedule import EligibilityCaseDecision
 from ._shared import log_audit, require_company_id
+from ...services.scheduling.schedule_eligibility_authorization import (
+    require_eligibility_case_access,
+    resolve_eligibility_manager_scope,
+)
 
 router = APIRouter()
 
 
 @router.get("/eligibility-cases")
-async def list_eligibility_cases(current_user=Depends(require_admin_or_client)):
+async def list_eligibility_cases(
+    location_id: UUID | None = Query(None),
+    current_user=Depends(require_company_member),
+):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
+        scope = await resolve_eligibility_manager_scope(
+            conn, company_id=company_id, actor_user_id=current_user.id, actor_role=current_user.role,
+        )
+        if location_id is not None and not scope.permits(location_id):
+            raise HTTPException(status_code=404, detail="Location not found")
+        if not scope.is_company_operations and not scope.managed_location_ids:
+            return {"cases": []}
         rows = await conn.fetch(
             """SELECT c.*, e.first_name, e.last_name FROM schedule_eligibility_cases c
                JOIN employees e ON e.id=c.employee_id WHERE c.company_id=$1
-               ORDER BY c.detected_at DESC LIMIT 200""", company_id)
+                 AND ($2::uuid IS NULL OR c.location_id=$2)
+                 AND ($3::boolean OR c.location_id=ANY($4::uuid[]))
+               ORDER BY c.detected_at DESC LIMIT 200""",
+            company_id, location_id, scope.is_company_operations, list(scope.managed_location_ids))
     return {"cases": [{**dict(row), "id": str(row["id"]), "employee_id": str(row["employee_id"])} for row in rows]}
 
 
 @router.post("/eligibility-cases/{case_id}/decision")
 async def decide_eligibility_case(case_id: UUID, body: EligibilityCaseDecision,
-                                  current_user=Depends(require_admin_or_client)):
+                                  current_user=Depends(require_company_member)):
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
-            case = await conn.fetchrow("SELECT * FROM schedule_eligibility_cases WHERE id=$1 AND company_id=$2 FOR UPDATE", case_id, company_id)
-            if not case:
-                raise HTTPException(status_code=404, detail="Eligibility case not found")
+            case, _scope = await require_eligibility_case_access(
+                conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id,
+                actor_role=current_user.role, lock=True,
+            )
             if case["status"] not in ("removal_requested", "warning_open"):
                 raise HTTPException(status_code=409, detail="Eligibility case already decided")
             if body.decision == "keep" and (not body.acknowledgement_confirmed or not body.acknowledgement_note):

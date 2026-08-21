@@ -33,7 +33,8 @@ async def schedule_eligibility_violations(conn, company_id: UUID, *, employee_id
     )
     permits = await conn.fetch(
         """SELECT id, expires_at, legal_basis FROM employee_work_permits
-           WHERE company_id = $1 AND employee_id = $2 AND schedule_blocking = true AND expires_at < $3""",
+           WHERE company_id = $1 AND employee_id = $2 AND schedule_blocking = true
+             AND status = 'active' AND confirmed_on_file = true AND expires_at < $3""",
         company_id, employee_id, shift_date,
     )
     out = []
@@ -62,22 +63,31 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
     )
     opened: list[UUID] = []
     for row in rows:
-        case_id = await conn.fetchval(
-            """
-            INSERT INTO schedule_eligibility_cases
-                (company_id, employee_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
-            VALUES ($1,$2,'credential',$3,'credential_expired','removal_requested',$4,$5::jsonb)
-            ON CONFLICT DO NOTHING RETURNING id
-            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'], json.dumps(row['legal_basis'] or {}),
+        assignments = await conn.fetch(
+            """SELECT s.id AS shift_id, s.location_id, s.starts_at
+               FROM schedule_shifts s JOIN schedule_shift_assignments a ON a.shift_id=s.id
+               WHERE s.company_id=$1 AND a.employee_id=$2 AND s.status <> 'cancelled'
+                 AND s.location_id IS NOT NULL AND s.starts_at::date >= $3""",
+            company_id, row["employee_id"], as_of,
         )
-        if case_id:
-            opened.append(case_id)
-            await conn.execute(
-                """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
-                   SELECT $1, s.id, $2, s.starts_at FROM schedule_shifts s
-                   JOIN schedule_shift_assignments a ON a.shift_id=s.id AND a.employee_id=$2
-                   WHERE s.company_id=$3 AND s.status <> 'cancelled' AND s.starts_at::date >= $4
-                   ON CONFLICT DO NOTHING""",
-                case_id, row['employee_id'], company_id, as_of,
+        by_location: dict[UUID, list] = {}
+        for assignment in assignments:
+            by_location.setdefault(assignment["location_id"], []).append(assignment)
+        for location_id, location_assignments in by_location.items():
+            case_id = await conn.fetchval(
+                """
+                INSERT INTO schedule_eligibility_cases
+                    (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
+                VALUES ($1,$2,$3,'credential',$4,'credential_expired','removal_requested',$5,$6::jsonb)
+                ON CONFLICT DO NOTHING RETURNING id
+                """, company_id, row['employee_id'], location_id, row['requirement_id'], row['expires_at'], json.dumps(_basis(row['legal_basis'])),
             )
+            if case_id:
+                opened.append(case_id)
+                for assignment in location_assignments:
+                    await conn.execute(
+                        """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
+                           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+                        case_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
+                    )
     return opened
