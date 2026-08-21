@@ -1,0 +1,11 @@
+# CloudFront-only origin gate for the Matcha server block.
+#
+# Install the real file at:
+#   /etc/nginx/snippets/matcha-cloudfront-origin-gate.conf
+#
+# Replace the placeholder with a secret stored only on the EC2 host. CloudFront
+# must overwrite X-Matcha-Origin-Verify with the same value as an origin custom
+# header; never accept this header from viewers.
+if ($http_x_matcha_origin_verify != "REPLACE_WITH_EC2_SECRET") {
+    return 403;
+}
