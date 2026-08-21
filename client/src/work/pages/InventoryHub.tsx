@@ -257,7 +257,7 @@ export default function InventoryHub() {
             <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-w-faint">At a glance</div>
             <InventoryHelpButton onClick={() => setHelp(INVENTORY_HELP.overview)} />
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid overflow-hidden rounded-xl bg-w-surface grid-cols-2 divide-y divide-w-line sm:grid-cols-4 sm:divide-x sm:divide-y-0">
             <MetricCard icon={Boxes} label="Tracked items" value={String(insights.totalItems)} detail={`${insights.knownCount} with a known count`} tone="neutral" />
             <MetricCard icon={DollarSign} label="On-hand value" value={formatCurrency(insights.inventoryValue)} detail={insights.costedCount ? `${insights.costedCount} items have unit cost` : 'Add unit costs to measure value'} tone="green" />
             <MetricCard icon={AlertTriangle} label="Needs attention" value={String(insights.attentionCount)} detail={`${insights.outCount} out · ${insights.unknownCount} unknown`} tone={insights.attentionCount > 0 ? 'amber' : 'green'} />
@@ -283,7 +283,7 @@ export default function InventoryHub() {
         </section>
 
         <div className="grid items-start gap-3 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-xl border border-w-line bg-w-surface p-4">
+          <section className="h-fit self-start rounded-xl bg-w-surface p-3">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-sm font-medium text-w-text"><Gauge size={15} className="text-w-accent" /> Stock health</div>
@@ -309,7 +309,7 @@ export default function InventoryHub() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-w-line bg-w-surface p-4">
+          <section className="h-fit self-start rounded-xl bg-w-surface p-3">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 text-sm font-medium text-w-text"><Activity size={15} className="text-w-accent" /> Recent movement flow</div>
@@ -489,14 +489,15 @@ function MetricCard({ icon: Icon, label, value, detail, tone }: {
     blue: 'text-blue-300 bg-blue-400/10',
   }[tone]
   return (
-    <div className="rounded-xl bg-w-surface px-3 py-3">
-      <div className="flex items-start justify-between gap-3">
-        <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${iconTone}`}><Icon size={16} /></span>
-        <span className="text-[10px] font-medium uppercase tracking-[0.16em] text-w-faint">Live</span>
+    <div className="flex min-w-0 items-center gap-2.5 px-3 py-2.5">
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${iconTone}`}><Icon size={14} /></span>
+      <div className="min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="text-lg font-semibold tracking-tight text-w-text">{value}</span>
+          <span className="truncate text-xs font-medium text-w-dim">{label}</span>
+        </div>
+        <div className="truncate text-[10px] text-w-faint">{detail}</div>
       </div>
-      <div className="mt-3 text-xl font-semibold tracking-tight text-w-text">{value}</div>
-      <div className="mt-1 text-xs font-medium text-w-dim">{label}</div>
-      <div className="mt-2 truncate text-[11px] text-w-faint">{detail}</div>
     </div>
   )
 }
@@ -546,7 +547,7 @@ function MovementRow({ movement, itemName }: { movement: InventoryMovement; item
 
 function AttentionPanel({ items, onSelect, onHelp }: { items: InventoryItem[]; onSelect: (itemId: string) => void; onHelp: () => void }) {
   return (
-    <section className="rounded-xl border border-w-line bg-w-surface p-4">
+    <section className="rounded-xl bg-w-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-w-text"><AlertTriangle size={15} className="text-amber-300" /> Needs attention</div>
@@ -554,13 +555,13 @@ function AttentionPanel({ items, onSelect, onHelp }: { items: InventoryItem[]; o
         </div>
         <div className="flex items-center gap-2"><InventoryHelpButton onClick={onHelp} />{items.length > 5 && <span className="rounded-full bg-amber-400/10 px-2 py-1 text-[10px] text-amber-200">+{items.length - 5} more</span>}</div>
       </div>
-      <div className="mt-3 space-y-1.5">
+      <div className="mt-2.5 space-y-1">
         {items.length === 0 ? <EmptyInsight icon={CheckCircle2} message="Everything with a count is above threshold." tone="green" /> : items.slice(0, 5).map((item) => {
           const state = getStockState(item)
           const stateLabel = state === 'unknown' ? 'Count needed' : state === 'out' ? 'Out of stock' : 'Low stock'
           const stateTone = state === 'out' ? 'text-red-300 bg-red-400/10' : state === 'unknown' ? 'text-w-dim bg-w-surface2' : 'text-amber-200 bg-amber-400/10'
           return (
-            <button type="button" key={item.id} onClick={() => onSelect(item.id)} className="flex w-full items-center gap-3 rounded-lg bg-w-surface2/70 px-2.5 py-2 text-left transition-colors hover:bg-w-surface2">
+            <button type="button" key={item.id} onClick={() => onSelect(item.id)} className="flex w-full items-center gap-3 rounded-lg bg-w-surface2/70 px-2.5 py-1.5 text-left transition-colors hover:bg-w-surface2">
               <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-w-text">{item.name}</span><span className="mt-0.5 block text-[10px] text-w-faint">{item.location_name ?? 'Company-wide'}</span></span>
               <span className="shrink-0 text-xs text-w-dim">{formatQuantity(item.current_quantity, item.unit)}</span>
               <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-medium ${stateTone}`}>{stateLabel}</span>
@@ -574,7 +575,7 @@ function AttentionPanel({ items, onSelect, onHelp }: { items: InventoryItem[]; o
 
 function ReorderPanel({ recommendations, onSelect, onHelp }: { recommendations: { item: InventoryItem; suggestion: InventorySuggestion }[]; onSelect: (itemId: string) => void; onHelp: () => void }) {
   return (
-    <section className="rounded-xl border border-w-line bg-w-surface p-4">
+    <section className="rounded-xl bg-w-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-w-text"><Sparkles size={15} className="text-w-accent" /> Reorder intelligence</div>
@@ -582,9 +583,9 @@ function ReorderPanel({ recommendations, onSelect, onHelp }: { recommendations: 
         </div>
         <div className="flex items-center gap-2"><InventoryHelpButton onClick={onHelp} /><span className="font-mono text-[10px] text-w-faint">90 days</span></div>
       </div>
-      <div className="mt-3 space-y-1.5">
+      <div className="mt-2.5 space-y-1">
         {recommendations.length === 0 ? <EmptyInsight icon={Activity} message="Not enough movement history for a recommendation yet." tone="neutral" /> : recommendations.slice(0, 5).map(({ item, suggestion }) => (
-          <button type="button" key={item.id} onClick={() => onSelect(item.id)} className="flex w-full items-center gap-3 rounded-lg bg-w-surface2/70 px-2.5 py-2 text-left transition-colors hover:bg-w-surface2">
+          <button type="button" key={item.id} onClick={() => onSelect(item.id)} className="flex w-full items-center gap-3 rounded-lg bg-w-surface2/70 px-2.5 py-1.5 text-left transition-colors hover:bg-w-surface2">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-w-accent/10 text-w-accent"><ArrowDownRight size={15} /></span>
             <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-w-text">{item.name}</span><span className="mt-0.5 block text-[10px] text-w-faint">{suggestion.daily_rate != null ? `~${Number(suggestion.daily_rate).toFixed(1)}/day` : 'Usage trend forming'} · {suggestion.confidence} confidence</span></span>
             <span className="shrink-0 text-right"><span className="block text-xs font-medium text-w-text">{suggestion.suggested_quantity ?? '—'} {item.unit ?? 'units'}</span><span className="mt-0.5 block text-[10px] text-w-faint">{Math.round(suggestion.cover_days)} days cover</span></span>
