@@ -10,10 +10,11 @@ interface Props {
   transparentAtTop?: boolean;
 }
 
-// The four offerings — primary nav, in sales order.
+// Product offerings — primary nav, in sales order.
 const PRODUCT_LINKS = [
   { to: "/matcha-platform", label: "Full Platform" },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
+  { to: "/matcha-ops", label: "Matcha Ops", isNew: true },
   { to: "/matcha-lite", label: "Matcha Lite" },
   { to: "/matcha-compliance", label: "Compliance", isNew: true },
   { to: "/matcha-brokers", label: "Brokers", isNew: true },
