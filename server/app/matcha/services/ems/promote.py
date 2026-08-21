@@ -47,6 +47,7 @@ def evaluate_promote(
     capabilities: Collection[OpsCapability] | None = None,
     features: dict,
     event_status: str,
+    source_kind: Optional[str] = None,
 ) -> PromoteVerdict:
     if capabilities is not None:
         allowed = OpsCapability.EVENT_PROMOTE in capabilities
@@ -61,6 +62,12 @@ def evaluate_promote(
         return PromoteVerdict("refuse", "Incident reporting is not enabled for this company.", 403)
     if event_status != "logged":
         return PromoteVerdict("refuse", f"Event is already {event_status}, not logged.", 409)
+    if source_kind == "schedule_compliance_warning":
+        return PromoteVerdict(
+            "refuse",
+            "Schedule competency warnings are operational follow-ups, not incident reports.",
+            409,
+        )
     return PromoteVerdict("proceed")
 
 

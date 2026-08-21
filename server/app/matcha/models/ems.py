@@ -40,6 +40,8 @@ class EmsEventOut(BaseModel):
     clarification_rounds: int = 0
     created_at: datetime
     updated_at: datetime
+    source_kind: Optional[str] = None
+    source_ref: Optional[str] = None
 
 
 class EmsEventListResponse(BaseModel):

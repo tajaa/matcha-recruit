@@ -44,10 +44,13 @@ export function EventList({ events, selectedId, onSelect }: EventListProps) {
             <div className="flex items-center gap-2 mb-1">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotClass(event.status)}`} />
               <span className="text-[10px] uppercase tracking-[0.12em] text-w-dim font-medium">
-                {EMS_CATEGORY_LABELS[event.category]}
+                {event.source_kind === 'schedule_compliance_warning' ? 'Schedule' : EMS_CATEGORY_LABELS[event.category]}
               </span>
               {event.urgency && event.status === 'logged' && (
                 <AlertTriangle className="w-3 h-3 text-red-500 shrink-0" />
+              )}
+              {event.source_kind === 'schedule_compliance_warning' && event.status === 'logged' && (
+                <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
               )}
               {!event.urgency && event.incident_recommendation && event.status === 'logged' && (
                 <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
@@ -58,7 +61,9 @@ export function EventList({ events, selectedId, onSelect }: EventListProps) {
             </div>
             <p className="text-sm text-w-text truncate">{label}</p>
             <p className="text-xs text-w-faint truncate mt-0.5">
-              {event.channel_name ? `#${event.channel_name}` : 'Unknown channel'}
+              {event.source_kind === 'schedule_compliance_warning'
+                ? 'Schedule'
+                : event.channel_name ? `#${event.channel_name}` : 'Unknown channel'}
               {event.location_name ? ` · ${event.location_name}` : ''}
               {event.reporter_name ? ` · ${event.reporter_name}` : ''}
             </p>

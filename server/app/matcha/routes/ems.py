@@ -717,6 +717,7 @@ async def promote(
             capabilities=access.capabilities,
             features=features,
             event_status=event["status"],
+            source_kind=event.get("source_kind"),
         )
         if not verdict.ok:
             raise HTTPException(status_code=verdict.http_status, detail=verdict.reason)

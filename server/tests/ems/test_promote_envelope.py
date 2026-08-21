@@ -116,6 +116,16 @@ class TestEvaluatePromote:
         assert v.kind == "refuse"
         assert v.http_status == 409
 
+    def test_schedule_warning_cannot_be_promoted_to_incident(self):
+        v = evaluate_promote(
+            role="client",
+            features=FEATURES_ON,
+            event_status="logged",
+            source_kind="schedule_compliance_warning",
+        )
+        assert v.kind == "refuse"
+        assert v.http_status == 409
+
 
 class _FakeConn:
     """Just enough of asyncpg's Connection for promote_event's two

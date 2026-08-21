@@ -30,7 +30,7 @@ from ...services.scheduling.schedule_rules import build_patch
 from ...services.scheduling.shift_writes import generate_week_template_shifts
 from ._shared import (
     require_company_id, log_audit, serialize_week_template, serialize_block,
-    fetch_shifts, assert_location_in_company, assert_job_in_company,
+    fetch_shifts, assert_location_in_company, assert_job_in_company, reconcile_warning_events,
 )
 
 router = APIRouter()
@@ -250,6 +250,7 @@ async def generate_from_week_template(week_template_id: UUID, body: GenerateFrom
                             {"series_id": str(result["series_id"]), "created": result["created"],
                              "blocks": len(blocks)})
 
+        await reconcile_warning_events(conn, company_id)
         lo = datetime.combine(body.start_date, time.min, tzinfo=timezone.utc)
         hi = datetime.combine(body.end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
         shifts = await fetch_shifts(conn, company_id, lo, hi)

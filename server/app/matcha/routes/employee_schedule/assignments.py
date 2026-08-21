@@ -19,6 +19,7 @@ from ._shared import (
     find_conflicts, raise_conflict, raise_shift_full,
     fetch_availability, availability_violations, raise_outside_availability,
     fetch_locked_shift_pair, check_job_qualification, raise_not_qualified,
+    reconcile_warning_events,
 )
 from ._compliance import check_shift_compliance, raise_for_violations, _fair_workweek_advisories
 
@@ -165,6 +166,7 @@ async def move_employee_assignment(
                                  "assignment.qualification_override",
                                  {"employee_id": str(body.employee_id), **unqualified})
 
+        await reconcile_warning_events(conn, company_id, [body.from_shift_id, body.to_shift_id])
         return {
             "source_shift": await fetch_shift_by_id(conn, company_id, body.from_shift_id),
             "target_shift": await fetch_shift_by_id(conn, company_id, body.to_shift_id),
@@ -274,6 +276,7 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                     logger.exception(
                         "scheduled_role training rules failed for shift %s", shift_id
                     )
+        await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -308,4 +311,5 @@ async def unassign_employee(shift_id: UUID, employee_id: UUID,
                                 "shift_kind": shift["kind"],
                                 "location_id": str(shift["location_id"]) if shift["location_id"] else None,
                             })
+        await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)

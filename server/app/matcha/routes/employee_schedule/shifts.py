@@ -28,6 +28,7 @@ from ._shared import (
     find_conflicts, raise_conflict, shift_snapshot,
     fetch_availability, availability_violations, log_availability_override, raise_outside_availability,
     shift_window_on_date, check_job_qualification, raise_not_qualified,
+    reconcile_warning_events,
 )
 from ._compliance import (
     check_shift_compliance, raise_for_violations, _approved_db_rules,
@@ -121,6 +122,16 @@ async def get_week(
                     "lapsed_credentials": sum(
                         1 for it in items if it["source"] != "training" and it["date"] and it["date"] < today
                     ),
+                    "warnings": [
+                        (
+                            f"Overdue training: {it['item'] or 'Training'} "
+                            f"(due {it['date'].isoformat()})"
+                            if it["source"] == "training"
+                            else f"Lapsed credential: {it['item'] or 'Credential'} "
+                            f"(due {it['date'].isoformat()})"
+                        )
+                        for it in items if it["date"] and it["date"] < today
+                    ],
                 }
                 for emp_id, items in lapses.items()
             }
@@ -268,6 +279,7 @@ async def create_shift(body: ShiftCreate,
                 await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
                                 "assignment.qualification_override",
                                 {"employee_id": emp_id, **detail})
+        await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -359,6 +371,7 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                     audit_details={"source": "duplicate", "source_shift_id": str(shift_id)},
                 )
                 created_ids.append(new_id)
+        await reconcile_warning_events(conn, company_id, created_ids)
         shifts = [await fetch_shift_by_id(conn, company_id, i) for i in created_ids]
     return {"created": len(created_ids), "shifts": shifts,
             "dropped": dropped, "compliance_warnings": compliance_warnings}
@@ -540,6 +553,7 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                     conn, company_id, shift_id, current_user.id,
                     UUID(employee_id), avail,
                 )
+        await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -583,6 +597,7 @@ async def delete_shift(shift_id: UUID,
                                 "before": shift_snapshot(existing),
                                 "was_published": existing["published_at"] is not None,
                             })
+        await reconcile_warning_events(conn, company_id, [shift_id])
     return {"ok": True, "id": str(shift_id)}
 
 
@@ -606,6 +621,7 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
                 raise HTTPException(status_code=404, detail="Shift not found")
             await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                             "shift.publish", {})
+        await reconcile_warning_events(conn, company_id, [shift_id])
         return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
@@ -640,6 +656,7 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
             )
             await log_audit(conn, company_id, "shift", None, current_user.id,
                             "shift.publish_range", {"count": count, "location_id": str(body.location_id) if body.location_id else None})
+        await reconcile_warning_events(conn, company_id)
         # Same window semantics as the UPDATE above, so the returned summary
         # counts exactly the shifts this call could have published.
         shifts = await fetch_shifts(conn, company_id, body.start, body.end,

@@ -7,12 +7,9 @@ import {
   toISODate, addDays, startOfWeekSunday,
 } from '../../../types/employeeSchedule'
 
-export type EmployeeScheduleTab = 'schedule' | 'templates' | 'jobs' | 'requests' | 'intelligence'
+export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intelligence'
 
-/** `locationId` is required to fetch a week's shifts — pass `''` while the
- *  caller is still waiting on the user to pick a location. */
 export function useEmployeeSchedule(
-  locationId: string,
   initialDate?: string,
   initialTab: EmployeeScheduleTab = 'schedule',
 ) {
@@ -31,19 +28,12 @@ export function useEmployeeSchedule(
   const [publishing, setPublishing] = useState(false)
 
   const reload = useCallback(async () => {
-    if (!locationId) {
-      setShifts([])
-      setRoster([])
-      setRosterFlags(null)
-      setSummary(null)
-      return
-    }
-    const w = await fetchWeek(weekStart, locationId)
+    const w = await fetchWeek(weekStart)
     setShifts(w.shifts)
     setRoster(w.roster)
     setRosterFlags(w.roster_flags)
     setSummary(w.summary)
-  }, [weekStart, locationId])
+  }, [weekStart])
 
   useEffect(() => {
     setLoading(true)
@@ -57,7 +47,7 @@ export function useEmployeeSchedule(
   async function publishWeek() {
     setPublishing(true)
     try {
-      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`, locationId)
+      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
       await reload()
     } finally {
       setPublishing(false)

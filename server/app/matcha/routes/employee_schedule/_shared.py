@@ -8,6 +8,7 @@ company_id.
 """
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -23,6 +24,9 @@ from ...services.scheduling.schedule_rules import (  # re-exported for the route
 from ...services.scheduling.shift_writes import (  # noqa: F401 — re-exported for route modules + tests
     _iso, fetch_availability, find_conflicts, log_audit, log_availability_override, shift_snapshot,
 )
+from ...services.scheduling.schedule_warning_events import reconcile_schedule_warning_events
+
+logger = logging.getLogger(__name__)
 
 _SHIFT_COLS = (
     "id, company_id, location_id, template_id, series_id, role, department, "
@@ -43,6 +47,14 @@ REQUEST_SELECT = """
     JOIN employees e ON e.id = r.employee_id
     LEFT JOIN schedule_shifts s ON s.id = r.shift_id
 """
+
+
+async def reconcile_warning_events(conn, company_id: UUID, shift_ids: Optional[list[UUID]] = None) -> None:
+    """Keep EMS warnings best-effort so an EMS outage never blocks scheduling."""
+    try:
+        await reconcile_schedule_warning_events(conn, company_id, shift_ids=shift_ids)
+    except Exception:
+        logger.exception("Could not reconcile schedule warning EMS events for %s", company_id)
 
 
 async def require_company_id(current_user) -> UUID:

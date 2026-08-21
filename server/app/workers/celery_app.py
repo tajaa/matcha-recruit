@@ -65,6 +65,7 @@ celery_app = Celery(
         "app.workers.tasks.debug_error",
         "app.workers.tasks.huume_code",
         "app.workers.tasks.sales_intake_poll",
+        "app.workers.tasks.schedule_warning_events",
     ],
 )
 
@@ -185,6 +186,7 @@ _SCHEDULED_TASKS = [
     ("benefit_eligibility_sync", "app.workers.tasks.benefit_eligibility_sync", "run_benefit_eligibility_sync"),
     ("benefit_enrollment_notifications", "app.workers.tasks.benefit_enrollment_notifications", "run_benefit_enrollment_notifications"),
     ("sales_intake_poll", "app.workers.tasks.sales_intake_poll", "run_sales_intake_poll"),
+    ("schedule_warning_events", "app.workers.tasks.schedule_warning_events", "reconcile_schedule_warning_events_task"),
     ("cappe_booking_reminders", "app.workers.tasks.cappe_booking_reminders", "run_cappe_booking_reminders"),
     ("cappe_domain_renewals", "app.workers.tasks.cappe_domain_renewals", "run_cappe_domain_renewals"),
     ("cappe_comp_expiry", "app.workers.tasks.cappe_comp_expiry", "run_cappe_comp_expiry"),

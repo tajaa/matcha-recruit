@@ -9,7 +9,6 @@ import InventoryHub from '../../work/pages/InventoryHub'
 import ProtocolPage from '../../work/pages/ProtocolPage'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import EmployeeSchedule from '../../pages/app/employees/EmployeeSchedule'
-import ScheduleEditor from '../pages/ScheduleEditor'
 import OpsHome from '../pages/OpsHome'
 import OpsAccess from '../pages/OpsAccess'
 import { WorkSurfaceProvider } from '../../work/routes/WorkSurfaceContext'
@@ -52,15 +51,13 @@ export default function OpsRoutes() {
               <Route path="inventory/:itemId" element={<InventoryHub />} />
             </Route>
             <Route
+              path="schedule"
               element={
                 <FeatureGate feature="employee_schedule" label="Schedule" allowPlatformAdmin>
-                  <Outlet />
+                  <EmployeeSchedule />
                 </FeatureGate>
               }
-            >
-              <Route path="schedule" element={<EmployeeSchedule />} />
-              <Route path="schedule/editor" element={<ScheduleEditor />} />
-            </Route>
+            />
             <Route
               path="schedule-intelligence"
               element={<Navigate to="/ops/schedule?tab=intelligence" replace />}

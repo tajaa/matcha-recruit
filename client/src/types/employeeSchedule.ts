@@ -88,10 +88,14 @@ export interface AssignmentMoveResponse {
   target_shift: Shift
 }
 
-// Per-employee lapse counts for the roster picker. `null` = both `training`
+// Per-employee lapse details for the roster picker. `null` = both `training`
 // and `credential_templates` are off for this company (module-off, not
 // "checked and clean" — an employee absent from the map has nothing lapsed).
-export type RosterFlags = Record<string, { overdue_training: number; lapsed_credentials: number }>
+export type RosterFlags = Record<string, {
+  overdue_training: number
+  lapsed_credentials: number
+  warnings?: string[]
+}>
 
 export interface WeekResponse {
   week_start: string

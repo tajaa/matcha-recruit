@@ -31,6 +31,12 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
   const docEntries = Object.entries(event.doc).filter(
     ([, v]) => typeof v === 'string' && v.trim().length > 0,
   )
+  const isScheduleWarning = event.source_kind === 'schedule_compliance_warning'
+  const scheduleShiftId = event.doc.shift_id
+  const scheduleDate = event.doc.shift_starts_at?.slice(0, 10)
+  const scheduleHref = isScheduleWarning && scheduleShiftId
+    ? `/ops/schedule?date=${scheduleDate ?? ''}&shift=${scheduleShiftId}${event.location_id ? `&location=${event.location_id}` : ''}`
+    : null
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-6">
@@ -38,7 +44,7 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
         {/* Header */}
         <div>
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-w-dim font-medium">
-            <span>{EMS_CATEGORY_LABELS[event.category]}</span>
+            <span>{isScheduleWarning ? 'Schedule warning' : EMS_CATEGORY_LABELS[event.category]}</span>
             {event.severity_hint && (
               <>
                 <span>·</span>
@@ -56,6 +62,7 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
                 {event.channel_name}
               </span>
             )}
+            {isScheduleWarning && <span>Schedule</span>}
             {event.location_name && (
               <span className="flex items-center gap-0.5">
                 <MapPin className="w-3 h-3" />
@@ -66,6 +73,21 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
             <span>{new Date(event.created_at).toLocaleString()}</span>
           </p>
         </div>
+
+        {isScheduleWarning && (
+          <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-amber-300">Scheduling follow-up needed</p>
+              <p className="mt-1.5">{event.doc.warning ?? event.narrative}</p>
+              {scheduleHref && (
+                <a href={scheduleHref} className="mt-2 inline-flex text-xs font-medium text-amber-300 hover:text-amber-200">
+                  Open schedule
+                </a>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Status banner */}
         {event.status === 'promoted' && event.incident_id && (

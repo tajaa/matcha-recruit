@@ -13,7 +13,7 @@ interface RosterPanelProps {
 
 function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
   employee: RosterEmployee
-  flags?: { overdue_training: number; lapsed_credentials: number }
+  flags?: { overdue_training: number; lapsed_credentials: number; warnings?: string[] }
   selected: boolean
   requiredJobId?: string | null
   onSelect(): void
@@ -39,7 +39,7 @@ function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
         <span className="block truncate text-xs text-zinc-200">{employee.name}</span>
         <span className="block truncate text-[10px] text-zinc-600">{employee.job_title || employee.department || 'Employee'}</span>
       </span>
-      {warnings > 0 && <span className="text-[10px] text-amber-400" title="Training or credential lapse">!{warnings}</span>}
+      {warnings > 0 && <span className="text-[10px] text-amber-400" title={flags?.warnings?.join('; ') || 'Training or credential lapse'}>{warnings}</span>}
       {unqualified && <span className="text-[10px] text-amber-400" title="Not qualified for this job">Not qualified</span>}
     </button>
   )

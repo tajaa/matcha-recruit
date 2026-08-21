@@ -21,6 +21,7 @@ from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
     fetch_availability, availability_violations, raise_outside_availability,
+    reconcile_warning_events,
 )
 from ...services.scheduling.shift_writes import log_availability_override
 from ._compliance import check_shift_compliance, raise_for_violations
@@ -242,6 +243,8 @@ async def review_request(request_id: UUID, body: RequestReview,
             await log_audit(conn, company_id, "request", request_id, current_user.id,
                             f"request.{new_status}", audit_details)
 
+        if req["shift_id"] is not None:
+            await reconcile_warning_events(conn, company_id, [req["shift_id"]])
         row = await conn.fetchrow(
             f"{REQUEST_SELECT} WHERE r.id = $1 AND r.company_id = $2",
             request_id, company_id,

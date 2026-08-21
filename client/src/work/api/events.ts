@@ -48,6 +48,8 @@ export interface EmsEvent {
   clarification_rounds: number
   created_at: string
   updated_at: string
+  source_kind: string | null
+  source_ref: string | null
 }
 
 export interface EmsEventListResponse {

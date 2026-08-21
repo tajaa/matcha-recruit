@@ -219,7 +219,7 @@ export default function EventsHub() {
             <EventDetail
               event={selectedEvent}
               canResolve={canResolve}
-              canPromote={canPromote && hasIncidents}
+              canPromote={canPromote && hasIncidents && selectedEvent.source_kind !== 'schedule_compliance_warning'}
               canAssign={canAssign}
               onResolve={handleResolve}
               onPromote={() => setShowPromote(true)}

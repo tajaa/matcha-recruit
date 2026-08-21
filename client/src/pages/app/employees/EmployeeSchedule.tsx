@@ -1,22 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
-  BarChart2, BriefcaseBusiness, CalendarDays, HelpCircle, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Check, X,
-  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy,
+  BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
+  Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchShift,
-  fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
-  addTemplateBlock, updateTemplateBlock, deleteTemplateBlock, generateFromWeekTemplate,
-  fetchRequests, reviewRequest, duplicateShift,
-  fetchJobs,
+  assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
+  generateFromTemplate, fetchRequests, reviewRequest, duplicateShift,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, ScheduleJob, WeekTemplate, TemplateBlock, BlockPayload, ScheduleRequest, ShiftPayload, RosterFlags,
+  Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
@@ -26,10 +23,6 @@ import { useEmployeeSchedule } from './useEmployeeSchedule'
 import type { EmployeeScheduleTab } from './useEmployeeSchedule'
 import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
-import ScheduleJobsTab from '../../../components/employees/schedule-editor/ScheduleJobsTab'
-import ScheduleEditorGuide from '../../../components/employees/schedule-editor/ScheduleEditorGuide'
-import LocationPicker from '../../../components/shared/LocationPicker'
-import { useLocationScope } from '../../../hooks/useLocationScope'
 import { useMe } from '../../../hooks/useMe'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
@@ -44,13 +37,9 @@ export default function EmployeeSchedule() {
   const [searchParams, setSearchParams] = useSearchParams()
   const linkedDate = searchParams.get('date') ?? undefined
   const highlightShiftId = searchParams.get('shift') ?? undefined
-  const highlightTemplateId = searchParams.get('template') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
-  const { locationId, setLocationId, locations } = useLocationScope()
   const { me, hasFeature, loading: meLoading } = useMe()
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
-  const [jobs, setJobs] = useState<ScheduleJob[]>([])
-  const [guideOpen, setGuideOpen] = useState(false)
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
     : requestedTab
@@ -68,34 +57,7 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule(locationId, linkedDate, initialTab)
-
-  const reloadJobs = useCallback(async () => {
-    if (!locationId) {
-      setJobs([])
-      return
-    }
-    try {
-      const response = await fetchJobs(locationId)
-      setJobs(response.jobs)
-    } catch {
-      setJobs([])
-    }
-  }, [locationId])
-  useEffect(() => { void reloadJobs() }, [reloadJobs])
-
-  // A Huume shift pill (work/pages/ChannelView/systemContent.tsx's
-  // `[[shift:<id>:<date>]]` token) links here with ?shift=&date= but no
-  // ?location= — the token predates location scoping. Resolve the shift's
-  // own location once so the pill still lands somewhere useful.
-  useEffect(() => {
-    if (locationId || !highlightShiftId) return
-    let cancelled = false
-    fetchShift(highlightShiftId)
-      .then((s) => { if (!cancelled && s.location_id) setLocationId(s.location_id) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [locationId, highlightShiftId, setLocationId])
+  } = useEmployeeSchedule(linkedDate, initialTab)
 
   useEffect(() => {
     const blockedIntelligence = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
@@ -135,26 +97,20 @@ export default function EmployeeSchedule() {
             </h1>
             <p className="text-sm text-zinc-500 mt-1 max-w-2xl">Build weekly shifts over your roster, assign employees, and publish. Generate recurring weeks from reusable templates. Employees see published shifts and can request swaps or time off.</p>
           </div>
-           <div className="flex shrink-0 items-center gap-2">
-             <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
-             <Link to={`/ops/schedule/editor?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200">Full shift editor</Link>
-             <button onClick={() => setGuideOpen(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-sm text-zinc-400 hover:text-zinc-100" aria-label="Open scheduling guide"><HelpCircle className="h-4 w-4" /> Guide</button>
-             <ScheduleLawPanel />
-           </div>
+          <ScheduleLawPanel />
         </div>
       </div>
 
       <div className="flex items-center gap-1 border-b border-white/[0.06] px-5">
         <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
         <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
-        <TabButton active={tab === 'jobs'} onClick={() => setTab('jobs')} icon={<BriefcaseBusiness className="h-4 w-4" />}>Jobs</TabButton>
         <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
         {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
       </div>
 
       <div className="min-w-0 space-y-6 p-5">
 
-      {tab === 'schedule' && (locationId ? (
+      {tab === 'schedule' && (
         <>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2">
@@ -182,7 +138,7 @@ export default function EmployeeSchedule() {
             <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
           ) : (
             <div className="min-w-0 overflow-x-auto pb-2">
-              <div className="grid min-w-0 grid-cols-1 gap-3 md:min-w-[1120px] md:grid-cols-7">
+              <div className="grid min-w-0 grid-cols-1 gap-3 md:min-w-[1260px] md:grid-cols-7">
                 {days.map((day) => (
                   <DayColumn
                     key={day}
@@ -194,39 +150,24 @@ export default function EmployeeSchedule() {
                     onChanged={reload}
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
-                    defaultLocationId={locationId}
-                    jobs={jobs}
                   />
                 ))}
               </div>
             </div>
           )}
         </>
-      ) : <PickLocationEmpty hasLocations={locations.length > 0} />)}
+      )}
 
-      {tab === 'templates' && (locationId
-        ? <TemplatesTab locationId={locationId} jobs={jobs} onGenerated={() => { setTab('schedule'); reload() }} highlightTemplateId={highlightTemplateId} />
-        : <PickLocationEmpty hasLocations={locations.length > 0} />)}
-      {tab === 'jobs' && (locationId ? <ScheduleJobsTab locationId={locationId} onJobsChanged={reloadJobs} /> : <PickLocationEmpty hasLocations={locations.length > 0} />)}
+      {tab === 'templates' && <TemplatesTab onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
-      <ScheduleEditorGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
-    </div>
-  )
-}
-
-function PickLocationEmpty({ hasLocations }: { hasLocations: boolean }) {
-  return (
-    <div className="flex min-h-[300px] flex-col items-center justify-center gap-2 text-center">
-      <p className="text-sm text-zinc-400">Select a location above to view its schedule.</p>
-      {!hasLocations && <p className="text-xs text-zinc-600">No locations set up yet — add one under Company.</p>}
     </div>
   )
 }
 
 function parseScheduleTab(value: string | null): EmployeeScheduleTab {
-  if (value === 'templates' || value === 'jobs' || value === 'requests' || value === 'intelligence') return value
+  if (value === 'templates' || value === 'requests' || value === 'intelligence') return value
   return 'schedule'
 }
 
@@ -247,9 +188,9 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, defaultLocationId, jobs }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; defaultLocationId?: string; jobs: ScheduleJob[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]
 }) {
   const [adding, setAdding] = useState(false)
   return (
@@ -261,14 +202,14 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} defaultLocationId={defaultLocationId} jobs={jobs} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
         {shifts.map((s) => (
           <ShiftCard
             key={s.id} shift={s} roster={roster} rosterFlags={rosterFlags}
-            onPatch={onPatch} onChanged={onChanged} jobs={jobs}
+            onPatch={onPatch} onChanged={onChanged}
             highlighted={s.id === highlightShiftId}
             weekDays={weekDays}
           />
@@ -278,9 +219,9 @@ function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highl
   )
 }
 
-function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays, jobs }: {
+function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted, weekDays }: {
   shift: Shift; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]; jobs: ScheduleJob[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlighted?: boolean; weekDays: string[]
 }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
@@ -379,7 +320,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         <ShiftForm
           day={shift.starts_at.slice(0, 10)}
           shift={shift}
-          onSaved={(s) => { onPatch(s); setEditing(false) }} jobs={jobs}
+          onSaved={(s) => { onPatch(s); setEditing(false) }}
           onCancel={() => setEditing(false)}
         />
       </div>
@@ -389,7 +330,7 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
   return (
     <div
       ref={cardRef}
-      className={`min-w-0 rounded-lg border p-2.5 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'} ${highlighted ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-950' : ''}`}
+      className={`min-h-[176px] min-w-0 rounded-lg border p-3 ${shift.status === 'cancelled' ? 'border-red-500/20 bg-red-500/5 opacity-70' : 'border-zinc-800 bg-zinc-900/60'} ${highlighted ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-zinc-950' : ''}`}
     >
       <div className="flex items-center justify-between gap-1">
         <span className="text-sm font-medium text-zinc-100">{fmtTime(shift.starts_at)}–{fmtTime(shift.ends_at)}</span>
@@ -407,15 +348,17 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
         {shift.assignments.map((a) => {
           const flags = rosterFlags?.[a.employee_id]
           const lapseCount = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
+          const warningDetails = flags?.warnings ?? []
           return (
             <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
               {a.name}
-              {a.availability_overridden && (
-                <span className="text-orange-400" title="Availability override">Availability override</span>
-              )}
               {lapseCount > 0 && (
-                <span className="text-amber-400" title={`${flags?.overdue_training ?? 0} overdue training, ${flags?.lapsed_credentials ?? 0} lapsed credential(s)`}>
-                  ⚠ {lapseCount}
+                <span
+                  className="inline-flex shrink-0 text-amber-400"
+                  title={warningDetails.join('; ') || `${lapseCount} scheduling warning${lapseCount === 1 ? '' : 's'}`}
+                  aria-label={warningDetails.join('; ') || `${lapseCount} scheduling warning${lapseCount === 1 ? '' : 's'}`}
+                >
+                  <AlertTriangle className="h-3 w-3" />
                 </span>
               )}
               <button onClick={() => removeAssignment(a.employee_id)} disabled={busy} className="text-zinc-500 hover:text-red-400"><X className="h-3 w-3" /></button>
@@ -426,6 +369,8 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
           {shift.assignments.length}/{shift.required_staff}
         </span>
       </div>
+
+      {shift.notes && <p className="mt-2 line-clamp-3 text-[11px] leading-relaxed text-zinc-500">{shift.notes}</p>}
 
       {pickerOpen && available.length > 0 && (
         <select
@@ -527,11 +472,9 @@ function spanHours(start: string, end: string): number {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
-  defaultLocationId?: string
-  jobs: ScheduleJob[]
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -543,7 +486,7 @@ function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCan
   const [start, setStart] = useState(shift ? shift.starts_at.slice(11, 16) : '09:00')
   const [end, setEnd] = useState(shift ? shift.ends_at.slice(11, 16) : '17:00')
   const [role, setRole] = useState(shift?.role ?? '')
-  const [jobId, setJobId] = useState(shift?.job_id ?? '')
+  const [notes, setNotes] = useState(shift?.notes ?? '')
   const [required, setRequired] = useState(String(shift?.required_staff ?? 1))
   const [busy, setBusy] = useState(false)
 
@@ -566,11 +509,8 @@ function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCan
       starts_at: `${startDay}T${start}:00Z`,
       ends_at: `${endDay}T${end}:00Z`,
       role: role.trim() || null,
-      job_id: jobId || null,
+      notes: notes.trim() || null,
       required_staff: Math.max(1, Math.round(Number(required) || 1)),
-    }
-    if (!editing && defaultLocationId) {
-      payload.location_id = defaultLocationId
     }
     if (!editing && kind === 'training' && requirementId) {
       payload.kind = 'training'
@@ -626,13 +566,6 @@ function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCan
         <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
       <label className="block">
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Job <span className="text-zinc-600 normal-case">(optional)</span></span>
-        <select value={jobId} onChange={(e) => setJobId(e.target.value)} className={`${inputCls} mt-0.5`}>
-          <option value="">No job — anyone can be assigned</option>
-          {jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}
-        </select>
-      </label>
-      <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">End</span>
         <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-0.5`} />
       </label>
@@ -650,6 +583,10 @@ function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCan
       <label className="block">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Staff needed</span>
         <input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-0.5`} />
+      </label>
+      <label className="block">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Notes <span className="text-zinc-600 normal-case">(optional)</span></span>
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className={`${inputCls} mt-0.5 resize-y`} />
       </label>
       {!editing && trainingEnabled && (
         <label className="block">
@@ -678,114 +615,52 @@ function ShiftForm({ day, shift, defaultLocationId, jobs, onDone, onSaved, onCan
 }
 
 // ---------- Templates tab ----------
-//
-// A week template is a named container of shift blocks (each block = one
-// shift definition, same shape templates used to be flat rows of). Location
-// lives on the parent only; a block always inherits it (server-enforced).
-// Generation materializes every block's shifts under one series_id, so a
-// whole week is produced — and can be re-produced for a similar week — in
-// one action instead of one generate call per shift definition.
 
-function TemplatesTab({ locationId, jobs, onGenerated, highlightTemplateId }: { locationId: string; jobs: ScheduleJob[]; onGenerated: () => void; highlightTemplateId?: string }) {
-  const [weekTemplates, setWeekTemplates] = useState<WeekTemplate[]>([])
+function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
+  const [templates, setTemplates] = useState<ShiftTemplate[]>([])
   const [loading, setLoading] = useState(true)
-  const [creatingNew, setCreatingNew] = useState(false)
+  const [adding, setAdding] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const r = await fetchWeekTemplates(locationId)
-      setWeekTemplates(r.week_templates)
-    } finally {
-      setLoading(false)
-    }
-  }, [locationId])
-  useEffect(() => { void load() }, [load])
+  const load = useCallback(() => fetchTemplates().then((r) => setTemplates(r.templates)), [])
+  useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-zinc-200">Week templates</h3>
-        <button onClick={() => setCreatingNew((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New week template</button>
+        <h3 className="text-sm font-medium text-zinc-200">Shift templates</h3>
+        <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
       </div>
-      {creatingNew && <Card className="p-4"><WeekTemplateForm defaultLocationId={locationId} jobs={jobs} onDone={() => { setCreatingNew(false); load() }} onCancel={() => setCreatingNew(false)} /></Card>}
-      {weekTemplates.length === 0 && !creatingNew ? (
-        <p className="text-sm text-zinc-600">No week templates for this location yet — build one (e.g. "Standard Week") to generate a full week of shifts in one action.</p>
+      {adding && <Card className="p-4"><TemplateForm onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
+      {templates.length === 0 && !adding ? (
+        <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
       ) : (
         <div className="space-y-2">
-          {weekTemplates.map((t) => (
-            <WeekTemplateCard
-              key={t.id} tpl={t} jobs={jobs} onChanged={load} onGenerated={onGenerated}
-              autoHighlight={t.id === highlightTemplateId}
-            />
-          ))}
+          {templates.map((t) => <TemplateRow key={t.id} tpl={t} onChanged={load} onGenerated={onGenerated} />)}
         </div>
       )}
     </div>
   )
 }
 
-const BLOCK_DOTS = ['bg-emerald-400', 'bg-sky-400', 'bg-amber-400', 'bg-fuchsia-400', 'bg-orange-400', 'bg-cyan-400']
-
-/** Sun-Sat strip so a manager can see AT A GLANCE which blocks cover which
- * days of the work week, instead of reading a flat list and reconstructing
- * the overlap in their head. Read-only — editing stays on TemplateBlockRow.
- * Deliberately minimal: a day label + one dot-and-time line per block, no
- * boxes or borders — the flat list below already carries names/staff/roles. */
-function TemplateWeekPreview({ blocks }: { blocks: TemplateBlock[] }) {
-  if (!blocks.length) return null
-  const dotByBlockId = new Map(blocks.map((b, i) => [b.id, BLOCK_DOTS[i % BLOCK_DOTS.length]]))
-  return (
-    <div className="grid grid-cols-7 gap-1 text-[10px]">
-      {WEEKDAY_LABELS.map((label, day) => {
-        const dayBlocks = blocks.filter((b) => b.days_of_week.includes(day))
-        return (
-          <div key={day} className="px-0.5">
-            <div className="font-medium uppercase tracking-wide text-zinc-600">{label}</div>
-            <div className="mt-0.5 space-y-0.5">
-              {dayBlocks.map((b) => (
-                <div key={b.id} className="flex items-center gap-1 text-zinc-400">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotByBlockId.get(b.id)}`} />
-                  <span className="truncate">{fmtTime(`2000-01-01T${b.start_time}Z`)}–{fmtTime(`2000-01-01T${b.end_time}Z`)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function WeekTemplateCard({ tpl, jobs, onChanged, onGenerated, autoHighlight }: { tpl: WeekTemplate; jobs: ScheduleJob[]; onChanged: () => void; onGenerated: () => void; autoHighlight?: boolean }) {
+function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onChanged: () => void; onGenerated: () => void }) {
   const { toast } = useToast()
-  const [expanded, setExpanded] = useState(!!autoHighlight)
-  const [addingBlock, setAddingBlock] = useState(false)
   const [busy, setBusy] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const today = toISODate(new Date())
   const [from, setFrom] = useState(today)
-  const [to, setTo] = useState(addDays(today, 6))
+  const [to, setTo] = useState(addDays(today, 13))
   const [genBusy, setGenBusy] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (autoHighlight) cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [autoHighlight])
-
-  const totalShiftsPerRun = tpl.blocks.reduce((n, b) => n + b.days_of_week.length, 0)
-  const canGenerate = tpl.blocks.some((b) => b.days_of_week.length > 0)
 
   async function remove() {
     setBusy(true)
-    try { await deleteWeekTemplate(tpl.id); onChanged() } finally { setBusy(false) }
+    try { await deleteTemplate(tpl.id); onChanged() } finally { setBusy(false) }
   }
   async function generate() {
     setGenBusy(true)
     try {
-      const res = await generateFromWeekTemplate(tpl.id, from, to)
+      const res = await generateFromTemplate(tpl.id, from, to)
       onGenerated()
       const warnings = res.compliance_warnings ?? []
       if (warnings.length) {
@@ -797,94 +672,37 @@ function WeekTemplateCard({ tpl, jobs, onChanged, onGenerated, autoHighlight }: 
   }
 
   return (
-    <Card ref={cardRef} className={`border-transparent bg-zinc-900/40 p-2.5 shadow-none transition-shadow ${autoHighlight ? 'ring-2 ring-emerald-500/60' : ''}`}>
-      <div className="flex items-center gap-2.5 flex-wrap">
-        <button onClick={() => setExpanded((v) => !v)} className="text-zinc-600 hover:text-zinc-200 p-0.5">
-          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-        </button>
+    <Card className="p-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="text-sm text-zinc-200">{tpl.name}</div>
-          <div className="text-[11px] text-zinc-600">
-            {tpl.blocks.length} block{tpl.blocks.length === 1 ? '' : 's'}
-            {' · '}~{totalShiftsPerRun} shift{totalShiftsPerRun === 1 ? '' : 's'} per week
+          <div className="text-[11px] text-zinc-500">
+            {fmtTime(`2000-01-01T${tpl.start_time}Z`)}–{fmtTime(`2000-01-01T${tpl.end_time}Z`)}
+            {tpl.role ? ` · ${tpl.role}` : ''} · {tpl.required_staff} staff
+            {' · '}{tpl.days_of_week.length ? tpl.days_of_week.map((d) => WEEKDAY_LABELS[d]).join(' ') : 'no days set'}
           </div>
         </div>
         <button onClick={() => setGenOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Sparkles className="h-3.5 w-3.5" /> Generate</button>
-        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
+        <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-4 w-4" /></button>
       </div>
       {genOpen && (
         <div className="mt-3 flex items-end gap-2 flex-wrap border-t border-zinc-800 pt-3">
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} mt-1`} /></label>
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">To</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inputCls} mt-1`} /></label>
-          <button onClick={generate} disabled={genBusy || !canGenerate} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{genBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Generate drafts</button>
-        </div>
-      )}
-      {expanded && (
-        <div className="mt-2.5 space-y-2 border-t border-zinc-800/70 pt-2.5">
-          {tpl.blocks.length > 0 && <TemplateWeekPreview blocks={tpl.blocks} />}
-          {tpl.blocks.length === 0 && !addingBlock && (
-            <p className="text-xs text-zinc-600">No blocks yet — add the first shift definition for this week.</p>
-          )}
-          <div className="space-y-1.5">
-          {tpl.blocks.map((b) => (
-            <TemplateBlockRow key={b.id} block={b} jobs={jobs} weekTemplateId={tpl.id} onChanged={onChanged} />
-          ))}
-          {addingBlock ? (
-            <TemplateBlockForm weekTemplateId={tpl.id} jobs={jobs} onDone={() => { setAddingBlock(false); onChanged() }} onCancel={() => setAddingBlock(false)} />
-          ) : (
-            <button onClick={() => setAddingBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800/70"><Plus className="h-3.5 w-3.5" /> Add block</button>
-          )}
-          </div>
+          <button onClick={generate} disabled={genBusy || !tpl.days_of_week.length} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{genBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Generate drafts</button>
         </div>
       )}
     </Card>
   )
 }
 
-function TemplateBlockRow({ block, jobs, weekTemplateId, onChanged }: { block: TemplateBlock; jobs: ScheduleJob[]; weekTemplateId: string; onChanged: () => void }) {
-  const [editing, setEditing] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  async function remove() {
-    setBusy(true)
-    try { await deleteTemplateBlock(weekTemplateId, block.id); onChanged() } finally { setBusy(false) }
-  }
-
-  if (editing) {
-    return <TemplateBlockForm weekTemplateId={weekTemplateId} jobs={jobs} initial={block} onDone={() => { setEditing(false); onChanged() }} onCancel={() => setEditing(false)} />
-  }
-
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-zinc-800/70 px-2.5 py-1">
-      <div className="flex-1 min-w-0">
-        <div className="text-sm text-zinc-200">{block.name}</div>
-        <div className="text-[11px] text-zinc-600">
-          {fmtTime(`2000-01-01T${block.start_time}Z`)}–{fmtTime(`2000-01-01T${block.end_time}Z`)}
-          {block.role ? ` · ${block.role}` : ''} · {block.required_staff} staff
-          {' · '}{block.days_of_week.length ? block.days_of_week.map((d) => WEEKDAY_LABELS[d]).join(' ') : 'no days set'}
-        </div>
-      </div>
-      <button onClick={() => setEditing(true)} className="text-zinc-600 hover:text-zinc-200 p-1"><Pencil className="h-3.5 w-3.5" /></button>
-      <button onClick={remove} disabled={busy} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
-    </div>
-  )
-}
-
-function TemplateBlockForm({ weekTemplateId, jobs, initial, onStage, onDone, onCancel }: {
-  weekTemplateId?: string
-  jobs: ScheduleJob[]
-  initial?: TemplateBlock
-  onStage?: (b: BlockPayload) => void
-  onDone?: () => void
-  onCancel: () => void
-}) {
-  const [name, setName] = useState(initial?.name ?? '')
-  const [role, setRole] = useState(initial?.role ?? '')
-  const [jobId, setJobId] = useState(initial?.job_id ?? '')
-  const [start, setStart] = useState(initial ? initial.start_time.slice(0, 5) : '09:00')
-  const [end, setEnd] = useState(initial ? initial.end_time.slice(0, 5) : '17:00')
-  const [required, setRequired] = useState(String(initial?.required_staff ?? 1))
-  const [days, setDays] = useState<number[]>(initial?.days_of_week ?? [1, 2, 3, 4, 5])
+function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('')
+  const [start, setStart] = useState('09:00')
+  const [end, setEnd] = useState('17:00')
+  const [required, setRequired] = useState('1')
+  const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5])
   const [busy, setBusy] = useState(false)
 
   function toggleDay(d: number) {
@@ -892,24 +710,20 @@ function TemplateBlockForm({ weekTemplateId, jobs, initial, onStage, onDone, onC
   }
   async function save() {
     if (!name.trim()) return
-    const payload: BlockPayload = {
-      name: name.trim(), role: role.trim() || null,
-      job_id: jobId || null,
-      start_time: `${start}:00`, end_time: `${end}:00`,
-      required_staff: Math.max(1, Math.round(Number(required) || 1)),
-      days_of_week: days,
-    }
-    if (onStage) { onStage(payload); return }
     setBusy(true)
     try {
-      if (initial) await updateTemplateBlock(weekTemplateId!, initial.id, payload)
-      else await addTemplateBlock(weekTemplateId!, payload)
-      onDone?.()
+      await createTemplate({
+        name: name.trim(), role: role.trim() || null,
+        start_time: `${start}:00`, end_time: `${end}:00`,
+        required_staff: Math.max(1, Math.round(Number(required) || 1)),
+        days_of_week: days,
+      })
+      onDone()
     } finally { setBusy(false) }
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-zinc-800 p-3">
+    <div className="space-y-2">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Name</span><input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} mt-1`} /></label>
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Role</span><input value={role} onChange={(e) => setRole(e.target.value)} className={`${inputCls} mt-1`} /></label>
@@ -917,7 +731,6 @@ function TemplateBlockForm({ weekTemplateId, jobs, initial, onStage, onDone, onC
         <label className="block"><span className="text-[10px] text-zinc-500 uppercase">End</span><input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inputCls} mt-1`} /></label>
       </div>
       <label className="block max-w-[120px]"><span className="text-[10px] text-zinc-500 uppercase">Staff needed</span><input value={required} onChange={(e) => setRequired(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Job</span><select value={jobId} onChange={(e) => setJobId(e.target.value)} className={`${inputCls} mt-1`}><option value="">No job — anyone</option>{jobs.map((job) => <option key={job.id} value={job.id}>{job.name}</option>)}</select></label>
       <div>
         <span className="text-[10px] text-zinc-500 uppercase">Repeat on</span>
         <div className="flex gap-1 mt-1">
@@ -927,60 +740,7 @@ function TemplateBlockForm({ weekTemplateId, jobs, initial, onStage, onDone, onC
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} {onStage ? 'Add block' : 'Save block'}</button>
-        <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
-      </div>
-    </div>
-  )
-}
-
-function WeekTemplateForm({ defaultLocationId, jobs, onDone, onCancel }: { defaultLocationId?: string; jobs: ScheduleJob[]; onDone: () => void; onCancel: () => void }) {
-  const [name, setName] = useState('')
-  const [notes, setNotes] = useState('')
-  const [stagedBlocks, setStagedBlocks] = useState<BlockPayload[]>([])
-  const [addingStagedBlock, setAddingStagedBlock] = useState(false)
-  const [busy, setBusy] = useState(false)
-
-  async function save() {
-    if (!name.trim()) return
-    setBusy(true)
-    try {
-      await createWeekTemplate({
-        name: name.trim(), location_id: defaultLocationId || null,
-        notes: notes.trim() || null, blocks: stagedBlocks,
-      })
-      onDone()
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Standard Week" className={`${inputCls} mt-1`} /></label>
-        <label className="block"><span className="text-[10px] text-zinc-500 uppercase">Notes</span><input value={notes} onChange={(e) => setNotes(e.target.value)} className={`${inputCls} mt-1`} /></label>
-      </div>
-      {stagedBlocks.length > 0 && (
-        <div className="space-y-1.5">
-          {stagedBlocks.map((b, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-800 px-2.5 py-1.5">
-              <div className="flex-1 min-w-0 text-sm text-zinc-200">
-                {b.name} <span className="text-[11px] text-zinc-500">
-                  {b.start_time?.slice(0, 5)}–{b.end_time?.slice(0, 5)}
-                  {b.role ? ` · ${b.role}` : ''} · {b.required_staff} staff
-                </span>
-              </div>
-              <button onClick={() => setStagedBlocks((prev) => prev.filter((_, x) => x !== i))} className="text-zinc-600 hover:text-red-400 p-1"><Trash2 className="h-3.5 w-3.5" /></button>
-            </div>
-          ))}
-        </div>
-      )}
-      {addingStagedBlock ? (
-        <TemplateBlockForm jobs={jobs} onStage={(b) => { setStagedBlocks((prev) => [...prev, b]); setAddingStagedBlock(false) }} onCancel={() => setAddingStagedBlock(false)} />
-      ) : (
-        <button onClick={() => setAddingStagedBlock(true)} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-800"><Plus className="h-3.5 w-3.5" /> Add block</button>
-      )}
-      <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save week template</button>
+        <button onClick={save} disabled={busy || !name.trim()} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save template</button>
         <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700">Cancel</button>
       </div>
     </div>
