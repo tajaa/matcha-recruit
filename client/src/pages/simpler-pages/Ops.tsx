@@ -84,6 +84,7 @@ export default function MatchaOpsPage() {
   return (
     <div style={{ backgroundColor: NOIR, color: BONE }} className="home-root min-h-screen overflow-x-hidden">
       <PageStyle />
+      <OpsMotionStyles />
       <GrainOverlay />
 
       {hasOpenedPricing && (
@@ -165,14 +166,14 @@ function OpsConsole() {
     <div className="relative mx-auto w-full max-w-[650px] overflow-visible" style={{ perspective: '1300px' }}>
       <div aria-hidden className="absolute left-[18%] top-[15%] h-[65%] w-[65%] rounded-full blur-3xl" style={{ backgroundColor: 'rgba(163,197,125,0.12)' }} />
 
-      <div className="relative mx-auto aspect-[1.04] w-[86%] rounded-[26px] border p-3 sm:p-4" style={{ ...FLOATING_CARD_STYLE, transform: 'rotateX(8deg) rotateY(-13deg) rotateZ(1deg)', background: 'linear-gradient(145deg, rgba(35,42,34,0.94), rgba(14,18,15,0.98))', borderColor: 'rgba(188,216,151,0.24)' }}>
+      <div className="ops-console-shell relative mx-auto aspect-[1.04] w-[86%] rounded-[26px] border p-3 sm:p-4" style={{ ...FLOATING_CARD_STYLE, background: 'linear-gradient(145deg, rgba(35,42,34,0.94), rgba(14,18,15,0.98))', borderColor: 'rgba(188,216,151,0.24)' }}>
         <div className="h-full rounded-[18px] border p-4 sm:p-6" style={{ background: 'linear-gradient(145deg, rgba(245,242,237,0.08), rgba(245,242,237,0.025))', borderColor: 'rgba(245,242,237,0.12)', transform: 'translateZ(28px)' }}>
           <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'rgba(245,242,237,0.10)' }}>
             <div className="flex items-center gap-2">
               <Radio size={14} style={{ color: LEAF }} />
               <span className="font-mk-mono text-[10px] uppercase tracking-[0.18em]" style={{ color: ASH }}>Matcha Ops / Live</span>
             </div>
-            <span className="rounded-full px-2 py-1 text-[9px] font-mk-mono uppercase tracking-wider" style={{ backgroundColor: 'rgba(163,197,125,0.12)', color: LEAF }}>Synced</span>
+            <span className="ops-synced rounded-full px-2 py-1 text-[9px] font-mk-mono uppercase tracking-wider" style={{ backgroundColor: 'rgba(163,197,125,0.12)', color: LEAF }}>Synced</span>
           </div>
 
           <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
@@ -195,14 +196,14 @@ function OpsConsole() {
             </div>
             <div className="flex h-24 items-end gap-1.5 sm:h-28 sm:gap-2">
               {[32, 48, 38, 64, 53, 72, 58, 84, 69, 92, 76, 88].map((height, index) => (
-                <div key={index} className="flex-1 rounded-t-sm" style={{ height: `${height}%`, background: index > 8 ? 'linear-gradient(to top, #668C4F, #BCD897)' : 'rgba(163,197,125,0.32)' }} />
+                <div key={index} className="ops-bar flex-1 rounded-t-sm" style={{ height: `${height}%`, animationDelay: `${index * 70}ms`, background: index > 8 ? 'linear-gradient(to top, #668C4F, #BCD897)' : 'rgba(163,197,125,0.32)' }} />
               ))}
             </div>
           </div>
 
           <div className="mt-4 space-y-2">
-            {SIGNALS.map((signal) => (
-              <div key={signal.label} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ backgroundColor: 'rgba(245,242,237,0.045)' }}>
+            {SIGNALS.map((signal, index) => (
+              <div key={signal.label} className="ops-signal-row flex items-center justify-between rounded-lg px-3 py-2" style={{ animationDelay: `${950 + index * 120}ms`, backgroundColor: 'rgba(245,242,237,0.045)' }}>
                 <span className="flex items-center gap-2 text-[11px]" style={{ color: ASH }}><span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: signal.color }} />{signal.label}</span>
                 <span className="font-mk-mono text-[10px]" style={{ color: BONE }}>{signal.value}</span>
               </div>
@@ -211,16 +212,58 @@ function OpsConsole() {
         </div>
       </div>
 
-      <div className="absolute -left-1 top-[12%] hidden rounded-2xl border p-3 sm:block sm:-left-4" style={{ ...FLOATING_CARD_STYLE, transform: 'translateZ(90px) rotateY(10deg) rotateZ(-4deg)', backgroundColor: 'rgba(23,27,22,0.92)', borderColor: 'rgba(163,197,125,0.28)' }}>
+      <div className="ops-float-left absolute -left-1 top-[12%] hidden rounded-2xl border p-3 sm:block sm:-left-4" style={{ ...FLOATING_CARD_STYLE, backgroundColor: 'rgba(23,27,22,0.92)', borderColor: 'rgba(163,197,125,0.28)' }}>
         <div className="flex items-center gap-2"><ClipboardList size={13} style={{ color: LEAF }} /><span className="text-[10px]" style={{ color: BONE }}>Event logged</span></div>
         <div className="mt-2 font-mk-mono text-[9px]" style={{ color: ASH }}>Store 04 · 09:42</div>
       </div>
 
-      <div className="absolute -right-1 bottom-[17%] hidden rounded-2xl border p-3 sm:block sm:-right-5" style={{ ...FLOATING_CARD_STYLE, transform: 'translateZ(110px) rotateY(-12deg) rotateZ(4deg)', backgroundColor: 'rgba(23,27,22,0.94)', borderColor: 'rgba(143,182,217,0.25)' }}>
+      <div className="ops-float-right absolute -right-1 bottom-[17%] hidden rounded-2xl border p-3 sm:block sm:-right-5" style={{ ...FLOATING_CARD_STYLE, backgroundColor: 'rgba(23,27,22,0.94)', borderColor: 'rgba(143,182,217,0.25)' }}>
         <div className="flex items-center gap-2"><ShieldCheck size={13} style={{ color: '#8FB6D9' }} /><span className="text-[10px]" style={{ color: BONE }}>Coverage clear</span></div>
         <div className="mt-2 font-mk-mono text-[9px]" style={{ color: ASH }}>Next shift · 06:00</div>
       </div>
     </div>
+  )
+}
+
+function OpsMotionStyles() {
+  return (
+    <style>{`
+      @keyframes opsConsoleDrift {
+        0%, 100% { transform: rotateX(8deg) rotateY(-13deg) rotateZ(1deg) translate3d(0, 0, 0); }
+        50% { transform: rotateX(8deg) rotateY(-13deg) rotateZ(1deg) translate3d(0, -8px, 0); }
+      }
+      @keyframes opsFloatLeft {
+        0%, 100% { transform: translateZ(90px) rotateY(10deg) rotateZ(-4deg) translateY(0); }
+        50% { transform: translateZ(90px) rotateY(10deg) rotateZ(-4deg) translateY(-10px); }
+      }
+      @keyframes opsFloatRight {
+        0%, 100% { transform: translateZ(110px) rotateY(-12deg) rotateZ(4deg) translateY(0); }
+        50% { transform: translateZ(110px) rotateY(-12deg) rotateZ(4deg) translateY(8px); }
+      }
+      @keyframes opsBarPulse {
+        0%, 100% { opacity: 0.62; transform: scaleY(0.84); }
+        50% { opacity: 1; transform: scaleY(1); }
+      }
+      @keyframes opsSignalPulse {
+        0%, 100% { opacity: 0.7; }
+        50% { opacity: 1; }
+      }
+      @keyframes opsSyncedPulse {
+        0%, 100% { box-shadow: 0 0 0 rgba(163,197,125,0); }
+        50% { box-shadow: 0 0 18px rgba(163,197,125,0.16); }
+      }
+      .ops-console-shell { animation: opsConsoleDrift 8s ease-in-out infinite; }
+      .ops-float-left { animation: opsFloatLeft 6s ease-in-out 0.35s infinite; }
+      .ops-float-right { animation: opsFloatRight 7s ease-in-out 0.7s infinite; }
+      .ops-bar { animation: opsBarPulse 2.8s ease-in-out infinite; transform-origin: bottom; }
+      .ops-signal-row { animation: opsSignalPulse 3.8s ease-in-out infinite; }
+      .ops-synced { animation: opsSyncedPulse 3s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        .ops-console-shell, .ops-float-left, .ops-float-right, .ops-bar, .ops-signal-row, .ops-synced { animation: none; }
+        .ops-console-shell { transform: rotateX(8deg) rotateY(-13deg) rotateZ(1deg); }
+        .ops-bar, .ops-signal-row { opacity: 1; transform: none; }
+      }
+    `}</style>
   )
 }
 
