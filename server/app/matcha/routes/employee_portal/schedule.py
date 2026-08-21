@@ -46,7 +46,10 @@ async def list_my_schedule_requests(
             "ORDER BY r.created_at DESC LIMIT 200",
             employee["id"],
         )
-    return {"requests": [serialize_request(dict(r)) for r in rows]}
+    return {"requests": [
+        {**serialize_request(dict(r)), "can_withdraw": r["employee_id"] == employee["id"]}
+        for r in rows
+    ]}
 
 
 @router.get("/me/schedule/offers", dependencies=_schedule_dep)

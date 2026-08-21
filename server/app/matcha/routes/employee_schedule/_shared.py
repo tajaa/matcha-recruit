@@ -339,8 +339,10 @@ async def fetch_shift_for_write(conn, company_id: UUID, shift_id: UUID):
     return row
 
 
-async def fetch_locked_shift_pair(conn, company_id: UUID, first_id: UUID, second_id: UUID) -> dict[str, Any]:
-    """Fetch two tenant-owned shifts under row locks in deterministic order."""
+async def fetch_locked_shift_pair(conn, company_id: UUID, *shift_ids: UUID) -> dict[str, Any]:
+    """Fetch one or more tenant-owned shifts under row locks in deterministic order."""
+    if not shift_ids:
+        return {}
     rows = await conn.fetch(
         """
         SELECT s.id, s.starts_at, s.ends_at, s.status, s.required_staff,
@@ -353,7 +355,7 @@ async def fetch_locked_shift_pair(conn, company_id: UUID, first_id: UUID, second
         ORDER BY s.id
         FOR UPDATE
         """,
-        company_id, sorted({first_id, second_id}),
+        company_id, sorted(set(shift_ids)),
     )
     return {str(row["id"]): row for row in rows}
 

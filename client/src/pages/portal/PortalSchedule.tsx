@@ -133,7 +133,7 @@ export default function PortalSchedule() {
                     {r.reason ? ` · “${r.reason}”` : ''}
                   </div>
                 </div>
-                {['pending', 'awaiting_counterparty', 'awaiting_manager'].includes(r.status) && (
+                {r.can_withdraw !== false && ['pending', 'awaiting_counterparty', 'awaiting_manager'].includes(r.status) && (
                   <button onClick={() => { (r.status === 'pending' ? cancelRequest(r.id) : withdrawMyRequest(r.id).then(load).catch((err) => toast(errorMessage(err), 'error'))) }} className="text-zinc-500 hover:text-red-400 p-1"><X className="h-4 w-4" /></button>
                 )}
               </div>

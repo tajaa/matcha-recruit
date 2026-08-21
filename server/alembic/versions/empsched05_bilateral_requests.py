@@ -66,6 +66,10 @@ def downgrade() -> None:
         "UPDATE schedule_requests SET status = 'pending' "
         "WHERE status IN ('awaiting_counterparty', 'awaiting_manager')"
     )
+    # `pickup` is a new request type with no representation in the legacy
+    # schema. Remove those rows before restoring the old request-type check;
+    # keeping them would make the downgrade fail as soon as one existed.
+    op.execute("DELETE FROM schedule_requests WHERE request_type = 'pickup'")
     op.execute("ALTER TABLE schedule_requests DROP COLUMN IF EXISTS counterparty_confirmed_at")
     op.execute("ALTER TABLE schedule_requests DROP COLUMN IF EXISTS counter_shift_id")
     op.execute(

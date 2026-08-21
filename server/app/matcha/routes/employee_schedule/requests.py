@@ -11,11 +11,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import RequestReview
-from ...services.scheduling.shift_writes import apply_assignment_core, remove_assignment_core
+from ...services.scheduling.shift_writes import (
+    apply_assignment_core, log_availability_override, remove_assignment_core,
+)
 from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
-    INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
+    INACTIVE_EMPLOYMENT_STATUSES, assert_employee_schedulable_at,
+    check_job_qualification, find_conflicts, raise_conflict, raise_not_qualified,
     fetch_availability, availability_violations, raise_outside_availability,
     reconcile_warning_events, fetch_locked_shift_pair,
 )
@@ -57,8 +60,9 @@ async def _active_employee(conn, company_id: UUID, employee_id: UUID) -> None:
 
 
 async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
-                           *, exclude_shift_id: UUID | None, force: bool) -> list[dict]:
+                           *, exclude_shift_id: UUID | None, force: bool) -> tuple[list[dict], dict | None]:
     await _active_employee(conn, company_id, employee_id)
+    await assert_employee_schedulable_at(conn, company_id, employee_id, shift["location_id"])
     conflicts = await find_conflicts(conn, company_id, employee_id, shift["starts_at"], shift["ends_at"],
                                      exclude_shift_id=exclude_shift_id)
     if conflicts and not force:
@@ -67,6 +71,9 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
     outside = availability_violations(availability[employee_id], shift["starts_at"], shift["ends_at"])
     if outside and not force:
         raise_outside_availability(employee_id, outside)
+    unqualified = await check_job_qualification(conn, company_id, employee_id, shift["job_id"])
+    if unqualified and not force:
+        raise_not_qualified(unqualified)
     violations = await check_shift_compliance(
         conn, company_id, location_id=shift["location_id"], starts_at=shift["starts_at"],
         ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
@@ -75,7 +82,7 @@ async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
         training_requirement_id=shift["training_requirement_id"],
     )
     raise_for_violations(violations, force=force)
-    return outside
+    return outside, unqualified
 
 
 @router.post("/requests/{request_id}/review")
@@ -126,7 +133,17 @@ async def review_request(request_id: UUID, body: RequestReview,
                     )
                     if same_day:
                         raise HTTPException(status_code=409, detail=same_day_conflict_detail(recipient, same_day))
-                    await _check_recipient(
+                    if req["request_type"] == "swap" and not legacy_one_way_swap:
+                        reverse_same_day = await find_same_day_assignments(
+                            conn, company_id, req["employee_id"], counter["starts_at"],
+                            exclude_shift_ids=[req["shift_id"]],
+                        )
+                        if reverse_same_day:
+                            raise HTTPException(
+                                status_code=409,
+                                detail=same_day_conflict_detail(req["employee_id"], reverse_same_day),
+                            )
+                    recipient_outside, recipient_unqualified = await _check_recipient(
                         conn, company_id, offered, recipient,
                         exclude_shift_id=req["counter_shift_id"] if req["request_type"] == "swap" and not legacy_one_way_swap else None,
                         force=body.force,
@@ -135,10 +152,12 @@ async def review_request(request_id: UUID, body: RequestReview,
                         # Validate the reverse leg too: the original owner is
                         # gaining the counter shift, so it must still pass the
                         # normal overlap/availability/compliance gates.
-                        await _check_recipient(
+                        counter_outside, counter_unqualified = await _check_recipient(
                             conn, company_id, counter, req["employee_id"],
                             exclude_shift_id=req["shift_id"], force=body.force,
                         )
+                    else:
+                        counter_outside, counter_unqualified = [], None
 
                 removed = await remove_assignment_core(
                     conn, company_id, shift_id=req["shift_id"], employee_id=req["employee_id"],
@@ -174,6 +193,29 @@ async def review_request(request_id: UUID, body: RequestReview,
                         actor_user_id=current_user.id,
                         audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
                     )
+                if recipient is not None and recipient_outside:
+                    await log_availability_override(
+                        conn, company_id, req["shift_id"], current_user.id,
+                        recipient, recipient_outside,
+                    )
+                if recipient is not None and recipient_unqualified:
+                    await log_audit(
+                        conn, company_id, "assignment", req["shift_id"], current_user.id,
+                        "assignment.qualification_override",
+                        {"employee_id": str(recipient), **recipient_unqualified},
+                    )
+                if req["request_type"] == "swap" and not legacy_one_way_swap:
+                    if counter_outside:
+                        await log_availability_override(
+                            conn, company_id, req["counter_shift_id"], current_user.id,
+                            req["employee_id"], counter_outside,
+                        )
+                    if counter_unqualified:
+                        await log_audit(
+                            conn, company_id, "assignment", req["counter_shift_id"], current_user.id,
+                            "assignment.qualification_override",
+                            {"employee_id": str(req["employee_id"]), **counter_unqualified},
+                        )
 
             await conn.execute(
                 """UPDATE schedule_requests SET status = $3, review_notes = $4,

@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -40,3 +41,18 @@ def test_same_day_conflict_detail_is_stable():
     detail = same_day_conflict_detail(employee_id, [{"shift_id": shift_id}])
     assert detail["code"] == "same_day_assignment"
     assert detail["conflicting_shift_ids"] == [str(shift_id)]
+
+
+def test_locked_shift_helper_accepts_a_variable_number_of_ids():
+    shared = Path(__file__).parents[2] / "app/matcha/routes/employee_schedule/_shared.py"
+    source = shared.read_text()
+    assert "async def fetch_locked_shift_pair(conn, company_id: UUID, *shift_ids: UUID)" in source
+    assert "sorted(set(shift_ids))" in source
+
+
+def test_bilateral_migration_removes_pickups_before_legacy_constraint():
+    migration = Path(__file__).parents[2] / "alembic/versions/empsched05_bilateral_requests.py"
+    source = migration.read_text()
+    delete_at = source.index("DELETE FROM schedule_requests WHERE request_type = 'pickup'")
+    constraint_at = source.rindex("schedule_requests_request_type_check\"")
+    assert delete_at < constraint_at

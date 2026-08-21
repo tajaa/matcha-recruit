@@ -189,6 +189,7 @@ export interface ScheduleRequest {
   unavailable_end: string | null
   reason: string | null
   status: RequestStatus
+  can_withdraw?: boolean
   review_notes: string | null
   reviewed_at: string | null
   created_at: string
