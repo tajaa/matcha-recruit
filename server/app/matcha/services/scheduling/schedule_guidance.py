@@ -30,7 +30,7 @@ async def refresh_assignment_break_guidance(
         return
     waiver_row = await conn.fetchrow(
         """
-        SELECT id, value, effective_from
+        SELECT id, value, effective_from, confirmed_by, confirmed_at
         FROM employee_compliance_attestations
         WHERE company_id = $1 AND employee_id = $2
           AND attestation_type = 'meal_break_waiver_on_file'
@@ -45,6 +45,8 @@ async def refresh_assignment_break_guidance(
         waiver = MealWaiverAttestation(
             id=waiver_row["id"], on_file=waiver_row["value"],
             effective_from=waiver_row["effective_from"],
+            confirmed_by=waiver_row["confirmed_by"],
+            confirmed_at=waiver_row["confirmed_at"],
         )
     plan = evaluate_break_plan(
         starts_at=starts_at, ends_at=ends_at, timezone=resolved.timezone,

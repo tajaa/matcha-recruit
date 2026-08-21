@@ -18,28 +18,29 @@ async def import_break_rule_sets(
     """Insert pending rule sets; never approve as part of ingestion."""
 
     inserted: list[UUID] = []
-    for item in rows:
-        rule_id = await conn.fetchval(
-            """
-            INSERT INTO schedule_break_rule_sets
-                (jurisdiction_id, industry_code, effective_from, effective_to,
-                 rules, citation, authority_url, source_type, source_external_id,
-                 source_version, review_status)
-            VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,'pending')
-            RETURNING id
-            """,
-            item.jurisdiction_id,
-            item.industry_code,
-            item.effective_from,
-            item.effective_to,
-            json.dumps(item.rules, sort_keys=True),
-            item.citation,
-            item.authority_url,
-            item.source_type,
-            item.source_external_id,
-            item.source_version,
-        )
-        inserted.append(rule_id)
+    async with conn.transaction():
+        for item in rows:
+            rule_id = await conn.fetchval(
+                """
+                INSERT INTO schedule_break_rule_sets
+                    (jurisdiction_id, industry_code, effective_from, effective_to,
+                     rules, citation, authority_url, source_type, source_external_id,
+                     source_version, review_status)
+                VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,'pending')
+                RETURNING id
+                """,
+                item.jurisdiction_id,
+                item.industry_code,
+                item.effective_from,
+                item.effective_to,
+                json.dumps(item.rules, sort_keys=True),
+                item.citation,
+                item.authority_url,
+                item.source_type,
+                item.source_external_id,
+                item.source_version,
+            )
+            inserted.append(rule_id)
     return inserted
 
 

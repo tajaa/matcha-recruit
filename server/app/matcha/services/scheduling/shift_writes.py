@@ -454,6 +454,19 @@ async def retime_shift_core(
         "WHERE id = $3 AND company_id = $4",
         new_starts_at, new_ends_at, shift_id, company_id,
     )
+    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
+
+    assignees = await conn.fetch(
+        "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+        shift_id,
+    )
+    for assignee in assignees:
+        await refresh_assignment_break_guidance(
+            conn, company_id, shift_id=shift_id,
+            employee_id=assignee["employee_id"],
+            location_id=existing_row["location_id"],
+            starts_at=new_starts_at, ends_at=new_ends_at,
+        )
     await log_audit(conn, company_id, "shift", shift_id, actor_user_id,
                     "shift.update", {
                         "fields": ["starts_at", "ends_at"],
