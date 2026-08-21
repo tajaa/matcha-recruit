@@ -25,22 +25,28 @@ export default function OrderQueue({
   }
 
   return (
-    <div>
-      <h3 className="text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-2">Order queue</h3>
-      <div className="space-y-2">
+    <section className="rounded-2xl border border-w-line bg-w-surface p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-w-text">Order queue</h3>
+          <p className="mt-1 text-xs text-w-dim">Orders staged from stockout signals or manually queued for approval.</p>
+        </div>
+        <span className="rounded-full bg-amber-400/10 px-2.5 py-1 text-[10px] font-medium text-amber-200">{orders.length} waiting</span>
+      </div>
+      <div className="mt-4 space-y-2">
         {orders.map((order) => {
           const suggestion = order.suggestion as Record<string, unknown> | null
           const dailyRate = suggestion?.daily_rate as number | null | undefined
           const stockoutInterval = suggestion?.avg_stockout_interval_days as number | null | undefined
           const itemName = items.find((i) => i.id === order.item_id)?.name
           return (
-            <div key={order.id} className="rounded-lg border border-zinc-200 dark:border-zinc-800 px-4 py-3 flex items-center justify-between">
+            <div key={order.id} className="flex flex-col gap-3 rounded-xl border border-w-line bg-w-surface2/50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm">
+                <p className="text-sm font-medium text-w-text">
                   {itemName ?? 'Item'}: {order.quantity ?? order.suggested_quantity ?? '—'}
                 </p>
                 {(dailyRate != null || stockoutInterval != null) && (
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  <p className="mt-1 text-xs text-w-dim">
                     {dailyRate != null ? `~${dailyRate.toFixed(1)}/day` : ''}
                     {dailyRate != null && stockoutInterval != null ? ', ' : ''}
                     {stockoutInterval != null ? `ran out every ~${Math.round(stockoutInterval)} days` : ''}
@@ -50,12 +56,12 @@ export default function OrderQueue({
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => handle(() => approveOrder(order.id), 'Order approved')}>Approve</Button>
                 <Button size="sm" variant="secondary" onClick={() => handle(() => receiveOrder(order.id), 'Order received')}>Receive</Button>
-                <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => handle(() => cancelOrder(order.id), 'Order cancelled')}>Cancel</Button>
+                <Button size="sm" variant="ghost" className="text-red-300 hover:text-red-200" onClick={() => handle(() => cancelOrder(order.id), 'Order cancelled')}>Cancel</Button>
               </div>
             </div>
           )
         })}
       </div>
-    </div>
+    </section>
   )
 }
