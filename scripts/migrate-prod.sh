@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 # Migrate PROD via SSH tunnel.
 #
-# Default target: the matcha-prod RDS instance. RDS lives in the APP VPC and is
-# reachable only from the app EC2 (the DB EC2 is a different VPC and cannot
-# route to it), so the tunnel jumps through the app box:
-#   localhost:5434 -> app EC2 (54.177.107.107) -> matcha-prod RDS :5432
+# Default target: matcha-postgres-prod, a self-hosted Postgres container on
+# the dedicated DB EC2 (13.56.253.173). RDS (matcha-prod) was retired
+# 2026-08-21 — the instance still exists but is STOPPED, kept only as a cold
+# fallback. The DB EC2 sits in its own VPC and its security group only allows
+# 5432/5433 from the app EC2's IP, so the tunnel still jumps through the app
+# box:
+#   localhost:5434 -> app EC2 (54.177.107.107) -> DB EC2 (13.56.253.173) :5433
 # Reads PROD_DATABASE_URL from server/.env (expects localhost:5434 +
-# sslmode=require — rds.force_ssl=1 rejects plaintext even through the tunnel).
+# sslmode=require — the container has ssl=on).
+#
+# The DB EC2 also runs a second container, matcha-postgres on :5432 — that one
+# is a frozen pre-cutover multi-app snapshot (last write 2026-06-06), NOT
+# live prod. Don't point anything at it.
 #
 # --legacy: target the OLD prod container instead (matcha-postgres-prod :5433
-# on the DB EC2) — the live DB until cutover, a frozen copy afterwards. Reads
-# PROD_LEGACY_DATABASE_URL. Pre-cutover, a migration that must reach live prod
-# goes here; run BOTH paths if you migrate before cutover so RDS doesn't drift.
+# on the now-STOPPED original DB EC2, 3.101.83.217) — frozen since the RDS
+# cutover, kept only for historical reference. Reads PROD_LEGACY_DATABASE_URL.
+# Will simply fail to connect until/unless that host is started again.
 #
 # ---------------------------------------------------------------------------
 # This script is deliberately hard to run by accident. Five gates stand between
@@ -20,8 +27,8 @@
 #   1. dirty-tree     — jparent01 was applied to prod from an UNCOMMITTED file,
 #                       while dev had run an older version of the same revision.
 #   2. preview        — `upgrade heads` never said what it was about to do.
-#   3. snapshot       — most downgrade()s are `pass`. An RDS snapshot is the
-#                       only rollback that exists.
+#   3. backup         — most downgrade()s are `pass`. A pg_dump to S3, taken
+#                       right before the apply, is the only rollback that exists.
 #   4. rehearsal      — run it for real, roll it back. This is what caught a
 #                       UniqueViolation on prod data, before prod. It also times
 #                       the run: a migration that crawls here will hang for real.
@@ -38,8 +45,11 @@ ENV_FILE="$REPO_ROOT/server/.env"
 
 APP_EC2="ec2-user@54.177.107.107"
 DB_EC2="ec2-user@3.101.83.217"
-RDS_HOST="matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com"
-RDS_INSTANCE_ID="matcha-prod"
+PROD_DB_HOST="13.56.253.173"
+PROD_DB_SSH="ec2-user@${PROD_DB_HOST}"
+PROD_DB_CONTAINER="matcha-postgres-prod"
+PROD_DB_PORT=5433
+S3_BACKUP_BUCKET="s3://matcha-recruit-backups"
 AWS_REGION_DEFAULT="us-west-1"
 
 LEGACY=0
@@ -73,10 +83,10 @@ if [[ "$LEGACY" == "1" ]]; then
   URL="${PROD_LEGACY_DATABASE_URL:-$(env_val PROD_LEGACY_DATABASE_URL)}"
   : "${URL:?Add PROD_LEGACY_DATABASE_URL=postgresql://user:pass@localhost:5433/matcha to server/.env}"
 else
-  LABEL="RDS matcha-prod (via app EC2)"
+  LABEL="self-hosted ${PROD_DB_CONTAINER} (via app EC2)"
   LOCAL_PORT=5434
   JUMP="$APP_EC2"
-  FORWARD="${LOCAL_PORT}:${RDS_HOST}:5432"
+  FORWARD="${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}"
   URL="${PROD_DATABASE_URL:-$(env_val PROD_DATABASE_URL)}"
   : "${URL:?Add PROD_DATABASE_URL=postgresql://matcha:pass@localhost:5434/matcha?sslmode=require to server/.env}"
 fi
@@ -157,56 +167,53 @@ echo "  $PENDING_COUNT revision(s) will be applied to ${LABEL}."
 echo
 
 # ---------------------------------------------------------------------------
-# GATE 3 — a snapshot, because there is no downgrade.
+# GATE 3 — a backup, because there is no downgrade.
 #
-# Most recent downgrade()s are `pass`, and scripts/backups.sh points at a host
-# that is stopped. If a migration commits something wrong, an RDS snapshot
-# restore is the entire recovery story.
+# Most recent downgrade()s are `pass`. There's no RDS snapshot API to lean on
+# for the self-hosted box, so the rollback story is a pg_dump taken over SSH
+# straight from the container, streamed to S3 without touching local/remote
+# disk (mirrors deploy/backup-prod-rds.sh's streaming approach).
 # ---------------------------------------------------------------------------
 if [[ "$NO_SNAPSHOT" == "1" ]]; then
   echo "!! --no-snapshot: proceeding with NO rollback path. If this goes wrong,"
   echo "!! there is nothing to restore from."
   echo
 elif [[ "$LEGACY" == "1" ]]; then
-  echo "Note: --legacy targets a container, not RDS — snapshot gate does not apply."
+  echo "Note: --legacy targets a frozen historical container — backup gate does not apply."
   echo "      Take your own backup if this migration is not reversible."
   echo
 elif command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1; then
-  # RDS identifiers allow only letters/digits/hyphens, no doubled or trailing
-  # hyphen. Alembic revision ids routinely contain underscores (tellus_app_05),
-  # which RDS rejects with InvalidParameterValue — normalize before using it.
   SNAP_SLUG="$(printf '%s' "$FIRST_PENDING" \
     | tr '[:upper:]' '[:lower:]' \
     | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-*//' -e 's/-*$//')"
-  SNAP_ID="matcha-prod-pre-${SNAP_SLUG:-migration}-$(date +%Y%m%d%H%M)"
-  read -r -p "Create RDS snapshot '${SNAP_ID}' before migrating? [Y/n] " reply
+  SNAP_ID="matcha_prod_pre_${SNAP_SLUG:-migration}_$(date +%Y%m%d%H%M%S)"
+  S3_KEY="postgres-selfhosted/${SNAP_ID}.dump"
+  read -r -p "pg_dump matcha to ${S3_BACKUP_BUCKET}/${S3_KEY} before migrating? [Y/n] " reply
   if [[ "${reply:-Y}" =~ ^[Yy]?$ ]]; then
-    # RDS snapshots are point-in-time at INITIATION (storage-level), so the
-    # rollback point is fixed the moment create-db-snapshot is accepted —
-    # nothing the migration writes afterwards leaks into it. Waiting for
-    # `db-snapshot-available` (several minutes) buys no additional safety;
-    # it only delays the migration. Let it finish in the background.
-    echo "Initiating snapshot (completes in background — rollback point is NOW)..."
-    aws rds create-db-snapshot \
-      --region "${AWS_REGION:-$AWS_REGION_DEFAULT}" \
-      --db-instance-identifier "$RDS_INSTANCE_ID" \
-      --db-snapshot-identifier "$SNAP_ID" >/dev/null
-    SNAP_CREATED=1
-    echo "Snapshot of record: $SNAP_ID (verified again before apply)"
-    echo
+    echo "Dumping ${PROD_DB_CONTAINER} and streaming to S3..."
+    if ssh -i "$PEM" "$PROD_DB_SSH" \
+        "sudo docker exec ${PROD_DB_CONTAINER} pg_dump --format=custom --no-owner -U matcha matcha" \
+        | aws s3 cp - "${S3_BACKUP_BUCKET}/${S3_KEY}" --expected-size 1073741824; then
+      SNAP_CREATED=1
+      echo "Backup of record: ${S3_BACKUP_BUCKET}/${S3_KEY} (verified again before apply)"
+      echo
+    else
+      echo "ABORT: pg_dump/S3 upload failed — no rollback path exists." >&2
+      exit 1
+    fi
   else
-    echo "!! Skipping snapshot: proceeding with NO rollback path. If this goes wrong,"
+    echo "!! Skipping backup: proceeding with NO rollback path. If this goes wrong,"
     echo "!! there is nothing to restore from."
     echo
   fi
 else
-  echo "aws CLI unavailable or not credentialed — cannot snapshot automatically."
-  read -r -p "Name an EXISTING snapshot to roll back to (or blank to abort): " existing_snap
+  echo "aws CLI unavailable or not credentialed — cannot back up automatically."
+  read -r -p "Name an EXISTING S3 backup to roll back to (or blank to abort): " existing_snap
   if [[ -z "$existing_snap" ]]; then
     echo "ABORT: no rollback path." >&2
     exit 1
   fi
-  echo "Rollback snapshot of record: $existing_snap"
+  echo "Rollback backup of record: $existing_snap"
   echo
 fi
 
@@ -247,27 +254,20 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# GATE 3b — verify the snapshot survived, now that the rehearsal has given it
-# time. create-db-snapshot returning accepted != snapshot exists: it can
-# transition to `failed` afterwards (storage pressure, concurrent snapshot,
-# instance state). Skipping the multi-minute completion WAIT is sound
-# (point-in-time is fixed at initiation) — skipping VERIFICATION is not.
-# One describe call costs ~1s; a failed/missing snapshot aborts before apply.
+# GATE 3b — verify the backup survived, now that the rehearsal has given it
+# time. The `aws s3 cp` exit code above already caught a failed stream, but
+# a cheap head-object confirms the object is actually sitting in the bucket
+# (not e.g. silently truncated by a killed pipe) before touching real data.
 # ---------------------------------------------------------------------------
 if [[ "$SNAP_CREATED" == "1" ]]; then
-  SNAP_STATUS="$(aws rds describe-db-snapshots \
-    --region "${AWS_REGION:-$AWS_REGION_DEFAULT}" \
-    --db-snapshot-identifier "$SNAP_ID" \
-    --query 'DBSnapshots[0].Status' --output text 2>/dev/null || echo "MISSING")"
-  case "$SNAP_STATUS" in
-    creating|available)
-      echo "Snapshot $SNAP_ID status: $SNAP_STATUS — rollback path confirmed."
-      echo ;;
-    *)
-      echo "ABORT: snapshot $SNAP_ID is '$SNAP_STATUS' — the rollback path does" >&2
-      echo "not exist. Fix the snapshot (or --no-snapshot) before migrating." >&2
-      exit 1 ;;
-  esac
+  if aws s3api head-object --bucket "${S3_BACKUP_BUCKET#s3://}" --key "$S3_KEY" >/dev/null 2>&1; then
+    echo "Backup ${S3_BACKUP_BUCKET}/${S3_KEY} confirmed in S3 — rollback path confirmed."
+    echo
+  else
+    echo "ABORT: backup ${S3_BACKUP_BUCKET}/${S3_KEY} not found in S3 — the rollback" >&2
+    echo "path does not exist. Fix the backup (or --no-snapshot) before migrating." >&2
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
