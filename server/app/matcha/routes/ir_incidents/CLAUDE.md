@@ -23,7 +23,8 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `broker_sharing.py` | Broker visibility opt-in for an incident | 3 |
 | `claims_readiness.py` | Claims-readiness packet for an incident | 1 |
 | `voice.py` | `POST /voice/parse` — Gemini dictation intake (`ir_voice_intake`) | 1 |
-| **Total** | | **87 routes** (per-file counts re-derived from the live route table 2026-07-27; the previous numbers had drifted) |
+| `chat_intake.py` | `POST /chat/turn` — conversational chat intake (`ir_chat_intake`), stateless per-turn REST, backed by `services/ir/ir_chat_intake.py` | 1 |
+| **Total** | | **88 routes** (per-file counts re-derived from the live route table 2026-07-27, plus `chat_intake.py` added 2026-08-18; the previous numbers had drifted) |
 
 **No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` — moved to `services/ir/ir_people_index.py`, refactor round 2 stage 3). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. The truly-anonymous `/report/:token` intake (`inbound_email.py`) intentionally does NOT auto-mint people; the attributed per-location `/intake/:token` magic link DOES, since it shares `create_incident_core` with the authed create. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 
@@ -76,7 +77,7 @@ The collection root uses `@router.post("")` (empty string), NOT `@router.post("/
 
 In a single `APIRouter`, FastAPI matches routes in registration order. Today:
 1. CRUD routes register first (because `crud.router` is the package router).
-2. Submodules append via `include_router` in this order: anonymous_reporting → info_requests → documents → osha → investigation_interviews → people → ai_analysis → analytics → copilot → audit_log → claims_readiness → voice.
+2. Submodules append via `include_router` in this order: anonymous_reporting → info_requests → documents → osha → investigation_interviews → people → capa → ai_analysis → analytics → copilot → audit_log → claims_readiness → voice → chat_intake → broker_sharing.
 
 Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule path. The only 1-segment static route is `/export`, which lives in `crud.py` ordered BEFORE `/{incident_id}` (preserved from the original file order).
 
@@ -123,6 +124,10 @@ Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule p
 ## `ir_voice_intake` (default ❌)
 
 **Voice dictation on the IR create form** (all IR products — shared `IRCreateIncidentModal`). Optional "Dictate" button: the reporter records a spoken account → one Gemini multimodal call transcribes + extracts the form fields (`services/ir/ir_voice_parser.py`) → prefills description / reporter / date / location / witnesses + a suggested type/severity hint, which the user **reviews and edits before submitting** (never auto-creates — it's a legal record). Audio captured as WAV via the existing PCM AudioWorklet (Gemini rejects `MediaRecorder` webm/opus). Gates `POST /ir/incidents/voice/parse` (2-segment, stacks on the `incidents` gate) + the button (`hasFeature('ir_voice_intake')`). Default off; admin-toggle; NOT bundled.
+
+## `ir_chat_intake` (default ❌)
+
+**Conversational IR intake.** The default authenticated create flow is a step-by-step wizard (`client/src/components/ir/IRCreateIncidentModal/`, no flag — every user gets it); this flag adds an alternate chat entry point. One short question at a time, texting-style; `services/ir/ir_chat_intake.py` makes one Gemini flash-lite (`gemini-3.5-flash-lite`, via `services/_shared/gemini.genai_client` + `core/services/model_catalog.GEMINI_FLASH_LITE` — the lightweight one-shot client, not `IRAnalyzer`) call per turn, extracting/merging fields into the same shape the wizard uses. **Stateless**: authenticated `POST /ir/incidents/chat/turn` and public token endpoints `POST /report/{token}/chat/turn` + `POST /intake/{token}/chat/turn` take the client-held transcript and accumulated fields each turn and return the merged state — no DB table, SSE, or server session. Public turns are separately bounded by a 64 KiB body limit and IP/link/company Redis budgets; the location-link route never accepts a client location. Public chat applies only to incident-report magic links, not `/request-info` links. On `complete: true` the client lands on an editable review step — same never-auto-submit invariant as voice dictation. All routes stack on `incidents`; the authenticated route and UI plus public link validation/turn routes and UI also require `ir_chat_intake`. Default off; admin-toggle; NOT bundled.
 
 ## `osha_logs` (default ✅)
 
