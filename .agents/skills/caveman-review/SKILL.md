@@ -1,55 +1,59 @@
 ---
 name: caveman-review
 description: >
-  Ultra-compressed code review comments. Cuts noise from PR feedback while preserving
-  the actionable signal. Each comment is one line: location, problem, fix. Use when user
-  says "review this PR", "code review", "review the diff", "/review", or invokes
-  /caveman-review. Auto-triggers when reviewing pull requests.
+  Review a pull request with concise, actionable comments and required
+  project-aware build/type/test gates. Use for PR, diff, and code-review requests.
 ---
 
-Write code review comments terse and actionable. One line per finding. Location, problem, fix. No throat-clearing.
+Review the requested range, then report concise findings ready to paste into a
+PR. A review is incomplete until the applicable validation gates have run or
+their environmental blocker is reported.
 
-## Rules
+## Establish the review range
 
-**Format:** `L<line>: <problem>. <fix>.` — or `<file>:L<line>: ...` when reviewing multi-file diffs.
+- For a PR or current branch review, compare `merge-base(base, HEAD)..HEAD`;
+  do not silently limit review to `HEAD^..HEAD`.
+- Review `HEAD^..HEAD` only when the user explicitly asks for the latest
+  commit. State that scope in the result.
+- Inspect `git status`, the changed-file list, and `git diff --check` before
+  reviewing. Do not treat unrelated worktree changes as part of the PR.
 
-**Severity prefix (optional, when mixed):**
-- `🔴 bug:` — broken behavior, will cause incident
-- `🟡 risk:` — works but fragile (race, missing null check, swallowed error)
-- `🔵 nit:` — style, naming, micro-optim. Author can ignore
-- `❓ q:` — genuine question, not a suggestion
+## Required validation gates
 
-**Drop:**
-- "I noticed that...", "It seems like...", "You might want to consider..."
-- "This is just a suggestion but..." — use `nit:` instead
-- "Great work!", "Looks good overall but..." — say it once at the top, not per comment
-- Restating what the line does — the reviewer can read the diff
-- Hedging ("perhaps", "maybe", "I think") — if unsure use `q:`
+Run the narrowest meaningful command for each changed surface. Report every
+command and result; a failed build/type check is a blocking finding.
 
-**Keep:**
-- Exact line numbers
-- Exact symbol/function/variable names in backticks
-- Concrete fix, not "consider refactoring this"
-- The *why* if the fix isn't obvious from the problem statement
+- Changes under `client/`, or changes to client-consumed API/type contracts:
+  run `npm run build` in `client/`. This runs TypeScript checking and the Vite
+  production build. Do not substitute a source scan for this gate.
+- Python server changes: run directly related pytest files when they exist.
+  If no focused tests exist, run an import/compile check for changed modules
+  and say coverage is absent.
+- Migrations: inspect upgrade/downgrade, constraints/indexes, and existing-row
+  compatibility. Never apply migrations without explicit approval.
+- Do not run broad linting unless requested. Lint is not a replacement for the
+  build/type gate.
 
-## Examples
+If a prerequisite is unavailable, report the exact blocker and do not claim
+the PR is clean. Do not implement fixes during a review unless asked.
 
-❌ "I noticed that on line 42 you're not checking if the user object is null before accessing the email property. This could potentially cause a crash if the user is not found in the database. You might want to add a null check here."
+## Review focus
 
-✅ `L42: 🔴 bug: user can be null after .find(). Add guard before .email.`
+Trace renamed or changed public interfaces to all consumers, including client
+API functions, types, route handlers, background paths, and tests. Check
+authorization and tenant scope on new endpoints. Compare behavior across every
+write path that can mutate the same data.
 
-❌ "It looks like this function is doing a lot of things and might benefit from being broken up into smaller functions for readability."
+## Output
 
-✅ `L88-140: 🔵 nit: 50-line fn does 4 things. Extract validate/normalize/persist.`
+Start with the reviewed range and validation status. Then write one terse line
+per finding:
 
-❌ "Have you considered what happens if the API returns a 429? I think we should probably handle that case."
+`<file>:L<line>: 🔴 bug: <problem>. <concrete fix>.`
 
-✅ `L23: 🟡 risk: no retry on 429. Wrap in withBackoff(3).`
+Use `🟡 risk`, `🔵 nit`, or `❓ q` where appropriate. Keep exact line numbers
+and concrete fixes. For security or architectural findings, add a short normal
+paragraph when the terse form cannot explain impact safely.
 
-## Auto-Clarity
-
-Drop terse mode for: security findings (CVE-class bugs need full explanation + reference), architectural disagreements (need rationale, not just a one-liner), and onboarding contexts where the author is new and needs the "why". In those cases write a normal paragraph, then resume terse for the rest.
-
-## Boundaries
-
-Reviews only — does not write the code fix, does not approve/request-changes, does not run linters. Output the comment(s) ready to paste into the PR. "stop caveman-review" or "normal mode": revert to verbose review style.
+Finish with validation results and any unrun gate. Do not approve/request
+changes or write code.

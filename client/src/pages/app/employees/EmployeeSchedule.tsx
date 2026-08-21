@@ -7,13 +7,13 @@ import {
 import { Card, useToast } from '../../../components/ui'
 import {
   createShift, updateShift, deleteShift, publishShift,
-  assignEmployee, unassignEmployee, fetchTemplates, createTemplate, deleteTemplate,
-  generateFromTemplate, fetchRequests, reviewRequest, duplicateShift,
+  assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
+  generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
 import type {
-  Shift, RosterEmployee, ShiftTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
+  Shift, RosterEmployee, WeekTemplate, ScheduleRequest, ShiftPayload, RosterFlags,
 } from '../../../types/employeeSchedule'
 import {
   STATUS_TONE, REQUEST_TONE, errorMessage,
@@ -25,6 +25,8 @@ import ScheduleIntelligence from './ScheduleIntelligence'
 import ScheduleLawPanel from '../../../components/employees/ScheduleLawPanel'
 import ScheduleHelperWizard from '../../../components/employees/onboarding/ScheduleHelperWizard'
 import { useMe } from '../../../hooks/useMe'
+import { useLocationScope } from '../../../hooks/useLocationScope'
+import LocationPicker from '../../../components/shared/LocationPicker'
 
 const inputCls = 'bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 w-full'
 const SCHEDULE_GUIDE_STORAGE_KEY = 'matcha.employee-schedule.guide.v1'
@@ -41,6 +43,7 @@ export default function EmployeeSchedule() {
   const highlightShiftId = searchParams.get('shift') ?? undefined
   const requestedTab = parseScheduleTab(searchParams.get('tab'))
   const { me, hasFeature, loading: meLoading } = useMe()
+  const { locationId, setLocationId, locations, loading: locationsLoading } = useLocationScope()
   const [guideOpen, setGuideOpen] = useState(() => {
     try { return window.localStorage.getItem(SCHEDULE_GUIDE_STORAGE_KEY) !== 'seen' } catch { return true }
   })
@@ -62,7 +65,7 @@ export default function EmployeeSchedule() {
     patchShift,
     publishWeek,
     days,
-  } = useEmployeeSchedule(linkedDate, initialTab)
+  } = useEmployeeSchedule(linkedDate, initialTab, locationId)
 
   useEffect(() => {
     const blockedIntelligence = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
@@ -116,11 +119,14 @@ export default function EmployeeSchedule() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 border-b border-white/[0.06] px-5">
-        <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
-        <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
-        <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
-        {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
+      <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-5">
+        <div className="flex items-center gap-1">
+          <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
+          <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
+          <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
+          {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
+        </div>
+        <LocationPicker locations={locations} value={locationId} onChange={setLocationId} />
       </div>
 
       <div className="min-w-0 space-y-6 p-5">
@@ -134,12 +140,14 @@ export default function EmployeeSchedule() {
               <button onClick={() => setWeekStart((w) => addDays(w, 7))} className="text-zinc-400 hover:text-zinc-100 p-1.5 rounded-lg border border-white/[0.08]"><ChevronRight className="h-4 w-4" /></button>
               <span className="text-sm text-zinc-500 ml-1">Week of {fmtDayLabel(weekStart)}</span>
             </div>
-            <button onClick={publishWeek} disabled={publishing || !summary?.draft} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-40">
+            <button onClick={publishWeek} disabled={publishing || !summary?.draft || !locationId} className="inline-flex items-center gap-1.5 text-sm text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-2 font-medium disabled:opacity-40">
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Publish week{summary?.draft ? ` (${summary.draft})` : ''}
             </button>
           </div>
 
-          {summary && (
+          {!locationId && !locationsLoading ? (
+            <div className="flex items-center justify-center h-64 text-sm text-zinc-500">Select a location to view its schedule.</div>
+          ) : summary && (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/[0.06] border border-white/[0.06] rounded-lg overflow-hidden">
               <Stat label="Shifts" value={summary.total_shifts} tone="text-zinc-200" />
               <Stat label="Published" value={summary.published} tone="text-emerald-400" />
@@ -151,7 +159,7 @@ export default function EmployeeSchedule() {
 
           {loading ? (
             <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
-          ) : (
+          ) : !locationId ? null : (
             <div className="min-w-0 overflow-x-auto pb-2">
               <div className="grid min-w-0 grid-cols-1 gap-3 md:min-w-[1260px] md:grid-cols-7">
                 {days.map((day) => (
@@ -165,6 +173,7 @@ export default function EmployeeSchedule() {
                     onChanged={reload}
                     highlightShiftId={highlightShiftId}
                     weekDays={days}
+                    locationId={locationId}
                   />
                 ))}
               </div>
@@ -173,7 +182,7 @@ export default function EmployeeSchedule() {
         </>
       )}
 
-      {tab === 'templates' && <TemplatesTab onGenerated={() => { setTab('schedule'); reload() }} />}
+      {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
       {tab === 'requests' && <RequestsTab onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
@@ -204,21 +213,21 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
-function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays }: {
+function DayColumn({ day, shifts, roster, rosterFlags, onPatch, onChanged, highlightShiftId, weekDays, locationId }: {
   day: string; shifts: Shift[]; roster: RosterEmployee[]; rosterFlags: RosterFlags | null
-  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]
+  onPatch: (s: Shift) => void; onChanged: () => void; highlightShiftId?: string; weekDays: string[]; locationId: string
 }) {
   const [adding, setAdding] = useState(false)
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between mb-2">
         <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">{fmtDayLabel(day)}</span>
-        <button onClick={() => setAdding((v) => !v)} className="text-zinc-500 hover:text-zinc-200 p-0.5"><Plus className="h-3.5 w-3.5" /></button>
+        <button onClick={() => setAdding((v) => !v)} disabled={!locationId} className="text-zinc-500 hover:text-zinc-200 p-0.5 disabled:opacity-40"><Plus className="h-3.5 w-3.5" /></button>
       </div>
       <div className="space-y-2">
         {adding && (
           <Card className="p-2.5">
-            <ShiftForm day={day} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
+            <ShiftForm day={day} locationId={locationId} onDone={() => { setAdding(false); onChanged() }} onCancel={() => setAdding(false)} />
           </Card>
         )}
         {shifts.length === 0 && !adding && <p className="text-[11px] text-zinc-700 py-2">No shifts</p>}
@@ -488,9 +497,10 @@ function spanHours(start: string, end: string): number {
  *  chosen time was invisible until the card re-rendered post-submit. The preview
  *  line below is the belt to that braces — the selection is legible even where
  *  the native control isn't. */
-function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
+function ShiftForm({ day, shift, locationId, onDone, onSaved, onCancel }: {
   day: string
   shift?: Shift
+  locationId?: string
   onDone?: () => void
   onSaved?: (s: Shift) => void
   onCancel: () => void
@@ -532,6 +542,7 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
       payload.kind = 'training'
       payload.training_requirement_id = requirementId
     }
+    if (!editing) payload.location_id = locationId
     return payload
   }
 
@@ -632,14 +643,22 @@ function ShiftForm({ day, shift, onDone, onSaved, onCancel }: {
 
 // ---------- Templates tab ----------
 
-function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
-  const [templates, setTemplates] = useState<ShiftTemplate[]>([])
+function TemplatesTab({ locationId, onGenerated }: { locationId: string; onGenerated: () => void }) {
+  const [templates, setTemplates] = useState<WeekTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
 
-  const load = useCallback(() => fetchTemplates().then((r) => setTemplates(r.templates)), [])
+  const load = useCallback(async () => {
+    if (!locationId) {
+      setTemplates([])
+      return
+    }
+    const response = await fetchWeekTemplates(locationId)
+    setTemplates(response.week_templates)
+  }, [locationId])
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
+  if (!locationId) return <p className="text-sm text-zinc-600">Select a location to manage its week templates.</p>
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
 
   return (
@@ -648,7 +667,7 @@ function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
         <h3 className="text-sm font-medium text-zinc-200">Shift templates</h3>
         <button onClick={() => setAdding((v) => !v)} className="inline-flex items-center gap-1 text-sm text-zinc-300 hover:text-zinc-100 px-3 py-1.5 rounded-lg border border-zinc-700"><Plus className="h-4 w-4" /> New template</button>
       </div>
-      {adding && <Card className="p-4"><TemplateForm onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
+      {adding && <Card className="p-4"><TemplateForm locationId={locationId} onDone={() => { setAdding(false); load() }} onCancel={() => setAdding(false)} /></Card>}
       {templates.length === 0 && !adding ? (
         <p className="text-sm text-zinc-600">No templates yet — create one to generate recurring shifts.</p>
       ) : (
@@ -660,7 +679,7 @@ function TemplatesTab({ onGenerated }: { onGenerated: () => void }) {
   )
 }
 
-function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onChanged: () => void; onGenerated: () => void }) {
+function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: WeekTemplate; onChanged: () => void; onGenerated: () => void }) {
   const { toast } = useToast()
   const [busy, setBusy] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
@@ -671,12 +690,12 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
 
   async function remove() {
     setBusy(true)
-    try { await deleteTemplate(tpl.id); onChanged() } finally { setBusy(false) }
+    try { await deleteWeekTemplate(tpl.id); onChanged() } finally { setBusy(false) }
   }
   async function generate() {
     setGenBusy(true)
     try {
-      const res = await generateFromTemplate(tpl.id, from, to)
+      const res = await generateFromWeekTemplate(tpl.id, from, to)
       onGenerated()
       const warnings = res.compliance_warnings ?? []
       if (warnings.length) {
@@ -693,9 +712,13 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
         <div className="flex-1 min-w-0">
           <div className="text-sm text-zinc-200">{tpl.name}</div>
           <div className="text-[11px] text-zinc-500">
-            {fmtTime(`2000-01-01T${tpl.start_time}Z`)}–{fmtTime(`2000-01-01T${tpl.end_time}Z`)}
-            {tpl.role ? ` · ${tpl.role}` : ''} · {tpl.required_staff} staff
-            {' · '}{tpl.days_of_week.length ? tpl.days_of_week.map((d) => WEEKDAY_LABELS[d]).join(' ') : 'no days set'}
+            {tpl.blocks.length === 0 ? 'No shift blocks' : tpl.blocks.map((block) => (
+              <span key={block.id} className="block">
+                {fmtTime(`2000-01-01T${block.start_time}Z`)}–{fmtTime(`2000-01-01T${block.end_time}Z`)}
+                {block.role ? ` · ${block.role}` : ''} · {block.required_staff} staff
+                {' · '}{block.days_of_week.length ? block.days_of_week.map((day) => WEEKDAY_LABELS[day]).join(' ') : 'no days set'}
+              </span>
+            ))}
           </div>
         </div>
         <button onClick={() => setGenOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"><Sparkles className="h-3.5 w-3.5" /> Generate</button>
@@ -705,14 +728,14 @@ function TemplateRow({ tpl, onChanged, onGenerated }: { tpl: ShiftTemplate; onCh
         <div className="mt-3 flex items-end gap-2 flex-wrap border-t border-zinc-800 pt-3">
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">From</span><input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className={`${inputCls} mt-1`} /></label>
           <label className="block"><span className="text-[10px] text-zinc-500 uppercase">To</span><input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={`${inputCls} mt-1`} /></label>
-          <button onClick={generate} disabled={genBusy || !tpl.days_of_week.length} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{genBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Generate drafts</button>
+          <button onClick={generate} disabled={genBusy || !tpl.blocks.some((block) => block.days_of_week.length)} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg px-3 py-1.5 disabled:opacity-50">{genBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Generate drafts</button>
         </div>
       )}
     </Card>
   )
 }
 
-function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; onDone: () => void; onCancel: () => void }) {
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
   const [start, setStart] = useState('09:00')
@@ -728,11 +751,16 @@ function TemplateForm({ onDone, onCancel }: { onDone: () => void; onCancel: () =
     if (!name.trim()) return
     setBusy(true)
     try {
-      await createTemplate({
-        name: name.trim(), role: role.trim() || null,
-        start_time: `${start}:00`, end_time: `${end}:00`,
-        required_staff: Math.max(1, Math.round(Number(required) || 1)),
-        days_of_week: days,
+      await createWeekTemplate({
+        name: name.trim(),
+        location_id: locationId,
+        blocks: [{
+          name: name.trim(),
+          role: role.trim() || null,
+          start_time: `${start}:00`, end_time: `${end}:00`,
+          required_staff: Math.max(1, Math.round(Number(required) || 1)),
+          days_of_week: days,
+        }],
       })
       onDone()
     } finally { setBusy(false) }

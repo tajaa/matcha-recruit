@@ -12,6 +12,7 @@ export type EmployeeScheduleTab = 'schedule' | 'templates' | 'requests' | 'intel
 export function useEmployeeSchedule(
   initialDate?: string,
   initialTab: EmployeeScheduleTab = 'schedule',
+  locationId = '',
 ) {
   const [tab, setTab] = useState<EmployeeScheduleTab>(initialTab)
   // `initialDate` (from a ?date= deep link — see systemContent.tsx's
@@ -28,12 +29,19 @@ export function useEmployeeSchedule(
   const [publishing, setPublishing] = useState(false)
 
   const reload = useCallback(async () => {
-    const w = await fetchWeek(weekStart)
+    if (!locationId) {
+      setShifts([])
+      setRoster([])
+      setRosterFlags(null)
+      setSummary(null)
+      return
+    }
+    const w = await fetchWeek(weekStart, locationId)
     setShifts(w.shifts)
     setRoster(w.roster)
     setRosterFlags(w.roster_flags)
     setSummary(w.summary)
-  }, [weekStart])
+  }, [locationId, weekStart])
 
   useEffect(() => {
     setLoading(true)
@@ -45,9 +53,10 @@ export function useEmployeeSchedule(
   }
 
   async function publishWeek() {
+    if (!locationId) return
     setPublishing(true)
     try {
-      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`)
+      await publishRange(`${weekStart}T00:00:00Z`, `${addDays(weekStart, 7)}T00:00:00Z`, locationId)
       await reload()
     } finally {
       setPublishing(false)

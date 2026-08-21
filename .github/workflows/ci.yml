@@ -2,9 +2,8 @@ name: PR checks
 
 # deploy.yml deliberately has no pull_request trigger (that workflow's deploy
 # leg must never be reachable from a PR), which left zero checks running on
-# PRs. Cheap and separate on purpose: no Docker, no vite build — just enough
-# to catch a broken import/syntax error before it merges green and is only
-# discovered at deploy time.
+# PRs. Cheap and separate on purpose: no Docker, but it runs the complete
+# frontend production build so type and bundling failures cannot merge green.
 on:
   pull_request:
 
@@ -43,8 +42,9 @@ jobs:
         run: npm ci --legacy-peer-deps
         working-directory: client
 
-      - name: Frontend typecheck
-        # NOT `npx tsc --noEmit` — the root tsconfig is files:[] + project
-        # references, so the bare form checks nothing and always exits 0.
-        run: npx tsc -p tsconfig.app.json --noEmit
+      - name: Frontend production build
+        # Runs `tsc -b` against project references, then Vite. The bare
+        # `npx tsc --noEmit` checks nothing because the root tsconfig has
+        # `files: []`.
+        run: npm run build
         working-directory: client
