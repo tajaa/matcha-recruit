@@ -208,6 +208,8 @@ async def fetch_shifts(
     assign_rows = await conn.fetch(
         """
         SELECT a.shift_id, a.employee_id, a.status,
+               a.manager_note, a.manager_note_visible_to_employee,
+               a.compliance_guidance,
                e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
@@ -243,8 +245,7 @@ async def fetch_shifts(
             )
     by_shift: dict[str, list[dict]] = {}
     for r in assign_rows:
-        by_shift.setdefault(str(r["shift_id"]), []).append(
-            {
+        assignment = {
                 "employee_id": str(r["employee_id"]),
                 "name": _display_name(r["first_name"], r["last_name"]),
                 "job_title": r["job_title"],
@@ -256,7 +257,14 @@ async def fetch_shifts(
                     (str(r["shift_id"]), str(r["employee_id"])), {}
                 ).get("at"),
             }
-        )
+        # Portal calls pass employee_id, so never expose another employee's
+        # private note or individualized compliance guidance.
+        if employee_id is None or r["employee_id"] == employee_id:
+            assignment["manager_note"] = (
+                r["manager_note"] if r["manager_note_visible_to_employee"] else None
+            )
+            assignment["compliance_guidance"] = r["compliance_guidance"]
+        by_shift.setdefault(str(r["shift_id"]), []).append(assignment)
     for s in shifts:
         s["assignments"] = by_shift.get(s["id"], [])
     return shifts
@@ -381,7 +389,9 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
     shift = _shift_row_to_dict(row)
     assign_rows = await conn.fetch(
         """
-        SELECT a.employee_id, a.status, e.first_name, e.last_name, e.job_title
+        SELECT a.employee_id, a.status, a.manager_note,
+               a.manager_note_visible_to_employee, a.compliance_guidance,
+               e.first_name, e.last_name, e.job_title
         FROM schedule_shift_assignments a
         JOIN employees e ON e.id = a.employee_id
         WHERE a.shift_id = $1
@@ -395,6 +405,9 @@ async def fetch_shift_by_id(conn, company_id: UUID, shift_id: UUID) -> Optional[
             "name": _display_name(r["first_name"], r["last_name"]),
             "job_title": r["job_title"],
             "status": r["status"],
+            "manager_note": r["manager_note"],
+            "manager_note_visible_to_employee": r["manager_note_visible_to_employee"],
+            "compliance_guidance": r["compliance_guidance"],
         }
         for r in assign_rows
     ]

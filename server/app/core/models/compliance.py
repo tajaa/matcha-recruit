@@ -201,6 +201,7 @@ class LocationCreate(BaseModel):
     naics: Optional[str] = None
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
+    timezone: Optional[str] = None
 
 
 class LocationUpdate(BaseModel):
@@ -215,6 +216,7 @@ class LocationUpdate(BaseModel):
     naics: Optional[str] = None
     max_employees: Optional[int] = None
     annual_avg_employees: Optional[int] = None
+    timezone: Optional[str] = None
 
 
 class FacilityAttributesUpdate(BaseModel):

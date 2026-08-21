@@ -8,11 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
-from app.matcha.models.scheduling.employee_schedule import AssignmentCreate, AssignmentMove
+from app.matcha.models.scheduling.employee_schedule import (
+    AssignmentCreate, AssignmentMove, AssignmentNoteUpdate,
+)
 from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
 from ...services.scheduling.shift_writes import (
     apply_assignment_core, log_availability_override, remove_assignment_core,
 )
+from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ._shared import (
     require_company_id, log_audit, fetch_shift_by_id, fetch_shift_for_write,
     assert_employee_in_company, assert_employee_schedulable_at, assert_shift_open_for_assignment,
@@ -26,6 +29,64 @@ from ._compliance import check_shift_compliance, raise_for_violations, _fair_wor
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.put("/shifts/{shift_id}/assignments/{employee_id}/note")
+async def update_assignment_note(
+    shift_id: UUID,
+    employee_id: UUID,
+    body: AssignmentNoteUpdate,
+    current_user=Depends(require_admin_or_client),
+):
+    """Set the one manager-owned note for an employee's shift assignment.
+
+    History is retained in schedule_audit_log rather than overwriting the
+    previous value without an accountable record.
+    """
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchrow(
+                """
+                SELECT a.manager_note, a.manager_note_visible_to_employee,
+                       a.manager_note_include_in_location_digest,
+                       a.manager_note_send_employee_notice
+                FROM schedule_shift_assignments a
+                JOIN schedule_shifts s ON s.id = a.shift_id
+                WHERE a.shift_id = $1 AND a.employee_id = $2 AND s.company_id = $3
+                FOR UPDATE
+                """,
+                shift_id, employee_id, company_id,
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="Assignment not found")
+            await conn.execute(
+                """
+                UPDATE schedule_shift_assignments
+                SET manager_note = $1,
+                    manager_note_visible_to_employee = $2,
+                    manager_note_include_in_location_digest = $3,
+                    manager_note_send_employee_notice = $4,
+                    manager_note_updated_by = $5,
+                    manager_note_updated_at = NOW()
+                WHERE shift_id = $6 AND employee_id = $7
+                """,
+                body.note.strip() if body.note else None,
+                body.visible_to_employee,
+                body.include_in_location_digest,
+                body.send_employee_notice,
+                current_user.id, shift_id, employee_id,
+            )
+            await log_audit(
+                conn, company_id, "assignment", shift_id, current_user.id,
+                "assignment.note.update",
+                {
+                    "employee_id": str(employee_id),
+                    "before": dict(existing),
+                    "after": body.model_dump(),
+                },
+            )
+        return await fetch_shift_by_id(conn, company_id, shift_id)
 
 
 @router.post("/assignments/move")
@@ -222,6 +283,11 @@ async def assign_employee(shift_id: UUID, body: AssignmentCreate,
                 ON CONFLICT (shift_id, employee_id) DO NOTHING
                 """,
                 company_id, shift_id, body.employee_id, current_user.id,
+            )
+            await refresh_assignment_break_guidance(
+                conn, company_id, shift_id=shift_id, employee_id=body.employee_id,
+                location_id=shift["location_id"], starts_at=shift["starts_at"],
+                ends_at=shift["ends_at"],
             )
             await log_audit(conn, company_id, "assignment", shift_id, current_user.id,
                             "assignment.create", {

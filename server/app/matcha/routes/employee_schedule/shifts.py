@@ -21,6 +21,11 @@ from ...services.scheduling.schedule_rules import (
 )
 from ...services.scheduling import schedule_compliance, schedule_intelligence
 from ...services.scheduling.shift_writes import create_shift_core
+from ...services.scheduling.schedule_location_readiness import (
+    assert_schedule_location_ready_to_publish,
+    get_schedule_location_readiness,
+)
+from ...services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 from ._shared import (
     require_company_id, log_audit, fetch_shifts, fetch_roster, fetch_shift_by_id,
     assert_employee_in_company, assert_employee_schedulable_at, assert_location_in_company,
@@ -169,6 +174,25 @@ async def location_scheduling_compliance(
         "state": state,
         "rules": schedule_compliance.rules_summary(state, db_rules),
         "statutes": statutes,
+    }
+
+
+@router.get("/locations/{location_id}/readiness")
+async def schedule_location_readiness(
+    location_id: UUID, current_user=Depends(require_admin_or_client),
+):
+    """Expose the exact prerequisites that block schedule publication."""
+    company_id = await require_company_id(current_user)
+    async with get_connection() as conn:
+        await assert_location_in_company(conn, company_id, location_id)
+        readiness = await get_schedule_location_readiness(conn, company_id, location_id)
+    return {
+        "location_id": str(location_id),
+        "ready_to_publish": readiness.ready_to_publish,
+        "missing_fields": list(readiness.missing_fields),
+        "jurisdiction_id": str(readiness.jurisdiction_id) if readiness.jurisdiction_id else None,
+        "timezone": readiness.timezone,
+        "industry_code": readiness.industry_code,
     }
 
 
@@ -414,6 +438,11 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                 detail="Cannot publish a cancelled shift — reopen it as a draft first",
             )
 
+        if new_status == "published":
+            await assert_schedule_location_ready_to_publish(
+                conn, company_id, patch.get("location_id", existing["location_id"]),
+            )
+
         new_start = patch.get("starts_at") or existing["starts_at"]
         new_end = patch.get("ends_at") or existing["ends_at"]
         if new_end <= new_start:
@@ -545,6 +574,17 @@ async def update_shift(shift_id: UUID, body: ShiftUpdate,
                                 "after": after,
                                 "was_published": was_published,
                             })
+            if retimed or "location_id" in patch:
+                assignees = await conn.fetch(
+                    "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1",
+                    shift_id,
+                )
+                for assignee in assignees:
+                    await refresh_assignment_break_guidance(
+                        conn, company_id, shift_id=shift_id,
+                        employee_id=assignee["employee_id"], location_id=new_location,
+                        starts_at=new_start, ends_at=new_end,
+                    )
             if forced:
                 await log_audit(conn, company_id, "shift", shift_id, current_user.id,
                                 "shift.compliance_override", {"forced": forced})
@@ -606,6 +646,15 @@ async def publish_shift(shift_id: UUID, current_user=Depends(require_admin_or_cl
     company_id = await require_company_id(current_user)
     async with get_connection() as conn:
         async with conn.transaction():
+            shift = await conn.fetchrow(
+                "SELECT location_id FROM schedule_shifts WHERE id = $1 AND company_id = $2",
+                shift_id, company_id,
+            )
+            if not shift:
+                raise HTTPException(status_code=404, detail="Shift not found")
+            await assert_schedule_location_ready_to_publish(
+                conn, company_id, shift["location_id"],
+            )
             row = await conn.fetchrow(
                 """
                 UPDATE schedule_shifts
@@ -638,6 +687,20 @@ async def publish_range(body: PublishRange, current_user=Depends(require_admin_o
     async with get_connection() as conn:
         await assert_location_in_company(conn, company_id, body.location_id)
         async with conn.transaction():
+            locations = await conn.fetch(
+                """
+                SELECT DISTINCT location_id
+                FROM schedule_shifts
+                WHERE company_id = $1 AND status = 'draft'
+                  AND starts_at >= $2 AND starts_at < $3
+                  AND ($4::uuid IS NULL OR location_id = $4 OR location_id IS NULL)
+                """,
+                company_id, body.start, body.end, body.location_id,
+            )
+            for location in locations:
+                await assert_schedule_location_ready_to_publish(
+                    conn, company_id, location["location_id"],
+                )
             count = await conn.fetchval(
                 """
                 WITH updated AS (

@@ -80,6 +80,7 @@ class EmployeeCreateRequest(BaseModel):
     department: Optional[str] = None
     work_location_id: Optional[UUID] = None
     uid: Optional[str] = None  # HR-internal badge / employee number
+    meal_break_waiver_on_file: Optional[bool] = None
 
     @model_validator(mode="after")
     def validate_work_email_present(self):
@@ -597,6 +598,17 @@ async def create_employee(
             work_city=row["work_city"] if compensation_fields_available else None,
             background_tasks=background_tasks,
         )
+
+        if request.meal_break_waiver_on_file is not None:
+            await conn.execute(
+                """
+                INSERT INTO employee_compliance_attestations
+                    (company_id, employee_id, attestation_type, value, effective_from, confirmed_by)
+                VALUES ($1, $2, 'meal_break_waiver_on_file', $3, $4, $5)
+                """,
+                company_id, row["id"], request.meal_break_waiver_on_file,
+                date.today(), current_user.id,
+            )
 
         # D4: cheap post-onboarding drift check — does this roster now imply a
         # jurisdiction the company's tracked locations don't cover? Alert-only,

@@ -34,6 +34,7 @@ class BusinessLocation(TimestampMixin, Base):
     state: Mapped[str] = mapped_column(String(2), nullable=False)
     county: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     zipcode: Mapped[str] = mapped_column(String(10), nullable=False)
+    timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, server_default="true"
     )

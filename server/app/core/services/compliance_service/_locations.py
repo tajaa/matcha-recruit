@@ -711,8 +711,8 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         location_id = await conn.fetchval(
             """
             INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes,
-                                            ein, naics, max_employees, annual_avg_employees)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                                            ein, naics, max_employees, annual_avg_employees, timezone)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING id
             """,
             company_id,
@@ -727,6 +727,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.naics,
             data.max_employees,
             data.annual_avg_employees,
+            data.timezone,
         )
 
         # Resolve county from zip if not provided
@@ -1165,6 +1166,10 @@ async def update_location(
         if data.annual_avg_employees is not None:
             updates.append(f"annual_avg_employees = ${param_idx}")
             params.append(data.annual_avg_employees)
+            param_idx += 1
+        if data.timezone is not None:
+            updates.append(f"timezone = ${param_idx}")
+            params.append(data.timezone)
             param_idx += 1
 
         if not updates:

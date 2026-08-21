@@ -111,6 +111,19 @@ class AssignmentCreate(BaseModel):
     employee_id: UUID
 
 
+class AssignmentNoteUpdate(BaseModel):
+    note: Optional[str] = Field(None, max_length=2000)
+    visible_to_employee: bool = True
+    include_in_location_digest: bool = True
+    send_employee_notice: bool = True
+
+
+class MealWaiverAttestationUpdate(BaseModel):
+    on_file: bool
+    effective_from: Optional[date] = None
+    note: Optional[str] = Field(None, max_length=1000)
+
+
 class AssignmentMove(BaseModel):
     employee_id: UUID
     from_shift_id: UUID

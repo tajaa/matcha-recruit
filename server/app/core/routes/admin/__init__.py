@@ -13,6 +13,7 @@ from app.core.routes.admin.users import router as _users
 from app.core.routes.admin.research import router as _research
 from app.core.routes.admin.products import router as _products
 from app.core.routes.admin.schedule_rules import router as _schedule_rules
+from app.core.routes.admin.schedule_break_rules import router as _schedule_break_rules
 from app.core.routes.admin.matcha_ops import router as _matcha_ops
 
 # Re-export the internal names other modules + tests import directly (the full
@@ -26,7 +27,7 @@ from app.core.routes.admin._shared import (  # noqa: F401
 from app.core.models.admin import ProposedCategory  # noqa: F401
 
 router = APIRouter()
-for _r in (_jurisdictions, _cappe_creators, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products, _schedule_rules, _matcha_ops):
+for _r in (_jurisdictions, _cappe_creators, _companies, _deal_flow, _brokers, _invites, _platform_settings, _posters, _users, _research, _products, _schedule_rules, _schedule_break_rules, _matcha_ops):
     router.include_router(_r)
 
 __all__ = [

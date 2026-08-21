@@ -190,6 +190,7 @@ async def create_shift_core(
     from app.matcha.services.training.training_assignment import (
         assign_training, evaluate_scheduled_role_rules,
     )
+    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 
     import logging
     logger = logging.getLogger(__name__)
@@ -217,6 +218,10 @@ async def create_shift_core(
             ON CONFLICT (shift_id, employee_id) DO NOTHING
             """,
             company_id, shift_id, emp_id, created_by,
+        )
+        await refresh_assignment_break_guidance(
+            conn, company_id, shift_id=shift_id, employee_id=emp_id,
+            location_id=location_id, starts_at=starts_at, ends_at=ends_at,
         )
         if kind == "training" and training_requirement is not None:
             await assign_training(
@@ -308,6 +313,7 @@ async def apply_assignment_core(
     from app.matcha.services.training.training_assignment import (
         assign_training, evaluate_scheduled_role_rules,
     )
+    from app.matcha.services.scheduling.schedule_guidance import refresh_assignment_break_guidance
 
     import logging
     logger = logging.getLogger(__name__)
@@ -321,6 +327,11 @@ async def apply_assignment_core(
         ON CONFLICT (shift_id, employee_id) DO NOTHING
         """,
         company_id, shift_id, employee_id, actor_user_id,
+    )
+    await refresh_assignment_break_guidance(
+        conn, company_id, shift_id=shift_id, employee_id=employee_id,
+        location_id=shift_row["location_id"], starts_at=shift_row["starts_at"],
+        ends_at=shift_row["ends_at"],
     )
     await log_audit(conn, company_id, "assignment", shift_id, actor_user_id,
                     "assignment.create", {
