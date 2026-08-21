@@ -124,6 +124,12 @@ class MealWaiverAttestationUpdate(BaseModel):
     note: Optional[str] = Field(None, max_length=1000)
 
 
+class EligibilityCaseDecision(BaseModel):
+    decision: Literal["remove", "keep"]
+    acknowledgement_confirmed: bool = False
+    acknowledgement_note: Optional[str] = Field(None, max_length=2000)
+
+
 class AssignmentMove(BaseModel):
     employee_id: UUID
     from_shift_id: UUID

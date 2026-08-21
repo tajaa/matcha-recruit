@@ -152,6 +152,7 @@ def _scheduler_flags(task_keys: list) -> dict:
 # scheduler_settings primary key; module/callable are imported lazily at
 # dispatch time so a broken task module can't block the rest of the batch.
 _SCHEDULED_TASKS = [
+    ("schedule_eligibility", "app.workers.tasks.schedule_eligibility", "run_schedule_eligibility"),
     ("structured_data_fetch", "app.workers.tasks.structured_data_fetch", "fetch_structured_data_sources"),
     ("compliance_checks", "app.workers.tasks.compliance_checks", "enqueue_scheduled_compliance_checks"),
     ("deadline_escalation", "app.workers.tasks.compliance_checks", "run_deadline_escalation"),

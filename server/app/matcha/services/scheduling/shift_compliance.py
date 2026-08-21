@@ -389,6 +389,10 @@ async def check_shift_compliance(
     age: Optional[int] = None
     age_lookup_failed = False
     if employee_id is not None:
+        from .schedule_eligibility import schedule_eligibility_violations
+        violations.extend(await schedule_eligibility_violations(
+            conn, company_id, employee_id=employee_id, shift_date=starts_at.date(),
+        ))
         week_hours = await _week_hours(conn, company_id, employee_id, starts_at, worked, exclude_shift_id)
         min_rest = await _min_rest_gap(conn, company_id, employee_id, starts_at, ends_at, exclude_shift_id)
         age, age_lookup_failed = await _employee_age(
