@@ -46,7 +46,6 @@ from .benefits import router as benefits_router
 from .labor_relations import router as labor_relations_router
 from .ems import router as ems_router
 from .inventory import router as inventory_router
-from .safety_meetings import router as safety_meetings_router
 from .ops_permissions import router as ops_permissions_router
 from ..dependencies import require_feature, require_any_feature, require_all_features
 from ...core.dependencies import require_admin
@@ -159,10 +158,6 @@ matcha_router.include_router(ems_router, prefix="/ems", tags=["ems"],
 # page's REST surface (items, movement ledger, order queue).
 matcha_router.include_router(inventory_router, prefix="/inventory", tags=["inventory"],
                               dependencies=[Depends(require_all_features("matcha_ops", "inventory"))])
-# Safety meetings — chunked Gemini transcription, manager review, and signed
-# toolbox-talk records. Standalone admin-toggle; not tied to Matcha Ops.
-matcha_router.include_router(safety_meetings_router, prefix="/safety-meetings", tags=["safety-meetings"],
-                              dependencies=[Depends(require_feature("safety_meetings"))])
 # Matcha Ops permission management — company-scoped grants, gated on
 # matcha_ops at the mount and permissions.manage per mutation inside.
 matcha_router.include_router(ops_permissions_router, prefix="/ops/permissions", tags=["ops-permissions"],

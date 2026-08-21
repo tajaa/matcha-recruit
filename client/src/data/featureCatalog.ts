@@ -18,7 +18,6 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       offer_letters: 'Offer Letters',
       er_copilot: 'ER Copilot',
       incidents: 'Incidents',
-      safety_meetings: 'Safety Meetings (transcribed toolbox talks + manager sign-off)',
       osha_logs: 'OSHA Logs (interactive 300/301/300A recordkeeping)',
       osha_export: 'OSHA 300 Log CSV Export (download-only)',
       osha_auto_report: 'OSHA Auto-Report (ITA electronic submission)',
