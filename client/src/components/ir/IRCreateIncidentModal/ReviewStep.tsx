@@ -12,7 +12,7 @@ type Props = {
   onSubmit: (e: React.FormEvent) => void
 }
 
-function ReviewRow({ label, value, onEdit }: { label: string; value: string; onEdit: () => void }) {
+function ReviewRow({ label, value, onEdit, editable = true }: { label: string; value: string; onEdit: () => void; editable?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-3 rounded-lg border border-white/[0.06] bg-zinc-900/60 px-3.5 py-3">
       <div className="min-w-0">
@@ -21,9 +21,11 @@ function ReviewRow({ label, value, onEdit }: { label: string; value: string; onE
           {value || 'Not set'}
         </div>
       </div>
-      <button type="button" onClick={onEdit} className="shrink-0 flex items-center gap-1 text-[11px] text-zinc-500 hover:text-emerald-400 transition-colors">
-        <Pencil className="h-3 w-3" /> Edit
-      </button>
+      {editable && (
+        <button type="button" onClick={onEdit} className="shrink-0 flex items-center gap-1 text-[11px] text-zinc-500 hover:text-emerald-400 transition-colors">
+          <Pencil className="h-3 w-3" /> Edit
+        </button>
+      )}
     </div>
   )
 }
@@ -40,6 +42,7 @@ export function ReviewStep({ form, locations, saving, submitError, onEditStep, o
         label="Where"
         value={selectedLocation ? locationLabel(selectedLocation) : ''}
         onEdit={() => onEditStep('location_id')}
+        editable={locations?.length !== 1}
       />
       <ReviewRow label="Reported by" value={form.reported_by_name || 'Unknown'} onEdit={() => onEditStep('reported_by_name')} />
       <ReviewRow

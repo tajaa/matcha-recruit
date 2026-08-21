@@ -102,11 +102,11 @@ async def _public_chat_budget(token: str, company_id: str, kind: str) -> None:
 
 
 async def _read_public_chat_turn(request: Request) -> PublicChatIntakeTurnRequest:
-    """Apply the same 8 KiB boundary the Cappe public AI endpoints use.
+    """Apply a bounded body ceiling to the public chat endpoint.
 
     FastAPI would otherwise parse the full body before Pydantic's per-field
-    limits run. These public token links do not sit behind Cappe's CloudFront
-    WAF, so the application must own the body ceiling.
+    limits run. These public token links do not sit behind the same edge WAF as
+    Cappe, so the application must own the body ceiling.
     """
     raw = await request.body()
     if len(raw) > MAX_PUBLIC_CHAT_BODY_BYTES:

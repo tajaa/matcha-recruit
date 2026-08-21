@@ -42,6 +42,18 @@ def _is_complete(fields: dict, location_options: list[dict]) -> bool:
     return all(fields.get(k) for k in _required_fields(location_options))
 
 
+def _normalized_witness_names(witnesses) -> list[str]:
+    """Keep malformed client/model witness values out of prompt and merge paths."""
+    names = []
+    for witness in witnesses or []:
+        if not isinstance(witness, dict):
+            continue
+        name = witness.get("name")
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
 def _render_known(known: dict) -> str:
     lines = []
     if known.get("reported_by_name"):
@@ -53,8 +65,9 @@ def _render_known(known: dict) -> str:
     if known.get("description"):
         lines.append(f"- what happened: {known['description']}")
     if known.get("witnesses"):
-        names = ", ".join(w.get("name", "") for w in known["witnesses"])
-        lines.append(f"- witnesses so far: {names}")
+        names = _normalized_witness_names(known["witnesses"])
+        if names:
+            lines.append(f"- witnesses so far: {', '.join(names)}")
     return "\n".join(lines) or "(nothing yet)"
 
 
@@ -133,8 +146,8 @@ def _coerce_chat_fields(raw: dict, known: dict, valid_location_ids: set) -> dict
             new_witnesses.append(name)
 
     if new_witnesses:
-        existing = list(known.get("witnesses") or [])
-        seen = {w.get("name", "").strip().lower() for w in existing if isinstance(w, dict)}
+        existing = [{"name": name} for name in _normalized_witness_names(known.get("witnesses"))]
+        seen = {w["name"].lower() for w in existing}
         for name in new_witnesses:
             key = name.lower()
             if key not in seen:
@@ -142,7 +155,9 @@ def _coerce_chat_fields(raw: dict, known: dict, valid_location_ids: set) -> dict
                 seen.add(key)
         merged["witnesses"] = existing[:MAX_WITNESSES]
     else:
-        merged["witnesses"] = list(known.get("witnesses") or [])
+        merged["witnesses"] = [
+            {"name": name} for name in _normalized_witness_names(known.get("witnesses"))
+        ]
 
     merged.setdefault("reported_by_name", None)
     merged.setdefault("occurred_at_text", None)
@@ -279,8 +294,8 @@ def _coerce_public_chat_fields(raw: dict, known: dict, *, intake_kind: PublicInt
             merged.setdefault(key, None)
 
     if "witnesses" in allowed:
-        existing = list(known.get("witnesses") or [])
-        seen = {w.get("name", "").strip().lower() for w in existing if isinstance(w, dict)}
+        existing = [{"name": name} for name in _normalized_witness_names(known.get("witnesses"))]
+        seen = {w["name"].lower() for w in existing}
         for witness in raw.get("witnesses") or []:
             name = witness.get("name") if isinstance(witness, dict) else witness
             if not isinstance(name, str) or not (cleaned := name.strip()[:255]):

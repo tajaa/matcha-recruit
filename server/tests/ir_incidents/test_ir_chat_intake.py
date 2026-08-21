@@ -8,6 +8,7 @@ exercised by a manual dev smoke, same posture as test_ir_voice_parser.py.
 
 from app.matcha.services.ir.ir_chat_intake import (
     MAX_WITNESSES,
+    _build_turn_prompt,
     _build_public_turn_prompt,
     _coerce_chat_fields,
     _coerce_public_chat_fields,
@@ -93,6 +94,16 @@ def test_empty_new_witness_list_does_not_erase_earlier_witnesses():
 
     merged_missing_key = _coerce({}, known)
     assert merged_missing_key["witnesses"] == [{"name": "Bob Smith"}]
+
+
+def test_malformed_known_witnesses_are_ignored():
+    known = {**EMPTY_KNOWN, "witnesses": [{"name": None}, {"name": 42}, "not-a-witness"]}
+    merged = _coerce({}, known)
+    assert merged["witnesses"] == []
+
+    # Prompt construction must also tolerate the same untrusted client state.
+    prompt = _build_turn_prompt([], known, [])
+    assert "witnesses so far" not in prompt
 
 
 def test_required_fields_drops_location_when_none_on_file():

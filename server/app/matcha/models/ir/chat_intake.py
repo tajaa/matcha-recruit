@@ -10,7 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # Keep in lockstep with services/ir/ir_chat_intake.py:MAX_TURNS (12) — a
 # transcript is a pair of messages per turn.
 MAX_TRANSCRIPT_MESSAGES = 24
-MAX_PUBLIC_CHAT_BODY_BYTES = 8 * 1024
+# Accommodates the full client-held transcript plus accumulated fields without
+# rejecting a valid conversation before MAX_PUBLIC_CHAT_MESSAGES is reached.
+MAX_PUBLIC_CHAT_BODY_BYTES = 64 * 1024
 MAX_PUBLIC_CHAT_MESSAGES = 24
 MAX_PUBLIC_CHAT_MESSAGE_CHARS = 600
 

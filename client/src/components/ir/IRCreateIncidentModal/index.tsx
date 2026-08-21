@@ -57,6 +57,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         setLocations(active)
         if (active.length === 1) {
           setForm((f) => (f.location_id ? f : { ...f, location_id: active[0].id }))
+          setStep((current) => current === 'location_id' ? 'reported_by_name' : current)
         }
       })
       .catch(() => {
@@ -182,7 +183,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
             canChat={canChat}
             showDictateUpsell={showDictateUpsell}
             locations={locations}
-            onClose={onClose}
+            onClose={handleClose}
             onPrefill={handlePrefill}
             onOpenChat={() => {
               // A stale `complete=true` from an earlier chat session (user
