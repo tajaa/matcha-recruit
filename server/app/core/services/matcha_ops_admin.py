@@ -93,7 +93,7 @@ async def _company_rows(conn) -> list[Any]:
                (SELECT COUNT(*) FROM schedule_shifts ss WHERE ss.company_id = c.id
                   AND ss.status = 'published' AND ss.starts_at >= NOW()) AS upcoming_shifts,
                (SELECT COUNT(*) FROM schedule_requests sr WHERE sr.company_id = c.id
-                  AND sr.status = 'pending') AS pending_schedule_requests
+                  AND sr.status = 'awaiting_manager') AS pending_schedule_requests
         FROM companies c
         WHERE c.deleted_at IS NULL
         ORDER BY c.name

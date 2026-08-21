@@ -31,7 +31,10 @@ def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
 ShiftStatus = Literal["draft", "published", "cancelled"]
 ShiftKind = Literal["work", "training"]
 AssignmentStatus = Literal["assigned", "confirmed", "declined"]
-RequestType = Literal["swap", "drop", "unavailable"]
+RequestType = Literal["swap", "drop", "pickup", "unavailable"]
+RequestStatus = Literal[
+    "pending", "awaiting_counterparty", "awaiting_manager", "approved", "denied", "cancelled"
+]
 RequestDecision = Literal["approved", "denied"]
 
 # ISO-ish weekday integers: 0=Sunday .. 6=Saturday.
@@ -256,14 +259,22 @@ class ScheduleRequestCreate(BaseModel):
 
     @model_validator(mode="after")
     def _check_shape(self) -> "ScheduleRequestCreate":
-        if self.request_type in ("swap", "drop") and self.shift_id is None:
-            raise ValueError("shift_id is required for swap/drop requests")
+        if self.request_type in ("swap", "drop", "pickup") and self.shift_id is None:
+            raise ValueError("shift_id is required for swap/drop/pickup requests")
+        if self.request_type == "swap" and self.target_employee_id is None:
+            raise ValueError("target_employee_id is required for swap requests")
         if self.request_type == "unavailable":
             if self.unavailable_start is None or self.unavailable_end is None:
                 raise ValueError("unavailable_start and unavailable_end are required")
             if self.unavailable_end < self.unavailable_start:
                 raise ValueError("unavailable_end must be on or after unavailable_start")
         return self
+
+
+class CounterpartyAccept(BaseModel):
+    """Acceptance of an offer; swaps also identify the shift being traded."""
+
+    counter_shift_id: Optional[UUID] = None
 
 
 class RequestReview(BaseModel):

@@ -3,8 +3,8 @@
 export type ShiftStatus = 'draft' | 'published' | 'cancelled'
 export type ShiftKind = 'work' | 'training'
 export type AssignmentStatus = 'assigned' | 'confirmed' | 'declined'
-export type RequestType = 'swap' | 'drop' | 'unavailable'
-export type RequestStatus = 'pending' | 'approved' | 'denied' | 'cancelled'
+export type RequestType = 'swap' | 'drop' | 'pickup' | 'unavailable'
+export type RequestStatus = 'pending' | 'awaiting_counterparty' | 'awaiting_manager' | 'approved' | 'denied' | 'cancelled'
 
 export interface ShiftAssignment {
   employee_id: string
@@ -180,6 +180,11 @@ export interface ScheduleRequest {
   shift_starts_at: string | null
   shift_ends_at: string | null
   target_employee_id: string | null
+  target_employee_name?: string | null
+  counter_shift_id: string | null
+  counterparty_confirmed_at: string | null
+  counter_shift_starts_at: string | null
+  counter_shift_ends_at: string | null
   unavailable_start: string | null
   unavailable_end: string | null
   reason: string | null
@@ -200,6 +205,8 @@ export const STATUS_TONE: Record<ShiftStatus, string> = {
 
 export const REQUEST_TONE: Record<RequestStatus, string> = {
   pending: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  awaiting_counterparty: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  awaiting_manager: 'text-sky-400 bg-sky-500/10 border-sky-500/20',
   approved: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
   denied: 'text-red-400 bg-red-500/10 border-red-500/20',
   cancelled: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',

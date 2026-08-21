@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { CalendarClock, Loader2, X, Check, Repeat, LogOut, CalendarOff, AlertTriangle, Clock } from 'lucide-react'
 import { useToast } from '../../components/ui'
 import {
-  fetchMySchedule, fetchMyRequests, createMyRequest, cancelMyRequest,
+  fetchMySchedule, fetchMyRequests, fetchMyOffers, fetchMyCoworkers,
+  createMyRequest, cancelMyRequest, acceptMyRequest, withdrawMyRequest,
   fetchMyAvailability, saveMyAvailability, type AvailabilityWindow,
 } from '../../api/employees/employeeSchedule'
 import type { Shift, ScheduleRequest } from '../../types/employeeSchedule'
@@ -20,17 +21,23 @@ export default function PortalSchedule() {
   const { toast } = useToast()
   const [shifts, setShifts] = useState<Shift[]>([])
   const [requests, setRequests] = useState<ScheduleRequest[]>([])
+  const [offers, setOffers] = useState<ScheduleRequest[]>([])
+  const [coworkers, setCoworkers] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const start = todayISO()
-    const [sch, reqs] = await Promise.all([
+    const [sch, reqs, openOffers, roster] = await Promise.all([
       fetchMySchedule(`${start}T00:00:00Z`, `${addDays(start, 28)}T00:00:00Z`),
       fetchMyRequests(),
+      fetchMyOffers(),
+      fetchMyCoworkers(),
     ])
     setShifts(sch.shifts)
     setRequests(reqs.requests)
+    setOffers(openOffers.offers)
+    setCoworkers(roster.employees)
     setLoadError(null)
   }, [])
 
@@ -89,7 +96,7 @@ export default function PortalSchedule() {
           <div key={day}>
             <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide mb-1.5">{fmtDay(day)}</div>
             <div className="space-y-2">
-              {byDay.get(day)!.map((s) => <ShiftCard key={s.id} shift={s} onChanged={load} />)}
+              {byDay.get(day)!.map((s) => <ShiftCard key={s.id} shift={s} coworkers={coworkers} onChanged={load} />)}
             </div>
           </div>
         ))}
@@ -98,6 +105,15 @@ export default function PortalSchedule() {
       <AvailabilityEditor />
 
       <UnavailableForm onDone={load} />
+
+      {offers.length > 0 && (
+        <section>
+          <h2 className="text-sm font-medium text-zinc-200 mb-2">Available offers</h2>
+          <div className="space-y-2">
+            {offers.map((r) => <OfferCard key={r.id} request={r} shifts={shifts} onChanged={load} />)}
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-sm font-medium text-zinc-200 mb-2">My requests</h2>
@@ -117,8 +133,8 @@ export default function PortalSchedule() {
                     {r.reason ? ` · “${r.reason}”` : ''}
                   </div>
                 </div>
-                {r.status === 'pending' && (
-                  <button onClick={() => { cancelRequest(r.id) }} className="text-zinc-500 hover:text-red-400 p-1"><X className="h-4 w-4" /></button>
+                {['pending', 'awaiting_counterparty', 'awaiting_manager'].includes(r.status) && (
+                  <button onClick={() => { (r.status === 'pending' ? cancelRequest(r.id) : withdrawMyRequest(r.id).then(load).catch((err) => toast(errorMessage(err), 'error'))) }} className="text-zinc-500 hover:text-red-400 p-1"><X className="h-4 w-4" /></button>
                 )}
               </div>
             ))}
@@ -129,9 +145,10 @@ export default function PortalSchedule() {
   )
 }
 
-function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }) {
+function ShiftCard({ shift, coworkers, onChanged }: { shift: Shift; coworkers: { id: string; name: string }[]; onChanged: () => void }) {
   const { toast } = useToast()
-  const [mode, setMode] = useState<'swap' | 'drop' | null>(null)
+  const [mode, setMode] = useState<'swap' | 'pickup' | null>(null)
+  const [targetEmployeeId, setTargetEmployeeId] = useState('')
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -139,10 +156,15 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
     if (!mode) return
     setBusy(true)
     try {
-      await createMyRequest({ request_type: mode, shift_id: shift.id, reason: reason.trim() || null })
+      if (mode === 'swap' && !targetEmployeeId) {
+        toast('Choose a coworker for the swap', 'error')
+        return
+      }
+      await createMyRequest({ request_type: mode, shift_id: shift.id, target_employee_id: targetEmployeeId || null, reason: reason.trim() || null })
       setMode(null)
       setReason('')
-      toast(`${mode === 'swap' ? 'Swap' : 'Drop'} request sent`, 'success')
+      setTargetEmployeeId('')
+      toast(`${mode === 'swap' ? 'Swap' : 'Pickup'} offer sent for confirmation`, 'success')
       onChanged()
     } catch (err) {
       toast(errorMessage(err), 'error')
@@ -162,16 +184,41 @@ function ShiftCard({ shift, onChanged }: { shift: Shift; onChanged: () => void }
           {(shift.role || shift.department) && <div className="text-[11px] text-zinc-500 truncate">{[shift.role, shift.department].filter(Boolean).join(' · ')}</div>}
         </div>
         <button onClick={() => setMode(mode === 'swap' ? null : 'swap')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><Repeat className="h-3.5 w-3.5" /> Swap</button>
-        <button onClick={() => setMode(mode === 'drop' ? null : 'drop')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><LogOut className="h-3.5 w-3.5" /> Drop</button>
+        <button onClick={() => setMode(mode === 'pickup' ? null : 'pickup')} className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100"><LogOut className="h-3.5 w-3.5" /> Offer pickup</button>
       </div>
       {mode && (
         <div className="mt-2 flex items-center gap-2 border-t border-zinc-800 pt-2">
+          {mode === 'swap' && <select value={targetEmployeeId} onChange={(e) => setTargetEmployeeId(e.target.value)} className={`${inputCls} max-w-[180px]`}><option value="">Swap with…</option>{coworkers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={`Reason for ${mode} (optional)`} className={inputCls} />
           <button onClick={submit} disabled={busy} className="inline-flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg px-2.5 py-1.5 shrink-0 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Send</button>
         </div>
       )}
     </div>
   )
+}
+
+function OfferCard({ request, shifts, onChanged }: { request: ScheduleRequest; shifts: Shift[]; onChanged: () => void }) {
+  const { toast } = useToast()
+  const [busy, setBusy] = useState(false)
+  const [counterShiftId, setCounterShiftId] = useState('')
+  const tradeableShifts = shifts
+  async function accept() {
+    setBusy(true)
+    try {
+      if (request.request_type === 'swap' && !counterShiftId) {
+        toast('Choose your shift to trade', 'error')
+        return
+      }
+      await acceptMyRequest(request.id, counterShiftId || null)
+      toast('Offer accepted; waiting for manager approval', 'success')
+      onChanged()
+    } catch (err) { toast(errorMessage(err), 'error') } finally { setBusy(false) }
+  }
+  return <div className="flex items-center gap-3 rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+    <div className="flex-1 min-w-0"><div className="text-sm text-zinc-200">{request.employee_name} · <span className="capitalize">{request.request_type}</span></div><div className="text-[11px] text-zinc-500">{request.shift_starts_at ? `${fmtDay(request.shift_starts_at)} ${fmtTime(request.shift_starts_at)}` : '—'}{request.reason ? ` · “${request.reason}”` : ''}</div></div>
+    {request.request_type === 'swap' && <select value={counterShiftId} onChange={(e) => setCounterShiftId(e.target.value)} className={`${inputCls} max-w-[180px]`}><option value="">Trade my shift…</option>{tradeableShifts.map((s) => <option key={s.id} value={s.id}>{fmtDay(s.starts_at)} {fmtTime(s.starts_at)}–{fmtTime(s.ends_at)}</option>)}</select>}
+    <button onClick={accept} disabled={busy} className="inline-flex items-center gap-1 bg-sky-600 hover:bg-sky-500 text-white text-xs rounded-lg px-2.5 py-1.5 disabled:opacity-50">{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Accept</button>
+  </div>
 }
 
 interface AvailabilityRow { enabled: boolean; start: string; end: string }

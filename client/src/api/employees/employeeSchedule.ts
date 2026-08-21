@@ -213,8 +213,26 @@ export function fetchMyRequests() {
   return api.get<{ requests: ScheduleRequest[] }>('/v1/portal/me/schedule/requests')
 }
 
+export function fetchMyOffers() {
+  return api.get<{ offers: ScheduleRequest[] }>('/v1/portal/me/schedule/offers')
+}
+
+export function fetchMyCoworkers() {
+  return api.get<{ employees: { id: string; name: string }[] }>('/v1/portal/me/schedule/coworkers')
+}
+
+export function acceptMyRequest(id: string, counterShiftId?: string | null) {
+  return api.post<ScheduleRequest>(`/v1/portal/me/schedule/requests/${id}/accept`, {
+    counter_shift_id: counterShiftId ?? null,
+  })
+}
+
+export function withdrawMyRequest(id: string) {
+  return api.post<{ status: string; request_id: string }>(`/v1/portal/me/schedule/requests/${id}/withdraw`, {})
+}
+
 export interface MyRequestPayload {
-  request_type: 'swap' | 'drop' | 'unavailable'
+  request_type: 'swap' | 'drop' | 'pickup' | 'unavailable'
   shift_id?: string | null
   target_employee_id?: string | null
   unavailable_start?: string | null

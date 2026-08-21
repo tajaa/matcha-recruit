@@ -39,13 +39,18 @@ _SHIFT_COLS = (
 # three surfaces that feed it must select the same columns.
 REQUEST_SELECT = """
     SELECT r.id, r.employee_id, r.request_type, r.shift_id, r.target_employee_id,
+           r.counter_shift_id, r.counterparty_confirmed_at,
            r.unavailable_start, r.unavailable_end, r.reason, r.status,
            r.review_notes, r.reviewed_at, r.created_at,
            e.first_name, e.last_name,
-           s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at
+           te.first_name AS target_first_name, te.last_name AS target_last_name,
+           s.starts_at AS shift_starts_at, s.ends_at AS shift_ends_at,
+           cs.starts_at AS counter_shift_starts_at, cs.ends_at AS counter_shift_ends_at
     FROM schedule_requests r
     JOIN employees e ON e.id = r.employee_id
+    LEFT JOIN employees te ON te.id = r.target_employee_id
     LEFT JOIN schedule_shifts s ON s.id = r.shift_id
+    LEFT JOIN schedule_shifts cs ON cs.id = r.counter_shift_id
 """
 
 
@@ -482,6 +487,11 @@ def serialize_request(r) -> dict:
         "shift_starts_at": _iso(r["shift_starts_at"]) if "shift_starts_at" in r else None,
         "shift_ends_at": _iso(r["shift_ends_at"]) if "shift_ends_at" in r else None,
         "target_employee_id": str(r["target_employee_id"]) if r["target_employee_id"] else None,
+        "target_employee_name": _display_name(r.get("target_first_name"), r.get("target_last_name")),
+        "counter_shift_id": str(r["counter_shift_id"]) if r.get("counter_shift_id") else None,
+        "counterparty_confirmed_at": _iso(r["counterparty_confirmed_at"]) if r.get("counterparty_confirmed_at") else None,
+        "counter_shift_starts_at": _iso(r["counter_shift_starts_at"]) if r.get("counter_shift_starts_at") else None,
+        "counter_shift_ends_at": _iso(r["counter_shift_ends_at"]) if r.get("counter_shift_ends_at") else None,
         "unavailable_start": _iso(r["unavailable_start"]),
         "unavailable_end": _iso(r["unavailable_end"]),
         "reason": r["reason"],

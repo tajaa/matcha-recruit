@@ -1,14 +1,9 @@
-"""Admin review of employee schedule requests (`/employee-schedule/requests`).
+"""Manager review of bilateral employee schedule requests.
 
-Employees file swap / drop / unavailability requests from the portal (see
-employee_portal.py). Admins list them and approve/deny here. Approving a `drop`
-unassigns the requester from the shift; approving a `swap` unassigns the
-requester and assigns the named target (if any); `unavailable` is informational
-(no shift mutation).
+Requests enter this router only after the counterparty has accepted. Every
+assignment mutation uses the shared scheduling writers in one transaction.
 """
 
-import logging
-from datetime import timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,20 +11,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.database import get_connection
 from ...dependencies import require_admin_or_client
 from app.matcha.models.scheduling.employee_schedule import RequestReview
-from ...services.training.training_assignment import evaluate_scheduled_role_rules, assign_training
+from ...services.scheduling.shift_writes import apply_assignment_core, remove_assignment_core
+from ...services.scheduling.shift_requests import find_same_day_assignments, same_day_conflict_detail
 from ._shared import (
     require_company_id, log_audit, serialize_request, REQUEST_SELECT,
     INACTIVE_EMPLOYMENT_STATUSES, find_conflicts, raise_conflict,
     fetch_availability, availability_violations, raise_outside_availability,
-    reconcile_warning_events,
+    reconcile_warning_events, fetch_locked_shift_pair,
 )
-from ...services.scheduling.shift_writes import log_availability_override
 from ._compliance import check_shift_compliance, raise_for_violations
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter()
-
 _MAX_REQUESTS = 200
 
 
@@ -42,17 +34,48 @@ async def list_requests(
     company_id = await require_company_id(current_user)
     params: list = [company_id]
     where = "r.company_id = $1"
-    if status is not None:
-        params.append(status)
-        where += f" AND r.status = ${len(params)}"
+    params.append(status or "awaiting_manager")
+    where += f" AND r.status = ${len(params)}"
     params.append(limit)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            f"{REQUEST_SELECT} WHERE {where} "
-            f"ORDER BY r.created_at DESC LIMIT ${len(params)}",
+            f"{REQUEST_SELECT} WHERE {where} ORDER BY r.created_at DESC LIMIT ${len(params)}",
             *params,
         )
     return {"requests": [serialize_request(dict(r)) for r in rows]}
+
+
+async def _active_employee(conn, company_id: UUID, employee_id: UUID) -> None:
+    row = await conn.fetchrow(
+        """SELECT COALESCE(employment_status, 'active') AS employment_status
+           FROM employees WHERE id = $1 AND org_id = $2""", employee_id, company_id,
+    )
+    if not row:
+        raise HTTPException(status_code=409, detail="Employee is no longer in this company")
+    if row["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
+        raise HTTPException(status_code=409, detail=f"Employee is {row['employment_status']} and cannot be scheduled")
+
+
+async def _check_recipient(conn, company_id: UUID, shift, employee_id: UUID,
+                           *, exclude_shift_id: UUID | None, force: bool) -> list[dict]:
+    await _active_employee(conn, company_id, employee_id)
+    conflicts = await find_conflicts(conn, company_id, employee_id, shift["starts_at"], shift["ends_at"],
+                                     exclude_shift_id=exclude_shift_id)
+    if conflicts and not force:
+        raise_conflict(employee_id, conflicts)
+    availability = await fetch_availability(conn, company_id, [employee_id])
+    outside = availability_violations(availability[employee_id], shift["starts_at"], shift["ends_at"])
+    if outside and not force:
+        raise_outside_availability(employee_id, outside)
+    violations = await check_shift_compliance(
+        conn, company_id, location_id=shift["location_id"], starts_at=shift["starts_at"],
+        ends_at=shift["ends_at"], break_minutes=shift["break_minutes"] or 0,
+        employee_id=employee_id, exclude_shift_id=exclude_shift_id, fw_event="assign",
+        fw_shift_published=(shift["status"] == "published"), shift_kind=shift["kind"],
+        training_requirement_id=shift["training_requirement_id"],
+    )
+    raise_for_violations(violations, force=force)
+    return outside
 
 
 @router.post("/requests/{request_id}/review")
@@ -60,193 +83,116 @@ async def review_request(request_id: UUID, body: RequestReview,
                          current_user=Depends(require_admin_or_client)):
     company_id = await require_company_id(current_user)
     new_status = "approved" if body.decision == "approved" else "denied"
+    changed_shift_ids: list[UUID] = []
     async with get_connection() as conn:
         async with conn.transaction():
-            # FOR UPDATE + the status guard on the UPDATE: two admins reviewing
-            # the same request would otherwise both pass a pre-transaction
-            # status check and both run their side effects (approve's assignment
-            # mutations landing under a final status of 'denied').
             req = await conn.fetchrow(
-                """
-                SELECT id, request_type, shift_id, employee_id, target_employee_id, status
-                FROM schedule_requests
-                WHERE id = $1 AND company_id = $2
-                FOR UPDATE
-                """,
+                """SELECT id, request_type, shift_id, employee_id, target_employee_id,
+                          counter_shift_id, counterparty_confirmed_at, status
+                   FROM schedule_requests WHERE id = $1 AND company_id = $2 FOR UPDATE""",
                 request_id, company_id,
             )
             if not req:
                 raise HTTPException(status_code=404, detail="Request not found")
-            if req["status"] != "pending":
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "request_already_reviewed",
-                        "message": f"Request was already {req['status']}",
-                        "status": req["status"],
-                    },
-                )
+            if req["status"] not in ("awaiting_manager", "pending"):
+                raise HTTPException(status_code=409, detail={"code": "request_not_manager_ready", "status": req["status"]})
 
-            is_swap_with_target = (
-                req["request_type"] == "swap"
-                and req["shift_id"] is not None
-                and req["target_employee_id"] is not None
-            )
-            swap_violations: list[dict] = []
-            if new_status == "approved" and is_swap_with_target:
-                # The target has to still be employable AND free, or approving
-                # would unassign the requester and silently staff nobody.
-                target = await conn.fetchrow(
-                    """
-                    SELECT COALESCE(employment_status, 'active') AS employment_status
-                    FROM employees WHERE id = $1 AND org_id = $2
-                    """,
-                    req["target_employee_id"], company_id,
-                )
-                if not target:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Swap target is no longer an employee of this company — "
-                               "deny this request, or ask the employee to file a drop instead",
-                    )
-                if target["employment_status"] in INACTIVE_EMPLOYMENT_STATUSES:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Swap target is {target['employment_status']} and cannot be scheduled",
-                    )
-                window = await conn.fetchrow(
-                    "SELECT starts_at, ends_at, location_id, break_minutes, status, "
-                    "kind, training_requirement_id, role "
-                    "FROM schedule_shifts WHERE id = $1 AND company_id = $2",
-                    req["shift_id"], company_id,
-                )
-                availability_override: list[dict] = []
-                if window:
-                    avail_map = await fetch_availability(
-                        conn, company_id, [req["target_employee_id"]])
-                    availability_override = availability_violations(
-                        avail_map[req["target_employee_id"]],
-                        window["starts_at"], window["ends_at"],
-                    )
-                if window and not body.force:
-                    conflicts = await find_conflicts(
-                        conn, company_id, req["target_employee_id"],
-                        window["starts_at"], window["ends_at"],
-                        exclude_shift_id=req["shift_id"],
-                    )
-                    if conflicts:
-                        raise_conflict(req["target_employee_id"], conflicts)
-                    if availability_override:
-                        raise_outside_availability(req["target_employee_id"], availability_override)
-                if window:
-                    # Approving a swap is an assignment write like any other —
-                    # without this, a swap was the one path that bypassed the
-                    # compliance gate (incl. the non-overridable minor BLOCK).
-                    swap_violations = await check_shift_compliance(
-                        conn, company_id, location_id=window["location_id"],
-                        starts_at=window["starts_at"], ends_at=window["ends_at"],
-                        break_minutes=window["break_minutes"] or 0,
-                        employee_id=req["target_employee_id"],
-                        exclude_shift_id=req["shift_id"],
-                        # The target gaining this shift is an admin-executed
-                        # assignment write like any other, so it gets the same
-                        # Fair Workweek notice/clopening check an ordinary
-                        # assign does.
-                        fw_event="assign", fw_shift_published=(window["status"] == "published"),
-                        shift_kind=window["kind"], training_requirement_id=window["training_requirement_id"],
-                    )
-                    raise_for_violations(swap_violations, force=body.force)
+            if new_status == "approved" and req["request_type"] in ("pickup", "swap", "drop"):
+                if req["shift_id"] is None:
+                    raise HTTPException(status_code=409, detail="Request has no shift")
+                if req["request_type"] in ("pickup", "swap") and not req["counterparty_confirmed_at"]:
+                    raise HTTPException(status_code=409, detail="Both employees must confirm first")
+                shift_ids = [req["shift_id"]]
+                legacy_one_way_swap = req["request_type"] == "swap" and req["counter_shift_id"] is None
+                if req["request_type"] == "swap" and not legacy_one_way_swap:
+                    if not req["target_employee_id"] or not req["counter_shift_id"]:
+                        raise HTTPException(status_code=409, detail="Swap is missing its counterparty shift")
+                    shift_ids.append(req["counter_shift_id"])
+                locked = await fetch_locked_shift_pair(conn, company_id, *shift_ids)
+                offered = locked.get(str(req["shift_id"]))
+                if offered is None or offered["status"] != "published":
+                    raise HTTPException(status_code=409, detail="Offered shift is no longer published")
 
-            await conn.execute(
-                """
-                UPDATE schedule_requests
-                SET status = $3, review_notes = $4, reviewed_by = $5,
-                    reviewed_at = NOW(), updated_at = NOW()
-                WHERE id = $1 AND company_id = $2 AND status = 'pending'
-                """,
-                request_id, company_id, new_status, body.review_notes, current_user.id,
-            )
-
-            if new_status == "approved" and req["shift_id"] is not None:
-                if req["request_type"] in ("swap", "drop"):
-                    await conn.execute(
-                        "DELETE FROM schedule_shift_assignments "
-                        "WHERE shift_id = $1 AND employee_id = $2",
-                        req["shift_id"], req["employee_id"],
+                recipient = None if req["request_type"] == "drop" else req["target_employee_id"]
+                if req["request_type"] in ("pickup", "swap") and recipient is None:
+                    raise HTTPException(status_code=409, detail="Request has no confirmed counterparty")
+                if recipient is not None:
+                    counter = locked.get(str(req["counter_shift_id"])) if req["request_type"] == "swap" and not legacy_one_way_swap else None
+                    if counter is not None and counter["status"] != "published":
+                        raise HTTPException(status_code=409, detail="Counter shift is no longer published")
+                    same_day = await find_same_day_assignments(
+                        conn, company_id, recipient, offered["starts_at"],
+                        exclude_shift_ids=([req["counter_shift_id"]] if req["request_type"] == "swap" and not legacy_one_way_swap else []),
                     )
-                if is_swap_with_target:
-                    await conn.execute(
-                        """
-                        INSERT INTO schedule_shift_assignments
-                            (company_id, shift_id, employee_id, assigned_by)
-                        VALUES ($1,$2,$3,$4)
-                        ON CONFLICT (shift_id, employee_id) DO NOTHING
-                        """,
-                        company_id, req["shift_id"], req["target_employee_id"],
-                        current_user.id,
+                    if same_day:
+                        raise HTTPException(status_code=409, detail=same_day_conflict_detail(recipient, same_day))
+                    await _check_recipient(
+                        conn, company_id, offered, recipient,
+                        exclude_shift_id=req["counter_shift_id"] if req["request_type"] == "swap" and not legacy_one_way_swap else None,
+                        force=body.force,
                     )
-                    if window is not None and window["kind"] == "work":
-                        try:
-                            await evaluate_scheduled_role_rules(
-                                conn, company_id, req["target_employee_id"],
-                                shift_id=req["shift_id"], shift_role=window["role"],
-                                shift_start=window["starts_at"].astimezone(timezone.utc).date(),
-                            )
-                        except Exception:
-                            logger.exception(
-                                "scheduled_role training rules failed for shift %s",
-                                req["shift_id"],
-                            )
-                    elif window is not None and window["kind"] == "training" and window["training_requirement_id"]:
-                        try:
-                            requirement = await conn.fetchrow(
-                                "SELECT id, title, training_type, frequency_months "
-                                "FROM training_requirements WHERE id = $1 AND company_id = $2",
-                                window["training_requirement_id"], company_id,
-                            )
-                            if requirement:
-                                await assign_training(
-                                    conn, company_id, dict(requirement), [req["target_employee_id"]],
-                                    source_type="schedule", source_ref=req["shift_id"],
-                                    source_note=f"Scheduled training session {window['starts_at'].date().isoformat()}",
-                                    due_date=window["starts_at"].astimezone(timezone.utc).date(),
-                                    assigned_by=current_user.id,
-                                )
-                        except Exception:
-                            logger.exception(
-                                "training assignment failed for swapped-in training shift %s",
-                                req["shift_id"],
-                            )
-                    if availability_override:
-                        await log_availability_override(
-                            conn, company_id, req["shift_id"], current_user.id,
-                            req["target_employee_id"], availability_override,
+                    if req["request_type"] == "swap" and not legacy_one_way_swap:
+                        # Validate the reverse leg too: the original owner is
+                        # gaining the counter shift, so it must still pass the
+                        # normal overlap/availability/compliance gates.
+                        await _check_recipient(
+                            conn, company_id, counter, req["employee_id"],
+                            exclude_shift_id=req["shift_id"], force=body.force,
                         )
 
-            shift_starts_at = None
-            if req["shift_id"] is not None:
-                shift_starts_at = await conn.fetchval(
-                    "SELECT starts_at FROM schedule_shifts WHERE id = $1 AND company_id = $2",
-                    req["shift_id"], company_id,
+                removed = await remove_assignment_core(
+                    conn, company_id, shift_id=req["shift_id"], employee_id=req["employee_id"],
+                    actor_user_id=current_user.id, shift_row=offered,
+                    audit_details={"request_id": str(request_id)},
                 )
-            audit_details: dict = {
-                "request_type": req["request_type"],
-                "shift_id": str(req["shift_id"]) if req["shift_id"] else None,
-                "employee_id": str(req["employee_id"]),
-                "target_employee_id": (
-                    str(req["target_employee_id"]) if req["target_employee_id"] else None
-                ),
-                "shift_starts_at": shift_starts_at.isoformat() if shift_starts_at else None,
-            }
-            if new_status == "approved" and is_swap_with_target and swap_violations:
-                audit_details["compliance_override"] = swap_violations
-            await log_audit(conn, company_id, "request", request_id, current_user.id,
-                            f"request.{new_status}", audit_details)
+                if not removed:
+                    raise HTTPException(status_code=409, detail="Offered shift is no longer assigned to its owner")
+                changed_shift_ids.append(req["shift_id"])
+                if req["request_type"] == "swap" and not legacy_one_way_swap:
+                    counter = locked[str(req["counter_shift_id"])]
+                    removed_counter = await remove_assignment_core(
+                        conn, company_id, shift_id=req["counter_shift_id"], employee_id=req["target_employee_id"],
+                        actor_user_id=current_user.id, shift_row=counter,
+                        audit_details={"request_id": str(request_id)},
+                    )
+                    if not removed_counter:
+                        raise HTTPException(status_code=409, detail="Counter shift is no longer assigned to its owner")
+                    await apply_assignment_core(
+                        conn, company_id, shift_row=offered, employee_id=req["target_employee_id"],
+                        actor_user_id=current_user.id,
+                        audit_details={"request_id": str(request_id), "request_type": "swap"},
+                    )
+                    await apply_assignment_core(
+                        conn, company_id, shift_row=counter, employee_id=req["employee_id"],
+                        actor_user_id=current_user.id,
+                        audit_details={"request_id": str(request_id), "request_type": "swap"},
+                    )
+                    changed_shift_ids.append(req["counter_shift_id"])
+                elif recipient is not None:
+                    await apply_assignment_core(
+                        conn, company_id, shift_row=offered, employee_id=recipient,
+                        actor_user_id=current_user.id,
+                        audit_details={"request_id": str(request_id), "request_type": req["request_type"]},
+                    )
 
-        if req["shift_id"] is not None:
-            await reconcile_warning_events(conn, company_id, [req["shift_id"]])
-        row = await conn.fetchrow(
-            f"{REQUEST_SELECT} WHERE r.id = $1 AND r.company_id = $2",
-            request_id, company_id,
-        )
+            await conn.execute(
+                """UPDATE schedule_requests SET status = $3, review_notes = $4,
+                   reviewed_by = $5, reviewed_at = NOW(), updated_at = NOW()
+                   WHERE id = $1 AND company_id = $2""",
+                request_id, company_id, new_status, body.review_notes, current_user.id,
+            )
+            shift_start = None
+            if req["shift_id"]:
+                shift_start = await conn.fetchval("SELECT starts_at FROM schedule_shifts WHERE id = $1", req["shift_id"])
+            await log_audit(
+                conn, company_id, "request", request_id, current_user.id, f"request.{new_status}",
+                {"request_type": req["request_type"], "shift_id": str(req["shift_id"]) if req["shift_id"] else None,
+                 "counter_shift_id": str(req["counter_shift_id"]) if req["counter_shift_id"] else None,
+                 "employee_id": str(req["employee_id"]),
+                 "target_employee_id": str(req["target_employee_id"]) if req["target_employee_id"] else None,
+                 "shift_starts_at": shift_start.isoformat() if shift_start else None},
+            )
+        if changed_shift_ids:
+            await reconcile_warning_events(conn, company_id, changed_shift_ids)
+        row = await conn.fetchrow(f"{REQUEST_SELECT} WHERE r.id = $1 AND r.company_id = $2", request_id, company_id)
     return serialize_request(dict(row))
