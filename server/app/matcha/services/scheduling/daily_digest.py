@@ -8,6 +8,7 @@ from html import escape
 from uuid import UUID
 
 from app.core.services.email import get_email_service
+from app.core.services.email._shared import _is_reserved_test_domain
 
 
 def _parse_guidance(value):
@@ -29,6 +30,11 @@ def _guidance_text(value) -> str:
 
 
 async def _claim(conn, *, company_id, location_id, digest_date, email, recipient_type) -> bool:
+    # recipient_email has no case-insensitive constraint at the DB level —
+    # normalize on write so Bob@x.com and bob@x.com converge on one claim
+    # instead of each getting their own (the sibling table this UNIONs
+    # against, schedule_location_notification_recipients, normalizes with
+    # LOWER(email) — see empsched08).
     row = await conn.fetchval(
         """
         INSERT INTO schedule_digest_deliveries
@@ -37,12 +43,40 @@ async def _claim(conn, *, company_id, location_id, digest_date, email, recipient
         ON CONFLICT (location_id, digest_date, recipient_email, recipient_type) DO NOTHING
         RETURNING id
         """,
-        company_id, location_id, digest_date, email, recipient_type,
+        company_id, location_id, digest_date, (email or "").lower(), recipient_type,
     )
     return row is not None
 
 
+async def _deliver(conn, service, *, company_id, location_id, digest_date, email, recipient_type, to_name, subject, html) -> str:
+    """Claim -> send -> release-on-transient-failure, in one place so all
+    three recipient loops share the same idempotency and retry semantics.
+
+    Returns one of: "sent", "skipped_duplicate", "skipped_permanent" (claim
+    kept — a reserved/test domain or an unconfigured provider will never
+    succeed, so retrying it every worker restart would just be noise),
+    "failed_released" (claim removed — genuinely transient, eligible for the
+    next scheduled run to retry)."""
+    if not await _claim(conn, company_id=company_id, location_id=location_id, digest_date=digest_date, email=email, recipient_type=recipient_type):
+        return "skipped_duplicate"
+    if not service.is_configured() or _is_reserved_test_domain(email):
+        return "skipped_permanent"
+    try:
+        ok = await service.send_email(email, to_name, subject, html)
+    except Exception:
+        ok = False
+    if ok:
+        return "sent"
+    await conn.execute(
+        "DELETE FROM schedule_digest_deliveries WHERE location_id=$1 AND digest_date=$2 AND recipient_email=LOWER($3) AND recipient_type=$4",
+        location_id, digest_date, email, recipient_type,
+    )
+    return "failed_released"
+
+
 def _manager_html(location_name: str, rows: list[dict], digest_date: date) -> str:
+    """Named, per-employee view — for employee-managers with an actual
+    supervisory relationship to this location (is_manager/is_supervisor)."""
     lines = []
     for row in rows:
         requirements = _guidance_text(row.get("compliance_guidance")) if row.get("compliance_guidance") else "No break guidance recorded."
@@ -59,12 +93,34 @@ def _manager_html(location_name: str, rows: list[dict], digest_date: date) -> st
     )
 
 
-def _employee_html(row: dict, digest_date: date) -> str:
+def _operational_html(location_name: str, rows: list[dict], digest_date: date) -> str:
+    """Redacted view — for schedule_location_notification_recipients, an
+    admin-entered address (often a shared/operational mailbox, not
+    necessarily a person with a supervisory relationship to any named
+    employee here). No employee names or note text; aggregate counts only."""
+    with_guidance = sum(1 for row in rows if row.get("compliance_guidance"))
+    digest_notes = sum(1 for row in rows if row.get("manager_note") and row.get("manager_note_include_in_location_digest"))
+    return (
+        f"<p>Today's schedule summary for {escape(location_name)} ({digest_date.isoformat()}):</p>"
+        f"<ul>"
+        f"<li>{len(rows)} shift assignment(s) today.</li>"
+        f"<li>{with_guidance} with break/compliance guidance on file.</li>"
+        f"<li>{digest_notes} with a manager note visible in this digest.</li>"
+        f"</ul>"
+        "<p>Employee-level detail is available to that employee's manager or supervisor.</p>"
+    )
+
+
+def _employee_html(rows: list[dict], digest_date: date) -> str:
+    """rows: every one of this employee's shift assignments today — an
+    employee with two shifts gets one email covering both, since the
+    per-recipient digest claim is keyed on (date, email), not per-shift."""
     lines = []
-    if row.get("compliance_guidance"):
-        lines.append(escape(_guidance_text(row["compliance_guidance"])))
-    if row.get("manager_note") and row.get("manager_note_visible_to_employee"):
-        lines.append(escape(row["manager_note"]))
+    for row in rows:
+        if row.get("compliance_guidance"):
+            lines.append(escape(_guidance_text(row["compliance_guidance"])))
+        if row.get("manager_note") and row.get("manager_note_visible_to_employee"):
+            lines.append(escape(row["manager_note"]))
     return f"<p>Your schedule notes for {digest_date.isoformat()}:</p><ul>{''.join(f'<li>{line}</li>' for line in lines)}</ul>"
 
 
@@ -94,6 +150,12 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
         company_id, location_id, digest_date,
     )
     row_dicts = [dict(row) for row in rows]
+    # Two distinct recipient populations, deliberately not unioned: an
+    # employee-manager has a real supervisory relationship to this location
+    # (is_manager/is_supervisor) and gets the named per-employee digest;
+    # schedule_location_notification_recipients is an admin-entered address —
+    # often a shared operational mailbox with no such relationship — and gets
+    # a redacted, aggregate-only summary instead.
     managers = await conn.fetch(
         """
         SELECT DISTINCT COALESCE(u.email, e.email) AS email
@@ -102,7 +164,11 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
           AND COALESCE(e.employment_status,'active')='active'
           AND (COALESCE(e.is_manager,false) OR COALESCE(e.is_supervisor,false))
           AND COALESCE(u.email,e.email) IS NOT NULL
-        UNION
+        """,
+        company_id, location_id,
+    )
+    operational_recipients = await conn.fetch(
+        """
         SELECT email FROM schedule_location_notification_recipients
         WHERE company_id=$1 AND location_id=$2 AND is_active
         """,
@@ -111,31 +177,49 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
     sent = 0
     service = get_email_service()
     for recipient in managers:
-        email = recipient["email"]
-        if not await _claim(conn, company_id=company_id, location_id=location_id, digest_date=digest_date, email=email, recipient_type="manager"):
-            continue
-        try:
-            ok = await service.send_email(email, None, f"Today's schedule breaks · {location['name']}", _manager_html(location["name"], row_dicts, digest_date))
-        except Exception:
-            ok = False
-        if not ok:
-            await conn.execute("DELETE FROM schedule_digest_deliveries WHERE location_id=$1 AND digest_date=$2 AND recipient_email=$3 AND recipient_type='manager'", location_id, digest_date, email)
-        else:
+        outcome = await _deliver(
+            conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,
+            email=recipient["email"], recipient_type="manager", to_name=None,
+            subject=f"Today's schedule breaks · {location['name']}",
+            html=_manager_html(location["name"], row_dicts, digest_date),
+        )
+        if outcome == "sent":
             sent += 1
+    for recipient in operational_recipients:
+        # schedule_digest_deliveries.recipient_type is CHECK-constrained to
+        # ('manager', 'employee') — reuse 'manager' for the dedupe claim
+        # rather than adding a migration for a third label; the content sent
+        # (_operational_html, redacted) is what actually differs.
+        outcome = await _deliver(
+            conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,
+            email=recipient["email"], recipient_type="manager", to_name=None,
+            subject=f"Today's schedule summary · {location['name']}",
+            html=_operational_html(location["name"], row_dicts, digest_date),
+        )
+        if outcome == "sent":
+            sent += 1
+    # Group by email BEFORE sending — an employee with two shifts today
+    # would otherwise claim the (date, email) digest slot on the first row
+    # and silently drop the second shift's guidance from every email ever
+    # sent for that date (the claim is per-recipient-per-day, not per-shift).
+    employee_rows_by_email: dict[str, list[dict]] = {}
     for row in row_dicts:
         if not row.get("email") or not row.get("manager_note_send_employee_notice"):
             continue
         if not row.get("compliance_guidance") and not (row.get("manager_note") and row.get("manager_note_visible_to_employee")):
             continue
-        email = row["email"]
-        if not await _claim(conn, company_id=company_id, location_id=location_id, digest_date=digest_date, email=email, recipient_type="employee"):
-            continue
-        try:
-            ok = await service.send_email(email, row.get("name"), f"Your schedule notes · {digest_date.isoformat()}", _employee_html(row, digest_date))
-        except Exception:
-            ok = False
-        if not ok:
-            await conn.execute("DELETE FROM schedule_digest_deliveries WHERE location_id=$1 AND digest_date=$2 AND recipient_email=$3 AND recipient_type='employee'", location_id, digest_date, email)
-        else:
+        employee_rows_by_email.setdefault(row["email"], []).append(row)
+    for email, rows_for_employee in employee_rows_by_email.items():
+        outcome = await _deliver(
+            conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,
+            email=email, recipient_type="employee", to_name=rows_for_employee[0].get("name"),
+            subject=f"Your schedule notes · {digest_date.isoformat()}",
+            html=_employee_html(rows_for_employee, digest_date),
+        )
+        if outcome == "sent":
             sent += 1
-    return {"sent": sent, "managers": len(managers), "employees": len(row_dicts)}
+    return {
+        "sent": sent, "managers": len(managers),
+        "operational_recipients": len(operational_recipients),
+        "employees": len(row_dicts),
+    }

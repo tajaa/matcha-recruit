@@ -113,6 +113,18 @@ thread.
 
 ## Tier 1 — correctness, before enabling anything
 
+**Status: F5-F13 fixed** (2026-08-21, commit after `7f91d21`). Digest worker now
+feature-gates locations, published/active-only filtering, permanent-vs-transient
+claim handling, per-recipient redaction for operational mailboxes, multi-shift
+employee grouping; `record_meal_break_waiver_core` now checks the location and
+bounds its refresh loop; the schedule surface fails closed on a flag-off turn
+instead of falling through to the generic AI; auth now resolves before the SSE
+stream starts and surfaces a real 403/404; and the four new staged actions can no
+longer double-execute within one turn. Deferred (needs a migration — see each
+item): the `shift_id`-less digest dedupe key doesn't need one after all (fixed by
+grouping in Python instead), but true DB-level case-insensitive email dedupe still
+does (mitigated by normalizing on write instead).
+
 ### F5 — Digest has no feature gate; enabling it mails every tenant
 
 `schedule_daily_digest.py:16-18` selects `FROM business_locations WHERE is_active IS NOT FALSE`
@@ -193,20 +205,25 @@ An `employee`-role caller is admitted to `send_message_stream` **because** the
 thread is `schedule_assistant` (`messaging.py:66-68`). If any flag is off, that
 caller reaches the generic workspace AI — precisely the surface the guard denies.
 
-### F11 — `messaging.py` role gate widened past what the plan describes
+### F11 — `messaging.py` role gate — allow-list hardening (correction below)
 
-`messaging.py:54` went `require_admin_or_client` → `require_company_member`
-(= `admin, client, individual, employee`, `dependencies.py:24`). The guard at
-`:66-68` is a denylist on one role, so **`individual` is newly admitted to every
-generic Matcha Work/Huume thread in the company**, with no surface check and no
-test. The plan never mentions it. (An `individual` can't *create* a schedule
-session — they fail `permits()` — but that isn't what this line controls.)
+**Correction to the original finding:** the claim that this diff newly admitted
+`individual` was wrong. `require_admin_or_client = require_roles("admin", "client",
+"individual")` (`dependencies.py:15`) already included `individual` — the name is
+misleading, but the role was never excluded. The *only* actual widening from
+`require_admin_or_client` → `require_company_member` is `employee`, and that one is
+real and intentional (it's what lets an employee-manager use the schedule
+surface). So the pre-existing denylist-on-`employee` guard was not the safety hole
+described.
 
-**Fix:** invert to an allow-list — `admin`/`client` on any thread, `employee` only
-when `surface == 'schedule_assistant'`, everything else 403.
+**Fixed anyway, as defensive hygiene:** rewrote it as an explicit allow-list —
+`admin`/`client` on any thread, `employee` only when `surface ==
+'schedule_assistant'`, everything else 403 — so a future role added to
+`require_company_member` doesn't silently reach every thread here by default the
+way `employee` almost did.
 
-Related: three role lists must stay hand-synced — `dependencies.py:24`,
-`actions.py:248`, `schedule_eligibility_authorization.py:20`.
+Still true and still worth tracking: three role lists must stay hand-synced —
+`dependencies.py:24`, `actions.py:248`, `schedule_eligibility_authorization.py:20`.
 
 ### F12 — Authorization runs after the rate limit and the run row, and never surfaces as 403
 

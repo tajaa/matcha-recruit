@@ -20,6 +20,9 @@ from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import require_company_member, get_client_company_id
+from app.matcha.services.scheduling.schedule_assistant_session import (
+    resolve_schedule_assistant_scope,
+)
 from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
 from app.matcha.routes.matcha_work._shared import _row_to_message, _sse_data
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
@@ -61,11 +64,20 @@ async def send_message_stream(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    # Employees may use the location-authorized schedule Huume surface, but
-    # must not gain the generic Matcha Work/Huume surface merely because the
-    # messaging endpoint admits company members. The schedule scope is
-    # re-checked in _run_huume_dispatch against the session's location.
-    if current_user.role == "employee" and thread.get("surface") != "schedule_assistant":
+    # require_company_member widened this endpoint from admin/client/individual
+    # (require_admin_or_client already included individual — see its
+    # definition in dependencies.py) to also admit employee, for the
+    # location-authorized schedule Huume surface. An employee must not gain
+    # the generic Matcha Work/Huume surface merely because this dependency
+    # admits company members generally — enforce that as an explicit
+    # allow-list rather than a denylist on one role, so a future role added
+    # to require_company_member doesn't silently reach every thread here too.
+    # The schedule scope itself is re-checked in _run_huume_dispatch against
+    # the session's location on every turn.
+    is_schedule_thread = thread.get("surface") == "schedule_assistant"
+    if current_user.role not in {"admin", "client", "individual"} and not (
+        current_user.role == "employee" and is_schedule_thread
+    ):
         raise HTTPException(status_code=403, detail="Matcha Work access is not enabled for this account")
 
     # Use the thread's actual company for all downstream operations (AI profile,
@@ -79,6 +91,20 @@ async def send_message_stream(
     if thread["status"] == "archived":
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
 
+    # Resolved HERE, before quota/rate-limit consumption and before the SSE
+    # stream starts, so a de-authorized manager (or a stale link into someone
+    # else's session) gets a real 403/404 response rather than headers already
+    # sent and the failure swallowed into a generic mid-stream error by
+    # event_stream()'s except BaseException below.
+    schedule_scope = None
+    if is_schedule_thread:
+        schedule_scope = await resolve_schedule_assistant_scope(
+            thread_id=thread_id,
+            company_id=company_id,
+            user_id=current_user.id,
+            actor_role=current_user.role,
+        )
+
     await _run_quota_gate(company_id, current_user)
 
     tc = TurnContext(
@@ -87,6 +113,7 @@ async def send_message_stream(
         current_user=current_user,
         thread=thread,
         company_id=company_id,
+        schedule_scope=schedule_scope,
     )
 
     await _prepare_attachments(tc)

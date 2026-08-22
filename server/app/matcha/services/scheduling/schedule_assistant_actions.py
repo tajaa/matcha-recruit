@@ -79,11 +79,14 @@ async def record_meal_break_waiver_core(
 ) -> dict[str, Any]:
     async with get_connection() as conn:
         async with conn.transaction():
+            location = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id=$1 AND company_id=$2", location_id, company_id,
+            )
             employee = await conn.fetchrow(
                 "SELECT work_location_id FROM employees WHERE id=$1 AND org_id=$2", employee_id, company_id,
             )
-            if not employee:
-                return {"status": "refused", "message": "Employee not found."}
+            if not employee or not location:
+                return {"status": "refused", "message": "Employee or location not found."}
             if employee["work_location_id"] != location_id:
                 assigned_here = await conn.fetchval(
                     """SELECT EXISTS(
@@ -106,12 +109,17 @@ async def record_meal_break_waiver_core(
                 company_id, employee_id, on_file, effective_from, actor_user_id,
                 note.strip() if note else None,
             )
+            # Company-wide by design — a waiver is an employee-level fact,
+            # not a location-scoped one — but bounded so a single confirm
+            # can't hold row locks open across an unbounded future roster.
             assignments = await conn.fetch(
                 """
                 SELECT s.id AS shift_id, s.location_id, s.starts_at, s.ends_at
                 FROM schedule_shift_assignments a JOIN schedule_shifts s ON s.id=a.shift_id
                 WHERE a.company_id=$1 AND a.employee_id=$2 AND s.status <> 'cancelled'
                   AND s.starts_at::date >= $3
+                ORDER BY s.starts_at
+                LIMIT 500
                 """,
                 company_id, employee_id, effective_from,
             )

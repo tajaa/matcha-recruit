@@ -57,6 +57,7 @@ from app.matcha.services.huume.scope import (
     SCHEDULE_TOOLS,
 )
 from app.matcha.services.scheduling.schedule_assistant_session import (
+    ScheduleAssistantScope,
     resolve_schedule_assistant_scope,
 )
 from app.matcha.services.billing.model_pricing import calculate_call_cost
@@ -503,6 +504,11 @@ class TurnContext:
     thread: dict
     company_id: UUID
     work_access: WorkAccess | None = None
+    # Resolved BEFORE the StreamingResponse starts (messaging.py) when the
+    # thread is a schedule_assistant surface, so an authorization failure is
+    # a real 403/404 the client can see, not swallowed into a generic
+    # mid-stream error after headers are already sent. See _run_huume_dispatch.
+    schedule_scope: "ScheduleAssistantScope | None" = None
 
     # Prompt inputs
     profile: dict | None = None
@@ -889,9 +895,20 @@ async def _run_huume_dispatch(tc: TurnContext):
     # mode's re-check in _inject_mode_contexts, so a downgraded company
     # falls through to the normal skill engine instead of keeping Huume.
     features = await get_company_features(company_id)
-    if not features.get("huume"):
-        return
-    if thread.get("surface") == "schedule_assistant" and not features.get("employee_schedule"):
+    is_schedule_thread = thread.get("surface") == "schedule_assistant"
+    if not features.get("huume") or (is_schedule_thread and not features.get("employee_schedule")):
+        if is_schedule_thread:
+            # An employee is only admitted to this endpoint (messaging.py)
+            # BECAUSE the thread is schedule_assistant. Falling through to
+            # the generic skill engine below — the normal behavior for a
+            # downgraded non-schedule company, see the comment above — would
+            # hand that same employee the full workspace AI the surface
+            # exists to deny them.
+            yield _sse_data({
+                "type": "error",
+                "message": "Scheduling isn't enabled for this company right now.",
+            })
+            tc.terminated = True
         return
 
     from app.matcha.services.huume import agent as huume_agent, store as huume_store
@@ -927,9 +944,16 @@ async def _run_huume_dispatch(tc: TurnContext):
     # Resolve against the thread's owning company. A shared thread may be
     # opened by a collaborator whose home company is different; that home
     # role must not grant target-company execution privileges.
+    #
+    # messaging.py already resolved (and re-validated) this scope before the
+    # StreamingResponse started, specifically so an authorization failure is
+    # a real 403/404 instead of a swallowed mid-stream error. Re-resolve here
+    # only as a defense-in-depth backstop in case a future caller reaches
+    # this dispatch without going through that route (e.g. a test harness) —
+    # tc.schedule_scope is the source of truth when present.
     surface_context = None
     if thread.get("surface") == "schedule_assistant":
-        schedule_scope = await resolve_schedule_assistant_scope(
+        schedule_scope = tc.schedule_scope or await resolve_schedule_assistant_scope(
             thread_id=thread_id,
             company_id=company_id,
             user_id=current_user.id,
