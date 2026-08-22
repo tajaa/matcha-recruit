@@ -26,6 +26,12 @@ def test_pickup_requires_shift_and_accepts_no_target():
         ScheduleRequestCreate(request_type="pickup")
 
 
+def test_schedule_request_insert_types_reused_request_type_parameter():
+    route = Path(__file__).parents[2] / "app/matcha/routes/employee_portal/schedule.py"
+    source = route.read_text()
+    assert "CASE WHEN $3::text IN ('pickup', 'swap')" in source
+
+
 def test_schedule_day_bounds_are_utc_wall_clock():
     start, end = schedule_day_bounds(datetime(2026, 8, 21, 23, 59, tzinfo=timezone.utc))
     assert start == datetime(2026, 8, 21, tzinfo=timezone.utc)
