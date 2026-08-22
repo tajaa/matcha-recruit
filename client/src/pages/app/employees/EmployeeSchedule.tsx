@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart2, CalendarDays, Loader2, Plus, Trash2, ChevronLeft, ChevronRight, Check, X,
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp,
@@ -115,6 +115,12 @@ export default function EmployeeSchedule() {
               <CircleHelp className="h-4 w-4" /> How scheduling works
             </button>
             <ScheduleLawPanel />
+            <Link
+              to={`/ops/schedule/editor?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 px-3 py-2 text-sm text-emerald-300 hover:border-emerald-400/60 hover:text-emerald-200"
+            >
+              Full shift editor
+            </Link>
           </div>
         </div>
       </div>
