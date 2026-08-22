@@ -84,16 +84,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INCIDENT_KEY: ${{ steps.incident.outputs.key }}
         run: |
-          changed="$(git status --porcelain | cut -c4-)"
-          test -n "$changed" || exit 0
-          if printf '%s\n' "$changed" | grep -Eq '(^\.github/|^deploy/|^scripts/|^server/alembic/|(^|/)\.env)'; then
+          git add --all
+          unsafe_paths="$(git diff --cached --no-renames --name-only | grep -E '(^\.github/|^deploy/|^scripts/|^server/alembic/|(^|/)\.env|(^|/)(package(-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Pipfile(\.lock)?|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml)$)' || true)"
+          if [ -n "$unsafe_paths" ]; then
             echo "Refusing unsafe automated change."
+            printf '%s\n' "$unsafe_paths"
             exit 1
           fi
+          git diff --cached --quiet && exit 0
           git config user.name "matcha-error-bot"
           git config user.email "matcha-error-bot@users.noreply.github.com"
-          git add --all
           git commit -m "fix: investigate silent error ${INCIDENT_KEY}"
+          branch="bot/silent-error-${INCIDENT_KEY}"
+          git push --set-upstream origin "$branch"
           gh pr create --repo "$GITHUB_REPOSITORY" --draft \
+            --head "$branch" \
             --title "fix: investigate silent error ${INCIDENT_KEY}" \
             --body "Automated OpenCode investigation from redacted production log and health-check evidence. Review evidence, diff, and test output before merging."
