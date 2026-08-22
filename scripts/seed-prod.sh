@@ -45,7 +45,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="$REPO_ROOT/secrets/roonMT-arm.pem"
 ENV_FILE="$REPO_ROOT/server/.env"
 APP_EC2="ec2-user@54.177.107.107"
-RDS_HOST="matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com"
+PROD_DB_HOST="13.56.253.173"
+PROD_DB_PORT=5433
 
 env_val() { grep "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d ' '; }
 
@@ -208,9 +209,9 @@ if [[ "$DEV" == "1" ]]; then
   URL="${DATABASE_URL:-$(env_val DATABASE_URL)}"
   URL="${URL:-postgresql://matcha:matcha_dev@127.0.0.1:5432/matcha}"
 else
-  LABEL="LIVE PROD (RDS matcha-prod via app EC2)"
+  LABEL="LIVE PROD (self-hosted matcha-postgres-prod via app EC2)"
   LOCAL_PORT=5434
-  FORWARD="${LOCAL_PORT}:${RDS_HOST}:5432"
+  FORWARD="${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}"
   URL="${PROD_DATABASE_URL:-$(env_val PROD_DATABASE_URL)}"
   : "${URL:?Add PROD_DATABASE_URL=postgresql://matcha:pass@localhost:5434/matcha?sslmode=require to server/.env}"
   if lsof -n -P -iTCP:"$LOCAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then

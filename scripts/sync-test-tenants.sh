@@ -43,7 +43,8 @@ cd "$REPO_ROOT"
 ENV_FILE="$REPO_ROOT/server/.env"
 PEM="$REPO_ROOT/secrets/roonMT-arm.pem"
 APP_EC2="ec2-user@54.177.107.107"
-RDS_HOST="matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com"
+PROD_DB_HOST="13.56.253.173"
+PROD_DB_PORT=5433
 LOCAL_PORT=5434
 LOCK_DIR="${TMPDIR:-/tmp}/matcha-sync-test-tenants.lock"
 OUT_DIR="$REPO_ROOT/scripts/sql"
@@ -129,7 +130,9 @@ fi
 
 # ---------------------------------------------------------------------------
 # Prod tunnel — same pattern as seed-prod.sh / migrate-prod.sh, reused (not
-# reopened) if seed-prod.sh's own invocations below need it too.
+# reopened) if seed-prod.sh's own invocations below need it too. Targets the
+# self-hosted matcha-postgres-prod container on the DB EC2 (RDS retired
+# 2026-08-21 — see migrate-prod.sh).
 # ---------------------------------------------------------------------------
 PROD_URL="${PROD_DATABASE_URL:-$(env_val PROD_DATABASE_URL)}"
 if [[ -z "$PROD_URL" ]]; then
@@ -143,7 +146,7 @@ if lsof -n -P -iTCP:"$LOCAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 else
   log "Opening SSH tunnel to ${APP_EC2}..."
   if [[ "$MODE" == "auto" ]]; then
-    if ! ssh -i "$PEM" -L "${LOCAL_PORT}:${RDS_HOST}:5432" "$APP_EC2" -N -f \
+    if ! ssh -i "$PEM" -L "${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}" "$APP_EC2" -N -f \
          -o BatchMode=yes -o ConnectTimeout=5 -o ExitOnForwardFailure=yes 2>/dev/null; then
       if [[ "$REQUIRE_PUSH" == "1" ]]; then
         log "Prod unreachable (tunnel failed) — FAILING (--require-push)."
@@ -153,13 +156,13 @@ else
       exit 0
     fi
   else
-    ssh -i "$PEM" -L "${LOCAL_PORT}:${RDS_HOST}:5432" "$APP_EC2" -N -f -o ExitOnForwardFailure=yes
+    ssh -i "$PEM" -L "${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}" "$APP_EC2" -N -f -o ExitOnForwardFailure=yes
   fi
   OPENED_TUNNEL=1
   sleep 1
 fi
 if [[ "$OPENED_TUNNEL" == "1" ]]; then
-  trap 'rm -rf "$LOCK_DIR"; pkill -f "ssh.*${LOCAL_PORT}:${RDS_HOST}:5432" 2>/dev/null || true' EXIT
+  trap 'rm -rf "$LOCK_DIR"; pkill -f "ssh.*${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}" 2>/dev/null || true' EXIT
 fi
 
 # ---------------------------------------------------------------------------
