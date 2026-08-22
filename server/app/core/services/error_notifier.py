@@ -136,10 +136,10 @@ def _wrap_html(heading: str, rows: list[tuple[str, str]], body_text: str, link: 
 
 
 async def notify_server_error(row: dict) -> None:
-    """Alert on a newly-inserted server_error_reports row. Only fires on CRITICAL level."""
+    """Alert on a newly-inserted actionable server-error fingerprint."""
     if not _alerts_enabled():
         return
-    if (row.get("level") or "").upper() != "CRITICAL":
+    if (row.get("level") or "").upper() not in {"ERROR", "CRITICAL"}:
         return
     fp = row.get("fingerprint") or ""
     if not _should_send(f"srv|{fp}"):
