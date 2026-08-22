@@ -381,6 +381,7 @@ async def check_shift_compliance(
     call's own feature-lookup + lapse-item query — callers looping over many
     employees (create_shift, update_shift) would otherwise re-resolve company
     features and re-query training/credential lapses once per employee."""
+    violations: list[dict] = []
     state, city = await _location_state(conn, company_id, location_id)
     worked = _hours(starts_at, ends_at, break_minutes)
 
@@ -407,7 +408,7 @@ async def check_shift_compliance(
     if state and not schedule_compliance.is_curated_state(state):
         db_rules, db_rules_fetch_failed = await _approved_db_rules(conn, state.strip().upper())
 
-    violations = schedule_compliance.evaluate_shift_for_employee(
+    violations.extend(schedule_compliance.evaluate_shift_for_employee(
         state=state,
         shift_hours=worked,
         break_minutes=break_minutes or 0,
@@ -415,7 +416,7 @@ async def check_shift_compliance(
         min_rest_gap_hours=min_rest,
         age=age,
         db_rules=db_rules,
-    )
+    ))
     if age_lookup_failed:
         # Fail visible, not open: the minor check couldn't run at all.
         violations.append({
