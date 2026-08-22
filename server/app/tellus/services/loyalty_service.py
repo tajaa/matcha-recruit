@@ -753,7 +753,7 @@ async def submit_social_post(
         """INSERT INTO tellus_loyalty_social_submissions
                (brand_id, account_id, platform, post_url, canonical_url, note)
            VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (brand_id, canonical_url) DO NOTHING
+            ON CONFLICT DO NOTHING
            RETURNING *""",
         brand_id, account_id, data.platform, data.post_url, canonical, data.note,
     )

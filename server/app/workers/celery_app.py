@@ -68,6 +68,7 @@ celery_app = Celery(
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_warning_events",
         "app.workers.tasks.schedule_daily_digest",
+        "app.workers.tasks.tellus_shoutout_scan",
     ],
 )
 
@@ -192,6 +193,7 @@ _SCHEDULED_TASKS = [
     ("pos_sales_sync", "app.workers.tasks.pos_sales_sync", "run_pos_sales_sync"),
     ("schedule_warning_events", "app.workers.tasks.schedule_warning_events", "reconcile_schedule_warning_events_task"),
     ("schedule_daily_digest", "app.workers.tasks.schedule_daily_digest", "send_schedule_daily_digest"),
+    ("tellus_shoutout_scan", "app.workers.tasks.tellus_shoutout_scan", "run_tellus_shoutout_scan"),
     ("cappe_booking_reminders", "app.workers.tasks.cappe_booking_reminders", "run_cappe_booking_reminders"),
     ("cappe_domain_renewals", "app.workers.tasks.cappe_domain_renewals", "run_cappe_domain_renewals"),
     ("cappe_comp_expiry", "app.workers.tasks.cappe_comp_expiry", "run_cappe_comp_expiry"),
