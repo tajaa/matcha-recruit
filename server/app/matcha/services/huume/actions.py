@@ -1157,6 +1157,8 @@ async def execute_huume_action(
     thread_id: Optional[UUID] = None, session_id: Optional[str] = None,
     exclude_ids: Optional[set[str]] = None,
     actor_role: Optional[str] = None,
+    week_start: Optional[date] = None,
+    week_end: Optional[date] = None,
 ) -> dict[str, Any]:
     """Execute a validated staged huume_action. Assumes evaluate_huume_action
     returned kind=='proceed'.
@@ -1223,6 +1225,7 @@ async def execute_huume_action(
         from app.matcha.services.huume import schedule_skill
         result = await schedule_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
+            week_start=week_start, week_end=week_end,
         )
     elif action.get("type") in {"schedule_note", "meal_break_waiver", "work_permit"}:
         from app.matcha.services.scheduling import schedule_assistant_actions
@@ -1234,6 +1237,7 @@ async def execute_huume_action(
                 visible_to_employee=bool(action.get("visible_to_employee", True)),
                 include_in_location_digest=bool(action.get("include_in_location_digest", True)),
                 send_employee_notice=bool(action.get("send_employee_notice", True)),
+                week_start=week_start, week_end=week_end,
             )
         elif action["type"] == "meal_break_waiver":
             result = await schedule_assistant_actions.record_meal_break_waiver_core(

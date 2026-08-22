@@ -60,7 +60,9 @@ async def send_message_stream(
     caller_company_id = await get_client_company_id(current_user)
     # Don't 404 on None — collaborators (individuals invited to another user's
     # thread) may have no company of their own.
-    thread = await doc_svc.get_thread(thread_id, caller_company_id, user_id=current_user.id)
+    thread = await doc_svc.get_thread(
+        thread_id, caller_company_id, user_id=current_user.id, allow_schedule_surface=True,
+    )
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 

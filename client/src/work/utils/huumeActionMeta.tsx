@@ -22,6 +22,10 @@ export const DONE_LABELS: Record<string, Record<string, string>> = {
   inventory_item_archive: { archived: 'Item archived' },
   inventory_receipt: { committed: 'Receipt committed' },
   schedule_change: { applied: 'Schedule updated' },
+  schedule_note: { created: 'Assignment note saved' },
+  meal_break_waiver: { created: 'Meal-break waiver recorded' },
+  work_permit: { created: 'Work permit recorded' },
+  eligibility_case_decision: { created: 'Eligibility decision applied' },
 }
 
 /** One-line summary for the chat banner strip / the panel's passive status line. */
@@ -65,6 +69,14 @@ export function bannerLabel(action: HuumeAction): string {
       return `Commit this receipt (${action.lines.length} line${action.lines.length === 1 ? '' : 's'})?`
     case 'schedule_change':
       return action.pill_text?.split('\n', 1)[0] ?? 'Apply this schedule change?'
+    case 'schedule_note':
+      return 'Save this assignment note?'
+    case 'meal_break_waiver':
+      return action.on_file ? 'Record this meal-break waiver?' : 'Record that no meal-break waiver is on file?'
+    case 'work_permit':
+      return 'Record this work permit?'
+    case 'eligibility_case_decision':
+      return action.decision === 'remove' ? 'Remove this employee assignment?' : 'Keep this employee assignment?'
     default:
       return 'Action staged — confirm or cancel?'
   }
@@ -85,6 +97,6 @@ export function actionIcon(type: HuumeAction['type'], size = 14) {
   if (type === 'inventory_order_decision') return <Truck size={size} />
   if (type === 'inventory_item_archive') return <Archive size={size} />
   if (type === 'inventory_receipt') return <Receipt size={size} />
-  if (type === 'schedule_change') return <CalendarClock size={size} />
+  if (type === 'schedule_change' || type === 'schedule_note' || type === 'meal_break_waiver' || type === 'work_permit' || type === 'eligibility_case_decision') return <CalendarClock size={size} />
   return <ShieldAlert size={size} />
 }

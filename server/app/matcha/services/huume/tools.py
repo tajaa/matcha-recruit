@@ -758,15 +758,15 @@ TOOLS: tuple[HuumeTool, ...] = (
     _tool(
         "propose_work_permit", "staged",
         "Stage entry of a confirmed minor work permit for one employee and "
-        "location. The permit dates are checked again when confirmed.",
+        "the selected schedule location. The location is supplied by the "
+        "server-scoped workspace; permit dates are checked again when confirmed.",
         properties={
             "employee_id": types.Schema(type=types.Type.STRING),
-            "location_id": types.Schema(type=types.Type.STRING),
             "issued_at": types.Schema(type=types.Type.STRING),
             "expires_at": types.Schema(type=types.Type.STRING),
             "confirm_id": types.Schema(type=types.Type.STRING),
         },
-        required=["employee_id", "location_id", "expires_at"],
+        required=["employee_id", "expires_at"],
     ),
     _tool(
         "list_schedule_eligibility_cases", "read",

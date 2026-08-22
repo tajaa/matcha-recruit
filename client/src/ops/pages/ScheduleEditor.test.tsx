@@ -3,18 +3,20 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, sendMessageStreamMock, reloadMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useEditorMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
   getScheduleHuumeSessionMock: vi.fn(),
   sendMessageStreamMock: vi.fn(() => new AbortController()),
+  reloadMock: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
-vi.mock('../../api/employees/scheduleChat', () => ({
+vi.mock('../../api/employees/scheduleAssistant', () => ({
   getScheduleHuumeSession: getScheduleHuumeSessionMock,
+  transcribeScheduleVoice: vi.fn(),
 }))
 vi.mock('../../work/api/matchaWork/messaging', () => ({
   sendMessageStream: sendMessageStreamMock,
@@ -34,6 +36,8 @@ const shift = {
 
 describe('ScheduleEditor', () => {
   beforeEach(() => {
+    reloadMock.mockClear()
+    sendMessageStreamMock.mockReset().mockReturnValue(new AbortController())
     getScheduleHuumeSessionMock.mockResolvedValue({
       session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
       week_start: '2026-08-09', week_end: '2026-08-16', messages: [], current_state: {}, version: 1,
@@ -66,6 +70,7 @@ describe('ScheduleEditor', () => {
       unassignFromShift: vi.fn().mockResolvedValue(null),
       removeShift: vi.fn().mockResolvedValue(false),
       publishWeek: vi.fn().mockResolvedValue(undefined),
+      reload: reloadMock,
     })
   })
 
@@ -128,5 +133,57 @@ describe('ScheduleEditor', () => {
       expect(screen.queryByText("Hey Huume, let's make schedules")).not.toBeInTheDocument()
     })
     expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
+  })
+
+  it('shows a session error with a retry instead of leaving the composer inert', async () => {
+    getScheduleHuumeSessionMock
+      .mockRejectedValueOnce(new Error('Session unavailable'))
+      .mockResolvedValueOnce({
+        session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+        week_start: '2026-08-09', week_end: '2026-08-16', messages: [], current_state: {}, version: 1,
+      })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Session unavailable')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.getByPlaceholderText('Try: add an opener Monday')).not.toBeDisabled())
+  })
+
+  it('reloads once for an applied action and ignores its persistent status later', async () => {
+    const callbacks: Array<{ onComplete: (response: unknown) => void }> = []
+    sendMessageStreamMock.mockImplementation((...args: unknown[]) => {
+      const options = args[2] as { onComplete: (response: unknown) => void }
+      callbacks.push(options)
+      return new AbortController()
+    })
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    const input = await screen.findByPlaceholderText('Try: add an opener Monday')
+    fireEvent.change(input, { target: { value: 'Apply the note' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    callbacks[0].onComplete({
+      user_message: { id: 'u1', thread_id: 'thread-1', role: 'user', content: 'Apply the note', version_created: null, metadata: null, created_at: new Date().toISOString() },
+      assistant_message: { id: 'a1', thread_id: 'thread-1', role: 'assistant', content: 'Applied.', version_created: 2, metadata: { huume_run_id: 'run-1' }, created_at: new Date().toISOString() },
+      current_state: { huume_action: { status: 'applied', confirm_id: 'confirm-1' } },
+    })
+    await waitFor(() => expect(reloadMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.change(screen.getByPlaceholderText('Try: add an opener Monday'), { target: { value: 'What changed?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+    callbacks[1].onComplete({
+      user_message: { id: 'u2', thread_id: 'thread-1', role: 'user', content: 'What changed?', version_created: null, metadata: null, created_at: new Date().toISOString() },
+      assistant_message: { id: 'a2', thread_id: 'thread-1', role: 'assistant', content: 'The note is still applied.', version_created: 3, metadata: { huume_run_id: 'run-2' }, created_at: new Date().toISOString() },
+      current_state: { huume_action: { status: 'applied', confirm_id: 'confirm-1' } },
+    })
+    await waitFor(() => expect(screen.getByText('The note is still applied.')).toBeInTheDocument())
+    expect(reloadMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -966,7 +966,6 @@ async def _run_huume_dispatch(tc: TurnContext):
             week_end=schedule_scope.week_end,
             allowed_tools=SCHEDULE_TOOLS,
             allowed_lookup_topics=SCHEDULE_LOOKUP_TOPICS,
-            write_mode="draft",
         )
     else:
         async with get_connection() as conn:
@@ -1042,7 +1041,9 @@ async def _run_huume_dispatch(tc: TurnContext):
     # frame (and the plan card / record tabs it drives) reflects those
     # writes too.
     try:
-        fresh = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+        fresh = await doc_svc.get_thread(
+            thread_id, company_id, user_id=current_user.id, allow_schedule_surface=True,
+        )
         if fresh:
             tc.current_state = fresh.get("current_state")
             tc.current_version = fresh.get("version")

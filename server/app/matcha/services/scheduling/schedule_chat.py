@@ -110,6 +110,14 @@ EXECUTE_FAILED_TEXT = (
 _CREATE_STATUS = "published"
 
 
+def _date_in_week(value: date, week_start: Optional[date], week_end: Optional[date]) -> bool:
+    """Return whether a schedule date is inside an inclusive editor week."""
+    if week_start is None:
+        return True
+    end = week_end or (week_start + timedelta(days=6))
+    return week_start <= value <= end
+
+
 # ── Stage A: the ONE Gemini call ─────────────────────────────────────────
 
 def _build_parse_prompt(
@@ -629,11 +637,14 @@ async def _persist_proposal(
 async def build_proposal(
     conn, *, company_id: UUID, channel_id: Optional[UUID], source_message_id: Optional[UUID],
     created_by: UUID, parsed: dict, today: date, original_content: str,
-    week_start: Optional[date] = None, surface: str = "channel",
+    week_start: Optional[date] = None, week_end: Optional[date] = None,
+    surface: str = "channel",
     clarify_history: Optional[list[dict]] = None,
     existing_proposal_id: Optional[UUID] = None,
 ) -> ProposalBuild:
     clarify_history = clarify_history or []
+    if week_start is not None and week_end is None:
+        week_end = week_start + timedelta(days=6)
 
     async def _clarify(question: str, options: Optional[list[str]] = None) -> ProposalBuild:
         proposal_doc = {
@@ -758,6 +769,11 @@ async def build_proposal(
             return await _clarify(dates_or_clarify.question, dates_or_clarify.options)
 
         for d in dates_or_clarify:
+            if not _date_in_week(d, week_start, week_end):
+                return await _clarify(
+                    f"That date is outside the selected schedule week "
+                    f"({week_start.isoformat()} through {week_end.isoformat()})."
+                )
             starts, ends = template_windows(
                 d, d, {sunday_indexed_weekday(d)}, start_time_v, end_time_v,
             )
@@ -1027,6 +1043,8 @@ async def _resolve_shift_ref(
     conn, company_id: UUID, location_id: Optional[UUID], ref: dict, today: date,
     *, from_employee_id: Optional[UUID] = None,
     statuses: tuple[str, ...] = ("published",),
+    week_start: Optional[date] = None,
+    week_end: Optional[date] = None,
 ) -> dict:
     """Find the one published shift a chat edit request refers to, scoped to
     company (+ location, if the channel is store-bound) and a forward window
@@ -1037,11 +1055,18 @@ async def _resolve_shift_ref(
     EDIT_LOOKUP_WINDOW_DAYS regardless (a real prod miss: an exact date 15+
     days out was invisible to its own exact-date filter).
     -> {"shift": row} | {"ambiguous": [rows]} | {"none": reason}"""
-    window_start = datetime.combine(today, time.min, tzinfo=timezone.utc)
+    window_start = datetime.combine(week_start or today, time.min, tzinfo=timezone.utc)
     has_exact_date = bool(ref.get("target_date"))
-    window_end = None if has_exact_date else (
-        window_start + timedelta(days=EDIT_LOOKUP_WINDOW_DAYS)
-    )
+    if week_start is not None:
+        window_end = datetime.combine(
+            (week_end or (week_start + timedelta(days=6))) + timedelta(days=1),
+            time.min,
+            tzinfo=timezone.utc,
+        )
+    else:
+        window_end = None if has_exact_date else (
+            window_start + timedelta(days=EDIT_LOOKUP_WINDOW_DAYS)
+        )
     async def _query(*, use_role: bool) -> list:
         params: list = [company_id, window_start]
         where = ["s.company_id = $1", f"s.status = ANY(${len(params) + 1}::text[])", "s.starts_at >= $2"]
@@ -1125,6 +1150,8 @@ async def build_edit_proposal(
     clarify_history: Optional[list[dict]] = None,
     existing_proposal_id: Optional[UUID] = None,
     editor_location_id: Optional[UUID] = None,
+    editor_week_start: Optional[date] = None,
+    editor_week_end: Optional[date] = None,
 ) -> ProposalBuild:
     """Resolve every edit_request into a concrete op against a real shift +
     real employee ids, with a build-time advisory preview (never blocking —
@@ -1133,6 +1160,8 @@ async def build_edit_proposal(
     `schedule_chat_proposals` table `build_proposal` uses — `proposal['kind']
     == 'edit'` is what `_bg_schedule_reply` dispatches on at confirm."""
     clarify_history = clarify_history or []
+    if editor_week_start is not None and editor_week_end is None:
+        editor_week_end = editor_week_start + timedelta(days=6)
 
     async def _clarify(question: str, options: Optional[list[str]] = None) -> ProposalBuild:
         proposal_doc = {
@@ -1215,6 +1244,7 @@ async def build_edit_proposal(
             found = await _resolve_shift_ref(
                 conn, company_id, location_id, ref, today, from_employee_id=emp_id,
                 statuses=shift_statuses,
+                week_start=editor_week_start, week_end=editor_week_end,
             )
             if "none" in found:
                 # An exact date was already given (target_day_hint is
@@ -1317,6 +1347,14 @@ async def build_edit_proposal(
                 new_starts_at, new_ends_at = starts[0], ends[0]
             if new_ends_at <= new_starts_at:
                 return await _clarify("What hours should that shift move to?")
+            if editor_week_start is not None and (
+                not _date_in_week(new_starts_at.date(), editor_week_start, editor_week_end)
+                or not _date_in_week(new_ends_at.date(), editor_week_start, editor_week_end)
+            ):
+                return await _clarify(
+                    f"That retime would leave the selected schedule week "
+                    f"({editor_week_start.isoformat()} through {editor_week_end.isoformat()})."
+                )
 
         advisories: list[dict] = []
         if kind in ("reassign", "assign") and to_employee_id:
@@ -1819,6 +1857,8 @@ def compose_clarify_followup(proposal: dict, answer: str) -> str:
 async def execute_proposal(
     conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
     create_status: str = _CREATE_STATUS,
+    week_start: Optional[date] = None,
+    week_end: Optional[date] = None,
 ) -> str:
     """Re-run the compliance gate per (shift, assignee) against CURRENT state
     — the proposal may be minutes or hours old — then create every shift in
@@ -1838,6 +1878,12 @@ async def execute_proposal(
     dropped: list[dict] = []
     created_shift_ids: list[UUID] = []
     violations_acknowledged: list[dict] = []
+
+    for shift in proposal["shifts"]:
+        if not _date_in_week(
+            datetime.fromisoformat(shift["starts_at"]).date(), week_start, week_end,
+        ):
+            return "That schedule proposal is outside the selected schedule week."
 
     # One batched lapse-item fetch over every assignee across every shift —
     # fetch_lapse_items already takes a list; looping it per assignee (as
@@ -1938,6 +1984,8 @@ async def execute_proposal(
 async def execute_edit_proposal(
     conn, *, proposal_row: dict, confirmed_by: UUID, features: dict,
     edit_published: bool = True,
+    week_start: Optional[date] = None,
+    week_end: Optional[date] = None,
 ) -> str:
     """Two-phase write, all in one transaction: every removal half first
     (bare unassign + the "take X off" half of a reassign), then every
@@ -1968,6 +2016,9 @@ async def execute_edit_proposal(
     affected_shift_ids: list[UUID] = []
     _details = lambda: {"source": "huume_chat_edit", "proposal_id": str(proposal_row["id"])}  # noqa: E731
 
+    def _in_editor_week(row) -> bool:
+        return _date_in_week(row["starts_at"].date(), week_start, week_end)
+
     async def _restore_if_removed(idx: int) -> None:
         info = removed.get(idx)
         if info and info["deleted"] and info["assignment_row"] is not None:
@@ -1991,6 +2042,8 @@ async def execute_edit_proposal(
                 )
                 if shift_row is None or shift_row["status"] == "cancelled":
                     continue  # phase 2 reports the failure for this op
+                if not _in_editor_week(shift_row):
+                    continue  # phase 2 reports the out-of-scope operation
                 assignment_row = await conn.fetchrow(
                     "SELECT * FROM schedule_shift_assignments WHERE shift_id = $1 AND employee_id = $2",
                     shift_id, employee_id,
@@ -2018,6 +2071,10 @@ async def execute_edit_proposal(
             if shift_row is None:
                 await _restore_if_removed(idx)
                 results.append({**op, "ok": False, "reason": "that shift no longer exists"})
+                continue
+            if not _in_editor_week(shift_row):
+                await _restore_if_removed(idx)
+                results.append({**op, "ok": False, "reason": "that shift is outside the selected schedule week"})
                 continue
 
             if op["kind"] == "cancel":
@@ -2066,6 +2123,9 @@ async def execute_edit_proposal(
                 )
                 if other_row is None or other_row["status"] == "cancelled":
                     results.append({**op, "ok": False, "reason": "the other shift is gone or cancelled"})
+                    continue
+                if not _in_editor_week(other_row):
+                    results.append({**op, "ok": False, "reason": "the other shift is outside the selected schedule week"})
                     continue
                 a_ids = [r["employee_id"] for r in await conn.fetch(
                     "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id)]
@@ -2127,6 +2187,12 @@ async def execute_edit_proposal(
             if op["kind"] == "retime":
                 new_starts_at = datetime.fromisoformat(op["new_starts_at"])
                 new_ends_at = datetime.fromisoformat(op["new_ends_at"])
+                if not _date_in_week(new_starts_at.date(), week_start, week_end) or not _date_in_week(
+                    new_ends_at.date(), week_start, week_end,
+                ):
+                    await _restore_if_removed(idx)
+                    results.append({**op, "ok": False, "reason": "that retime is outside the selected schedule week"})
+                    continue
                 assignee_rows = await conn.fetch(
                     "SELECT employee_id FROM schedule_shift_assignments WHERE shift_id = $1", shift_id,
                 )

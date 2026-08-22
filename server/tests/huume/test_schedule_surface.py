@@ -18,7 +18,6 @@ def _schedule_context() -> HuumeSurfaceContext:
         week_end=date(2026, 8, 30),
         allowed_tools=SCHEDULE_TOOLS,
         allowed_lookup_topics=SCHEDULE_LOOKUP_TOPICS,
-        write_mode="draft",
     )
 
 

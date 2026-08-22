@@ -7,7 +7,7 @@ import wave
 from types import SimpleNamespace
 from uuid import uuid4
 
-from app.matcha.routes.employee_schedule import chat as chat_route
+from app.matcha.routes.employee_schedule import assistant as assistant_route
 from app.matcha.services.scheduling import schedule_voice
 
 
@@ -188,13 +188,13 @@ def test_voice_endpoint_classifies_command_and_applies_rate_limits(monkeypatch):
             "model": "test-model",
         }
 
-    monkeypatch.setattr(chat_route, "require_company_id", fake_require_company_id)
-    monkeypatch.setattr(chat_route, "check_rate_limit", fake_rate_limit)
-    monkeypatch.setattr(chat_route, "read_wav_or_400", fake_read_wav)
-    monkeypatch.setattr(chat_route.schedule_voice, "validate_schedule_wav", lambda audio: None)
-    monkeypatch.setattr(chat_route.schedule_voice, "transcribe_schedule_request", fake_transcribe)
+    monkeypatch.setattr(assistant_route, "require_company_id", fake_require_company_id)
+    monkeypatch.setattr(assistant_route, "check_rate_limit", fake_rate_limit)
+    monkeypatch.setattr(assistant_route, "read_wav_or_400", fake_read_wav)
+    monkeypatch.setattr(assistant_route.schedule_voice, "validate_schedule_wav", lambda audio: None)
+    monkeypatch.setattr(assistant_route.schedule_voice, "transcribe_schedule_request", fake_transcribe)
 
-    result = _run(chat_route.transcribe_schedule_voice(
+    result = _run(assistant_route.transcribe_schedule_voice(
         file=SimpleNamespace(content_type="audio/wav"),
         current_user=SimpleNamespace(id=user_id),
     ))

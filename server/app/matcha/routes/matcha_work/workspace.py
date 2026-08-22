@@ -163,6 +163,7 @@ async def list_recent_activity_endpoint(
                        th.updated_at
                 FROM mw_threads th
                 WHERE th.company_id = $1
+                  AND th.surface <> 'schedule_assistant'
                   AND th.updated_at > NOW() - INTERVAL '14 days'
                 ORDER BY th.updated_at DESC
                 LIMIT 30

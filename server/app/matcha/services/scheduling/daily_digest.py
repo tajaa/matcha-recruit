@@ -208,7 +208,7 @@ async def send_location_daily_digest(conn, *, company_id: UUID, location_id: UUI
             continue
         if not row.get("compliance_guidance") and not (row.get("manager_note") and row.get("manager_note_visible_to_employee")):
             continue
-        employee_rows_by_email.setdefault(row["email"], []).append(row)
+        employee_rows_by_email.setdefault(str(row["email"]).lower(), []).append(row)
     for email, rows_for_employee in employee_rows_by_email.items():
         outcome = await _deliver(
             conn, service, company_id=company_id, location_id=location_id, digest_date=digest_date,

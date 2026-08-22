@@ -1068,6 +1068,35 @@ async def run_huume_turn(
                     staged = pre_turn_action
                 else:
                     if action_type == "schedule_note":
+                        try:
+                            shift_uuid = UUID(str(args.get("shift_id") or ""))
+                            employee_uuid = UUID(str(args.get("employee_id") or ""))
+                        except (TypeError, ValueError):
+                            step = recorder.record(
+                                tool=name, kind="staged", label="Assignment note refused",
+                                status="rejected", detail="The shift or employee identifier is invalid.",
+                            )
+                            return {"status": "refused", "message": "The shift or employee identifier is invalid."}, step
+                        async with get_connection() as _conn:
+                            assignment_exists = await _conn.fetchval(
+                                """
+                                SELECT EXISTS(
+                                    SELECT 1
+                                    FROM schedule_shift_assignments a
+                                    JOIN schedule_shifts s ON s.id=a.shift_id
+                                    WHERE a.shift_id=$1 AND a.employee_id=$2
+                                      AND s.company_id=$3 AND s.location_id=$4
+                                      AND s.status <> 'cancelled'
+                                )
+                                """,
+                                shift_uuid, employee_uuid, company_id, surface_context.location_id,
+                            )
+                        if not assignment_exists:
+                            step = recorder.record(
+                                tool=name, kind="staged", label="Assignment note refused",
+                                status="rejected", detail="That employee is not assigned to this schedule shift.",
+                            )
+                            return {"status": "refused", "message": "That employee is not assigned to this schedule shift."}, step
                         staged = {
                             "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
                             "location_id": str(surface_context.location_id),
@@ -1078,6 +1107,43 @@ async def run_huume_turn(
                             "send_employee_notice": bool(args.get("send_employee_notice", True)),
                         }
                     elif action_type == "meal_break_waiver":
+                        try:
+                            employee_uuid = UUID(str(args.get("employee_id") or ""))
+                        except (TypeError, ValueError):
+                            step = recorder.record(
+                                tool=name, kind="staged", label="Meal-break waiver refused",
+                                status="rejected", detail="The employee identifier is invalid.",
+                            )
+                            return {"status": "refused", "message": "The employee identifier is invalid."}, step
+                        async with get_connection() as _conn:
+                            employee_exists = await _conn.fetchval(
+                                """
+                                SELECT EXISTS(
+                                    SELECT 1
+                                    FROM employees e
+                                    JOIN business_locations l ON l.id=$3
+                                    WHERE e.id=$1 AND e.org_id=$2 AND l.company_id=$2
+                                      AND l.is_active IS NOT FALSE
+                                      AND (
+                                          e.work_location_id=$3
+                                          OR EXISTS(
+                                              SELECT 1
+                                              FROM schedule_shift_assignments a
+                                              JOIN schedule_shifts s ON s.id=a.shift_id
+                                              WHERE a.company_id=$2 AND a.employee_id=e.id
+                                                AND s.location_id=$3 AND s.status <> 'cancelled'
+                                          )
+                                      )
+                                )
+                                """,
+                                employee_uuid, company_id, surface_context.location_id,
+                            )
+                        if not employee_exists:
+                            step = recorder.record(
+                                tool=name, kind="staged", label="Meal-break waiver refused",
+                                status="rejected", detail="That employee is not in this schedule workspace.",
+                            )
+                            return {"status": "refused", "message": "That employee is not in this schedule workspace."}, step
                         staged = {
                             "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
                             "location_id": str(surface_context.location_id),
@@ -1120,10 +1186,6 @@ async def run_huume_turn(
                                 "acknowledgement_note": args.get("acknowledgement_note"),
                             }
                         else:
-                            requested_location = str(args.get("location_id") or "")
-                            if requested_location and requested_location != str(surface_context.location_id):
-                                step = recorder.record(tool=name, kind="staged", label="Permit location refused", status="rejected")
-                                return {"status": "refused", "message": "The permit location must match this schedule workspace."}, step
                             staged = {
                                 "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
                                 "employee_id": args.get("employee_id"), "location_id": str(surface_context.location_id),
@@ -1156,6 +1218,7 @@ async def run_huume_turn(
                 result = await actions.execute_huume_action(
                     company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
                     actor_role=user_role,
+                    week_start=surface_context.week_start, week_end=surface_context.week_end,
                 )
                 ok = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": "applied" if ok else "failed"}
@@ -1164,9 +1227,15 @@ async def run_huume_turn(
 
             if name == "find_shift_coverage":
                 from app.matcha.services.huume import schedule_skill
+                if not surface_context.is_schedule or not surface_context.location_id:
+                    step = recorder.record(
+                        tool=name, kind="read", label="Coverage lookup unavailable",
+                        status="rejected", detail="This tool requires a scoped schedule workspace.",
+                    )
+                    return {"status": "refused", "message": "This tool requires a scoped schedule workspace."}, step
                 result = await schedule_skill.find_coverage(
                     company_id=company_id, role=user_role, features=features,
-                    date_str=str(args.get("date") or (surface_context.week_start.isoformat() if surface_context.week_start else "")),
+                    date_str=str(args.get("date") or ""),
                     role_hint=args.get("role_hint"),
                     location_id=surface_context.location_id,
                     schedule_surface=surface_context.is_schedule,
@@ -1231,6 +1300,7 @@ async def run_huume_turn(
                             _conn, company_id=company_id, actor_user_id=user_id, args=args,
                             location_id=surface_context.location_id if surface_context.is_schedule else None,
                             week_start=surface_context.week_start if surface_context.is_schedule else None,
+                            week_end=surface_context.week_end if surface_context.is_schedule else None,
                         )
                     proposal_status = proposed.get("status")
                     if proposal_status != "ready":
@@ -1269,6 +1339,7 @@ async def run_huume_turn(
                     return {"status": "refused", "message": verdict.message}, step
                 result = await actions.execute_huume_action(
                     company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                    week_start=surface_context.week_start, week_end=surface_context.week_end,
                 )
                 done = result.get("status") == "created"
                 state_updates["huume_action"] = {**staged, "status": spec["done_status"] if done else "failed"}
@@ -1725,6 +1796,20 @@ async def run_huume_turn(
             for call in calls:
                 name = call.name
                 args = dict(call.args or {})
+                # Enforce the surface allow-list before any control-flow or
+                # bookkeeping special case. `call_tool` keeps the same guard
+                # for direct callers, but an unlisted function must not be
+                # able to finish a turn or consume a schedule retry slot.
+                if allowed_tool_names is not None and name not in allowed_tool_names:
+                    recorder.record(
+                        tool=name, kind="read", label=f"Tool unavailable: {name}",
+                        status="rejected", detail="Tool is outside this Huume surface.", args=args,
+                    )
+                    response_parts.append(types.Part.from_function_response(
+                        name=name,
+                        response={"status": "refused", "message": "That capability is not available in this assistant."},
+                    ))
+                    continue
                 if name == "finish":
                     if not sole_finish_call:
                         recorder.record(

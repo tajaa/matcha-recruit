@@ -18,26 +18,21 @@ async def create_thread(
     company_id: UUID,
     user_id: UUID,
     title: str = "New Chat",
-    *,
-    surface: str = "workspace",
-    initial_state: Optional[dict] = None,
-    huume_mode: bool = False,
 ) -> dict:
     # Pre-populate initial state with company profile hints
-    initial_state = dict(initial_state or {})
-    if surface == "workspace":
-        try:
-            profile = await get_company_profile_for_ai(company_id)
-            if profile.get("name"):
-                initial_state.setdefault("company_name", profile["name"])
-            if profile.get("industry"):
-                initial_state.setdefault("industry", profile["industry"])
-            if profile.get("default_employment_type"):
-                initial_state.setdefault("employment_type", profile["default_employment_type"])
-            if profile.get("headquarters_state"):
-                initial_state.setdefault("work_state", profile["headquarters_state"])
-        except Exception:
-            logger.warning("Failed to fetch company profile for thread pre-population", exc_info=True)
+    initial_state: dict = {}
+    try:
+        profile = await get_company_profile_for_ai(company_id)
+        if profile.get("name"):
+            initial_state.setdefault("company_name", profile["name"])
+        if profile.get("industry"):
+            initial_state.setdefault("industry", profile["industry"])
+        if profile.get("default_employment_type"):
+            initial_state.setdefault("employment_type", profile["default_employment_type"])
+        if profile.get("headquarters_state"):
+            initial_state.setdefault("work_state", profile["headquarters_state"])
+    except Exception:
+        logger.warning("Failed to fetch company profile for thread pre-population", exc_info=True)
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -53,8 +48,8 @@ async def create_thread(
                 user_id,
                 title,
                 json.dumps(initial_state),
-                surface,
-                huume_mode,
+                "workspace",
+                False,
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
@@ -62,8 +57,23 @@ async def create_thread(
         return d
 
 
-async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None = None) -> Optional[dict]:
+async def get_thread(
+    thread_id: UUID,
+    company_id: UUID,
+    *,
+    user_id: UUID | None = None,
+    allow_schedule_surface: bool = False,
+) -> Optional[dict]:
     async with get_connection() as conn:
+        surface_filter = (
+            "TRUE"
+            if allow_schedule_surface and user_id is not None
+            else "surface <> 'schedule_assistant'"
+        )
+        schedule_owner_filter = (
+            "(surface <> 'schedule_assistant' OR ($3 IS NOT NULL AND created_by=$3))"
+            if allow_schedule_surface else "TRUE"
+        )
         if user_id is not None:
             # Allow access if company matches OR user is a thread collaborator OR
             # user is an active collaborator on the thread's parent project
@@ -74,7 +84,7 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
-                WHERE id=$1 AND (
+                WHERE id=$1 AND {surface_filter} AND {schedule_owner_filter} AND (
                     company_id IS NOT DISTINCT FROM $2
                     OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $3)
                     OR EXISTS(
@@ -96,7 +106,7 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
-                WHERE id=$1 AND company_id=$2
+                WHERE id=$1 AND {surface_filter} AND company_id=$2
                 """,
                 thread_id,
                 company_id,

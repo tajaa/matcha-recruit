@@ -87,6 +87,8 @@ async def find_coverage(
         return {"error": "Only a business admin can ask for coverage suggestions."}
     if not features.get("employee_schedule"):
         return {"error": "Scheduling isn't enabled for this company."}
+    if schedule_surface and not location_id:
+        return {"error": "This tool requires a scoped schedule workspace."}
     try:
         target = _date.fromisoformat((date_str or "").strip())
     except ValueError:
@@ -102,6 +104,7 @@ async def find_coverage(
 async def propose(
     conn, *, company_id: UUID, actor_user_id: UUID, args: dict[str, Any],
     location_id: Optional[UUID] = None, week_start: Optional[_date] = None,
+    week_end: Optional[_date] = None,
 ) -> ScheduleProposalResult:
     """Resolve a STAGE-turn request without executing it.
 
@@ -134,6 +137,7 @@ async def propose(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content="[huume thread] shift create", week_start=week_start,
+                week_end=week_end,
             )
         else:
             edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
@@ -149,6 +153,7 @@ async def propose(
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content=f"[huume thread] {kind} request",
                 editor_location_id=location_id,
+                editor_week_start=week_start, editor_week_end=week_end,
             )
     except Exception:
         return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}
@@ -176,7 +181,10 @@ async def propose(
     }
 
 
-async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, Any]) -> dict[str, Any]:
+async def execute(
+    *, company_id: UUID, actor_user_id: UUID, action: dict[str, Any],
+    week_start: Optional[_date] = None, week_end: Optional[_date] = None,
+) -> dict[str, Any]:
     """CONFIRM-turn executor, dispatched from `actions.execute_huume_action`.
     `action['proposal_id']` was minted by `propose` above on the stage turn
     and rides the staged dict verbatim across the turn boundary."""
@@ -210,6 +218,7 @@ async def execute(*, company_id: UUID, actor_user_id: UUID, action: dict[str, An
             text = await executor(
                 conn, proposal_row={**dict(row), "proposal": proposal},
                 confirmed_by=actor_user_id, features=features,
+                week_start=week_start, week_end=week_end,
             )
         except schedule_chat.ProposalExecutionClaimError as exc:
             return {"status": "error", "message": str(exc)}

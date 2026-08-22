@@ -57,6 +57,14 @@ function titleFor(action: ActionDocViewerProps['action']): string {
       return 'Archive Inventory Item'
     case 'inventory_receipt':
       return `Receipt Commit${action.vendor ? ` — ${action.vendor}` : ''}`
+    case 'schedule_note':
+      return 'Assignment Note'
+    case 'meal_break_waiver':
+      return 'Meal-Break Waiver'
+    case 'work_permit':
+      return 'Work Permit'
+    case 'eligibility_case_decision':
+      return 'Eligibility Decision'
     case 'schedule_change':
       return `Schedule Change${action.target_employee_name ? ` — ${action.target_employee_name}` : ''}`
   }
@@ -265,6 +273,43 @@ export default function ActionDocViewer({ action, lightMode }: ActionDocViewerPr
           </div>
           <Prose>{action.pill_text}</Prose>
         </>
+      )}
+
+      {action.type === 'schedule_note' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Employee" value={action.employee_id} />
+            <Meta label="Shift" value={action.shift_id} />
+          </div>
+          <Prose>{action.note}</Prose>
+        </>
+      )}
+
+      {action.type === 'meal_break_waiver' && (
+        <>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <Meta label="Employee" value={action.employee_id} />
+            <Meta label="On file" value={action.on_file ? 'Yes' : 'No'} />
+            <Meta label="Effective" value={action.effective_from} />
+          </div>
+          <Prose>{action.note}</Prose>
+        </>
+      )}
+
+      {action.type === 'work_permit' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <Meta label="Employee" value={action.employee_id} />
+          <Meta label="Issued" value={action.issued_at} />
+          <Meta label="Expires" value={action.expires_at} />
+        </div>
+      )}
+
+      {action.type === 'eligibility_case_decision' && (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          <Meta label="Case" value={action.case_id} />
+          <Meta label="Decision" value={action.decision} />
+          <Meta label="Acknowledgement" value={action.acknowledgement_note} />
+        </div>
       )}
     </div>
   )

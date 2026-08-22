@@ -780,6 +780,48 @@ export interface HuumeActionScheduleChange {
   employee_names?: string[] | null
 }
 
+export interface HuumeActionScheduleNote {
+  type: 'schedule_note'
+  status: 'proposed' | 'created' | 'failed' | 'cancelled'
+  confirm_id: string
+  location_id: string
+  shift_id: string
+  employee_id: string
+  note?: string | null
+}
+
+export interface HuumeActionMealBreakWaiver {
+  type: 'meal_break_waiver'
+  status: 'proposed' | 'created' | 'failed' | 'cancelled'
+  confirm_id: string
+  location_id: string
+  employee_id: string
+  on_file: boolean
+  effective_from?: string | null
+  note?: string | null
+}
+
+export interface HuumeActionWorkPermit {
+  type: 'work_permit'
+  status: 'proposed' | 'created' | 'failed' | 'cancelled'
+  confirm_id: string
+  location_id: string
+  employee_id: string
+  issued_at?: string | null
+  expires_at?: string | null
+}
+
+export interface HuumeActionEligibilityDecision {
+  type: 'eligibility_case_decision'
+  status: 'proposed' | 'created' | 'failed' | 'cancelled'
+  confirm_id: string
+  location_id: string
+  case_id: string
+  employee_id?: string
+  decision: 'remove' | 'keep'
+  acknowledgement_note?: string | null
+}
+
 /** `current_state.huume_action` — the single staged confirm-first action
  * (one slot: staging a new one replaces whatever was pending).
  * Confirm/cancel are chat-only tools; the UI's buttons send the literal
@@ -802,6 +844,10 @@ export type HuumeAction =
   | HuumeActionInventoryItemArchive
   | HuumeActionInventoryReceipt
   | HuumeActionScheduleChange
+  | HuumeActionScheduleNote
+  | HuumeActionMealBreakWaiver
+  | HuumeActionWorkPermit
+  | HuumeActionEligibilityDecision
 
 /** Subset of the backend `OfferLetter` model — only what the Huume panel's
  * offer viewer needs for the terms strip. Extra backend fields are ignored. */

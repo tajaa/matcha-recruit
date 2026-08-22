@@ -14,7 +14,6 @@ class HuumeSurfaceContext:
     week_end: date | None = None
     allowed_tools: frozenset[str] | None = None
     allowed_lookup_topics: frozenset[str] | None = None
-    write_mode: Literal["draft", "published"] | None = None
 
     @property
     def is_schedule(self) -> bool:

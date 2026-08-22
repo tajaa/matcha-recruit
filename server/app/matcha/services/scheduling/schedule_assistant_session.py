@@ -24,13 +24,21 @@ class ScheduleAssistantScope:
     week_start: date
     week_end: date
     actor_role: str
-    write_mode: str = "draft"
 
 
 def _week_end(week_start: date) -> date:
     # This is the inclusive display boundary for the editor's seven-day week.
     # SQL readers derive their own exclusive timestamp boundary when querying.
     return week_start + timedelta(days=6)
+
+
+def _coerce_jsonb(value) -> dict:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
 async def _assert_manager_location(
@@ -93,8 +101,9 @@ async def get_or_create_schedule_assistant_session(
                 week_start,
             )
             if existing:
+                session_id = existing["id"]
                 thread_id = existing["thread_id"]
-                current_state = existing["current_state"]
+                current_state = _coerce_jsonb(existing["current_state"])
                 version = existing["version"]
             else:
                 current_state = {
@@ -102,9 +111,13 @@ async def get_or_create_schedule_assistant_session(
                         "kind": "schedule_assistant",
                         "location_id": str(location_id),
                         "week_start": week_start.isoformat(),
-                        "write_mode": "draft",
                     }
                 }
+                # This is deliberately a raw insert rather than the generic
+                # workspace create_thread helper: the session row and its
+                # surface/thread mapping must be created under this same
+                # advisory-locked transaction, and schedule threads are
+                # hidden from workspace element/list projections.
                 thread = await conn.fetchrow(
                     f"""
                     INSERT INTO mw_threads(
@@ -119,13 +132,14 @@ async def get_or_create_schedule_assistant_session(
                     json.dumps(current_state),
                 )
                 thread_id = thread["id"]
-                current_state = thread["current_state"]
+                current_state = _coerce_jsonb(thread["current_state"])
                 version = thread["version"]
-                await conn.execute(
+                session_row = await conn.fetchrow(
                     """
                     INSERT INTO schedule_assistant_sessions(
                         company_id, user_id, location_id, week_start, thread_id
                     ) VALUES($1, $2, $3, $4, $5)
+                    RETURNING id
                     """,
                     company_id,
                     user_id,
@@ -133,10 +147,11 @@ async def get_or_create_schedule_assistant_session(
                     week_start,
                     thread_id,
                 )
+                session_id = session_row["id"]
 
     messages = await get_thread_messages(thread_id, limit=50)
     return {
-        "session_id": str(existing["id"]) if existing else str(thread_id),
+        "session_id": str(session_id),
         "thread_id": str(thread_id),
         "location_id": str(location_id),
         "week_start": week_start.isoformat(),

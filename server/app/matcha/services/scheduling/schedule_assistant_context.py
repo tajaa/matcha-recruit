@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 
@@ -37,19 +38,39 @@ async def get_schedule_overview(
             return {"status": "not_found", "message": "That location is not available."}
         shifts = await conn.fetch(
             """
-            SELECT s.id, s.role, s.department, s.starts_at, s.ends_at,
-                   s.required_staff, s.status, s.kind, s.notes,
-                   a.employee_id, a.status AS assignment_status,
-                   a.manager_note, a.manager_note_visible_to_employee,
-                   a.compliance_guidance,
-                   e.first_name, e.last_name
-            FROM schedule_shifts s
-            LEFT JOIN schedule_shift_assignments a ON a.shift_id=s.id
+            WITH bounded_shifts AS (
+                SELECT s.id, s.role, s.department, s.starts_at, s.ends_at,
+                       s.required_staff, s.status, s.kind, s.notes,
+                       COUNT(*) OVER () AS total_shift_count
+                FROM schedule_shifts s
+                WHERE s.company_id=$1 AND s.location_id=$2
+                  AND s.status <> 'cancelled'
+                  AND s.starts_at >= $3 AND s.starts_at < $4
+                ORDER BY s.starts_at, s.id
+                LIMIT 500
+            )
+            SELECT b.id, b.role, b.department, b.starts_at, b.ends_at,
+                   b.required_staff, b.status, b.kind, b.notes,
+                   b.total_shift_count,
+                   COALESCE(
+                       json_agg(
+                           json_build_object(
+                               'employee_id', a.employee_id,
+                               'name', TRIM(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')),
+                               'status', a.status,
+                               'manager_note', a.manager_note,
+                               'manager_note_visible_to_employee', a.manager_note_visible_to_employee,
+                               'compliance_guidance', a.compliance_guidance
+                           ) ORDER BY e.first_name, e.last_name, a.employee_id
+                       ) FILTER (WHERE a.employee_id IS NOT NULL),
+                       '[]'::json
+                   ) AS assignments
+            FROM bounded_shifts b
+            LEFT JOIN schedule_shift_assignments a ON a.shift_id=b.id
             LEFT JOIN employees e ON e.id=a.employee_id
-            WHERE s.company_id=$1 AND s.location_id=$2
-              AND s.starts_at >= $3 AND s.starts_at < $4
-            ORDER BY s.starts_at, e.first_name, e.last_name
-            LIMIT 500
+            GROUP BY b.id, b.role, b.department, b.starts_at, b.ends_at,
+                     b.required_staff, b.status, b.kind, b.notes, b.total_shift_count
+            ORDER BY b.starts_at, b.id
             """,
             company_id,
             location_id,
@@ -59,6 +80,12 @@ async def get_schedule_overview(
     by_shift: dict[str, dict] = {}
     for row in shifts:
         key = str(row["id"])
+        assignments = row["assignments"]
+        if isinstance(assignments, str):
+            try:
+                assignments = json.loads(assignments)
+            except (TypeError, ValueError):
+                assignments = []
         item = by_shift.setdefault(key, {
             "id": key,
             "role": row["role"],
@@ -71,26 +98,24 @@ async def get_schedule_overview(
             "notes": row["notes"],
             "assignments": [],
         })
-        if row["employee_id"]:
-            item["assignments"].append({
-                "employee_id": str(row["employee_id"]),
-                "name": " ".join(filter(None, [row["first_name"], row["last_name"]])),
-                "status": row["assignment_status"],
-                # Huume is operating in the manager's scoped workspace, so it
-                # may see the manager note even when that note is intentionally
-                # hidden from the employee. Preserve the visibility bit so it
-                # can describe what the employee will receive accurately.
-                "manager_note": row["manager_note"],
-                "manager_note_visible_to_employee": row["manager_note_visible_to_employee"],
-                "compliance_guidance": row["compliance_guidance"],
-            })
+        item["assignments"] = [
+            {
+                **assignment,
+                "employee_id": str(assignment["employee_id"]),
+            }
+            for assignment in assignments
+            if isinstance(assignment, dict) and assignment.get("employee_id")
+        ]
     result = list(by_shift.values())
+    total_shift_count = int(shifts[0]["total_shift_count"]) if shifts else 0
     return {
         "status": "ok",
         "location": dict(location),
         "week_start": week_start.isoformat(),
         "week_end": (week_start + timedelta(days=6)).isoformat(),
         "shift_count": len(result),
+        "total_shift_count": total_shift_count,
+        "truncated": total_shift_count > len(result),
         "open_staffing_count": sum(
             max(0, (s["required_staff"] or 0) - len(s["assignments"])) for s in result
         ),

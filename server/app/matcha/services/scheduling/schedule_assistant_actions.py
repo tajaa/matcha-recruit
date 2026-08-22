@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +19,8 @@ async def update_assignment_note_core(
     visible_to_employee: bool = True,
     include_in_location_digest: bool = True,
     send_employee_notice: bool = True,
+    week_start: date | None = None,
+    week_end: date | None = None,
 ) -> dict[str, Any]:
     async with get_connection() as conn:
         async with conn.transaction():
@@ -26,7 +28,8 @@ async def update_assignment_note_core(
                 """
                 SELECT a.manager_note, a.manager_note_visible_to_employee,
                        a.manager_note_include_in_location_digest,
-                       a.manager_note_send_employee_notice, s.location_id
+                       a.manager_note_send_employee_notice, s.location_id,
+                       s.starts_at
                 FROM schedule_shift_assignments a
                 JOIN schedule_shifts s ON s.id=a.shift_id
                 WHERE a.shift_id=$1 AND a.employee_id=$2 AND s.company_id=$3
@@ -38,6 +41,10 @@ async def update_assignment_note_core(
                 return {"status": "refused", "message": "That employee is not assigned to this shift."}
             if existing["location_id"] != location_id:
                 return {"status": "refused", "message": "That shift is outside this schedule workspace."}
+            if week_start is not None:
+                selected_week_end = week_end or (week_start + timedelta(days=6))
+                if not week_start <= existing["starts_at"].date() <= selected_week_end:
+                    return {"status": "refused", "message": "That shift is outside this schedule workspace."}
             after = {
                 "note": note.strip() if note else None,
                 "visible_to_employee": visible_to_employee,

@@ -2,6 +2,21 @@
 
 Backend routes for Matcha Work (collaborative AI workspace — projects, threads, tasks, recruiting, AI turns). Package was split from an 11,572-line flat `matcha_work.py` into per-domain submodules on 2026-07-03. URL surface unchanged at the split; external import path `app.matcha.routes.matcha_work` stable.
 
+## Schedule assistant routing invariant (2026-08-21)
+
+`messaging.py` is also the scoped transport for `surface='schedule_assistant'`:
+it admits the session owner through the schedule-session authorization path and
+passes the resolved location/week context to Huume. The generic Work capability
+resolver is intentionally not used for this surface; location authorization is
+rechecked by `schedule_assistant_session._assert_manager_location` and schedule
+writes recheck their domain relationships.
+
+`matcha_work_document.get_thread()` hides schedule surfaces by default. The
+streaming route opts in only to load the session thread, and still requires the
+session owner; generic thread reads, lists, and recent activity must not expose
+schedule state or staged actions. The old `/employee-schedule/chat` parser is no
+longer mounted; voice transcription lives under `/employee-schedule/assistant`.
+
 **Route count (recounted 2026-07-19, from source; +2 for `huume.py`'s plan approve/execute routes added since):** **204** gated routes on `router` + **4** on `public_router` = 208 endpoints. Reproduce with:
 
 ```bash
@@ -119,4 +134,3 @@ Full suite: `cd server && ./venv/bin/python -m pytest tests/matcha_work/ -q` —
 ## Thread modes (moved from root Key Modules)
 
 - **Matcha Work thread modes** (`matcha/services/matcha_work/matcha_work_modes.py` — THE registry) — per-thread grounding modes, one boolean column each on `mw_threads`: `node` (internal data), `compliance`, `payer`, `benefits`, `legal`, `risk`, `training`. Toggle via `POST /matcha-work/threads/{id}/modes/{key}` (3 legacy per-mode aliases remain). Context builders in `services/matcha_work/matcha_work_node.py` (node/compliance/payer-staff) + `services/matcha_work/matcha_work_mode_contexts.py` (benefits/legal/risk/training, all read-only SQL — legal deliberately does NOT call `legal_defense.gather_evidence` per turn). Adding a mode = migration + builder + one `ThreadMode` entry + one frontend `THREAD_MODE_TOGGLES` row (`client/src/work/components/panels/constants.ts`); everything else (setter, route, column lists, models, dispatch loop, toggle buttons, list badges) is registry-driven. Compliance + payer keep bespoke dispatch blocks in `messaging.py` (`custom_dispatch=True`). Modes that read a **paid** subsystem carry `required_feature` (benefits→`benefits_admin`, legal→`legal_defense`, risk→`risk_profile`, training→`training`): the toggle route 403s without the flag, the dispatch loop re-checks it each turn (so a revoked flag stops injecting), and the frontend hides the button. node/compliance/payer predate this and stay ungated.
-
