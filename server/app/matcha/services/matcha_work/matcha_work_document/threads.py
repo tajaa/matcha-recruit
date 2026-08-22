@@ -71,8 +71,8 @@ async def get_thread(
             else "surface <> 'schedule_assistant'"
         )
         schedule_owner_filter = (
-            "(surface <> 'schedule_assistant' OR ($3 IS NOT NULL AND created_by=$3))"
-            if allow_schedule_surface else "TRUE"
+            "(surface <> 'schedule_assistant' OR created_by=$3::uuid)"
+            if allow_schedule_surface and user_id is not None else "TRUE"
         )
         if user_id is not None:
             # Allow access if company matches OR user is a thread collaborator OR
@@ -86,11 +86,11 @@ async def get_thread(
                 FROM mw_threads
                 WHERE id=$1 AND {surface_filter} AND {schedule_owner_filter} AND (
                     company_id IS NOT DISTINCT FROM $2
-                    OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $3)
+                    OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $3::uuid)
                     OR EXISTS(
                         SELECT 1 FROM mw_project_collaborators pc
                         JOIN mw_threads t ON t.project_id = pc.project_id
-                        WHERE t.id = $1 AND pc.user_id = $3 AND pc.status = 'active'
+                        WHERE t.id = $1 AND pc.user_id = $3::uuid AND pc.status = 'active'
                     )
                 )
                 """,
