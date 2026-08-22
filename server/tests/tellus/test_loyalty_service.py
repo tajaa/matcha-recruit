@@ -71,6 +71,12 @@ def test_social_url_canonicalization():
         loyalty_service.canonicalize_social_url("instagram", "https://example.com/post")
 
 
+def test_social_submission_uses_bare_conflict_target_for_partial_index():
+    source = inspect.getsource(loyalty_service.submit_social_post)
+    assert "ON CONFLICT DO NOTHING" in source
+    assert "ON CONFLICT (brand_id, canonical_url)" not in source
+
+
 def _function_source(module) -> str:
     return "\n".join(
         inspect.getsource(obj)

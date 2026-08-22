@@ -34,6 +34,7 @@ from .prompts import router as prompts_router
 from .public_intake import router as public_intake_router
 from .push import router as push_router
 from .rewards import router as rewards_router
+from .shoutouts import router as shoutouts_router
 
 tellus_router = APIRouter(
     tags=["tellus"],
@@ -82,6 +83,7 @@ tellus_router.include_router(likes_router)
 # card reads (require_consumer), per-endpoint.
 tellus_router.include_router(promo_router)
 tellus_router.include_router(loyalty_router)
+tellus_router.include_router(shoutouts_router)
 
 # Push device-token registration (any authenticated Tell-Us account).
 tellus_router.include_router(push_router)
