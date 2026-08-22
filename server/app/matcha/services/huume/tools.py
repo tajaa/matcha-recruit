@@ -860,6 +860,10 @@ TOOLS: tuple[HuumeTool, ...] = (
             "to_employee_name": types.Schema(type=types.Type.STRING),
             "second_employee_name": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
             "second_date": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
+            "second_time_hint": types.Schema(
+                type=types.Type.STRING,
+                description="For kind='swap', the other person's shift time when they have more than one shift that day.",
+            ),
             "second_role_hint": types.Schema(type=types.Type.STRING, description="For kind='swap'."),
             "new_date": types.Schema(type=types.Type.STRING, description="For kind='retime'."),
             "new_start_time": types.Schema(type=types.Type.STRING, description="HH:MM 24h, for kind='retime'."),

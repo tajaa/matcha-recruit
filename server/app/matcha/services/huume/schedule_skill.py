@@ -64,6 +64,7 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
         "to_employee_name": args.get("to_employee_name"),
         "second_employee_name": args.get("second_employee_name"),
         "second_date": args.get("second_date"),
+        "second_time_hint": args.get("second_time_hint"),
         "second_role_hint": args.get("second_role_hint"),
         "new_date": args.get("new_date"),
         "new_start_time": args.get("new_start_time"),
@@ -140,14 +141,40 @@ async def propose(
                 week_end=week_end,
             )
         else:
-            edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
-            if edit_req is None:
+            # `schedule_chat` reserves kind='swap' for a roster-level swap:
+            # every assignee on one shift moves to the other. On this surface,
+            # though, a request that names two people means exchange only
+            # those two assignment rows. Translate it into two reassign ops
+            # before the proposal is resolved so other assignees stay put.
+            if kind == "swap" and args.get("target_employee_name") and args.get("second_employee_name"):
+                first = schedule_chat.coerce_edit_request({
+                    "kind": "reassign",
+                    "target_employee_name": args.get("target_employee_name"),
+                    "to_employee_name": args.get("second_employee_name"),
+                    "target_date": args.get("target_date"),
+                    "target_time_hint": args.get("target_time_hint"),
+                    "target_staffing_hint": args.get("target_staffing_hint"),
+                    "target_role_hint": args.get("target_role_hint"),
+                })
+                second = schedule_chat.coerce_edit_request({
+                    "kind": "reassign",
+                    "target_employee_name": args.get("second_employee_name"),
+                    "to_employee_name": args.get("target_employee_name"),
+                    "target_date": args.get("second_date") or args.get("target_date"),
+                    "target_time_hint": args.get("second_time_hint"),
+                    "target_role_hint": args.get("second_role_hint"),
+                })
+                edit_requests = [request for request in (first, second) if request is not None]
+            else:
+                edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
+                edit_requests = [edit_req] if edit_req is not None else []
+            if not edit_requests:
                 return {
                     "status": "clarify",
                     "message": "I need the employee and the specific shift before I can make that change. "
                                "Reply with the shift date and time, or the employee currently assigned.",
                 }
-            parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": [edit_req]}
+            parsed = {"ack": "Got it.", "action": "edit", "shift_requests": [], "edit_requests": edit_requests}
             build = await schedule_chat.build_edit_proposal(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,

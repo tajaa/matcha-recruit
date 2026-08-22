@@ -55,6 +55,10 @@ class TestRegistry:
         tool = TOOLS_BY_NAME["propose_schedule_change"]
         assert "target_time_hint" in tool.declaration.parameters.properties
 
+    def test_schema_declares_second_time_hint(self):
+        tool = TOOLS_BY_NAME["propose_schedule_change"]
+        assert "second_time_hint" in tool.declaration.parameters.properties
+
     def test_intent_hints_are_multiword_only(self):
         # A bare "assign" substring-matched training/PTO assignment asks
         # that have nothing to do with scheduling — every hint here must be
@@ -66,6 +70,9 @@ class TestRegistry:
 
     def test_spec_fields_forward_target_time_hint(self):
         assert "target_time_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
+
+    def test_spec_fields_forward_second_time_hint(self):
+        assert "second_time_hint" in _HR_OPS_TOOL_SPECS["propose_schedule_change"]["fields"]
 
     def test_schema_declares_target_staffing_hint(self):
         # Two shifts can share the exact date AND time AND role (one
@@ -223,6 +230,53 @@ class TestProposeClarify(unittest.TestCase):
         assert result == {
             "status": "ready", "proposal_id": PROPOSAL_ID, "pill_text": "Schedule change pill",
         }
+
+    def test_named_people_swap_becomes_two_individual_reassignments(self):
+        build = schedule_chat.ProposalBuild(
+            kind="edit", proposal_id=PROPOSAL_ID, pill_text="Schedule change pill",
+        )
+        captured = {}
+
+        async def fake_build_edit_proposal(*args, **kwargs):
+            captured.update(kwargs["parsed"])
+            return build
+
+        with mock.patch.object(schedule_chat, "build_edit_proposal", fake_build_edit_proposal):
+            result = _run(schedule_skill.propose(
+                conn=None, company_id="c1", actor_user_id="u1",
+                args={
+                    "kind": "swap",
+                    "target_employee_name": "Aisha Kim",
+                    "second_employee_name": "Elena Iyer",
+                    "target_date": "2026-08-20",
+                    "target_time_hint": "08:00",
+                    "second_time_hint": "09:00",
+                },
+            ))
+
+        assert result["status"] == "ready"
+        assert captured["edit_requests"] == [
+            {
+                "kind": "reassign", "target_employee_name": "Aisha Kim",
+                "target_date": "2026-08-20", "target_day_hint": None,
+                "target_time_hint": "08:00", "target_role_hint": None,
+                "target_staffing_hint": None, "to_employee_name": "Elena Iyer",
+                "second_employee_name": None, "second_date": None,
+                "second_day_hint": None, "second_time_hint": None,
+                "second_role_hint": None, "new_date": None, "new_day_hint": None,
+                "new_start_time": None, "new_end_time": None, "shift_by_minutes": None,
+            },
+            {
+                "kind": "reassign", "target_employee_name": "Elena Iyer",
+                "target_date": "2026-08-20", "target_day_hint": None,
+                "target_time_hint": "09:00", "target_role_hint": None,
+                "target_staffing_hint": None, "to_employee_name": "Aisha Kim",
+                "second_employee_name": None, "second_date": None,
+                "second_day_hint": None, "second_time_hint": None,
+                "second_role_hint": None, "new_date": None, "new_day_hint": None,
+                "new_start_time": None, "new_end_time": None, "shift_by_minutes": None,
+            },
+        ]
 
     def test_builder_exception_returns_refused_result(self):
         async def failing_build_edit_proposal(*args, **kwargs):

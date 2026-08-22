@@ -451,6 +451,7 @@ def coerce_edit_request(raw) -> Optional[dict]:
         "second_employee_name": _s("second_employee_name"),
         "second_date": second_date,
         "second_day_hint": _day_hint("second_day_hint"),
+        "second_time_hint": _s("second_time_hint", 40),
         "second_role_hint": _s("second_role_hint", 80),
         "new_date": new_date,
         "new_day_hint": _day_hint("new_day_hint"),
@@ -1307,6 +1308,7 @@ async def build_edit_proposal(
                 second_emp_id = m["employee"]["id"]
             second_ref = {
                 "target_date": req.get("second_date") or req.get("target_date"),
+                "target_time_hint": req.get("second_time_hint"),
                 "target_role_hint": req.get("second_role_hint"),
             }
             second_shift, bail = await _resolve_or_clarify(
