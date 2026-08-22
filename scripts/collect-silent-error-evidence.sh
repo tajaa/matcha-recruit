@@ -17,23 +17,30 @@ set -uo pipefail
 container_logs() {
   local prefix="$1"
   local container
+  local signals
   container="$(docker ps --format '{{.Names}}' | grep "^${prefix}" | head -n 1 || true)"
   [ -n "$container" ] || return 0
-  echo "=== ${prefix} log signals ==="
-  docker logs --since "${WINDOW_MINUTES}m" --timestamps "$container" 2>&1 \
-    | grep -E 'ERROR|Traceback|" 5[0-9][0-9] ' || true
+  signals="$(docker logs --since "${WINDOW_MINUTES}m" --timestamps "$container" 2>&1 \
+    | grep -E 'ERROR|Traceback|" 5[0-9][0-9] ' || true)"
+  if [ -n "$signals" ]; then
+    printf '=== %s log signals ===\n%s\n' "$prefix" "$signals"
+  fi
 }
 
 container_logs matcha-backend
 container_logs matcha-worker
 
-echo "=== nginx 5xx ==="
-sudo tail -n 5000 /var/log/nginx/access.log 2>/dev/null \
-  | grep -E '" [5][0-9][0-9] ' || true
+nginx_5xx="$(sudo tail -n 5000 /var/log/nginx/access.log 2>/dev/null \
+  | grep -E '" [5][0-9][0-9] ' || true)"
+if [ -n "$nginx_5xx" ]; then
+  printf '=== nginx 5xx ===\n%s\n' "$nginx_5xx"
+fi
 
-echo "=== nginx errors ==="
-sudo tail -n 1000 /var/log/nginx/error.log 2>/dev/null \
-  | grep -Ei 'error|crit|alert|emerg' || true
+nginx_errors="$(sudo tail -n 1000 /var/log/nginx/error.log 2>/dev/null \
+  | grep -Ei 'error|crit|alert|emerg' || true)"
+if [ -n "$nginx_errors" ]; then
+  printf '=== nginx errors ===\n%s\n' "$nginx_errors"
+fi
 REMOTE
 
 for url in "${PROD_HEALTH_URL:-}" "${PROD_API_HEALTH_URL:-}"; do
