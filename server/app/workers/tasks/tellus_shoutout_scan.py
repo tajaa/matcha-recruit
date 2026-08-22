@@ -4,7 +4,7 @@ import logging
 
 from ...tellus.services.shoutout.scan_service import scan_brand
 from ..celery_app import celery_app
-from ..utils import get_db_connection, scheduler_enabled, scheduler_settings_row
+from ..utils import get_db_connection, scheduler_enabled
 
 logger = logging.getLogger(__name__)
 _TASK_KEY = "tellus_shoutout_scan"
@@ -15,7 +15,6 @@ async def _dispatch() -> dict:
     try:
         if not await scheduler_enabled(conn, _TASK_KEY, default=False):
             return {"status": "disabled", "scanned": 0}
-        setting = await scheduler_settings_row(conn, _TASK_KEY)
         claimed = await conn.fetchrow(
             """UPDATE scheduler_settings SET last_run_at=NOW()
                WHERE task_key=$1 AND (last_run_at IS NULL OR last_run_at < NOW() - INTERVAL '6 hours')

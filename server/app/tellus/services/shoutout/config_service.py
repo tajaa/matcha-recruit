@@ -1,8 +1,6 @@
 """Shoutout radar configuration and queue reads."""
 from uuid import UUID
 
-from .grounding import url_fingerprint
-
 _COVERAGE = {"instagram": "partial", "tiktok": "poor", "youtube": "good", "facebook": "partial", "x": "good"}
 
 
@@ -46,7 +44,12 @@ async def put_config(conn, brand_id: UUID, data) -> dict:
             data.offer_terms, data.offer_expiry_days, data.min_confidence, data.lookback_days,
         )
         await conn.execute("DELETE FROM tellus_shoutout_handles WHERE brand_id = $1", brand_id)
+        seen_handles: set[tuple[str, str]] = set()
         for handle in data.handles:
+            key = (handle.platform, handle.handle)
+            if key in seen_handles:
+                continue
+            seen_handles.add(key)
             await conn.execute(
                 "INSERT INTO tellus_shoutout_handles (brand_id, platform, handle) VALUES ($1,$2,$3)",
                 brand_id, handle.platform, handle.handle,
@@ -65,7 +68,7 @@ async def set_enabled(conn, brand_id: UUID, enabled: bool) -> dict:
             raise ValueError("Choose a default store and offer title before enabling the radar")
     row = await conn.fetchrow(
         """UPDATE tellus_shoutout_configs SET is_enabled = $2, updated_at = NOW()
-           WHERE brand_id = $1 RETURNING id""", brand_id, enabled,
+           WHERE brand_id = $1 RETURNING brand_id""", brand_id, enabled,
     )
     if row is None:
         raise ValueError("Save the radar configuration before enabling it")

@@ -6,6 +6,29 @@ from .grounding import corroborated_candidates
 from .prompt import build_prompt
 from .provider import GeminiGroundingProvider
 
+_PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
+
+
+def valid_candidate(candidate: dict) -> dict | None:
+    """Reject untrusted model values before they reach typed database columns."""
+    if candidate.get("platform") not in _PLATFORMS:
+        return None
+    if not isinstance(candidate.get("url"), str):
+        return None
+    confidence = candidate.get("confidence")
+    if isinstance(confidence, bool) or not isinstance(confidence, int) or not 0 <= confidence <= 100:
+        return None
+    matched_terms = candidate.get("matched_terms", [])
+    if not isinstance(matched_terms, list) or not all(isinstance(term, str) for term in matched_terms):
+        return None
+    author = candidate.get("author_handle")
+    excerpt = candidate.get("excerpt")
+    if author is not None and not isinstance(author, str):
+        return None
+    if excerpt is not None and not isinstance(excerpt, str):
+        return None
+    return candidate
+
 
 def score_candidate(candidate: dict, own_handles: set[str]) -> int:
     author = str(candidate.get("author_handle") or "").lstrip("@").lower()
@@ -49,14 +72,18 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
         )
         handles = await conn.fetch("SELECT platform, handle FROM tellus_shoutout_handles WHERE brand_id=$1 AND is_active", brand_id)
     try:
-        candidates, grounded = await provider.search(build_prompt(
+        result = await provider.search(build_prompt(
             brand_name=brand["name"], handles=[dict(row) for row in handles], brand_terms=claimed["brand_terms"],
             city=brand["city"], state=brand["state"], lookback_days=claimed["lookback_days"],
         ))
-        accepted, rejected = corroborated_candidates(candidates, grounded)
+        accepted, rejected = corroborated_candidates(result.mentions, result.grounding_uris)
         own_handles = {row["handle"] for row in handles}
         new, duplicate = 0, 0
         for candidate in accepted:
+            candidate = valid_candidate(candidate)
+            if candidate is None:
+                rejected += 1
+                continue
             score = score_candidate(candidate, own_handles)
             if score < claimed["min_confidence"]:
                 continue
@@ -68,7 +95,7 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
                    ON CONFLICT DO NOTHING RETURNING id""",
                 brand_id, candidate["platform"], candidate["url"], candidate["canonical_url"], candidate["url_fingerprint"],
                 candidate.get("author_handle"), candidate.get("excerpt"), score, candidate.get("matched_terms", []),
-                True, next((uri for uri in grounded if uri), None), json.dumps(candidate),
+                True, candidate["grounding_uri"], json.dumps(candidate),
             )
             if inserted:
                 new += 1
@@ -81,9 +108,9 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
                 )
         await conn.execute(
             """UPDATE tellus_shoutout_scan_runs SET status='completed',finished_at=NOW(),gemini_calls=1,
-               grounding_uris=$2,grounding_resolved=$2,candidates_returned=$3,urls_rejected=$4,
-               mentions_new=$5,mentions_duplicate=$6 WHERE id=$1""",
-            run["id"], len(grounded), len(candidates), rejected, new, duplicate,
+               grounding_uris=$2,grounding_resolved=$3,candidates_returned=$4,urls_rejected=$5,
+               mentions_new=$6,mentions_duplicate=$7 WHERE id=$1""",
+            run["id"], len(result.grounding_uris), result.grounding_resolved, len(result.mentions), rejected, new, duplicate,
         )
         await conn.execute("UPDATE tellus_shoutout_configs SET last_scanned_at=NOW(), consecutive_failures=0 WHERE brand_id=$1", brand_id)
         return {"new": new, "duplicate": duplicate}
@@ -91,5 +118,10 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
         await conn.execute(
             "UPDATE tellus_shoutout_scan_runs SET status='failed',finished_at=NOW(),error=$2 WHERE id=$1", run["id"], str(exc)[:2000],
         )
-        await conn.execute("UPDATE tellus_shoutout_configs SET consecutive_failures=consecutive_failures+1 WHERE brand_id=$1", brand_id)
+        await conn.execute(
+            """UPDATE tellus_shoutout_configs
+               SET consecutive_failures=consecutive_failures+1,
+                   next_scan_after=NOW() + ((LEAST(160, 20 * POWER(2, consecutive_failures + 1)::int))::text || ' hours')::interval
+               WHERE brand_id=$1""", brand_id,
+        )
         raise

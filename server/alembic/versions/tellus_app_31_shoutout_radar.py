@@ -34,7 +34,8 @@ def upgrade() -> None:
         consecutive_failures INT NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        FOREIGN KEY (default_store_id, brand_id) REFERENCES tellus_stores(id, brand_id) ON DELETE SET NULL,
+        FOREIGN KEY (default_store_id, brand_id) REFERENCES tellus_stores(id, brand_id)
+            ON DELETE SET NULL (default_store_id),
         CHECK (NOT is_enabled OR (default_store_id IS NOT NULL AND offer_title IS NOT NULL))
     )""")
     op.execute("""CREATE TABLE IF NOT EXISTS tellus_shoutout_scan_runs (

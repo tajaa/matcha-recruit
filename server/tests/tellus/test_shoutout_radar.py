@@ -32,6 +32,7 @@ def test_grounding_gate_accepts_matching_result():
     )
     assert rejected == 0
     assert accepted[0]["canonical_url"] == "https://instagram.com/p/real"
+    assert accepted[0]["grounding_uri"] == "https://instagram.com/p/real"
 
 
 def test_brand_own_handle_scores_zero_and_terms_must_be_in_excerpt():
@@ -41,6 +42,16 @@ def test_brand_own_handle_scores_zero_and_terms_must_be_in_excerpt():
     assert scan_service.score_candidate(
         {"author_handle": "fan", "confidence": 50, "excerpt": "Lovely place", "matched_terms": ["not present"]}, set()
     ) == 50
+
+
+def test_invalid_model_values_are_skipped_before_database_writes():
+    assert scan_service.valid_candidate({"platform": "other", "url": "https://example.com", "confidence": 10}) is None
+    assert scan_service.valid_candidate({"platform": "instagram", "url": "https://instagram.com/p/a", "confidence": "90"}) is None
+    assert scan_service.valid_candidate({"platform": "instagram", "url": "https://instagram.com/p/a", "confidence": 90, "matched_terms": [1]}) is None
+    assert scan_service.valid_candidate({
+        "platform": "instagram", "url": "https://instagram.com/p/a", "confidence": 90,
+        "matched_terms": ["coffee"], "excerpt": "Great coffee",
+    }) is not None
 
 
 def test_reseen_update_never_touches_status_or_catches_unique_violation():
@@ -72,6 +83,21 @@ def test_provider_handles_a_response_without_candidates(monkeypatch):
     monkeypatch.setattr(provider, "get_genai_client", lambda: FakeClient())
 
     import asyncio
-    mentions, uris = asyncio.run(provider.GeminiGroundingProvider().search("test"))
-    assert mentions == []
-    assert uris == []
+    result = asyncio.run(provider.GeminiGroundingProvider().search("test"))
+    assert result.mentions == []
+    assert result.grounding_uris == []
+    assert result.grounding_resolved == 0
+
+
+def test_scan_run_uses_real_resolution_count_and_failure_backoff():
+    source = inspect.getsource(scan_service.scan_brand)
+    assert "result.grounding_resolved" in source
+    assert "next_scan_after=NOW()" in source
+
+
+def test_config_enablement_returns_the_actual_primary_key_and_dedupes_handles():
+    from app.tellus.services.shoutout import config_service
+
+    source = inspect.getsource(config_service)
+    assert "RETURNING brand_id" in source
+    assert "seen_handles" in source

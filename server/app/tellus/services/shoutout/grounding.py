@@ -25,20 +25,23 @@ def url_fingerprint(platform: str, raw_url: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+_PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
+
+
 def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -> tuple[list[dict], int]:
     """Retain only model candidates whose URL is represented by this response's grounding."""
-    grounded: set[str] = set()
+    grounded: dict[str, str] = {}
     for uri in grounding_uris:
-        for platform in ("instagram", "tiktok", "youtube", "facebook", "x"):
+        for platform in _PLATFORMS:
             try:
-                grounded.add(url_fingerprint(platform, uri))
+                grounded.setdefault(url_fingerprint(platform, uri), uri)
             except LoyaltyError:
                 continue
     accepted, rejected = [], 0
     for candidate in candidates:
         platform = candidate.get("platform")
         url = candidate.get("url")
-        if not isinstance(platform, str) or not isinstance(url, str):
+        if platform not in _PLATFORMS or not isinstance(url, str):
             rejected += 1
             continue
         try:
@@ -49,5 +52,10 @@ def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -
         if fingerprint not in grounded:
             rejected += 1
             continue
-        accepted.append({**candidate, "canonical_url": canonicalize_social_url(platform, url), "url_fingerprint": fingerprint})
+        accepted.append({
+            **candidate,
+            "canonical_url": canonicalize_social_url(platform, url),
+            "url_fingerprint": fingerprint,
+            "grounding_uri": grounded[fingerprint],
+        })
     return accepted, rejected
