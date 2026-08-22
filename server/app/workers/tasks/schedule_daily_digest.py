@@ -1,10 +1,13 @@
 """Idempotent daily break and shift-note delivery for schedule locations."""
 
 import asyncio
+import logging
 from datetime import date
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+
+logger = logging.getLogger(__name__)
 
 
 async def _run() -> dict:
@@ -14,15 +17,32 @@ async def _run() -> dict:
             return {"sent": 0, "skipped": True}
         from app.matcha.services.scheduling.daily_digest import send_location_daily_digest
         locations = await conn.fetch(
-            "SELECT company_id, id FROM business_locations WHERE is_active IS NOT FALSE ORDER BY company_id, id"
+            """
+            SELECT l.company_id, l.id
+            FROM business_locations l
+            JOIN companies c ON c.id = l.company_id
+            WHERE l.is_active IS NOT FALSE
+              AND COALESCE((c.enabled_features->>'employee_schedule')::boolean, false)
+              AND COALESCE((c.enabled_features->>'matcha_ops')::boolean, false)
+            ORDER BY l.company_id, l.id
+            """
         )
         total = 0
+        failures = 0
         for location in locations:
-            result = await send_location_daily_digest(
-                conn, company_id=location["company_id"], location_id=location["id"], digest_date=date.today()
-            )
+            try:
+                result = await send_location_daily_digest(
+                    conn, company_id=location["company_id"], location_id=location["id"], digest_date=date.today()
+                )
+            except Exception:
+                logger.exception(
+                    "schedule_daily_digest failed for company=%s location=%s",
+                    location["company_id"], location["id"],
+                )
+                failures += 1
+                continue
             total += result.get("sent", 0)
-        return {"sent": total, "locations": len(locations)}
+        return {"sent": total, "locations": len(locations), "failures": failures}
     finally:
         await conn.close()
 

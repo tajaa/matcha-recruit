@@ -5,7 +5,7 @@ from uuid import uuid4
 from app.matcha.services.huume.actions import evaluate_huume_action
 
 
-FEATURES = {"huume": True, "employee_schedule": True, "matcha_work": False}
+FEATURES = {"huume": True, "employee_schedule": True, "matcha_work": True}
 
 
 def _note_action(**overrides):
@@ -22,19 +22,29 @@ def _note_action(**overrides):
     return action
 
 
-def test_schedule_surface_does_not_require_matcha_work_flag():
+def test_schedule_surface_still_requires_matcha_work_flag():
+    # matcha_work is a hard prerequisite for every Huume action, schedule
+    # surface included — the /matcha-work router this call arrives through is
+    # gated on the flag at the mount, so a bypass here is unreachable and was
+    # removed (see actions.py's evaluate_huume_action comment).
     verdict = evaluate_huume_action(
         staged_action=_note_action(),
-        features=FEATURES,
+        features={**FEATURES, "matcha_work": False},
         role="client",
         thread_huume_mode=True,
         this_turn_staged_new=False,
         schedule_surface=True,
     )
-    assert verdict.kind == "proceed"
+    assert verdict.kind == "refuse"
+    assert "Matcha Work" in verdict.message
 
 
-def test_location_manager_can_confirm_scoped_schedule_action():
+def test_employee_role_passes_the_capability_gate_on_schedule_surface():
+    # This only proves evaluate_huume_action's role-based capability check
+    # (schedule_manager_authorized in actions.py) admits any employee role.
+    # It is NOT a location-authorization test — that check runs earlier, in
+    # schedule_assistant_session.resolve_schedule_assistant_scope, and is
+    # covered separately (see tests/employee_schedule/test_schedule_assistant_session.py).
     verdict = evaluate_huume_action(
         staged_action=_note_action(),
         features=FEATURES,
@@ -75,7 +85,7 @@ def test_schedule_action_rejects_invalid_writer_inputs_before_execution():
 def test_non_schedule_surface_keeps_matcha_work_gate():
     verdict = evaluate_huume_action(
         staged_action=_note_action(),
-        features=FEATURES,
+        features={**FEATURES, "matcha_work": False},
         role="client",
         thread_huume_mode=True,
         this_turn_staged_new=False,

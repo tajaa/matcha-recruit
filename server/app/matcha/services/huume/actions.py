@@ -232,7 +232,13 @@ def evaluate_huume_action(
         return HuumeVerdict(kind="refuse", message="Huume actions are only available in a Huume thread.")
     if not features.get("huume"):
         return HuumeVerdict(kind="refuse", message="Huume isn't enabled for this company.")
-    if not features.get("matcha_work") and not schedule_surface:
+    # `matcha_work` is always required here regardless of surface — the message
+    # never reaches this function unless it already passed through the
+    # /matcha-work router, which is gated on that flag at the mount (twice:
+    # routes/__init__.py and the package constructor). A schedule-only bypass
+    # was tried and found unreachable/misleading; don't reintroduce one without
+    # giving the schedule turn its own non-/matcha-work endpoint first.
+    if not features.get("matcha_work"):
         return HuumeVerdict(kind="refuse", message="Matcha Work isn't enabled for this company.")
     if not features.get(required_feature):
         return HuumeVerdict(

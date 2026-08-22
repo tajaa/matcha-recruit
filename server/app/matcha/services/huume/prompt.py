@@ -46,7 +46,7 @@ def build_discovery_block(tools: Iterable[HuumeTool]) -> str:
     return "\n".join(lines)
 
 
-def build_state_block(current_state: dict[str, Any]) -> str:
+def build_state_block(current_state: dict[str, Any], *, schedule_surface: bool = False) -> str:
     """Pure. Renders whatever is currently staged on the thread so the model
     doesn't have to guess an offer_id on a confirm turn (Huume hardening
     review gap #1) — every id it needs to echo back is right here. Always
@@ -195,6 +195,38 @@ def build_state_block(current_state: dict[str, Any]) -> str:
                 f"confirms applies it; omitting confirm_id (or a different one) stages a NEW "
                 f"proposal instead."
             )
+        elif action.get("type") == "schedule_note":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: assignment note "
+                f"for employee_id={action.get('employee_id')} on shift_id={action.get('shift_id')}, "
+                f"confirm_id={action.get('confirm_id')}. Calling propose_assignment_note again with "
+                f"EXACTLY this confirm_id after the admin confirms saves it; omitting confirm_id "
+                f"(or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "meal_break_waiver":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: meal-break waiver "
+                f"(on_file={action.get('on_file')}) for employee_id={action.get('employee_id')}, "
+                f"confirm_id={action.get('confirm_id')}. Calling propose_meal_break_waiver again with "
+                f"EXACTLY this confirm_id after the admin confirms records it; omitting confirm_id "
+                f"(or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "work_permit":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: work permit for "
+                f"employee_id={action.get('employee_id')} expiring {action.get('expires_at')}, "
+                f"confirm_id={action.get('confirm_id')}. Calling propose_work_permit again with "
+                f"EXACTLY this confirm_id after the admin confirms records it; omitting confirm_id "
+                f"(or a different one) stages a NEW proposal instead."
+            )
+        elif action.get("type") == "eligibility_case_decision":
+            lines.append(
+                f"- STAGED ACTION awaiting the admin's confirmation: eligibility decision "
+                f"({action.get('decision')}) for case_id={action.get('case_id')}, "
+                f"confirm_id={action.get('confirm_id')}. Calling propose_eligibility_case_decision "
+                f"again with EXACTLY this confirm_id after the admin confirms applies it; omitting "
+                f"confirm_id (or a different one) stages a NEW proposal instead."
+            )
         elif action.get("type") == "amend_handbook":
             lines.append(
                 f"- STAGED ACTION awaiting the admin's confirmation: amend handbook "
@@ -274,6 +306,8 @@ def build_state_block(current_state: dict[str, Any]) -> str:
             lines.append("- This thread has a Handbook Pilot session with no pending drafts.")
 
     if not lines:
+        if schedule_surface:
+            return "Nothing is currently staged. Any propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, or propose_eligibility_case_decision call today starts fresh."
         return "Nothing is currently staged. Any send_offer, build_onboarding_plan, or execute_approved_steps call today starts fresh."
     return "\n".join(lines)
 
@@ -327,7 +361,7 @@ You also carry the company's two document pilots into this chat, when they're en
 
 ## The confirm-first rule — READ FIRST, NEVER VIOLATE
 
-You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, promote_ems_event, record_stock_movement, decide_inventory_order, create_inventory_item, archive_inventory_item, stage_receipt_from_attachment, and propose_schedule_change. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE action can be staged at a time — staging a new one replaces whatever was pending, so don't stage a second while the admin is still deciding on the first.
+You do NOT have the authority to send an offer, file any record, or execute an onboarding plan step on your own. These tools are "staged": send_offer, draft_discipline, draft_disciplinary_action, decide_disciplinary_action, build_onboarding_plan, report_incident, open_er_case, assign_training, decide_pto_request, promote_ems_event, record_stock_movement, decide_inventory_order, create_inventory_item, archive_inventory_item, stage_receipt_from_attachment, propose_schedule_change, propose_assignment_note, propose_meal_break_waiver, propose_work_permit, and propose_eligibility_case_decision. Calling them proposes an action; nothing actually sends, files, assigns, decides, promotes, or writes a real record until the admin explicitly confirms on a LATER turn (a separate message from them, not the same turn). When you stage something, say clearly what you're proposing and that you're waiting for their confirmation — never say you "sent", "filed", or "did" something you only staged. Only ONE action can be staged at a time — staging a new one replaces whatever was pending, so don't stage a second while the admin is still deciding on the first.
 
 execute_approved_steps only runs plan steps the admin has explicitly approved (in full, or by name). If they haven't approved anything yet, ask which steps to run rather than calling it. A plan you build THIS turn cannot be executed THIS turn, even if the admin's message told you to do both — build it, describe it, and wait for their next message.
 

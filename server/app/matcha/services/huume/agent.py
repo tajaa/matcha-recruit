@@ -588,6 +588,7 @@ async def run_huume_turn(
                    "thinking_tokens": 0, "cached_tokens": 0}
     schedule_proposal_attempts = 0
     schedule_proposal_fingerprints: set[str] = set()
+    executed_schedule_action_confirm_ids: set[str] = set()
     duplicate_tool_calls_blocked = 0
     tool_retry_limit_blocks = 0
     tool_rejections = 0
@@ -1112,7 +1113,8 @@ async def run_huume_turn(
                                 "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
                                 "location_id": str(surface_context.location_id), "case_id": str(case["id"]),
                                 "employee_id": str(case["employee_id"]), "requirement_type": case["requirement_type"],
-                                "case_status": case["status"], "expires_at": case["expires_at"],
+                                "case_status": case["status"],
+                                "expires_at": case["expires_at"].isoformat() if case["expires_at"] else None,
                                 "legal_basis": case["legal_basis"], "decision": args.get("decision"),
                                 "acknowledgement_confirmed": bool(args.get("acknowledgement_confirmed", False)),
                                 "acknowledgement_note": args.get("acknowledgement_note"),
@@ -1139,6 +1141,18 @@ async def run_huume_turn(
                 if not verdict.ok:
                     step = recorder.record(tool=name, kind="staged", label=f"{name.replace('_', ' ').title()} refused", status="rejected", detail=verdict.message)
                     return {"status": "refused", "message": verdict.message}, step
+                # Gemini can emit the same confirming call twice in one batch
+                # (parallel function calls); pre_turn_action is frozen for the
+                # whole turn so both calls would otherwise see status=="proposed"
+                # and both execute, writing the record twice. One confirm_id
+                # executes at most once per turn.
+                if staged["confirm_id"] in executed_schedule_action_confirm_ids:
+                    step = recorder.record(
+                        tool=name, kind="staged", label="Duplicate confirmation blocked",
+                        status="rejected", detail="This action was already executed this turn.",
+                    )
+                    return {"status": "refused", "message": "That was already confirmed and executed this turn."}, step
+                executed_schedule_action_confirm_ids.add(staged["confirm_id"])
                 result = await actions.execute_huume_action(
                     company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
                     actor_role=user_role,
@@ -1619,7 +1633,8 @@ async def run_huume_turn(
     client = get_genai_client()
     _system_instruction = build_system_prompt(
         company_name=company_name or "your company", today=date.today().isoformat(),
-        state_block=build_state_block(current_state), surface_context=surface_context,
+        state_block=build_state_block(current_state, schedule_surface=surface_context.is_schedule),
+        surface_context=surface_context,
     )
     _tools_arg = [types.Tool(function_declarations=tool_declarations(allowed_names=allowed_tool_names))]
     # Two configs, same tools + system prompt — only ThinkingConfig differs.
