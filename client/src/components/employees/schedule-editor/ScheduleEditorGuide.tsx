@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutTemplate, MousePointer2, Send, Tag, Users, X } from 'lucide-react'
+import { ArrowLeftRight, BriefcaseBusiness, Check, ChevronLeft, ChevronRight, ClipboardCheck, LayoutTemplate, MousePointer2, Send, ShieldAlert, Sparkles, Tag, Users, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Modal } from '../../ui'
 
@@ -64,6 +64,27 @@ const STEPS: GuideStep[] = [
     body: 'Click any shift to edit its exact time, role, location, staffing, break, and notes. When the draft looks right, use Publish in the top bar.',
     icon: Send,
     detail: <span>Published shifts are locked by default. Turn on Edit published only when you intentionally need to change live schedules.</span>,
+  },
+  {
+    eyebrow: '08 / Ask Huume',
+    title: 'Build shifts by talking, not clicking',
+    body: 'Use Ask Huume in the top bar to describe what you need in plain language, or dictate by voice. Huume drafts the shifts or template changes and you review before anything saves.',
+    icon: Sparkles,
+    detail: <span>Every AI-drafted change lands as an editable draft first — nothing is assigned or published without your confirmation.</span>,
+  },
+  {
+    eyebrow: '09 / Compliance guidance',
+    title: 'Review break rules and waivers before you publish',
+    body: 'Assignments now carry individualized compliance guidance — break-rule requirements checked against the shift, and any waiver attestations on file for that employee. Unresolved warnings also surface as events in Ops so the team catches them outside the editor.',
+    icon: ShieldAlert,
+    detail: <span>A guidance note does not block the shift. Read it, resolve it, or record a waiver attestation before you publish.</span>,
+  },
+  {
+    eyebrow: '10 / Eligibility and swaps',
+    title: 'Eligibility and shift-transfer changes go through review',
+    body: 'A credential expiring (like a work permit) opens a location-scoped eligibility case instead of silently blocking assignment; a manager reviews and decides. Employee-initiated swaps and pickups need the other employee to confirm before a manager approves them.',
+    icon: ArrowLeftRight,
+    detail: <span>Nothing reassigns itself. Expiring credentials fail closed until reviewed, and every eligibility decision is audit-logged.</span>,
   },
 ]
 
