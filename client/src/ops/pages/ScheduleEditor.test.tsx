@@ -3,14 +3,22 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ScheduleEditor from './ScheduleEditor'
 
-const { useMeMock, useEditorMock, useLocationScopeMock } = vi.hoisted(() => ({
+const { useMeMock, useEditorMock, useLocationScopeMock, getScheduleHuumeSessionMock, sendMessageStreamMock } = vi.hoisted(() => ({
   useMeMock: vi.fn(),
   useEditorMock: vi.fn(),
   useLocationScopeMock: vi.fn(),
+  getScheduleHuumeSessionMock: vi.fn(),
+  sendMessageStreamMock: vi.fn(() => new AbortController()),
 }))
 
 vi.mock('../../hooks/useMe', () => ({ useMe: useMeMock }))
 vi.mock('../../hooks/employees/useScheduleEditor', () => ({ useScheduleEditor: useEditorMock }))
+vi.mock('../../api/employees/scheduleChat', () => ({
+  getScheduleHuumeSession: getScheduleHuumeSessionMock,
+}))
+vi.mock('../../work/api/matchaWork/messaging', () => ({
+  sendMessageStream: sendMessageStreamMock,
+}))
 vi.mock('../../hooks/useLocationScope', async () => {
   const actual = await vi.importActual<typeof import('../../hooks/useLocationScope')>('../../hooks/useLocationScope')
   return { ...actual, useLocationScope: useLocationScopeMock }
@@ -26,6 +34,10 @@ const shift = {
 
 describe('ScheduleEditor', () => {
   beforeEach(() => {
+    getScheduleHuumeSessionMock.mockResolvedValue({
+      session_id: 'session-1', thread_id: 'thread-1', location_id: 'loc1',
+      week_start: '2026-08-09', week_end: '2026-08-16', messages: [], current_state: {}, version: 1,
+    })
     useMeMock.mockReturnValue({
       me: { profile: { name: 'Jamie Rivera' } },
       hasFeature: () => false,
@@ -83,7 +95,7 @@ describe('ScheduleEditor', () => {
     expect(employeeList).toHaveClass('overflow-y-auto')
   })
 
-  it('opens the personalized Huume schedule assistant', () => {
+  it('opens the personalized Huume schedule assistant', async () => {
     render(
       <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
         <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
@@ -93,7 +105,7 @@ describe('ScheduleEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
 
     expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
-    expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument())
   })
 
   it('resets the assistant conversation when the schedule scope changes', async () => {
@@ -103,16 +115,17 @@ describe('ScheduleEditor', () => {
       </MemoryRouter>,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    await waitFor(() => expect(screen.getByPlaceholderText('Try: add an opener Monday')).not.toBeDisabled())
     fireEvent.change(screen.getByPlaceholderText('Try: add an opener Monday'), {
       target: { value: "Hey Huume, let's make schedules" },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
-    expect(screen.getByText(/What should we do with the week of 2026-08-09/)).toBeInTheDocument()
+    expect(screen.getByText("Hey Huume, let's make schedules")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Next week' }))
 
     await waitFor(() => {
-      expect(screen.queryByText(/What should we do with the week of 2026-08-09/)).not.toBeInTheDocument()
+      expect(screen.queryByText("Hey Huume, let's make schedules")).not.toBeInTheDocument()
     })
     expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument()
   })

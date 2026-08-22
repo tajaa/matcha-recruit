@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.dependencies import require_company_member, get_client_company_id
 from app.matcha.models.matcha_work.matcha_work import SendMessageRequest, SendMessageResponse
 from app.matcha.routes.matcha_work._shared import _row_to_message, _sse_data
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
@@ -51,7 +51,7 @@ router = APIRouter()
 async def send_message_stream(
     thread_id: UUID,
     body: SendMessageRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Send message with SSE progress + token usage events."""
     caller_company_id = await get_client_company_id(current_user)
@@ -60,6 +60,13 @@ async def send_message_stream(
     thread = await doc_svc.get_thread(thread_id, caller_company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Employees may use the location-authorized schedule Huume surface, but
+    # must not gain the generic Matcha Work/Huume surface merely because the
+    # messaging endpoint admits company members. The schedule scope is
+    # re-checked in _run_huume_dispatch against the session's location.
+    if current_user.role == "employee" and thread.get("surface") != "schedule_assistant":
+        raise HTTPException(status_code=403, detail="Matcha Work access is not enabled for this account")
 
     # Use the thread's actual company for all downstream operations (AI profile,
     # token budget, etc.) so collaborators don't accidentally scope ops to their

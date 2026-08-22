@@ -52,6 +52,7 @@ from . import (
     legal_skill, onboarding_skill, record_view, routing, store,
 )
 from .prompt import build_state_block, build_system_prompt
+from .scope import HuumeSurfaceContext
 from .tools import TOOLS_BY_NAME, tool_declarations
 
 logger = logging.getLogger(__name__)
@@ -553,6 +554,7 @@ async def run_huume_turn(
     features: Optional[dict[str, Any]] = None,
     integrations: Optional[dict[str, bool]] = None,
     run_id: Optional[UUID] = None,
+    surface_context: HuumeSurfaceContext | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one Huume turn. Yields `status`/`step`/`error` frames, then
     exactly one final `huume_result` frame:
@@ -597,6 +599,10 @@ async def run_huume_turn(
 
     if features is None or integrations is None:
         features, integrations = await store.get_thread_features_and_integrations(company_id)
+
+    if surface_context is None:
+        surface_context = HuumeSurfaceContext()
+    allowed_tool_names = surface_context.allowed_tools
 
     # Production callers provide target-company access. Direct skill-engine
     # tests and legacy callers may omit it temporarily and retain the old role
@@ -646,12 +652,55 @@ async def run_huume_turn(
     async def call_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
         """Returns (function_response payload, step dict)."""
         try:
+            if allowed_tool_names is not None and name not in allowed_tool_names:
+                step = recorder.record(
+                    tool=name, kind="read", label=f"Tool unavailable: {name}",
+                    status="rejected", detail="Tool is outside this Huume surface.",
+                )
+                return {"status": "refused", "message": "That capability is not available in this assistant."}, step
+
             if name == "lookup_context":
+                topic = str(args.get("topic") or "")
+                if surface_context.is_schedule:
+                    allowed_topics = surface_context.allowed_lookup_topics or frozenset()
+                    if topic not in allowed_topics:
+                        step = recorder.record(
+                            tool=name, kind="read", label="Lookup topic unavailable", status="rejected",
+                        )
+                        return {"status": "refused", "message": "That lookup is outside this schedule workspace."}, step
                 result = await onboarding_skill.lookup_context(
-                    company_id=company_id, topic=str(args.get("topic") or ""), query=args.get("query"),
+                    company_id=company_id, topic=topic, query=args.get("query"),
                     features=features, days=args.get("days"),
                 )
                 step = recorder.record(tool=name, kind="read", label=f"Looked up {args.get('topic')}", status="ok")
+                return _json_safe(result), step
+
+            if name == "get_schedule_overview":
+                from app.matcha.services.scheduling.schedule_assistant_context import get_schedule_overview
+                if not surface_context.is_schedule or not surface_context.location_id or not surface_context.week_start:
+                    step = recorder.record(tool=name, kind="read", label="Schedule context unavailable", status="rejected")
+                    return {"status": "refused", "message": "This tool requires a scoped schedule workspace."}, step
+                result = await get_schedule_overview(
+                    company_id=company_id,
+                    location_id=surface_context.location_id,
+                    week_start=surface_context.week_start,
+                )
+                ok = result.get("status") == "ok"
+                step = recorder.record(
+                    tool=name, kind="read", label="Reviewed schedule overview",
+                    status="ok" if ok else "rejected", detail=result.get("message"),
+                )
+                return _json_safe(result), step
+
+            if name == "list_schedule_eligibility_cases":
+                from app.matcha.services.scheduling.schedule_assistant_context import list_schedule_eligibility_cases
+                if not surface_context.is_schedule or not surface_context.location_id:
+                    step = recorder.record(tool=name, kind="read", label="Eligibility context unavailable", status="rejected")
+                    return {"status": "refused", "message": "This tool requires a scoped schedule workspace."}, step
+                result = await list_schedule_eligibility_cases(
+                    company_id=company_id, location_id=surface_context.location_id,
+                )
+                step = recorder.record(tool=name, kind="read", label="Reviewed schedule eligibility cases", status="ok")
                 return _json_safe(result), step
 
             if name == "list_assets":
@@ -817,6 +866,7 @@ async def run_huume_turn(
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
                     state_updates["huume_action"] = staged
@@ -909,6 +959,7 @@ async def run_huume_turn(
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
                     state_updates["huume_action"] = staged
@@ -959,6 +1010,7 @@ async def run_huume_turn(
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
                     state_updates["huume_action"] = staged
@@ -990,11 +1042,120 @@ async def run_huume_turn(
                 )
                 return _json_safe(result), step
 
+            if name in {
+                "propose_assignment_note", "propose_meal_break_waiver", "propose_work_permit",
+                "propose_eligibility_case_decision",
+            }:
+                if not surface_context.is_schedule or not surface_context.location_id:
+                    step = recorder.record(tool=name, kind="staged", label="Schedule action unavailable", status="rejected")
+                    return {"status": "refused", "message": "This action requires a scoped schedule workspace."}, step
+                action_type = {
+                    "propose_assignment_note": "schedule_note",
+                    "propose_meal_break_waiver": "meal_break_waiver",
+                    "propose_work_permit": "work_permit",
+                    "propose_eligibility_case_decision": "eligibility_case_decision",
+                }[name]
+                confirm_id = str(args.get("confirm_id") or "").strip()
+                confirming = (
+                    isinstance(pre_turn_action, dict)
+                    and pre_turn_action.get("type") == action_type
+                    and pre_turn_action.get("status") == "proposed"
+                    and confirm_id
+                    and pre_turn_action.get("confirm_id") == confirm_id
+                )
+                if confirming:
+                    staged = pre_turn_action
+                else:
+                    if action_type == "schedule_note":
+                        staged = {
+                            "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
+                            "location_id": str(surface_context.location_id),
+                            "shift_id": args.get("shift_id"), "employee_id": args.get("employee_id"),
+                            "note": args.get("note"),
+                            "visible_to_employee": bool(args.get("visible_to_employee", True)),
+                            "include_in_location_digest": bool(args.get("include_in_location_digest", True)),
+                            "send_employee_notice": bool(args.get("send_employee_notice", True)),
+                        }
+                    elif action_type == "meal_break_waiver":
+                        staged = {
+                            "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
+                            "location_id": str(surface_context.location_id),
+                            "employee_id": args.get("employee_id"), "on_file": bool(args.get("on_file")),
+                            "effective_from": args.get("effective_from") or date.today().isoformat(),
+                            "note": args.get("note"),
+                        }
+                    else:
+                        if action_type == "eligibility_case_decision":
+                            case_id = str(args.get("case_id") or "").strip()
+                            if not case_id:
+                                step = recorder.record(tool=name, kind="staged", label="Eligibility decision refused", status="rejected")
+                                return {"status": "refused", "message": "Tell me which eligibility case to decide."}, step
+                            try:
+                                case_uuid = UUID(case_id)
+                            except ValueError:
+                                step = recorder.record(tool=name, kind="staged", label="Eligibility decision refused", status="rejected")
+                                return {"status": "refused", "message": "That eligibility case identifier is invalid."}, step
+                            if args.get("decision") not in {"remove", "keep"}:
+                                step = recorder.record(tool=name, kind="staged", label="Eligibility decision refused", status="rejected")
+                                return {"status": "refused", "message": "Choose remove or keep for the eligibility case."}, step
+                            async with get_connection() as _conn:
+                                case = await _conn.fetchrow(
+                                    """SELECT id, employee_id, requirement_type, status, expires_at, legal_basis
+                                       FROM schedule_eligibility_cases
+                                       WHERE id=$1 AND company_id=$2 AND location_id=$3""",
+                                    case_uuid, company_id, surface_context.location_id,
+                                )
+                            if not case:
+                                step = recorder.record(tool=name, kind="staged", label="Eligibility case not found", status="rejected")
+                                return {"status": "refused", "message": "That eligibility case is not in this schedule workspace."}, step
+                            staged = {
+                                "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
+                                "location_id": str(surface_context.location_id), "case_id": str(case["id"]),
+                                "employee_id": str(case["employee_id"]), "requirement_type": case["requirement_type"],
+                                "case_status": case["status"], "expires_at": case["expires_at"],
+                                "legal_basis": case["legal_basis"], "decision": args.get("decision"),
+                                "acknowledgement_confirmed": bool(args.get("acknowledgement_confirmed", False)),
+                                "acknowledgement_note": args.get("acknowledgement_note"),
+                            }
+                        else:
+                            requested_location = str(args.get("location_id") or "")
+                            if requested_location and requested_location != str(surface_context.location_id):
+                                step = recorder.record(tool=name, kind="staged", label="Permit location refused", status="rejected")
+                                return {"status": "refused", "message": "The permit location must match this schedule workspace."}, step
+                            staged = {
+                                "type": action_type, "status": "proposed", "confirm_id": uuid4().hex[:8],
+                                "employee_id": args.get("employee_id"), "location_id": str(surface_context.location_id),
+                                "issued_at": args.get("issued_at"), "expires_at": args.get("expires_at"),
+                            }
+                verdict = actions.evaluate_huume_action(
+                    staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
+                    thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    schedule_surface=True,
+                )
+                if verdict.kind == "stage":
+                    state_updates["huume_action"] = staged
+                    step = recorder.record(tool=name, kind="staged", label=f"Staged: {name.replace('_', ' ')}", status="ok", detail=verdict.message)
+                    return {"status": "staged", "confirm_id": staged["confirm_id"], "message": verdict.message}, step
+                if not verdict.ok:
+                    step = recorder.record(tool=name, kind="staged", label=f"{name.replace('_', ' ').title()} refused", status="rejected", detail=verdict.message)
+                    return {"status": "refused", "message": verdict.message}, step
+                result = await actions.execute_huume_action(
+                    company_id=company_id, actor_user_id=user_id, action=verdict.action, thread_id=thread_id,
+                    actor_role=user_role,
+                )
+                ok = result.get("status") == "created"
+                state_updates["huume_action"] = {**staged, "status": "applied" if ok else "failed"}
+                step = recorder.record(tool=name, kind="write", label=name.replace("propose_", "").replace("_", " ").title(), status="ok" if ok else "error", detail=result.get("message"))
+                return _json_safe(result), step
+
             if name == "find_shift_coverage":
                 from app.matcha.services.huume import schedule_skill
                 result = await schedule_skill.find_coverage(
                     company_id=company_id, role=user_role, features=features,
-                    date_str=str(args.get("date") or ""), role_hint=args.get("role_hint"),
+                    date_str=str(args.get("date") or (surface_context.week_start.isoformat() if surface_context.week_start else "")),
+                    role_hint=args.get("role_hint"),
+                    location_id=surface_context.location_id,
+                    schedule_surface=surface_context.is_schedule,
                 )
                 ok = "error" not in result
                 step = recorder.record(
@@ -1054,6 +1215,8 @@ async def run_huume_turn(
                     async with _get_connection() as _conn:
                         proposed = await schedule_skill.propose(
                             _conn, company_id=company_id, actor_user_id=user_id, args=args,
+                            location_id=surface_context.location_id if surface_context.is_schedule else None,
+                            week_start=surface_context.week_start if surface_context.is_schedule else None,
                         )
                     proposal_status = proposed.get("status")
                     if proposal_status != "ready":
@@ -1070,6 +1233,7 @@ async def run_huume_turn(
                 verdict = actions.evaluate_huume_action(
                     staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                     thread_huume_mode=True, this_turn_staged_new=not confirming,
+                    schedule_surface=surface_context.is_schedule,
                 )
                 if verdict.kind == "stage":
                     state_updates["huume_action"] = staged
@@ -1393,6 +1557,7 @@ async def run_huume_turn(
                     verdict = actions.evaluate_huume_action(
                         staged_action=staged, features=features, role=user_role, capabilities=work_capabilities,
                         thread_huume_mode=True, this_turn_staged_new=not confirming,
+                        schedule_surface=surface_context.is_schedule,
                     )
                     if verdict.kind == "stage":
                         state_updates["huume_action"] = staged
@@ -1454,9 +1619,9 @@ async def run_huume_turn(
     client = get_genai_client()
     _system_instruction = build_system_prompt(
         company_name=company_name or "your company", today=date.today().isoformat(),
-        state_block=build_state_block(current_state),
+        state_block=build_state_block(current_state), surface_context=surface_context,
     )
-    _tools_arg = [types.Tool(function_declarations=tool_declarations())]
+    _tools_arg = [types.Tool(function_declarations=tool_declarations(allowed_names=allowed_tool_names))]
     # Two configs, same tools + system prompt — only ThinkingConfig differs.
     # Call 1 (the model's first read of the turn) uses the planner
     # model/thinking; calls 2..N (tool-result follow-ups) use the executor's.

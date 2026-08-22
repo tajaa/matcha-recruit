@@ -75,6 +75,7 @@ def _tool_args_to_edit_request(kind: str, args: dict[str, Any]) -> dict[str, Any
 async def find_coverage(
     *, company_id: UUID, role: Optional[str], features: dict[str, Any],
     date_str: str, role_hint: Optional[str], location_id: Optional[UUID] = None,
+    schedule_surface: bool = False,
 ) -> dict[str, Any]:
     """Read-only — same envelope shape as every other read tool: role +
     `employee_schedule` re-checked per call, never trusted from an earlier
@@ -82,7 +83,7 @@ async def find_coverage(
     from app.database import get_connection
     from app.matcha.services.scheduling.coverage import find_coverage_candidates
 
-    if role not in _ALLOWED_ROLES:
+    if role not in _ALLOWED_ROLES and not schedule_surface:
         return {"error": "Only a business admin can ask for coverage suggestions."}
     if not features.get("employee_schedule"):
         return {"error": "Scheduling isn't enabled for this company."}
@@ -100,6 +101,7 @@ async def find_coverage(
 
 async def propose(
     conn, *, company_id: UUID, actor_user_id: UUID, args: dict[str, Any],
+    location_id: Optional[UUID] = None, week_start: Optional[_date] = None,
 ) -> ScheduleProposalResult:
     """Resolve a STAGE-turn request without executing it.
 
@@ -109,6 +111,14 @@ async def propose(
     retry the same deterministic resolution.
     """
     from app.matcha.services.scheduling import schedule_chat
+
+    if location_id and not (args.get("location_name") or "").strip():
+        location_name = await conn.fetchval(
+            "SELECT name FROM business_locations WHERE id=$1 AND company_id=$2 AND is_active IS NOT FALSE",
+            location_id, company_id,
+        )
+        if location_name:
+            args = {**args, "location_name": location_name}
 
     kind = str(args.get("kind") or "").strip().lower()
     today = _date.today()
@@ -123,7 +133,7 @@ async def propose(
             build = await schedule_chat.build_proposal(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
-                original_content="[huume thread] shift create",
+                original_content="[huume thread] shift create", week_start=week_start,
             )
         else:
             edit_req = schedule_chat.coerce_edit_request(_tool_args_to_edit_request(kind, args))
@@ -138,6 +148,7 @@ async def propose(
                 conn, company_id=company_id, channel_id=None, source_message_id=None,
                 created_by=actor_user_id, parsed=parsed, today=today,
                 original_content=f"[huume thread] {kind} request",
+                editor_location_id=location_id,
             )
     except Exception:
         return {"status": "refused", "message": "That failed just now — try the Schedule page instead."}

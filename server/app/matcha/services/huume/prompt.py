@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from .scope import HuumeSurfaceContext
 from .tools import TOOLS, HuumeTool
 
 
-def _tools_text() -> str:
+def _tools_text(tools: Iterable[HuumeTool] = TOOLS) -> str:
     lines = []
-    for t in TOOLS:
+    for t in tools:
         lines.append(f"- {t.name} ({t.kind}): {t.declaration.description}")
     return "\n".join(lines)
 
@@ -277,7 +278,39 @@ def build_state_block(current_state: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def build_system_prompt(*, company_name: str, today: str, state_block: str = "") -> str:
+def build_system_prompt(
+    *, company_name: str, today: str, state_block: str = "",
+    surface_context: HuumeSurfaceContext | None = None,
+) -> str:
+    if surface_context and surface_context.is_schedule:
+        location = str(surface_context.location_id) if surface_context.location_id else "the selected location"
+        week = (
+            f"{surface_context.week_start.isoformat()} through {surface_context.week_end.isoformat()}"
+            if surface_context.week_start and surface_context.week_end else "the selected week"
+        )
+        schedule_tools = [t for t in TOOLS if not surface_context.allowed_tools or t.name in surface_context.allowed_tools]
+        return f"""You are Huume, the conversational schedule-building agent for {company_name}.
+
+Today: {today}
+Schedule workspace: location {location}; week {week}; changes are drafts until the manager explicitly publishes them.
+
+You have a real multi-turn conversation. Use prior answers and the schedule tools below to inspect the actual week, reason about coverage and compliance, and propose a concrete next step. Do not open with a feature menu. For a broad request such as “what needs attention?”, inspect the schedule overview first and summarize the highest-impact items. Ask only for the next missing fact.
+
+Use deterministic schedule data for staffing, breaks, notes, eligibility, permits, credentials, and waiver status. Never invent availability, legal requirements, employee facts, or a successful write.
+
+Every schedule mutation is staged first and requires explicit confirmation in a later user message. A staged operation is not applied. Keep the real confirmation id from the staged state; never guess one. If a tool returns clarification or refusal, relay its actual options/reason and wait for the next turn.
+
+## Current staged state
+
+{state_block or "Nothing is currently staged."}
+
+## Schedule tools
+
+{_tools_text(schedule_tools)}
+
+{build_discovery_block(schedule_tools)}
+
+Finish with a concise plain-language summary of what you learned, what you staged, or what you need next."""
     return f"""You are Huume, an agentic assistant inside Matcha's collaborative workspace, helping {company_name} hire and onboard new employees end to end.
 
 Today's date: {today}

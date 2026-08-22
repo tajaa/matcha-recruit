@@ -4,6 +4,25 @@ import type {
   ScheduleChatTurnResponse,
   ScheduleVoiceTranscript,
 } from '../../types/scheduleChat'
+import type { MWMessage } from '../../work/types'
+
+export interface ScheduleHuumeSession {
+  session_id: string
+  thread_id: string
+  location_id: string
+  week_start: string
+  week_end: string
+  messages: MWMessage[]
+  current_state: Record<string, unknown>
+  version: number
+}
+
+export function getScheduleHuumeSession(locationId: string, weekStart: string) {
+  return api.post<ScheduleHuumeSession>('/employee-schedule/assistant/sessions', {
+    location_id: locationId,
+    week_start: weekStart,
+  })
+}
 
 export function sendScheduleChatMessage(body: {
   message: string

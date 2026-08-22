@@ -15,7 +15,7 @@ import ScheduleEditorToolbar from '../../components/employees/schedule-editor/Sc
 import ShiftInspector, { type NewShiftDefaults } from '../../components/employees/schedule-editor/ShiftInspector'
 import WeekTimeGrid from '../../components/employees/schedule-editor/WeekTimeGrid'
 import ScheduleEditorGuide from '../../components/employees/schedule-editor/ScheduleEditorGuide'
-import ScheduleChatPanel from '../../components/employees/schedule-editor/ScheduleChatPanel'
+import ScheduleHuumePanel from '../../components/employees/schedule-editor/ScheduleHuumePanel'
 
 const GUIDE_STORAGE_KEY = 'matcha.schedule-editor.guide.v2'
 
@@ -200,13 +200,12 @@ export default function ScheduleEditor() {
               />
             )}
             {chatOpen && (
-              <ScheduleChatPanel
+              <ScheduleHuumePanel
                 key={`${weekStart}:${locationId}`}
                 firstName={firstName}
                 weekStart={weekStart}
                 locationId={locationId || null}
                 locationName={currentLocationName}
-                editPublished={editPublished}
                 onApplied={() => void editor.reload()}
                 onClose={() => setChatOpen(false)}
               />

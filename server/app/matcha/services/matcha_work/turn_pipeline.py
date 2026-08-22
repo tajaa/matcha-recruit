@@ -51,6 +51,14 @@ from app.matcha.services.matcha_work.work_permissions import (
     WorkAccess,
     resolve_work_access,
 )
+from app.matcha.services.huume.scope import (
+    HuumeSurfaceContext,
+    SCHEDULE_LOOKUP_TOPICS,
+    SCHEDULE_TOOLS,
+)
+from app.matcha.services.scheduling.schedule_assistant_session import (
+    resolve_schedule_assistant_scope,
+)
 from app.matcha.services.billing.model_pricing import calculate_call_cost
 
 logger = logging.getLogger(__name__)
@@ -883,6 +891,8 @@ async def _run_huume_dispatch(tc: TurnContext):
     features = await get_company_features(company_id)
     if not features.get("huume"):
         return
+    if thread.get("surface") == "schedule_assistant" and not features.get("employee_schedule"):
+        return
 
     from app.matcha.services.huume import agent as huume_agent, store as huume_store
 
@@ -917,10 +927,28 @@ async def _run_huume_dispatch(tc: TurnContext):
     # Resolve against the thread's owning company. A shared thread may be
     # opened by a collaborator whose home company is different; that home
     # role must not grant target-company execution privileges.
-    async with get_connection() as conn:
-        tc.work_access = await resolve_work_access(
-            conn, user=current_user, company_id=company_id
+    surface_context = None
+    if thread.get("surface") == "schedule_assistant":
+        schedule_scope = await resolve_schedule_assistant_scope(
+            thread_id=thread_id,
+            company_id=company_id,
+            user_id=current_user.id,
+            actor_role=current_user.role,
         )
+        surface_context = HuumeSurfaceContext(
+            surface="schedule_assistant",
+            location_id=schedule_scope.location_id,
+            week_start=schedule_scope.week_start,
+            week_end=schedule_scope.week_end,
+            allowed_tools=SCHEDULE_TOOLS,
+            allowed_lookup_topics=SCHEDULE_LOOKUP_TOPICS,
+            write_mode="draft",
+        )
+    else:
+        async with get_connection() as conn:
+            tc.work_access = await resolve_work_access(
+                conn, user=current_user, company_id=company_id
+            )
 
     current_state = thread.get("current_state") or {}
     final_result: dict | None = None
@@ -933,6 +961,7 @@ async def _run_huume_dispatch(tc: TurnContext):
             company_name=(tc.profile or {}).get("name") or "",
             attachment_texts=tc.file_context_parts,
             features=features, integrations=integrations, run_id=run_id,
+            surface_context=surface_context,
         ):
             if frame.get("type") == "huume_result":
                 final_result = frame.get("data")
@@ -1486,4 +1515,3 @@ async def _audit_and_persist(tc: TurnContext) -> None:
     except asyncio.CancelledError:
         _schedule_cancel_finalizer(tc)
         raise
-

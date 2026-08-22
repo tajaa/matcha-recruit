@@ -18,36 +18,43 @@ async def create_thread(
     company_id: UUID,
     user_id: UUID,
     title: str = "New Chat",
+    *,
+    surface: str = "workspace",
+    initial_state: Optional[dict] = None,
+    huume_mode: bool = False,
 ) -> dict:
     # Pre-populate initial state with company profile hints
-    initial_state: dict = {}
-    try:
-        profile = await get_company_profile_for_ai(company_id)
-        if profile.get("name"):
-            initial_state["company_name"] = profile["name"]
-        if profile.get("industry"):
-            initial_state["industry"] = profile["industry"]
-        if profile.get("default_employment_type"):
-            initial_state["employment_type"] = profile["default_employment_type"]
-        if profile.get("headquarters_state"):
-            initial_state["work_state"] = profile["headquarters_state"]
-    except Exception:
-        logger.warning("Failed to fetch company profile for thread pre-population", exc_info=True)
+    initial_state = dict(initial_state or {})
+    if surface == "workspace":
+        try:
+            profile = await get_company_profile_for_ai(company_id)
+            if profile.get("name"):
+                initial_state.setdefault("company_name", profile["name"])
+            if profile.get("industry"):
+                initial_state.setdefault("industry", profile["industry"])
+            if profile.get("default_employment_type"):
+                initial_state.setdefault("employment_type", profile["default_employment_type"])
+            if profile.get("headquarters_state"):
+                initial_state.setdefault("work_state", profile["headquarters_state"])
+        except Exception:
+            logger.warning("Failed to fetch company profile for thread pre-population", exc_info=True)
 
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""
-                INSERT INTO mw_threads(company_id, created_by, title, current_state)
-                VALUES($1, $2, $3, $4::jsonb)
+                INSERT INTO mw_threads(company_id, created_by, title, current_state, surface, huume_mode)
+                VALUES($1, $2, $3, $4::jsonb, $5, $6)
                 RETURNING id, company_id, created_by, title, status,
-                          current_state, version, is_pinned, {MODE_COLUMNS_SQL}, linked_offer_letter_id,
+                          current_state, version, is_pinned, surface, {MODE_COLUMNS_SQL}, linked_offer_letter_id,
                           created_at, updated_at
                 """,
                 company_id,
                 user_id,
                 title,
                 json.dumps(initial_state),
+                surface,
+                huume_mode,
             )
             await _upsert_element_from_thread_row(conn, dict(row))
         d = dict(row)
@@ -63,7 +70,7 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             row = await conn.fetchrow(
                 f"""
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, {MODE_COLUMNS_SQL},
+                       current_state, version, is_pinned, surface, {MODE_COLUMNS_SQL},
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
@@ -85,7 +92,7 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             row = await conn.fetchrow(
                 f"""
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, {MODE_COLUMNS_SQL},
+                       current_state, version, is_pinned, surface, {MODE_COLUMNS_SQL},
                        linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
@@ -131,13 +138,13 @@ async def list_threads(
         if user_id is not None:
             # $1=company_id(UUID), $2=user_id(UUID) — UUIDs first, ints after
             access_clause = (
-                "project_id IS NULL AND (company_id=$1"
+                "surface='workspace' AND project_id IS NULL AND (company_id=$1"
                 " OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = $2)"
                 " OR EXISTS(SELECT 1 FROM mw_project_collaborators pc WHERE pc.project_id = mw_threads.project_id"
                 " AND pc.user_id = $2 AND pc.status = 'active'))"
             )
         else:
-            access_clause = "project_id IS NULL AND company_id=$1"
+            access_clause = "surface='workspace' AND project_id IS NULL AND company_id=$1"
 
         collab_count_sql = "(SELECT COUNT(*) FROM mw_thread_collaborators WHERE thread_id = mw_threads.id) AS collaborator_count"
 
@@ -145,7 +152,7 @@ async def list_threads(
             if user_id is not None:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
+                           SELECT id, title, status, version, is_pinned, surface, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -162,11 +169,11 @@ async def list_threads(
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, surface, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
-                    WHERE company_id=$1 AND status=$2
+                    WHERE surface='workspace' AND company_id=$1 AND status=$2
                     ORDER BY is_pinned DESC, updated_at DESC
                     LIMIT $3 OFFSET $4
                     """,
@@ -179,7 +186,7 @@ async def list_threads(
             if user_id is not None:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, surface, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
@@ -195,11 +202,11 @@ async def list_threads(
             else:
                 rows = await conn.fetch(
                     f"""
-                    SELECT id, title, status, version, is_pinned, {MODE_COLUMNS_SQL}, created_at, updated_at,
+                    SELECT id, title, status, version, is_pinned, surface, {MODE_COLUMNS_SQL}, created_at, updated_at,
                            {task_type_sql},
                            {collab_count_sql}
                     FROM mw_threads
-                    WHERE company_id=$1
+                    WHERE surface='workspace' AND company_id=$1
                     ORDER BY is_pinned DESC, updated_at DESC
                     LIMIT $2 OFFSET $3
                     """,

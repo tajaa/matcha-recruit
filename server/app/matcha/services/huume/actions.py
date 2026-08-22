@@ -129,6 +129,10 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "inventory_item_archive": "inventory",
     "inventory_receipt": "inventory",
     "schedule_change": "employee_schedule",
+    "schedule_note": "employee_schedule",
+    "meal_break_waiver": "employee_schedule",
+    "work_permit": "employee_schedule",
+    "eligibility_case_decision": "employee_schedule",
 }
 
 # discipline_from_incident / discipline_decision — the incident-triggered
@@ -206,6 +210,7 @@ def evaluate_huume_action(
     capabilities: Optional[set[WorkCapability] | frozenset[WorkCapability]] = None,
     thread_huume_mode: bool,
     this_turn_staged_new: bool,
+    schedule_surface: bool = False,
 ) -> HuumeVerdict:
     """Pure, DB-free safety envelope for executing a staged `huume_action`
     (any type in _HUUME_ACTION_REQUIRED_FEATURE). Order: authz → confirm-first →
@@ -227,7 +232,7 @@ def evaluate_huume_action(
         return HuumeVerdict(kind="refuse", message="Huume actions are only available in a Huume thread.")
     if not features.get("huume"):
         return HuumeVerdict(kind="refuse", message="Huume isn't enabled for this company.")
-    if not features.get("matcha_work"):
+    if not features.get("matcha_work") and not schedule_surface:
         return HuumeVerdict(kind="refuse", message="Matcha Work isn't enabled for this company.")
     if not features.get(required_feature):
         return HuumeVerdict(
@@ -240,7 +245,8 @@ def evaluate_huume_action(
         if this_turn_staged_new
         else WorkCapability.ACTION_EXECUTE
     )
-    if required_capability not in effective_capabilities:
+    schedule_manager_authorized = schedule_surface and role in {"admin", "client", "employee"}
+    if required_capability not in effective_capabilities and not schedule_manager_authorized:
         return HuumeVerdict(
             kind="refuse",
             message=(
@@ -347,6 +353,64 @@ def evaluate_huume_action(
         # amend_handbook.
         if not staged_action.get("proposal_id"):
             return HuumeVerdict(kind="refuse", message="There's no schedule change to apply.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type in {"schedule_note", "meal_break_waiver", "work_permit"}:
+        if not staged_action.get("confirm_id"):
+            return HuumeVerdict(kind="refuse", message="There's no staged schedule action to apply.")
+        required = {
+            "schedule_note": ("location_id", "shift_id", "employee_id", "note"),
+            "meal_break_waiver": ("location_id", "employee_id", "effective_from", "on_file"),
+            "work_permit": ("employee_id", "location_id", "expires_at"),
+        }[action_type]
+        if any(
+            staged_action.get(field) in (None, "")
+            or (field == "note" and not str(staged_action.get(field) or "").strip())
+            for field in required
+        ):
+            return HuumeVerdict(kind="refuse", message="The staged schedule action is missing required details.")
+        try:
+            UUID(str(staged_action["location_id"]))
+            UUID(str(staged_action["employee_id"]))
+            if action_type == "schedule_note":
+                UUID(str(staged_action["shift_id"]))
+            elif action_type == "meal_break_waiver":
+                date.fromisoformat(str(staged_action["effective_from"]))
+            elif action_type == "work_permit":
+                expires = date.fromisoformat(str(staged_action["expires_at"]))
+                issued = staged_action.get("issued_at")
+                if issued and date.fromisoformat(str(issued)) > expires:
+                    return HuumeVerdict(kind="refuse", message="The permit issue date is after its expiry date.")
+        except (TypeError, ValueError):
+            return HuumeVerdict(kind="refuse", message="One of the staged schedule identifiers or dates is invalid.")
+        return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
+
+    if action_type == "eligibility_case_decision":
+        if (
+            not staged_action.get("confirm_id")
+            or not staged_action.get("case_id")
+            or not staged_action.get("location_id")
+        ):
+            return HuumeVerdict(kind="refuse", message="There's no staged eligibility decision to apply.")
+        if staged_action.get("decision") not in {"remove", "keep"}:
+            return HuumeVerdict(kind="refuse", message="Eligibility decisions must be remove or keep.")
+        try:
+            UUID(str(staged_action["case_id"]))
+            UUID(str(staged_action["location_id"]))
+        except (TypeError, ValueError):
+            return HuumeVerdict(kind="refuse", message="The eligibility case identifier is invalid.")
+        if staged_action.get("decision") == "keep":
+            if not staged_action.get("acknowledgement_confirmed"):
+                return HuumeVerdict(
+                    kind="refuse",
+                    message="Keeping the employee requires explicit acknowledgement of the compliance risk.",
+                )
+            note = str(staged_action.get("acknowledgement_note") or "").strip()
+            if len(note) < 20:
+                return HuumeVerdict(
+                    kind="refuse",
+                    message="Keeping the employee requires a written acknowledgement of at least 20 characters.",
+                )
         return HuumeVerdict(kind="proceed", message="", action=dict(staged_action))
 
     return HuumeVerdict(kind="refuse", message="That action type isn't something I can execute.")
@@ -1086,6 +1150,7 @@ async def execute_huume_action(
     *, company_id: UUID, actor_user_id: Optional[UUID], action: dict[str, Any],
     thread_id: Optional[UUID] = None, session_id: Optional[str] = None,
     exclude_ids: Optional[set[str]] = None,
+    actor_role: Optional[str] = None,
 ) -> dict[str, Any]:
     """Execute a validated staged huume_action. Assumes evaluate_huume_action
     returned kind=='proceed'.
@@ -1152,6 +1217,43 @@ async def execute_huume_action(
         from app.matcha.services.huume import schedule_skill
         result = await schedule_skill.execute(
             company_id=company_id, actor_user_id=actor_user_id, action=action,
+        )
+    elif action.get("type") in {"schedule_note", "meal_break_waiver", "work_permit"}:
+        from app.matcha.services.scheduling import schedule_assistant_actions
+        if action["type"] == "schedule_note":
+            result = await schedule_assistant_actions.update_assignment_note_core(
+                company_id=company_id, actor_user_id=actor_user_id,
+                location_id=UUID(action["location_id"]), shift_id=UUID(action["shift_id"]),
+                employee_id=UUID(action["employee_id"]), note=action.get("note"),
+                visible_to_employee=bool(action.get("visible_to_employee", True)),
+                include_in_location_digest=bool(action.get("include_in_location_digest", True)),
+                send_employee_notice=bool(action.get("send_employee_notice", True)),
+            )
+        elif action["type"] == "meal_break_waiver":
+            result = await schedule_assistant_actions.record_meal_break_waiver_core(
+                company_id=company_id, actor_user_id=actor_user_id,
+                location_id=UUID(action["location_id"]), employee_id=UUID(action["employee_id"]),
+                on_file=bool(action["on_file"]),
+                effective_from=date.fromisoformat(action["effective_from"]), note=action.get("note"),
+            )
+        else:
+            result = await schedule_assistant_actions.record_work_permit_core(
+                company_id=company_id, actor_user_id=actor_user_id,
+                employee_id=UUID(action["employee_id"]), location_id=UUID(action["location_id"]),
+                issued_at=date.fromisoformat(action["issued_at"]) if action.get("issued_at") else None,
+                expires_at=date.fromisoformat(action["expires_at"]),
+            )
+    elif action.get("type") == "eligibility_case_decision":
+        from app.matcha.services.scheduling.schedule_assistant_actions import decide_eligibility_case_core
+        result = await decide_eligibility_case_core(
+            company_id=company_id,
+            actor_user_id=actor_user_id,
+            actor_role=actor_role or "",
+            case_id=UUID(action["case_id"]),
+            location_id=UUID(action["location_id"]),
+            decision=action["decision"],
+            acknowledgement_confirmed=bool(action.get("acknowledgement_confirmed")),
+            acknowledgement_note=action.get("acknowledgement_note"),
         )
     else:
         result = {"status": "error", "message": "Unsupported action."}

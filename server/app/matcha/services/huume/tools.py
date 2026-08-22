@@ -726,6 +726,85 @@ TOOLS: tuple[HuumeTool, ...] = (
         intent_hints=("received a delivery", "got a delivery", "invoice attached", "packing slip"),
     ),
     _tool(
+        "propose_assignment_note", "staged",
+        "Stage one visible manager note on an employee's shift. Use a shift "
+        "and employee id from the schedule overview. Nothing is written or "
+        "emailed until a later confirmation.",
+        properties={
+            "shift_id": types.Schema(type=types.Type.STRING),
+            "employee_id": types.Schema(type=types.Type.STRING),
+            "note": types.Schema(type=types.Type.STRING),
+            "visible_to_employee": types.Schema(type=types.Type.BOOLEAN),
+            "include_in_location_digest": types.Schema(type=types.Type.BOOLEAN),
+            "send_employee_notice": types.Schema(type=types.Type.BOOLEAN),
+            "confirm_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["shift_id", "employee_id", "note"],
+    ),
+    _tool(
+        "propose_meal_break_waiver", "staged",
+        "Stage a manager confirmation that an employee's signed meal-break "
+        "waiver is or is not on file. Include the effective date and note; "
+        "future assignment break guidance is refreshed only after confirmation.",
+        properties={
+            "employee_id": types.Schema(type=types.Type.STRING),
+            "on_file": types.Schema(type=types.Type.BOOLEAN),
+            "effective_from": types.Schema(type=types.Type.STRING),
+            "note": types.Schema(type=types.Type.STRING),
+            "confirm_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["employee_id", "on_file", "effective_from"],
+    ),
+    _tool(
+        "propose_work_permit", "staged",
+        "Stage entry of a confirmed minor work permit for one employee and "
+        "location. The permit dates are checked again when confirmed.",
+        properties={
+            "employee_id": types.Schema(type=types.Type.STRING),
+            "location_id": types.Schema(type=types.Type.STRING),
+            "issued_at": types.Schema(type=types.Type.STRING),
+            "expires_at": types.Schema(type=types.Type.STRING),
+            "confirm_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["employee_id", "location_id", "expires_at"],
+    ),
+    _tool(
+        "list_schedule_eligibility_cases", "read",
+        "List open credential/permit eligibility cases and recurring "
+        "escalations for this schedule location. Use it to explain why an "
+        "employee is blocked or why a previously acknowledged retention is "
+        "still being warned about.",
+        properties={},
+        discovery=True,
+        intent_hints=("who is blocked", "expired permits", "expired credentials", "compliance issues"),
+    ),
+    _tool(
+        "propose_eligibility_case_decision", "staged",
+        "Stage a decision on one open credential or work-permit eligibility "
+        "case. Choose remove to take the employee off the affected future "
+        "shifts, or keep only when the manager explicitly acknowledges the "
+        "cited legal/compliance risk with a written explanation. Nothing "
+        "changes until a later confirmation.",
+        properties={
+            "case_id": types.Schema(type=types.Type.STRING),
+            "decision": types.Schema(type=types.Type.STRING, enum=["remove", "keep"]),
+            "acknowledgement_confirmed": types.Schema(type=types.Type.BOOLEAN),
+            "acknowledgement_note": types.Schema(type=types.Type.STRING),
+            "confirm_id": types.Schema(type=types.Type.STRING),
+        },
+        required=["case_id", "decision"],
+    ),
+    _tool(
+        "get_schedule_overview", "read",
+        "Read the selected location's full schedule-builder week, including "
+        "draft and published shifts, open staffing, assignment notes visible "
+        "to the manager, and deterministic break/compliance guidance. Use "
+        "this for 'what needs attention?' before proposing a change.",
+        properties={},
+        discovery=True,
+        intent_hints=("what needs attention", "review this week", "schedule overview", "check the schedule"),
+    ),
+    _tool(
         "find_shift_coverage", "read",
         "Find who is free to cover shifts on one date — use for 'who can "
         "cover / replace / fill in for X' questions. date must be YYYY-MM-DD. "
@@ -840,5 +919,8 @@ TOOLS: tuple[HuumeTool, ...] = (
 TOOLS_BY_NAME: dict[str, HuumeTool] = {t.name: t for t in TOOLS}
 
 
-def tool_declarations() -> list[types.FunctionDeclaration]:
-    return [t.declaration for t in TOOLS]
+def tool_declarations(*, allowed_names=None) -> list[types.FunctionDeclaration]:
+    if allowed_names is None:
+        return [t.declaration for t in TOOLS]
+    allowed = set(allowed_names)
+    return [t.declaration for t in TOOLS if t.name in allowed]
