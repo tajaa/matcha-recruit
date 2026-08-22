@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -111,6 +112,20 @@ describe('ScheduleEditor', () => {
 
     expect(screen.getByText('Huume · Schedule assistant')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument())
+  })
+
+  it('opens the assistant when React StrictMode replays effects', async () => {
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+          <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+        </MemoryRouter>
+      </StrictMode>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Try: add an opener Monday')).not.toBeDisabled())
   })
 
   it('resets the assistant conversation when the schedule scope changes', async () => {

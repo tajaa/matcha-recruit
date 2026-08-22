@@ -77,6 +77,10 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
 
   useEffect(() => {
     let cancelled = false
+    // React StrictMode re-runs effects after their simulated cleanup. The
+    // cleanup below marks the component unmounted, so restore the live state
+    // before accepting this scope's session response.
+    mountedRef.current = true
     abortRef.current?.abort()
     setThreadId(null)
     setMessages([])
