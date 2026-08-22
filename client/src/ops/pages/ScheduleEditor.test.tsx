@@ -114,6 +114,29 @@ describe('ScheduleEditor', () => {
     await waitFor(() => expect(screen.getByText(/Hi, Jamie/)).toBeInTheDocument())
   })
 
+  it('sends selected blocks as authoritative Huume context', async () => {
+    render(
+      <MemoryRouter initialEntries={['/ops/schedule/editor?week=2026-08-09&location=loc1']}>
+        <Routes><Route path="/ops/schedule/editor" element={<ScheduleEditor />} /></Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select Opener for Huume' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Huume' }))
+    const input = await screen.findByPlaceholderText('Try: add an opener Monday')
+    fireEvent.change(input, { target: { value: 'Move the selected person' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send scheduling question' }))
+
+    expect(screen.getByText('Using 1 selected shift as context')).toBeInTheDocument()
+    expect(sendMessageStreamMock).toHaveBeenCalledWith(
+      'thread-1',
+      expect.stringContaining('Selected schedule blocks — authoritative context for this request:'),
+      expect.any(Object),
+    )
+    const [, sentContent] = sendMessageStreamMock.mock.calls[0] as unknown as [unknown, string, unknown]
+    expect(sentContent).toContain('Sun 8/9 · 9a–5p · Opener · open · staffing: 0/1')
+  })
+
   it('opens the assistant when React StrictMode replays effects', async () => {
     render(
       <StrictMode>

@@ -10,14 +10,27 @@ import MessageBubble from '../../../work/components/panels/MessageBubble'
 import HuumeActionCard from '../../../work/components/panels/HuumeActionCard'
 import HuumeStepTimeline from '../../../work/components/panels/HuumeStepTimeline'
 import { useVoiceDictation } from '../../../hooks/useVoiceDictation'
+import type { Shift } from '../../../types/employeeSchedule'
+import { fmtDayLabel, fmtTime } from '../../../types/employeeSchedule'
 
 interface ScheduleHuumePanelProps {
   firstName: string
   weekStart: string
   locationId: string | null
   locationName?: string
+  selectedShifts: Shift[]
+  onClearSelectedShifts(): void
   onApplied(): void
   onClose(): void
+}
+
+export function selectedShiftContext(shifts: Shift[]): string {
+  if (!shifts.length) return ''
+  const blocks = shifts.map((shift, index) => {
+    const assignees = shift.assignments.map((assignment) => assignment.name).filter(Boolean)
+    return `${index + 1}. ${fmtDayLabel(shift.starts_at)} · ${fmtTime(shift.starts_at)}–${fmtTime(shift.ends_at)} · ${shift.role || 'Untitled shift'} · ${assignees.length ? `assigned: ${assignees.join(', ')}` : 'open'} · staffing: ${assignees.length}/${shift.required_staff}`
+  })
+  return `\n\nSelected schedule blocks — authoritative context for this request:\n${blocks.join('\n')}\nUse these exact blocks as the shift references. Keep any assignee not named in my request on their current shift.`
 }
 
 function optimisticUserMessage(threadId: string, content: string): MWMessage {
@@ -43,7 +56,7 @@ function appliedActionKey(response: MWSendResponse): string | null {
   return runId ? 'run:' + runId : null
 }
 
-export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, onApplied, onClose }: ScheduleHuumePanelProps) {
+export default function ScheduleHuumePanel({ firstName, weekStart, locationId, locationName, selectedShifts, onClearSelectedShifts, onApplied, onClose }: ScheduleHuumePanelProps) {
   const { toast } = useToast()
   const [threadId, setThreadId] = useState<string | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
@@ -113,14 +126,15 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
   }, [messages, steps, status])
 
   async function send(contentOverride?: string) {
-    const content = (contentOverride ?? input).trim()
-    if (!content || !threadId || busy || sessionError) return
+    const displayContent = (contentOverride ?? input).trim()
+    if (!displayContent || !threadId || busy || sessionError) return
+    const content = displayContent + selectedShiftContext(selectedShifts)
     setInput('')
     setBusy(true)
     setStatus('Huume is working…')
     stepsRef.current = []
     setSteps([])
-    const optimistic = optimisticUserMessage(threadId, content)
+    const optimistic = optimisticUserMessage(threadId, displayContent)
     setMessages((current) => [...current, optimistic])
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
@@ -145,7 +159,7 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
             }
         setMessages((current) => [
           ...current.filter((message) => message.id !== optimistic.id),
-          response.user_message,
+          { ...response.user_message, content: displayContent },
           assistantMessage,
         ])
         setCurrentState(response.current_state || {})
@@ -231,6 +245,13 @@ export default function ScheduleHuumePanel({ firstName, weekStart, locationId, l
         <span className="ml-auto text-[10px] text-zinc-600">{locationName || 'Location'} · {weekStart}</span>
         <button type="button" onClick={onClose} className="rounded p-1 text-zinc-500 hover:text-zinc-100" aria-label="Close schedule assistant"><X className="h-4 w-4" /></button>
       </header>
+      {selectedShifts.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-2 text-[11px] text-emerald-100">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-300" />
+          <span className="min-w-0 flex-1 truncate">Using {selectedShifts.length} selected shift{selectedShifts.length === 1 ? '' : 's'} as context</span>
+          <button type="button" onClick={onClearSelectedShifts} className="shrink-0 text-emerald-300 hover:text-emerald-100">Clear</button>
+        </div>
+      )}
       <div className="flex max-h-[min(560px,70vh)] min-h-[220px] flex-col gap-3 overflow-y-auto px-3 py-3" role="log" aria-live="polite">
         {messages.length === 0 && !sessionError && <div className="text-xs text-zinc-400">Hi, {firstName}. What would you like to understand or change in this week’s schedule?</div>}
         {messages.map((message) => <MessageBubble key={message.id} message={message} lightMode={false} />)}

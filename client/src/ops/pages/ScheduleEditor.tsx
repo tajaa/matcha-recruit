@@ -49,6 +49,7 @@ export default function ScheduleEditor() {
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => !hasSeenGuide())
   const [chatOpen, setChatOpen] = useState(false)
+  const [huumeSelectedShiftIds, setHuumeSelectedShiftIds] = useState<Set<string>>(() => new Set())
   const [jobs, setJobs] = useState<ScheduleJob[]>([])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -61,6 +62,11 @@ export default function ScheduleEditor() {
   const currentLocation = locations.find((l) => l.id === locationId)
   const currentLocationName = currentLocation ? locationLabel(currentLocation) : ''
   const firstName = me?.profile?.name.trim().split(/\s+/)[0] || 'there'
+  const huumeSelectedShifts = editor.shifts.filter((shift) => huumeSelectedShiftIds.has(shift.id))
+
+  useEffect(() => {
+    setHuumeSelectedShiftIds(new Set())
+  }, [locationId, weekStart])
 
   useEffect(() => {
     if (!locationId) {
@@ -164,6 +170,7 @@ export default function ScheduleEditor() {
           onExit={() => navigate(`/ops/schedule?week=${weekStart}${locationId ? `&location=${locationId}` : ''}`)}
           onHelp={() => setGuideOpen(true)}
           chatOpen={chatOpen}
+          huumeSelectionCount={huumeSelectedShifts.length}
           onToggleChat={() => setChatOpen((value) => !value)}
         />
         {!locationId ? (
@@ -180,7 +187,7 @@ export default function ScheduleEditor() {
         ) : (
           <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
             <RosterPanel roster={editor.roster} rosterFlags={editor.rosterFlags} selectedEmployeeId={selectedEmployeeId} onSelectEmployee={setSelectedEmployeeId} requiredJobId={inspectorShift?.job_id} />
-            <WeekTimeGrid days={days} shifts={editor.shifts} pendingKeys={editor.pendingKeys} editPublished={editPublished} selectedEmployeeId={selectedEmployeeId} onCreateAt={(date, minute, employeeId) => openNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })} onOpenShift={openShift} onAssignSelected={(shift) => { if (selectedEmployeeId && canMutate(shift)) void editor.assignToShift(shift, selectedEmployeeId) }} onResizeShift={(shift, endMinute) => { if (canMutate(shift)) void editor.resizeShift(shift, endMinute) }} />
+            <WeekTimeGrid days={days} shifts={editor.shifts} pendingKeys={editor.pendingKeys} editPublished={editPublished} selectedEmployeeId={selectedEmployeeId} huumeSelectedShiftIds={huumeSelectedShiftIds} onCreateAt={(date, minute, employeeId) => openNew({ date, minute, employeeIds: employeeId ? [employeeId] : undefined })} onOpenShift={openShift} onToggleHuumeSelection={(shift) => setHuumeSelectedShiftIds((current) => { const next = new Set(current); if (next.has(shift.id)) next.delete(shift.id); else next.add(shift.id); return next })} onAssignSelected={(shift) => { if (selectedEmployeeId && canMutate(shift)) void editor.assignToShift(shift, selectedEmployeeId) }} onResizeShift={(shift, endMinute) => { if (canMutate(shift)) void editor.resizeShift(shift, endMinute) }} />
             {(inspectorShift || newDefaults) && (
               <ShiftInspector
                 key={inspectorShift?.id ?? `${newDefaults?.date}-${newDefaults?.minute}`}
@@ -206,6 +213,8 @@ export default function ScheduleEditor() {
                 weekStart={weekStart}
                 locationId={locationId || null}
                 locationName={currentLocationName}
+                selectedShifts={huumeSelectedShifts}
+                onClearSelectedShifts={() => setHuumeSelectedShiftIds(new Set())}
                 onApplied={() => void editor.reload()}
                 onClose={() => setChatOpen(false)}
               />

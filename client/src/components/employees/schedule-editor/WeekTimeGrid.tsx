@@ -10,8 +10,10 @@ interface WeekTimeGridProps {
   pendingKeys: ReadonlySet<string>
   editPublished: boolean
   selectedEmployeeId: string | null
+  huumeSelectedShiftIds: ReadonlySet<string>
   onCreateAt(date: string, minute: number, employeeId?: string): void
   onOpenShift(shift: Shift): void
+  onToggleHuumeSelection(shift: Shift): void
   onAssignSelected(shift: Shift): void
   onResizeShift(shift: Shift, endMinute: number): void
 }
@@ -21,7 +23,7 @@ function TimeSlot({ date, minute, onCreate }: { date: string; minute: number; on
   return <button ref={setNodeRef} onClick={onCreate} className={`absolute left-0 right-0 border-t border-zinc-900/80 text-left ${isOver ? 'bg-emerald-500/10' : 'hover:bg-white/[0.02]'}`} style={{ top: minute, height: 15 }} aria-label={`Create shift on ${date} at ${minute} minutes`} />
 }
 
-export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, onCreateAt, onOpenShift, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
+export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished, selectedEmployeeId, huumeSelectedShiftIds, onCreateAt, onOpenShift, onToggleHuumeSelection, onAssignSelected, onResizeShift }: WeekTimeGridProps) {
   const hours = Array.from({ length: 24 }, (_, i) => i)
   const layouts = days.map((day) => {
     const dayShifts = shifts.filter((shift) => shift.starts_at.slice(0, 10) === day)
@@ -49,7 +51,7 @@ export default function WeekTimeGrid({ days, shifts, pendingKeys, editPublished,
                 {positioned.map(({ shift, lane, laneCount }) => {
                   const position = shiftPosition(shift)
                   const laneWidth = width / laneCount
-                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} style={{ top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }} onOpen={() => onOpenShift(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
+                  return <ShiftBlock key={shift.id} shift={shift} pending={pendingKeys.has(`shift:${shift.id}`)} editable={shift.status !== 'cancelled' && (shift.status === 'draft' || editPublished)} selectedEmployeeId={selectedEmployeeId} huumeSelected={huumeSelectedShiftIds.has(shift.id)} style={{ top: `${position.topPercent}%`, height: `${position.heightPercent}%`, left: lane * laneWidth + 2, width: Math.max(laneWidth - 4, 120) }} onOpen={() => onOpenShift(shift)} onToggleHuumeSelection={() => onToggleHuumeSelection(shift)} onAssignSelected={() => onAssignSelected(shift)} onResize={(endMinute) => onResizeShift(shift, endMinute)} />
                 })}
               </div>
             )

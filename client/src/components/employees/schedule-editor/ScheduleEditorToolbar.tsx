@@ -22,6 +22,7 @@ interface ScheduleEditorToolbarProps {
   onExit(): void
   onHelp(): void
   chatOpen: boolean
+  huumeSelectionCount: number
   onToggleChat(): void
 }
 
@@ -36,7 +37,7 @@ export default function ScheduleEditorToolbar({
   weekStart, summary, saveState, lastSavedAt, editPublished, publishing,
   locations, locationId, onChangeLocation,
   onPreviousWeek, onNextWeek, onThisWeek, onTogglePublishedEditing, onPublish, onExit, onHelp,
-  chatOpen, onToggleChat,
+  chatOpen, huumeSelectionCount, onToggleChat,
 }: ScheduleEditorToolbarProps) {
   return (
     <div className="border-b border-white/[0.06] bg-zinc-950/90 px-3 py-3 backdrop-blur md:px-5">
@@ -71,6 +72,7 @@ export default function ScheduleEditorToolbar({
         <span>{summary?.total_shifts ?? 0} shifts</span>
         <span>{summary?.open_shifts ?? 0} open slots</span>
         <span>Drag to arrange</span>
+        <span className={huumeSelectionCount ? 'text-emerald-400' : ''}>{huumeSelectionCount ? `${huumeSelectionCount} selected for Huume` : 'Use ✨ on a shift to give Huume context'}</span>
       </div>
     </div>
   )
