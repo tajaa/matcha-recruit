@@ -146,8 +146,8 @@ async def create_my_schedule_request(
                 INSERT INTO schedule_requests
                     (company_id, employee_id, request_type, shift_id, target_employee_id,
                      unavailable_start, unavailable_end, reason, status)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
-                        CASE WHEN $3 IN ('pickup', 'swap')
+                VALUES ($1,$2,$3::text,$4,$5,$6,$7,$8,
+                        CASE WHEN $3::text IN ('pickup', 'swap')
                              THEN 'awaiting_counterparty' ELSE 'awaiting_manager' END)
                 RETURNING id
                 """,

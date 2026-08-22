@@ -445,6 +445,19 @@ async def approve_credential_document(
                 if val is None:
                     continue
 
+                # AI extraction returns date values as strings. Reject malformed
+                # dates before asyncpg binds them to PostgreSQL DATE columns.
+                if field_name in {
+                    "license_expiration",
+                    "dea_expiration",
+                    "board_certification_expiration",
+                    "malpractice_expiration",
+                }:
+                    try:
+                        val = date.fromisoformat(str(val))
+                    except ValueError:
+                        continue
+
                 # Only map known credential fields
                 if field_name in (
                     "license_type", "license_number", "license_state", "license_expiration",
