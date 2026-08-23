@@ -137,6 +137,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # investigate.sh can die AFTER the model has already edited files
+          # (report missing, or a required heading missing — checked only
+          # after the model run). Without discarding those partial edits
+          # first, publish.sh's `git add --all` would find a real diff and
+          # take the PR path instead of the issue path — shipping a
+          # possibly-broken, definitely-unreviewed fix under a body that
+          # says "Investigation failed."
+          git reset --hard HEAD
+          git clean -fd
           echo "Investigation failed or produced no report." > "$RUNNER_TEMP/report.md"
           echo "### Verification" > "$RUNNER_TEMP/verification.md"
           echo "_(not run — investigation did not complete)_" >> "$RUNNER_TEMP/verification.md"

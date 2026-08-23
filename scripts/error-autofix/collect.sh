@@ -17,19 +17,22 @@ LIMIT="${AUTOFIX_LIMIT:-25}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --hours) HOURS="$2"; shift 2 ;;
-        --limit) LIMIT="$2"; shift 2 ;;
+        --hours) [ $# -ge 2 ] || die "--hours needs a value"; HOURS="$2"; shift 2 ;;
+        --limit) [ $# -ge 2 ] || die "--limit needs a value"; LIMIT="$2"; shift 2 ;;
         *) die "unknown argument: $1" ;;
     esac
 done
 
 QUERY_PY="$(cat "$SCRIPT_DIR/_query.py")"
 
+# A real SSH/connection failure must be fatal, not silently treated as "no
+# errors" — otherwise a prod outage that takes the box unreachable is
+# reported by this pipeline as a clean, quiet run.
 raw_json="$(
     ssh_prod <<REMOTE
 CONTAINER="\$($(resolve_backend_container_cmd))"
 if [ -z "\$CONTAINER" ]; then
-    echo '[]'
+    echo '{"incidents":[],"skipped_infra":0}'
     exit 0
 fi
 docker exec -i -e AUTOFIX_HOURS="$HOURS" -e AUTOFIX_LIMIT="$LIMIT" "\$CONTAINER" python - <<'PYEOF'
@@ -37,13 +40,12 @@ $QUERY_PY
 PYEOF
 REMOTE
 )"
-
-if [ -z "$raw_json" ]; then
-    echo '[]'
-    exit 0
+ssh_rc=$?
+if [ "$ssh_rc" -ne 0 ]; then
+    die "ssh/docker collection failed (exit $ssh_rc) — prod may be unreachable"
 fi
 
-if ! printf '%s' "$raw_json" | jq -e . >/dev/null 2>&1; then
+if [ -z "$raw_json" ] || ! printf '%s' "$raw_json" | jq -e . >/dev/null 2>&1; then
     die "collector received non-JSON output from prod"
 fi
 
@@ -56,6 +58,7 @@ raw_json="$(printf '%s' "$raw_json" | jq -c '.incidents // []')"
 # error_id/occurrences/timestamps are structural and must survive byte-for-
 # byte — redact_stream's UUID/digit rules would corrupt them.
 count="$(printf '%s' "$raw_json" | jq 'length')"
+count="${count:-0}"
 out="[]"
 for ((i = 0; i < count; i++)); do
     incident="$(printf '%s' "$raw_json" | jq -c ".[$i]")"

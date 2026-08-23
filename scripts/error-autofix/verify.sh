@@ -65,18 +65,28 @@ map_test_dirs() {
             [ -n "$hit" ] && dirs+=("$(dirname "$hit")")
         done < <(grep -rlF "$mod" "$REPO_ROOT/server/tests" 2>/dev/null | sed "s#^$REPO_ROOT/##")
     done
-    printf '%s\n' "${dirs[@]}" | sort -u
+    printf '%s\n' "${dirs[@]+"${dirs[@]}"}" | sort -u
 }
 
+# investigate.sh commits nothing and stages nothing (it edits the working
+# tree only — see its own docstring), so at the point this runs (workflow
+# order is investigate -> verify -> publish, publish does the commit) BOTH
+# the committed-vs-base diff AND the staged diff are empty. Without the
+# plain worktree-diff fallback, this always fell through to "no changed
+# files" -> "no matching test directory" -> a green-looking table that
+# tested nothing, on every single PR.
 CHANGED_FILES=($(git -C "$REPO_ROOT" diff --name-only "$BASE_SHA"...HEAD 2>/dev/null || true))
 if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
     CHANGED_FILES=($(git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null || true))
 fi
+if [ "${#CHANGED_FILES[@]}" -eq 0 ]; then
+    CHANGED_FILES=($(git -C "$REPO_ROOT" diff --name-only 2>/dev/null || true))
+fi
 
-TEST_DIRS=($(map_test_dirs "${CHANGED_FILES[@]}"))
+TEST_DIRS=($(map_test_dirs "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"))
 
 CLIENT_CHANGED=false
-for f in "${CHANGED_FILES[@]}"; do
+for f in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
     [[ "$f" == client/* ]] && CLIENT_CHANGED=true && break
 done
 
@@ -141,7 +151,7 @@ run_suite() {
 
 compileall_check() {
     local tree="$1" changed_py=() f
-    for f in "${CHANGED_FILES[@]}"; do
+    for f in "${CHANGED_FILES[@]+"${CHANGED_FILES[@]}"}"; do
         [[ "$f" == *.py ]] && [ -f "$tree/$f" ] && changed_py+=("$tree/$f")
     done
     [ "${#changed_py[@]}" -eq 0 ] && { echo pass; return; }

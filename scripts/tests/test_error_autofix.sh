@@ -55,17 +55,73 @@ redacted_key="$(printf '%s' "$structural" | redact_stream)"
 check "redact_stream spares a bare stable_key (no digit run \\u2265 7)" $([ "$redacted_key" = "$structural" ] && echo 0 || echo 1)
 
 ################################################################################
-# 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH
+# collect.sh — SSH failure is fatal (not silently "no errors"), no-container
+# shape matches _query.py's real shape, --hours/--limit are guarded
 ################################################################################
 mkdir -p "$TMP_DIR/bin"
+cat > "$TMP_DIR/bin/ssh" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null   # drain the heredoc collect.sh sends us; we don't execute it
+case "${SSH_STUB_MODE:-ok}" in
+    fail)
+        exit 255
+        ;;
+    no_container)
+        echo '{"incidents":[],"skipped_infra":0}'
+        ;;
+    *)
+        echo '{"incidents":[{"stable_key":"deadbeef0001","error_id":"1","kind":"http_error","level":"ERROR","exception_type":"DataError","message":"boom for user@example.com","traceback":"File \"/app/x.py\", line 1","source":"api","request_method":"POST","request_path":"/api/x?token=secret","request_status":500,"occurrences":3,"days_seen":1,"first_seen":"2026-08-19T00:00:00Z","last_seen":"2026-08-22T00:00:00Z","request_id":"abc123","company_id":null}],"skipped_infra":1}'
+        ;;
+esac
+EOF
+chmod +x "$TMP_DIR/bin/ssh"
+
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" SSH_STUB_MODE=fail \
+    "$AUTOFIX_DIR/collect.sh" > /dev/null 2>"$TMP_DIR/collect_err.txt"
+check "collect.sh exits nonzero on ssh failure (not silently '[]')" $([ "$?" != "0" ] && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" SSH_STUB_MODE=no_container \
+    "$AUTOFIX_DIR/collect.sh" > "$TMP_DIR/collect_out.json" 2>&1
+rc=$?
+check "collect.sh handles 'no container' cleanly (valid empty array, exit 0)" \
+    $([ "$rc" = "0" ] && [ "$(jq -e 'type=="array" and length==0' "$TMP_DIR/collect_out.json" 2>/dev/null)" = "true" ] && echo 0 || echo 1)
+
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" SSH_STUB_MODE=ok \
+    "$AUTOFIX_DIR/collect.sh" > "$TMP_DIR/collect_out2.json" 2>"$TMP_DIR/collect_err2.txt"
+rc=$?
+redacted_message="$(jq -r '.[0].message' "$TMP_DIR/collect_out2.json" 2>/dev/null)"
+ok=0
+[ "$rc" = "0" ] || ok=1
+grep -qF 'user@example.com' <<< "$redacted_message" && ok=1
+[ "$(jq -r '.[0].stable_key' "$TMP_DIR/collect_out2.json" 2>/dev/null)" = "deadbeef0001" ] || ok=1
+check "collect.sh redacts message but preserves stable_key end to end" "$ok"
+
+PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" "$AUTOFIX_DIR/collect.sh" --hours > /dev/null 2>&1
+check "collect.sh rejects --hours with no value instead of crashing on \$2" $([ "$?" != "0" ] && echo 0 || echo 1)
+
+################################################################################
+# 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH
+################################################################################
 GH_STUB_RESPONSE_FILE="$TMP_DIR/gh_response.json"
+echo '[{"state":"OPEN","mergedAt":null,"closedAt":null}]' > "$GH_STUB_RESPONSE_FILE"
 cat > "$TMP_DIR/bin/gh" <<EOF
 #!/usr/bin/env bash
-if [[ "\$*" == *"--label autofix"* ]]; then
-    echo 0
-    exit 0
-fi
-cat "$GH_STUB_RESPONSE_FILE"
+case "\$1 \$2" in
+    "issue list")
+        # No open no-fix issue tracking this incident, unless a test overrides it.
+        echo "\${GH_STUB_ISSUE_HITS:-0}"
+        ;;
+    "pr list")
+        if [[ "\$*" == *"--label autofix"* ]]; then
+            echo 0
+        else
+            cat "$GH_STUB_RESPONSE_FILE"
+        fi
+        ;;
+    *)
+        cat "$GH_STUB_RESPONSE_FILE"
+        ;;
+esac
 EOF
 chmod +x "$TMP_DIR/bin/gh"
 
@@ -82,7 +138,7 @@ make_incident() {
 }
 
 incident_file="$TMP_DIR/incidents.json"
-make_incident "aaa111" "2026-08-19T00:00:00+00:00" "2026-08-22T00:00:00+00:00" > "$incident_file"
+make_incident "aaa111111111" "2026-08-19T00:00:00Z" "2026-08-22T00:00:00Z" > "$incident_file"
 
 echo '[{"state":"OPEN","mergedAt":null,"closedAt":null}]' > "$GH_STUB_RESPONSE_FILE"
 run_select "$incident_file" > /dev/null 2>&1
@@ -96,12 +152,12 @@ echo '[{"state":"CLOSED","mergedAt":null,"closedAt":"2026-01-01T00:00:00Z"}]' > 
 run_select "$incident_file" > /dev/null
 check "select.sh re-investigates a closed-unmerged PR after the cooldown" $?
 
-make_incident "bbb222" "2026-08-19T00:00:00+00:00" "2026-08-19T01:00:00+00:00" > "$incident_file"
+make_incident "bbb222222222" "2026-08-19T00:00:00Z" "2026-08-19T01:00:00Z" > "$incident_file"
 echo '[{"state":"MERGED","mergedAt":"2026-08-20T00:00:00Z","closedAt":"2026-08-20T00:00:00Z"}]' > "$GH_STUB_RESPONSE_FILE"
 run_select "$incident_file" > /dev/null 2>&1
 check "select.sh skips MERGED when last_seen predates the merge" $([ "$?" = "3" ] && echo 0 || echo 1)
 
-make_incident "ccc333" "2026-08-19T00:00:00+00:00" "2026-08-22T00:00:00+00:00" > "$incident_file"
+make_incident "ccc333333333" "2026-08-19T00:00:00Z" "2026-08-22T00:00:00Z" > "$incident_file"
 echo '[{"state":"MERGED","mergedAt":"2026-08-20T00:00:00Z","closedAt":"2026-08-20T00:00:00Z"}]' > "$GH_STUB_RESPONSE_FILE"
 out="$(run_select "$incident_file")"
 check "select.sh re-opens for a genuine recurrence after merge+grace" $([ -n "$out" ] && echo 0 || echo 1)
@@ -109,6 +165,16 @@ check "select.sh re-opens for a genuine recurrence after merge+grace" $([ -n "$o
 echo '[]' > "$GH_STUB_RESPONSE_FILE"
 out="$(run_select "$incident_file")"
 check "select.sh emits an incident with no prior PR at all" $([ -n "$out" ] && echo 0 || echo 1)
+
+################################################################################
+# open no-fix issue must not starve the queue: skip, don't re-investigate
+################################################################################
+GH_STUB_ISSUE_HITS=1 run_select "$incident_file" > /dev/null 2>&1
+check "select.sh skips (exit 3) when an open no-fix issue already tracks this key" $([ "$?" = "3" ] && echo 0 || echo 1)
+
+unset GH_STUB_ISSUE_HITS
+out="$(run_select "$incident_file")"
+check "select.sh still investigates once the no-fix issue is gone" $([ -n "$out" ] && echo 0 || echo 1)
 
 ################################################################################
 # 10: publish.sh path guard — denylist and allowlist both fatal on bad paths

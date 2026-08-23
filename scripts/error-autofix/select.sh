@@ -52,14 +52,33 @@ already_handled() {
         fi
     fi
 
+    # A prior investigation that found no safe fix opens an issue, not a PR
+    # (publish.sh). Without checking for that, the top-ranked incident with
+    # no safe fix would be re-selected and re-investigated (a ~12-minute
+    # model run) on every single run forever, and every incident ranked
+    # below it would starve. The issue title embeds "[KEY]" for exact,
+    # reliable matching — GitHub's body/comment search index is not
+    # reliable enough to dedup on (see publish.sh).
+    [[ "$key" =~ ^[0-9a-f]{12}$ ]] || die "stable_key has unexpected shape: $key"
+    local open_issue_hit
+    open_issue_hit="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
+        --json title --jq "map(select(.title | contains(\"[$key]\"))) | length")"
+    if [ "${open_issue_hit:-0}" -gt 0 ]; then
+        echo skip
+        return
+    fi
+
     local prs
     prs="$(gh pr list --repo "$REPO" --head "$branch" --state all --limit 100 \
-        --json state,mergedAt,closedAt --jq '.')"
+        --json state,mergedAt,closedAt,createdAt --jq 'sort_by(.createdAt) | reverse')"
 
     local n
     n="$(printf '%s' "$prs" | jq 'length')"
     [ "$n" -gt 0 ] || { echo investigate; return; }
 
+    # Most recent PR for this branch decides. Sorted explicitly rather than
+    # trusting gh's default ordering — .[0] on an unsorted list is only
+    # "probably" the right one.
     local state merged_at closed_at
     state="$(printf '%s' "$prs" | jq -r '.[0].state')"
     merged_at="$(printf '%s' "$prs" | jq -r '.[0].mergedAt')"

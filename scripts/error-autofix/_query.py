@@ -60,6 +60,16 @@ def _normalize(text):
     return text
 
 
+def _ts(dt):
+    """Canonical UTC timestamp: no microseconds, always 'Z' suffix — never
+    isoformat()'s '+00:00'. select.sh compares these lexicographically
+    against gh's mergedAt/closedAt (which are 'Z'-suffixed) and against
+    _iso_plus_hours' own 'Z'-suffixed output; mixing '+00:00' and 'Z' breaks
+    that comparison ('.' sorts before 'Z', so a same-second '+00:00' value
+    can compare as "earlier" than a 'Z' value it's actually equal to)."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def stable_key(kind, exception_type, message, traceback_str):
     """Deterministic incident identity, computed once, here. Does not need to
     match error_reporter._fingerprint (server/app/core/services/
@@ -141,20 +151,20 @@ async def main():
                 "request_status": r["request_status"],
                 "occurrences": r["occurrences"] or 0,
                 "days_seen": 1,
-                "first_seen": r["first_seen"].isoformat(),
-                "last_seen": r["last_seen"].isoformat(),
+                "first_seen": _ts(r["first_seen"]),
+                "last_seen": _ts(r["last_seen"]),
                 "request_id": ctx.get("request_id"),
                 "company_id": ctx.get("company_id"),
             }
         else:
             g["occurrences"] += r["occurrences"] or 0
             g["days_seen"] += 1
-            if r["first_seen"].isoformat() < g["first_seen"]:
-                g["first_seen"] = r["first_seen"].isoformat()
-            if r["last_seen"].isoformat() > g["last_seen"]:
+            if _ts(r["first_seen"]) < g["first_seen"]:
+                g["first_seen"] = _ts(r["first_seen"])
+            if _ts(r["last_seen"]) > g["last_seen"]:
                 # Keep the newest row as the exemplar: newest error_id (for
                 # the admin link) and newest traceback (most likely current).
-                g["last_seen"] = r["last_seen"].isoformat()
+                g["last_seen"] = _ts(r["last_seen"])
                 g["error_id"] = r["id"]
                 g["traceback"] = r["traceback"] or g["traceback"]
 

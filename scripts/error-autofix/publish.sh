@@ -4,7 +4,7 @@
 # there is no diff, open/update a tracking issue instead.
 #
 # Usage: ./publish.sh incident.json report.md verification.md
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -71,12 +71,17 @@ ADMIN_LINK=""
 # ---- no diff: track the incident as an issue instead of a silent no-op ----
 if git diff --cached --quiet; then
     git reset --hard >/dev/null 2>&1
-    title="error: $EXC in $PATH_"
-    marker="<!-- autofix-key: $KEY -->"
-    body="$marker
-
-Investigated, but the model could not produce a safe fix from the available
-evidence.
+    # The key lives in the TITLE, not just an HTML comment in the body:
+    # GitHub's issue search does not reliably full-text-match a body
+    # comment (it's a code-search index, not a database LIKE), so a
+    # marker-in-body search silently misses and opens a fresh issue every
+    # run. A title substring match, checked client-side against the label's
+    # issue list (never via `gh issue list --search`), is exact and
+    # reliable. select.sh does the matching check before ever calling this
+    # script, using the same "[$KEY]" convention.
+    title="error: $EXC in $PATH_ [$KEY]"
+    body="Investigated, but the model could not produce a safe fix from the
+available evidence.
 
 **Endpoint** \`$METHOD $PATH_\`
 **Occurrences** $OCC · first seen $FIRST_SEEN · last seen $LAST_SEEN
@@ -92,12 +97,12 @@ $TRACEBACK
 \`\`\`
 </details>"
 
-    existing="$(gh issue list --repo "$REPO" --state open --search "\"$marker\" in:body" --json number --jq '.[0].number' 2>/dev/null || true)"
-    if [ -n "$existing" ] && [ "$existing" != "null" ]; then
+    existing="$(gh issue list --repo "$REPO" --state open --label autofix-nofix --limit 100 \
+        --json number,title --jq "map(select(.title | contains(\"[$KEY]\"))) | .[0].number // empty")"
+    if [ -n "$existing" ]; then
         gh issue comment "$existing" --repo "$REPO" --body "$body" >/dev/null
     else
-        gh issue create --repo "$REPO" --title "$title" --body "$body" --label autofix-nofix >/dev/null \
-            || gh issue create --repo "$REPO" --title "$title" --body "$body" >/dev/null
+        gh issue create --repo "$REPO" --title "$title" --body "$body" --label autofix-nofix >/dev/null
     fi
     exit 0
 fi
@@ -145,7 +150,15 @@ BODY_FILE="$(mktemp)"
 
 TITLE="fix: $EXC in $PATH_"
 
-if gh pr view "$BRANCH" --repo "$REPO" >/dev/null 2>&1; then
+# `gh pr view <branch>` matches a PR for that head branch REGARDLESS of
+# state — including one already merged or closed. select.sh's re-open path
+# (a genuine recurrence after a merged fix, or a retry after a
+# closed-unmerged cooldown) pushes new commits to this same branch name, so
+# without an explicit state check this would silently `gh pr edit` the old,
+# already-closed PR instead of creating a new one — the recurrence would
+# never surface anywhere a human looks.
+existing_open_pr="$(gh pr list --repo "$REPO" --head "$BRANCH" --state open --limit 1 --json number --jq '.[0].number // empty')"
+if [ -n "$existing_open_pr" ]; then
     gh pr edit "$BRANCH" --repo "$REPO" --title "$TITLE" --body-file "$BODY_FILE"
 else
     gh pr create --repo "$REPO" --draft --head "$BRANCH" --title "$TITLE" --body-file "$BODY_FILE"
@@ -153,4 +166,6 @@ fi
 
 gh pr edit "$BRANCH" --repo "$REPO" --add-label autofix >/dev/null 2>&1 || true
 gh pr edit "$BRANCH" --repo "$REPO" --add-label "sev:$SEV" >/dev/null 2>&1 || true
-[ "$NEW_FAILURES" -gt 0 ] 2>/dev/null && { gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true; }
+if [ "$NEW_FAILURES" -gt 0 ] 2>/dev/null; then
+    gh pr edit "$BRANCH" --repo "$REPO" --add-label needs-work >/dev/null 2>&1 || true
+fi
