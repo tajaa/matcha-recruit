@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Collect a small, redacted incident bundle for the self-hosted OpenCode runner.
 # It intentionally reads logs only; no production mutation occurs here.
+#
+# Fallback source for scripts/error-autofix/collect.sh (which reads
+# server_error_reports directly) when that DB path is unreachable.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=./error-autofix/lib.sh
+source "$SCRIPT_DIR/error-autofix/lib.sh"
 
 : "${SSH_KEY:?SSH_KEY must point to the EC2 private key}"
 
@@ -54,23 +61,7 @@ done
 # receives no raw URL query strings, auth headers, cookies, emails, IPs, UUIDs,
 # or long numeric identifiers. Timestamps are normalized later by the workflow.
 tmp_file="${EVIDENCE_FILE}.redacted"
-sed -E \
-  -e 's/[Bb]earer[[:space:]]+[^[:space:]]+/Bearer [REDACTED]/g' \
-  -e 's/[Bb]asic[[:space:]]+[^[:space:]]+/Basic [REDACTED]/g' \
-  -e 's#(https?://)[^/@[:space:]]+:[^/@[:space:]]+@#\1[USERINFO_REDACTED]@#gI' \
-  -e 's/[?][^[:space:]]*/?[QUERY_REDACTED]/g' \
-  -e 's/((authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token)[[:space:]]*[:=][[:space:]]*)[^[:cntrl:]]*/\1[REDACTED]/gI' \
-  -e 's/("(password|passwd|secret|token|access_token|refresh_token|api_key|authorization|cookie)"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"[REDACTED]"/gI' \
-  -e 's/((password|passwd|secret|token|access_token|refresh_token|api_key|signature|key)[[:space:]]*=[[:space:]]*)[^[:space:],;"]+/\1[REDACTED]/gI' \
-  -e 's/(^|[^[:alnum:]_])(AKIA|ASIA)[[:alnum:]]{16}([^[:alnum:]_]|$)/\1[AWS_KEY_REDACTED]\3/g' \
-  -e 's/(^|[^[:alnum:]_])(ghp_[[:alnum:]]+|github_pat_[[:alnum:]_]+)([^[:alnum:]_]|$)/\1[GITHUB_TOKEN_REDACTED]\3/g' \
-  -e 's/(^|[^[:alnum:]_])eyJ[[:alnum:]_-]+\.[[:alnum:]_-]+\.[[:alnum:]_-]+([^[:alnum:]_]|$)/\1[JWT_REDACTED]\2/g' \
-  -e 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/[EMAIL]/g' \
-  -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/[IP]/g' \
-  -e 's/([[:xdigit:]]{1,4}:){2,}[[:xdigit:]:]+/[IP]/gI' \
-  -e 's/[0-9a-f]{8}-[0-9a-f-]{27,}/[UUID]/gI' \
-  -e 's/[0-9]{7,}/[NUMBER]/g' \
-  "$EVIDENCE_FILE" > "$tmp_file"
+redact_stream < "$EVIDENCE_FILE" > "$tmp_file"
 mv "$tmp_file" "$EVIDENCE_FILE"
 
 # Keep model input bounded even during a noisy outage.
