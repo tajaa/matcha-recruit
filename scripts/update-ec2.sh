@@ -58,10 +58,10 @@ EXAMPLES:
     $0 --status            # Check container status
 
 NOTES:
-    Backend deploys fire an RDS logical backup (deploy/backup-prod-rds.sh) in
-    the BACKGROUND on the EC2 — deploys never wait on it. RDS automated
-    snapshots (7-day PITR) are the primary rollback; schema-change rollback is
-    migrate-prod.sh's snapshot gate. Check ~/backup.log on EC2 for dump status.
+    Backend deploys enqueue a self-hosted Postgres logical backup through
+    pg-backup.service and never wait on it. The same service runs twice daily.
+    Dumps stream to s3://matcha-recruit-backups/postgres-selfhosted/; there is
+    no RDS PITR for live prod. Check ~/backup.log on EC2 for dump status.
 EOF
 }
 
@@ -103,24 +103,19 @@ ecr_login() {
 }
 
 backup_database() {
-    # Fire-and-forget: the RDS logical dump runs in the background on the EC2
-    # so the deploy never blocks on it (the old ~/backup-postgres.sh both
-    # blocked the deploy AND had been broken since the RDS cutover — it still
-    # pointed at the long-gone matcha-postgres container). RDS automated
-    # snapshots (7-day PITR) are the primary rollback path regardless.
-    log_info "Triggering background RDS logical backup (non-blocking)..."
-    # Non-fatal by construction: the whole trigger sits in an `if` so a scp or
-    # ssh failure can't kill the deploy via set -e. The `{ nohup … & }` group
-    # keeps ONLY the dump backgrounded — a bare `A && B &` backgrounds the
-    # entire chain, making ssh exit 0 even when chmod fails (dead-code warn).
-    # </dev/null so ssh returns immediately and the dump survives the session.
-    if scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new deploy/backup-prod-rds.sh \
-            "$EC2_USER@$EC2_HOST:~/backup-prod-rds.sh" \
-        && ssh_cmd "chmod +x ~/backup-prod-rds.sh && { nohup bash ~/backup-prod-rds.sh >> ~/backup.log 2>&1 < /dev/null & }"
+    # Install the canonical service every normal backend deploy so the host
+    # timer cannot drift back to the retired container script. --no-block
+    # queues this deploy's extra run without making the rollout wait for it.
+    # The script's flock handles a timer/deploy collision safely.
+    log_info "Installing backup timer and triggering logical backup (non-blocking)..."
+    if scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new \
+            deploy/backup-prod.sh deploy/pg-backup.service deploy/pg-backup.timer \
+            "$EC2_USER@$EC2_HOST:/tmp/" \
+        && ssh_cmd "sudo install -m 0755 /tmp/backup-prod.sh /home/ec2-user/backup-prod.sh && sudo install -m 0644 /tmp/pg-backup.service /etc/systemd/system/pg-backup.service && sudo install -m 0644 /tmp/pg-backup.timer /etc/systemd/system/pg-backup.timer && sudo systemctl daemon-reload && sudo systemctl enable --now pg-backup.timer && sudo systemctl start --no-block pg-backup.service"
     then
-        log_success "Backup running in background (tail ~/backup.log on EC2 to check)"
+        log_success "Backup queued; twice-daily timer installed (check ~/backup.log)"
     else
-        log_warn "Could not trigger backup — deploy continues; check ~/backup.log on EC2"
+        log_warn "Could not install or trigger backup — deploy continues; check pg-backup.service"
     fi
 }
 

@@ -1,6 +1,6 @@
 # Server (FastAPI Backend)
 
-Python 3.12, FastAPI + asyncpg + Celery + Gemini. Production runs on EC2 with Postgres on a separate dedicated host (treated as RDS — see root CLAUDE.md for DB connection rules and the **production-safety guard list**).
+Python 3.12, FastAPI + asyncpg + Celery + Gemini. Production runs on EC2 with Postgres in a container on a separate dedicated DB EC2; stopped RDS is only a cold fallback. See root `CLAUDE.md` for connection rules and the **production-safety guard list**.
 
 ## Layout
 
@@ -104,9 +104,9 @@ The IR-incidents tests (445 passing) are the model to follow.
 
 ## Migration authoring rules
 
-Prod is an RDS instance at the far end of an SSH tunnel (~100ms per round-trip),
+Prod is a dedicated DB EC2 at the far end of an SSH tunnel (~100ms per round-trip),
 and `migrate-prod.sh` gates every run: uncommitted migrations abort, pending
-revisions are printed, an RDS snapshot is taken, the whole upgrade is **rehearsed
+revisions are printed, a logical dump is streamed to S3, the whole upgrade is **rehearsed
 against live prod rows and rolled back**, and you type `migrate prod` to commit.
 Write migrations that survive that:
 
@@ -121,7 +121,7 @@ Write migrations that survive that:
   (ctid + `ROW_NUMBER()`, as in `jparent01`). Merging one row at a time hides the
   collision; merging a set does not.
 - **Write a real `downgrade()`** where feasible. If it is genuinely irreversible,
-  say so in the docstring — the RDS snapshot is then the only rollback.
+  say so in the docstring — the pre-migration S3 dump is then the only rollback.
 - **Commit the migration before applying it to ANY database, dev included.** Dev
   and prod running different bytes of the same revision id is a silent drift with
   no alarm on it.

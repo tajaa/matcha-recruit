@@ -5,16 +5,15 @@
 # it, so your credentials never leave your laptop (nothing is sent to the remote
 # process list). psql must be installed locally.
 #
-#   Default: matcha-prod RDS, tunnelled via the app EC2:
-#     localhost:5434 -> app EC2 (54.177.107.107) -> matcha-prod RDS :5432
-#   --legacy: the OLD prod container instead (matcha-postgres-prod :5433 on the
-#     DB EC2) — live until cutover, frozen after.
+#   Default: live matcha-postgres-prod, tunnelled via the app EC2:
+#     localhost:5434 -> app EC2 -> DB EC2 (13.56.253.173) :5433
+#   --legacy: the historical prod container on the stopped original DB EC2.
 #
 # Reads PROD_DATABASE_URL / PROD_LEGACY_DATABASE_URL from server/.env
-# (RDS expects sslmode=require — rds.force_ssl=1 rejects plaintext).
+# (the live container has SSL enabled and expects sslmode=require).
 #
 # Flags:
-#   --legacy   target the old :5433 container (DB EC2) instead of RDS
+#   --legacy   target the old :5433 container on the stopped original DB EC2
 #   --write    allow writes (default session is default_transaction_read_only=on)
 # Any other args are passed straight to psql, e.g.:
 #   ./scripts/prod-psql.sh -c "SELECT count(*) FROM companies;"
@@ -26,7 +25,8 @@ ENV_FILE="$REPO_ROOT/server/.env"
 
 APP_EC2="ec2-user@54.177.107.107"
 DB_EC2="ec2-user@3.101.83.217"
-RDS_HOST="matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com"
+PROD_DB_HOST="13.56.253.173"
+PROD_DB_PORT=5433
 
 env_val() { grep "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d ' '; }
 
@@ -49,10 +49,10 @@ if [[ "$LEGACY" == "1" ]]; then
   URL="${PROD_LEGACY_DATABASE_URL:-$(env_val PROD_LEGACY_DATABASE_URL)}"
   : "${URL:?Add PROD_LEGACY_DATABASE_URL=postgresql://user:pass@localhost:5433/matcha to server/.env}"
 else
-  LABEL="RDS matcha-prod (via app EC2)"
+  LABEL="LIVE PROD (self-hosted matcha-postgres-prod via app EC2)"
   LOCAL_PORT=5434
   JUMP="$APP_EC2"
-  FORWARD="${LOCAL_PORT}:${RDS_HOST}:5432"
+  FORWARD="${LOCAL_PORT}:${PROD_DB_HOST}:${PROD_DB_PORT}"
   URL="${PROD_DATABASE_URL:-$(env_val PROD_DATABASE_URL)}"
   : "${URL:?Add PROD_DATABASE_URL=postgresql://matcha:pass@localhost:5434/matcha?sslmode=require to server/.env}"
 fi

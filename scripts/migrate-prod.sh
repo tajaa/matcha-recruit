@@ -172,7 +172,7 @@ echo
 # Most recent downgrade()s are `pass`. There's no RDS snapshot API to lean on
 # for the self-hosted box, so the rollback story is a pg_dump taken over SSH
 # straight from the container, streamed to S3 without touching local/remote
-# disk (mirrors deploy/backup-prod-rds.sh's streaming approach).
+# disk (mirrors deploy/backup-prod.sh's streaming approach).
 # ---------------------------------------------------------------------------
 if [[ "$NO_SNAPSHOT" == "1" ]]; then
   echo "!! --no-snapshot: proceeding with NO rollback path. If this goes wrong,"

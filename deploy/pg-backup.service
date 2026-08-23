@@ -1,0 +1,12 @@
+[Unit]
+Description=Matcha production Postgres backup to S3
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+Environment=HOME=/home/ec2-user
+ExecStart=/home/ec2-user/backup-prod.sh
+StandardOutput=append:/home/ec2-user/backup.log
+StandardError=append:/home/ec2-user/backup.log

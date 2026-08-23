@@ -70,21 +70,22 @@ Cross-product import rule: `cappe/`, `tellus/`, and `oceanlab/` import only from
 - **AI**: Google Gemini via `GEMINI_API_KEY` (native Google AI; Vertex removed)
 - **Storage**: S3 + CloudFront (`server/app/core/services/storage.py`)
 - **Auth**: JWT
-- **Deployment**: AWS EC2 — Nginx reverse proxy + Postgres on dedicated EC2 (acts as RDS, runs directly on host, not Docker).
+- **Deployment**: AWS EC2 — Nginx reverse proxy + Postgres in a container on a dedicated DB EC2.
 
 ## Database
 
-**RDS cutover is DONE.** `matcha-prod` (PG 15.18, encrypted, app VPC; DB `matcha`, user `matcha`) is the one and only production DB — verified 2026-07-19, `DATABASE_URL` on the app EC2 points there. Full workflow + scripts: `docs/ops/DB_WORKFLOW.md`.
+**The RDS rollback is DONE.** Live production is `matcha-postgres-prod` (PG 15 in Docker; DB `matcha`, user `matcha`) on the dedicated `matcha-postgres-db` EC2. Verified 2026-08-23: the app host's `DATABASE_URL` points to `13.56.253.173:5433`, that EC2 and container are running, and `matcha-prod` RDS is stopped. Full workflow + scripts: `docs/ops/DB_WORKFLOW.md`.
 
 | Instance | Where | Role | Who connects |
 |---|---|---|---|
-| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD — the only one** | app EC2 (SG-locked); laptop via app-EC2 tunnel → `localhost:5434`. `rds.force_ssl=1` |
+| `matcha-postgres-prod` container | `matcha-postgres-db` EC2 `13.56.253.173:5433` | **PROD — the only live one**; data on encrypted EBS mounted at `/mnt/encdb/pgdata` | app EC2; laptop tools tunnel through app EC2 to `localhost:5434`; SSL required |
 | `matcha-postgres` container | **local** Docker `:5432` | **DEV** | laptop directly / `dev-remote.sh` |
-| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **RETIRED** — frozen pre-cutover copy, host EC2 is stopped | nothing |
+| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` | **STOPPED cold fallback**, frozen at the 2026-08-21 rollback; not live prod | nothing unless deliberately restarted |
+| Historical containers | original DB EC2 `3.101.83.217` | **RETIRED**; host stopped | nothing |
 
-**⚠️ Prod == RDS, nothing else.** The `--legacy`/`--legacy-source` flags on `migrate-prod.sh`, `prod-psql.sh`, `refresh-dev-from-prod.sh` target the retired `:5433` container — **do not use them**, a migration there reaches nothing and creates the illusion prod was migrated. Everything real goes through the app EC2 (`54.177.107.107`); laptop tools tunnel to `localhost:5434` (`PROD_DATABASE_URL` in `server/.env`).
+**⚠️ Prod == `13.56.253.173:5433`, nothing else.** `migrate-prod.sh`, `prod-psql.sh`, `refresh-dev-from-prod.sh`, `seed-prod.sh`, and `sync-test-tenants.sh` use that endpoint through the app EC2 (`54.177.107.107`); laptop tools terminate at `localhost:5434` using `PROD_DATABASE_URL` in `server/.env`. `--legacy` flags target the retired original host, not RDS and not live prod.
 
-**NEVER do the following without explicit user approval — especially against prod (RDS):**
+**NEVER do the following without explicit user approval — especially against prod:**
 - CREATE ROLE / DROP ROLE
 - CREATE TABLE / DROP TABLE on real tables
 - `alembic upgrade head` against prod
@@ -101,9 +102,9 @@ Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/
 - **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` → test → `./scripts/migrate-prod.sh` (5 safety gates; `alembic_version` must match after; dev-only apply is the drift that caused real 500s). Detail: `docs/ops/DB_WORKFLOW.md`
 - **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — anonymized clone. `SKIP_ANONYMIZE=1` currently set (pre-customer, clones verbatim); turn it back OFF the moment real customers exist (`DEV_PRESERVE_EMAILS` keeps your own logins). Detail: `docs/ops/DB_WORKFLOW.md`
 - **Seed/demo → prod:** `./scripts/seed-prod.sh <pack> [--dry-run|--undo|--dev]` — the ONLY sanctioned prod write path; always `--dry-run` first. Guards + pack conventions: `docs/ops/DB_WORKFLOW.md` + `scripts/seed/README.md`
-- **Backups:** RDS automated snapshots (7-day PITR) primary + `deploy/backup-prod-rds.sh` streamed-to-S3 dump fired in background by every backend deploy. The old 12h host cron is DEAD; `./scripts/backups.sh` is stale. Detail: `docs/ops/DB_WORKFLOW.md`
+- **Backups:** `pg-backup.timer` runs `deploy/backup-prod.sh` twice daily on the app EC2; every normal backend deploy installs the units and queues an extra non-blocking run. Dumps stream to `s3://matcha-recruit-backups/postgres-selfhosted/` with 7-day retention. **There is no live-prod RDS PITR.** One manual EBS snapshot exists from cutover, but no recurring EBS snapshot policy. Detail: `docs/ops/DB_WORKFLOW.md`
 
-**SSH:** `ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107` (app host — the only one that matters; it is also the jump host to RDS). The old DB host `3.101.83.217` is **stopped**. Beware stale addresses in older notes: `52.9.117.137` (`ec2-ahnimal`) is a different, also-stopped legacy instance.
+**SSH:** app host/jump: `ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107`; live DB host: `ssh -i secrets/roonMT-arm.pem ec2-user@13.56.253.173`. The original DB host `3.101.83.217` and stale `52.9.117.137` (`ec2-ahnimal`) are stopped legacy instances.
 
 ## Directory Structure
 
@@ -346,7 +347,7 @@ Normal rollout is `./scripts/build-and-push.sh && ./scripts/update-ec2.sh --matc
 
 Gitlink footgun (a mode-160000 clone-in-tree breaks `actions/checkout`'s credential teardown) is guarded by `scripts/tests/test_ci_guards.sh` case 7. Story: `docs/ops/DEPLOY.md`
 
-Two deploy-slowness regressions fixed 2026-07-19 — don't reintroduce: (1) never `docker image prune -a` before the pull (pruning belongs after the swap; the pre-pull prune survives only as a `<4GB`-free-disk safety valve); (2) the pre-deploy RDS backup is fire-and-forget and must stay non-fatal to the deploy (the old `~/backup-postgres.sh` cron had been silently broken since the RDS cutover, targeting a container that no longer exists). Full mechanics + history: `docs/ops/DEPLOY.md`
+Two deploy-slowness regressions fixed 2026-07-19 — don't reintroduce: (1) never `docker image prune -a` before the pull (pruning belongs after the swap; the pre-pull prune survives only as a `<4GB`-free-disk safety valve); (2) the deploy-triggered logical backup is queued through systemd and must stay non-blocking/non-fatal. The same service owns the twice-daily timer, preventing recurrence of the stale `~/backup-postgres.sh` target. Full mechanics + history: `docs/ops/DEPLOY.md`
 
 **Changelog auto-generation**: a normal (non-hotfix, non-CI, `--matcha`) laptop deploy also runs `server/scripts/generate_changelog.py` right before the tenant sync (`update-ec2.sh:379`) — it shells out to `gh pr list`, asks Gemini for one entry per merged PR per product, and writes new rows into dev's `admin_updates` / `tellus_admin_updates` (never prod directly; the sync step that follows pushes them). Needs `server/.env`'s `GEMINI_API_KEY`/Gemini settings and a `gh` session; failure only `log_warn`s, never blocks the deploy. See `AUTO_CHANGELOG_PLAN.md` for the full design.
 

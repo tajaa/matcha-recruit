@@ -20,10 +20,11 @@
 #     failed upload can't strand a plaintext prod dump on the host.
 #   - 7-day retention prune in S3, mirroring the old script.
 #
-# Intended to be fired in the BACKGROUND by update-ec2.sh (nohup) so deploys
-# never block on it; safe to run by hand or from cron too. There is no RDS
+# Run by pg-backup.service: its timer fires twice daily and normal backend
+# deploys enqueue an extra run without waiting. There is no RDS
 # PITR anymore — this streamed dump is the only offsite recovery story until
-# the DB EC2 gets its own snapshot/backup story (EBS snapshots, etc).
+# the DB EC2 gets a recurring EBS snapshot policy. One manual encrypted-volume
+# snapshot exists from the August 21 cutover, but AWS has no DLM/Backup plan.
 set -euo pipefail
 
 S3_BUCKET="s3://matcha-recruit-backups"
@@ -32,6 +33,15 @@ RETENTION_DAYS=7
 ENV_FILE="$HOME/matcha/.env.backend"
 PG_IMAGE="public.ecr.aws/docker/library/postgres:15-alpine"
 S3_KEY="postgres-selfhosted/matcha_prod_${DATE}.dump"
+LOCK_FILE="/tmp/matcha-prod-backup.lock"
+
+# A deploy can request a backup at the same moment as the twice-daily timer.
+# Skip the duplicate rather than running two full pg_dump streams concurrently.
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "$(date): Backup already running; skipping duplicate trigger"
+  exit 0
+fi
 
 DATABASE_URL=$(grep '^DATABASE_URL=' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
 if [ -z "$DATABASE_URL" ]; then

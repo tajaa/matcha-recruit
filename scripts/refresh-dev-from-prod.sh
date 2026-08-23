@@ -2,9 +2,9 @@
 # refresh-dev-from-prod.sh
 # Replace the DEV database with an ANONYMIZED clone of PRODUCTION.
 #
-# PROD = the matcha-prod RDS instance (app VPC). It is reachable ONLY from the
-# app EC2 (54.177.107.107) — dump runs there via SSH and streams straight to
-# this laptop.
+# PROD = matcha-postgres-prod on the dedicated DB EC2 (13.56.253.173:5433).
+# The app EC2 can reach its database port; pg_dump runs on the app EC2 and
+# streams straight to this laptop.
 # DEV = the LOCAL matcha-postgres docker container (managed by dev-remote.sh).
 # The old DB EC2 (3.101.83.217, "matcha-postgres-db") is STOPPED and has no
 # public IP anymore — dev moved off it entirely on 2026-06-15. There is no
@@ -25,7 +25,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="${PEM:-$REPO_ROOT/secrets/roonMT-arm.pem}"
 APP_EC2="${APP_EC2:-ec2-user@54.177.107.107}"
-RDS_HOST="${RDS_HOST:-matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com}"
+PROD_DB_HOST="${PROD_DB_HOST:-13.56.253.173}"
+PROD_DB_PORT="${PROD_DB_PORT:-5433}"
 
 DEV_CONTAINER="${DEV_CONTAINER:-matcha-postgres}"          # local docker container (target, rebuilt)
 DB_NAME="${DB_NAME:-matcha}"
@@ -99,12 +100,11 @@ for arg in "$@"; do
     esac
 done
 
-# RDS creds come from PROD_DATABASE_URL in server/.env (the laptop-tunnel form;
-# only the password is reused here — host is the real endpoint, used from the
-# app EC2 which is the only box that can route to RDS).
-RDS_URL="$(sed -n 's/^PROD_DATABASE_URL=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
-RDS_PW="$(printf '%s' "$RDS_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
-[[ -n "$RDS_PW" ]] || { echo "${RED}Could not parse password from PROD_DATABASE_URL in server/.env${NC}"; exit 1; }
+# PROD_DATABASE_URL uses the laptop-tunnel form. Only its password is reused;
+# pg_dump connects from the app EC2 to the real DB EC2 endpoint.
+PROD_URL="$(sed -n 's/^PROD_DATABASE_URL=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
+PROD_PW="$(printf '%s' "$PROD_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
+[[ -n "$PROD_PW" ]] || { echo "${RED}Could not parse password from PROD_DATABASE_URL in server/.env${NC}"; exit 1; }
 
 if [[ "$SKIP_ANON" == true ]]; then
     ANON_STATUS="${RED}OFF — dev becomes a FULL, UNSCRUBBED copy of prod (real emails/passwords/PII)${NC}"
@@ -114,7 +114,7 @@ fi
 
 cat <<EOF
 ${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
-  source (prod, read-only): RDS $RDS_HOST : $DB_NAME (dumped on $APP_EC2)
+  source (prod, read-only): $PROD_DB_HOST:$PROD_DB_PORT : $DB_NAME (dumped on $APP_EC2)
   target (dev,  REBUILT)  : local docker $DEV_CONTAINER : $DB_NAME
   anonymize PII: $ANON_STATUS
   non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
@@ -169,7 +169,7 @@ if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
 fi
 
 RENDERED="$(mktemp -t anonymize_dev.XXXXXX.sql)"
-DUMP_FILE="$(mktemp -t prod_rds.XXXXXX.dump)"
+DUMP_FILE="$(mktemp -t prod_ec2.XXXXXX.dump)"
 trap 'rm -f "$RENDERED" "$DUMP_FILE"' EXIT
 sed -e "s|__DEV_PW_HASH__|$DEV_PW_HASH|g" \
     -e "s|__PRESERVE_EMAILS__|$PRESERVE_SQL|g" "$ANON_SQL" > "$RENDERED"
@@ -182,14 +182,14 @@ docker exec "$DEV_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SNAP_DI
 echo "      $(du -h "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz" | cut -f1) -> $SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
 ls -1t "$SNAP_DIR"/dev_pre_refresh_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f   # keep last 5
 
-echo "${YELLOW}Dumping RDS prod on the app EC2 (via a PG15 dump container), streaming to this laptop...${NC}"
+echo "${YELLOW}Dumping prod on the app EC2 (via a PG15 dump container), streaming to this laptop...${NC}"
 # Password rides stdin (read by the remote shell) so it never appears in
-# argv/ps on the app EC2. PGSSLMODE=require: rds.force_ssl=1. pg_dump runs
+# argv/ps on the app EC2. The live container has SSL enabled. pg_dump runs
 # inside `postgres:15` (--network host, -e VARNAME with no '=' forwards the
 # value from the remote shell's env without it showing up in `docker run`'s
 # own argv) so the archive version matches the local PG15 restore target.
-printf '%s\n' "$RDS_PW" | ssh -i "$PEM" "$APP_EC2" \
-    "IFS= read -r PGPASSWORD; export PGPASSWORD PGSSLMODE=require; docker run --rm --network host -e PGPASSWORD -e PGSSLMODE postgres:15 pg_dump -h '$RDS_HOST' -p 5432 -U '$DB_USER' -d '$DB_NAME' -Fc" \
+printf '%s\n' "$PROD_PW" | ssh -i "$PEM" "$APP_EC2" \
+    "IFS= read -r PGPASSWORD; export PGPASSWORD PGSSLMODE=require; docker run --rm --network host -e PGPASSWORD -e PGSSLMODE postgres:15 pg_dump -h '$PROD_DB_HOST' -p '$PROD_DB_PORT' -U '$DB_USER' -d '$DB_NAME' -Fc" \
     > "$DUMP_FILE"
 echo "      $(du -h "$DUMP_FILE" | cut -f1) dumped"
 
