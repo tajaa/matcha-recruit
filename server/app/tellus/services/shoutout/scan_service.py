@@ -3,11 +3,17 @@ import asyncio
 import json
 from uuid import UUID
 
-from .grounding import corroborated_candidates
+from .grounding import corroborated_candidates, url_fingerprint
 from .prompt import build_prompt
 from .provider import GeminiGroundingProvider
+from ..loyalty_service import LoyaltyError, canonicalize_social_url
 
 _PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
+
+
+class TestPostError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        self.status, self.code, self.message = status, code, message
 
 
 def valid_candidate(candidate: dict) -> dict | None:
@@ -39,6 +45,51 @@ def score_candidate(candidate: dict, own_handles: set[str]) -> int:
     matched = [term for term in candidate.get("matched_terms", []) if isinstance(term, str) and term.lower() in excerpt]
     confidence = min(60, max(0, int(candidate.get("confidence") or 0)))
     return min(100, confidence + (20 if matched else 0) + (10 if candidate.get("corroborated") else 0))
+
+
+async def submit_test_post(conn, *, brand_id: UUID, actor_id: UUID, data) -> dict:
+    """Add an explicitly ungrounded fixture without claiming it was radar-detected."""
+    try:
+        canonical_url = canonicalize_social_url(data.platform, data.post_url)
+        fingerprint = url_fingerprint(data.platform, data.post_url)
+    except LoyaltyError as error:
+        raise TestPostError(error.http_status, error.code, error.message)
+
+    async with conn.transaction():
+        config = await conn.fetchrow(
+            "SELECT brand_terms FROM tellus_shoutout_configs WHERE brand_id=$1", brand_id,
+        )
+        excerpt = data.excerpt.strip()
+        matched_terms = [
+            term for term in (config["brand_terms"] if config else [])
+            if term.lower() in excerpt.lower()
+        ]
+        run = await conn.fetchrow(
+            """INSERT INTO tellus_shoutout_scan_runs
+                   (brand_id,status,trigger,finished_at,candidates_returned)
+               VALUES ($1,'completed','test',NOW(),1) RETURNING id""",
+            brand_id,
+        )
+        mention = await conn.fetchrow(
+            """INSERT INTO tellus_shoutout_mentions
+                   (brand_id,platform,post_url,canonical_url,url_fingerprint,author_handle,excerpt,confidence,
+                    matched_terms,corroborated,url_verify_status,raw_payload)
+               VALUES ($1,$2,$3,$3,$4,$5,$6,100,$7,FALSE,'uncorroborated',$8::jsonb)
+               ON CONFLICT DO NOTHING RETURNING id""",
+            brand_id, data.platform, canonical_url, fingerprint, data.author_handle, excerpt, matched_terms,
+            json.dumps({"source": "brand_test", "submitted_by": str(actor_id)}),
+        )
+        if mention is None:
+            await conn.execute(
+                """UPDATE tellus_shoutout_mentions SET seen_count=seen_count+1,last_seen_at=NOW()
+                   WHERE brand_id=$1 AND url_fingerprint=$2""",
+                brand_id, fingerprint,
+            )
+        await conn.execute(
+            """UPDATE tellus_shoutout_scan_runs SET mentions_new=$2,mentions_duplicate=$3 WHERE id=$1""",
+            run["id"], 1 if mention else 0, 0 if mention else 1,
+        )
+    return {"run_id": run["id"], "mention_id": mention["id"] if mention else None, "created": mention is not None}
 
 
 async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provider=None) -> dict:

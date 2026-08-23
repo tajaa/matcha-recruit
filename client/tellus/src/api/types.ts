@@ -1148,6 +1148,7 @@ export interface ShoutoutMention {
   confidence: number
   matched_terms: string[]
   corroborated: boolean
+  is_test: boolean
   status: ShoutoutMentionStatus
   seen_count: number
   first_seen_at: string
@@ -1158,7 +1159,7 @@ export interface ShoutoutMention {
 export interface ShoutoutRun {
   id: string
   status: 'running' | 'completed' | 'failed'
-  trigger: 'scheduled' | 'admin'
+  trigger: 'scheduled' | 'admin' | 'test'
   started_at: string
   finished_at: string | null
   gemini_calls: number
@@ -1169,6 +1170,13 @@ export interface ShoutoutRun {
   mentions_new: number
   mentions_duplicate: number
   error: string | null
+}
+
+export interface ShoutoutTestPost {
+  platform: ShoutoutPlatform
+  post_url: string
+  author_handle: string
+  excerpt: string
 }
 
 export interface ShoutoutOffer {

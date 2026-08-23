@@ -7,6 +7,7 @@ import type {
   ShoutoutOfferPreview,
   ShoutoutRun,
   ShoutoutPlatform,
+  ShoutoutTestPost,
 } from './types'
 
 export const shoutoutApi = {
@@ -33,6 +34,8 @@ export const shoutoutApi = {
   revokeOffer: (brandId: string, offerId: string, note?: string) =>
     tellusApi.post<void>(`/businesses/${brandId}/shoutouts/offers/${offerId}/revoke`, { note }),
   listRuns: (brandId: string) => tellusApi.get<ShoutoutRun[]>(`/businesses/${brandId}/shoutouts/runs`),
+  submitTestPost: (brandId: string, body: ShoutoutTestPost) =>
+    tellusApi.post(`/businesses/${brandId}/shoutouts/test-posts`, body),
   socialSubmissions: (brandId: string) => tellusApi.get<import('./types').LoyaltySocialSubmission[]>(`/businesses/${brandId}/loyalty/social-submissions`),
   decideSocial: (brandId: string, submissionId: string, decision: 'approve' | 'reject', note?: string) =>
     tellusApi.post(`/businesses/${brandId}/loyalty/social-submissions/${submissionId}/${decision}`, { note }),

@@ -1,6 +1,12 @@
-"""Pure and source-guard coverage for shoutout radar safety invariants."""
+"""Pure and fake-connection coverage for shoutout radar safety invariants."""
+import asyncio
 import inspect
+import json
+from uuid import uuid4
 
+import pytest
+
+from app.tellus.models.shoutouts import ShoutoutTestPostIn
 from app.tellus.services.shoutout import grounding, scan_service
 
 
@@ -103,3 +109,61 @@ def test_config_enablement_returns_the_actual_primary_key_and_dedupes_handles():
     source = inspect.getsource(config_service)
     assert "RETURNING brand_id" in source
     assert "seen_handles" in source
+
+
+class _Transaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+
+class _TestPostConn:
+    def __init__(self):
+        self.run_id = uuid4()
+        self.mention_id = uuid4()
+        self.queries = []
+
+    def transaction(self):
+        return _Transaction()
+
+    async def fetchrow(self, query, *args):
+        self.queries.append((query, args))
+        if "SELECT brand_terms" in query:
+            return {"brand_terms": ["matcha"]}
+        if "INSERT INTO tellus_shoutout_scan_runs" in query:
+            return {"id": self.run_id}
+        if "INSERT INTO tellus_shoutout_mentions" in query:
+            return {"id": self.mention_id}
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def execute(self, query, *args):
+        self.queries.append((query, args))
+
+
+def test_test_post_creates_a_labeled_ungrounded_run_and_mention():
+    conn = _TestPostConn()
+    data = ShoutoutTestPostIn(
+        platform="instagram", post_url="https://instagram.com/p/example?utm_source=test",
+        author_handle="@HappyCustomer", excerpt="I loved Matcha today.",
+    )
+
+    result = asyncio.run(scan_service.submit_test_post(conn, brand_id=uuid4(), actor_id=uuid4(), data=data))
+
+    assert result == {"run_id": conn.run_id, "mention_id": conn.mention_id, "created": True}
+    mention_query, mention_args = next(item for item in conn.queries if "INSERT INTO tellus_shoutout_mentions" in item[0])
+    assert "'uncorroborated'" in mention_query
+    assert mention_args[2] == "https://instagram.com/p/example"
+    assert mention_args[4] == "happycustomer"
+    assert mention_args[6] == ["matcha"]
+    assert json.loads(mention_args[7])["source"] == "brand_test"
+
+
+def test_test_post_rejects_a_url_for_the_wrong_platform():
+    data = ShoutoutTestPostIn(
+        platform="instagram", post_url="https://x.com/customer/status/1", author_handle="customer", excerpt="Great",
+    )
+
+    with pytest.raises(scan_service.TestPostError, match="does not match"):
+        asyncio.run(scan_service.submit_test_post(None, brand_id=uuid4(), actor_id=uuid4(), data=data))

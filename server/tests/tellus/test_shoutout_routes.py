@@ -4,7 +4,7 @@ import pytest
 from app.tellus.dependencies import require_consumer
 from app.tellus.models.shoutout_offers import ShoutoutOfferRevokeIn
 from app.tellus.models.shoutouts import (
-    ShoutoutApproveIn, ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn,
+    ShoutoutApproveIn, ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn, ShoutoutTestPostIn,
 )
 from app.tellus.routes import promo_public, shoutouts
 
@@ -37,7 +37,7 @@ def test_public_offer_previews_are_unauthenticated_and_claims_require_consumers(
 
 
 def test_shoutout_input_models_forbid_unknown_fields():
-    for model in (ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn, ShoutoutApproveIn, ShoutoutOfferRevokeIn):
+    for model in (ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn, ShoutoutApproveIn, ShoutoutTestPostIn, ShoutoutOfferRevokeIn):
         assert model.model_config.get("extra") == "forbid"
 
 
@@ -50,3 +50,10 @@ def test_approve_requires_a_client_request_id_and_limits_overrides():
         ShoutoutApproveIn(client_request_id="00000000-0000-0000-0000-000000000000", expiry_days=0)
     with pytest.raises(ValueError):
         ShoutoutApproveIn(client_request_id="00000000-0000-0000-0000-000000000000", title="x" * 121)
+
+
+def test_test_post_normalizes_the_customer_handle():
+    body = ShoutoutTestPostIn(
+        platform="instagram", post_url="https://instagram.com/p/example", author_handle=" @Happy_Customer ", excerpt="Great post",
+    )
+    assert body.author_handle == "happy_customer"

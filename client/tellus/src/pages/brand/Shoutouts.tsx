@@ -12,6 +12,7 @@ import type {
   ShoutoutOffer,
   ShoutoutPlatform,
   ShoutoutRun,
+  ShoutoutTestPost,
   Store,
 } from '../../api/types'
 
@@ -83,6 +84,7 @@ function MentionRow({ brandId, mention, stores, defaults, onChange }: {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Chip>{mention.platform}</Chip>
+            {mention.is_test && <Chip tone="warning">Test post</Chip>}
             <Chip tone={mention.confidence >= 80 ? 'positive' : undefined}>{mention.confidence}% confidence</Chip>
             {mention.author_handle && <span className="text-xs text-tu-faint">@{mention.author_handle}</span>}
           </div>
@@ -244,7 +246,9 @@ function OfferList({ brandId, offers, onChange }: { brandId: string; offers: Sho
 function RunHistory({ runs }: { runs: ShoutoutRun[] }) {
   if (!runs.length) return <Card><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">No scans have run yet. Enable the radar and its scheduled scan will record results here.</p></Card>
   const latest = runs[0]
-  const latestSummary = latest.status === 'failed'
+  const latestSummary = latest.trigger === 'test'
+    ? 'A manually added test post was sent through the review queue without a Google Search call.'
+    : latest.status === 'failed'
     ? 'The latest scan failed. Review the error below; the radar will retry after its backoff period.'
     : latest.candidates_returned === 0
       ? 'The latest scan completed successfully but Google Search returned no candidate posts.'
@@ -257,13 +261,25 @@ function RunHistory({ runs }: { runs: ShoutoutRun[] }) {
   </Card>
 }
 
-function SocialSubmissions({ brandId }: { brandId: string }) {
+function SocialSubmissions({ brandId, onTestPost }: { brandId: string; onTestPost: () => void }) {
   const [rows, setRows] = useState<LoyaltySocialSubmission[]>([])
   const [loading, setLoading] = useState(true)
+  const [testPost, setTestPost] = useState<ShoutoutTestPost>({ platform: 'instagram', post_url: '', author_handle: '', excerpt: '' })
+  const [submittingTest, setSubmittingTest] = useState(false)
+  const [testError, setTestError] = useState('')
   async function load() { try { setRows(await shoutoutApi.socialSubmissions(brandId)) } finally { setLoading(false) } }
   useEffect(() => { void load() }, [brandId])
   async function decide(id: string, decision: 'approve' | 'reject') { await shoutoutApi.decideSocial(brandId, id, decision); await load() }
-  return <Card><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Customer-submitted posts</h2></div><p className="mt-1 text-sm text-tu-dim">Separate from radar detections. These are customer-submitted loyalty entries and their existing points workflow.</p>{loading ? <Spinner /> : rows.length === 0 ? <Empty>No customer submissions.</Empty> : <div className="mt-4 divide-y divide-tu-border">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium">{row.platform} · {row.status}</p><a className="text-xs text-tu-accent hover:underline" href={row.post_url} target="_blank" rel="noreferrer">{row.post_url}</a></div>{row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void decide(row.id, 'approve')}>Approve</Button><Button size="sm" variant="danger" onClick={() => void decide(row.id, 'reject')}>Reject</Button></div>}</div>)}</div>}</Card>
+  async function submitTestPost(e: React.FormEvent) {
+    e.preventDefault(); setSubmittingTest(true); setTestError('')
+    try {
+      await shoutoutApi.submitTestPost(brandId, testPost)
+      setTestPost({ platform: 'instagram', post_url: '', author_handle: '', excerpt: '' })
+      onTestPost()
+    } catch (e) { setTestError(e instanceof Error ? e.message : 'Could not add test post') }
+    finally { setSubmittingTest(false) }
+  }
+  return <Card><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Customer-submitted posts</h2></div><p className="mt-1 text-sm text-tu-dim">Separate from radar detections. These are customer-submitted loyalty entries and their existing points workflow.</p><form className="mt-4 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3" onSubmit={submitTestPost}><div><h3 className="text-sm font-semibold">Test a customer post</h3><p className="mt-1 text-xs text-tu-dim">Adds a clearly labeled test scan and review-queue item. It does not call Google Search or award loyalty points.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="Platform" value={testPost.platform} onChange={(e) => setTestPost((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Customer handle" value={testPost.author_handle} onChange={(e) => setTestPost((current) => ({ ...current, author_handle: e.target.value }))} placeholder="@happycustomer" /></div><Input label="Public post URL" value={testPost.post_url} onChange={(e) => setTestPost((current) => ({ ...current, post_url: e.target.value }))} placeholder="https://instagram.com/p/example" /><Textarea label="Post text" rows={2} value={testPost.excerpt} onChange={(e) => setTestPost((current) => ({ ...current, excerpt: e.target.value }))} placeholder="Loved the coffee at your brand today." /><div className="flex items-center justify-between gap-3"><ErrorText>{testError}</ErrorText><Button type="submit" size="sm" loading={submittingTest} disabled={!testPost.post_url.trim() || !testPost.author_handle.trim() || !testPost.excerpt.trim()}><Plus className="h-3.5 w-3.5" /> Add test post</Button></div></form>{loading ? <Spinner /> : rows.length === 0 ? <Empty>No customer submissions.</Empty> : <div className="mt-4 divide-y divide-tu-border">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium">{row.platform} · {row.status}</p><a className="text-xs text-tu-accent hover:underline" href={row.post_url} target="_blank" rel="noreferrer">{row.post_url}</a></div>{row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void decide(row.id, 'approve')}>Approve</Button><Button size="sm" variant="danger" onClick={() => void decide(row.id, 'reject')}>Reject</Button></div>}</div>)}</div>}</Card>
 }
 
 export default function BrandShoutouts() {
@@ -287,5 +303,5 @@ export default function BrandShoutouts() {
   }
   useEffect(() => { void Promise.all([tellusApi.get<Store[]>('/stores'), loadQueue()]).then(([nextStores]) => setStores(nextStores)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load shoutouts')) }, [brandId])
 
-  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Only grounded mentions appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar to start searching.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} /></div>
+  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
 }

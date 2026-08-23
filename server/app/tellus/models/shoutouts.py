@@ -59,6 +59,26 @@ class ShoutoutApproveIn(BaseModel):
     expiry_days: int | None = Field(default=None, ge=1, le=365)
 
 
+class ShoutoutTestPostIn(BaseModel):
+    """Brand-entered fixture for exercising the radar review flow."""
+    model_config = ConfigDict(extra="forbid")
+    platform: ShoutoutPlatform
+    post_url: str = Field(min_length=8, max_length=2_048)
+    author_handle: str = Field(min_length=1, max_length=120)
+    excerpt: str = Field(min_length=1, max_length=2_000)
+
+    @field_validator("author_handle")
+    @classmethod
+    def normalize_author_handle(cls, value: str) -> str:
+        return value.strip().lstrip("@").lower()
+
+
+class ShoutoutTestPostOut(BaseModel):
+    run_id: UUID
+    mention_id: UUID | None = None
+    created: bool
+
+
 class ShoutoutMentionOut(BaseModel):
     id: UUID
     platform: ShoutoutPlatform
@@ -68,6 +88,7 @@ class ShoutoutMentionOut(BaseModel):
     confidence: int
     matched_terms: list[str]
     corroborated: bool
+    is_test: bool
     status: ShoutoutStatus
     seen_count: int
     first_seen_at: datetime
@@ -95,7 +116,7 @@ class ShoutoutConfigOut(BaseModel):
 class ShoutoutRunOut(BaseModel):
     id: UUID
     status: Literal["running", "completed", "failed"]
-    trigger: Literal["scheduled", "admin"]
+    trigger: Literal["scheduled", "admin", "test"]
     started_at: datetime
     finished_at: datetime | None = None
     gemini_calls: int

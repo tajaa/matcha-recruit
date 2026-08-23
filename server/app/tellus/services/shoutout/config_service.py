@@ -80,7 +80,8 @@ async def set_enabled(conn, brand_id: UUID, enabled: bool) -> dict:
 async def list_mentions(conn, brand_id: UUID, status: str | None) -> list[dict]:
     rows = await conn.fetch(
         """SELECT id, platform, post_url, author_handle, excerpt, confidence, matched_terms,
-                  corroborated, status, seen_count, first_seen_at, last_seen_at, decided_at
+                  corroborated, raw_payload->>'source' = 'brand_test' AS is_test,
+                  status, seen_count, first_seen_at, last_seen_at, decided_at
              FROM tellus_shoutout_mentions WHERE brand_id = $1 AND ($2::text IS NULL OR status = $2)
              ORDER BY last_seen_at DESC""", brand_id, status,
     )

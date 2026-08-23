@@ -8,11 +8,11 @@ from ...database import get_connection
 from ..dependencies import require_brand_capability
 from ..models.shoutouts import (
     ShoutoutApproveIn, ShoutoutConfigOut, ShoutoutConfigPut, ShoutoutEnableIn,
-    ShoutoutMentionOut, ShoutoutRejectIn, ShoutoutRunOut,
+    ShoutoutMentionOut, ShoutoutRejectIn, ShoutoutRunOut, ShoutoutTestPostIn, ShoutoutTestPostOut,
 )
 from ..models.shoutout_offers import ShoutoutOfferOut, ShoutoutOfferRevokeIn
 from ..services.access_service import BrandAccessContext
-from ..services.shoutout import config_service, review_service
+from ..services.shoutout import config_service, review_service, scan_service
 from ..services.shoutout import offers_service
 
 router = APIRouter()
@@ -25,6 +25,10 @@ def _review_error(error: review_service.ShoutoutReviewError) -> None:
 
 def _offer_error(error: offers_service.OfferError) -> None:
     raise HTTPException(error.status, detail={"code": error.code, "message": error.message, **error.extra})
+
+
+def _test_post_error(error: scan_service.TestPostError) -> None:
+    raise HTTPException(error.status, detail={"code": error.code, "message": error.message})
 
 
 @router.get("/businesses/{brand_id}/shoutouts/config", response_model=ShoutoutConfigOut)
@@ -111,3 +115,16 @@ async def revoke_offer(
 async def runs(brand_id: UUID, context: BrandAccessContext = Depends(SHOUTOUT_MANAGER)):
     async with get_connection() as conn:
         return await config_service.list_runs(conn, brand_id)
+
+
+@router.post("/businesses/{brand_id}/shoutouts/test-posts", response_model=ShoutoutTestPostOut)
+async def submit_test_post(
+    brand_id: UUID, body: ShoutoutTestPostIn, context: BrandAccessContext = Depends(SHOUTOUT_MANAGER),
+):
+    async with get_connection() as conn:
+        try:
+            return await scan_service.submit_test_post(
+                conn, brand_id=brand_id, actor_id=context.account.id, data=body,
+            )
+        except scan_service.TestPostError as error:
+            _test_post_error(error)
