@@ -11,9 +11,11 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import optional_consumer_account_id, require_consumer
 from ..models.promo import ClaimOut, ClaimPreviewOut, RedeemIn, RedeemOut, ScanBootstrapOut
+from ..models.shoutout_offers import ShoutoutOfferClaimOut, ShoutoutOfferPreviewOut
 from ..models.tellus import TellusAccount
 from ..services import promo_service
 from ..services.promo_service import PromoError
+from ..services.shoutout import offers_service
 
 router = APIRouter()
 
@@ -23,6 +25,13 @@ def _raise(e: PromoError):
     # jsonable_encoder — see PromoError's docstring on .extra being primitives.
     raise HTTPException(
         status_code=e.http_status,
+        detail=jsonable_encoder({"code": e.code, "message": e.message, **e.extra}),
+    )
+
+
+def _raise_offer(e: offers_service.OfferError):
+    raise HTTPException(
+        status_code=e.status,
         detail=jsonable_encoder({"code": e.code, "message": e.message, **e.extra}),
     )
 
@@ -70,6 +79,60 @@ async def claim(
             _raise(e)
     response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
     return ClaimOut(**card, created=created)
+
+
+@router.get("/o/{offer_token}", response_model=ShoutoutOfferPreviewOut)
+async def shoutout_offer_preview(
+    offer_token: str, request: Request, authorization: Optional[str] = Header(default=None),
+):
+    await check_rate_limit(client_ip(request), "tellus_shoutout_offer_preview", 120, 60)
+    viewer = await optional_consumer_account_id(authorization)
+    async with get_connection() as conn:
+        try:
+            return await offers_service.preview_offer(conn, token=offer_token, account_id=viewer)
+        except offers_service.OfferError as error:
+            _raise_offer(error)
+
+
+@router.post("/o/{offer_token}/claim", response_model=ShoutoutOfferClaimOut)
+async def shoutout_offer_claim(
+    offer_token: str, request: Request, account: TellusAccount = Depends(require_consumer),
+):
+    ip = client_ip(request)
+    await check_rate_limit(ip, "tellus_shoutout_offer_claim_burst", 5, 60)
+    await check_rate_limit(ip, "tellus_shoutout_offer_claim", 30, 3600)
+    async with get_connection() as conn:
+        try:
+            return await offers_service.claim_offer(conn, token=offer_token, account_id=account.id)
+        except offers_service.OfferError as error:
+            _raise_offer(error)
+
+
+@router.get("/o/code/{short_code}", response_model=ShoutoutOfferPreviewOut)
+async def shoutout_offer_code_preview(
+    short_code: str, request: Request, authorization: Optional[str] = Header(default=None),
+):
+    await check_rate_limit(client_ip(request), "tellus_shoutout_code_preview", 120, 60)
+    viewer = await optional_consumer_account_id(authorization)
+    async with get_connection() as conn:
+        try:
+            return await offers_service.preview_offer(conn, short_code=short_code, account_id=viewer)
+        except offers_service.OfferError as error:
+            _raise_offer(error)
+
+
+@router.post("/o/code/{short_code}/claim", response_model=ShoutoutOfferClaimOut)
+async def shoutout_offer_code_claim(
+    short_code: str, request: Request, account: TellusAccount = Depends(require_consumer),
+):
+    ip = client_ip(request)
+    await check_rate_limit(ip, "tellus_shoutout_code_claim_burst", 3, 60)
+    await check_rate_limit(ip, "tellus_shoutout_code_claim", 20, 3600)
+    async with get_connection() as conn:
+        try:
+            return await offers_service.claim_offer(conn, short_code=short_code, account_id=account.id)
+        except offers_service.OfferError as error:
+            _raise_offer(error)
 
 
 # ── scanner ───────────────────────────────────────────────────────────────────

@@ -91,7 +91,9 @@ def test_provider_handles_a_response_without_candidates(monkeypatch):
 
 def test_scan_run_uses_real_resolution_count_and_failure_backoff():
     source = inspect.getsource(scan_service.scan_brand)
-    assert "result.grounding_resolved" in source
+    assert "grounding_resolved = sum" in source
+    assert "gemini_calls=2" in source
+    assert "asyncio.gather" in source
     assert "next_scan_after=NOW()" in source
 
 

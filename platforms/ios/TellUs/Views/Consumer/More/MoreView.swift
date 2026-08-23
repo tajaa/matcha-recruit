@@ -27,6 +27,7 @@ struct MoreView: View {
                 }
                 NavigationLink("My Reviews") { MyReviewsView() }
                 NavigationLink("Redemptions") { RedemptionsView() }
+                NavigationLink("Redeem a reward code") { RedeemCodeView() }
                 NavigationLink("Leaderboard") { LeaderboardView() }
                 NavigationLink("Places") { PlacesView() }
             }

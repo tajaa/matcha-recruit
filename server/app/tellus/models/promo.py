@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 CampaignStatus = Literal["active", "paused", "cancelled"]
-CampaignType = Literal["qr", "location"]
+CampaignType = Literal["qr", "location", "shoutout"]
 EffectiveCardStatus = Literal["issued", "redeemed", "cancelled", "expired"]
 ClaimUnavailableReason = Literal[
     "ok", "cap_reached", "cancelled", "brand_inactive", "paused", "not_started", "ended",
@@ -22,7 +22,7 @@ class CampaignCreate(BaseModel):
     card_expiry_days: int = Field(default=30, ge=1, le=365)
     starts_at: Optional[datetime] = None
     ends_at: Optional[datetime] = None
-    campaign_type: CampaignType = "qr"
+    campaign_type: Literal["qr", "location"] = "qr"
     store_id: Optional[UUID] = None
     radius_miles: Optional[float] = Field(default=None, gt=0, le=10)
 

@@ -180,6 +180,20 @@ class TestMapRedeemFailure:
         card = {"status": "issued", "campaign_status": "active", "expires_at": PAST}
         assert map_redeem_failure(card, now=NOW).http_status == 410
 
+    def test_shoutout_wrong_store_is_rejected_after_expiry_checks(self):
+        from uuid import uuid4
+
+        store_id = uuid4()
+        err = map_redeem_failure(
+            {
+                "status": "issued", "campaign_status": "active", "expires_at": FUTURE,
+                "campaign_type": "shoutout", "store_id": store_id,
+            },
+            now=NOW, scanner_store_id=uuid4(),
+        )
+        assert err.http_status == 409
+        assert err.code == "wrong_store"
+
     def test_extra_is_json_serializable(self):
         """The routes splat .extra into HTTPException(detail=...) and Starlette
         serializes that with json.dumps, NOT jsonable_encoder — so a raw
@@ -259,6 +273,7 @@ class TestAtomicSourceGuards:
             "c.status <> 'cancelled'",
         ):
             assert predicate in src
+        assert "c.campaign_type <> 'shoutout' OR c.store_id IS NULL OR c.store_id = $2" in src
 
     def test_no_points_economy_writes(self):
         src = _all_function_source(promo_service)

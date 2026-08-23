@@ -14,6 +14,7 @@ import Intake from './pages/Intake'
 import PublicBrand from './pages/PublicBrand'
 import Places from './pages/Places'
 import Claim from './pages/Claim'
+import Offer from './pages/Offer'
 import FriendInvite from './pages/FriendInvite'
 import Scan from './pages/Scan'
 import CardView from './pages/consumer/CardView'
@@ -39,6 +40,7 @@ import BrandCampaigns from './pages/brand/Campaigns'
 import BrandSettings from './pages/brand/Settings'
 import BrandBilling from './pages/brand/Billing'
 import BrandBoard from './pages/brand/Board'
+import BrandShoutouts from './pages/brand/Shoutouts'
 import LoyaltyBuilder from './pages/brand/LoyaltyBuilder'
 import LoyaltyCounter from './pages/brand/LoyaltyCounter'
 import { useBusinesses } from './hooks/useBusinesses'
@@ -165,6 +167,8 @@ export default function App() {
       <Route path="/b/:slug" element={<PublicBrand />} />
       <Route path="/places" element={<PlacesRoute />} />
       <Route path="/p/:token" element={<Claim />} />
+      <Route path="/o/:token" element={<Offer />} />
+      <Route path="/o/code/:code" element={<Offer />} />
       <Route path="/f/:token" element={<FriendInvite />} />
       <Route path="/scan/:deviceToken" element={<Scan />} />
 
@@ -203,6 +207,7 @@ export default function App() {
       <Route path="/brand/settings" element={<Protected requireType="brand"><BrandSettings /></Protected>} />
       <Route path="/brand/:brandId/loyalty" element={<BusinessCapabilityProtected capability="rewards.manage"><LoyaltyBuilder /></BusinessCapabilityProtected>} />
       <Route path="/brand/:brandId/counter" element={<BusinessCapabilityProtected capability="redemptions.redeem"><LoyaltyCounter /></BusinessCapabilityProtected>} />
+      <Route path="/brand/:brandId/shoutouts" element={<BusinessCapabilityProtected capability="promos.manage"><BrandShoutouts /></BusinessCapabilityProtected>} />
 
       {/* Internal admin */}
       <Route path="/admin/accounts" element={<AdminOnly><AdminAccounts /></AdminOnly>} />

@@ -27,6 +27,10 @@ struct TellUsApp: App {
                 }
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
+                    appState.handleUniversalLink(url)
+                }
+                .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                    if let url = activity.webpageURL { appState.handleUniversalLink(url) }
                 }
         }
     }

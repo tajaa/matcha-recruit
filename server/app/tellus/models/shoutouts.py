@@ -52,6 +52,10 @@ class ShoutoutRejectIn(BaseModel):
 class ShoutoutApproveIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     client_request_id: UUID
+    store_id: UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    terms: str | None = Field(default=None, max_length=2000)
+    expiry_days: int | None = Field(default=None, ge=1, le=365)
 
 
 class ShoutoutMentionOut(BaseModel):

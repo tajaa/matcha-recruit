@@ -52,16 +52,9 @@ final class AppState {
             forName: .tellusPushTapped, object: nil, queue: .main
         ) { [weak self] note in
             guard let route = DeepLinkRoute.parse(userInfo: note.userInfo ?? [:]) else { return }
-            Task { @MainActor in
-                guard let self else { return }
-                switch self.phase {
-                case .consumer:
-                    self.pendingDeepLink = route
-                case .brand:
-                    if case .friendRequests = route {} else if case .friendProfile = route {} else if case .friendInvite = route {} else { self.pendingDeepLink = route }
-                default:
-                    self.deferredDeepLink = route
-                }
+                Task { @MainActor in
+                    guard let self else { return }
+                self.present(route)
             }
         }
         Task { await restore() }
@@ -100,6 +93,22 @@ final class AppState {
 
     func didLogin(_ response: TokenResponse) {
         route(response.account)
+    }
+
+    func handleUniversalLink(_ url: URL) {
+        guard let route = DeepLinkRoute.parse(url: url) else { return }
+        present(route)
+    }
+
+    private func present(_ route: DeepLinkRoute) {
+        switch phase {
+        case .consumer:
+            pendingDeepLink = route
+        case .brand:
+            if case .friendRequests = route {} else if case .friendProfile = route {} else if case .friendInvite = route {} else { pendingDeepLink = route }
+        default:
+            deferredDeepLink = route
+        }
     }
 
     /// Ask for notification permission (once per install) and register this

@@ -62,7 +62,7 @@ _CAMPAIGN_COLUMNS_QUALIFIED = (
 _CARD_SELECT_SQL = """
     SELECT pc.id, pc.card_token, pc.status, pc.issued_at, pc.expires_at, pc.redeemed_at,
            pc.campaign_id, pc.account_id, c.brand_id, c.status AS campaign_status,
-           c.title AS campaign_title, c.reward_text,
+            c.title AS campaign_title, c.reward_text, c.campaign_type, c.store_id,
            b.name AS brand_name, b.logo_url AS brand_logo_url,
            s.name AS redeemed_store_name
     FROM tellus_promo_cards pc
@@ -140,7 +140,9 @@ def claim_reason(campaign: dict, now: Optional[datetime] = None) -> str:
     return "ok"
 
 
-def map_redeem_failure(card: Optional[dict], now: Optional[datetime] = None) -> PromoError:
+def map_redeem_failure(
+    card: Optional[dict], now: Optional[datetime] = None, scanner_store_id: Optional[UUID] = None,
+) -> PromoError:
     """card is None (unknown token, or a diagnostic re-query scoped to the
     wrong brand — same 404 either way so a scanner can't probe for another
     brand's card tokens)."""
@@ -164,6 +166,12 @@ def map_redeem_failure(card: Optional[dict], now: Optional[datetime] = None) -> 
         return PromoError(410, "cancelled", "This promo was cancelled.")
     if card["expires_at"] is not None and card["expires_at"] <= now:
         return PromoError(410, "expired", "This reward card has expired.")
+    if (
+        card.get("campaign_type") == "shoutout"
+        and card.get("store_id") is not None
+        and card.get("store_id") != scanner_store_id
+    ):
+        return PromoError(409, "wrong_store", "This offer must be redeemed at its selected store.")
     # status == 'issued' but the UPDATE still didn't match — only remaining
     # cause is a wrong-brand scan, kept as 404 (no cross-brand existence leak).
     return PromoError(404, "not_found", "That reward card wasn't found.")
@@ -309,7 +317,7 @@ async def list_campaigns(conn, brand_id: UUID) -> list[dict]:
              FROM tellus_promo_campaigns c
              LEFT JOIN tellus_promo_cards pc ON pc.campaign_id = c.id
              LEFT JOIN tellus_stores s ON s.id = c.store_id
-             WHERE c.brand_id = $1
+              WHERE c.brand_id = $1 AND c.campaign_type <> 'shoutout'
              GROUP BY c.id, s.name
             ORDER BY c.created_at DESC""",
         brand_id,
@@ -330,7 +338,7 @@ async def get_campaign_owned(conn, brand_id: UUID, campaign_id: UUID) -> dict:
     row = await conn.fetchrow(
         f"SELECT {_CAMPAIGN_COLUMNS_QUALIFIED}, s.name AS store_name "
         "FROM tellus_promo_campaigns c LEFT JOIN tellus_stores s ON s.id = c.store_id "
-        "WHERE c.id = $1 AND c.brand_id = $2",
+         "WHERE c.id = $1 AND c.brand_id = $2 AND c.campaign_type <> 'shoutout'",
         campaign_id, brand_id,
     )
     if row is None:
@@ -775,7 +783,8 @@ async def redeem_card(conn, scanner: dict, raw_card_token: str) -> dict:
                redeemed_store_id = $2, redeemed_scanner_id = $3
            FROM tellus_promo_campaigns c
            WHERE pc.card_token = $1 AND pc.status = 'issued' AND pc.expires_at > NOW()
-             AND c.id = pc.campaign_id AND c.brand_id = $4 AND c.status <> 'cancelled'
+              AND c.id = pc.campaign_id AND c.brand_id = $4 AND c.status <> 'cancelled'
+              AND (c.campaign_type <> 'shoutout' OR c.store_id IS NULL OR c.store_id = $2)
            RETURNING pc.redeemed_at, c.title AS campaign_title, c.reward_text""",
         token, scanner.get("store_id"), scanner.get("id"), scanner["brand_id"],
     )
@@ -793,7 +802,10 @@ async def redeem_card(conn, scanner: dict, raw_card_token: str) -> dict:
         _CARD_SELECT_SQL + " WHERE pc.card_token = $1 AND c.brand_id = $2",
         token, scanner["brand_id"],
     )
-    raise map_redeem_failure(dict(diagnostic) if diagnostic is not None else None)
+    raise map_redeem_failure(
+        dict(diagnostic) if diagnostic is not None else None,
+        scanner_store_id=scanner.get("store_id"),
+    )
 
 
 async def create_scanner(conn, brand_id: UUID, store_id: UUID, label: Optional[str], store_name: str) -> dict:

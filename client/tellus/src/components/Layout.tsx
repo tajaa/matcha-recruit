@@ -98,7 +98,7 @@ export function Layout({ children }: { children: ReactNode }) {
       ]
     : CONSUMER_NAV
   const brandNav = isBrand && account?.brand_id
-    ? [...BRAND_NAV.slice(0, 1), { to: `/brand/${account.brand_id}/loyalty`, label: 'Loyalty', icon: Star }, ...BRAND_NAV.slice(1)]
+    ? [...BRAND_NAV.slice(0, 1), { to: `/brand/${account.brand_id}/shoutouts`, label: 'Shoutouts', icon: Megaphone }, { to: `/brand/${account.brand_id}/loyalty`, label: 'Loyalty', icon: Star }, ...BRAND_NAV.slice(1)]
     : BRAND_NAV
   const baseNav = isPendingBrand ? BRAND_PENDING_NAV : isBrand ? brandNav : (commsBrands.length ? [...consumerNav.slice(0, 8), { to: '/brand/messages', label: 'Comms inbox', icon: MessageCircle }, ...consumerNav.slice(8)] : consumerNav)
   const nav = account?.is_admin ? [...baseNav, ...ADMIN_NAV] : baseNav

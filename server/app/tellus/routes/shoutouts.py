@@ -10,8 +10,10 @@ from ..models.shoutouts import (
     ShoutoutApproveIn, ShoutoutConfigOut, ShoutoutConfigPut, ShoutoutEnableIn,
     ShoutoutMentionOut, ShoutoutRejectIn, ShoutoutRunOut,
 )
+from ..models.shoutout_offers import ShoutoutOfferOut, ShoutoutOfferRevokeIn
 from ..services.access_service import BrandAccessContext
 from ..services.shoutout import config_service, review_service
+from ..services.shoutout import offers_service
 
 router = APIRouter()
 SHOUTOUT_MANAGER = require_brand_capability("promos.manage")
@@ -19,6 +21,10 @@ SHOUTOUT_MANAGER = require_brand_capability("promos.manage")
 
 def _review_error(error: review_service.ShoutoutReviewError) -> None:
     raise HTTPException(error.status, detail={"code": error.code, "message": error.message})
+
+
+def _offer_error(error: offers_service.OfferError) -> None:
+    raise HTTPException(error.status, detail={"code": error.code, "message": error.message, **error.extra})
 
 
 @router.get("/businesses/{brand_id}/shoutouts/config", response_model=ShoutoutConfigOut)
@@ -77,9 +83,28 @@ async def approve_mention(
             return await review_service.approve_mention(
                 conn, brand_id=brand_id, mention_id=mention_id, actor_id=context.account.id,
                 client_request_id=body.client_request_id,
+                store_id=body.store_id, title=body.title, terms=body.terms, expiry_days=body.expiry_days,
             )
         except review_service.ShoutoutReviewError as error:
             _review_error(error)
+
+
+@router.get("/businesses/{brand_id}/shoutouts/offers", response_model=list[ShoutoutOfferOut])
+async def offers(brand_id: UUID, context: BrandAccessContext = Depends(SHOUTOUT_MANAGER)):
+    async with get_connection() as conn:
+        return await offers_service.list_offers(conn, brand_id)
+
+
+@router.post("/businesses/{brand_id}/shoutouts/offers/{offer_id}/revoke", status_code=204)
+async def revoke_offer(
+    brand_id: UUID, offer_id: UUID, body: ShoutoutOfferRevokeIn,
+    context: BrandAccessContext = Depends(SHOUTOUT_MANAGER),
+):
+    async with get_connection() as conn:
+        try:
+            await offers_service.revoke_offer(conn, brand_id, offer_id)
+        except offers_service.OfferError as error:
+            _offer_error(error)
 
 
 @router.get("/businesses/{brand_id}/shoutouts/runs", response_model=list[ShoutoutRunOut])

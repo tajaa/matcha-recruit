@@ -1,4 +1,5 @@
 """Corroborated mention scanning and idempotent queue persistence."""
+import asyncio
 import json
 from uuid import UUID
 
@@ -72,11 +73,19 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
         )
         handles = await conn.fetch("SELECT platform, handle FROM tellus_shoutout_handles WHERE brand_id=$1 AND is_active", brand_id)
     try:
-        result = await provider.search(build_prompt(
-            brand_name=brand["name"], handles=[dict(row) for row in handles], brand_terms=claimed["brand_terms"],
-            city=brand["city"], state=brand["state"], lookback_days=claimed["lookback_days"],
-        ))
-        accepted, rejected = corroborated_candidates(result.mentions, result.grounding_uris)
+        search_args = {
+            "brand_name": brand["name"], "handles": [dict(row) for row in handles],
+            "brand_terms": claimed["brand_terms"], "exclude_terms": claimed["exclude_terms"],
+            "city": brand["city"], "state": brand["state"], "lookback_days": claimed["lookback_days"],
+        }
+        results = await asyncio.gather(
+            provider.search(build_prompt(**search_args, focus="handles")),
+            provider.search(build_prompt(**search_args, focus="terms")),
+        )
+        mentions = [mention for result in results for mention in result.mentions]
+        grounding_uris = list(dict.fromkeys(uri for result in results for uri in result.grounding_uris))
+        grounding_resolved = sum(result.grounding_resolved for result in results)
+        accepted, rejected = corroborated_candidates(mentions, grounding_uris)
         own_handles = {row["handle"] for row in handles}
         new, duplicate = 0, 0
         for candidate in accepted:
@@ -107,10 +116,10 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
                     brand_id, candidate["url_fingerprint"], score,
                 )
         await conn.execute(
-            """UPDATE tellus_shoutout_scan_runs SET status='completed',finished_at=NOW(),gemini_calls=1,
+            """UPDATE tellus_shoutout_scan_runs SET status='completed',finished_at=NOW(),gemini_calls=2,
                grounding_uris=$2,grounding_resolved=$3,candidates_returned=$4,urls_rejected=$5,
                mentions_new=$6,mentions_duplicate=$7 WHERE id=$1""",
-            run["id"], len(result.grounding_uris), result.grounding_resolved, len(result.mentions), rejected, new, duplicate,
+            run["id"], len(grounding_uris), grounding_resolved, len(mentions), rejected, new, duplicate,
         )
         await conn.execute("UPDATE tellus_shoutout_configs SET last_scanned_at=NOW(), consecutive_failures=0 WHERE brand_id=$1", brand_id)
         return {"new": new, "duplicate": duplicate}

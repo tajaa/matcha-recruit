@@ -15,6 +15,9 @@ enum DeepLinkRoute: Hashable, Identifiable {
     case boardManage(slug: String?)
     /// Consumer: open a promo claim sheet from a campaign push.
     case promoClaim(token: String)
+    /// Consumer: open a shoutout offer from a universal link.
+    case shoutoutOffer(token: String)
+    case shoutoutCode(code: String)
     case friendRequests(highlightRequestId: String)
     case friendProfile(accountId: String, name: String)
     case friendInvite(token: String)
@@ -26,6 +29,8 @@ enum DeepLinkRoute: Hashable, Identifiable {
         case .report(let id): return "report-\(id)"
         case .boardManage(let slug): return "board-manage-\(slug ?? "own")"
         case .promoClaim(let token): return "promo-\(token)"
+        case .shoutoutOffer(let token): return "shoutout-offer-\(token)"
+        case .shoutoutCode(let code): return "shoutout-code-\(code)"
         case .friendRequests(let id): return "friend-requests-\(id)"
         case .friendProfile(let id, _): return "friend-profile-\(id)"
         case .friendInvite(let token): return "friend-invite-\(token)"
@@ -63,5 +68,18 @@ enum DeepLinkRoute: Hashable, Identifiable {
         default:
             return nil
         }
+    }
+
+    /// Parse the web URL used by offer links. Supports both the apex URL and
+    /// the `/tellus` path handed to the app by Universal Links.
+    static func parse(url: URL) -> DeepLinkRoute? {
+        let components = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        guard let offerIndex = components.firstIndex(of: "o"), components.count > offerIndex + 1 else { return nil }
+        if components[offerIndex + 1] == "code", components.count > offerIndex + 2 {
+            let code = components[offerIndex + 2]
+            return code.isEmpty ? nil : .shoutoutCode(code: code)
+        }
+        let token = components[offerIndex + 1]
+        return token.isEmpty ? nil : .shoutoutOffer(token: token)
     }
 }

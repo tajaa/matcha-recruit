@@ -18,7 +18,7 @@ ADMIN_ACTIONS = (
     "abuse_report.review", "abuse_report.action", "abuse_report.dismiss",
     "account.handle_clear",
     "earning_rule.update", "badge.update", "listing.update",
-    "board_post.moderate", "board_reply.moderate",
+    "board_post.moderate", "board_reply.moderate", "shoutout.scan",
 )
 
 
