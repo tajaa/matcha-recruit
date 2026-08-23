@@ -115,13 +115,17 @@ async def revoke_offer(conn, brand_id: UUID, offer_id: UUID) -> None:
 
 
 async def _load_offer(conn, *, token: str | None = None, short_code: str | None = None) -> dict:
+    if bool(token) == bool(short_code):
+        raise OfferError(404, "not_found", "This offer link is not available.")
     row = await conn.fetchrow(
-        """SELECT o.*, s.name AS store_name, c.status AS campaign_status,
+        """SELECT o.*, o.created_at AS offer_created_at, s.name AS store_name, c.status AS campaign_status,
                   c.claim_token, c.starts_at, c.ends_at, c.claim_count, c.max_claims,
-                  b.name AS brand_name, b.logo_url AS brand_logo_url, b.plan_status
+                  b.name AS brand_name, b.logo_url AS brand_logo_url, b.plan_status,
+                  cfg.require_app_install
              FROM tellus_shoutout_offers o
              JOIN tellus_promo_campaigns c ON c.id=o.campaign_id
              JOIN tellus_brands b ON b.id=o.brand_id
+             LEFT JOIN tellus_shoutout_configs cfg ON cfg.brand_id=o.brand_id
              LEFT JOIN tellus_stores s ON s.id=o.store_id
             WHERE (($1::text IS NOT NULL AND o.offer_token=$1) OR ($2::text IS NOT NULL AND o.short_code=$2))""",
         token, short_code,
@@ -143,26 +147,55 @@ def _offer_available(offer: dict) -> bool:
     )
 
 
-async def preview_offer(conn, *, token: str, account_id: UUID | None) -> dict:
-    offer = await _load_offer(conn, token=token)
+async def preview_offer(
+    conn, *, token: str | None = None, short_code: str | None = None, account_id: UUID | None,
+) -> dict:
+    offer = await _load_offer(conn, token=token, short_code=short_code)
     existing = None
+    web_claim_allowed = not bool(offer.get("require_app_install"))
     if account_id:
         existing = await conn.fetchrow(
             "SELECT card_token FROM tellus_promo_cards WHERE campaign_id=$1 AND account_id=$2",
             offer["campaign_id"], account_id,
         )
+        if offer.get("require_app_install"):
+            web_claim_allowed = bool(await conn.fetchval(
+                "SELECT created_at <= $2 FROM tellus_accounts WHERE id=$1", account_id, offer["offer_created_at"],
+            ))
     return {
         "brand_name": offer["brand_name"], "brand_logo_url": offer["brand_logo_url"],
         "store_name": offer["store_name"], "reward_text": offer["reward_text"],
         "offer_terms": offer.get("offer_terms"), "short_code": offer["short_code"],
-        "claim_expires_at": offer["claim_expires_at"], "available": _offer_available(offer) and existing is None,
+        "claim_expires_at": offer["claim_expires_at"],
+        "require_app_install": bool(offer.get("require_app_install")),
+        "web_claim_allowed": web_claim_allowed,
+        "available": _offer_available(offer) and existing is None,
         "already_claimed": existing is not None, "card_token": existing["card_token"] if existing else None,
     }
 
 
-async def claim_offer(conn, *, token: str | None = None, short_code: str | None = None, account_id: UUID) -> dict:
+async def claim_offer(
+    conn, *, token: str | None = None, short_code: str | None = None, account_id: UUID,
+    client_kind: str | None = None,
+) -> dict:
     async with conn.transaction():
         offer = await _load_offer(conn, token=token, short_code=short_code)
+        existing = await conn.fetchrow(
+            "SELECT card_token FROM tellus_promo_cards WHERE campaign_id=$1 AND account_id=$2",
+            offer["campaign_id"], account_id,
+        )
+        if existing is not None:
+            card, created = await promo_service.claim_card(conn, offer["claim_token"], account_id)
+            return {
+                "offer_id": offer["id"], "card_token": card["card_token"], "reward_text": offer["reward_text"],
+                "store_name": offer["store_name"], "claim_expires_at": offer["claim_expires_at"], "created": created,
+            }
+        if offer.get("require_app_install") and client_kind != "ios":
+            existed_when_offered = await conn.fetchval(
+                "SELECT created_at <= $2 FROM tellus_accounts WHERE id=$1", account_id, offer["offer_created_at"],
+            )
+            if not existed_when_offered:
+                raise OfferError(409, "app_install_required", "Install the Tell-Us iPhone app to claim this offer.")
         if not _offer_available(offer):
             raise OfferError(410, "unavailable", "This offer is expired, revoked, or unavailable.")
         card, created = await promo_service.claim_card(conn, offer["claim_token"], account_id)

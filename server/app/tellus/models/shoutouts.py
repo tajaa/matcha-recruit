@@ -31,6 +31,7 @@ class ShoutoutConfigPut(BaseModel):
     offer_expiry_days: int = Field(default=14, ge=1, le=365)
     min_confidence: int = Field(default=60, ge=0, le=100)
     lookback_days: int = Field(default=14, ge=1, le=90)
+    require_app_install: bool = False
     handles: list[ShoutoutHandleIn] = Field(default_factory=list, max_length=20)
 
     @field_validator("brand_terms", "exclude_terms")
@@ -84,6 +85,7 @@ class ShoutoutConfigOut(BaseModel):
     offer_expiry_days: int
     min_confidence: int
     lookback_days: int
+    require_app_install: bool
     handles: list[ShoutoutHandleIn]
     platform_coverage: dict[str, Literal["good", "partial", "poor"]]
     last_scanned_at: datetime | None = None

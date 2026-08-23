@@ -11,6 +11,7 @@ import type {
   ShoutoutMention,
   ShoutoutOffer,
   ShoutoutPlatform,
+  ShoutoutRun,
   Store,
 } from '../../api/types'
 
@@ -25,7 +26,7 @@ const PLATFORMS: { value: ShoutoutPlatform; label: string }[] = [
 const EMPTY_CONFIG: ShoutoutConfig = {
   is_enabled: false, brand_terms: [], exclude_terms: [], default_store_id: null,
   offer_title: null, offer_terms: null, offer_expiry_days: 14, min_confidence: 60,
-  lookback_days: 14, handles: [],
+  lookback_days: 14, require_app_install: false, handles: [],
   platform_coverage: { instagram: 'partial', tiktok: 'poor', youtube: 'good', facebook: 'partial', x: 'good' },
   last_scanned_at: null, next_scan_after: null,
 }
@@ -151,7 +152,8 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
         brand_terms: splitTerms(brandTerms), exclude_terms: splitTerms(excludeTerms),
         default_store_id: config.default_store_id, offer_title: config.offer_title,
         offer_terms: config.offer_terms, offer_expiry_days: config.offer_expiry_days,
-        min_confidence: config.min_confidence, lookback_days: config.lookback_days, handles: config.handles,
+        min_confidence: config.min_confidence, lookback_days: config.lookback_days,
+        require_app_install: config.require_app_install, handles: config.handles,
       })
       setConfig(next); onSaved(next)
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not save configuration') }
@@ -200,6 +202,15 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
           <Input label="Reward title" value={config.offer_title ?? ''} onChange={(e) => setConfig((current) => ({ ...current, offer_title: e.target.value || null }))} placeholder="A thank-you from us" />
         </div>
         <Textarea label="Reward terms (optional)" rows={2} value={config.offer_terms ?? ''} onChange={(e) => setConfig((current) => ({ ...current, offer_terms: e.target.value || null }))} placeholder="One per customer. Redeem at the selected store." />
+        <label className="flex items-start gap-3 rounded-lg border border-tu-border bg-tu-panel2 p-3 text-sm">
+          <input
+            type="checkbox"
+            checked={config.require_app_install}
+            onChange={(e) => setConfig((current) => ({ ...current, require_app_install: e.target.checked }))}
+            className="mt-0.5"
+          />
+          <span><strong>Require app install for new customers</strong><br /><span className="text-tu-dim">Existing Tell-Us accounts can claim on the web. New customers must claim in the iPhone app.</span></span>
+        </label>
         <div className="grid gap-3 sm:grid-cols-3">
           <Input label="Offer expires in days" type="number" min={1} max={365} value={config.offer_expiry_days} onChange={(e) => setConfig((current) => ({ ...current, offer_expiry_days: Number(e.target.value) }))} />
           <Input label="Minimum confidence" type="number" min={0} max={100} value={config.min_confidence} onChange={(e) => setConfig((current) => ({ ...current, min_confidence: Number(e.target.value) }))} />
@@ -230,6 +241,22 @@ function OfferList({ brandId, offers, onChange }: { brandId: string; offers: Sho
   ))}</div>
 }
 
+function RunHistory({ runs }: { runs: ShoutoutRun[] }) {
+  if (!runs.length) return <Card><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">No scans have run yet. Enable the radar and its scheduled scan will record results here.</p></Card>
+  const latest = runs[0]
+  const latestSummary = latest.status === 'failed'
+    ? 'The latest scan failed. Review the error below; the radar will retry after its backoff period.'
+    : latest.candidates_returned === 0
+      ? 'The latest scan completed successfully but Google Search returned no candidate posts.'
+      : latest.mentions_new === 0
+        ? 'The latest scan completed, but candidates were duplicates or did not meet the grounding/confidence checks.'
+        : 'The latest scan found new mentions ready for review.'
+  return <Card>
+    <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">{latestSummary}</p></div><Chip tone={latest.status === 'completed' ? 'positive' : latest.status === 'failed' ? 'negative' : undefined}>{latest.status}</Chip></div>
+    <div className="mt-4 space-y-3">{runs.slice(0, 10).map((run) => <div key={run.id} className="rounded-lg border border-tu-border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{run.trigger} scan</span><span className="text-xs text-tu-faint">{formatDate(run.started_at)}{run.finished_at ? ` - ${formatDate(run.finished_at)}` : ''}</span></div><p className="mt-2 text-xs text-tu-dim">{run.gemini_calls} Gemini calls · {run.grounding_resolved}/{run.grounding_uris} grounding links resolved · {run.candidates_returned} candidates · {run.urls_rejected} rejected · {run.mentions_new} new · {run.mentions_duplicate} duplicates</p>{run.error && <p className="mt-2 max-h-20 overflow-auto rounded bg-tu-panel2 p-2 font-mono text-xs text-tu-bad">{run.error}</p>}</div>)}</div>
+  </Card>
+}
+
 function SocialSubmissions({ brandId }: { brandId: string }) {
   const [rows, setRows] = useState<LoyaltySocialSubmission[]>([])
   const [loading, setLoading] = useState(true)
@@ -244,6 +271,7 @@ export default function BrandShoutouts() {
   const [stores, setStores] = useState<Store[]>([])
   const [mentions, setMentions] = useState<ShoutoutMention[]>([])
   const [offers, setOffers] = useState<ShoutoutOffer[]>([])
+  const [runs, setRuns] = useState<ShoutoutRun[]>([])
   const [radarConfig, setRadarConfig] = useState<ShoutoutConfig>(EMPTY_CONFIG)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -252,12 +280,12 @@ export default function BrandShoutouts() {
 
   async function loadQueue() {
     try {
-      const [nextMentions, nextOffers] = await Promise.all([shoutoutApi.listMentions(currentBrandId), shoutoutApi.listOffers(currentBrandId)])
-      setMentions(nextMentions); setOffers(nextOffers)
+      const [nextMentions, nextOffers, nextRuns] = await Promise.all([shoutoutApi.listMentions(currentBrandId), shoutoutApi.listOffers(currentBrandId), shoutoutApi.listRuns(currentBrandId)])
+      setMentions(nextMentions); setOffers(nextOffers); setRuns(nextRuns)
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load shoutouts') }
     finally { setLoading(false) }
   }
   useEffect(() => { void Promise.all([tellusApi.get<Store[]>('/stores'), loadQueue()]).then(([nextStores]) => setStores(nextStores)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load shoutouts')) }, [brandId])
 
-  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Only grounded mentions appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar to start searching.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} /></div>
+  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Only grounded mentions appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar to start searching.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} /></div>
 }

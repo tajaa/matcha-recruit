@@ -43,7 +43,9 @@ final class PromoService {
 
     func claimShoutout(token: String?, code: String?) async throws -> ShoutoutOfferClaimResult {
         let path = if let token { "/o/\(token)/claim" } else { "/o/code/\(code ?? "")/claim" }
-        return try await client.request(method: "POST", path: path, body: EmptyBody())
+        return try await client.request(
+            method: "POST", path: path, body: EmptyBody(), headers: ["X-TellUs-Client": "ios"],
+        )
     }
 
     // MARK: Brand

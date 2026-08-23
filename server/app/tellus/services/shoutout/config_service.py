@@ -9,7 +9,7 @@ async def get_config(conn, brand_id: UUID) -> dict:
     config = dict(row) if row else {
         "is_enabled": False, "brand_terms": [], "exclude_terms": [], "default_store_id": None,
         "offer_title": None, "offer_terms": None, "offer_expiry_days": 14, "min_confidence": 60,
-        "lookback_days": 14, "last_scanned_at": None, "next_scan_after": None,
+        "lookback_days": 14, "require_app_install": False, "last_scanned_at": None, "next_scan_after": None,
     }
     handles = await conn.fetch(
         "SELECT platform, handle FROM tellus_shoutout_handles WHERE brand_id = $1 ORDER BY platform, handle", brand_id,
@@ -33,15 +33,17 @@ async def put_config(conn, brand_id: UUID, data) -> dict:
         await conn.execute(
             """INSERT INTO tellus_shoutout_configs
                    (brand_id, brand_terms, exclude_terms, default_store_id, offer_title, offer_terms,
-                    offer_expiry_days, min_confidence, lookback_days)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                    offer_expiry_days, min_confidence, lookback_days, require_app_install)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                ON CONFLICT (brand_id) DO UPDATE SET brand_terms=EXCLUDED.brand_terms,
-                   exclude_terms=EXCLUDED.exclude_terms, default_store_id=EXCLUDED.default_store_id,
-                   offer_title=EXCLUDED.offer_title, offer_terms=EXCLUDED.offer_terms,
-                   offer_expiry_days=EXCLUDED.offer_expiry_days, min_confidence=EXCLUDED.min_confidence,
-                   lookback_days=EXCLUDED.lookback_days, updated_at=NOW()""",
+                    exclude_terms=EXCLUDED.exclude_terms, default_store_id=EXCLUDED.default_store_id,
+                    offer_title=EXCLUDED.offer_title, offer_terms=EXCLUDED.offer_terms,
+                    offer_expiry_days=EXCLUDED.offer_expiry_days, min_confidence=EXCLUDED.min_confidence,
+                    lookback_days=EXCLUDED.lookback_days, require_app_install=EXCLUDED.require_app_install,
+                    updated_at=NOW()""",
             brand_id, data.brand_terms, data.exclude_terms, data.default_store_id, data.offer_title,
             data.offer_terms, data.offer_expiry_days, data.min_confidence, data.lookback_days,
+            data.require_app_install,
         )
         await conn.execute("DELETE FROM tellus_shoutout_handles WHERE brand_id = $1", brand_id)
         seen_handles: set[tuple[str, str]] = set()

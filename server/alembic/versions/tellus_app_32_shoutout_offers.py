@@ -9,6 +9,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute("ALTER TABLE tellus_shoutout_configs ADD COLUMN IF NOT EXISTS require_app_install BOOLEAN NOT NULL DEFAULT FALSE")
     op.execute("ALTER TABLE tellus_promo_campaigns DROP CONSTRAINT IF EXISTS tellus_promo_campaigns_campaign_type_check")
     op.execute("""ALTER TABLE tellus_promo_campaigns ADD CONSTRAINT tellus_promo_campaigns_campaign_type_check
         CHECK (campaign_type IN ('qr', 'location', 'shoutout'))""")
@@ -51,3 +52,4 @@ def downgrade() -> None:
     op.execute("ALTER TABLE tellus_promo_campaigns DROP CONSTRAINT IF EXISTS tellus_promo_campaigns_campaign_type_check")
     op.execute("""ALTER TABLE tellus_promo_campaigns ADD CONSTRAINT tellus_promo_campaigns_campaign_type_check
         CHECK (campaign_type IN ('qr', 'location'))""")
+    op.execute("ALTER TABLE tellus_shoutout_configs DROP COLUMN IF EXISTS require_app_install")

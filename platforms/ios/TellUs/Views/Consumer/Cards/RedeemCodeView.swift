@@ -15,8 +15,8 @@ struct RedeemCodeView: View {
                         if let value = values.first { code = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
                     }
                     Spacer()
-                    Button("Find offer") { showOffer = true }
-                        .buttonStyle(.borderedProminent).tint(TU.ember).disabled(code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Find offer") { showOffer = normalizeShoutoutCode(code) != nil }
+                        .buttonStyle(.borderedProminent).tint(TU.ember).disabled(normalizeShoutoutCode(code) == nil)
                 }
             } footer: {
                 Text("Paste the code from the thank-you link your business sent you.")
@@ -24,6 +24,6 @@ struct RedeemCodeView: View {
         }
         .themedScreen()
         .navigationTitle("Redeem a code")
-        .sheet(isPresented: $showOffer) { ShoutoutOfferView(code: code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) }
+        .sheet(isPresented: $showOffer) { if let normalized = normalizeShoutoutCode(code) { ShoutoutOfferView(code: normalized) } }
     }
 }

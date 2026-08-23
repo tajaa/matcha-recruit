@@ -15,4 +15,11 @@ final class DeepLinkURLParsingTests: XCTestCase {
     func testUnrelatedURLIsIgnored() {
         XCTAssertNil(DeepLinkRoute.parse(url: URL(string: "https://hey-matcha.com/tellus/b/store")!))
     }
+
+    func testRejectsNonCanonicalHostsAndAPIPaths() {
+        XCTAssertNil(DeepLinkRoute.parse(url: URL(string: "http://hey-matcha.com/tellus/o/abc123")!))
+        XCTAssertNil(DeepLinkRoute.parse(url: URL(string: "https://other.example/tellus/o/abc123")!))
+        XCTAssertNil(DeepLinkRoute.parse(url: URL(string: "https://hey-matcha.com/api/o/abc123")!))
+        XCTAssertNil(DeepLinkRoute.parse(url: URL(string: "https://hey-matcha.com/tellus/o/abc123/extra")!))
+    }
 }

@@ -1132,6 +1132,7 @@ export interface ShoutoutConfig {
   offer_expiry_days: number
   min_confidence: number
   lookback_days: number
+  require_app_install: boolean
   handles: ShoutoutHandle[]
   platform_coverage: Record<ShoutoutPlatform, 'good' | 'partial' | 'poor'>
   last_scanned_at: string | null
@@ -1196,6 +1197,8 @@ export interface ShoutoutOfferPreview {
   offer_terms: string | null
   short_code: string
   claim_expires_at: string
+  require_app_install: boolean
+  web_claim_allowed: boolean
   available: boolean
   already_claimed: boolean
   card_token: string | null

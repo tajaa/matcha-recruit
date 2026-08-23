@@ -32,6 +32,8 @@ class ShoutoutOfferPreviewOut(BaseModel):
     offer_terms: str | None
     short_code: str
     claim_expires_at: datetime
+    require_app_install: bool
+    web_claim_allowed: bool
     available: bool
     already_claimed: bool = False
     card_token: str | None = None
