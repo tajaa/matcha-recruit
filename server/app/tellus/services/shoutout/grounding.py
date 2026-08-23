@@ -1,5 +1,6 @@
-"""Strict URL identity and Google-grounding corroboration helpers."""
+"""Strict URL identity and web-search corroboration helpers."""
 import hashlib
+from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..loyalty_service import LoyaltyError, canonicalize_social_url
@@ -28,7 +29,14 @@ def url_fingerprint(platform: str, raw_url: str) -> str:
 _PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
 
 
-def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -> tuple[list[dict], int]:
+@dataclass(frozen=True)
+class CorroborationResult:
+    accepted: list[dict]
+    invalid_url: int
+    source_mismatch: int
+
+
+def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -> CorroborationResult:
     """Retain only model candidates whose URL is represented by this response's grounding."""
     grounded: dict[str, str] = {}
     for uri in grounding_uris:
@@ -37,20 +45,20 @@ def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -
                 grounded.setdefault(url_fingerprint(platform, uri), uri)
             except LoyaltyError:
                 continue
-    accepted, rejected = [], 0
+    accepted, invalid_url, source_mismatch = [], 0, 0
     for candidate in candidates:
         platform = candidate.get("platform")
         url = candidate.get("url")
         if platform not in _PLATFORMS or not isinstance(url, str):
-            rejected += 1
+            invalid_url += 1
             continue
         try:
             fingerprint = url_fingerprint(platform, url)
         except LoyaltyError:
-            rejected += 1
+            invalid_url += 1
             continue
         if fingerprint not in grounded:
-            rejected += 1
+            source_mismatch += 1
             continue
         accepted.append({
             **candidate,
@@ -58,4 +66,4 @@ def corroborated_candidates(candidates: list[dict], grounding_uris: list[str]) -
             "url_fingerprint": fingerprint,
             "grounding_uri": grounded[fingerprint],
         })
-    return accepted, rejected
+    return CorroborationResult(accepted, invalid_url, source_mismatch)

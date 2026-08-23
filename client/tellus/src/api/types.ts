@@ -1159,7 +1159,7 @@ export interface ShoutoutMention {
 export interface ShoutoutRun {
   id: string
   status: 'running' | 'completed' | 'failed'
-  trigger: 'scheduled' | 'admin' | 'test'
+  trigger: 'scheduled' | 'admin' | 'manual' | 'test'
   started_at: string
   finished_at: string | null
   gemini_calls: number
@@ -1170,6 +1170,17 @@ export interface ShoutoutRun {
   mentions_new: number
   mentions_duplicate: number
   error: string | null
+  source_mismatch_rejected: number
+  invalid_candidates_rejected: number
+  below_confidence_rejected: number
+}
+
+export interface ShoutoutScanResult {
+  new: number
+  duplicate: number
+  source_mismatch_rejected: number
+  invalid_candidates_rejected: number
+  below_confidence_rejected: number
 }
 
 export interface ShoutoutTestPost {
@@ -1177,6 +1188,12 @@ export interface ShoutoutTestPost {
   post_url: string
   author_handle: string
   excerpt: string
+}
+
+export interface ShoutoutManualScan {
+  platform: ShoutoutPlatform
+  handle: string
+  max_results: number
 }
 
 export interface ShoutoutOffer {

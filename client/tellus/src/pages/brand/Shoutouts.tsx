@@ -8,10 +8,12 @@ import type {
   LoyaltySocialSubmission,
   ShoutoutConfig,
   ShoutoutHandle,
+  ShoutoutManualScan,
   ShoutoutMention,
   ShoutoutOffer,
   ShoutoutPlatform,
   ShoutoutRun,
+  ShoutoutScanResult,
   ShoutoutTestPost,
   Store,
 } from '../../api/types'
@@ -116,7 +118,7 @@ function MentionRow({ brandId, mention, stores, defaults, onChange }: {
   )
 }
 
-function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: Store[]; onSaved: (config: ShoutoutConfig) => void }) {
+function Configuration({ brandId, stores, onSaved, onScanned }: { brandId: string; stores: Store[]; onSaved: (config: ShoutoutConfig) => void; onScanned: () => void }) {
   const [config, setConfig] = useState<ShoutoutConfig>(EMPTY_CONFIG)
   const [brandTerms, setBrandTerms] = useState('')
   const [excludeTerms, setExcludeTerms] = useState('')
@@ -124,6 +126,9 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
   const [handle, setHandle] = useState('')
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [manualScan, setManualScan] = useState<ShoutoutManualScan>({ platform: 'instagram', handle: '', max_results: 10 })
+  const [scanResult, setScanResult] = useState<ShoutoutScanResult | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -171,6 +176,16 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
     finally { setBusy(false) }
   }
 
+  async function runManualScan() {
+    setScanning(true); setError(''); setScanResult(null)
+    try {
+      setScanResult(await shoutoutApi.runManualScan(brandId, manualScan))
+      setManualScan((current) => ({ ...current, handle: '' }))
+      onScanned()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not run the scan') }
+    finally { setScanning(false) }
+  }
+
   return (
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -178,10 +193,9 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
           <div className="flex items-center gap-2"><Search className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Radar configuration</h2></div>
           <p className="mt-1 text-sm text-tu-dim">Find public customer posts. Nothing is sent or awarded until you approve it.</p>
         </div>
-        <Button variant={config.is_enabled ? 'soft' : 'primary'} loading={busy} onClick={() => void toggle()}>
-          {config.is_enabled ? 'Pause radar' : 'Enable radar'}
-        </Button>
+        <Button variant={config.is_enabled ? 'soft' : 'primary'} loading={busy} onClick={() => void toggle()}>{config.is_enabled ? 'Pause radar' : 'Enable radar'}</Button>
       </div>
+       <div className="mt-4 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3"><p className="text-sm font-semibold">Scan a handle now</p><p className="mt-1 text-xs text-tu-dim">Search public customer posts about one handle without saving it to the radar.</p><div className="mt-3 grid gap-3 sm:grid-cols-[150px_1fr_120px_auto]"><Select label="Social platform" value={manualScan.platform} onChange={(e) => setManualScan((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Handle" value={manualScan.handle} onChange={(e) => setManualScan((current) => ({ ...current, handle: e.target.value }))} placeholder="@yourbrand" /><Input label="Results" type="number" min={1} max={10} value={manualScan.max_results} onChange={(e) => setManualScan((current) => ({ ...current, max_results: Number(e.target.value) }))} /><div className="flex items-end"><Button type="button" loading={scanning} disabled={!manualScan.handle.trim() || manualScan.max_results < 1 || manualScan.max_results > 10} onClick={() => void runManualScan()}><Search className="h-4 w-4" /> Run scan</Button></div></div>{scanResult && <p className="mt-3 text-xs text-tu-dim">{scanResult.new + scanResult.duplicate > 0 ? `${scanResult.new + scanResult.duplicate} verified post${scanResult.new + scanResult.duplicate === 1 ? '' : 's'} found.` : ['No verified posts found.', scanResult.source_mismatch_rejected > 0 && `${scanResult.source_mismatch_rejected} source mismatch${scanResult.source_mismatch_rejected === 1 ? '' : 'es'}.`, scanResult.invalid_candidates_rejected > 0 && `${scanResult.invalid_candidates_rejected} invalid candidate${scanResult.invalid_candidates_rejected === 1 ? '' : 's'}.`, scanResult.below_confidence_rejected > 0 && `${scanResult.below_confidence_rejected} below confidence.`].filter(Boolean).join(' ')}</p>}</div>
       <form onSubmit={save} className="mt-5 space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <Textarea label="Brand terms (comma separated)" rows={2} value={brandTerms} onChange={(e) => setBrandTerms(e.target.value)} placeholder="brand name, product, campaign" />
@@ -219,7 +233,7 @@ function Configuration({ brandId, stores, onSaved }: { brandId: string; stores: 
           <Input label="Look back (days)" type="number" min={1} max={90} value={config.lookback_days} onChange={(e) => setConfig((current) => ({ ...current, lookback_days: Number(e.target.value) }))} />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-tu-faint">Last scan: {formatDate(config.last_scanned_at)} · Google Search grounding only</p>
+          <p className="text-xs text-tu-faint">Last scan: {formatDate(config.last_scanned_at)} · Web-search grounding only</p>
           <Button type="submit" loading={saving}><ShieldCheck className="h-4 w-4" /> Save configuration</Button>
         </div>
         <ErrorText>{error}</ErrorText>
@@ -247,17 +261,21 @@ function RunHistory({ runs }: { runs: ShoutoutRun[] }) {
   if (!runs.length) return <Card><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">No scans have run yet. Enable the radar and its scheduled scan will record results here.</p></Card>
   const latest = runs[0]
   const latestSummary = latest.trigger === 'test'
-    ? 'A manually added test post was sent through the review queue without a Google Search call.'
+    ? 'A manually added test post was sent through the review queue without a web-search call.'
     : latest.status === 'failed'
     ? 'The latest scan failed. Review the error below; the radar will retry after its backoff period.'
     : latest.candidates_returned === 0
-      ? 'The latest scan completed successfully but Google Search returned no candidate posts.'
+      ? 'The latest scan completed successfully but web search returned no candidate posts.'
       : latest.mentions_new === 0
-        ? 'The latest scan completed, but candidates were duplicates or did not meet the grounding/confidence checks.'
+       ? latest.source_mismatch_rejected > 0
+         ? `The latest scan found ${latest.source_mismatch_rejected} candidate URL${latest.source_mismatch_rejected === 1 ? '' : 's'} without an exact web-search source match.`
+         : latest.below_confidence_rejected > 0
+           ? 'The latest scan found grounded candidates, but they were below the configured confidence threshold.'
+           : 'The latest scan completed, but candidates were duplicates or did not meet the validation checks.'
         : 'The latest scan found new mentions ready for review.'
   return <Card>
     <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">{latestSummary}</p></div><Chip tone={latest.status === 'completed' ? 'positive' : latest.status === 'failed' ? 'negative' : undefined}>{latest.status}</Chip></div>
-    <div className="mt-4 space-y-3">{runs.slice(0, 10).map((run) => <div key={run.id} className="rounded-lg border border-tu-border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{run.trigger} scan</span><span className="text-xs text-tu-faint">{formatDate(run.started_at)}{run.finished_at ? ` - ${formatDate(run.finished_at)}` : ''}</span></div><p className="mt-2 text-xs text-tu-dim">{run.gemini_calls} Gemini calls · {run.grounding_resolved}/{run.grounding_uris} grounding links resolved · {run.candidates_returned} candidates · {run.urls_rejected} rejected · {run.mentions_new} new · {run.mentions_duplicate} duplicates</p>{run.error && <p className="mt-2 max-h-20 overflow-auto rounded bg-tu-panel2 p-2 font-mono text-xs text-tu-bad">{run.error}</p>}</div>)}</div>
+     <div className="mt-4 space-y-3">{runs.slice(0, 10).map((run) => <div key={run.id} className="rounded-lg border border-tu-border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{run.trigger} scan</span><span className="text-xs text-tu-faint">{formatDate(run.started_at)}{run.finished_at ? ` - ${formatDate(run.finished_at)}` : ''}</span></div><p className="mt-2 text-xs text-tu-dim">{run.gemini_calls} AI calls · {run.grounding_resolved}/{run.grounding_uris} grounding links resolved · {run.candidates_returned} candidates · {run.urls_rejected} rejected · {run.source_mismatch_rejected} source mismatches · {run.invalid_candidates_rejected} invalid · {run.below_confidence_rejected} below confidence · {run.mentions_new} new · {run.mentions_duplicate} duplicates</p>{run.error && <p className="mt-2 max-h-20 overflow-auto rounded bg-tu-panel2 p-2 font-mono text-xs text-tu-bad">{run.error}</p>}</div>)}</div>
   </Card>
 }
 
@@ -279,7 +297,7 @@ function SocialSubmissions({ brandId, onTestPost }: { brandId: string; onTestPos
     } catch (e) { setTestError(e instanceof Error ? e.message : 'Could not add test post') }
     finally { setSubmittingTest(false) }
   }
-  return <Card><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Customer-submitted posts</h2></div><p className="mt-1 text-sm text-tu-dim">Separate from radar detections. These are customer-submitted loyalty entries and their existing points workflow.</p><form className="mt-4 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3" onSubmit={submitTestPost}><div><h3 className="text-sm font-semibold">Test a customer post</h3><p className="mt-1 text-xs text-tu-dim">Adds a clearly labeled test scan and review-queue item. It does not call Google Search or award loyalty points.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="Platform" value={testPost.platform} onChange={(e) => setTestPost((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Customer handle" value={testPost.author_handle} onChange={(e) => setTestPost((current) => ({ ...current, author_handle: e.target.value }))} placeholder="@happycustomer" /></div><Input label="Public post URL" value={testPost.post_url} onChange={(e) => setTestPost((current) => ({ ...current, post_url: e.target.value }))} placeholder="https://instagram.com/p/example" /><Textarea label="Post text" rows={2} value={testPost.excerpt} onChange={(e) => setTestPost((current) => ({ ...current, excerpt: e.target.value }))} placeholder="Loved the coffee at your brand today." /><div className="flex items-center justify-between gap-3"><ErrorText>{testError}</ErrorText><Button type="submit" size="sm" loading={submittingTest} disabled={!testPost.post_url.trim() || !testPost.author_handle.trim() || !testPost.excerpt.trim()}><Plus className="h-3.5 w-3.5" /> Add test post</Button></div></form>{loading ? <Spinner /> : rows.length === 0 ? <Empty>No customer submissions.</Empty> : <div className="mt-4 divide-y divide-tu-border">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium">{row.platform} · {row.status}</p><a className="text-xs text-tu-accent hover:underline" href={row.post_url} target="_blank" rel="noreferrer">{row.post_url}</a></div>{row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void decide(row.id, 'approve')}>Approve</Button><Button size="sm" variant="danger" onClick={() => void decide(row.id, 'reject')}>Reject</Button></div>}</div>)}</div>}</Card>
+  return <Card><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Customer-submitted posts</h2></div><p className="mt-1 text-sm text-tu-dim">Separate from radar detections. These are customer-submitted loyalty entries and their existing points workflow.</p><form className="mt-4 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3" onSubmit={submitTestPost}><div><h3 className="text-sm font-semibold">Test a customer post</h3><p className="mt-1 text-xs text-tu-dim">Adds a clearly labeled test scan and review-queue item. It does not call web search or award loyalty points.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="Platform" value={testPost.platform} onChange={(e) => setTestPost((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Customer handle" value={testPost.author_handle} onChange={(e) => setTestPost((current) => ({ ...current, author_handle: e.target.value }))} placeholder="@happycustomer" /></div><Input label="Public post URL" value={testPost.post_url} onChange={(e) => setTestPost((current) => ({ ...current, post_url: e.target.value }))} placeholder="https://instagram.com/p/example" /><Textarea label="Post text" rows={2} value={testPost.excerpt} onChange={(e) => setTestPost((current) => ({ ...current, excerpt: e.target.value }))} placeholder="Loved the coffee at your brand today." /><div className="flex items-center justify-between gap-3"><ErrorText>{testError}</ErrorText><Button type="submit" size="sm" loading={submittingTest} disabled={!testPost.post_url.trim() || !testPost.author_handle.trim() || !testPost.excerpt.trim()}><Plus className="h-3.5 w-3.5" /> Add test post</Button></div></form>{loading ? <Spinner /> : rows.length === 0 ? <Empty>No customer submissions.</Empty> : <div className="mt-4 divide-y divide-tu-border">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium">{row.platform} · {row.status}</p><a className="text-xs text-tu-accent hover:underline" href={row.post_url} target="_blank" rel="noreferrer">{row.post_url}</a></div>{row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void decide(row.id, 'approve')}>Approve</Button><Button size="sm" variant="danger" onClick={() => void decide(row.id, 'reject')}>Reject</Button></div>}</div>)}</div>}</Card>
 }
 
 export default function BrandShoutouts() {
@@ -303,5 +321,5 @@ export default function BrandShoutouts() {
   }
   useEffect(() => { void Promise.all([tellusApi.get<Store[]>('/stores'), loadQueue()]).then(([nextStores]) => setStores(nextStores)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load shoutouts')) }, [brandId])
 
-  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
+  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} onScanned={() => void loadQueue()} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
 }

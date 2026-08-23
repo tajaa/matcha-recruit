@@ -1,15 +1,11 @@
-"""Gemini Google Search provider behind the radar's future-provider seam."""
-import asyncio
+"""OpenAI web-search provider behind the radar's future-provider seam."""
 import json
 from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
-from google.genai import types
 
-from ....core.services.genai_client import get_genai_client
-from ....core.services.model_catalog import GEMINI_FLASH
-from ....core.services.rate_limiter import get_rate_limiter
+from ....config import get_settings
 
 
 @dataclass(frozen=True)
@@ -28,7 +24,13 @@ def _json_object(text: str) -> dict:
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
-        return {}
+        start, end = value.find("{"), value.rfind("}")
+        if start < 0 or end < start:
+            return {}
+        try:
+            parsed = json.loads(value[start:end + 1])
+        except (TypeError, ValueError):
+            return {}
     return parsed if isinstance(parsed, dict) else {}
 
 
@@ -47,33 +49,58 @@ async def resolve_grounding_uris(uris: list[str]) -> tuple[list[str], int]:
     return resolved, successful
 
 
-class GeminiGroundingProvider:
+def _response_text_and_sources(payload: dict) -> tuple[str, list[str]]:
+    text, citations = [], []
+    for item in payload.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "web_search_call":
+            action = item.get("action")
+            sources = action.get("sources", []) if isinstance(action, dict) else []
+            for source in sources:
+                if isinstance(source, dict) and isinstance(source.get("url"), str):
+                    citations.append(source["url"])
+            continue
+        if item.get("type") != "message":
+            continue
+        for content in item.get("content", []):
+            if not isinstance(content, dict) or content.get("type") != "output_text":
+                continue
+            if isinstance(content.get("text"), str):
+                text.append(content["text"])
+            for annotation in content.get("annotations", []):
+                if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
+                    continue
+                url = annotation.get("url")
+                if isinstance(url, str):
+                    citations.append(url)
+    return "\n".join(text), list(dict.fromkeys(citations))
+
+
+class OpenAIWebSearchProvider:
     async def search(self, prompt: str) -> SearchResult:
-        limiter = get_rate_limiter()
-        await limiter.check_limit("gemini_compliance", "tellus_shoutout_radar")
-        try:
-            response = await asyncio.wait_for(
-                get_genai_client().aio.models.generate_content(
-                    model=GEMINI_FLASH,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.0,
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                    ),
-                ),
-                timeout=90,
+        settings = get_settings()
+        if not settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for shoutout scans.")
+        if not settings.openai_luna_model:
+            raise RuntimeError("OPENAI_LUNA_MODEL is required for shoutout scans.")
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={
+                    "model": settings.openai_luna_model,
+                    "input": prompt,
+                    "tools": [{"type": "web_search_preview"}],
+                    "tool_choice": "required",
+                    "include": ["web_search_call.action.sources"],
+                },
             )
-        finally:
-            # A timeout may still have reached Gemini, so it still consumes the budget.
-            await limiter.record_call("gemini_compliance", "tellus_shoutout_radar")
-        data = _json_object(getattr(response, "text", "") or "")
+            response.raise_for_status()
+        text, citations = _response_text_and_sources(response.json())
+        data = _json_object(text)
         mentions = data.get("mentions") if isinstance(data.get("mentions"), list) else []
-        candidates_response = getattr(response, "candidates", None) or []
-        first_candidate = candidates_response[0] if candidates_response else None
-        metadata = getattr(first_candidate, "grounding_metadata", None)
-        chunks = getattr(metadata, "grounding_chunks", None) or []
-        uris = [uri for uri in (getattr(getattr(chunk, "web", None), "uri", None) for chunk in chunks) if uri]
-        resolved, resolved_count = await resolve_grounding_uris(uris)
+        resolved, resolved_count = await resolve_grounding_uris(citations)
         return SearchResult(
             mentions=[item for item in mentions if isinstance(item, dict)],
             grounding_uris=resolved,

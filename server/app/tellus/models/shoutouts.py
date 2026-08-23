@@ -18,7 +18,10 @@ class ShoutoutHandleIn(BaseModel):
     @field_validator("handle")
     @classmethod
     def normalize_handle(cls, value: str) -> str:
-        return value.strip().lstrip("@").lower()
+        normalized = value.strip().lstrip("@").lower()
+        if not normalized:
+            raise ValueError("handle must not be blank")
+        return normalized
 
 
 class ShoutoutConfigPut(BaseModel):
@@ -43,6 +46,11 @@ class ShoutoutConfigPut(BaseModel):
 class ShoutoutEnableIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+
+
+class ShoutoutManualScanIn(ShoutoutHandleIn):
+    """One-off public-post search target; it is never saved as a brand handle."""
+    max_results: int = Field(default=10, ge=1, le=10)
 
 
 class ShoutoutRejectIn(BaseModel):
@@ -116,7 +124,7 @@ class ShoutoutConfigOut(BaseModel):
 class ShoutoutRunOut(BaseModel):
     id: UUID
     status: Literal["running", "completed", "failed"]
-    trigger: Literal["scheduled", "admin", "test"]
+    trigger: Literal["scheduled", "admin", "manual", "test"]
     started_at: datetime
     finished_at: datetime | None = None
     gemini_calls: int
@@ -127,3 +135,14 @@ class ShoutoutRunOut(BaseModel):
     mentions_new: int
     mentions_duplicate: int
     error: str | None = None
+    source_mismatch_rejected: int = 0
+    invalid_candidates_rejected: int = 0
+    below_confidence_rejected: int = 0
+
+
+class ShoutoutScanResultOut(BaseModel):
+    new: int
+    duplicate: int
+    source_mismatch_rejected: int
+    invalid_candidates_rejected: int
+    below_confidence_rejected: int

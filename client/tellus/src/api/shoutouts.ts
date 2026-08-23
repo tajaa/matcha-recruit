@@ -6,7 +6,9 @@ import type {
   ShoutoutOfferClaimResult,
   ShoutoutOfferPreview,
   ShoutoutRun,
+  ShoutoutScanResult,
   ShoutoutPlatform,
+  ShoutoutManualScan,
   ShoutoutTestPost,
 } from './types'
 
@@ -34,6 +36,7 @@ export const shoutoutApi = {
   revokeOffer: (brandId: string, offerId: string, note?: string) =>
     tellusApi.post<void>(`/businesses/${brandId}/shoutouts/offers/${offerId}/revoke`, { note }),
   listRuns: (brandId: string) => tellusApi.get<ShoutoutRun[]>(`/businesses/${brandId}/shoutouts/runs`),
+  runManualScan: (brandId: string, body: ShoutoutManualScan) => tellusApi.post<ShoutoutScanResult>(`/businesses/${brandId}/shoutouts/scan`, body),
   submitTestPost: (brandId: string, body: ShoutoutTestPost) =>
     tellusApi.post(`/businesses/${brandId}/shoutouts/test-posts`, body),
   socialSubmissions: (brandId: string) => tellusApi.get<import('./types').LoyaltySocialSubmission[]>(`/businesses/${brandId}/loyalty/social-submissions`),

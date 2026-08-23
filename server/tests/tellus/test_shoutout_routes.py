@@ -1,10 +1,13 @@
 """Route dependency and request-shape guards for the shoutout radar."""
+import inspect
+
 import pytest
 
 from app.tellus.dependencies import require_consumer
 from app.tellus.models.shoutout_offers import ShoutoutOfferRevokeIn
 from app.tellus.models.shoutouts import (
-    ShoutoutApproveIn, ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn, ShoutoutTestPostIn,
+    ShoutoutApproveIn, ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutManualScanIn, ShoutoutRejectIn,
+    ShoutoutScanResultOut, ShoutoutTestPostIn,
 )
 from app.tellus.routes import promo_public, shoutouts
 
@@ -37,7 +40,7 @@ def test_public_offer_previews_are_unauthenticated_and_claims_require_consumers(
 
 
 def test_shoutout_input_models_forbid_unknown_fields():
-    for model in (ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutRejectIn, ShoutoutApproveIn, ShoutoutTestPostIn, ShoutoutOfferRevokeIn):
+    for model in (ShoutoutConfigPut, ShoutoutEnableIn, ShoutoutHandleIn, ShoutoutManualScanIn, ShoutoutRejectIn, ShoutoutApproveIn, ShoutoutTestPostIn, ShoutoutOfferRevokeIn):
         assert model.model_config.get("extra") == "forbid"
 
 
@@ -57,3 +60,29 @@ def test_test_post_normalizes_the_customer_handle():
         platform="instagram", post_url="https://instagram.com/p/example", author_handle=" @Happy_Customer ", excerpt="Great post",
     )
     assert body.author_handle == "happy_customer"
+
+
+def test_manual_scan_normalizes_the_handle_without_persisting_it():
+    body = ShoutoutManualScanIn(platform="instagram", handle=" @OneOff_Handle ", max_results=10)
+    assert body.handle == "oneoff_handle"
+    with pytest.raises(ValueError):
+        ShoutoutManualScanIn(platform="instagram", handle=" @ ")
+    with pytest.raises(ValueError):
+        ShoutoutManualScanIn(platform="instagram", handle="oneoff_handle", max_results=11)
+
+
+def test_manual_scan_uses_the_grounded_scan_service():
+    source = inspect.getsource(shoutouts.run_manual_scan)
+    assert 'trigger="manual"' in source
+    assert "force=True" in source
+    assert "manual_max_results=body.max_results" in source
+
+
+def test_manual_scan_response_exposes_rejection_reasons():
+    route = next(route for route in shoutouts.router.routes if route.path.endswith("/shoutouts/scan"))
+    assert route.response_model is ShoutoutScanResultOut
+    result = ShoutoutScanResultOut(
+        new=0, duplicate=0, source_mismatch_rejected=2,
+        invalid_candidates_rejected=1, below_confidence_rejected=0,
+    )
+    assert result.source_mismatch_rejected == 2

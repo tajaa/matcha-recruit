@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 import json
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -23,22 +24,68 @@ def test_url_fingerprint_collapses_social_variants():
 
 
 def test_grounding_gate_drops_model_url_absent_from_search_response():
-    accepted, rejected = grounding.corroborated_candidates(
+    result = grounding.corroborated_candidates(
         [{"platform": "instagram", "url": "https://instagram.com/p/hallucinated"}],
         ["https://instagram.com/p/real"],
     )
-    assert accepted == []
-    assert rejected == 1
+    assert result.accepted == []
+    assert result.source_mismatch == 1
 
 
 def test_grounding_gate_accepts_matching_result():
-    accepted, rejected = grounding.corroborated_candidates(
+    result = grounding.corroborated_candidates(
         [{"platform": "instagram", "url": "https://www.instagram.com/p/real/?utm_source=search"}],
         ["https://instagram.com/p/real"],
     )
-    assert rejected == 0
-    assert accepted[0]["canonical_url"] == "https://instagram.com/p/real"
-    assert accepted[0]["grounding_uri"] == "https://instagram.com/p/real"
+    assert result.source_mismatch == 0
+    assert result.accepted[0]["canonical_url"] == "https://instagram.com/p/real"
+    assert result.accepted[0]["grounding_uri"] == "https://instagram.com/p/real"
+
+
+def test_grounding_gate_accepts_three_candidates_from_three_sources():
+    result = grounding.corroborated_candidates(
+        [
+            {"platform": "instagram", "url": "https://instagram.com/p/one"},
+            {"platform": "instagram", "url": "https://instagram.com/p/two"},
+            {"platform": "instagram", "url": "https://instagram.com/p/three"},
+        ],
+        [
+            "https://instagram.com/p/one?utm_source=openai",
+            "https://instagram.com/p/two?utm_source=openai",
+            "https://instagram.com/p/three?utm_source=openai",
+        ],
+    )
+    assert len(result.accepted) == 3
+    assert result.invalid_url == 0
+    assert result.source_mismatch == 0
+
+
+def test_grounding_gate_separates_invalid_urls_from_source_mismatches():
+    result = grounding.corroborated_candidates(
+        [
+            {"platform": "instagram", "url": "https://x.com/customer/status/1"},
+            {"platform": "instagram", "url": "https://instagram.com/p/missing"},
+        ],
+        ["https://instagram.com/p/real"],
+    )
+    assert result.invalid_url == 1
+    assert result.source_mismatch == 1
+
+
+def test_manual_prompt_requests_the_selected_result_limit():
+    from app.tellus.services.shoutout.prompt import build_prompt
+
+    prompt = build_prompt(
+        brand_name="Cafe", handles=[{"platform": "instagram", "handle": "cafe"}], brand_terms=[],
+        city=None, state=None, lookback_days=14, focus="manual_handle", max_results=10,
+    )
+    assert "Business:" not in prompt
+    assert "@cafe" in prompt
+    assert "public instagram posts" in prompt
+    assert "official instagram.com domain" in prompt
+    assert "Do not use aggregators" in prompt
+    assert "Return no more than 10 results." in prompt
+    assert "Sources: line with an OpenAI web-search citation for the exact public post URL" in prompt
 
 
 def test_brand_own_handle_scores_zero_and_terms_must_be_in_excerpt():
@@ -68,39 +115,145 @@ def test_reseen_update_never_touches_status_or_catches_unique_violation():
     assert "UniqueViolationError" not in inspect.getsource(scan_service)
 
 
-def test_provider_handles_a_response_without_candidates(monkeypatch):
-    class FakeLimiter:
-        async def check_limit(self, *_):
-            return None
-
-        async def record_call(self, *_):
-            return None
-
-    class FakeModels:
-        async def generate_content(self, **_):
-            return type("Response", (), {"text": None, "candidates": None})()
-
-    class FakeClient:
-        aio = type("Aio", (), {"models": FakeModels()})()
-
+def test_openai_response_parser_collects_annotations_and_web_search_sources():
     from app.tellus.services.shoutout import provider
 
-    monkeypatch.setattr(provider, "get_rate_limiter", lambda: FakeLimiter())
-    monkeypatch.setattr(provider, "get_genai_client", lambda: FakeClient())
+    text, citations = provider._response_text_and_sources({
+        "output": [
+            {"type": "web_search_call", "action": {"sources": [
+                {"url": "https://instagram.com/p/source"},
+                {"url": "https://instagram.com/p/source-two"},
+            ]}},
+            {"type": "message", "content": [{"type": "output_text", "text": (
+                '{"mentions":[{"platform":"instagram","url":"https://instagram.com/p/real"}]}'
+                "\n\nSources: ([instagram.com](https://instagram.com/p/real))"
+            ), "annotations": [
+                {"type": "url_citation", "url": "https://instagram.com/p/real"},
+                {"type": "file_citation", "url": "https://example.com/ignore"},
+                {"type": "url_citation", "url": "https://instagram.com/p/real"},
+            ]}]},
+        ],
+    })
+    assert provider._json_object(text) == {"mentions": [{"platform": "instagram", "url": "https://instagram.com/p/real"}]}
+    assert citations == [
+        "https://instagram.com/p/source",
+        "https://instagram.com/p/source-two",
+        "https://instagram.com/p/real",
+    ]
 
-    import asyncio
-    result = asyncio.run(provider.GeminiGroundingProvider().search("test"))
-    assert result.mentions == []
-    assert result.grounding_uris == []
-    assert result.grounding_resolved == 0
+
+def test_openai_response_parser_ignores_malformed_sources():
+    from app.tellus.services.shoutout import provider
+
+    _, citations = provider._response_text_and_sources({
+        "output": [
+            {"type": "web_search_call", "action": {"sources": [None, {}, {"url": 4}]}},
+            {"type": "web_search_call", "action": None},
+        ],
+    })
+    assert citations == []
+
+
+def test_response_parser_tolerates_citation_markers_after_json():
+    from app.tellus.services.shoutout import provider
+
+    assert provider._json_object('{"mentions":[]}【source】') == {"mentions": []}
+
+
+def test_provider_uses_openai_responses_with_required_web_search():
+    from app.tellus.services.shoutout import provider
+
+    source = inspect.getsource(provider.OpenAIWebSearchProvider.search)
+    assert '"https://api.openai.com/v1/responses"' in source
+    assert '"type": "web_search_preview"' in source
+    assert '"tool_choice": "required"' in source
+    assert '"web_search_call.action.sources"' in source
+
+
+def test_provider_requests_and_returns_web_search_sources(monkeypatch):
+    from app.tellus.services.shoutout import provider
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "output": [
+                    {"type": "web_search_call", "action": {"sources": [
+                        {"url": "https://instagram.com/p/real"},
+                    ]}},
+                    {"type": "message", "content": [{"type": "output_text", "text": (
+                        '{"mentions":[{"platform":"instagram","url":"https://instagram.com/p/real"}]}'
+                    ), "annotations": []}]},
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self):
+            self.payload = None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def post(self, _url, *, headers, json):
+            self.payload = json
+            return FakeResponse()
+
+    client = FakeClient()
+    monkeypatch.setattr(provider, "get_settings", lambda: SimpleNamespace(
+        openai_api_key="test-key", openai_luna_model="gpt-5.6-luna",
+    ))
+    monkeypatch.setattr(provider.httpx, "AsyncClient", lambda **_: client)
+
+    async def resolve(uris):
+        return uris, len(uris)
+
+    monkeypatch.setattr(provider, "resolve_grounding_uris", resolve)
+    result = asyncio.run(provider.OpenAIWebSearchProvider().search("find posts"))
+
+    assert client.payload["include"] == ["web_search_call.action.sources"]
+    assert result.grounding_uris == ["https://instagram.com/p/real"]
+    assert result.grounding_resolved == 1
 
 
 def test_scan_run_uses_real_resolution_count_and_failure_backoff():
     source = inspect.getsource(scan_service.scan_brand)
     assert "grounding_resolved = sum" in source
-    assert "gemini_calls=2" in source
+    assert "gemini_calls=$2" in source
+    assert "source_mismatch_rejected=$7" in source
+    assert "invalid_candidates_rejected=$8" in source
+    assert "below_confidence_rejected=$9" in source
     assert "asyncio.gather" in source
     assert "next_scan_after=NOW()" in source
+    assert "mentions = mentions[:manual_max_results]" in source
+    assert 'mention.get("platform") == manual_handle["platform"]' in source
+
+
+class _ManualCooldownConn:
+    def transaction(self):
+        return _Transaction()
+
+    async def execute(self, *_):
+        return None
+
+    async def fetchval(self, *_):
+        return 1
+
+
+def test_manual_scan_enforces_its_cooldown_before_a_provider_call():
+    with pytest.raises(scan_service.ManualScanError, match="Wait 30 seconds") as error:
+        asyncio.run(scan_service.scan_brand(_ManualCooldownConn(), uuid4(), trigger="manual", force=True))
+    assert error.value.status == 429
+    assert error.value.code == "manual_scan_cooldown"
+
+
+def test_manual_scan_allows_an_immediate_retry_after_a_failure():
+    source = inspect.getsource(scan_service.scan_brand)
+    assert "status <> 'failed'" in source
 
 
 def test_config_enablement_returns_the_actual_primary_key_and_dedupes_handles():

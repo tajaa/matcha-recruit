@@ -5,13 +5,18 @@ from uuid import UUID
 
 from .grounding import corroborated_candidates, url_fingerprint
 from .prompt import build_prompt
-from .provider import GeminiGroundingProvider
+from .provider import OpenAIWebSearchProvider
 from ..loyalty_service import LoyaltyError, canonicalize_social_url
 
 _PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
 
 
 class TestPostError(Exception):
+    def __init__(self, status: int, code: str, message: str):
+        self.status, self.code, self.message = status, code, message
+
+
+class ManualScanError(Exception):
     def __init__(self, status: int, code: str, message: str):
         self.status, self.code, self.message = status, code, message
 
@@ -92,60 +97,96 @@ async def submit_test_post(conn, *, brand_id: UUID, actor_id: UUID, data) -> dic
     return {"run_id": run["id"], "mention_id": mention["id"] if mention else None, "created": mention is not None}
 
 
-async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provider=None) -> dict:
-    provider = provider or GeminiGroundingProvider()
+async def scan_brand(
+    conn, brand_id: UUID, *, trigger: str = "scheduled", force: bool = False,
+    manual_handle: dict | None = None, manual_max_results: int | None = None, provider=None,
+) -> dict:
+    provider = provider or OpenAIWebSearchProvider()
     async with conn.transaction():
         await conn.execute(
             "UPDATE tellus_shoutout_scan_runs SET status='failed', finished_at=NOW(), error='stale run reclaimed' "
             "WHERE brand_id=$1 AND status='running' AND started_at < NOW() - INTERVAL '1 hour'", brand_id,
         )
+        if trigger == "manual":
+            recent_manual = await conn.fetchval(
+                """SELECT 1 FROM tellus_shoutout_scan_runs WHERE brand_id=$1 AND trigger='manual'
+                   AND status <> 'failed' AND started_at > NOW() - INTERVAL '30 seconds'""",
+                brand_id,
+            )
+            if recent_manual:
+                raise ManualScanError(429, "manual_scan_cooldown", "Wait 30 seconds before another manual scan.")
         run = await conn.fetchrow(
             """INSERT INTO tellus_shoutout_scan_runs (brand_id,status,trigger)
                VALUES ($1,'running',$2) ON CONFLICT DO NOTHING RETURNING id""",
             brand_id, trigger,
         )
         if run is None:
+            if trigger == "manual":
+                raise ManualScanError(409, "scan_already_running", "Another shoutout scan is already running.")
             return {"skipped": "already_running"}
-        config = await conn.fetchrow("SELECT * FROM tellus_shoutout_configs WHERE brand_id=$1 AND is_enabled", brand_id)
-        if config is None:
+        config = await conn.fetchrow("SELECT * FROM tellus_shoutout_configs WHERE brand_id=$1", brand_id)
+        if manual_handle is None and (config is None or not config["is_enabled"]):
             await conn.execute("UPDATE tellus_shoutout_scan_runs SET status='completed', finished_at=NOW() WHERE id=$1", run["id"])
             return {"skipped": "disabled"}
-        claimed = await conn.fetchrow(
-            """UPDATE tellus_shoutout_configs SET next_scan_after=NOW()+INTERVAL '20 hours'
-               WHERE brand_id=$1 AND (next_scan_after IS NULL OR next_scan_after <= NOW()) RETURNING *""", brand_id,
-        )
-        if claimed is None:
-            await conn.execute("UPDATE tellus_shoutout_scan_runs SET status='completed', finished_at=NOW() WHERE id=$1", run["id"])
-            return {"skipped": "not_due"}
+        if manual_handle is not None:
+            claimed = dict(config) if config else {
+                "brand_terms": [], "exclude_terms": [], "lookback_days": 14, "min_confidence": 60,
+            }
+            if config and config["is_enabled"]:
+                claimed = await conn.fetchrow(
+                    """UPDATE tellus_shoutout_configs SET next_scan_after=NOW()+INTERVAL '20 hours'
+                       WHERE brand_id=$1 RETURNING *""", brand_id,
+                )
+        else:
+            claimed = await conn.fetchrow(
+                """UPDATE tellus_shoutout_configs SET next_scan_after=NOW()+INTERVAL '20 hours'
+                   WHERE brand_id=$1 AND ($2 OR next_scan_after IS NULL OR next_scan_after <= NOW()) RETURNING *""",
+                brand_id, force,
+            )
+            if claimed is None:
+                await conn.execute("UPDATE tellus_shoutout_scan_runs SET status='completed', finished_at=NOW() WHERE id=$1", run["id"])
+                return {"skipped": "not_due"}
         brand = await conn.fetchrow(
             """SELECT b.name, s.city, s.state FROM tellus_brands b
                LEFT JOIN LATERAL (SELECT city, state FROM tellus_stores WHERE brand_id=b.id ORDER BY created_at LIMIT 1) s ON TRUE
                WHERE b.id=$1""", brand_id,
         )
-        handles = await conn.fetch("SELECT platform, handle FROM tellus_shoutout_handles WHERE brand_id=$1 AND is_active", brand_id)
+        handles = [manual_handle] if manual_handle else await conn.fetch(
+            "SELECT platform, handle FROM tellus_shoutout_handles WHERE brand_id=$1 AND is_active", brand_id,
+        )
     try:
         search_args = {
             "brand_name": brand["name"], "handles": [dict(row) for row in handles],
             "brand_terms": claimed["brand_terms"], "exclude_terms": claimed["exclude_terms"],
             "city": brand["city"], "state": brand["state"], "lookback_days": claimed["lookback_days"],
         }
-        results = await asyncio.gather(
-            provider.search(build_prompt(**search_args, focus="handles")),
-            provider.search(build_prompt(**search_args, focus="terms")),
-        )
+        if manual_max_results is not None:
+            search_args["max_results"] = manual_max_results
+        searches = [provider.search(build_prompt(**search_args, focus="manual_handle" if manual_handle else "handles"))]
+        if manual_handle is None:
+            searches.append(provider.search(build_prompt(**search_args, focus="terms")))
+        results = await asyncio.gather(*searches)
         mentions = [mention for result in results for mention in result.mentions]
+        if manual_handle is not None:
+            mentions = [mention for mention in mentions if mention.get("platform") == manual_handle["platform"]]
+        if manual_max_results is not None:
+            mentions = mentions[:manual_max_results]
         grounding_uris = list(dict.fromkeys(uri for result in results for uri in result.grounding_uris))
         grounding_resolved = sum(result.grounding_resolved for result in results)
-        accepted, rejected = corroborated_candidates(mentions, grounding_uris)
+        corroboration = corroborated_candidates(mentions, grounding_uris)
+        invalid_candidates = corroboration.invalid_url
+        source_mismatches = corroboration.source_mismatch
+        below_confidence = 0
         own_handles = {row["handle"] for row in handles}
         new, duplicate = 0, 0
-        for candidate in accepted:
+        for candidate in corroboration.accepted:
             candidate = valid_candidate(candidate)
             if candidate is None:
-                rejected += 1
+                invalid_candidates += 1
                 continue
             score = score_candidate(candidate, own_handles)
             if score < claimed["min_confidence"]:
+                below_confidence += 1
                 continue
             inserted = await conn.fetchrow(
                 """INSERT INTO tellus_shoutout_mentions
@@ -166,14 +207,23 @@ async def scan_brand(conn, brand_id: UUID, *, trigger: str = "scheduled", provid
                        confidence=GREATEST(confidence,$3) WHERE brand_id=$1 AND url_fingerprint=$2""",
                     brand_id, candidate["url_fingerprint"], score,
                 )
+        urls_rejected = invalid_candidates + source_mismatches
         await conn.execute(
-            """UPDATE tellus_shoutout_scan_runs SET status='completed',finished_at=NOW(),gemini_calls=2,
-               grounding_uris=$2,grounding_resolved=$3,candidates_returned=$4,urls_rejected=$5,
-               mentions_new=$6,mentions_duplicate=$7 WHERE id=$1""",
-            run["id"], len(grounding_uris), grounding_resolved, len(mentions), rejected, new, duplicate,
+            """UPDATE tellus_shoutout_scan_runs SET status='completed',finished_at=NOW(),gemini_calls=$2,
+                grounding_uris=$3,grounding_resolved=$4,candidates_returned=$5,urls_rejected=$6,
+                source_mismatch_rejected=$7,invalid_candidates_rejected=$8,below_confidence_rejected=$9,
+                mentions_new=$10,mentions_duplicate=$11 WHERE id=$1""",
+            run["id"], len(searches), len(grounding_uris), grounding_resolved, len(mentions), urls_rejected,
+            source_mismatches, invalid_candidates, below_confidence, new, duplicate,
         )
         await conn.execute("UPDATE tellus_shoutout_configs SET last_scanned_at=NOW(), consecutive_failures=0 WHERE brand_id=$1", brand_id)
-        return {"new": new, "duplicate": duplicate}
+        return {
+            "new": new,
+            "duplicate": duplicate,
+            "source_mismatch_rejected": source_mismatches,
+            "invalid_candidates_rejected": invalid_candidates,
+            "below_confidence_rejected": below_confidence,
+        }
     except Exception as exc:
         await conn.execute(
             "UPDATE tellus_shoutout_scan_runs SET status='failed',finished_at=NOW(),error=$2 WHERE id=$1", run["id"], str(exc)[:2000],
