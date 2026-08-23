@@ -126,6 +126,8 @@ async def list_recent_activity_endpoint(
 ):
     """Recent activity feed across projects, tasks, threads in this company."""
     company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
