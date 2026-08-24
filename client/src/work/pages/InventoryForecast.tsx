@@ -21,6 +21,7 @@ import {
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
+import InventoryNavigation from '../components/inventory/InventoryNavigation'
 import { useMe } from '../../hooks/useMe'
 
 const DEFAULT_SETTINGS: ForecastSettings = {
@@ -161,6 +162,8 @@ export default function InventoryForecast() {
             <button type="button" onClick={() => window.location.reload()} className="inline-flex items-center gap-2 rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-dim hover:text-w-text"><RefreshCw size={13} /> Refresh</button>
           </div>
         </header>
+
+        <InventoryNavigation />
 
         <section id="waste-par" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">

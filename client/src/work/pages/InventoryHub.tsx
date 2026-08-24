@@ -17,7 +17,6 @@ import {
   RefreshCw,
   Search,
   Sparkles,
-  TrendingUp,
   Upload,
   Wrench,
 } from 'lucide-react'
@@ -30,6 +29,7 @@ import SalesImportModal from '../components/inventory/SalesImportModal'
 import SalesMappingsPanel from '../components/inventory/SalesMappingsPanel'
 import SalesIntakeWizard from '../components/inventory/SalesIntakeWizard'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
+import InventoryNavigation from '../components/inventory/InventoryNavigation'
 import InventoryGuideWizard, {
   INVENTORY_HELP,
   InventoryHelpButton,
@@ -183,13 +183,12 @@ export default function InventoryHub() {
           </div>
         </header>
 
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-w-line pb-3">
+        <InventoryNavigation />
+
+        <div className="flex flex-wrap items-center gap-1.5">
           <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/inventory/audit`)}>
             <ClipboardCheck className="mr-1.5 inline h-3.5 w-3.5" /> Audit stock
           </Button>
-          {hasFeature('inventory_forecasting') && <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/inventory/forecast`)}>
-            <TrendingUp className="mr-1.5 inline h-3.5 w-3.5" /> Forecast demand
-          </Button>}
           {canSales && <Button variant="secondary" size="sm" onClick={() => { setReviewImportId(null); setSalesOpen(true) }}>
             <Upload className="mr-1.5 inline h-3.5 w-3.5" /> Import sales
           </Button>}

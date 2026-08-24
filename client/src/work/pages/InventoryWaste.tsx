@@ -9,6 +9,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { useMe } from '../../hooks/useMe'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
+import InventoryNavigation from '../components/inventory/InventoryNavigation'
 
 function isoDay(offset = 0) { const value = new Date(); value.setDate(value.getDate() + offset); return value.toISOString().slice(0, 10) }
 const money = (value: number | null) => value == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
@@ -60,6 +61,7 @@ export default function InventoryWaste() {
   const parDrift = parLines.filter((line) => line.recommended_par != null && line.current_par != null).sort((a, b) => Math.abs((b.recommended_par ?? 0) - (b.current_par ?? 0)) - Math.abs((a.recommended_par ?? 0) - (a.current_par ?? 0))).slice(0, 5)
   return <main className="mx-auto max-w-6xl space-y-6 p-6">
     <div className="flex items-center justify-between"><div><Button variant="ghost" size="sm" onClick={() => navigate(-1)}><ArrowLeft size={16} /> Back</Button><h1 className="mt-2 text-2xl font-semibold text-w-text">Inventory waste</h1><p className="text-sm text-w-dim">Last 7 days of recorded loss, recipe variance, and perishable risk.</p></div><div className="flex gap-2"><Button variant="ghost" size="sm" onClick={() => setGuideOpen(true)}>How this works</Button><Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}><RefreshCw size={16} /> Refresh</Button></div></div>
+    <InventoryNavigation />
     <section className="grid gap-3 sm:grid-cols-3"><Metric label="Waste value" value={money(reasonRollup?.total_value ?? null)} /><Metric label="Waste / revenue" value={reasonRollup?.waste_pct_of_revenue == null ? '—' : `${(reasonRollup.waste_pct_of_revenue * 100).toFixed(1)}%`} /><Metric label="Units discarded" value={String(reasonRollup?.total_units ?? 0)} /></section>
     <section id="waste-record" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4"><h2 className="font-medium text-w-text">Record waste</h2><p className="mt-1 text-xs text-w-dim">Human entry may explicitly classify theft; chat reports never do.</p><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_9rem_10rem_auto]"><Select options={items.map((item) => ({ value: item.id, label: item.name }))} value={wasteItem} onChange={(event) => setWasteItem(event.target.value)} placeholder="Choose item…" /><input type="number" min="0.001" step="any" value={wasteQuantity} onChange={(event) => setWasteQuantity(event.target.value)} placeholder="Quantity" className="rounded-lg border border-w-line bg-w-surface2 px-3 py-2 text-sm text-w-text" /><Select options={reasons} value={wasteReason} onChange={(event) => setWasteReason(event.target.value as WasteReason)} /><Button disabled={recording || !wasteItem || !wasteQuantity} onClick={() => void submitWaste()}>Record</Button></div></section>
     <section id="waste-review" className="scroll-mt-6 grid gap-4 lg:grid-cols-2"><Rollup title="By reason" rollup={reasonRollup} /><Rollup title="By category" rollup={categoryRollup} /></section>
