@@ -505,3 +505,10 @@ async def create_inventory(conn):
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_inventory_par_history_item ON inventory_par_history (item_id, changed_at DESC)")
     await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_par_history_run_item ON inventory_par_history (run_id, item_id) WHERE run_id IS NOT NULL")
+    await conn.execute("""CREATE TABLE IF NOT EXISTS inventory_waste_alert_deliveries (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(), company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL, alert_date DATE NOT NULL,
+        alert_kind VARCHAR(30) NOT NULL CHECK (alert_kind IN ('expiring','waste_spike','par_applied')),
+        recipient_email VARCHAR(255), channel_id UUID, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""")
+    await conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_waste_alert_deliveries
+        ON inventory_waste_alert_deliveries (company_id, location_id, alert_date, alert_kind, recipient_email) NULLS NOT DISTINCT""")
