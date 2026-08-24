@@ -279,6 +279,10 @@ class ForecastParApply(BaseModel):
     mode: Literal["manual", "huume"] = "manual"
 
 
+class ForecastParAIDraft(BaseModel):
+    run_id: UUID
+
+
 class ForecastAIDraftRequest(BaseModel):
     location_id: Optional[UUID] = None
     horizon_start: Optional[date] = None

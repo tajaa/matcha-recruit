@@ -20,11 +20,13 @@ from app.matcha.models.inventory import (
     ForecastRuleUpsert,
     ForecastRunCreate,
     ForecastParApply,
+    ForecastParAIDraft,
     ForecastSettingsUpsert,
 )
 from app.matcha.services.inventory import forecast_store
 from app.matcha.services.inventory import forecast_ai
 from app.matcha.services.inventory.waste import par_store
+from app.matcha.services.inventory.waste import par_ai
 
 
 router = APIRouter()
@@ -210,6 +212,20 @@ async def apply_forecast_par(
             conn, company_id=company_id, run_id=run_id, user_id=user.id,
             mode=body.mode, item_ids=body.item_ids,
         )
+
+
+@router.post('/par-ai')
+async def draft_par_exceptions(body: ForecastParAIDraft, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client), _gate=_forecast_gate):
+    await check_rate_limit(f'user:{user.id}', 'inventory_par_ai_burst', 5, 60)
+    await check_rate_limit(f'user:{user.id}', 'inventory_par_ai', 40, 3600)
+    await check_rate_limit(str(company_id), 'inventory_par_ai_company', 120, 3600)
+    async with get_connection() as conn:
+        rows = await conn.fetch("""SELECT fl.item_id, i.name, fl.status, fl.recommended_par,
+            COALESCE((SELECT COUNT(*) FROM inventory_movements m WHERE m.item_id=fl.item_id AND m.kind='stockout' AND m.created_at > NOW()-INTERVAL '30 days'),0) AS stockouts,
+            COALESCE((SELECT SUM(ABS(m.quantity_delta)) FROM inventory_movements m WHERE m.item_id=fl.item_id AND m.kind='waste' AND m.created_at > NOW()-INTERVAL '30 days'),0) AS waste_units
+            FROM inventory_forecast_lines fl JOIN inventory_forecast_runs fr ON fr.id=fl.run_id JOIN inventory_items i ON i.id=fl.item_id
+            WHERE fl.run_id=$1 AND fr.company_id=$2 AND fl.status <> 'ready'""", body.run_id, company_id)
+    return await par_ai.propose_par_exceptions(suppressed_items=[dict(row) for row in rows])
 
 
 @router.get("/runs/{run_id}")
