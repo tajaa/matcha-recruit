@@ -14,11 +14,13 @@ import asyncio
 import csv
 import io
 import logging
+from datetime import date
 from typing import Any, Optional
 from uuid import UUID
 
 from app.config import get_settings
 from app.matcha.services.ir.ir_analysis import IRAnalyzer
+from app.matcha.services.inventory.waste import lots as lots_service
 
 logger = logging.getLogger(__name__)
 
@@ -337,6 +339,7 @@ async def commit_receipt_lines(
                     if row is None:
                         raise ValueError("order not open")
                     movement_ids.append(str(row["receipt_movement_id"]))
+                    # mark_received already writes this receipt's advisory lot.
                 else:
                     if item_id is not None:
                         owned = await conn.fetchval(
@@ -360,6 +363,12 @@ async def commit_receipt_lines(
                         lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}],
                     )
                     movement_ids.append(str(inserted[0]["id"]))
+                    await lots_service.record_lot(
+                        conn, company_id=company_id, item_id=item_id, location_id=location_id,
+                        received_movement_id=inserted[0]["id"], quantity=quantity,
+                        received_on=date.today(), expires_on=None, lot_code=None,
+                        unit_cost=None, created_by=user_id,
+                    )
                 created += 1
         except Exception:
             logger.warning("receipt line %d commit failed", n, exc_info=True)

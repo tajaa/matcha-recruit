@@ -1,10 +1,12 @@
 """DB service for the inventory order queue."""
 
 import json
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory import movements as movements_service
+from app.matcha.services.inventory.waste import lots as lots_service
 
 
 def decode_suggestion(value):
@@ -107,6 +109,11 @@ async def mark_received(
         # on movement["id"] below.
         return None
     movement = inserted[0]
+    await lots_service.record_lot(
+        conn, company_id=company_id, item_id=order["item_id"], location_id=None,
+        received_movement_id=movement["id"], quantity=received_qty, received_on=date.today(),
+        expires_on=None, lot_code=None, unit_cost=None, created_by=user_id,
+    )
     row = await conn.fetchrow(
         """
         UPDATE inventory_orders

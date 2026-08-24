@@ -232,6 +232,32 @@ async def create_inventory(conn):
         CREATE INDEX IF NOT EXISTS idx_inventory_movements_item
         ON inventory_movements (item_id, created_at DESC)
     """)
+    # Advisory FEFO overlay only: item.current_quantity remains authoritative.
+    # It follows inventory_movements because received_movement_id is a FK.
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_lots (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
+            received_movement_id UUID REFERENCES inventory_movements(id) ON DELETE SET NULL,
+            lot_code VARCHAR(80), received_on DATE NOT NULL, expires_on DATE,
+            quantity_received NUMERIC NOT NULL CHECK (quantity_received > 0),
+            quantity_remaining NUMERIC NOT NULL CHECK (quantity_remaining >= 0),
+            status VARCHAR(20) NOT NULL DEFAULT 'open'
+                CHECK (status IN ('open','depleted','discarded','expired')),
+            unit_cost NUMERIC, created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inventory_lots_expiry
+        ON inventory_lots (company_id, expires_on) WHERE status='open' AND expires_on IS NOT NULL
+    """)
+    await conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_lots_receipt
+        ON inventory_lots (received_movement_id, item_id) WHERE received_movement_id IS NOT NULL
+    """)
     await conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_movements_sales
         ON inventory_movements (sales_import_id, item_id)

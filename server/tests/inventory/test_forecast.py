@@ -74,6 +74,35 @@ def test_replenishment_accounts_for_lead_time_safety_stock_and_case_pack():
     assert result["suggested_quantity"] == Decimal("12")
 
 
+def test_shelf_life_caps_target_quantity():
+    result = calculate_replenishment(
+        current_quantity=Decimal("0"), daily_demand=[Decimal("2")] * 14,
+        forecast_start=date(2026, 2, 2), lead_time_days=2, safety_stock_days=5,
+        shelf_life_days=5,
+    )
+    assert result["shelf_cap"] == Decimal("10")
+    assert result["target_quantity"] == Decimal("10")
+    assert result["shelf_life_capped"] is True
+
+
+def test_case_pack_cannot_reinflate_past_shelf_cap():
+    result = calculate_replenishment(
+        current_quantity=Decimal("0"), daily_demand=[Decimal("2")] * 14,
+        forecast_start=date(2026, 2, 2), lead_time_days=2, safety_stock_days=5,
+        shelf_life_days=5, case_pack_quantity=Decimal("12"),
+    )
+    assert result["suggested_quantity"] == Decimal("10")
+
+
+def test_shelf_life_cap_falls_back_when_window_is_past_horizon():
+    result = calculate_replenishment(
+        current_quantity=Decimal("0"), daily_demand=[Decimal("2")] * 3,
+        forecast_start=date(2026, 2, 2), lead_time_days=20, safety_stock_days=5,
+        shelf_life_days=2,
+    )
+    assert result["shelf_cap"] == Decimal("4")
+
+
 def test_week_override_changes_only_its_forecast_week():
     start = date(2026, 2, 2)
     demand = forecast_daily_demand(

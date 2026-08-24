@@ -31,6 +31,9 @@ class InventoryItemOut(BaseModel):
     current_quantity: Optional[Decimal] = None
     low_stock_threshold: Optional[Decimal] = None
     unit_cost: Optional[Decimal] = None
+    category: Optional[str] = None
+    shelf_life_days: Optional[int] = None
+    yield_pct: Optional[Decimal] = None
     auto_created: bool
     archived_at: Optional[datetime] = None
     location_id: Optional[UUID] = None
@@ -46,6 +49,9 @@ class InventoryItemCreate(BaseModel):
     current_quantity: Optional[Decimal] = None
     low_stock_threshold: Optional[Decimal] = None
     unit_cost: Optional[Decimal] = Field(default=None, ge=0)
+    category: Optional[str] = Field(default=None, max_length=60)
+    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    yield_pct: Optional[Decimal] = Field(default=None, gt=0, le=1)
     location_id: Optional[UUID] = None
 
 
@@ -54,6 +60,9 @@ class InventoryItemPatch(BaseModel):
     unit: Optional[str] = None
     low_stock_threshold: Optional[Decimal] = None
     unit_cost: Optional[Decimal] = Field(default=None, ge=0)
+    category: Optional[str] = Field(default=None, max_length=60)
+    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    yield_pct: Optional[Decimal] = Field(default=None, gt=0, le=1)
     set_quantity: Optional[Decimal] = None
     archived: Optional[bool] = None
 

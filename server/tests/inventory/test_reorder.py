@@ -56,3 +56,9 @@ def test_confidence_tiers():
     assert suggest_order(many, NOW)["confidence"] in ("high", "medium")
     few = [_out(1, 1), _out(2, 1)]
     assert suggest_order(few, NOW)["confidence"] == "low"
+
+
+def test_shelf_life_limits_cover_days():
+    result = suggest_order([_out(d, 2) for d in range(1, 11)], NOW, shelf_life_days=5)
+    assert result["cover_days"] == 5
+    assert result["suggested_quantity"] == 10

@@ -11,7 +11,7 @@ DEFAULT_COVER_DAYS = 14
 LOOKBACK_DAYS = 90
 
 
-def suggest_order(movements: list[dict], now: datetime) -> dict | None:
+def suggest_order(movements: list[dict], now: datetime, shelf_life_days: int | None = None) -> dict | None:
     """movements: chronological dicts with keys {kind, quantity,
     quantity_delta, created_at}. Returns None when history is too thin to
     say anything useful (fewer than 2 'out' movements AND no prior 'in'
@@ -55,8 +55,9 @@ def suggest_order(movements: list[dict], now: datetime) -> dict | None:
         stockout_intervals.append((curr["created_at"] - prev["created_at"]).total_seconds() / 86400)
     avg_stockout_interval = mean(stockout_intervals) if stockout_intervals else None
 
+    cover_days = min(DEFAULT_COVER_DAYS, max(1, int(shelf_life_days))) if shelf_life_days else DEFAULT_COVER_DAYS
     if daily_rate is not None and daily_rate > 0:
-        suggested_quantity = math.ceil(daily_rate * DEFAULT_COVER_DAYS)
+        suggested_quantity = math.ceil(daily_rate * cover_days)
     elif receipts:
         last_receipt = max(receipts, key=lambda m: m["created_at"])
         suggested_quantity = float(last_receipt["quantity"])
@@ -76,7 +77,7 @@ def suggest_order(movements: list[dict], now: datetime) -> dict | None:
         "suggested_quantity": suggested_quantity,
         "daily_rate": daily_rate,
         "avg_stockout_interval_days": avg_stockout_interval,
-        "cover_days": DEFAULT_COVER_DAYS,
+        "cover_days": cover_days,
         "confidence": confidence,
         "n_samples": n_samples,
         "waste_in_window": waste_in_window,

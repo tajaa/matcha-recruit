@@ -26,6 +26,9 @@ export interface InventoryItem {
   current_quantity: number | null
   low_stock_threshold: number | null
   unit_cost: number | null
+  category: string | null
+  shelf_life_days: number | null
+  yield_pct: number | null
   auto_created: boolean
   archived_at: string | null
   location_id: string | null
@@ -96,6 +99,9 @@ export async function createItem(body: {
   current_quantity?: number
   low_stock_threshold?: number
   unit_cost?: number
+  category?: string
+  shelf_life_days?: number
+  yield_pct?: number
   location_id?: string
 }) {
   return api.post<InventoryItem>('/inventory/items', body)
@@ -112,6 +118,9 @@ export async function patchItem(
     unit: string
     low_stock_threshold: number
     unit_cost: number
+    category: string
+    shelf_life_days: number
+    yield_pct: number
     set_quantity: number
     archived: boolean
   }>,
@@ -529,6 +538,8 @@ export type ForecastLine = {
   lead_demand: number
   safety_demand: number
   target_quantity: number
+  shelf_cap: number | null
+  shelf_life_capped: boolean
   suggested_quantity: number | null
   runout_date: string | null
   order_by_date: string | null

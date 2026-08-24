@@ -114,6 +114,7 @@ def calculate_replenishment(
     case_pack_quantity=Decimal("1"),
     minimum_order_quantity=Decimal("0"),
     on_order_quantity=Decimal("0"),
+    shelf_life_days: int | None = None,
 ) -> dict:
     """Calculate runout and an advisory replenishment quantity."""
     lead_time_days = max(0, int(lead_time_days))
@@ -144,6 +145,15 @@ def calculate_replenishment(
         lead_demand += average_demand * Decimal(str(lead_time_days - len(demand)))
     safety_demand = average_demand * Decimal(str(safety_stock_days))
     target_quantity = lead_demand + safety_demand
+    shelf_cap = None
+    shelf_life_capped = False
+    if shelf_life_days:
+        shelf_life_days = max(1, int(shelf_life_days))
+        window = demand[lead_time_days:lead_time_days + shelf_life_days]
+        shelf_cap = sum(window, Decimal("0")) or sum(demand[:shelf_life_days], Decimal("0"))
+        if shelf_cap < target_quantity:
+            target_quantity = shelf_cap
+            shelf_life_capped = True
 
     status = "ready"
     suggested_quantity = None
@@ -162,6 +172,11 @@ def calculate_replenishment(
             _decimal(case_pack_quantity),
             _decimal(minimum_order_quantity),
         )
+        # A supplier's pack size is a constraint, not permission to order
+        # inventory beyond its usable life. The discrepancy is surfaced as a
+        # shelf-life cap for a supplier/pack-size decision.
+        if shelf_cap is not None:
+            suggested_quantity = min(suggested_quantity, max(target_quantity - _decimal(current_quantity) - _decimal(on_order_quantity), Decimal("0")))
 
     return {
         "status": status,
@@ -174,6 +189,8 @@ def calculate_replenishment(
         "runout_date": runout_date,
         "order_by_date": order_by_date,
         "on_order_quantity": _decimal(on_order_quantity),
+        "shelf_cap": shelf_cap,
+        "shelf_life_capped": shelf_life_capped,
     }
 
 
@@ -189,6 +206,7 @@ def forecast_item(
     case_pack_quantity=Decimal("1"),
     minimum_order_quantity=Decimal("0"),
     on_order_quantity=Decimal("0"),
+    shelf_life_days: int | None = None,
     overrides: Iterable[object] = (),
 ) -> dict:
     """Forecast one item and suppress ordering when history is too sparse."""
@@ -214,6 +232,7 @@ def forecast_item(
         case_pack_quantity=case_pack_quantity,
         minimum_order_quantity=minimum_order_quantity,
         on_order_quantity=on_order_quantity,
+        shelf_life_days=shelf_life_days,
     )
     if nonzero_days < MIN_NONZERO_HISTORY_DAYS:
         result.update(

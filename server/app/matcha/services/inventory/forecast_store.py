@@ -29,6 +29,15 @@ def _jsonable(value):
     return value
 
 
+def _json_object(value) -> dict:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _settings_dict(row) -> dict:
     values = dict(DEFAULT_SETTINGS)
     if row is not None:
@@ -164,6 +173,7 @@ async def _forecast_inputs(conn, *, company_id: UUID, location_id: Optional[UUID
     rows = await conn.fetch(
         """
         SELECT i.id, i.name, i.unit, i.location_id, i.current_quantity, i.unit_cost,
+               i.category, i.shelf_life_days, i.low_stock_threshold,
                COALESCE(r.lead_time_days, $3) AS lead_time_days,
                COALESCE(r.safety_stock_days, $4) AS safety_stock_days,
                COALESCE(r.case_pack_quantity, 1) AS case_pack_quantity,
@@ -242,6 +252,7 @@ async def build_preview(
             case_pack_quantity=item["case_pack_quantity"],
             minimum_order_quantity=item["minimum_order_quantity"],
             on_order_quantity=item["on_order_quantity"],
+            shelf_life_days=item["shelf_life_days"],
             overrides=overrides,
         )
         lines.append({
@@ -251,6 +262,9 @@ async def build_preview(
             "location_id": item["location_id"],
             "current_quantity": item["current_quantity"],
             "unit_cost": item["unit_cost"],
+            "category": item["category"],
+            "shelf_life_days": item["shelf_life_days"],
+            "low_stock_threshold": item["low_stock_threshold"],
             "lead_time_days": item["lead_time_days"],
             "safety_stock_days": item["safety_stock_days"],
             "case_pack_quantity": item["case_pack_quantity"],
@@ -365,7 +379,12 @@ async def get_run(conn, *, company_id: UUID, run_id: UUID) -> Optional[dict]:
         """,
         run_id,
     )
-    return {**dict(run), "lines": [dict(line) for line in lines]}
+    materialized = []
+    for line in lines:
+        row = dict(line)
+        calculation = _json_object(row.get("calculation"))
+        materialized.append({**row, **calculation, "calculation": calculation})
+    return {**dict(run), "lines": materialized}
 
 
 async def get_latest_run(conn, *, company_id: UUID, location_id: Optional[UUID]) -> Optional[dict]:
