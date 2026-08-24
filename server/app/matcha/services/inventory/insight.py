@@ -17,7 +17,10 @@ from app.matcha.services.inventory.waste.agent import _response_text
 
 _NUMERIC = re.compile(r"[$%]|\d")
 _ACTIONS = {"right_size_par", "review_handling", "check_rotation", "count_stock", "none"}
-_ACTION_FOR_DIAGNOSIS = {"over_ordering": "right_size_par", "handling": "review_handling", "unexplained_shrink": "count_stock", "external": "none", "mixed": "none"}
+_ACTION_FOR_DIAGNOSIS = {
+    "over_ordering": "right_size_par", "handling": "review_handling", "unexplained_shrink": "count_stock", "external": "none", "mixed": "none",
+    "restock_overdue": "none", "restock_upcoming": "none", "on_track": "none",
+}
 
 
 def _render(template: str, tokens: dict[str, str]) -> str | None:
@@ -37,6 +40,12 @@ def deterministic_insight(*, diagnosis: str, tokens: dict[str, str]) -> dict:
         headline, detail = "Loss points to handling rather than demand.", "Review preparation, storage, and rotation before changing a PAR."
     elif diagnosis == "unexplained_shrink":
         headline, detail = "Loss needs a stock-count check.", "Review the movement ledger and count the affected stock."
+    elif diagnosis == "restock_overdue":
+        headline, detail = "Some orders are already late.", "Review the overdue items and order before demand outpaces stock."
+    elif diagnosis == "restock_upcoming":
+        headline, detail = "Restocking is on schedule.", "Review the plan and place orders before their order-by dates."
+    elif diagnosis == "on_track":
+        headline, detail = "No restocking needed right now.", "Current stock and orders on the way cover the forecast window."
     else:
         headline, detail = "No single loss cause is decisive.", "Keep watching the pattern before changing inventory targets."
     return {"headline": headline, "diagnosis": diagnosis, "action": action, "confidence": "deterministic", "detail": detail}
@@ -71,7 +80,12 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
         rendered = {field: _render(str(raw.get(field, "")), tokens) for field in ("headline", "detail")}
         if not rendered["headline"] or not rendered["detail"]:
             return fallback
-        result = {**raw, **rendered}
+        confidence = raw.get("confidence")
+        result = {
+            "headline": rendered["headline"], "detail": rendered["detail"],
+            "diagnosis": diagnosis, "action": raw["action"],
+            "confidence": confidence if isinstance(confidence, str) else "model",
+        }
         if redis: await cache_set(redis, key, result, ttl=900)
         return result
     except (httpx.HTTPError, ValueError, TypeError, json.JSONDecodeError):

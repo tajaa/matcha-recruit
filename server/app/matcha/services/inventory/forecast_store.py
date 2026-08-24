@@ -413,8 +413,15 @@ async def get_run(conn, *, company_id: UUID, run_id: UUID) -> Optional[dict]:
     materialized = []
     for line in lines:
         row = dict(line)
-        calculation = _json_object(row.get("calculation"))
-        materialized.append({**row, **calculation, "calculation": calculation})
+        row.pop("calculation", None)
+        daily_demand = row.get("daily_demand")
+        if isinstance(daily_demand, str):
+            try:
+                daily_demand = json.loads(daily_demand)
+            except ValueError:
+                daily_demand = []
+            row["daily_demand"] = daily_demand
+        materialized.append(row)
     snapshot = _json_object(run.get("settings_snapshot"))
     settings = _json_object(snapshot.get("settings"))
     try:

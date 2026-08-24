@@ -228,13 +228,15 @@ async def preview_forecast_par(
 
 
 @router.post("/insight")
-async def forecast_insight(run_id: UUID, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client), _gate=_forecast_gate):
+async def forecast_insight(run_id: UUID, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client), _gate=_forecast_gate):
+    await check_rate_limit(f"user:{user.id}", "inventory_forecast_insight", 30, 3600)
     async with get_connection() as conn:
         run = await forecast_store.get_run(conn, company_id=company_id, run_id=run_id)
     if run is None: raise HTTPException(404, "Forecast run not found.")
     plan = run["plan"]
-    diagnosis = "over_ordering" if plan["lines"] else "mixed"
-    tokens = {"items": str(len(plan["lines"])), "order_value": f"${plan['total_order_value']:,.2f}" if plan["total_order_value"] is not None else "uncosted items", "overdue": str(plan["buckets"]["overdue"])}
+    overdue = plan["buckets"]["overdue"]
+    diagnosis = "restock_overdue" if overdue else "restock_upcoming" if plan["lines"] else "on_track"
+    tokens = {"items": str(len(plan["lines"])), "order_value": f"${plan['total_order_value']:,.2f}" if plan["total_order_value"] is not None else "uncosted items", "overdue": str(overdue)}
     return await insight.interpret(surface="forecast", diagnosis=diagnosis, tokens=tokens)
 
 

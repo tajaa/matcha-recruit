@@ -65,10 +65,12 @@ export default function InventoryForecast() {
     let active = true
     setLoading(true)
     Promise.all([getForecastSettings(locationId || undefined), getLatestForecastRun(locationId || undefined)]).then(async ([nextSettings, latest]) => {
+      if (!active) return
+      setSettings(nextSettings)
       const stale = !latest || Date.now() - new Date(latest.created_at).getTime() > 12 * 60 * 60 * 1000
       const nextRun = stale ? await createForecastRun({ location_id: locationId || null }) : latest
       if (!active) return
-      setSettings(nextSettings); setRun(nextRun)
+      setRun(nextRun)
       void getForecastInsight(nextRun.id).then(setInsight).catch(() => setInsight(null))
       void previewForecastPar(nextRun.id).then(setParPreview).catch(() => setParPreview(null))
     }).catch(() => { if (active) toast('Failed to load reorder plan', 'error') }).finally(() => { if (active) setLoading(false) })
@@ -102,7 +104,13 @@ export default function InventoryForecast() {
 
   async function recalculate() {
     setSaving(true)
-    try { setRun(await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })); toast('Reorder plan refreshed', 'success') }
+    try {
+      const nextRun = await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })
+      setRun(nextRun)
+      void getForecastInsight(nextRun.id).then(setInsight).catch(() => setInsight(null))
+      void previewForecastPar(nextRun.id).then(setParPreview).catch(() => setParPreview(null))
+      toast('Reorder plan refreshed', 'success')
+    }
     catch { toast('Could not refresh the reorder plan', 'error') }
     finally { setSaving(false) }
   }
@@ -233,15 +241,20 @@ function NumberField({ label, value, min, max, step, onChange }: { label: string
   return <Input label={label} type="number" min={min} max={max} step={step} value={String(value)} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} className="border-w-line bg-w-surface2" />
 }
 
-function ReorderPlan({ run, onOrder, onAudit }: { run: ForecastRun; onOrder: (line: ForecastPlanLine) => void; onAudit: () => void }) {
+function ReorderPlan({ run, onOrder, onAudit }: { run: ForecastRun; onOrder: (line: ForecastPlanLine) => Promise<void>; onAudit: () => void }) {
   const plan = run.plan
+  const [orderingId, setOrderingId] = useState<string | null>(null)
+  async function handleOrder(line: ForecastPlanLine) {
+    setOrderingId(line.item_id)
+    try { await onOrder(line) } finally { setOrderingId(null) }
+  }
   return (
     <section className="overflow-hidden rounded-xl border border-w-line bg-w-surface">
       <div className="flex flex-col gap-2 border-b border-w-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div><h2 className="text-sm font-medium">Reorder plan</h2><p className="mt-1 text-xs text-w-dim">As of {new Date(run.created_at).toLocaleString()} · based on committed sales through {run.history_start}</p></div>
         <div className="flex flex-wrap gap-2 text-[11px] text-w-dim"><span>{plan.lines.length} items need ordering</span>{plan.total_order_value !== null && <span>{formatMoney(plan.total_order_value)} estimated</span>}<span>{plan.buckets.overdue} overdue</span></div>
       </div>
-      <div className="grid divide-y divide-w-line">{plan.lines.map((line) => <div key={line.item_id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><p className="font-medium text-w-text">{line.name}</p><UrgencyBadge urgency={line.urgency} /></div><p className="mt-1 text-xs text-w-dim">{formatNumber(line.average_daily_demand)}/day · {line.lead_demand ? `${formatNumber(line.lead_demand)} lead demand` : 'no lead demand'} · {line.runout_date ? `runs out ${line.runout_date}` : 'no runout date'}</p></div><div className="flex items-center gap-3"><div className="text-right text-xs text-w-dim"><p className="font-medium text-w-text">Order {formatNumber(line.suggested_quantity)}{line.unit ? ` ${line.unit}` : ''}</p><p>{line.extended_cost === null ? 'Cost unavailable' : formatMoney(line.extended_cost)}</p></div><Button size="sm" onClick={() => onOrder(line)}>Order</Button></div></div>)}</div>
+      <div className="grid divide-y divide-w-line">{plan.lines.map((line) => <div key={line.item_id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><p className="font-medium text-w-text">{line.name}</p><UrgencyBadge urgency={line.urgency} /></div><p className="mt-1 text-xs text-w-dim">{formatNumber(line.average_daily_demand)}/day · {line.lead_demand ? `${formatNumber(line.lead_demand)} lead demand` : 'no lead demand'} · {line.runout_date ? `runs out ${line.runout_date}` : 'no runout date'}</p></div><div className="flex items-center gap-3"><div className="text-right text-xs text-w-dim"><p className="font-medium text-w-text">Order {formatNumber(line.suggested_quantity)}{line.unit ? ` ${line.unit}` : ''}</p><p>{line.extended_cost === null ? 'Cost unavailable' : formatMoney(line.extended_cost)}</p></div><Button size="sm" disabled={orderingId === line.item_id} onClick={() => void handleOrder(line)}>{orderingId === line.item_id ? 'Ordering…' : 'Order'}</Button></div></div>)}</div>
       {plan.suppressed_count > 0 && <div className="border-t border-w-line bg-w-surface2 px-4 py-3 text-xs text-w-dim"><span>{plan.suppressed_count} item{plan.suppressed_count === 1 ? '' : 's'} can’t be forecast yet: {Object.entries(plan.suppressed_by_status).map(([status, count]) => `${count} ${status.replaceAll('_', ' ')}`).join(', ')}.</span>{plan.suppressed_by_status.count_required && <button type="button" onClick={onAudit} className="ml-2 font-medium text-w-accent hover:underline">Count stock</button>}</div>}
     </section>
   )

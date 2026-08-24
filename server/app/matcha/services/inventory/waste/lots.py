@@ -115,7 +115,7 @@ def spoilage_risk_for_item_lots(*, lots: list[dict], average_daily_demand: Decim
     terminal losses and do not consume future demand capacity for a later lot.
     """
     demand = Decimal(str(average_daily_demand))
-    ordered = sorted(lots, key=lambda row: (row.get("expires_on") is None, row.get("expires_on"), row.get("received_on"), row.get("created_at"), str(row.get("id"))))
+    ordered = sorted(lots, key=lambda row: (row.get("expires_on") or date.max, row.get("received_on") or date.min, row.get("created_at"), str(row.get("id"))))
     earlier_quantity = Decimal("0")
     scored: list[dict] = []
     for lot in ordered:

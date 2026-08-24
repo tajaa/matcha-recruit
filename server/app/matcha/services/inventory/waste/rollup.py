@@ -110,13 +110,19 @@ async def waste_summary(conn, *, company_id: UUID, location_id: Optional[UUID], 
     bleeder = by_item["groups"][0] if by_item["groups"] else None
     reason_mix = await waste_rollup(conn, company_id=company_id, location_id=location_id, start=start, end=end, group_by="reason", item_id=UUID(bleeder["key"]), revenue=current_revenue) if bleeder else None
     dominant = reason_mix["groups"][0] if reason_mix and reason_mix["groups"] else None
+    dominant_share = None
+    if dominant is not None:
+        if dominant["pct"] is not None:
+            dominant_share = float(dominant["pct"])
+        elif reason_mix["total_units"]:
+            dominant_share = float(dominant["units"] / reason_mix["total_units"])
     return {
         "start": start, "end": end, "prior_start": prior_start, "prior_end": prior_end,
         "current": current, "prior": prior, "value_delta": value_delta, "value_pct_change": value_pct_change,
         "comparable": comparable, "direction": "up" if comparable and value_delta > 0 else "down" if comparable and value_delta < 0 else "flat" if comparable else "unknown",
         "bleeder": bleeder, "bleeder_reason_mix": reason_mix["groups"] if reason_mix else [],
         "dominant_reason": dominant["key"] if dominant else None,
-        "diagnosis": diagnosis_for(dominant["key"] if dominant else None, float(dominant["pct"] or 0) if dominant else None),
+        "diagnosis": diagnosis_for(dominant["key"] if dominant else None, dominant_share),
     }
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.database import get_connection
+from app.core.services.redis_cache import check_rate_limit
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
 from app.matcha.services.inventory import insight, movements
 from app.matcha.services.inventory.waste import at_risk, lots, reasons, rollup
@@ -68,7 +69,8 @@ async def waste_at_risk(location_id: Optional[UUID] = None, within_days: int = Q
 
 
 @router.post("/insight")
-async def waste_insight(body: WasteInsight, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client)):
+async def waste_insight(body: WasteInsight, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client)):
+    await check_rate_limit(f"user:{user.id}", "inventory_waste_insight", 30, 3600)
     if body.end < body.start or (body.end - body.start).days > 366: raise HTTPException(400, "invalid insight period")
     async with get_connection() as conn:
         summary = await rollup.waste_summary(conn, company_id=company_id, location_id=body.location_id, start=body.start, end=body.end)
@@ -115,7 +117,6 @@ async def enroll_par(body: ParEnroll, company_id: UUID = Depends(get_client_comp
 
 @router.post('/ask')
 async def ask_waste_analyst(body: WasteAsk, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client)):
-    from app.core.services.redis_cache import check_rate_limit
     await check_rate_limit(f'user:{user.id}', 'inventory_waste_ask', 30, 3600)
     end = body.end or date.today(); start = body.start or end - timedelta(days=6)
     async with get_connection() as conn:
