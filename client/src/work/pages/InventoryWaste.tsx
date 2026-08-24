@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Package, RefreshCw } from 'lucide-react'
+import { MessageSquare, Package, RefreshCw } from 'lucide-react'
 import { Button, Select, useToast } from '../../components/ui'
 import {
   askWasteAnalyst, getLatestForecastRun, getWasteRollup, getWasteVariance,
@@ -9,6 +9,8 @@ import {
 import { useMe } from '../../hooks/useMe'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 import InventoryNavigation from '../components/inventory/InventoryNavigation'
+import { useWorkBase } from '../routes/WorkSurfaceContext'
+import { useNavigate } from 'react-router-dom'
 
 function isoDay(offset = 0) { const value = new Date(); value.setDate(value.getDate() + offset); return value.toISOString().slice(0, 10) }
 const money = (value: number | null) => value == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value)
@@ -17,7 +19,7 @@ const reasons: { value: WasteReason; label: string }[] = [
 ]
 
 export default function InventoryWaste() {
-  const { toast } = useToast(); const { hasFeature, me } = useMe()
+  const base = useWorkBase(); const navigate = useNavigate(); const { toast } = useToast(); const { hasFeature, me } = useMe()
   const canSales = hasFeature('sales_intake')
   const canForecast = canSales && hasFeature('inventory_forecasting')
   const [reasonRollup, setReasonRollup] = useState<WasteRollup | null>(null)
@@ -62,6 +64,7 @@ export default function InventoryWaste() {
     <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between"><div><div className="mb-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.2em] text-w-accent"><Package size={13} /> Operations / Inventory</div><h1 className="text-2xl font-semibold tracking-tight text-w-text sm:text-3xl">Waste & loss</h1><p className="mt-1.5 max-w-2xl text-sm text-w-dim">Record confirmed loss, identify recurring causes, and protect perishable stock.</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => void load()} disabled={loading} className="inline-flex items-center gap-2 rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs font-medium text-w-dim transition-colors hover:border-w-accent/40 hover:text-w-text disabled:opacity-50"><RefreshCw size={13} /> Refresh</button><Button variant="secondary" size="sm" onClick={() => setGuideOpen(true)}>How this works</Button></div></header>
     <InventoryNavigation />
     <section className="grid overflow-hidden rounded-xl bg-w-surface grid-cols-1 divide-y divide-w-line sm:grid-cols-3 sm:divide-x sm:divide-y-0"><Metric label="Waste value" value={money(reasonRollup?.total_value ?? null)} /><Metric label="Waste / revenue" value={reasonRollup?.waste_pct_of_revenue == null ? '—' : `${(reasonRollup.waste_pct_of_revenue * 100).toFixed(1)}%`} /><Metric label="Units discarded" value={String(reasonRollup?.total_units ?? 0)} /></section>
+    <section id="huume-capture" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-2"><MessageSquare className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Report waste with @huume</h2><p className="mt-1 text-xs text-w-dim">From any team chat, write <span className="font-medium text-w-text">@huume tossed 3 boxes of gloves; package was torn</span>. Review and confirm Huume’s staged record.</p></div></div><Button variant="secondary" size="sm" onClick={() => navigate(`${base}/channels`)}>Open team chat</Button></div></section>
     <section id="waste-record" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4"><h2 className="font-medium text-w-text">Record waste</h2><p className="mt-1 text-xs text-w-dim">Human entry may explicitly classify theft; chat reports never do.</p><div className="mt-3 grid gap-2 sm:grid-cols-[1fr_9rem_10rem_auto]"><Select options={items.map((item) => ({ value: item.id, label: item.name }))} value={wasteItem} onChange={(event) => setWasteItem(event.target.value)} placeholder="Choose item…" /><input type="number" min="0.001" step="any" value={wasteQuantity} onChange={(event) => setWasteQuantity(event.target.value)} placeholder="Quantity" className="rounded-lg border border-w-line bg-w-surface2 px-3 py-2 text-sm text-w-text" /><Select options={reasons} value={wasteReason} onChange={(event) => setWasteReason(event.target.value as WasteReason)} /><Button disabled={recording || !wasteItem || !wasteQuantity} onClick={() => void submitWaste()}>Record</Button></div></section>
     <section id="waste-review" className="scroll-mt-6 grid gap-4 lg:grid-cols-2"><Rollup title="By reason" rollup={reasonRollup} /><Rollup title="By category" rollup={categoryRollup} /></section>
     <section className="grid gap-4 lg:grid-cols-2"><SimpleList title="Top bleeders" empty="No waste recorded in this period." rows={itemRollup?.groups.map((group) => ({ label: group.label, value: `${group.units} units · ${money(group.value)}` })) ?? []} /><SimpleList title="Expiring within 7 days" empty="No open lots expiring this week." rows={lots.map((lot) => ({ label: lot.name, value: `${lot.quantity_remaining} left · ${lot.days_to_expiry}d` }))} /></section>

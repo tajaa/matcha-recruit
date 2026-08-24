@@ -216,7 +216,7 @@ export default function InventoryForecast() {
         ) : (
           <ForecastResults run={run} />
         )}
-        <InventoryWasteGuide open={guideOpen} initialStep={3} autoOpenKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'} onClose={() => setGuideOpen(false)} />
+        <InventoryWasteGuide open={guideOpen} initialStep={4} autoOpenKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'} onClose={() => setGuideOpen(false)} />
       </div>
     </div>
   )
