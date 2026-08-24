@@ -128,6 +128,9 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "inventory_item_create": "inventory",
     "inventory_item_archive": "inventory",
     "inventory_receipt": "inventory",
+    "waste_movement": "inventory_waste",
+    "waste_par_change": "inventory_waste",
+    "waste_recipe_correction": "inventory_waste",
     "schedule_change": "employee_schedule",
     "schedule_note": "employee_schedule",
     "meal_break_waiver": "employee_schedule",
@@ -172,6 +175,7 @@ _MAX_PTO_NOTE_CHARS = 500
 _INVENTORY_ACTIONS = frozenset({
     "inventory_movement", "inventory_order_decision",
     "inventory_item_create", "inventory_item_archive", "inventory_receipt",
+    "waste_movement", "waste_par_change", "waste_recipe_correction",
 })
 _INVENTORY_MOVEMENT_KINDS = frozenset({"out", "stockout", "adjust", "waste"})
 _INVENTORY_RECEIVED_STEER_MESSAGE = (
@@ -349,6 +353,18 @@ def evaluate_huume_action(
 
     if action_type == "inventory_receipt":
         return _validate_inventory_receipt(staged_action)
+    if action_type == "waste_movement":
+        staged = {**staged_action, "type": "inventory_movement", "kind": "waste"}
+        verdict = _validate_inventory_movement(staged)
+        return HuumeVerdict(verdict.kind, verdict.message, {**(verdict.action or {}), "type": "waste_movement"} if verdict.action else None)
+    if action_type == "waste_par_change":
+        if not _is_uuid(staged_action.get("run_id")) or not _is_uuid(staged_action.get("item_id")):
+            return HuumeVerdict(kind="refuse", message="I need the forecast run and item ids for that par change.")
+        return HuumeVerdict(kind="proceed", message="", action={"type": "waste_par_change", "run_id": str(staged_action["run_id"]), "item_id": str(staged_action["item_id"])})
+    if action_type == "waste_recipe_correction":
+        if not str(staged_action.get("sold_name") or "").strip() or not isinstance(staged_action.get("components"), list):
+            return HuumeVerdict(kind="refuse", message="I need the sold name and recipe components.")
+        return HuumeVerdict(kind="proceed", message="", action={"type": "waste_recipe_correction", "sold_name": str(staged_action["sold_name"])[:200], "components": staged_action["components"][:20], "location_id": staged_action.get("location_id")})
 
     if action_type == "schedule_change":
         # No further field validation needed here — schedule_skill.propose

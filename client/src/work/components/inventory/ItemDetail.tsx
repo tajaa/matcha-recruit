@@ -146,6 +146,8 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
           )}
         </div>
 
+        <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="text-sm font-medium text-w-text">Perishable & par settings</h2><div className="mt-3 grid gap-2 sm:grid-cols-4"><DetailStat label="Category" value={item.category ?? 'Uncategorized'} /><DetailStat label="Shelf life" value={item.shelf_life_days ? `${item.shelf_life_days} days` : 'Not set'} /><DetailStat label="Yield" value={item.yield_pct ? `${Math.round(item.yield_pct * 100)}%` : '100%'} /><DetailStat label="Par source" value={item.par_source === 'auto' ? 'Auto-managed' : 'Manual'} /></div></section>
+
         <section className="overflow-hidden rounded-xl border border-w-line bg-w-surface">
           <div className="flex items-start justify-between gap-3 border-b border-w-line px-4 py-3">
             <div>

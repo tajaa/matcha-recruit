@@ -61,7 +61,7 @@ def _parse_row_block_lines(text: str) -> list[dict]:
 async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: dict[str, Any]) -> dict[str, Any]:
     """Dispatch a validated staged inventory action to its executor."""
     atype = action.get("type")
-    if atype == "inventory_movement":
+    if atype in {"inventory_movement", "waste_movement"}:
         return await _execute_movement(company_id, actor_user_id, action)
     if atype == "inventory_order_decision":
         return await _execute_order_decision(company_id, actor_user_id, action)
@@ -71,6 +71,18 @@ async def execute(*, company_id: UUID, actor_user_id: Optional[UUID], action: di
         return await _execute_item_archive(company_id, actor_user_id, action)
     if atype == "inventory_receipt":
         return await _execute_receipt(company_id, actor_user_id, action)
+    if atype == "waste_par_change":
+        from app.database import get_connection
+        from app.matcha.services.inventory.waste import par_store
+        async with get_connection() as conn:
+            result = await par_store.apply_par_recommendations(conn, company_id=company_id, run_id=UUID(action['run_id']), user_id=actor_user_id, mode='huume', item_ids=[UUID(action['item_id'])])
+        return {"status": "created" if result['applied'] else "error", "message": "Par change applied." if result['applied'] else str(result['skipped']), "bg_tasks": []}
+    if atype == "waste_recipe_correction":
+        from app.database import get_connection
+        from app.matcha.services.inventory import sales_mappings
+        async with get_connection() as conn:
+            row = await sales_mappings.upsert_mapping(conn, company_id=company_id, location_id=UUID(action['location_id']) if action.get('location_id') else None, sold_name=action['sold_name'], kind='recipe', components=action['components'], created_by=actor_user_id)
+        return {"status": "created", "message": "Recipe mapping saved.", "record_id": str(row['id']), "bg_tasks": []}
     return {"status": "error", "message": "Unsupported action."}
 
 

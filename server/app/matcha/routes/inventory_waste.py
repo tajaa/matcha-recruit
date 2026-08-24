@@ -53,6 +53,16 @@ async def list_lots(item_id: Optional[UUID] = None, expiring_within_days: int = 
         rows = await lots.expiring_lots(conn, company_id=company_id, location_id=location_id, within_days=expiring_within_days)
     return {"lots": [row for row in rows if item_id is None or row['item_id'] == item_id]}
 
+@router.get('/variance')
+async def usage_variance(start: date, end: date, location_id: Optional[UUID] = None, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client), _sales=Depends(require_feature('sales_intake'))):
+    async with get_connection() as conn:
+        rows = await conn.fetch("""SELECT al.*, i.name, i.unit FROM inventory_audit_lines al
+            JOIN inventory_audit_runs ar ON ar.id=al.run_id JOIN inventory_items i ON i.id=al.item_id
+            WHERE ar.company_id=$1 AND al.created_at::date BETWEEN $2 AND $3
+            AND ($4::uuid IS NULL OR i.location_id IS NULL OR i.location_id=$4)
+            ORDER BY al.created_at DESC""", company_id, start, end, location_id)
+    return {'lines': [dict(row) for row in rows]}
+
 @router.post("/lots/{lot_id}/discard")
 async def discard_lot(lot_id: UUID, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client)):
     async with get_connection() as conn:
