@@ -153,76 +153,80 @@ async def record_movements(
     contributes nothing to the return list."""
     inserted = []
     for line in lines:
-        quantity = line.get("quantity")
-        estimated = bool(line.get("estimated", False))
-        waste_reason = line.get("waste_reason") if kind == "waste" else None
-        delta = None
-        if kind == "out" and quantity is not None:
-            delta = -abs(float(quantity))
-        elif kind == "in" and quantity is not None:
-            delta = abs(float(quantity))
-        elif kind == "sale" and quantity is not None:
-            # A negative POS quantity is a refund and puts stock back.
-            delta = -float(quantity)
-        elif kind == "waste" and quantity is not None:
-            delta = -abs(float(quantity))
+        # The ledger row, aggregate count, and advisory FEFO label must move
+        # together.  A lot-write failure may not leave an API caller with a
+        # 500 after stock was already decremented.
+        async with conn.transaction():
+            quantity = line.get("quantity")
+            estimated = bool(line.get("estimated", False))
+            waste_reason = line.get("waste_reason") if kind == "waste" else None
+            delta = None
+            if kind == "out" and quantity is not None:
+                delta = -abs(float(quantity))
+            elif kind == "in" and quantity is not None:
+                delta = abs(float(quantity))
+            elif kind == "sale" and quantity is not None:
+                # A negative POS quantity is a refund and puts stock back.
+                delta = -float(quantity)
+            elif kind == "waste" and quantity is not None:
+                delta = -abs(float(quantity))
 
-        if sales_import_id is not None:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO inventory_movements (
-                    company_id, item_id, channel_id, source_message_id, recorded_by,
-                    kind, quantity, quantity_delta, quantity_estimated, note, narrative,
-                    sales_import_id, audit_run_id, waste_reason
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-                ON CONFLICT (sales_import_id, item_id) WHERE sales_import_id IS NOT NULL DO NOTHING
-                RETURNING *
-                """,
-                company_id, line["item_id"], channel_id, source_message_id, recorded_by,
-                kind, quantity, delta, estimated, note, narrative, sales_import_id, audit_run_id,
-                waste_reason,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO inventory_movements (
-                    company_id, item_id, channel_id, source_message_id, recorded_by,
-                    kind, quantity, quantity_delta, quantity_estimated, note, narrative,
-                    audit_run_id, waste_reason
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                ON CONFLICT (source_message_id, item_id) WHERE source_message_id IS NOT NULL DO NOTHING
-                RETURNING *
-                """,
-                company_id, line["item_id"], channel_id, source_message_id, recorded_by,
-                kind, quantity, delta, estimated, note, narrative, audit_run_id, waste_reason,
-            )
-        if row is None:
-            continue
-        inserted.append(dict(row))
-
-        if kind == "stockout":
-            await conn.execute(
-                "UPDATE inventory_items SET current_quantity = 0, updated_at = NOW() WHERE id = $1",
-                line["item_id"],
-            )
-        elif delta is not None:
-            await conn.execute(
-                """
-                UPDATE inventory_items SET current_quantity = CASE
-                    WHEN current_quantity IS NULL THEN NULL
-                    ELSE GREATEST(current_quantity + $2, 0)
-                END, updated_at = NOW() WHERE id = $1
-                """,
-                line["item_id"], delta,
-            )
-            # Lots are advisory labels, not a second stock ledger, but they
-            # still need to follow observed depletion or expiry alerts become
-            # permanently stale.  A targeted lot discard owns its own close
-            # and opts out to avoid consuming an unrelated FEFO lot.
-            if delta < 0 and line.get("consume_lots", True):
-                await lots_service.consume_fefo(
-                    conn, company_id=company_id, item_id=line["item_id"], quantity=abs(delta),
+            if sales_import_id is not None:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO inventory_movements (
+                        company_id, item_id, channel_id, source_message_id, recorded_by,
+                        kind, quantity, quantity_delta, quantity_estimated, note, narrative,
+                        sales_import_id, audit_run_id, waste_reason
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    ON CONFLICT (sales_import_id, item_id) WHERE sales_import_id IS NOT NULL DO NOTHING
+                    RETURNING *
+                    """,
+                    company_id, line["item_id"], channel_id, source_message_id, recorded_by,
+                    kind, quantity, delta, estimated, note, narrative, sales_import_id, audit_run_id,
+                    waste_reason,
                 )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO inventory_movements (
+                        company_id, item_id, channel_id, source_message_id, recorded_by,
+                        kind, quantity, quantity_delta, quantity_estimated, note, narrative,
+                        audit_run_id, waste_reason
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    ON CONFLICT (source_message_id, item_id) WHERE source_message_id IS NOT NULL DO NOTHING
+                    RETURNING *
+                    """,
+                    company_id, line["item_id"], channel_id, source_message_id, recorded_by,
+                    kind, quantity, delta, estimated, note, narrative, audit_run_id, waste_reason,
+                )
+            if row is None:
+                continue
+            inserted.append(dict(row))
+
+            if kind == "stockout":
+                await conn.execute(
+                    "UPDATE inventory_items SET current_quantity = 0, updated_at = NOW() WHERE id = $1",
+                    line["item_id"],
+                )
+            elif delta is not None:
+                await conn.execute(
+                    """
+                    UPDATE inventory_items SET current_quantity = CASE
+                        WHEN current_quantity IS NULL THEN NULL
+                        ELSE GREATEST(current_quantity + $2, 0)
+                    END, updated_at = NOW() WHERE id = $1
+                    """,
+                    line["item_id"], delta,
+                )
+                # Lots are advisory labels, not a second stock ledger, but they
+                # still need to follow observed depletion or expiry alerts become
+                # permanently stale.  A targeted lot discard owns its own close
+                # and opts out to avoid consuming an unrelated FEFO lot.
+                if delta < 0 and line.get("consume_lots", True):
+                    await lots_service.consume_fefo(
+                        conn, company_id=company_id, item_id=line["item_id"], quantity=abs(delta),
+                    )
     return inserted
 
 

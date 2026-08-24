@@ -182,6 +182,13 @@ class FakeRecordConn:
         self.fetch_calls = []
         self._next_id = 0
 
+    class _Transaction:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_args): return False
+
+    def transaction(self):
+        return self._Transaction()
+
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query, args))
         columns = (

@@ -68,7 +68,8 @@ async def consume_fefo(conn, *, company_id: UUID, item_id: UUID, quantity) -> li
         updated = await conn.fetchrow(
             """
             UPDATE inventory_lots
-            SET quantity_remaining=$2, status=CASE WHEN $2=0 THEN 'depleted' ELSE 'open' END,
+            SET quantity_remaining=$2::numeric,
+                status=CASE WHEN $2::numeric=0 THEN 'depleted' ELSE 'open' END,
                 updated_at=NOW()
             WHERE id=$1 RETURNING *
             """, row["id"], after,

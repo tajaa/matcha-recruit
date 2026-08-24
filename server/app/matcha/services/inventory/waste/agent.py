@@ -1,14 +1,68 @@
-"""Read-only grounded waste analyst.
+"""Read-only grounded waste analyst, narrated by the configured OpenAI Luna.
 
-The first response is deterministic by design: every displayed amount is
-constructed from a rollup and ships its source id. A later model narrator may
-rephrase these records, but cannot become the source of any number.
+Tool results remain the source of truth. Luna receives only their bounded JSON
+and writes a qualitative lead-in; deterministic evidence records carry every
+number and its citation. A provider failure degrades to that evidence safely.
 """
+import json
+import logging
+import re
 from datetime import date
 from typing import Optional
 from uuid import UUID
 
+import httpx
+
+from app.config import get_settings
+
 from . import lots, rollup
+
+
+logger = logging.getLogger(__name__)
+_NUMERIC_NARRATION = re.compile(r"[$%]|\\d")
+
+
+def _response_text(payload: dict) -> str:
+    """Extract text from a Responses API payload without trusting its shape."""
+    if isinstance(payload.get("output_text"), str):
+        return payload["output_text"].strip()
+    parts: list[str] = []
+    for output in payload.get("output", []):
+        if not isinstance(output, dict) or output.get("type") != "message":
+            continue
+        for content in output.get("content", []):
+            if isinstance(content, dict) and content.get("type") == "output_text" and isinstance(content.get("text"), str):
+                parts.append(content["text"])
+    return "\n".join(parts).strip()
+
+
+async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
+    """Return a qualitative, non-numeric lead-in or None for safe fallback."""
+    settings = get_settings()
+    if not settings.openai_api_key or not settings.openai_luna_model:
+        return None
+    prompt = (
+        "You are a concise inventory-waste analyst. Answer the manager's question "
+        "qualitatively using only the supplied deterministic tool results. Do not "
+        "state or infer any quantities, money, percentages, dates, or par values; "
+        "those are appended as cited evidence. Do not propose writes. Return one "
+        "plain sentence, at most 45 words.\n\n"
+        f"Question: {question[:1000]}\n\n"
+        f"Tool results: {json.dumps(sources, default=str, separators=(',', ':'))}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={"model": settings.openai_luna_model, "input": prompt},
+            )
+            response.raise_for_status()
+        text = _response_text(response.json())
+        return text if text and not _NUMERIC_NARRATION.search(text) else None
+    except (httpx.HTTPError, ValueError, TypeError):
+        logger.warning("inventory waste Luna narration failed", exc_info=True)
+        return None
 
 
 async def usage_variance_for_item(
@@ -105,14 +159,19 @@ async def answer_question(conn, *, company_id: UUID, location_id: Optional[UUID]
         details.append('Recent waste facts: ' + ', '.join(
             f"{row['name']} ({row['waste_reason'] or 'unknown'})" for row in rows
         ) + ' [item:history]')
-    return {
-        'answer': ' '.join(details), 'question': question[:1000],
-        'citations': [
+    citations = [
             {'id': 'waste:reason', 'kind': 'waste_rollup', 'data': by_reason},
             {'id': 'waste:item', 'kind': 'waste_rollup', 'data': by_item},
             {'id': 'lots:expiring', 'kind': 'expiring_lots', 'data': expiring},
             {'id': 'usage:variance', 'kind': 'usage_variance_for_item', 'data': usage},
             {'id': 'par:history', 'kind': 'par_history_for_item', 'data': pars},
             {'id': 'item:history', 'kind': 'item_history', 'data': history},
-        ],
+        ]
+    narration = await _narrate_with_luna(
+        question=question,
+        sources={citation['id']: citation['data'] for citation in citations},
+    )
+    return {
+        'answer': ' '.join(([narration] if narration else []) + details),
+        'question': question[:1000], 'citations': citations,
     }

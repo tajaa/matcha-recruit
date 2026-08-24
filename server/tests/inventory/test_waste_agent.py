@@ -1,0 +1,69 @@
+import asyncio
+from types import SimpleNamespace
+
+from app.matcha.services.inventory.waste import agent
+
+
+def test_response_text_reads_responses_message_content():
+    assert agent._response_text({"output": [{"type": "message", "content": [
+        {"type": "output_text", "text": "Waste is concentrated in a single area."},
+    ]}]}) == "Waste is concentrated in a single area."
+
+
+def test_luna_narration_uses_configured_responses_model(monkeypatch):
+    payload = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"output_text": "Waste appears concentrated in a recurring operating pattern."}
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, _url, *, headers, json):
+            payload.update(headers=headers, json=json)
+            return Response()
+
+    monkeypatch.setattr(agent, "get_settings", lambda: SimpleNamespace(
+        openai_api_key="test-key", openai_luna_model="gpt-5.6-luna",
+    ))
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    result = asyncio.run(agent._narrate_with_luna(question="What is driving waste?", sources={"waste:reason": {}}))
+
+    assert result == "Waste appears concentrated in a recurring operating pattern."
+    assert payload["json"]["model"] == "gpt-5.6-luna"
+    assert payload["headers"]["Authorization"] == "Bearer test-key"
+
+
+def test_luna_narration_rejects_numeric_model_output(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"output_text": "Waste rose by 10%."}
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, *_args, **_kwargs):
+            return Response()
+
+    monkeypatch.setattr(agent, "get_settings", lambda: SimpleNamespace(
+        openai_api_key="test-key", openai_luna_model="gpt-5.6-luna",
+    ))
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    assert asyncio.run(agent._narrate_with_luna(question="Why?", sources={})) is None

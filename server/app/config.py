@@ -74,6 +74,11 @@ class Settings:
     # Gemini API
     gemini_api_key: Optional[str]
 
+    # OpenAI Luna is used only by narrowly scoped, grounded narrators.  Keep
+    # the configured model explicit because account availability can differ.
+    openai_api_key: Optional[str]
+    openai_luna_model: Optional[str]
+
     # SerpApi (Google Search) for Tell-Us shoutout scans.
     serp_api_key: Optional[str]
 
@@ -339,6 +344,8 @@ def load_settings() -> Settings:
         database_url=database_url_clean,
         database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
+        openai_api_key=os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_1"),
+        openai_luna_model=os.getenv("OPENAI_LUNA_MODEL"),
         serp_api_key=os.getenv("SERP_API_KEY"),
         use_vertex_ai=os.getenv("USE_VERTEX_AI", "").strip().lower() in ("1", "true", "yes"),
         vertex_ai_project=os.getenv("VERTEX_AI_PROJECT"),
