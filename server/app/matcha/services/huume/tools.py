@@ -725,6 +725,13 @@ TOOLS: tuple[HuumeTool, ...] = (
         discovery=True,
         intent_hints=("received a delivery", "got a delivery", "invoice attached", "packing slip"),
     ),
+    _tool("record_waste_movement", "staged", "Stage observed discarded stock with a reason; this only records after a later confirmation.", properties={
+        "item_id": types.Schema(type=types.Type.STRING), "quantity": types.Schema(type=types.Type.NUMBER),
+        "waste_reason": types.Schema(type=types.Type.STRING, enum=["spoilage","expired","prep_error","overproduction","breakage","contamination","theft","comp","recall","unknown"]),
+        "note": types.Schema(type=types.Type.STRING), "location_id": types.Schema(type=types.Type.STRING), "confirm_id": types.Schema(type=types.Type.STRING),
+    }, required=["item_id", "quantity", "waste_reason"]),
+    _tool("apply_waste_par_change", "staged", "Stage a manager-approved predictive par change from a forecast run.", properties={"run_id": types.Schema(type=types.Type.STRING), "item_id": types.Schema(type=types.Type.STRING)}, required=["run_id", "item_id"]),
+    _tool("correct_waste_recipe", "staged", "Stage a recipe mapping correction; components are existing item ids and quantities per sale.", properties={"sold_name": types.Schema(type=types.Type.STRING), "components": types.Schema(type=types.Type.ARRAY, items=types.Schema(type=types.Type.OBJECT)), "location_id": types.Schema(type=types.Type.STRING), "confirm_id": types.Schema(type=types.Type.STRING)}, required=["sold_name", "components"]),
     _tool(
         "propose_assignment_note", "staged",
         "Stage one visible manager note on an employee's shift. Use a shift "

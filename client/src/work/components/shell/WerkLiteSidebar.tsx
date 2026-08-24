@@ -34,6 +34,7 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = canReviewEvents(opsAccess) && hasFeature('ems')
   const showInventory = canReviewEvents(opsAccess) && hasFeature('inventory')
+  const showWaste = showInventory && hasFeature('inventory_waste')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [boards, setBoards] = useState<MWProject[]>([])
@@ -168,6 +169,15 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             <Package size={16} />
           </button>
         )}
+        {showWaste && (
+          <button
+            onClick={() => navigate(`${base}/inventory/waste`)}
+            className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory/waste`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+            title="Waste & par"
+          >
+            <Package size={16} />
+          </button>
+        )}
         <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
           className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
@@ -287,6 +297,19 @@ export default function WerkLiteSidebar({ open, onToggle }: Props) {
             >
               <Package size={14} strokeWidth={1.6} />
               Inventory
+            </button>
+          )}
+          {showWaste && (
+            <button
+              onClick={() => navigate(`${base}/inventory/waste`)}
+              className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                location.pathname.startsWith(`${base}/inventory/waste`)
+                  ? 'bg-w-surface2 text-white font-medium'
+                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
+              }`}
+            >
+              <Package size={14} strokeWidth={1.6} />
+              Waste & par
             </button>
           )}
 

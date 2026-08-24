@@ -7,7 +7,7 @@ import { useMe } from '../../hooks/useMe'
 import { useVoiceDictation } from '../../hooks/useVoiceDictation'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import {
-  commitAudit, getAuditSheet, listItems, parseAuditVoice,
+  commitAudit, getAuditSheet, getWasteVariance, listItems, parseAuditVoice,
   type AuditCommitLine, type AuditSheetRow, type InventoryItem, type VoiceCountLine,
 } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
@@ -58,15 +58,26 @@ export default function InventoryAudit() {
   const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
   const [unmatched, setUnmatched] = useState<VoiceCountLine[]>([])
   const [lastVariance, setLastVariance] = useState<NonNullable<Awaited<ReturnType<typeof commitAudit>>['variance']> | null>(null)
+  const [usageByItemId, setUsageByItemId] = useState<Map<string, number | null>>(new Map())
 
   const load = useCallback(() => {
     setLoading(true)
-    const request = canSales ? getAuditSheet().then((rows) => {
+    const request = canSales ? Promise.all([
+      getAuditSheet(),
+      getWasteVariance(new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10)),
+    ]).then(([rows, variance]) => {
       setSheetRows(rows)
       setItems(rows.map((row) => row.item))
+      // The endpoint is newest-first, so preserve the latest completed audit
+      // result per item rather than mixing several count sessions.
+      setUsageByItemId(new Map(variance.lines.reduce<[string, number | null][]>((result, line) => {
+        if (!result.some(([itemId]) => itemId === line.item_id)) result.push([line.item_id, line.usage_variance])
+        return result
+      }, [])))
     }) : listItems().then((res) => {
       setSheetRows([])
       setItems(res.items)
+      setUsageByItemId(new Map())
     })
     request
       .catch(() => toast('Failed to load inventory', 'error'))
@@ -317,6 +328,7 @@ export default function InventoryAudit() {
                 const expected = sheetRow?.expected ?? item.current_quantity
                 const counted = parseCountValue(value)
                 const variance = expected != null && counted != null ? counted - Number(expected) : null
+                const usageVariance = usageByItemId.get(item.id)
                 return (
                   <tr key={item.id} className={touched ? 'bg-emerald-500/5' : undefined}>
                     <td className="px-4 py-2">
@@ -347,6 +359,7 @@ export default function InventoryAudit() {
                     }`}>
                       {variance == null ? '—' : `${variance > 0 ? '+' : ''}${variance}`}
                       {variance != null && item.unit_cost != null ? ` ($${(variance * Number(item.unit_cost)).toFixed(2)})` : ''}
+                      {usageVariance != null && <div className={`mt-0.5 text-[11px] ${usageVariance > 0 ? 'text-red-400' : usageVariance < 0 ? 'text-emerald-400' : 'text-zinc-500'}`}>Usage {usageVariance > 0 ? '+' : ''}{usageVariance}</div>}
                     </td>}
                   </tr>
                 )

@@ -18,6 +18,7 @@ interface Props {
   openChats: () => void
   showEvents: boolean
   showInventory: boolean
+  showWaste: boolean
   showChannels: boolean
   loggedEventsCount: number
 }
@@ -39,6 +40,7 @@ export default function CollapsedRail({
   openChats,
   showEvents,
   showInventory,
+  showWaste,
   showChannels,
   loggedEventsCount,
 }: Props) {
@@ -99,6 +101,16 @@ export default function CollapsedRail({
           onClick={() => navigate(`${base}/inventory`)}
           className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
           title="Inventory"
+        >
+          <Package size={16} />
+        </button>
+      )}
+
+      {showWaste && (
+        <button
+          onClick={() => navigate(`${base}/inventory/waste`)}
+          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/inventory/waste`) ? 'bg-w-surface2 text-white' : 'text-w-dim hover:text-white hover:bg-w-surface2/60'}`}
+          title="Waste & par"
         >
           <Package size={16} />
         </button>

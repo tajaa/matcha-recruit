@@ -398,6 +398,23 @@ _HR_OPS_TOOL_SPECS: dict[str, dict[str, Any]] = {
         "failed_label": "Stock movement not recorded",
         "done_status": "recorded",
     },
+    "record_waste_movement": {
+        "action_type": "waste_movement", "match_key": "confirm_id", "mints_confirm_id": True,
+        "fields": ("item_id", "quantity", "waste_reason", "note", "location_id"),
+        "decision_fields": ("quantity", "waste_reason"), "staged_label": "Staged: waste movement",
+        "refused_label": "Waste movement refused", "done_label": "Recorded waste",
+        "failed_label": "Waste not recorded", "done_status": "recorded",
+    },
+    "apply_waste_par_change": {
+        "action_type": "waste_par_change", "match_key": "item_id", "mints_confirm_id": False,
+        "fields": ("run_id", "item_id"), "staged_label": "Staged: par change",
+        "refused_label": "Par change refused", "done_label": "Applied par change", "failed_label": "Par not changed", "done_status": "applied",
+    },
+    "correct_waste_recipe": {
+        "action_type": "waste_recipe_correction", "match_key": "confirm_id", "mints_confirm_id": True,
+        "fields": ("sold_name", "components", "location_id"), "staged_label": "Staged: recipe correction",
+        "refused_label": "Recipe correction refused", "done_label": "Saved recipe correction", "failed_label": "Recipe not saved", "done_status": "saved",
+    },
     "decide_inventory_order": {
         "action_type": "inventory_order_decision",
         "match_key": "order_id",

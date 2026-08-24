@@ -202,6 +202,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         openChats={() => sections.open('chats')}
         showEvents={showEvents}
         showInventory={showInventory}
+        showWaste={showInventory && hasFeature('inventory_waste')}
         showChannels={showChannels}
         loggedEventsCount={loggedEventsCount}
       />
@@ -287,6 +288,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Inventory
             </button>
           )}
+          {showInventory && hasFeature('inventory_waste') && <button onClick={() => navigate(`${base}/inventory/waste`)} className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] ${location.pathname.startsWith(`${base}/inventory/waste`) ? 'bg-w-surface2 text-white font-medium' : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'}`}><Package size={14} strokeWidth={1.6} /> Waste & par</button>}
 
           {/* Assets (company-wide feed of everything Huume has created) */}
           {showAssets && (
