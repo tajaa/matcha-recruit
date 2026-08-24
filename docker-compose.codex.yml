@@ -1,0 +1,104 @@
+name: matcha-codex-sandbox
+
+services:
+  workspace:
+    build:
+      context: .
+      dockerfile: docker/codex-sandbox/Dockerfile
+      args:
+        INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-false}
+    init: true
+    working_dir: /workspace
+    environment:
+      HOME: /home/codex
+      GIT_CONFIG_GLOBAL: /home/codex/.config/git/config
+      CODEX_SANDBOX: "1"
+      BACKEND_PORT: ${BACKEND_PORT:-8001}
+      FRONTEND_PORT: ${FRONTEND_PORT:-5174}
+      TELLUS_PORT: ${TELLUS_PORT:-5191}
+      OCEANLAB_PORT: ${OCEANLAB_PORT:-5201}
+      CHAT_PORT: ${CHAT_PORT:-8080}
+    volumes:
+      - .:/workspace
+      - codex_home:/home/codex
+      - codex_state:/home/codex/.codex
+      - codex_cache:/home/codex/.cache
+      - codex_npm_cache:/home/codex/.npm
+      - gh_config:/home/codex/.config/gh
+      - git_config:/home/codex/.config/git
+      - python_dependencies:/workspace/server/venv
+      - client_node_modules:/workspace/client/node_modules
+      - tellus_node_modules:/workspace/client/tellus/node_modules
+      - oceanlab_node_modules:/workspace/client/oceanlab/node_modules
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8001}:${BACKEND_PORT:-8001}"
+      - "127.0.0.1:${FRONTEND_PORT:-5174}:${FRONTEND_PORT:-5174}"
+      - "127.0.0.1:${TELLUS_PORT:-5191}:${TELLUS_PORT:-5191}"
+      - "127.0.0.1:${OCEANLAB_PORT:-5201}:${OCEANLAB_PORT:-5201}"
+      - "127.0.0.1:${CHAT_PORT:-8080}:${CHAT_PORT:-8080}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+      - /run:rw,nosuid,size=16m
+    cap_drop:
+      - ALL
+    # Required only for the root entrypoint to initialize named dependency
+    # volumes, then gosu drops to the dedicated `codex` user before commands.
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    command: ["sleep", "infinity"]
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: matcha
+      POSTGRES_PASSWORD: matcha_dev
+      POSTGRES_DB: matcha
+    volumes:
+      - codex_postgres_data:/var/lib/postgresql/data
+    tmpfs:
+      - /var/run/postgresql:rw,nosuid,size=16m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U matcha -d matcha"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - codex_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  codex_home:
+  codex_state:
+  codex_cache:
+  codex_npm_cache:
+  gh_config:
+  git_config:
+  python_dependencies:
+  client_node_modules:
+  tellus_node_modules:
+  oceanlab_node_modules:
+  codex_postgres_data:
+  codex_redis_data:

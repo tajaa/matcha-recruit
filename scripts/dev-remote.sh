@@ -22,6 +22,8 @@ CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 #
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
 # DATABASE_URL, REDIS_URL, CHAT_PORT
+# Set CODEX_SANDBOX=1 when running from scripts/codex-sandbox.sh. In that mode
+# PostgreSQL and Redis are Compose services, not host Docker containers.
 
 # Colors
 GREEN='\033[0;32m'
@@ -32,6 +34,11 @@ NC='\033[0m' # No Color
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
+
+IS_CODEX_SANDBOX=false
+case "${CODEX_SANDBOX:-}" in
+    1|true|TRUE|yes|YES) IS_CODEX_SANDBOX=true ;;
+esac
 
 is_port_in_use() {
     local port=$1
@@ -69,7 +76,7 @@ pick_available_port() {
     return 1
 }
 
-if [ ! -f "$KEY_FILE" ]; then
+if [ "$IS_CODEX_SANDBOX" = false ] && [ ! -f "$KEY_FILE" ]; then
     echo -e "${YELLOW}Note: SSH key not found at $KEY_FILE (only needed for remote ops; local dev DB doesn't need it).${NC}"
 fi
 
@@ -87,6 +94,11 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+if [ "$IS_CODEX_SANDBOX" = true ] && [ "$ENABLE_CHAT" = true ]; then
+    echo -e "${RED}--chat is not available in the Codex sandbox. Use a separately controlled model endpoint instead.${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}Starting Matcha Recruit Remote Dev environment...${NC}"
 
@@ -163,68 +175,79 @@ ensure_local_postgres() {
         sleep 1
     done
 }
-ensure_local_postgres
-
-if is_port_in_use "$FRONTEND_PORT"; then
-    if [ "$FRONTEND_PORT_SOURCE" = "env" ]; then
-        echo -e "${RED}Error: FRONTEND_PORT $FRONTEND_PORT is already in use. Set FRONTEND_PORT to a free port.${NC}"
-        exit 1
-    fi
-
-    ALT_FRONTEND_PORT="$(pick_available_port 5175 5190)"
-    if [ -z "$ALT_FRONTEND_PORT" ]; then
-        echo -e "${RED}Error: No free frontend ports found in 5175-5190.${NC}"
-        exit 1
-    fi
-
-    echo -e "${YELLOW}Port $FRONTEND_PORT is in use; using $ALT_FRONTEND_PORT for the frontend instead.${NC}"
-    FRONTEND_PORT="$ALT_FRONTEND_PORT"
-fi
-
-
-# Check/Start Redis (Local)
-echo -e "${YELLOW}Checking Redis...${NC}"
-if docker ps --format '{{.Names}}' | grep -q '^matcha-redis$'; then
-    echo -e "${GREEN}Redis is already running${NC}"
-    EXISTING_REDIS_PORT="$(docker port matcha-redis 6379/tcp 2>/dev/null | head -n 1 | awk -F: '{print $NF}')"
-    if [ -n "$EXISTING_REDIS_PORT" ]; then
-        if [ "$REDIS_PORT_SOURCE" = "env" ] && [ "$REDIS_PORT" != "$EXISTING_REDIS_PORT" ]; then
-            echo -e "${YELLOW}REDIS_PORT is set to $REDIS_PORT but matcha-redis is bound to $EXISTING_REDIS_PORT; update REDIS_PORT/REDIS_URL if you want to match.${NC}"
-        fi
-        REDIS_PORT="$EXISTING_REDIS_PORT"
-    fi
+if [ "$IS_CODEX_SANDBOX" = true ]; then
+    echo -e "${GREEN}Using sandbox PostgreSQL and Redis Compose services${NC}"
 else
-    # Remove stopped container if exists
-    docker rm matcha-redis 2>/dev/null || true
-    if is_port_in_use "$REDIS_PORT"; then
-        if [ "$REDIS_PORT_SOURCE" = "env" ]; then
-            echo -e "${RED}Error: REDIS_PORT $REDIS_PORT is already in use. Set REDIS_PORT to a free port.${NC}"
+    ensure_local_postgres
+
+    if is_port_in_use "$FRONTEND_PORT"; then
+        if [ "$FRONTEND_PORT_SOURCE" = "env" ]; then
+            echo -e "${RED}Error: FRONTEND_PORT $FRONTEND_PORT is already in use. Set FRONTEND_PORT to a free port.${NC}"
             exit 1
         fi
 
-        ALT_REDIS_PORT="$(pick_available_port 6381 6390)"
-        if [ -z "$ALT_REDIS_PORT" ]; then
-            echo -e "${RED}Error: No free Redis ports found in 6381-6390.${NC}"
+        ALT_FRONTEND_PORT="$(pick_available_port 5175 5190)"
+        if [ -z "$ALT_FRONTEND_PORT" ]; then
+            echo -e "${RED}Error: No free frontend ports found in 5175-5190.${NC}"
             exit 1
         fi
 
-        echo -e "${YELLOW}Port $REDIS_PORT is in use; using $ALT_REDIS_PORT for Redis instead.${NC}"
-        REDIS_PORT="$ALT_REDIS_PORT"
+        echo -e "${YELLOW}Port $FRONTEND_PORT is in use; using $ALT_FRONTEND_PORT for the frontend instead.${NC}"
+        FRONTEND_PORT="$ALT_FRONTEND_PORT"
     fi
-    echo -e "${YELLOW}Starting Redis...${NC}"
-    docker run -d \
-        --name matcha-redis \
-        -p "${REDIS_PORT}:6379" \
-        -v matcha_redis_data:/data \
-        redis:7-alpine \
-        redis-server --appendonly yes
+
+    # Check/Start Redis (Local)
+    echo -e "${YELLOW}Checking Redis...${NC}"
+    if docker ps --format '{{.Names}}' | grep -q '^matcha-redis$'; then
+        echo -e "${GREEN}Redis is already running${NC}"
+        EXISTING_REDIS_PORT="$(docker port matcha-redis 6379/tcp 2>/dev/null | head -n 1 | awk -F: '{print $NF}')"
+        if [ -n "$EXISTING_REDIS_PORT" ]; then
+            if [ "$REDIS_PORT_SOURCE" = "env" ] && [ "$REDIS_PORT" != "$EXISTING_REDIS_PORT" ]; then
+                echo -e "${YELLOW}REDIS_PORT is set to $REDIS_PORT but matcha-redis is bound to $EXISTING_REDIS_PORT; update REDIS_PORT/REDIS_URL if you want to match.${NC}"
+            fi
+            REDIS_PORT="$EXISTING_REDIS_PORT"
+        fi
+    else
+        # Remove stopped container if exists
+        docker rm matcha-redis 2>/dev/null || true
+        if is_port_in_use "$REDIS_PORT"; then
+            if [ "$REDIS_PORT_SOURCE" = "env" ]; then
+                echo -e "${RED}Error: REDIS_PORT $REDIS_PORT is already in use. Set REDIS_PORT to a free port.${NC}"
+                exit 1
+            fi
+
+            ALT_REDIS_PORT="$(pick_available_port 6381 6390)"
+            if [ -z "$ALT_REDIS_PORT" ]; then
+                echo -e "${RED}Error: No free Redis ports found in 6381-6390.${NC}"
+                exit 1
+            fi
+
+            echo -e "${YELLOW}Port $REDIS_PORT is in use; using $ALT_REDIS_PORT for Redis instead.${NC}"
+            REDIS_PORT="$ALT_REDIS_PORT"
+        fi
+        echo -e "${YELLOW}Starting Redis...${NC}"
+        docker run -d \
+            --name matcha-redis \
+            -p "${REDIS_PORT}:6379" \
+            -v matcha_redis_data:/data \
+            redis:7-alpine \
+            redis-server --appendonly yes
+    fi
 fi
 
 if [ "$DATABASE_URL_SOURCE" = "default" ]; then
-    DATABASE_URL="postgresql://matcha:matcha_dev@localhost:${LOCAL_PORT}/matcha"
+    if [ "$IS_CODEX_SANDBOX" = true ]; then
+        DATABASE_URL="postgresql://matcha:matcha_dev@postgres:5432/matcha"
+    else
+        DATABASE_URL="postgresql://matcha:matcha_dev@localhost:${LOCAL_PORT}/matcha"
+    fi
 fi
 if [ "$REDIS_URL_SOURCE" = "default" ]; then
-    REDIS_URL="redis://localhost:${REDIS_PORT}/0"
+    if [ "$IS_CODEX_SANDBOX" = true ]; then
+        REDIS_URL="redis://redis:6379/0"
+    else
+        REDIS_URL="redis://localhost:${REDIS_PORT}/0"
+    fi
 fi
 
 CHAT_REUSE_EXISTING=false
@@ -257,9 +280,15 @@ GS_OFF="export POWERLEVEL9K_DISABLE_GITSTATUS=true &&"
 # receive VITE_TELLUS_TARGET (its '/tellus' proxy → this server, making
 # http://localhost:5174/tellus/ work in dev like prod). Range starts at the
 # tellus default (5191), clear of the main frontend's 5175-5190 fallback.
-TELLUS_PORT=""
+if [ "$IS_CODEX_SANDBOX" = true ]; then
+    TELLUS_PORT="${TELLUS_PORT:-5191}"
+else
+    TELLUS_PORT=""
+fi
 if [ -d "$PROJECT_ROOT/client/tellus/node_modules" ]; then
-    TELLUS_PORT="$(pick_available_port 5191 5199)"
+    if [ "$IS_CODEX_SANDBOX" = false ]; then
+        TELLUS_PORT="$(pick_available_port 5191 5199)"
+    fi
 fi
 TELLUS_ENV=""
 if [ -n "$TELLUS_PORT" ]; then
@@ -269,9 +298,15 @@ fi
 # Oceanlab frontend port — same pattern as Tell-Us above, picked before the
 # panes so the main frontend can receive VITE_OCEANLAB_TARGET (its '/oceanlab'
 # proxy -> this server). Default oceanlab port is 5201.
-OCEANLAB_PORT=""
+if [ "$IS_CODEX_SANDBOX" = true ]; then
+    OCEANLAB_PORT="${OCEANLAB_PORT:-5201}"
+else
+    OCEANLAB_PORT=""
+fi
 if [ -d "$PROJECT_ROOT/client/oceanlab/node_modules" ]; then
-    OCEANLAB_PORT="$(pick_available_port 5201 5209)"
+    if [ "$IS_CODEX_SANDBOX" = false ]; then
+        OCEANLAB_PORT="$(pick_available_port 5201 5209)"
+    fi
 fi
 OCEANLAB_ENV=""
 if [ -n "$OCEANLAB_PORT" ]; then
@@ -286,27 +321,43 @@ if [ "$ENABLE_CHAT" = true ]; then
     CHAT_ENV="export AI_CHAT_BASE_URL='http://localhost:${CHAT_PORT}' && "
 fi
 
+DEV_WATCH_ENV=""
+VITE_HOST_ARGS=""
+if [ "$IS_CODEX_SANDBOX" = true ]; then
+    # Bind-mounted macOS source trees do not reliably emit native filesystem
+    # events inside Linux, and published ports need a non-loopback Vite bind.
+    DEV_WATCH_ENV="export CHOKIDAR_USEPOLLING=true WATCHFILES_FORCE_POLLING=true &&"
+    VITE_HOST_ARGS="--host 0.0.0.0"
+    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until pg_isready -h postgres -p 5432 -U matcha -d matcha >/dev/null 2>&1 && redis-cli -h redis ping >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'Sandbox Postgres or Redis did not become ready within 60s.'; exit 1; fi; done; }"
+    STATUS_PANE="echo 'Sandbox service status (PostgreSQL + Redis)'; while true; do date; pg_isready -h postgres -p 5432 -U matcha -d matcha; redis-cli -h redis ping; sleep 5; done"
+    WAITING_MESSAGE="Waiting for sandbox Postgres and Redis..."
+else
+    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
+    STATUS_PANE="echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
+    WAITING_MESSAGE="Waiting for DB tunnel on localhost:$LOCAL_PORT..."
+fi
+
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "$GS_OFF export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
 tmux set-option -t "$SESSION_NAME" mouse on
 
-# Pane 1: Local Postgres logs (replaces the old EC2 SSH tunnel) - 30% width
+# Pane 1: Local service logs/status (replaces the old EC2 SSH tunnel) - 30% width
 tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
-    "echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
+    "$STATUS_PANE"
 
 sleep 1
 
 # Pane 2: Worker - Split below tunnel
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "$GS_OFF export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo 'Waiting for DB tunnel on localhost:$LOCAL_PORT...' && WAITED=0 && MAX_WAIT=60 && until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "$GS_OFF ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- $VITE_HOST_ARGS --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
@@ -320,14 +371,14 @@ fi
 # http://localhost:$FRONTEND_PORT/tellus/ works; the direct port works too.
 if [ -n "$TELLUS_PORT" ]; then
     tmux new-window -t "$SESSION_NAME" -n "tellus" -c "$PROJECT_ROOT/client/tellus" \
-        "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
+        "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
 fi
 
 # Extra window: Oceanlab frontend (separate Vite app served at /oceanlab/).
 # Same pattern as the Tell-Us window above.
 if [ -n "$OCEANLAB_PORT" ]; then
     tmux new-window -t "$SESSION_NAME" -n "oceanlab" -c "$PROJECT_ROOT/client/oceanlab" \
-        "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
+        "$GS_OFF ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
 fi
 
 # Select the server pane as active
@@ -335,8 +386,13 @@ tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
-echo -e "  - Database: LOCAL matcha-postgres (localhost:$LOCAL_PORT/matcha)"
-echo -e "  - Redis:    Local ($REDIS_PORT)"
+if [ "$IS_CODEX_SANDBOX" = true ]; then
+    echo -e "  - Database: sandbox postgres service (postgres:5432/matcha)"
+    echo -e "  - Redis:    sandbox redis service (redis:6379)"
+else
+    echo -e "  - Database: LOCAL matcha-postgres (localhost:$LOCAL_PORT/matcha)"
+    echo -e "  - Redis:    Local ($REDIS_PORT)"
+fi
 echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
 if [ -n "$TELLUS_PORT" ]; then
