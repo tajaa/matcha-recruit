@@ -5,7 +5,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-MovementKind = Literal["out", "in", "stockout", "adjust", "sale"]
+MovementKind = Literal["out", "in", "stockout", "adjust", "sale", "waste"]
+WasteReason = Literal[
+    "spoilage", "expired", "prep_error", "overproduction",
+    "breakage", "contamination", "theft", "comp", "recall", "unknown",
+]
 OrderStatus = Literal["queued", "ordered", "received", "cancelled"]
 
 
@@ -63,6 +67,7 @@ class MovementOut(BaseModel):
     quantity_estimated: bool
     note: Optional[str] = None
     narrative: str
+    waste_reason: Optional[WasteReason] = None
     created_at: datetime
 
 
@@ -190,6 +195,7 @@ class AuditSheetRow(BaseModel):
     sold: Decimal = Decimal("0")
     manual_out: Decimal = Decimal("0")
     stockouts: Decimal = Decimal("0")
+    wasted: Decimal = Decimal("0")
 
 
 class AuditRunOut(BaseModel):

@@ -27,19 +27,21 @@ Message: "{content}"
 Return ONLY JSON matching this shape:
 {{
   "actionable": true or false,
-  "kind": "movement" | "stockout" | "receipt" | "order_request" | "return",
+  "kind": "movement" | "stockout" | "receipt" | "order_request" | "return" | "waste",
   "lines": [
     {{"item_name": "...", "quantity": number or null, "unit": "..." or null, "direction": "out" or "in"}}
   ],
-  "recipient_note": "..." or null
+  "recipient_note": "..." or null,
+  "waste_reason": "spoilage" | "expired" | "prep_error" | "overproduction" | "breakage" | "contamination" | "comp" | "recall" | "unknown" | null
 }}
 
 Rules:
 - "actionable": false when the message does not name any identifiable stock item, or is not really about inventory (a misclassification) — the caller falls back to plain event logging in that case.
-- "kind": "movement" for an ordinary deduction/use ("we gifted some cookies"), "stockout" for a "ran out of" / "out of" report, "receipt" for goods coming IN with an invoice/delivery/order behind it ("we received the produce delivery", "we got 3 more reams, add them to stock"), "return" for goods coming back INTO stock from a customer/patient/guest return (no document expected — "a patient returned an unopened box of gloves, put it back in stock"), "order_request" for an explicit "we need to reorder X".
+- "kind": "movement" for an ordinary deduction/use ("we gifted some cookies"), "stockout" for a "ran out of" / "out of" report, "receipt" for goods coming IN with an invoice/delivery/order behind it ("we received the produce delivery", "we got 3 more reams, add them to stock"), "return" for goods coming back INTO stock from a customer/patient/guest return (no document expected — "a patient returned an unopened box of gloves, put it back in stock"), "order_request" for an explicit "we need to reorder X", "waste" for stock destroyed or discarded rather than used or sold ("threw out 3 lbs of spinach, went slimy", "dropped a tray of glasses", "had to toss the batch, burned it").
+- "waste_reason" is set ONLY when kind is "waste", to the closest match from the list above. Never report "theft" — if the message alleges something was stolen, use "unknown" instead; that judgment belongs to a human, not this extraction.
 - "quantity" is null when the message doesn't state a number ("some cookies") — never guess a number.
 - "recipient_note" captures a short human-readable aside like "gifted to Elizabeth (manager)" — null if there isn't one.
-- Every "direction" is "out" for movement/stockout, "in" for receipt/return. order_request lines have direction "out" (they represent what's being replenished).
+- Every "direction" is "out" for movement/stockout/waste, "in" for receipt/return. order_request lines have direction "out" (they represent what's being replenished).
 """
 
 
@@ -53,6 +55,7 @@ _FALLBACK_RESULT = {
     "kind": "movement",
     "lines": [],
     "recipient_note": None,
+    "waste_reason": None,
 }
 
 _NUMERIC_RE = re.compile(r"(\d+(?:\.\d+)?)")
@@ -75,7 +78,7 @@ def _parse_model_json(text: str) -> dict:
     return json.loads(text)
 
 
-_VALID_KINDS = {"movement", "stockout", "receipt", "order_request", "return"}
+_VALID_KINDS = {"movement", "stockout", "receipt", "order_request", "return", "waste"}
 
 
 def _coerce_result(parsed: dict) -> dict:
@@ -89,6 +92,11 @@ def _coerce_result(parsed: dict) -> dict:
     result = {**_FALLBACK_RESULT, **parsed}
     if result.get("kind") not in _VALID_KINDS:
         result["actionable"] = False
+    # Belt-and-braces alongside reasons.coerce_chat_reason at the call
+    # site — theft must never survive extraction even if a future prompt
+    # edit loosens the rule text above.
+    if result.get("waste_reason") == "theft":
+        result["waste_reason"] = "unknown"
     return result
 
 

@@ -12,6 +12,7 @@ from typing import Literal, Optional
 APPROVE_ROLES = frozenset({"client", "admin"})
 
 _INVENTORY_OFF_MESSAGE = "Inventory tracking isn't turned on for this workspace."
+_WASTE_OFF_MESSAGE = "Waste & shrinkage tracking isn't turned on for this workspace."
 _APPROVE_ONLY_MESSAGE = (
     "Only a manager can approve or cancel an order — an admin can do that "
     "from the Inventory page or by replying here."
@@ -29,13 +30,18 @@ class InventoryVerdict:
 
 
 def evaluate_inventory_action(
-    *, role: Optional[str], features: dict, stage: Literal["movement", "approve_order"],
+    *, role: Optional[str], features: dict, stage: Literal["movement", "approve_order", "waste"],
 ) -> InventoryVerdict:
     """movement: any channel member (any role) may record a deduction/
     receipt/stockout, as long as `inventory` is enabled. approve_order:
-    role must be client/admin, same pair as scheduling's ALLOWED_ROLES."""
+    role must be client/admin, same pair as scheduling's ALLOWED_ROLES.
+    waste: same any-member bar as movement, PLUS `inventory_waste` must
+    also be enabled — a company can run bare stock tracking without
+    opting into shrinkage reporting."""
     if not features.get("inventory"):
         return InventoryVerdict("refuse", _INVENTORY_OFF_MESSAGE)
+    if stage == "waste" and not features.get("inventory_waste"):
+        return InventoryVerdict("refuse", _WASTE_OFF_MESSAGE)
     if stage == "approve_order" and role not in APPROVE_ROLES:
         return InventoryVerdict("refuse", _APPROVE_ONLY_MESSAGE)
     return InventoryVerdict("proceed")

@@ -335,7 +335,7 @@ async def audit_sheet(
     by_id = {str(row["item_id"]): row for row in breakdown}
     return [{"item": InventoryItemOut(**dict(item)), **{
         key: by_id.get(str(item["id"]), {}).get(key)
-        for key in ("expected", "baseline", "baseline_at", "received", "sold", "manual_out", "stockouts")
+        for key in ("expected", "baseline", "baseline_at", "received", "sold", "manual_out", "stockouts", "wasted")
     }} for item in rows]
 
 

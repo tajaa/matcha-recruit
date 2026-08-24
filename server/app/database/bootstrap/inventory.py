@@ -156,7 +156,7 @@ async def create_inventory(conn):
             channel_id UUID REFERENCES channels(id) ON DELETE SET NULL,
             source_message_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
             recorded_by UUID REFERENCES users(id) ON DELETE SET NULL,
-            kind VARCHAR(20) NOT NULL CHECK (kind IN ('out','in','stockout','adjust','sale')),
+            kind VARCHAR(20) NOT NULL CHECK (kind IN ('out','in','stockout','adjust','sale','waste')),
             quantity NUMERIC,
             quantity_delta NUMERIC,
             quantity_estimated BOOLEAN NOT NULL DEFAULT FALSE,
@@ -174,7 +174,19 @@ async def create_inventory(conn):
     await conn.execute("ALTER TABLE inventory_movements DROP CONSTRAINT IF EXISTS inventory_movements_kind_check")
     await conn.execute("""
         ALTER TABLE inventory_movements ADD CONSTRAINT inventory_movements_kind_check
-        CHECK (kind IN ('out','in','stockout','adjust','sale'))
+        CHECK (kind IN ('out','in','stockout','adjust','sale','waste'))
+    """)
+    await conn.execute("ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS waste_reason VARCHAR(30)")
+    await conn.execute("ALTER TABLE inventory_movements DROP CONSTRAINT IF EXISTS inventory_movements_waste_reason_check")
+    await conn.execute("""
+        ALTER TABLE inventory_movements ADD CONSTRAINT inventory_movements_waste_reason_check
+        CHECK (waste_reason IS NULL OR (kind='waste' AND waste_reason IN (
+            'spoilage','expired','prep_error','overproduction',
+            'breakage','contamination','theft','comp','recall','unknown')))
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inventory_movements_waste
+        ON inventory_movements (company_id, created_at DESC) WHERE kind='waste'
     """)
     await conn.execute("""
         ALTER TABLE inventory_movements
@@ -205,6 +217,19 @@ async def create_inventory(conn):
         WHERE sales_import_id IS NOT NULL
     """)
     await conn.execute("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC")
+    await conn.execute("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS category VARCHAR(60)")
+    await conn.execute("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS shelf_life_days INT")
+    await conn.execute("ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS inventory_items_shelf_life_days_check")
+    await conn.execute("""
+        ALTER TABLE inventory_items ADD CONSTRAINT inventory_items_shelf_life_days_check
+        CHECK (shelf_life_days IS NULL OR shelf_life_days BETWEEN 1 AND 3650)
+    """)
+    await conn.execute("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS yield_pct NUMERIC")
+    await conn.execute("ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS inventory_items_yield_pct_check")
+    await conn.execute("""
+        ALTER TABLE inventory_items ADD CONSTRAINT inventory_items_yield_pct_check
+        CHECK (yield_pct IS NULL OR (yield_pct > 0 AND yield_pct <= 1))
+    """)
 
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS inventory_orders (

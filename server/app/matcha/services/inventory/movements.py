@@ -142,15 +142,17 @@ async def record_movements(
     recorded_by: Optional[UUID], kind: str, lines: list[dict], narrative: str, note: Optional[str],
     sales_import_id: Optional[UUID] = None, audit_run_id: Optional[UUID] = None,
 ) -> list[dict]:
-    """lines: [{item_id, quantity (Decimal|None), estimated (bool)}]. kind
-    applies to every line in this call (movement handler calls this once
-    per kind: 'out'/'in'; stockout handler calls it separately with
-    kind='stockout'). Returns inserted rows only — a WS replay that hits
-    the ON CONFLICT DO NOTHING contributes nothing to the return list."""
+    """lines: [{item_id, quantity (Decimal|None), estimated (bool), waste_reason
+    (str|None, only meaningful when kind='waste')}]. kind applies to every line
+    in this call (movement handler calls this once per kind: 'out'/'in';
+    stockout handler calls it separately with kind='stockout'). Returns
+    inserted rows only — a WS replay that hits the ON CONFLICT DO NOTHING
+    contributes nothing to the return list."""
     inserted = []
     for line in lines:
         quantity = line.get("quantity")
         estimated = bool(line.get("estimated", False))
+        waste_reason = line.get("waste_reason") if kind == "waste" else None
         delta = None
         if kind == "out" and quantity is not None:
             delta = -abs(float(quantity))
@@ -159,6 +161,8 @@ async def record_movements(
         elif kind == "sale" and quantity is not None:
             # A negative POS quantity is a refund and puts stock back.
             delta = -float(quantity)
+        elif kind == "waste" and quantity is not None:
+            delta = -abs(float(quantity))
 
         if sales_import_id is not None:
             row = await conn.fetchrow(
@@ -166,13 +170,14 @@ async def record_movements(
                 INSERT INTO inventory_movements (
                     company_id, item_id, channel_id, source_message_id, recorded_by,
                     kind, quantity, quantity_delta, quantity_estimated, note, narrative,
-                    sales_import_id, audit_run_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    sales_import_id, audit_run_id, waste_reason
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 ON CONFLICT (sales_import_id, item_id) WHERE sales_import_id IS NOT NULL DO NOTHING
                 RETURNING *
                 """,
                 company_id, line["item_id"], channel_id, source_message_id, recorded_by,
                 kind, quantity, delta, estimated, note, narrative, sales_import_id, audit_run_id,
+                waste_reason,
             )
         else:
             row = await conn.fetchrow(
@@ -180,13 +185,13 @@ async def record_movements(
                 INSERT INTO inventory_movements (
                     company_id, item_id, channel_id, source_message_id, recorded_by,
                     kind, quantity, quantity_delta, quantity_estimated, note, narrative,
-                    audit_run_id
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    audit_run_id, waste_reason
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 ON CONFLICT (source_message_id, item_id) WHERE source_message_id IS NOT NULL DO NOTHING
                 RETURNING *
                 """,
                 company_id, line["item_id"], channel_id, source_message_id, recorded_by,
-                kind, quantity, delta, estimated, note, narrative, audit_run_id,
+                kind, quantity, delta, estimated, note, narrative, audit_run_id, waste_reason,
             )
         if row is None:
             continue
@@ -221,7 +226,10 @@ async def amend_movement_quantity(conn, *, movement_id: UUID, quantity, user_id:
         return None
     old_qty = float(old["quantity"] or 0)
     new_qty = float(quantity)
-    sign = -1 if old["kind"] == "out" else 1
+    # 'out' and 'waste' both deplete stock — an amended estimate on either
+    # must apply the same negative sign, or a waste clarify-reply would
+    # ADD stock instead of correcting a deduction (bug found 2026-08-24).
+    sign = -1 if old["kind"] in ("out", "waste") else 1
     diff = sign * (new_qty - old_qty)
 
     row = await conn.fetchrow(

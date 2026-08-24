@@ -21,6 +21,40 @@ def movement_pill(item_name: str, qty, remaining, note: str | None, estimated: b
     return base
 
 
+def waste_pill(item_name: str, qty, remaining, reason: str, estimated: bool, *, reason_coerced: bool = False) -> str:
+    """reason_coerced=True means the reporter's own wording was overridden
+    (e.g. an alleged theft became 'unknown') — the pill says so and points
+    at the page, per the provenance invariant: a personnel accusation is
+    never minted from a chat aside."""
+    from app.matcha.services.inventory.waste.reasons import label as _reason_label
+
+    qty_str = f"~{_fmt_qty(qty)}" if estimated else _fmt_qty(qty)
+    base = f"\U0001F4E6 Logged {qty_str} × {item_name} as waste — {_reason_label(reason)}"
+    if remaining is None:
+        base += ". Count unknown — set it on the Inventory page."
+    else:
+        base += f". {_fmt_qty(remaining)} left."
+    if reason_coerced:
+        base += (
+            " I can't record an accusation from chat, so I logged this as "
+            "unknown — set the real reason on the Inventory page if you know it."
+        )
+    return base
+
+
+def waste_unmatched_pill(item_name=None) -> str:
+    name = _safe_name(item_name)
+    if not name:
+        return (
+            "\U0001F4E6 I don't see that item in the catalog — "
+            "add it on the Inventory page first, then I can log the waste."
+        )
+    return (
+        f"\U0001F4E6 I don't see {name} in the catalog — "
+        "add it on the Inventory page first, then I can log the waste."
+    )
+
+
 def return_pill(item_name: str, qty, new_count, estimated: bool, unmatched: list[str] | None = None) -> str:
     """Chat-only return — no invoice/receipt/CSV needed by design, unlike
     every other addition (services/inventory/CLAUDE.md provenance

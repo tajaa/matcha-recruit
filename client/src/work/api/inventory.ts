@@ -2,7 +2,10 @@ import { api } from '../../api/client'
 
 // ── Types ──
 
-export type MovementKind = 'out' | 'in' | 'stockout' | 'adjust' | 'sale'
+export type MovementKind = 'out' | 'in' | 'stockout' | 'adjust' | 'sale' | 'waste'
+export type WasteReason =
+  | 'spoilage' | 'expired' | 'prep_error' | 'overproduction'
+  | 'breakage' | 'contamination' | 'theft' | 'comp' | 'recall' | 'unknown'
 export type OrderStatus = 'queued' | 'ordered' | 'received' | 'cancelled'
 
 export interface InventoryOrder {
@@ -41,6 +44,7 @@ export interface InventoryMovement {
   quantity_estimated: boolean
   note: string | null
   narrative: string
+  waste_reason: WasteReason | null
   created_at: string
 }
 

@@ -376,6 +376,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # over committed sales imports. Requires both Inventory and Sales Intake;
     # it never creates or approves an order.
     "inventory_forecasting": False,
+    # Waste & shrinkage: a 'waste' movement kind + reason codes, theoretical-
+    # vs-actual usage variance, perishability-aware par (shelf-life-capped
+    # forecast targets, closed-loop par writeback), and a grounded waste
+    # analyst. Requires Inventory; does NOT require Sales Intake/Forecasting
+    # at the flag level — capture and rollup work on ledger data alone, and
+    # the endpoints that genuinely need POS data gate on those flags
+    # individually. See services/inventory/CLAUDE.md. NOT bundled.
+    "inventory_waste": False,
     # Safety meetings (toolbox talks) — record a safety meeting in-app: chunked
     # mic audio (the shared WAV-via-AudioWorklet stack) uploads ~1-minute
     # segments as the meeting runs, each transcribed by Gemini immediately;
@@ -795,6 +803,7 @@ FEATURE_REQUIRES: dict[str, tuple[str, ...]] = {
     "inventory_voice": ("inventory",),
     "sales_intake": ("inventory",),
     "inventory_forecasting": ("inventory", "sales_intake"),
+    "inventory_waste": ("inventory",),
     "employee_schedule": ("matcha_ops",),
     "schedule_intelligence": ("matcha_ops", "employee_schedule"),
     "matcha_ops_calls_all_members": ("matcha_ops",),

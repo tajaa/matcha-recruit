@@ -32,6 +32,12 @@ def suggest_order(movements: list[dict], now: datetime) -> dict | None:
     outs = [m for m in in_window if m["kind"] in ("out", "sale") and m["quantity"] is not None]
     stockouts = [m for m in in_window if m["kind"] == "stockout"]
     receipts = [m for m in in_window if m["kind"] == "in" and m["quantity"] is not None]
+    # 'waste' is deliberately EXCLUDED from `outs` — waste is loss, not
+    # demand, and must never inflate a reorder suggestion. Surfaced
+    # separately so a confirm pill can read "14 suggested; 6 wasted last
+    # cycle" without silently feeding it into the rate.
+    wastes = [m for m in in_window if m["kind"] == "waste" and m["quantity"] is not None]
+    waste_in_window = sum(float(m["quantity"]) for m in wastes) if wastes else 0.0
 
     n_out = len(outs)
     if n_out < 2 and not receipts:
@@ -73,4 +79,5 @@ def suggest_order(movements: list[dict], now: datetime) -> dict | None:
         "cover_days": DEFAULT_COVER_DAYS,
         "confidence": confidence,
         "n_samples": n_samples,
+        "waste_in_window": waste_in_window,
     }

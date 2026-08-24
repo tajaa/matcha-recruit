@@ -21,7 +21,8 @@ async def expected_breakdown(conn, company_id: UUID, item_ids: list[UUID], locat
                    SUM(CASE WHEN m.kind='in' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS received,
                    SUM(CASE WHEN m.kind='sale' THEN -COALESCE(m.quantity_delta,0) ELSE 0 END) AS sold,
                    SUM(CASE WHEN m.kind='out' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS manual_out,
-                   SUM(CASE WHEN m.kind='stockout' THEN 1 ELSE 0 END) AS stockouts
+                   SUM(CASE WHEN m.kind='stockout' THEN 1 ELSE 0 END) AS stockouts,
+                   SUM(CASE WHEN m.kind='waste' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS wasted
             FROM inventory_movements m
             LEFT JOIN baselines b ON b.item_id=m.item_id
             WHERE m.company_id=$1 AND m.item_id=ANY($2::uuid[])
@@ -31,7 +32,8 @@ async def expected_breakdown(conn, company_id: UUID, item_ids: list[UUID], locat
         SELECT i.id AS item_id, i.current_quantity AS expected, i.unit_cost,
                b.baseline, b.baseline_at,
                COALESCE(k.received,0) AS received, COALESCE(k.sold,0) AS sold,
-               COALESCE(k.manual_out,0) AS manual_out, COALESCE(k.stockouts,0) AS stockouts
+               COALESCE(k.manual_out,0) AS manual_out, COALESCE(k.stockouts,0) AS stockouts,
+               COALESCE(k.wasted,0) AS wasted
         FROM inventory_items i
         LEFT JOIN baselines b ON b.item_id=i.id
         LEFT JOIN buckets k ON k.item_id=i.id

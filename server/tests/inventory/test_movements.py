@@ -157,3 +157,143 @@ class TestFindOrCreateItem:
         assert result == {"id": "item-1", "name": "Nitrile Gloves (M)"}
         assert conn.execute_calls == []  # matched against `existing`, no INSERT
         assert calls["n"] == 0  # and no catalog requery
+
+
+class FakeRecordConn:
+    """Fakes the INSERT ... RETURNING * / UPDATE current_quantity pair
+    record_movements runs per line. fetchrow echoes the bound params back
+    as a row (matching real Postgres RETURNING * behavior closely enough
+    to assert on); execute just records what it was called with."""
+
+    _COLUMNS_WITH_SALES_IMPORT = (
+        "company_id", "item_id", "channel_id", "source_message_id", "recorded_by",
+        "kind", "quantity", "quantity_delta", "quantity_estimated", "note", "narrative",
+        "sales_import_id", "audit_run_id", "waste_reason",
+    )
+    _COLUMNS_WITHOUT_SALES_IMPORT = (
+        "company_id", "item_id", "channel_id", "source_message_id", "recorded_by",
+        "kind", "quantity", "quantity_delta", "quantity_estimated", "note", "narrative",
+        "audit_run_id", "waste_reason",
+    )
+
+    def __init__(self):
+        self.fetchrow_calls = []
+        self.execute_calls = []
+        self._next_id = 0
+
+    async def fetchrow(self, query, *args):
+        self.fetchrow_calls.append((query, args))
+        columns = (
+            self._COLUMNS_WITH_SALES_IMPORT if "sales_import_id, audit_run_id, waste_reason" in query
+            else self._COLUMNS_WITHOUT_SALES_IMPORT
+        )
+        self._next_id += 1
+        row = dict(zip(columns, args))
+        row["id"] = f"movement-{self._next_id}"
+        return row
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+
+
+class TestRecordMovementsWaste:
+    def test_waste_delta_is_negative(self):
+        conn = FakeRecordConn()
+
+        _run(movements.record_movements(
+            conn, company_id="company-1", channel_id=None, source_message_id="msg-1",
+            recorded_by="user-1", kind="waste",
+            lines=[{"item_id": "item-1", "quantity": 3, "estimated": False, "waste_reason": "spoilage"}],
+            narrative="tossed 3", note=None,
+        ))
+
+        update_calls = [c for c in conn.execute_calls if "current_quantity" in c[0]]
+        assert len(update_calls) == 1
+        _query, args = update_calls[0]
+        assert args == ("item-1", -3.0)  # depletes, never adds
+
+    def test_waste_reason_threaded_into_insert(self):
+        conn = FakeRecordConn()
+
+        _run(movements.record_movements(
+            conn, company_id="company-1", channel_id=None, source_message_id="msg-1",
+            recorded_by="user-1", kind="waste",
+            lines=[{"item_id": "item-1", "quantity": 2, "estimated": False, "waste_reason": "spoilage"}],
+            narrative="tossed 2", note=None,
+        ))
+
+        _query, args = conn.fetchrow_calls[0]
+        assert args[-1] == "spoilage"  # waste_reason is the last bound param
+
+    def test_waste_reason_rejected_on_non_waste_kind(self):
+        # A 'waste_reason' key on a non-waste-kind line must never reach
+        # the DB — the CHECK constraint would reject it, but the Python
+        # side should never even try.
+        conn = FakeRecordConn()
+
+        _run(movements.record_movements(
+            conn, company_id="company-1", channel_id=None, source_message_id="msg-1",
+            recorded_by="user-1", kind="out",
+            lines=[{"item_id": "item-1", "quantity": 2, "estimated": False, "waste_reason": "spoilage"}],
+            narrative="gave some away", note=None,
+        ))
+
+        _query, args = conn.fetchrow_calls[0]
+        assert args[-1] is None
+
+
+class FakeAmendConn:
+    """amend_movement_quantity: fetchrow(get old row), fetchrow(UPDATE...
+    RETURNING), execute(item current_quantity update)."""
+
+    def __init__(self, old_row):
+        self._old_row = old_row
+        self.execute_calls = []
+        self._fetchrow_n = 0
+
+    async def fetchrow(self, query, *args):
+        self._fetchrow_n += 1
+        if self._fetchrow_n == 1:
+            return self._old_row
+        # UPDATE inventory_movements ... RETURNING *
+        return {"id": self._old_row.get("id", "movement-1"), "quantity": args[1]}
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query, args))
+
+
+class TestAmendMovementQuantitySign:
+    def test_amend_out_uses_negative_sign(self):
+        # Existing behavior, pinned so the fix below can't silently flip it.
+        conn = FakeAmendConn(old_row={"item_id": "item-1", "quantity": 2, "kind": "out"})
+
+        _run(movements.amend_movement_quantity(
+            conn, movement_id="movement-1", quantity=5, user_id="user-1",
+        ))
+
+        _query, args = conn.execute_calls[0]
+        assert args == ("item-1", -3.0)  # sign=-1 * (5-2)
+
+    def test_amend_waste_uses_negative_sign(self):
+        # Bug fixed 2026-08-24: amend_movement_quantity's sign map used to
+        # only special-case 'out', so amending an estimated waste quantity
+        # would ADD stock back instead of correcting a deduction.
+        conn = FakeAmendConn(old_row={"item_id": "item-1", "quantity": 2, "kind": "waste"})
+
+        _run(movements.amend_movement_quantity(
+            conn, movement_id="movement-1", quantity=5, user_id="user-1",
+        ))
+
+        _query, args = conn.execute_calls[0]
+        assert args == ("item-1", -3.0)  # sign=-1 * (5-2), NOT +3.0
+
+    def test_amend_in_uses_positive_sign(self):
+        # Unaffected sibling case, pinned for the same reason.
+        conn = FakeAmendConn(old_row={"item_id": "item-1", "quantity": 2, "kind": "in"})
+
+        _run(movements.amend_movement_quantity(
+            conn, movement_id="movement-1", quantity=5, user_id="user-1",
+        ))
+
+        _query, args = conn.execute_calls[0]
+        assert args == ("item-1", 3.0)

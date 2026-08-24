@@ -842,6 +842,7 @@ async def _bg_inventory_request(
         from app.matcha.services.inventory.extraction import extract_inventory
         from app.matcha.services.inventory.reorder import suggest_order
         from app.matcha.services.inventory.rules import evaluate_inventory_action
+        from app.matcha.services.inventory.waste import reasons
 
         sys_row = None
         item_rows = []
@@ -941,6 +942,66 @@ async def _bg_inventory_request(
                         "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
                         sys_row["id"], inserted[0]["id"],
                     )
+
+            elif kind == "waste":
+                waste_verdict = evaluate_inventory_action(role=role, features=features, stage="waste")
+                if not waste_verdict.ok:
+                    sys_row = await _insert_system_message(conn, channel_id_str, waste_verdict.reason)
+                else:
+                    # Same provenance invariant as `return`: waste is a
+                    # first-hand observed LOSS, never a fabrication, so
+                    # free-form chat needs no confirm step — but it also
+                    # never auto-creates an item, matching `return`'s bar
+                    # (mint the catalog row on the page, not from a chat
+                    # aside about throwing something away).
+                    raw_reason = extracted.get("waste_reason")
+                    reason = reasons.coerce_chat_reason(raw_reason)
+                    reason_coerced = raw_reason != reason
+                    resolved_lines = []
+                    unmatched_names = []
+                    for line in lines:
+                        raw_name = line.get("item_name", "")
+                        item = await movements_service.find_item(
+                            conn, company_id, raw_name, location_id, existing=item_rows,
+                        )
+                        if item is None:
+                            unmatched_names.append(raw_name)
+                            continue
+                        qty = line.get("quantity")
+                        estimated = qty is None
+                        resolved_lines.append({
+                            "item_id": item["id"], "quantity": 1 if estimated else qty,
+                            "estimated": estimated, "waste_reason": reason,
+                        })
+                    if not resolved_lines:
+                        pill_text = pills.waste_unmatched_pill(unmatched_names[0] if unmatched_names else None)
+                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                    else:
+                        inserted = await movements_service.record_movements(
+                            conn, company_id=company_id, channel_id=UUID(channel_id_str),
+                            source_message_id=UUID(message_id_str), recorded_by=UUID(sender_user_id_str),
+                            kind="waste", lines=resolved_lines, narrative=stripped,
+                            note=extracted.get("recipient_note"),
+                        )
+                        if not inserted:
+                            return
+                        first = inserted[0]
+                        item_row = await conn.fetchrow(
+                            "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
+                        )
+                        pill_text = pills.waste_pill(
+                            item_row["name"], first["quantity"], item_row["current_quantity"],
+                            reason, first["quantity_estimated"], reason_coerced=reason_coerced,
+                        )
+                        single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
+                        if single_unknown:
+                            pill_text = pills.quantity_question(pill_text)
+                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                        if single_unknown:
+                            await conn.execute(
+                                "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                                sys_row["id"], inserted[0]["id"],
+                            )
 
             elif kind == "receipt":
                 # Provenance invariant (services/inventory/CLAUDE.md): a
