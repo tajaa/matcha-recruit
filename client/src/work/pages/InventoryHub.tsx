@@ -12,6 +12,7 @@ import {
   Clock3,
   DollarSign,
   Gauge,
+  Link2,
   Loader2,
   Package,
   RefreshCw,
@@ -28,6 +29,7 @@ import ReceiveDeliveryModal from '../components/inventory/ReceiveDeliveryModal'
 import SalesImportModal from '../components/inventory/SalesImportModal'
 import SalesMappingsPanel from '../components/inventory/SalesMappingsPanel'
 import SalesIntakeWizard from '../components/inventory/SalesIntakeWizard'
+import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 import InventoryNavigation from '../components/inventory/InventoryNavigation'
 import InventoryGuideWizard, {
@@ -43,10 +45,13 @@ import {
   listOrders,
   listSalesImports,
   listSuggestions,
+  listPOSConnections,
+  authorizeSquare,
   type InventoryItem,
   type InventoryMovement,
   type InventoryOrder,
   type InventorySuggestion,
+  type POSConnection,
 } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
@@ -64,6 +69,7 @@ export default function InventoryHub() {
   const [orders, setOrders] = useState<InventoryOrder[]>([])
   const [movements, setMovements] = useState<InventoryMovement[]>([])
   const [suggestions, setSuggestions] = useState<Record<string, InventorySuggestion>>({})
+  const [connections, setConnections] = useState<POSConnection[]>([])
   const [locations, setLocations] = useState<ChannelLocation[]>([])
   const [locFilter, setLocFilter] = useState<'all' | 'none' | string>('all')
   const [search, setSearch] = useState('')
@@ -103,6 +109,16 @@ export default function InventoryHub() {
   useEffect(() => {
     listChannelLocations().then(setLocations).catch(() => setLocations([]))
   }, [])
+
+  useEffect(() => {
+    if (!canSales) return
+    listPOSConnections().then((result) => setConnections(result.connections)).catch(() => setConnections([]))
+  }, [canSales])
+
+  async function connectSquare() {
+    try { window.location.assign((await authorizeSquare()).oauth_url) }
+    catch { toast('Square is not configured yet', 'error') }
+  }
 
   const visibleItems = useMemo(() => {
     let filtered = items
@@ -343,6 +359,8 @@ export default function InventoryHub() {
           <AttentionPanel items={insights.attentionItems} onSelect={(itemId) => navigate(`${base}/inventory/${itemId}`)} onHelp={() => setHelp(INVENTORY_HELP.attention)} />
           <ReorderPanel recommendations={insights.recommendations} onSelect={(itemId) => navigate(`${base}/inventory/${itemId}`)} onHelp={() => setHelp(INVENTORY_HELP.reorder)} />
         </div>
+
+        {canSales && <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Connect Square here when you are setting up inventory data. Forecasting uses the committed sales ledger after mapping.</p></div></div>{connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}</span></div><POSConnectionPanel connection={connection} locations={locations} onConnect={connectSquare} /></div>)}</div>}{connections.length === 0 && <div className="mt-3"><POSConnectionPanel connection={null} locations={locations} onConnect={connectSquare} /></div>}</section>}
 
         <OrderQueue orders={visibleOrders} items={visibleItems} onChange={load} onHelp={() => setHelp(INVENTORY_HELP.orders)} />
 
