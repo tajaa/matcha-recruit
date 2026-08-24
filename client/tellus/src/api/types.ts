@@ -1139,6 +1139,9 @@ export interface ShoutoutConfig {
   next_scan_after: string | null
 }
 
+export type ShoutoutStatsSource = 'search' | 'profile_api'
+export type ShoutoutStatsStatus = 'ok' | 'not_found' | 'unsupported' | 'error'
+
 export interface ShoutoutMention {
   id: string
   platform: ShoutoutPlatform
@@ -1154,6 +1157,27 @@ export interface ShoutoutMention {
   first_seen_at: string
   last_seen_at: string
   decided_at: string | null
+  like_count: number | null
+  comment_count: number | null
+  author_followers: number | null
+  author_verified: boolean | null
+  posted_age: string | null
+  image_url: string | null
+  stats_source: ShoutoutStatsSource | null
+  stats_status: ShoutoutStatsStatus | null
+  stats_fetched_at: string | null
+}
+
+export interface ShoutoutStats {
+  like_count: number | null
+  comment_count: number | null
+  author_followers: number | null
+  author_verified: boolean | null
+  posted_age: string | null
+  image_url: string | null
+  stats_source: ShoutoutStatsSource | null
+  stats_status: ShoutoutStatsStatus | null
+  stats_fetched_at: string | null
 }
 
 export interface ShoutoutRun {

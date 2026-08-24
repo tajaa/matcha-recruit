@@ -78,6 +78,13 @@ def test_manual_scan_uses_the_grounded_scan_service():
     assert "manual_max_results=body.max_results" in source
 
 
+def test_stats_route_is_post_and_calls_the_instagram_stats_service():
+    route = next(route for route in shoutouts.router.routes if route.path.endswith("/shoutouts/mentions/{mention_id}/stats"))
+    assert "POST" in route.methods
+    source = inspect.getsource(shoutouts.fetch_mention_stats)
+    assert "instagram_stats.fetch_mention_stats" in source
+
+
 def test_manual_scan_response_exposes_rejection_reasons():
     route = next(route for route in shoutouts.router.routes if route.path.endswith("/shoutouts/scan"))
     assert route.response_model is ShoutoutScanResultOut

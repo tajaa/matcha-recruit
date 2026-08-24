@@ -9,11 +9,11 @@ from ..dependencies import require_brand_capability
 from ..models.shoutouts import (
     ShoutoutApproveIn, ShoutoutConfigOut, ShoutoutConfigPut, ShoutoutEnableIn,
     ShoutoutManualScanIn, ShoutoutMentionOut, ShoutoutRejectIn, ShoutoutRunOut, ShoutoutScanResultOut,
-    ShoutoutTestPostIn, ShoutoutTestPostOut,
+    ShoutoutStatsOut, ShoutoutTestPostIn, ShoutoutTestPostOut,
 )
 from ..models.shoutout_offers import ShoutoutOfferOut, ShoutoutOfferRevokeIn
 from ..services.access_service import BrandAccessContext
-from ..services.shoutout import config_service, review_service, scan_service
+from ..services.shoutout import config_service, instagram_stats, review_service, scan_service
 from ..services.shoutout import offers_service
 
 router = APIRouter()
@@ -33,6 +33,10 @@ def _test_post_error(error: scan_service.TestPostError) -> None:
 
 
 def _manual_scan_error(error: scan_service.ManualScanError) -> None:
+    raise HTTPException(error.status, detail={"code": error.code, "message": error.message})
+
+
+def _stats_error(error: instagram_stats.StatsError) -> None:
     raise HTTPException(error.status, detail={"code": error.code, "message": error.message})
 
 
@@ -68,6 +72,18 @@ async def mentions(
 ):
     async with get_connection() as conn:
         return await config_service.list_mentions(conn, brand_id, status)
+
+
+@router.post("/businesses/{brand_id}/shoutouts/mentions/{mention_id}/stats", response_model=ShoutoutStatsOut)
+async def fetch_mention_stats(
+    brand_id: UUID, mention_id: UUID,
+    context: BrandAccessContext = Depends(SHOUTOUT_MANAGER),
+):
+    async with get_connection() as conn:
+        try:
+            return await instagram_stats.fetch_mention_stats(conn, brand_id=brand_id, mention_id=mention_id)
+        except instagram_stats.StatsError as error:
+            _stats_error(error)
 
 
 @router.post("/businesses/{brand_id}/shoutouts/mentions/{mention_id}/reject", status_code=204)

@@ -28,6 +28,55 @@ def url_fingerprint(platform: str, raw_url: str) -> str:
 
 _PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
 
+_POST_PATH_RULES: dict[str, tuple[str, ...]] = {
+    "instagram": ("p", "reel", "reels", "tv"),
+    "tiktok": ("video", "t", "v", "photo"),
+    "youtube": ("watch", "shorts", "live", "v"),
+    "facebook": ("posts", "reel", "videos", "photo", "photos", "permalink.php", "share", "watch", "story.php"),
+    "x": ("status",),
+}
+
+_EXCLUDED_SEGMENTS = {"explore", "tags", "hashtag", "search", "directory"}
+
+_TERMINAL_KEYWORDS = {"permalink.php", "story.php"}
+
+
+def is_post_url(platform: str, raw_url: str) -> bool:
+    """True only for a single public post/video permalink, not a profile, tab, or index page."""
+    rules = _POST_PATH_RULES.get(platform)
+    if rules is None:
+        return False
+    parsed = urlsplit(raw_url.strip())
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if any(segment.lower() in _EXCLUDED_SEGMENTS for segment in segments):
+        return False
+    if platform == "youtube" and host == "youtu.be":
+        return len(segments) >= 1
+    if platform == "youtube" and any(segment == "watch" for segment in segments):
+        return bool(dict(parse_qsl(parsed.query)).get("v"))
+    lowered = [segment.lower() for segment in segments]
+    for index, segment in enumerate(lowered):
+        if segment not in rules:
+            continue
+        if segment in _TERMINAL_KEYWORDS:
+            return True
+        if index + 1 < len(lowered) and lowered[index + 1]:
+            return True
+    return False
+
+
+def instagram_shortcode(raw_url: str) -> str | None:
+    """Return the shortcode from /p/<code>, /reel/<code>, /reels/<code>, /tv/<code>,
+    including the /<user>/p/<code> form. None for any non-post URL."""
+    if not is_post_url("instagram", raw_url):
+        return None
+    segments = [segment for segment in urlsplit(raw_url.strip()).path.split("/") if segment]
+    for index, segment in enumerate(segments):
+        if segment in ("p", "reel", "reels", "tv") and index + 1 < len(segments):
+            return segments[index + 1]
+    return None
+
 
 @dataclass(frozen=True)
 class CorroborationResult:

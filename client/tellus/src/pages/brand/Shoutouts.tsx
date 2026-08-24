@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Check, Clipboard, ExternalLink, Eye, Link2, Plus, Search, ShieldCheck, X } from 'lucide-react'
+import { BarChart2, Check, Clipboard, ExternalLink, Eye, Link2, Plus, Search, ShieldCheck, X } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import { shoutoutApi } from '../../api/shoutouts'
 import { tellusApi } from '../../api/tellusClient'
 import { Button, Card, Chip, Empty, ErrorText, Input, Select, Spinner, Textarea } from '../../components/ui'
+import { formatCount } from '../../utils/formatCount'
 import type {
   LoyaltySocialSubmission,
   ShoutoutConfig,
@@ -14,6 +15,7 @@ import type {
   ShoutoutPlatform,
   ShoutoutRun,
   ShoutoutScanResult,
+  ShoutoutStats,
   ShoutoutTestPost,
   Store,
 } from '../../api/types'
@@ -46,12 +48,13 @@ function formatDate(value: string | null) {
   return value ? new Date(value).toLocaleString() : 'Never'
 }
 
-function MentionRow({ brandId, mention, stores, defaults, onChange }: {
+function MentionRow({ brandId, mention, stores, defaults, onChange, onStatsFetched }: {
   brandId: string
   mention: ShoutoutMention
   stores: Store[]
   defaults: ShoutoutConfig
   onChange: () => void
+  onStatsFetched: (mentionId: string, stats: ShoutoutStats) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -60,6 +63,18 @@ function MentionRow({ brandId, mention, stores, defaults, onChange }: {
   const [title, setTitle] = useState(defaults.offer_title ?? '')
   const [terms, setTerms] = useState(defaults.offer_terms ?? '')
   const [expiryDays, setExpiryDays] = useState(defaults.offer_expiry_days)
+  const [statsBusy, setStatsBusy] = useState(false)
+  const [statsError, setStatsError] = useState('')
+
+  async function fetchStats() {
+    setStatsBusy(true); setStatsError('')
+    try {
+      const stats = await shoutoutApi.fetchStats(brandId, mention.id)
+      onStatsFetched(mention.id, stats)
+    } catch (e) {
+      setStatsError(e instanceof Error ? e.message : 'Could not fetch stats')
+    } finally { setStatsBusy(false) }
+  }
 
   async function decide(decision: 'approve' | 'reject') {
     setBusy(true); setError('')
@@ -83,24 +98,44 @@ function MentionRow({ brandId, mention, stores, defaults, onChange }: {
   return (
     <div className="space-y-2 border-b border-tu-border px-4 py-4 last:border-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 gap-3">
+          {mention.image_url && (
+            <a href={mention.post_url} target="_blank" rel="noreferrer" className="shrink-0">
+              <img src={mention.image_url} alt="" className="h-16 w-16 rounded-md object-cover" />
+            </a>
+          )}
+          <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Chip>{mention.platform}</Chip>
             {mention.is_test && <Chip tone="warning">Test post</Chip>}
             <Chip tone={mention.confidence >= 80 ? 'positive' : undefined}>{mention.confidence}% confidence</Chip>
             {mention.author_handle && <span className="text-xs text-tu-faint">@{mention.author_handle}</span>}
+            {mention.like_count != null && (
+              <Chip>{mention.stats_source === 'search' ? '~' : ''}{formatCount(mention.like_count)} likes</Chip>
+            )}
+            {mention.comment_count != null && <Chip>{formatCount(mention.comment_count)} comments</Chip>}
+            {mention.author_followers != null && <Chip>{formatCount(mention.author_followers)} followers</Chip>}
+            {mention.posted_age && <span className="text-xs text-tu-faint">{mention.posted_age}</span>}
           </div>
           <p className="mt-2 whitespace-pre-wrap text-sm text-tu-dim">{mention.excerpt || 'No excerpt returned.'}</p>
           {mention.matched_terms.length > 0 && <p className="mt-1 text-xs text-tu-faint">Matched: {mention.matched_terms.join(', ')}</p>}
+          {mention.stats_status === 'not_found' && <p className="mt-1 text-xs text-tu-faint">Exact stats unavailable — post is not in this account's recent activity.</p>}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <a href={mention.post_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-tu-accent hover:underline">
             Open post <ExternalLink className="h-3.5 w-3.5" />
           </a>
+          {mention.platform === 'instagram' && mention.author_handle && mention.stats_source !== 'profile_api' && (
+            <Button size="sm" variant="ghost" loading={statsBusy} onClick={() => void fetchStats()}>
+              <BarChart2 className="h-3.5 w-3.5" /> Get exact stats
+            </Button>
+          )}
           <Button size="sm" loading={busy} onClick={() => setOfferOpen(true)}><Check className="h-3.5 w-3.5" /> Send offer</Button>
           <Button size="sm" variant="danger" loading={busy} onClick={() => void decide('reject')}><X className="h-3.5 w-3.5" /> Reject</Button>
         </div>
       </div>
+      <ErrorText>{statsError}</ErrorText>
       {offerOpen && (
         <div className="mt-3 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3">
           <p className="text-sm font-semibold">Configure this thank-you</p>
@@ -321,5 +356,9 @@ export default function BrandShoutouts() {
   }
   useEffect(() => { void Promise.all([tellusApi.get<Store[]>('/stores'), loadQueue()]).then(([nextStores]) => setStores(nextStores)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load shoutouts')) }, [brandId])
 
-  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} onScanned={() => void loadQueue()} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
+  function patchMentionStats(mentionId: string, stats: ShoutoutStats) {
+    setMentions((current) => current.map((mention) => (mention.id === mentionId ? { ...mention, ...stats } : mention)))
+  }
+
+  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} onScanned={() => void loadQueue()} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} onStatsFetched={patchMentionStats} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
 }

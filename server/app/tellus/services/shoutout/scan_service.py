@@ -39,6 +39,12 @@ def valid_candidate(candidate: dict) -> dict | None:
         return None
     if excerpt is not None and not isinstance(excerpt, str):
         return None
+    like_count = candidate.get("like_count")
+    if like_count is not None and (isinstance(like_count, bool) or not isinstance(like_count, int) or like_count < 0):
+        return None
+    posted_age = candidate.get("posted_age")
+    if posted_age is not None and not isinstance(posted_age, str):
+        return None
     return candidate
 
 
@@ -188,15 +194,21 @@ async def scan_brand(
             if score < claimed["min_confidence"]:
                 below_confidence += 1
                 continue
+            like_count = candidate.get("like_count")
+            posted_age = candidate.get("posted_age")
+            stats_source = "search" if like_count is not None else None
             inserted = await conn.fetchrow(
                 """INSERT INTO tellus_shoutout_mentions
                    (brand_id,platform,post_url,canonical_url,url_fingerprint,author_handle,excerpt,confidence,
-                    matched_terms,corroborated,grounding_uri,url_verify_status,raw_payload)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'grounded',$12::jsonb)
+                    matched_terms,corroborated,grounding_uri,url_verify_status,raw_payload,
+                    like_count,posted_age,stats_source,stats_fetched_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'grounded',$12::jsonb,
+                    $13::int,$14::text,$15::text,CASE WHEN $13::int IS NOT NULL THEN NOW() END)
                    ON CONFLICT DO NOTHING RETURNING id""",
                 brand_id, candidate["platform"], candidate["url"], candidate["canonical_url"], candidate["url_fingerprint"],
                 candidate.get("author_handle"), candidate.get("excerpt"), score, candidate.get("matched_terms", []),
                 True, candidate["grounding_uri"], json.dumps(candidate),
+                like_count, posted_age, stats_source,
             )
             if inserted:
                 new += 1
@@ -204,8 +216,16 @@ async def scan_brand(
                 duplicate += 1
                 await conn.execute(
                     """UPDATE tellus_shoutout_mentions SET seen_count=seen_count+1,last_seen_at=NOW(),
-                       confidence=GREATEST(confidence,$3) WHERE brand_id=$1 AND url_fingerprint=$2""",
-                    brand_id, candidate["url_fingerprint"], score,
+                       confidence=GREATEST(confidence,$3),
+                       author_handle=COALESCE(author_handle,$4::text),
+                       posted_age=COALESCE($5::text,posted_age),
+                       like_count=CASE WHEN stats_source='profile_api' THEN like_count ELSE COALESCE($6::int,like_count) END,
+                       stats_source=CASE WHEN stats_source='profile_api' THEN stats_source
+                                         WHEN $6::int IS NULL THEN stats_source ELSE 'search' END,
+                       stats_fetched_at=CASE WHEN stats_source='profile_api' THEN stats_fetched_at
+                                              WHEN $6::int IS NULL THEN stats_fetched_at ELSE NOW() END
+                     WHERE brand_id=$1 AND url_fingerprint=$2""",
+                    brand_id, candidate["url_fingerprint"], score, candidate.get("author_handle"), posted_age, like_count,
                 )
         urls_rejected = invalid_candidates + source_mismatches
         await conn.execute(

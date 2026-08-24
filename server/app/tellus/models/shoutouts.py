@@ -102,6 +102,27 @@ class ShoutoutMentionOut(BaseModel):
     first_seen_at: datetime
     last_seen_at: datetime
     decided_at: datetime | None = None
+    like_count: int | None = None
+    comment_count: int | None = None
+    author_followers: int | None = None
+    author_verified: bool | None = None
+    posted_age: str | None = None
+    image_url: str | None = None
+    stats_source: Literal["search", "profile_api"] | None = None
+    stats_status: Literal["ok", "not_found", "unsupported", "error"] | None = None
+    stats_fetched_at: datetime | None = None
+
+
+class ShoutoutStatsOut(BaseModel):
+    like_count: int | None = None
+    comment_count: int | None = None
+    author_followers: int | None = None
+    author_verified: bool | None = None
+    posted_age: str | None = None
+    image_url: str | None = None
+    stats_source: Literal["search", "profile_api"] | None = None
+    stats_status: Literal["ok", "not_found", "unsupported", "error"] | None = None
+    stats_fetched_at: datetime | None = None
 
 
 class ShoutoutConfigOut(BaseModel):

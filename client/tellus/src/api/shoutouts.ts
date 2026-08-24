@@ -9,6 +9,7 @@ import type {
   ShoutoutScanResult,
   ShoutoutPlatform,
   ShoutoutManualScan,
+  ShoutoutStats,
   ShoutoutTestPost,
 } from './types'
 
@@ -30,6 +31,8 @@ export const shoutoutApi = {
       client_request_id: crypto.randomUUID(),
       ...body,
     }),
+  fetchStats: (brandId: string, mentionId: string) =>
+    tellusApi.post<ShoutoutStats>(`/businesses/${brandId}/shoutouts/mentions/${mentionId}/stats`, {}),
   reject: (brandId: string, mentionId: string, note?: string) =>
     tellusApi.post<void>(`/businesses/${brandId}/shoutouts/mentions/${mentionId}/reject`, { note }),
   listOffers: (brandId: string) => tellusApi.get<ShoutoutOffer[]>(`/businesses/${brandId}/shoutouts/offers`),
