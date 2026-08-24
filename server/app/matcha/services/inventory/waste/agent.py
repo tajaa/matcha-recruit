@@ -19,7 +19,7 @@ from . import lots, rollup
 
 
 logger = logging.getLogger(__name__)
-_NUMERIC_NARRATION = re.compile(r"[$%]|\\d")
+_NUMERIC_NARRATION = re.compile(r"[$%]|\d")
 
 
 def _response_text(payload: dict) -> str:

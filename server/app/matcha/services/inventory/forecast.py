@@ -247,3 +247,29 @@ def forecast_item(
         confidence=("high" if nonzero_days >= 8 else "medium" if nonzero_days >= 4 else "low"),
     )
     return result
+
+
+def build_reorder_plan(lines: Iterable[Mapping], *, today: date) -> dict:
+    """Rank persisted forecast lines into a manager-ready, read-only order plan."""
+    plan_lines, suppressed = [], {}
+    uncosted_count = 0
+    for raw in lines:
+        line = dict(raw)
+        suggested = line.get("suggested_quantity")
+        status = line.get("status", "unknown")
+        if suggested is None or _decimal(suggested) <= 0:
+            suppressed[status] = suppressed.get(status, 0) + 1
+            continue
+        order_by = line.get("order_by_date")
+        if isinstance(order_by, str):
+            order_by = date.fromisoformat(order_by[:10])
+        days_until = (order_by - today).days if order_by is not None else None
+        urgency = "overdue" if days_until is not None and days_until < 0 else "within_7_days" if days_until is not None and days_until <= 7 else "within_14_days" if days_until is not None and days_until <= 14 else "later"
+        unit_cost = line.get("unit_cost")
+        extended_cost = _decimal(unit_cost) * _decimal(suggested) if unit_cost is not None else None
+        if extended_cost is None:
+            uncosted_count += 1
+        plan_lines.append({**line, "order_by_date": order_by, "days_until_order_by": days_until, "urgency": urgency, "extended_cost": extended_cost})
+    plan_lines.sort(key=lambda line: (line["order_by_date"] is None, line["order_by_date"] or date.max, line["extended_cost"] is None, -(line["extended_cost"] or Decimal("0")), line.get("name", "").lower()))
+    buckets = {key: sum(1 for line in plan_lines if line["urgency"] == key) for key in ("overdue", "within_7_days", "within_14_days", "later")}
+    return {"total_order_value": sum((line["extended_cost"] or Decimal("0") for line in plan_lines), Decimal("0")) if any(line["extended_cost"] is not None for line in plan_lines) else None, "uncosted_count": uncosted_count, "buckets": buckets, "suppressed_count": sum(suppressed.values()), "suppressed_by_status": suppressed, "lines": plan_lines}

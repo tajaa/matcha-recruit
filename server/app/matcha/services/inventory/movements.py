@@ -7,6 +7,24 @@ from app.matcha.services.inventory.matching import best_match, normalize_name
 from app.matcha.services.inventory.waste import lots as lots_service
 
 
+async def recent_movements_for_items(conn, *, company_id: UUID, item_ids: list[UUID], limit_days: int = 90) -> dict[UUID, list[dict]]:
+    """Chronological movement history bucketed by item, tenant scoped once."""
+    if not item_ids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT item_id, kind, quantity, quantity_delta, created_at
+        FROM inventory_movements
+        WHERE company_id=$1 AND item_id=ANY($2::uuid[]) AND created_at >= NOW() - ($3::int * INTERVAL '1 day')
+        ORDER BY item_id, created_at ASC, id ASC
+        """, company_id, item_ids, limit_days,
+    )
+    grouped: dict[UUID, list[dict]] = {item_id: [] for item_id in item_ids}
+    for row in rows:
+        grouped.setdefault(row["item_id"], []).append(dict(row))
+    return grouped
+
+
 async def list_item_names(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
     """Items visible in a store scope. A store-scoped channel sees its own
     items plus legacy company-wide (location_id IS NULL) rows; an unscoped

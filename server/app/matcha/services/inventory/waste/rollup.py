@@ -17,11 +17,13 @@ _GROUP_COLUMNS: dict[str, str] = {
     "category": "COALESCE(i.category, 'uncategorized')",
     "item": "i.id::text",
 }
+_UNSET = object()
 
 
 async def waste_rollup(
     conn, *, company_id: UUID, location_id: Optional[UUID],
-    start: date, end: date, group_by: GroupBy = "reason",
+    start: date, end: date, group_by: GroupBy = "reason", item_id: Optional[UUID] = None,
+    revenue: Optional[Decimal] | object = _UNSET,
 ) -> dict:
     """Totals + breakdown of kind='waste' movements in [start, end]
     (inclusive on both ends, by created_at date), dollarized via
@@ -45,10 +47,11 @@ async def waste_rollup(
         WHERE m.company_id = $1 AND m.kind = 'waste'
           AND m.created_at::date BETWEEN $2 AND $3
           AND ($4::uuid IS NULL OR i.location_id IS NULL OR i.location_id = $4)
+          AND ($5::uuid IS NULL OR m.item_id = $5)
         GROUP BY {group_col}
         ORDER BY value DESC NULLS LAST, units DESC
         """,
-        company_id, start, end, location_id,
+        company_id, start, end, location_id, item_id,
     )
 
     total_units = sum((row["units"] or Decimal("0")) for row in rows)
@@ -76,7 +79,8 @@ async def waste_rollup(
             "uncosted_count": row["uncosted_count"] or 0,
         })
 
-    revenue = await waste_revenue(conn, company_id=company_id, location_id=location_id, start=start, end=end)
+    if revenue is _UNSET:
+        revenue = await waste_revenue(conn, company_id=company_id, location_id=location_id, start=start, end=end)
     waste_pct_of_revenue = (total_value / revenue) if (total_value is not None and revenue) else None
 
     return {
@@ -85,6 +89,34 @@ async def waste_rollup(
         "unexplained_value": unexplained_value, "uncosted_count": uncosted_count,
         "revenue": revenue, "waste_pct_of_revenue": waste_pct_of_revenue,
         "groups": groups,
+}
+
+
+async def waste_summary(conn, *, company_id: UUID, location_id: Optional[UUID], start: date, end: date) -> dict:
+    """Period-over-period deterministic waste conclusion; callers do no money math."""
+    from app.matcha.services.inventory.waste.reasons import diagnosis_for
+
+    days = (end - start).days + 1
+    prior_end = start.fromordinal(start.toordinal() - 1)
+    prior_start = start.fromordinal(start.toordinal() - days)
+    current_revenue = await waste_revenue(conn, company_id=company_id, location_id=location_id, start=start, end=end)
+    prior_revenue = await waste_revenue(conn, company_id=company_id, location_id=location_id, start=prior_start, end=prior_end)
+    current = await waste_rollup(conn, company_id=company_id, location_id=location_id, start=start, end=end, group_by="reason", revenue=current_revenue)
+    prior = await waste_rollup(conn, company_id=company_id, location_id=location_id, start=prior_start, end=prior_end, group_by="reason", revenue=prior_revenue)
+    by_item = await waste_rollup(conn, company_id=company_id, location_id=location_id, start=start, end=end, group_by="item", revenue=current_revenue)
+    value_delta = None if current["total_value"] is None or prior["total_value"] is None else current["total_value"] - prior["total_value"]
+    comparable = prior["total_value"] is not None and prior["total_value"] != 0 and current["total_value"] is not None
+    value_pct_change = value_delta / prior["total_value"] if comparable else None
+    bleeder = by_item["groups"][0] if by_item["groups"] else None
+    reason_mix = await waste_rollup(conn, company_id=company_id, location_id=location_id, start=start, end=end, group_by="reason", item_id=UUID(bleeder["key"]), revenue=current_revenue) if bleeder else None
+    dominant = reason_mix["groups"][0] if reason_mix and reason_mix["groups"] else None
+    return {
+        "start": start, "end": end, "prior_start": prior_start, "prior_end": prior_end,
+        "current": current, "prior": prior, "value_delta": value_delta, "value_pct_change": value_pct_change,
+        "comparable": comparable, "direction": "up" if comparable and value_delta > 0 else "down" if comparable and value_delta < 0 else "flat" if comparable else "unknown",
+        "bleeder": bleeder, "bleeder_reason_mix": reason_mix["groups"] if reason_mix else [],
+        "dominant_reason": dominant["key"] if dominant else None,
+        "diagnosis": diagnosis_for(dominant["key"] if dominant else None, float(dominant["pct"] or 0) if dominant else None),
     }
 
 

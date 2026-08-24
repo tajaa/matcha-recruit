@@ -1,7 +1,8 @@
 import asyncio
+from datetime import date
 from decimal import Decimal
 
-from app.matcha.services.inventory.waste.lots import spoilage_risk_score
+from app.matcha.services.inventory.waste.lots import spoilage_risk_for_item_lots, spoilage_risk_score
 from app.matcha.services.inventory.waste.lots import consume_fefo
 
 
@@ -33,6 +34,16 @@ def test_spoilage_risk_without_expiry_is_not_a_spoilage_claim():
     )
     assert result["score"] == 0
     assert result["basis"] == "no_expiry"
+
+
+def test_item_lot_risk_allocates_demand_once_in_fefo_order():
+    lots = [
+        {"id": "early", "quantity_remaining": Decimal("8"), "days_to_expiry": 5, "expires_on": date(2026, 8, 29), "received_on": date(2026, 8, 1), "created_at": date(2026, 8, 1)},
+        {"id": "late", "quantity_remaining": Decimal("8"), "days_to_expiry": 10, "expires_on": date(2026, 9, 3), "received_on": date(2026, 8, 2), "created_at": date(2026, 8, 2)},
+    ]
+    scored = spoilage_risk_for_item_lots(lots=lots, average_daily_demand=Decimal("1"))
+    assert scored[0]["at_risk_quantity"] == Decimal("3")
+    assert scored[1]["at_risk_quantity"] == Decimal("6")
 
 
 def test_consume_fefo_binds_remaining_quantity_as_numeric():

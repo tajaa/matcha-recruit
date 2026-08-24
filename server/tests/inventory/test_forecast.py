@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.matcha.services.inventory.forecast import (
-    calculate_replenishment,
+    build_reorder_plan, calculate_replenishment,
     forecast_daily_demand,
     forecast_item,
 )
@@ -159,3 +159,16 @@ def test_ai_adjustments_are_clamped_to_mondays_inside_horizon():
 
 def test_ai_json_parser_removes_json_fence():
     assert _parse_json('```json\n{"adjustments": []}\n```') == {"adjustments": []}
+
+
+def test_reorder_plan_ranks_urgency_and_keeps_uncosted_lines():
+    plan = build_reorder_plan([
+        {"name": "Later", "status": "ready", "suggested_quantity": Decimal("2"), "unit_cost": Decimal("5"), "order_by_date": date(2026, 9, 10)},
+        {"name": "Now", "status": "ready", "suggested_quantity": Decimal("3"), "unit_cost": None, "order_by_date": date(2026, 8, 23)},
+        {"name": "Sparse", "status": "insufficient_history", "suggested_quantity": None, "unit_cost": Decimal("2"), "order_by_date": None},
+    ], today=date(2026, 8, 24))
+    assert [line["name"] for line in plan["lines"]] == ["Now", "Later"]
+    assert plan["lines"][0]["urgency"] == "overdue"
+    assert plan["total_order_value"] == Decimal("10")
+    assert plan["uncosted_count"] == 1
+    assert plan["suppressed_by_status"] == {"insufficient_history": 1}

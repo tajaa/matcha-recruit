@@ -2,12 +2,12 @@
 
 import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from app.matcha.services.inventory.forecast import forecast_item
+from app.matcha.services.inventory.forecast import build_reorder_plan, forecast_item
 from app.matcha.services.inventory.waste.par import recommend_par
 
 
@@ -415,7 +415,14 @@ async def get_run(conn, *, company_id: UUID, run_id: UUID) -> Optional[dict]:
         row = dict(line)
         calculation = _json_object(row.get("calculation"))
         materialized.append({**row, **calculation, "calculation": calculation})
-    return {**dict(run), "lines": materialized}
+    snapshot = _json_object(run.get("settings_snapshot"))
+    settings = _json_object(snapshot.get("settings"))
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo(settings.get("timezone", "UTC"))).date()
+    except Exception:
+        today = datetime.utcnow().date()
+    return {**dict(run), "lines": materialized, "plan": build_reorder_plan(materialized, today=today)}
 
 
 async def get_latest_run(conn, *, company_id: UUID, location_id: Optional[UUID]) -> Optional[dict]:

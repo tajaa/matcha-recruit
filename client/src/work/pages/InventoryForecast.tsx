@@ -1,26 +1,30 @@
 import { useEffect, useState } from 'react'
-import { BarChart3, Check, Link2, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { BarChart3, Check, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import { Button, Input, useToast } from '../../components/ui'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 import {
   createForecastRun,
+  createOrder,
+  applyForecastPar,
   getForecastSettings,
+  getForecastInsight,
+  previewForecastPar,
   getLatestForecastRun,
-  listPOSConnections,
-  authorizeSquare,
   draftForecastAdjustments,
   putForecastSettings,
-  type ForecastLine,
   type ForecastAIDraft,
   type ForecastOverride,
   type ForecastRun,
   type ForecastSettings,
-  type POSConnection,
+  type ForecastPlanLine,
+  type ForecastParPreview,
+  type InventoryInsight,
 } from '../api/inventory'
-import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 import InventoryNavigation from '../components/inventory/InventoryNavigation'
 import { useMe } from '../../hooks/useMe'
+import { useNavigate } from 'react-router-dom'
+import { useWorkBase } from '../routes/WorkSurfaceContext'
 
 const DEFAULT_SETTINGS: ForecastSettings = {
   location_id: null,
@@ -36,12 +40,15 @@ const DEFAULT_SETTINGS: ForecastSettings = {
 
 export default function InventoryForecast() {
   const { me } = useMe()
+  const navigate = useNavigate()
+  const base = useWorkBase()
   const { toast } = useToast()
   const [locations, setLocations] = useState<ChannelLocation[]>([])
   const [locationId, setLocationId] = useState('')
   const [settings, setSettings] = useState<ForecastSettings>(DEFAULT_SETTINGS)
   const [run, setRun] = useState<ForecastRun | null>(null)
-  const [connections, setConnections] = useState<POSConnection[]>([])
+  const [insight, setInsight] = useState<InventoryInsight | null>(null)
+  const [parPreview, setParPreview] = useState<ForecastParPreview | null>(null)
   const [managerContext, setManagerContext] = useState('')
   const [aiDraft, setAiDraft] = useState<ForecastAIDraft | null>(null)
   const [acceptedOverrides, setAcceptedOverrides] = useState<ForecastOverride[]>([])
@@ -57,20 +64,14 @@ export default function InventoryForecast() {
   useEffect(() => {
     let active = true
     setLoading(true)
-    Promise.all([
-      getForecastSettings(locationId || undefined),
-      getLatestForecastRun(locationId || undefined),
-      listPOSConnections(),
-    ]).then(([nextSettings, latest, nextConnections]) => {
+    Promise.all([getForecastSettings(locationId || undefined), getLatestForecastRun(locationId || undefined)]).then(async ([nextSettings, latest]) => {
+      const stale = !latest || Date.now() - new Date(latest.created_at).getTime() > 12 * 60 * 60 * 1000
+      const nextRun = stale ? await createForecastRun({ location_id: locationId || null }) : latest
       if (!active) return
-      setSettings(nextSettings)
-      setRun(latest)
-      setConnections(nextConnections.connections)
-    }).catch(() => {
-      if (active) toast('Failed to load forecast setup', 'error')
-    }).finally(() => {
-      if (active) setLoading(false)
-    })
+      setSettings(nextSettings); setRun(nextRun)
+      void getForecastInsight(nextRun.id).then(setInsight).catch(() => setInsight(null))
+      void previewForecastPar(nextRun.id).then(setParPreview).catch(() => setParPreview(null))
+    }).catch(() => { if (active) toast('Failed to load reorder plan', 'error') }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [locationId, toast])
 
@@ -78,7 +79,7 @@ export default function InventoryForecast() {
     setSettings((current) => ({ ...current, [key]: value }))
   }
 
-  async function saveAndRun() {
+  async function saveSettings() {
     setSaving(true)
     try {
       await putForecastSettings({
@@ -91,14 +92,19 @@ export default function InventoryForecast() {
         par_auto_apply: settings.par_auto_apply,
         par_max_drift_pct: settings.par_max_drift_pct,
       })
-      const next = await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })
-      setRun(next)
-      toast('Forecast snapshot saved', 'success')
+      toast('Forecast settings saved', 'success')
     } catch {
       toast('Could not save the forecast', 'error')
     } finally {
       setSaving(false)
     }
+  }
+
+  async function recalculate() {
+    setSaving(true)
+    try { setRun(await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })); toast('Reorder plan refreshed', 'success') }
+    catch { toast('Could not refresh the reorder plan', 'error') }
+    finally { setSaving(false) }
   }
 
   async function askAssistant() {
@@ -124,14 +130,6 @@ export default function InventoryForecast() {
     ].sort((left, right) => left.week_start.localeCompare(right.week_start)))
   }
 
-  async function connectSquare() {
-    try {
-      const result = await authorizeSquare()
-      window.location.assign(result.oauth_url)
-    } catch {
-      toast('Square is not configured yet', 'error')
-    }
-  }
 
   if (loading) {
     return <div className="flex h-full items-center justify-center bg-w-bg"><Loader2 className="h-5 w-5 animate-spin text-w-dim" /></div>
@@ -152,21 +150,27 @@ export default function InventoryForecast() {
               <option value="">All locations</option>
               {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
             </select>
-            <button type="button" onClick={() => window.location.reload()} className="inline-flex items-center gap-2 rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-dim hover:text-w-text"><RefreshCw size={13} /> Refresh</button>
+            <button type="button" onClick={() => void recalculate()} disabled={saving} className="inline-flex items-center gap-2 rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-dim hover:text-w-text disabled:opacity-50"><RefreshCw size={13} /> {saving ? 'Calculating…' : 'Recalculate'}</button>
           </div>
         </header>
 
         <InventoryNavigation />
 
-        <section id="waste-par" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4">
+        {run && <>
+          <ReorderPlan run={run} onOrder={async (line) => { try { await createOrder({ item_id: line.item_id, quantity: line.suggested_quantity ?? undefined }); toast(`${line.name} added to the order queue`, 'success') } catch { toast('Could not stage that order', 'error') } }} onAudit={() => navigate(`${base}/inventory/audit`)} />
+          {parPreview && <ParPreview preview={parPreview} onApply={async () => { try { await applyForecastPar(run.id); await recalculate(); toast('Eligible PARs applied for review', 'success') } catch { toast('Could not apply eligible PARs', 'error') } }} />}
+          {insight && <section className="rounded-xl border border-w-accent/20 bg-w-surface p-4"><p className="text-[10px] font-medium uppercase tracking-[0.16em] text-w-accent">Luna’s read on the plan</p><h2 className="mt-1 font-medium text-w-text">{insight.headline}</h2><p className="mt-1 text-sm text-w-dim">{insight.detail}</p></section>}
+        </>}
+
+        <details id="waste-par" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface"><summary className="cursor-pointer px-4 py-3 text-sm font-medium text-w-text">Adjust the model <span className="ml-2 text-xs font-normal text-w-dim">{settings.configured ? 'your settings' : 'using defaults'} · {settings.horizon_days}d horizon · {settings.history_days}d history · {settings.default_lead_time_days}d lead</span></summary><section className="border-t border-w-line p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="text-sm font-medium">Forecast setup</h2>
               <p className="mt-1 text-xs text-w-dim">Use at least four non-zero sales days per item for a reorder recommendation. Sparse items stay review-only.</p>
             </div>
-            <Button onClick={saveAndRun} disabled={saving}>
+            <Button onClick={saveSettings} disabled={saving}>
               {saving ? <Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 inline h-3.5 w-3.5" />}
-              {saving ? 'Calculating…' : 'Save and calculate'}
+              {saving ? 'Saving…' : 'Save settings'}
             </Button>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -176,11 +180,10 @@ export default function InventoryForecast() {
             <NumberField label="Safety stock days" value={settings.default_safety_stock_days} min={0} max={180} onChange={(value) => updateSetting('default_safety_stock_days', value)} />
             <NumberField label="Maximum auto-par drift" value={settings.par_max_drift_pct} min={0.01} max={5} step={0.01} onChange={(value) => updateSetting('par_max_drift_pct', value)} />
           </div>
-          <label className="mt-4 flex items-start gap-2 text-xs text-w-dim"><input type="checkbox" checked={settings.par_auto_apply} onChange={(event) => updateSetting('par_auto_apply', event.target.checked)} className="mt-0.5" /><span><strong className="font-medium text-w-text">Apply enrolled pars automatically</strong><br />Only auto-enrolled items with sufficient confidence and an in-bound drift are changed.</span></label>
-           <p className="mt-3 text-[11px] text-w-faint">Historical sales come from committed imports and existing product-to-stock mappings. Suggestions below are review-only and never create an order.</p>
-        </section>
+           <p className="mt-3 text-[11px] text-w-faint">Historical sales come from committed imports and existing product-to-stock mappings. Suggestions below are review-only; staging an order still requires a manager decision in the order queue.</p>
+        </section></details>
 
-        <section className="rounded-xl border border-w-line bg-w-surface p-4">
+        <details className="rounded-xl border border-w-line bg-w-surface"><summary className="cursor-pointer px-4 py-3 text-sm font-medium text-w-text">Plan for an event</summary><section className="border-t border-w-line p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-w-accent" /><h2 className="text-sm font-medium">Scenario assistant</h2></div>
@@ -201,21 +204,8 @@ export default function InventoryForecast() {
           />
           {aiDraft && <AIDraftPanel draft={aiDraft} accepted={acceptedOverrides} onAccept={acceptAdjustment} />}
           {acceptedOverrides.length > 0 && <p className="mt-3 text-xs text-w-accent">{acceptedOverrides.length} reviewed scenario adjustment{acceptedOverrides.length === 1 ? '' : 's'} will be included in the next snapshot.</p>}
-        </section>
+        </section></details>
 
-        <section className="rounded-xl border border-w-line bg-w-surface p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Square imports finalized orders into the same reviewed sales ledger as CSV and Gmail imports.</p></div></div>
-          </div>
-          {connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}{connection.last_sync_at ? ` · last sync ${connection.last_sync_at.slice(0, 10)}` : ''}</span></div><POSConnectionPanel connection={connection} locations={locations} onConnect={connectSquare} /></div>)}</div>}
-          {connections.length === 0 && <POSConnectionPanel connection={null} locations={locations} onConnect={connectSquare} />}
-        </section>
-
-        {!run ? (
-          <section className="rounded-xl border border-dashed border-w-line bg-w-surface px-4 py-10 text-center text-sm text-w-dim">No forecast snapshot yet. Save the setup to calculate one.</section>
-        ) : (
-          <ForecastResults run={run} />
-        )}
         <InventoryWasteGuide open={guideOpen} initialStep={4} autoOpenKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'} onClose={() => setGuideOpen(false)} />
       </div>
     </div>
@@ -243,36 +233,29 @@ function NumberField({ label, value, min, max, step, onChange }: { label: string
   return <Input label={label} type="number" min={min} max={max} step={step} value={String(value)} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} className="border-w-line bg-w-surface2" />
 }
 
-function ForecastResults({ run }: { run: ForecastRun }) {
-  const counts = run.lines.reduce((result, line) => {
-    result[line.status] = (result[line.status] ?? 0) + 1
-    return result
-  }, {} as Record<string, number>)
+function ReorderPlan({ run, onOrder, onAudit }: { run: ForecastRun; onOrder: (line: ForecastPlanLine) => void; onAudit: () => void }) {
+  const plan = run.plan
   return (
     <section className="overflow-hidden rounded-xl border border-w-line bg-w-surface">
       <div className="flex flex-col gap-2 border-b border-w-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="text-sm font-medium">Latest snapshot</h2><p className="mt-1 text-xs text-w-dim">{run.forecast_start} to {run.forecast_end} · based on history through {run.history_start}</p></div>
-        <div className="flex flex-wrap gap-2 text-[11px] text-w-dim"><span>{run.lines.length} items</span><span>{counts.ready ?? 0} ready</span><span>{counts.count_required ?? 0} count required</span><span>{counts.insufficient_history ?? 0} sparse</span></div>
+        <div><h2 className="text-sm font-medium">Reorder plan</h2><p className="mt-1 text-xs text-w-dim">As of {new Date(run.created_at).toLocaleString()} · based on committed sales through {run.history_start}</p></div>
+        <div className="flex flex-wrap gap-2 text-[11px] text-w-dim"><span>{plan.lines.length} items need ordering</span>{plan.total_order_value !== null && <span>{formatMoney(plan.total_order_value)} estimated</span>}<span>{plan.buckets.overdue} overdue</span></div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-xs">
-          <thead className="bg-w-surface2 text-[10px] uppercase tracking-wider text-w-faint"><tr><th className="px-4 py-3">Item</th><th className="px-3 py-3">History</th><th className="px-3 py-3">Daily demand</th><th className="px-3 py-3">On hand</th><th className="px-3 py-3">Runout</th><th className="px-3 py-3">Order by</th><th className="px-4 py-3 text-right">Suggested</th></tr></thead>
-          <tbody className="divide-y divide-w-line">
-            {run.lines.map((line) => <ForecastRow key={line.item_id} line={line} />)}
-          </tbody>
-        </table>
-      </div>
+      <div className="grid divide-y divide-w-line">{plan.lines.map((line) => <div key={line.item_id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="flex items-center gap-2"><p className="font-medium text-w-text">{line.name}</p><UrgencyBadge urgency={line.urgency} /></div><p className="mt-1 text-xs text-w-dim">{formatNumber(line.average_daily_demand)}/day · {line.lead_demand ? `${formatNumber(line.lead_demand)} lead demand` : 'no lead demand'} · {line.runout_date ? `runs out ${line.runout_date}` : 'no runout date'}</p></div><div className="flex items-center gap-3"><div className="text-right text-xs text-w-dim"><p className="font-medium text-w-text">Order {formatNumber(line.suggested_quantity)}{line.unit ? ` ${line.unit}` : ''}</p><p>{line.extended_cost === null ? 'Cost unavailable' : formatMoney(line.extended_cost)}</p></div><Button size="sm" onClick={() => onOrder(line)}>Order</Button></div></div>)}</div>
+      {plan.suppressed_count > 0 && <div className="border-t border-w-line bg-w-surface2 px-4 py-3 text-xs text-w-dim"><span>{plan.suppressed_count} item{plan.suppressed_count === 1 ? '' : 's'} can’t be forecast yet: {Object.entries(plan.suppressed_by_status).map(([status, count]) => `${count} ${status.replaceAll('_', ' ')}`).join(', ')}.</span>{plan.suppressed_by_status.count_required && <button type="button" onClick={onAudit} className="ml-2 font-medium text-w-accent hover:underline">Count stock</button>}</div>}
     </section>
   )
 }
 
-function ForecastRow({ line }: { line: ForecastLine }) {
-  const status = line.status === 'ready' ? 'Ready' : line.status === 'count_required' ? 'Count required' : line.status === 'no_demand' ? 'No demand' : 'Sparse history'
-  const parBasis = line.par_basis === 'shelf_life' ? 'Shelf-life capped' : line.par_basis === 'structural_deficit' ? 'Structural deficit' : line.par_basis === 'demand' ? 'Demand based' : null
-  return <tr className="text-w-dim"><td className="px-4 py-3"><div className="font-medium text-w-text">{line.name}</div><div className="text-[11px] text-w-faint">{status}{line.unit ? ` · ${line.unit}` : ''}</div>{line.recommended_par !== null && <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]"><span className="text-w-dim">Par {formatNumber(line.recommended_par)}</span>{parBasis && <span className={`rounded-full px-1.5 py-0.5 ${line.shelf_life_capped ? 'bg-amber-500/15 text-amber-300' : 'bg-w-surface2 text-w-faint'}`}>{parBasis}</span>}</div>}</td><td className="px-3 py-3">{line.history_nonzero_days} days</td><td className="px-3 py-3">{formatNumber(line.average_daily_demand)}</td><td className="px-3 py-3">{line.current_quantity === null ? 'Unknown' : formatNumber(line.current_quantity)}</td><td className="px-3 py-3">{line.runout_date ?? '—'}</td><td className="px-3 py-3">{line.order_by_date ?? '—'}</td><td className="px-4 py-3 text-right font-medium text-w-text">{line.suggested_quantity === null ? '—' : formatNumber(line.suggested_quantity)}</td></tr>
+function UrgencyBadge({ urgency }: { urgency: ForecastPlanLine['urgency'] }) { const label = urgency === 'overdue' ? 'Order now' : urgency === 'within_7_days' ? 'Within 7 days' : urgency === 'within_14_days' ? 'Within 14 days' : 'Later'; return <span className={`rounded-full px-2 py-0.5 text-[10px] ${urgency === 'overdue' ? 'bg-red-400/15 text-red-300' : urgency === 'within_7_days' ? 'bg-amber-400/15 text-amber-300' : 'bg-w-surface2 text-w-dim'}`}>{label}</span> }
+
+function ParPreview({ preview, onApply }: { preview: ForecastParPreview; onApply: () => void }) {
+  if (!preview.considered) return null
+  return <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-medium uppercase tracking-[0.16em] text-w-accent">PAR drift</p><h2 className="mt-1 text-sm font-medium text-w-text">{preview.would_apply} PAR{preview.would_apply === 1 ? '' : 's'} ready to right-size</h2><p className="mt-1 text-xs text-w-dim">{preview.would_skip} blocked by the guardrails; nothing changes until you apply it.</p></div>{preview.would_apply > 0 && <Button size="sm" onClick={onApply}>Right-size eligible PARs</Button>}</div><div className="mt-3 divide-y divide-w-line">{preview.proposals.slice(0, 5).map((line) => <div key={line.item_id} className="flex items-center justify-between py-2 text-xs"><span className="font-medium text-w-text">{line.name}</span><span className="text-w-dim">{formatNumber(line.current_par)} → {formatNumber(line.recommended_par)} · {line.allowed ? 'ready' : line.reason.replaceAll('_', ' ')}</span></div>)}</div></section>
 }
 
 function formatNumber(value: number | null) {
   if (value === null) return '—'
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)
 }
+function formatMoney(value: number) { return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) }

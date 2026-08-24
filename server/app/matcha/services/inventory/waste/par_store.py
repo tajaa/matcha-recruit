@@ -4,53 +4,51 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from app.matcha.services.inventory.waste.par import (
-    par_drift_pct, par_exceeds_shelf_capacity, should_auto_apply,
-)
+from app.matcha.services.inventory.waste.par import decide_par_line
 
 
-async def apply_par_recommendations(conn, *, company_id: UUID, run_id: UUID, user_id: Optional[UUID], mode: Literal["auto", "manual", "huume"], item_ids: Optional[list[UUID]] = None) -> dict:
+async def _max_drift(conn, *, company_id: UUID, run_id: UUID) -> Decimal:
     settings = await conn.fetchrow(
         "SELECT par_max_drift_pct FROM inventory_forecast_settings WHERE company_id=$1 AND location_id IS NOT DISTINCT FROM (SELECT location_id FROM inventory_forecast_runs WHERE id=$2)",
         company_id, run_id,
     )
-    max_drift = Decimal(str(settings["par_max_drift_pct"])) if settings else Decimal("0.5")
-    rows = await conn.fetch(
-        """
+    return Decimal(str(settings["par_max_drift_pct"])) if settings else Decimal("0.5")
+
+
+async def _par_rows(conn, *, company_id: UUID, run_id: UUID, item_ids: Optional[list[UUID]], include_history: bool = False):
+    history_join = "LEFT JOIN inventory_par_history ph ON ph.run_id=fl.run_id AND ph.item_id=fl.item_id" if include_history else ""
+    history_column = ", ph.id AS already_applied" if include_history else ""
+    return await conn.fetch(
+        f"""
         SELECT fl.item_id, fl.status, fl.confidence, fl.recommended_par, fl.par_basis,
-               fl.shelf_cap_quantity, i.low_stock_threshold AS current_par, i.par_source
+               fl.shelf_cap_quantity, i.low_stock_threshold AS current_par, i.par_source, i.name{history_column}
         FROM inventory_forecast_lines fl JOIN inventory_forecast_runs fr ON fr.id=fl.run_id
         JOIN inventory_items i ON i.id=fl.item_id
+        {history_join}
         WHERE fl.run_id=$1 AND fr.company_id=$2
           AND ($3::uuid[] IS NULL OR fl.item_id=ANY($3::uuid[]))
         """, run_id, company_id, item_ids,
     )
+
+
+async def apply_par_recommendations(conn, *, company_id: UUID, run_id: UUID, user_id: Optional[UUID], mode: Literal["auto", "manual", "huume"], item_ids: Optional[list[UUID]] = None) -> dict:
+    max_drift = await _max_drift(conn, company_id=company_id, run_id=run_id)
+    rows = await _par_rows(conn, company_id=company_id, run_id=run_id, item_ids=item_ids)
     out = {"considered": len(rows), "applied": 0, "skipped": [], "proposed": []}
     explicit = mode in {"manual", "huume"} and item_ids is not None
     for row in rows:
         current, recommendation = row["current_par"], row["recommended_par"]
-        if explicit:
-            allowed, reason = should_auto_apply(
-                current_par=current, recommended_par=recommendation, par_source="auto",
-                status=row["status"], confidence=row["confidence"], max_drift_pct=max_drift,
-            )
-            if not allowed and reason in {"manual_par_pinned", "drift_exceeds_bound"}:
-                allowed, reason = True, "manager_override"
-        else:
-            allowed, reason = should_auto_apply(
-                current_par=current, recommended_par=recommendation, par_source=row["par_source"],
-                status=row["status"], confidence=row["confidence"], max_drift_pct=max_drift,
-            )
-        drift = par_drift_pct(current, recommendation)
+        decision = decide_par_line(
+            current_par=current, recommended_par=recommendation, par_source=row["par_source"],
+            status=row["status"], confidence=row["confidence"], shelf_cap_quantity=row["shelf_cap_quantity"],
+            max_drift_pct=max_drift, explicit=explicit,
+        )
+        allowed, reason, drift = decision["allowed"], decision["reason"], decision["drift_pct"]
         detail = {"item_id": row["item_id"], "current_par": current, "recommended_par": recommendation,
                   "par_basis": row["par_basis"], "drift_pct": drift, "reason": reason}
         if not allowed:
             out["skipped"].append({"item_id": row["item_id"], "reason": reason})
             out["proposed"].append(detail)
-            continue
-        if par_exceeds_shelf_capacity(recommendation, row["shelf_cap_quantity"]):
-            out["skipped"].append({"item_id": row["item_id"], "reason": "par_exceeds_shelf_capacity"})
-            out["proposed"].append({**detail, "reason": "par_exceeds_shelf_capacity"})
             continue
         try:
             async with conn.transaction():
@@ -81,6 +79,31 @@ async def apply_par_recommendations(conn, *, company_id: UUID, run_id: UUID, use
         except Exception:
             out["skipped"].append({"item_id": row["item_id"], "reason": "write_failed"})
     return out
+
+
+async def plan_par_recommendations(conn, *, company_id: UUID, run_id: UUID, mode: Literal["manual", "huume"], item_ids: Optional[list[UUID]] = None) -> dict:
+    """Read-only preview of the exact gate used by the sole PAR writer."""
+    max_drift = await _max_drift(conn, company_id=company_id, run_id=run_id)
+    rows = await _par_rows(conn, company_id=company_id, run_id=run_id, item_ids=item_ids, include_history=True)
+    explicit = mode in {"manual", "huume"} and item_ids is not None
+    proposals, blocked = [], {}
+    for row in rows:
+        decision = decide_par_line(
+            current_par=row["current_par"], recommended_par=row["recommended_par"], par_source=row["par_source"],
+            status=row["status"], confidence=row["confidence"], shelf_cap_quantity=row["shelf_cap_quantity"],
+            max_drift_pct=max_drift, explicit=explicit,
+        )
+        already_applied = row["already_applied"] is not None
+        allowed = decision["allowed"] and not already_applied
+        reason = "already_applied" if already_applied else decision["reason"]
+        proposal = {"item_id": row["item_id"], "name": row["name"], "current_par": row["current_par"], "recommended_par": row["recommended_par"], "par_basis": row["par_basis"], "drift_pct": decision["drift_pct"], "allowed": allowed, "reason": reason, "overridable": decision["overridable"] if not already_applied else False, "already_applied": already_applied}
+        proposals.append(proposal)
+        if not allowed: blocked[reason] = blocked.get(reason, 0) + 1
+    def ranking(line):
+        delta = abs(line["recommended_par"] - line["current_par"]) if line["recommended_par"] is not None and line["current_par"] is not None else Decimal("-1")
+        return (not line["allowed"], -delta, line["name"].lower())
+    proposals.sort(key=ranking)
+    return {"run_id": run_id, "mode": mode, "scope": "selected" if item_ids is not None else "all", "considered": len(proposals), "would_apply": sum(line["allowed"] for line in proposals), "would_skip": sum(not line["allowed"] for line in proposals), "max_drift_pct": max_drift, "blocked_by_reason": blocked, "proposals": proposals}
 
 
 async def enroll_items_in_auto_par(conn, *, company_id: UUID, item_ids: list[UUID], enrolled: bool) -> int:

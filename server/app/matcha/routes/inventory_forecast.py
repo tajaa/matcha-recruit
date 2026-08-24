@@ -23,7 +23,7 @@ from app.matcha.models.inventory import (
     ForecastParAIDraft,
     ForecastSettingsUpsert,
 )
-from app.matcha.services.inventory import forecast_store
+from app.matcha.services.inventory import forecast_store, insight
 from app.matcha.services.inventory import forecast_ai
 from app.matcha.services.inventory.waste import par_store
 from app.matcha.services.inventory.waste import par_ai
@@ -213,6 +213,29 @@ async def apply_forecast_par(
             conn, company_id=company_id, run_id=run_id, user_id=user.id,
             mode=body.mode, item_ids=body.item_ids,
         )
+
+
+@router.post("/runs/{run_id}/par-preview")
+async def preview_forecast_par(
+    run_id: UUID, body: ForecastParApply,
+    company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client),
+    _gate=_par_gate,
+):
+    async with get_connection() as conn:
+        return await par_store.plan_par_recommendations(
+            conn, company_id=company_id, run_id=run_id, mode=body.mode, item_ids=body.item_ids,
+        )
+
+
+@router.post("/insight")
+async def forecast_insight(run_id: UUID, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client), _gate=_forecast_gate):
+    async with get_connection() as conn:
+        run = await forecast_store.get_run(conn, company_id=company_id, run_id=run_id)
+    if run is None: raise HTTPException(404, "Forecast run not found.")
+    plan = run["plan"]
+    diagnosis = "over_ordering" if plan["lines"] else "mixed"
+    tokens = {"items": str(len(plan["lines"])), "order_value": f"${plan['total_order_value']:,.2f}" if plan["total_order_value"] is not None else "uncosted items", "overdue": str(plan["buckets"]["overdue"])}
+    return await insight.interpret(surface="forecast", diagnosis=diagnosis, tokens=tokens)
 
 
 @router.post('/par-ai')

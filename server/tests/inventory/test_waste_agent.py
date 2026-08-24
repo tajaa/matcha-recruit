@@ -67,3 +67,7 @@ def test_luna_narration_rejects_numeric_model_output(monkeypatch):
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: Client())
 
     assert asyncio.run(agent._narrate_with_luna(question="Why?", sources={})) is None
+
+
+def test_numeric_guard_rejects_plain_digits_without_currency_or_percent():
+    assert agent._NUMERIC_NARRATION.search("Waste includes 172 discarded units.")

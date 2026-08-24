@@ -82,7 +82,9 @@ async def consume_fefo(conn, *, company_id: UUID, item_id: UUID, quantity) -> li
 async def expiring_lots(conn, *, company_id: UUID, location_id: Optional[UUID], within_days: int) -> list[dict]:
     return [dict(row) for row in await conn.fetch(
         """
-        SELECT l.*, i.name, i.unit, (l.expires_on-CURRENT_DATE) AS days_to_expiry
+        SELECT l.*, i.name, i.unit, i.current_quantity AS item_current_quantity,
+               i.shelf_life_days AS item_shelf_life_days,
+               (l.expires_on-CURRENT_DATE) AS days_to_expiry
         FROM inventory_lots l JOIN inventory_items i ON i.id=l.item_id
         WHERE l.company_id=$1 AND l.status='open' AND l.expires_on IS NOT NULL
           AND l.expires_on <= CURRENT_DATE + $3::int
@@ -104,3 +106,33 @@ def spoilage_risk_score(*, quantity_remaining: Decimal, days_to_expiry: Optional
     score = Decimal("1") if demand <= 0 and quantity > 0 else min(Decimal("1"), at_risk / quantity) if quantity > 0 else Decimal("0")
     return {"score": score, "days_of_cover": cover, "at_risk_quantity": at_risk,
             "basis": "expiry_vs_demand"}
+
+
+def spoilage_risk_for_item_lots(*, lots: list[dict], average_daily_demand: Decimal) -> list[dict]:
+    """Score a single item's lots without crediting the same demand to each lot.
+
+    Lots consume in the same FEFO order as ``consume_fefo``. Expired lots are
+    terminal losses and do not consume future demand capacity for a later lot.
+    """
+    demand = Decimal(str(average_daily_demand))
+    ordered = sorted(lots, key=lambda row: (row.get("expires_on") is None, row.get("expires_on"), row.get("received_on"), row.get("created_at"), str(row.get("id"))))
+    earlier_quantity = Decimal("0")
+    scored: list[dict] = []
+    for lot in ordered:
+        quantity = Decimal(str(lot["quantity_remaining"]))
+        days = lot.get("days_to_expiry")
+        if days is None:
+            risk = spoilage_risk_score(quantity_remaining=quantity, days_to_expiry=None, average_daily_demand=demand)
+            scored.append({**lot, **risk, "consumable_quantity": Decimal("0")})
+            continue
+        days = int(days)
+        if days <= 0:
+            risk = {"score": Decimal("1") if quantity > 0 else Decimal("0"), "days_of_cover": quantity / demand if demand > 0 else None, "at_risk_quantity": quantity, "basis": "expired"}
+            scored.append({**lot, **risk, "consumable_quantity": Decimal("0")})
+            continue
+        consumable = min(quantity, max(Decimal("0"), demand * Decimal(days) - earlier_quantity))
+        effective_rate = consumable / Decimal(days)
+        risk = spoilage_risk_score(quantity_remaining=quantity, days_to_expiry=days, average_daily_demand=effective_rate)
+        scored.append({**lot, **risk, "consumable_quantity": consumable})
+        earlier_quantity += quantity
+    return scored

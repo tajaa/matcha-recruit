@@ -52,3 +52,18 @@ def coerce_chat_reason(reason: str | None) -> str:
     if reason in WASTE_REASONS and reason not in CHAT_FORBIDDEN_REASONS:
         return reason
     return "unknown"
+
+
+def diagnosis_for(reason: str | None, share: float | None = None) -> str:
+    """Deterministic veto category for manager-facing waste conclusions."""
+    if reason is None or (share is not None and share < 0.5):
+        return "mixed"
+    if reason in {"spoilage", "expired", "overproduction"}:
+        return "over_ordering"
+    if reason in {"prep_error", "breakage", "contamination"}:
+        return "handling"
+    if reason in {"theft", "unknown"}:
+        return "unexplained_shrink"
+    if reason in {"comp", "recall"}:
+        return "external"
+    return "mixed"

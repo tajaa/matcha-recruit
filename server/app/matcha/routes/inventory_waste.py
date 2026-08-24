@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client, require_feature
-from app.matcha.services.inventory import movements
-from app.matcha.services.inventory.waste import lots, reasons, rollup
+from app.matcha.services.inventory import insight, movements
+from app.matcha.services.inventory.waste import at_risk, lots, reasons, rollup
 from app.matcha.services.inventory.waste import par_store
 from app.matcha.services.inventory.waste import agent as waste_agent
 
@@ -32,6 +32,11 @@ class WasteAsk(BaseModel):
     end: Optional[date] = None
     location_id: Optional[UUID] = None
 
+class WasteInsight(BaseModel):
+    start: date
+    end: date
+    location_id: Optional[UUID] = None
+
 @router.post("")
 async def record_waste(body: WasteLine, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client)):
     reason = body.reason if body.reason in reasons.WASTE_REASONS else "unknown"
@@ -46,6 +51,30 @@ async def waste_rollup(start: date, end: date, location_id: Optional[UUID] = Non
     if end < start: raise HTTPException(400, "end must be on or after start")
     async with get_connection() as conn:
         return await rollup.waste_rollup(conn, company_id=company_id, location_id=location_id, start=start, end=end, group_by=group_by)
+
+
+@router.get("/summary")
+async def waste_summary(start: date, end: date, location_id: Optional[UUID] = None, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client)):
+    if end < start: raise HTTPException(400, "end must be on or after start")
+    if (end - start).days > 366: raise HTTPException(400, "date range cannot exceed 366 days")
+    async with get_connection() as conn:
+        return await rollup.waste_summary(conn, company_id=company_id, location_id=location_id, start=start, end=end)
+
+
+@router.get("/at-risk")
+async def waste_at_risk(location_id: Optional[UUID] = None, within_days: int = Query(365, ge=1, le=3650), company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client)):
+    async with get_connection() as conn:
+        return await at_risk.at_risk_stock(conn, company_id=company_id, location_id=location_id, within_days=within_days)
+
+
+@router.post("/insight")
+async def waste_insight(body: WasteInsight, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client)):
+    if body.end < body.start or (body.end - body.start).days > 366: raise HTTPException(400, "invalid insight period")
+    async with get_connection() as conn:
+        summary = await rollup.waste_summary(conn, company_id=company_id, location_id=body.location_id, start=body.start, end=body.end)
+    current = summary["current"]
+    tokens = {"loss_value": f"${current['total_value']:,.2f}" if current["total_value"] is not None else "uncosted loss", "loss_units": f"{current['total_units']} units", "bleeder": summary["bleeder"]["label"] if summary["bleeder"] else "no item", "period": f"{body.start.isoformat()} to {body.end.isoformat()}"}
+    return await insight.interpret(surface="waste", diagnosis=summary["diagnosis"], tokens=tokens)
 
 @router.get("/lots")
 async def list_lots(item_id: Optional[UUID] = None, expiring_within_days: int = Query(7, ge=0, le=365), location_id: Optional[UUID] = None, company_id: UUID = Depends(get_client_company_id), _=Depends(require_admin_or_client)):

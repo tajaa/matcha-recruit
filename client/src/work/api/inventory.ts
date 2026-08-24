@@ -568,7 +568,11 @@ export type ForecastRun = {
   override_count: number
   created_at: string
   lines: ForecastLine[]
+  plan: ForecastReorderPlan
 }
+
+export type ForecastPlanLine = ForecastLine & { days_until_order_by: number | null; urgency: 'overdue' | 'within_7_days' | 'within_14_days' | 'later'; extended_cost: number | null }
+export type ForecastReorderPlan = { total_order_value: number | null; uncosted_count: number; buckets: Record<'overdue' | 'within_7_days' | 'within_14_days' | 'later', number>; suppressed_count: number; suppressed_by_status: Record<string, number>; lines: ForecastPlanLine[] }
 
 type ForecastRequest = {
   location_id?: string | null
@@ -621,11 +625,20 @@ export function getForecastRun(runId: string) {
 export function applyForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) {
   return api.post<{ considered: number; applied: number; skipped: { item_id: string; reason: string }[] }>(`/inventory/forecast/runs/${runId}/apply-par`, body)
 }
+export type ForecastParPreview = { considered: number; would_apply: number; would_skip: number; max_drift_pct: number; blocked_by_reason: Record<string, number>; proposals: { item_id: string; name: string; current_par: number | null; recommended_par: number | null; par_basis: string; drift_pct: number | null; allowed: boolean; reason: string; overridable: boolean; already_applied: boolean }[] }
+export function previewForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) { return api.post<ForecastParPreview>(`/inventory/forecast/runs/${runId}/par-preview`, body) }
+export type InventoryInsight = { headline: string; detail: string; diagnosis: string; action: 'right_size_par' | 'review_handling' | 'check_rotation' | 'count_stock' | 'none'; confidence: string }
+export function getForecastInsight(runId: string) { return api.post<InventoryInsight>(`/inventory/forecast/insight?run_id=${runId}`, {}) }
 
 export type WasteRollup = { total_units: number; total_value: number | null; revenue: number | null; waste_pct_of_revenue: number | null; groups: { key: string; label: string; units: number; value: number | null; pct: number | null }[] }
-export function getWasteRollup(start: string, end: string, groupBy: 'reason' | 'category' | 'item' = 'reason') {
-  return api.get<WasteRollup>(`/inventory/waste/rollup?start=${start}&end=${end}&group_by=${groupBy}`)
+export function getWasteRollup(start: string, end: string, groupBy: 'reason' | 'category' | 'item' = 'reason', locationId?: string) {
+  return api.get<WasteRollup>(`/inventory/waste/rollup?start=${start}&end=${end}&group_by=${groupBy}${locationId ? `&location_id=${locationId}` : ''}`)
 }
+export type WasteSummary = { current: WasteRollup; prior: WasteRollup; value_delta: number | null; value_pct_change: number | null; comparable: boolean; direction: 'up' | 'down' | 'flat' | 'unknown'; bleeder: WasteRollup['groups'][number] | null; dominant_reason: string | null; diagnosis: 'over_ordering' | 'handling' | 'unexplained_shrink' | 'external' | 'mixed'; bleeder_reason_mix: WasteRollup['groups'] }
+export type WasteRiskLine = { item_id: string; name: string; unit: string | null; item_current_quantity: number | null; open_lot_quantity: number; soonest_days_to_expiry: number; average_daily_demand: number; demand_basis: 'ledger' | 'insufficient_history'; confidence: string; n_samples: number; quantity_at_risk: number; value_at_risk: number | null; uncosted_count: number; lot_drift: number | null }
+export function getWasteSummary(start: string, end: string, locationId?: string) { return api.get<WasteSummary>(`/inventory/waste/summary?start=${start}&end=${end}${locationId ? `&location_id=${locationId}` : ''}`) }
+export function getWasteAtRisk(locationId?: string) { return api.get<{ lines: WasteRiskLine[] }>(`/inventory/waste/at-risk${locationId ? `?location_id=${locationId}` : ''}`) }
+export function getWasteInsight(body: { start: string; end: string; location_id?: string }) { return api.post<InventoryInsight>('/inventory/waste/insight', body) }
 export function recordWaste(body: { item_id: string; quantity: number; reason: WasteReason; note?: string }) {
   return api.post('/inventory/waste', body)
 }
