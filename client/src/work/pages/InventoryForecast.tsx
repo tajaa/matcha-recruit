@@ -20,6 +20,7 @@ import {
 } from '../api/inventory'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
+import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 
 const DEFAULT_SETTINGS: ForecastSettings = {
   location_id: null,
@@ -48,6 +49,7 @@ export default function InventoryForecast() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [askingAI, setAskingAI] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
 
   useEffect(() => {
     listChannelLocations().then(setLocations).catch(() => setLocations([]))
@@ -149,6 +151,7 @@ export default function InventoryForecast() {
             <p className="mt-1.5 max-w-2xl text-sm text-w-dim">Project demand from committed sales and turn it into an explainable replenishment recommendation. Nothing here approves an order.</p>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setGuideOpen(true)}>How predictive PARs work</Button>
             <select value={locationId} onChange={(event) => setLocationId(event.target.value)} className="rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-text outline-none focus:border-w-accent/50">
               <option value="">All locations</option>
               {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
@@ -215,6 +218,7 @@ export default function InventoryForecast() {
         ) : (
           <ForecastResults run={run} />
         )}
+        <InventoryWasteGuide open={guideOpen} initialStep={3} onClose={() => setGuideOpen(false)} />
       </div>
     </div>
   )

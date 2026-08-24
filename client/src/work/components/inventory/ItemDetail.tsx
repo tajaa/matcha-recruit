@@ -12,6 +12,7 @@ import {
   type InventorySectionHelp,
 } from './InventoryHelp'
 import ParPanel from './ParPanel'
+import InventoryWasteGuide from './InventoryWasteGuide'
 
 export default function ItemDetail({ itemId }: { itemId: string }) {
   const navigate = useNavigate()
@@ -31,6 +32,7 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
   const [lots, setLots] = useState<{ id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[]>([])
   const [savingPerishable, setSavingPerishable] = useState(false)
   const [help, setHelp] = useState<InventorySectionHelp | null>(null)
+  const [guideStep, setGuideStep] = useState<number | null>(null)
 
   const load = () => {
     setLoading(true)
@@ -178,9 +180,9 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
           )}
         </div>
 
-        <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-medium text-w-text">Perishable settings</h2><p className="mt-1 text-xs text-w-dim">Yield adjusts theoretical recipe usage; shelf life bounds replenishment.</p></div><Button size="sm" disabled={savingPerishable} onClick={() => void savePerishableSettings()}>Save</Button></div><div className="mt-3 grid gap-2 sm:grid-cols-3"><Input label="Category" value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Shelf life (days)" type="number" min="1" max="3650" value={shelfLifeInput} onChange={(event) => setShelfLifeInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Usable yield (0–1)" type="number" min="0.01" max="1" step="0.01" value={yieldInput} onChange={(event) => setYieldInput(event.target.value)} className="border-w-line bg-w-surface2" /></div></section>
+        <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-medium text-w-text">Perishable settings</h2><p className="mt-1 text-xs text-w-dim">Yield adjusts theoretical recipe usage; shelf life bounds replenishment.</p></div><div className="flex gap-2"><InventoryHelpButton onClick={() => setGuideStep(2)} /><Button size="sm" disabled={savingPerishable} onClick={() => void savePerishableSettings()}>Save</Button></div></div><div className="mt-3 grid gap-2 sm:grid-cols-3"><Input label="Category" value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Shelf life (days)" type="number" min="1" max="3650" value={shelfLifeInput} onChange={(event) => setShelfLifeInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Usable yield (0–1)" type="number" min="0.01" max="1" step="0.01" value={yieldInput} onChange={(event) => setYieldInput(event.target.value)} className="border-w-line bg-w-surface2" /></div></section>
 
-        <ParPanel item={item} forecastEnabled={canForecast} onUpdated={load} />
+        <ParPanel item={item} forecastEnabled={canForecast} onUpdated={load} onGuide={() => setGuideStep(3)} />
 
         <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="text-sm font-medium text-w-text">Lots expiring within a year</h2>{lots.length ? <div className="mt-3 divide-y divide-w-line text-sm">{lots.map((lot) => <div key={lot.id} className="flex justify-between py-2"><span className="text-w-text">{lot.name}</span><span className="text-w-dim">{lot.quantity_remaining} left · {lot.days_to_expiry}d</span></div>)}</div> : <p className="mt-2 text-xs text-w-dim">No open dated lots for this item.</p>}</section>
 
@@ -203,6 +205,7 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
           </div>
         </section>
         <InventoryHelpModal help={help} onClose={() => setHelp(null)} />
+        <InventoryWasteGuide open={guideStep !== null} initialStep={guideStep ?? 0} onClose={() => setGuideStep(null)} />
       </div>
     </div>
   )
