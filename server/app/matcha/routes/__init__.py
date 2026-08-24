@@ -167,6 +167,11 @@ matcha_router.include_router(
     tags=["inventory-forecast"],
     dependencies=[Depends(require_all_features("matcha_ops", "inventory", "sales_intake", "inventory_forecasting"))],
 )
+from .inventory_waste import router as inventory_waste_router
+matcha_router.include_router(
+    inventory_waste_router, prefix="/inventory/waste", tags=["inventory-waste"],
+    dependencies=[Depends(require_all_features("matcha_ops", "inventory", "inventory_waste"))],
+)
 matcha_router.include_router(
     inventory_pos_router,
     prefix="/inventory/sales/connections",
