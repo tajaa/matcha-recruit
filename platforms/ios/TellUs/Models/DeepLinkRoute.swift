@@ -15,6 +15,9 @@ enum DeepLinkRoute: Hashable, Identifiable {
     case boardManage(slug: String?)
     /// Consumer: open a promo claim sheet from a campaign push.
     case promoClaim(token: String)
+    /// Consumer: open a shoutout offer from a universal link.
+    case shoutoutOffer(token: String)
+    case shoutoutCode(code: String)
     case friendRequests(highlightRequestId: String)
     case friendProfile(accountId: String, name: String)
     case friendInvite(token: String)
@@ -26,6 +29,8 @@ enum DeepLinkRoute: Hashable, Identifiable {
         case .report(let id): return "report-\(id)"
         case .boardManage(let slug): return "board-manage-\(slug ?? "own")"
         case .promoClaim(let token): return "promo-\(token)"
+        case .shoutoutOffer(let token): return "shoutout-offer-\(token)"
+        case .shoutoutCode(let code): return "shoutout-code-\(code)"
         case .friendRequests(let id): return "friend-requests-\(id)"
         case .friendProfile(let id, _): return "friend-profile-\(id)"
         case .friendInvite(let token): return "friend-invite-\(token)"
@@ -63,5 +68,32 @@ enum DeepLinkRoute: Hashable, Identifiable {
         default:
             return nil
         }
+    }
+
+    /// Parse the web URL used by offer links. Supports both the apex URL and
+    /// the `/tellus` path handed to the app by Universal Links.
+    static func parse(url: URL) -> DeepLinkRoute? {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased(),
+              host == "hey-matcha.com" || host == "www.hey-matcha.com" else { return nil }
+        let components = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        let tokenIndex: Int?
+        if components.count == 3, components[0] == "tellus", components[1] == "o" {
+            tokenIndex = 2
+        } else if components.count == 2, components[0] == "o" {
+            tokenIndex = 1
+        } else {
+            tokenIndex = nil
+        }
+        if let tokenIndex, components[tokenIndex] != "code" {
+            return .shoutoutOffer(token: components[tokenIndex])
+        }
+        if components.count == 4, components[0] == "tellus", components[1] == "o", components[2] == "code" {
+            return components[3].isEmpty ? nil : .shoutoutCode(code: components[3])
+        }
+        if components.count == 3, components[0] == "o", components[1] == "code" {
+            return components[2].isEmpty ? nil : .shoutoutCode(code: components[2])
+        }
+        return nil
     }
 }

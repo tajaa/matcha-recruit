@@ -25,6 +25,11 @@ def app_url(path: str = "") -> str:
     return f"{_base_url()}/tellus{path}"
 
 
+def tellus_web_url(path: str = "") -> str:
+    """Absolute URL for a public Tell-Us web route, including offer links."""
+    return f"{_base_url()}/tellus{path}"
+
+
 def _shell(heading: str, body_html: str, *, cta_label: str | None = None, cta_url: str | None = None) -> str:
     """Full HTML document in the Tell-Us transactional style. `heading` and
     `body_html` MUST already be escaped by the caller; `cta_url` escaped here."""

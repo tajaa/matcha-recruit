@@ -1,0 +1,364 @@
+import { useEffect, useState } from 'react'
+import { BarChart2, Check, Clipboard, ExternalLink, Eye, Link2, Plus, Search, ShieldCheck, X } from 'lucide-react'
+import { useParams } from 'react-router-dom'
+import { shoutoutApi } from '../../api/shoutouts'
+import { tellusApi } from '../../api/tellusClient'
+import { Button, Card, Chip, Empty, ErrorText, Input, Select, Spinner, Textarea } from '../../components/ui'
+import { formatCount } from '../../utils/formatCount'
+import type {
+  LoyaltySocialSubmission,
+  ShoutoutConfig,
+  ShoutoutHandle,
+  ShoutoutManualScan,
+  ShoutoutMention,
+  ShoutoutOffer,
+  ShoutoutPlatform,
+  ShoutoutRun,
+  ShoutoutScanResult,
+  ShoutoutStats,
+  ShoutoutTestPost,
+  Store,
+} from '../../api/types'
+
+const PLATFORMS: { value: ShoutoutPlatform; label: string }[] = [
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'x', label: 'X' },
+]
+
+const EMPTY_CONFIG: ShoutoutConfig = {
+  is_enabled: false, brand_terms: [], exclude_terms: [], default_store_id: null,
+  offer_title: null, offer_terms: null, offer_expiry_days: 14, min_confidence: 60,
+  lookback_days: 14, require_app_install: false, handles: [],
+  platform_coverage: { instagram: 'partial', tiktok: 'poor', youtube: 'good', facebook: 'partial', x: 'good' },
+  last_scanned_at: null, next_scan_after: null,
+}
+
+function splitTerms(value: string) {
+  return [...new Set(value.split(',').map((term) => term.trim()).filter(Boolean))]
+}
+
+function joinTerms(values: string[]) {
+  return values.join(', ')
+}
+
+function formatDate(value: string | null) {
+  return value ? new Date(value).toLocaleString() : 'Never'
+}
+
+function MentionRow({ brandId, mention, stores, defaults, onChange, onStatsFetched }: {
+  brandId: string
+  mention: ShoutoutMention
+  stores: Store[]
+  defaults: ShoutoutConfig
+  onChange: () => void
+  onStatsFetched: (mentionId: string, stats: ShoutoutStats) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [offerOpen, setOfferOpen] = useState(false)
+  const [storeId, setStoreId] = useState(defaults.default_store_id ?? '')
+  const [title, setTitle] = useState(defaults.offer_title ?? '')
+  const [terms, setTerms] = useState(defaults.offer_terms ?? '')
+  const [expiryDays, setExpiryDays] = useState(defaults.offer_expiry_days)
+  const [statsBusy, setStatsBusy] = useState(false)
+  const [statsError, setStatsError] = useState('')
+
+  async function fetchStats() {
+    setStatsBusy(true); setStatsError('')
+    try {
+      const stats = await shoutoutApi.fetchStats(brandId, mention.id)
+      onStatsFetched(mention.id, stats)
+    } catch (e) {
+      setStatsError(e instanceof Error ? e.message : 'Could not fetch stats')
+    } finally { setStatsBusy(false) }
+  }
+
+  async function decide(decision: 'approve' | 'reject') {
+    setBusy(true); setError('')
+    try {
+      if (decision === 'approve') {
+        const offer = await shoutoutApi.approve(brandId, mention.id, {
+          store_id: storeId || null, title, terms: terms || null, expiry_days: expiryDays,
+        })
+        await navigator.clipboard.writeText(offer.claim_url)
+        alert('Offer created and link copied. Send it to the customer manually.')
+        setOfferOpen(false)
+      } else {
+        await shoutoutApi.reject(brandId, mention.id)
+      }
+      onChange()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update this mention')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="space-y-2 border-b border-tu-border px-4 py-4 last:border-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          {mention.image_url && (
+            <a href={mention.post_url} target="_blank" rel="noreferrer" className="shrink-0">
+              <img src={mention.image_url} alt="" className="h-16 w-16 rounded-md object-cover" />
+            </a>
+          )}
+          <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip>{mention.platform}</Chip>
+            {mention.is_test && <Chip tone="warning">Test post</Chip>}
+            <Chip tone={mention.confidence >= 80 ? 'positive' : undefined}>{mention.confidence}% confidence</Chip>
+            {mention.author_handle && <span className="text-xs text-tu-faint">@{mention.author_handle}</span>}
+            {mention.like_count != null && (
+              <Chip>{mention.stats_source === 'search' ? '~' : ''}{formatCount(mention.like_count)} likes</Chip>
+            )}
+            {mention.comment_count != null && <Chip>{formatCount(mention.comment_count)} comments</Chip>}
+            {mention.author_followers != null && <Chip>{formatCount(mention.author_followers)} followers</Chip>}
+            {mention.posted_age && <span className="text-xs text-tu-faint">{mention.posted_age}</span>}
+          </div>
+          <p className="mt-2 whitespace-pre-wrap text-sm text-tu-dim">{mention.excerpt || 'No excerpt returned.'}</p>
+          {mention.matched_terms.length > 0 && <p className="mt-1 text-xs text-tu-faint">Matched: {mention.matched_terms.join(', ')}</p>}
+          {mention.stats_status === 'not_found' && <p className="mt-1 text-xs text-tu-faint">Exact stats unavailable — post is not in this account's recent activity.</p>}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <a href={mention.post_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-tu-accent hover:underline">
+            Open post <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+          {mention.platform === 'instagram' && mention.author_handle && mention.stats_source !== 'profile_api' && (
+            <Button size="sm" variant="ghost" loading={statsBusy} onClick={() => void fetchStats()}>
+              <BarChart2 className="h-3.5 w-3.5" /> Get exact stats
+            </Button>
+          )}
+          <Button size="sm" loading={busy} onClick={() => setOfferOpen(true)}><Check className="h-3.5 w-3.5" /> Send offer</Button>
+          <Button size="sm" variant="danger" loading={busy} onClick={() => void decide('reject')}><X className="h-3.5 w-3.5" /> Reject</Button>
+        </div>
+      </div>
+      <ErrorText>{statsError}</ErrorText>
+      {offerOpen && (
+        <div className="mt-3 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3">
+          <p className="text-sm font-semibold">Configure this thank-you</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Select label="Redeem at" value={storeId} onChange={(e) => setStoreId(e.target.value)} options={[{ value: '', label: 'Choose a store' }, ...stores.map((store) => ({ value: store.id, label: store.name }))]} />
+            <Input label="Reward title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A thank-you from us" />
+          </div>
+          <Textarea label="Terms (optional)" rows={2} value={terms} onChange={(e) => setTerms(e.target.value)} />
+          <Input label="Expires in days" type="number" min={1} max={365} value={expiryDays} onChange={(e) => setExpiryDays(Number(e.target.value))} />
+          <div className="flex justify-end gap-2"><Button size="sm" variant="ghost" onClick={() => setOfferOpen(false)}>Cancel</Button><Button size="sm" loading={busy} disabled={!storeId || !title.trim()} onClick={() => void decide('approve')}><Link2 className="h-3.5 w-3.5" /> Create and copy link</Button></div>
+        </div>
+      )}
+      <ErrorText>{error}</ErrorText>
+    </div>
+  )
+}
+
+function Configuration({ brandId, stores, onSaved, onScanned }: { brandId: string; stores: Store[]; onSaved: (config: ShoutoutConfig) => void; onScanned: () => void }) {
+  const [config, setConfig] = useState<ShoutoutConfig>(EMPTY_CONFIG)
+  const [brandTerms, setBrandTerms] = useState('')
+  const [excludeTerms, setExcludeTerms] = useState('')
+  const [platform, setPlatform] = useState<ShoutoutPlatform>('instagram')
+  const [handle, setHandle] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [manualScan, setManualScan] = useState<ShoutoutManualScan>({ platform: 'instagram', handle: '', max_results: 10 })
+  const [scanResult, setScanResult] = useState<ShoutoutScanResult | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let live = true
+    shoutoutApi.getConfig(brandId).then((next) => {
+      if (!live) return
+      setConfig(next); setBrandTerms(joinTerms(next.brand_terms)); setExcludeTerms(joinTerms(next.exclude_terms))
+      onSaved(next)
+    }).catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load radar configuration') })
+    return () => { live = false }
+  }, [brandId, onSaved])
+
+  function addHandle() {
+    const normalized = handle.trim().replace(/^@/, '').toLowerCase()
+    if (!normalized || config.handles.some((item) => item.platform === platform && item.handle === normalized)) return
+    setConfig((current) => ({ ...current, handles: [...current.handles, { platform, handle: normalized }] }))
+    setHandle('')
+  }
+
+  function removeHandle(item: ShoutoutHandle) {
+    setConfig((current) => ({ ...current, handles: current.handles.filter((candidate) => candidate !== item) }))
+  }
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setSaving(true); setError('')
+    try {
+      const next = await shoutoutApi.putConfig(brandId, {
+        brand_terms: splitTerms(brandTerms), exclude_terms: splitTerms(excludeTerms),
+        default_store_id: config.default_store_id, offer_title: config.offer_title,
+        offer_terms: config.offer_terms, offer_expiry_days: config.offer_expiry_days,
+        min_confidence: config.min_confidence, lookback_days: config.lookback_days,
+        require_app_install: config.require_app_install, handles: config.handles,
+      })
+      setConfig(next); onSaved(next)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not save configuration') }
+    finally { setSaving(false) }
+  }
+
+  async function toggle() {
+    setBusy(true); setError('')
+    try {
+      const next = await shoutoutApi.setEnabled(brandId, !config.is_enabled)
+      setConfig(next); onSaved(next)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not update radar status') }
+    finally { setBusy(false) }
+  }
+
+  async function runManualScan() {
+    setScanning(true); setError(''); setScanResult(null)
+    try {
+      setScanResult(await shoutoutApi.runManualScan(brandId, manualScan))
+      setManualScan((current) => ({ ...current, handle: '' }))
+      onScanned()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not run the scan') }
+    finally { setScanning(false) }
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2"><Search className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Radar configuration</h2></div>
+          <p className="mt-1 text-sm text-tu-dim">Find public customer posts. Nothing is sent or awarded until you approve it.</p>
+        </div>
+        <Button variant={config.is_enabled ? 'soft' : 'primary'} loading={busy} onClick={() => void toggle()}>{config.is_enabled ? 'Pause radar' : 'Enable radar'}</Button>
+      </div>
+       <div className="mt-4 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3"><p className="text-sm font-semibold">Scan a handle now</p><p className="mt-1 text-xs text-tu-dim">Search public customer posts about one handle without saving it to the radar.</p><div className="mt-3 grid gap-3 sm:grid-cols-[150px_1fr_120px_auto]"><Select label="Social platform" value={manualScan.platform} onChange={(e) => setManualScan((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Handle" value={manualScan.handle} onChange={(e) => setManualScan((current) => ({ ...current, handle: e.target.value }))} placeholder="@yourbrand" /><Input label="Results (optional)" type="number" min={1} max={100} value={manualScan.max_results} onChange={(e) => setManualScan((current) => ({ ...current, max_results: e.target.value === '' ? 10 : Math.min(100, Math.max(1, Number(e.target.value))) }))} /><div className="flex items-end"><Button type="button" loading={scanning} disabled={!manualScan.handle.trim()} onClick={() => void runManualScan()}><Search className="h-4 w-4" /> Run scan</Button></div></div>{scanResult && <p className="mt-3 text-xs text-tu-dim">{scanResult.new + scanResult.duplicate > 0 ? `${scanResult.new + scanResult.duplicate} verified post${scanResult.new + scanResult.duplicate === 1 ? '' : 's'} found.` : ['No verified posts found.', scanResult.source_mismatch_rejected > 0 && `${scanResult.source_mismatch_rejected} source mismatch${scanResult.source_mismatch_rejected === 1 ? '' : 'es'}.`, scanResult.invalid_candidates_rejected > 0 && `${scanResult.invalid_candidates_rejected} invalid candidate${scanResult.invalid_candidates_rejected === 1 ? '' : 's'}.`, scanResult.below_confidence_rejected > 0 && `${scanResult.below_confidence_rejected} below confidence.`].filter(Boolean).join(' ')}</p>}</div>
+      <form onSubmit={save} className="mt-5 space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Textarea label="Brand terms (comma separated)" rows={2} value={brandTerms} onChange={(e) => setBrandTerms(e.target.value)} placeholder="brand name, product, campaign" />
+          <Textarea label="Exclude terms (comma separated)" rows={2} value={excludeTerms} onChange={(e) => setExcludeTerms(e.target.value)} placeholder="job, giveaway, complaint" />
+        </div>
+        <div>
+          <span className="mb-1 block text-xs font-medium text-tu-dim">Brand handles</span>
+          <div className="flex flex-wrap gap-2">
+            {config.handles.map((item) => <Chip key={`${item.platform}:${item.handle}`}><button type="button" onClick={() => removeHandle(item)} className="mr-1 hover:text-tu-bad">×</button>{item.platform}: @{item.handle}</Chip>)}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <Select value={platform} onChange={(e) => setPlatform(e.target.value as ShoutoutPlatform)} options={PLATFORMS} />
+            <Input value={handle} onChange={(e) => setHandle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addHandle() } }} placeholder="@yourbrand" />
+            <Button type="button" variant="soft" onClick={addHandle}><Plus className="h-4 w-4" /> Add</Button>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Select label="Default reward store" value={config.default_store_id ?? ''} onChange={(e) => setConfig((current) => ({ ...current, default_store_id: e.target.value || null }))}
+            options={[{ value: '', label: 'Select a store' }, ...stores.map((store) => ({ value: store.id, label: `${store.name}${store.city ? ` · ${store.city}` : ''}` }))]} />
+          <Input label="Reward title" value={config.offer_title ?? ''} onChange={(e) => setConfig((current) => ({ ...current, offer_title: e.target.value || null }))} placeholder="A thank-you from us" />
+        </div>
+        <Textarea label="Reward terms (optional)" rows={2} value={config.offer_terms ?? ''} onChange={(e) => setConfig((current) => ({ ...current, offer_terms: e.target.value || null }))} placeholder="One per customer. Redeem at the selected store." />
+        <label className="flex items-start gap-3 rounded-lg border border-tu-border bg-tu-panel2 p-3 text-sm">
+          <input
+            type="checkbox"
+            checked={config.require_app_install}
+            onChange={(e) => setConfig((current) => ({ ...current, require_app_install: e.target.checked }))}
+            className="mt-0.5"
+          />
+          <span><strong>Require app install for new customers</strong><br /><span className="text-tu-dim">Existing Tell-Us accounts can claim on the web. New customers must claim in the iPhone app.</span></span>
+        </label>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Input label="Offer expires in days" type="number" min={1} max={365} value={config.offer_expiry_days} onChange={(e) => setConfig((current) => ({ ...current, offer_expiry_days: Number(e.target.value) }))} />
+          <Input label="Minimum confidence" type="number" min={0} max={100} value={config.min_confidence} onChange={(e) => setConfig((current) => ({ ...current, min_confidence: Number(e.target.value) }))} />
+          <Input label="Look back (days)" type="number" min={1} max={90} value={config.lookback_days} onChange={(e) => setConfig((current) => ({ ...current, lookback_days: Number(e.target.value) }))} />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-tu-faint">Last scan: {formatDate(config.last_scanned_at)} · Web-search grounding only</p>
+          <Button type="submit" loading={saving}><ShieldCheck className="h-4 w-4" /> Save configuration</Button>
+        </div>
+        <ErrorText>{error}</ErrorText>
+      </form>
+    </Card>
+  )
+}
+
+function OfferList({ brandId, offers, onChange }: { brandId: string; offers: ShoutoutOffer[]; onChange: () => void }) {
+  async function revoke(offer: ShoutoutOffer) {
+    if (!confirm('Revoke this offer? The customer will no longer be able to claim it.')) return
+    try { await shoutoutApi.revokeOffer(brandId, offer.id); onChange() }
+    catch (e) { alert(e instanceof Error ? e.message : 'Could not revoke offer') }
+  }
+  if (!offers.length) return <Empty>No approved offers yet.</Empty>
+  return <div className="space-y-2">{offers.map((offer) => (
+    <div key={offer.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-tu-border px-3 py-3">
+      <div><p className="font-medium">{offer.reward_text}</p><p className="text-xs text-tu-faint">{offer.store_name || 'Store'} · code {offer.short_code} · expires {new Date(offer.claim_expires_at).toLocaleDateString()}</p></div>
+      <div className="flex items-center gap-2"><Chip tone={offer.status === 'claimed' ? 'positive' : offer.status === 'revoked' ? 'negative' : undefined}>{offer.status}</Chip><Button size="sm" variant="soft" onClick={() => navigator.clipboard.writeText(offer.claim_url)}><Clipboard className="h-3.5 w-3.5" /> Copy link</Button>{offer.status !== 'revoked' && <Button size="sm" variant="ghost" onClick={() => void revoke(offer)}>Revoke</Button>}</div>
+    </div>
+  ))}</div>
+}
+
+function RunHistory({ runs }: { runs: ShoutoutRun[] }) {
+  if (!runs.length) return <Card><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">No scans have run yet. Enable the radar and its scheduled scan will record results here.</p></Card>
+  const latest = runs[0]
+  const latestSummary = latest.trigger === 'test'
+    ? 'A manually added test post was sent through the review queue without a web-search call.'
+    : latest.status === 'failed'
+    ? 'The latest scan failed. Review the error below; the radar will retry after its backoff period.'
+    : latest.candidates_returned === 0
+      ? 'The latest scan completed successfully but web search returned no candidate posts.'
+      : latest.mentions_new === 0
+       ? latest.source_mismatch_rejected > 0
+         ? `The latest scan found ${latest.source_mismatch_rejected} candidate URL${latest.source_mismatch_rejected === 1 ? '' : 's'} without an exact web-search source match.`
+         : latest.below_confidence_rejected > 0
+           ? 'The latest scan found grounded candidates, but they were below the configured confidence threshold.'
+           : 'The latest scan completed, but candidates were duplicates or did not meet the validation checks.'
+        : 'The latest scan found new mentions ready for review.'
+  return <Card>
+    <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">Scan history</h2><p className="mt-1 text-sm text-tu-dim">{latestSummary}</p></div><Chip tone={latest.status === 'completed' ? 'positive' : latest.status === 'failed' ? 'negative' : undefined}>{latest.status}</Chip></div>
+     <div className="mt-4 space-y-3">{runs.slice(0, 10).map((run) => <div key={run.id} className="rounded-lg border border-tu-border p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{run.trigger} scan</span><span className="text-xs text-tu-faint">{formatDate(run.started_at)}{run.finished_at ? ` - ${formatDate(run.finished_at)}` : ''}</span></div><p className="mt-2 text-xs text-tu-dim">{run.gemini_calls} AI calls · {run.grounding_resolved}/{run.grounding_uris} grounding links resolved · {run.candidates_returned} candidates · {run.urls_rejected} rejected · {run.source_mismatch_rejected} source mismatches · {run.invalid_candidates_rejected} invalid · {run.below_confidence_rejected} below confidence · {run.mentions_new} new · {run.mentions_duplicate} duplicates</p>{run.error && <p className="mt-2 max-h-20 overflow-auto rounded bg-tu-panel2 p-2 font-mono text-xs text-tu-bad">{run.error}</p>}</div>)}</div>
+  </Card>
+}
+
+function SocialSubmissions({ brandId, onTestPost }: { brandId: string; onTestPost: () => void }) {
+  const [rows, setRows] = useState<LoyaltySocialSubmission[]>([])
+  const [loading, setLoading] = useState(true)
+  const [testPost, setTestPost] = useState<ShoutoutTestPost>({ platform: 'instagram', post_url: '', author_handle: '', excerpt: '' })
+  const [submittingTest, setSubmittingTest] = useState(false)
+  const [testError, setTestError] = useState('')
+  async function load() { try { setRows(await shoutoutApi.socialSubmissions(brandId)) } finally { setLoading(false) } }
+  useEffect(() => { void load() }, [brandId])
+  async function decide(id: string, decision: 'approve' | 'reject') { await shoutoutApi.decideSocial(brandId, id, decision); await load() }
+  async function submitTestPost(e: React.FormEvent) {
+    e.preventDefault(); setSubmittingTest(true); setTestError('')
+    try {
+      await shoutoutApi.submitTestPost(brandId, testPost)
+      setTestPost({ platform: 'instagram', post_url: '', author_handle: '', excerpt: '' })
+      onTestPost()
+    } catch (e) { setTestError(e instanceof Error ? e.message : 'Could not add test post') }
+    finally { setSubmittingTest(false) }
+  }
+  return <Card><div className="flex items-center gap-2"><Eye className="h-4 w-4 text-tu-accent" /><h2 className="font-semibold">Customer-submitted posts</h2></div><p className="mt-1 text-sm text-tu-dim">Separate from radar detections. These are customer-submitted loyalty entries and their existing points workflow.</p><form className="mt-4 space-y-3 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3" onSubmit={submitTestPost}><div><h3 className="text-sm font-semibold">Test a customer post</h3><p className="mt-1 text-xs text-tu-dim">Adds a clearly labeled test scan and review-queue item. It does not call web search or award loyalty points.</p></div><div className="grid gap-3 sm:grid-cols-2"><Select label="Platform" value={testPost.platform} onChange={(e) => setTestPost((current) => ({ ...current, platform: e.target.value as ShoutoutPlatform }))} options={PLATFORMS} /><Input label="Customer handle" value={testPost.author_handle} onChange={(e) => setTestPost((current) => ({ ...current, author_handle: e.target.value }))} placeholder="@happycustomer" /></div><Input label="Public post URL" value={testPost.post_url} onChange={(e) => setTestPost((current) => ({ ...current, post_url: e.target.value }))} placeholder="https://instagram.com/p/example" /><Textarea label="Post text" rows={2} value={testPost.excerpt} onChange={(e) => setTestPost((current) => ({ ...current, excerpt: e.target.value }))} placeholder="Loved the coffee at your brand today." /><div className="flex items-center justify-between gap-3"><ErrorText>{testError}</ErrorText><Button type="submit" size="sm" loading={submittingTest} disabled={!testPost.post_url.trim() || !testPost.author_handle.trim() || !testPost.excerpt.trim()}><Plus className="h-3.5 w-3.5" /> Add test post</Button></div></form>{loading ? <Spinner /> : rows.length === 0 ? <Empty>No customer submissions.</Empty> : <div className="mt-4 divide-y divide-tu-border">{rows.map((row) => <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-medium">{row.platform} · {row.status}</p><a className="text-xs text-tu-accent hover:underline" href={row.post_url} target="_blank" rel="noreferrer">{row.post_url}</a></div>{row.status === 'pending' && <div className="flex gap-2"><Button size="sm" onClick={() => void decide(row.id, 'approve')}>Approve</Button><Button size="sm" variant="danger" onClick={() => void decide(row.id, 'reject')}>Reject</Button></div>}</div>)}</div>}</Card>
+}
+
+export default function BrandShoutouts() {
+  const { brandId } = useParams()
+  const [stores, setStores] = useState<Store[]>([])
+  const [mentions, setMentions] = useState<ShoutoutMention[]>([])
+  const [offers, setOffers] = useState<ShoutoutOffer[]>([])
+  const [runs, setRuns] = useState<ShoutoutRun[]>([])
+  const [radarConfig, setRadarConfig] = useState<ShoutoutConfig>(EMPTY_CONFIG)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  if (!brandId) return <ErrorText>Business not found.</ErrorText>
+  const currentBrandId = brandId
+
+  async function loadQueue() {
+    try {
+      const [nextMentions, nextOffers, nextRuns] = await Promise.all([shoutoutApi.listMentions(currentBrandId), shoutoutApi.listOffers(currentBrandId), shoutoutApi.listRuns(currentBrandId)])
+      setMentions(nextMentions); setOffers(nextOffers); setRuns(nextRuns)
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load shoutouts') }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { void Promise.all([tellusApi.get<Store[]>('/stores'), loadQueue()]).then(([nextStores]) => setStores(nextStores)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load shoutouts')) }, [brandId])
+
+  function patchMentionStats(mentionId: string, stats: ShoutoutStats) {
+    setMentions((current) => current.map((mention) => (mention.id === mentionId ? { ...mention, ...stats } : mention)))
+  }
+
+  return <div className="space-y-6"><div><div className="flex items-center gap-2"><Link2 className="h-5 w-5 text-tu-accent" /><h1 className="text-xl font-bold">Shoutouts</h1></div><p className="mt-1 text-sm text-tu-dim">Turn verified public customer love into a store-bound thank-you, one approval at a time.</p></div><ErrorText>{error}</ErrorText><Configuration brandId={brandId} stores={stores} onSaved={setRadarConfig} onScanned={() => void loadQueue()} /><RunHistory runs={runs} /><section className="space-y-3"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Review queue</h2><p className="text-sm text-tu-dim">Grounded mentions and clearly labeled test posts appear here.</p></div><Chip>{mentions.length} pending</Chip></div>{loading ? <Spinner /> : mentions.length === 0 ? <Empty>No pending mentions. Enable the radar or add a test post below.</Empty> : <Card className="p-0"><div>{mentions.map((mention) => <MentionRow key={mention.id} brandId={brandId} mention={mention} stores={stores} defaults={radarConfig} onChange={() => void loadQueue()} onStatsFetched={patchMentionStats} />)}</div></Card>}</section><section className="space-y-3"><div><h2 className="font-semibold">Approved offers</h2><p className="text-sm text-tu-dim">Copy the link and send it manually to the customer.</p></div><OfferList brandId={brandId} offers={offers} onChange={() => void loadQueue()} /></section><SocialSubmissions brandId={brandId} onTestPost={() => void loadQueue()} /></div>
+}

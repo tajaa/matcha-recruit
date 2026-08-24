@@ -1018,7 +1018,7 @@ export interface AdminBoardReplyRow {
 // ── Promo campaigns / QR reward cards ───────────────────────────────────────
 
 export type PromoCampaignStatus = 'active' | 'paused' | 'cancelled'
-export type PromoCampaignType = 'qr' | 'location'
+export type PromoCampaignType = 'qr' | 'location' | 'shoutout'
 export type EffectiveCardStatus = 'issued' | 'redeemed' | 'cancelled' | 'expired'
 export type ClaimUnavailableReason =
   'ok' | 'cap_reached' | 'cancelled' | 'brand_inactive' | 'paused' | 'not_started' | 'ended' |
@@ -1112,6 +1112,154 @@ export interface PromoScanBootstrap {
   store_name: string
   brand_name: string
   brand_logo_url: string | null
+}
+
+export type ShoutoutPlatform = 'instagram' | 'tiktok' | 'youtube' | 'facebook' | 'x'
+export type ShoutoutMentionStatus = 'pending' | 'approved' | 'rejected' | 'expired'
+
+export interface ShoutoutHandle {
+  platform: ShoutoutPlatform
+  handle: string
+}
+
+export interface ShoutoutConfig {
+  is_enabled: boolean
+  brand_terms: string[]
+  exclude_terms: string[]
+  default_store_id: string | null
+  offer_title: string | null
+  offer_terms: string | null
+  offer_expiry_days: number
+  min_confidence: number
+  lookback_days: number
+  require_app_install: boolean
+  handles: ShoutoutHandle[]
+  platform_coverage: Record<ShoutoutPlatform, 'good' | 'partial' | 'poor'>
+  last_scanned_at: string | null
+  next_scan_after: string | null
+}
+
+export type ShoutoutStatsSource = 'search' | 'profile_api'
+export type ShoutoutStatsStatus = 'ok' | 'not_found' | 'unsupported' | 'error'
+
+export interface ShoutoutMention {
+  id: string
+  platform: ShoutoutPlatform
+  post_url: string
+  author_handle: string | null
+  excerpt: string | null
+  confidence: number
+  matched_terms: string[]
+  corroborated: boolean
+  is_test: boolean
+  status: ShoutoutMentionStatus
+  seen_count: number
+  first_seen_at: string
+  last_seen_at: string
+  decided_at: string | null
+  like_count: number | null
+  comment_count: number | null
+  author_followers: number | null
+  author_verified: boolean | null
+  posted_age: string | null
+  image_url: string | null
+  stats_source: ShoutoutStatsSource | null
+  stats_status: ShoutoutStatsStatus | null
+  stats_fetched_at: string | null
+}
+
+export interface ShoutoutStats {
+  like_count: number | null
+  comment_count: number | null
+  author_followers: number | null
+  author_verified: boolean | null
+  posted_age: string | null
+  image_url: string | null
+  stats_source: ShoutoutStatsSource | null
+  stats_status: ShoutoutStatsStatus | null
+  stats_fetched_at: string | null
+}
+
+export interface ShoutoutRun {
+  id: string
+  status: 'running' | 'completed' | 'failed'
+  trigger: 'scheduled' | 'admin' | 'manual' | 'test'
+  started_at: string
+  finished_at: string | null
+  gemini_calls: number
+  grounding_uris: number
+  grounding_resolved: number
+  candidates_returned: number
+  urls_rejected: number
+  mentions_new: number
+  mentions_duplicate: number
+  error: string | null
+  source_mismatch_rejected: number
+  invalid_candidates_rejected: number
+  below_confidence_rejected: number
+}
+
+export interface ShoutoutScanResult {
+  new: number
+  duplicate: number
+  source_mismatch_rejected: number
+  invalid_candidates_rejected: number
+  below_confidence_rejected: number
+}
+
+export interface ShoutoutTestPost {
+  platform: ShoutoutPlatform
+  post_url: string
+  author_handle: string
+  excerpt: string
+}
+
+export interface ShoutoutManualScan {
+  platform: ShoutoutPlatform
+  handle: string
+  max_results: number
+}
+
+export interface ShoutoutOffer {
+  id: string
+  mention_id: string
+  campaign_id: string
+  store_id: string | null
+  store_name: string | null
+  offer_token: string
+  claim_url: string
+  short_code: string
+  reward_text: string
+  status: 'sent' | 'claimed' | 'revoked'
+  claim_expires_at: string
+  claimed_account_id: string | null
+  claimed_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface ShoutoutOfferPreview {
+  brand_name: string
+  brand_logo_url: string | null
+  store_name: string | null
+  reward_text: string
+  offer_terms: string | null
+  short_code: string
+  claim_expires_at: string
+  require_app_install: boolean
+  web_claim_allowed: boolean
+  available: boolean
+  already_claimed: boolean
+  card_token: string | null
+}
+
+export interface ShoutoutOfferClaimResult {
+  offer_id: string
+  card_token: string
+  reward_text: string
+  store_name: string | null
+  claim_expires_at: string
+  created: boolean
 }
 
 // Designer document model — QR layers store no URL; the campaign's

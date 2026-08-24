@@ -1,0 +1,15 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["5D6TJVCPBK.com.beetlejuse.app"],
+        "components": [
+          { "/": "/tellus/o/*" },
+          { "/": "/tellus/o/code/*" },
+          { "/": "/o/*" },
+          { "/": "/o/code/*" }
+        ]
+      }
+    ]
+  }
+}

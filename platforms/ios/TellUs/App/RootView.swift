@@ -49,6 +49,10 @@ private struct DeepLinkDestinationView: View {
                 BoardManageView(brandId: nil, slug: slug ?? appState.account?.brand_slug)
             case .promoClaim(let token):
                 ClaimSheet(token: token)
+            case .shoutoutOffer(let token):
+                ShoutoutOfferView(token: token)
+            case .shoutoutCode(let code):
+                ShoutoutOfferView(code: code)
             case .friendRequests(let id):
                 FriendsHubView(initialTab: .requests, highlightRequestId: id)
             case .friendProfile(let id, _):

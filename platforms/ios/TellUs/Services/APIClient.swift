@@ -225,11 +225,12 @@ class APIClient {
         method: String,
         path: String,
         body: (any Encodable)? = nil,
+        headers: [String: String] = [:],
         retryOnUnauthorized: Bool = true,
         retryOnMaintenance: Bool = true
     ) async throws -> T {
         let data = try await requestData(
-            method: method, path: path, body: body,
+            method: method, path: path, body: body, headers: headers,
             retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: retryOnMaintenance
         )
         // Decode off MainActor — large payloads used to hold up the main
@@ -257,6 +258,7 @@ class APIClient {
         method: String,
         path: String,
         body: (any Encodable)? = nil,
+        headers: [String: String] = [:],
         retryOnUnauthorized: Bool = true,
         retryOnMaintenance: Bool = true
     ) async throws -> Data {
@@ -277,6 +279,9 @@ class APIClient {
             urlRequest.httpBody = try encoder.encode(body)
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
+        for (field, value) in headers {
+            urlRequest.setValue(value, forHTTPHeaderField: field)
+        }
 
         let data: Data
         let response: URLResponse
@@ -289,7 +294,7 @@ class APIClient {
             if let urlError = _isTransientNetworkError(error) {
                 if retryOnMaintenance && _isIdempotentMethod(method) {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
-                    return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                    return try await requestData(method: method, path: path, body: body, headers: headers, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
                 }
                 throw APIError.networkUnavailable(urlError)
             }
@@ -304,7 +309,7 @@ class APIClient {
             if retryOnUnauthorized {
                 do {
                     _ = try await AuthService.shared.refresh()
-                    return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: false)
+                    return try await requestData(method: method, path: path, body: body, headers: headers, retryOnUnauthorized: false)
                 } catch {
                     try await failAfterRefreshFailure(error)
                 }

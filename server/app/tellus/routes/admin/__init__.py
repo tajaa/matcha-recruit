@@ -11,10 +11,11 @@ from .claims import router as claims_router
 from .economy import router as economy_router
 from .moderation import router as moderation_router
 from .updates import router as updates_router
+from .shoutouts import router as shoutouts_router
 
 router = APIRouter()
 for _r in (updates_router, accounts_router, brands_router, claims_router,
-           moderation_router, economy_router, audit_router):
+           moderation_router, economy_router, audit_router, shoutouts_router):
     router.include_router(_r)
 
 __all__ = ["router"]

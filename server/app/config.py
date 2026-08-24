@@ -74,6 +74,9 @@ class Settings:
     # Gemini API
     gemini_api_key: Optional[str]
 
+    # SerpApi (Google Search) for Tell-Us shoutout scans.
+    serp_api_key: Optional[str]
+
     # Vertex AI (BAA-eligible endpoint) — gated by USE_VERTEX_AI; default off
     # keeps the consumer AI Studio endpoint. Flip on once a GCP project + a
     # signed Google Cloud BAA exist so PHI-bearing prompts go to the covered API.
@@ -336,6 +339,7 @@ def load_settings() -> Settings:
         database_url=database_url_clean,
         database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
+        serp_api_key=os.getenv("SERP_API_KEY"),
         use_vertex_ai=os.getenv("USE_VERTEX_AI", "").strip().lower() in ("1", "true", "yes"),
         vertex_ai_project=os.getenv("VERTEX_AI_PROJECT"),
         vertex_ai_location=os.getenv("VERTEX_AI_LOCATION", "us-central1"),

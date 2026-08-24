@@ -34,6 +34,18 @@ final class PromoService {
         try await client.request(method: "POST", path: "/p/\(token)/claim")
     }
 
+    func shoutoutPreview(token: String?, code: String?) async throws -> ShoutoutOfferPreview {
+        let path = if let token { "/o/\(token)" } else { "/o/code/\(code ?? "")" }
+        return try await client.request(method: "GET", path: path)
+    }
+
+    private struct EmptyBody: Encodable {}
+
+    func claimShoutout(token: String?, code: String?) async throws -> ShoutoutOfferClaimResult {
+        let path = if let token { "/o/\(token)/claim" } else { "/o/code/\(code ?? "")/claim" }
+        return try await client.request(method: "POST", path: path, body: EmptyBody())
+    }
+
     // MARK: Brand
 
     func campaigns() async throws -> [PromoCampaign] {
