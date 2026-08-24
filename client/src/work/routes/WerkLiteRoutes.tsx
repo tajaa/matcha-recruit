@@ -12,6 +12,7 @@ import ProtocolPage from '../pages/ProtocolPage'
 import InventoryHub from '../pages/InventoryHub'
 import InventoryAudit from '../pages/InventoryAudit'
 import InventoryForecast from '../pages/InventoryForecast'
+import InventoryWaste from '../pages/InventoryWaste'
 import { FeatureGate } from '../../components/shared/FeatureGate'
 import { WorkSurfaceProvider } from './WorkSurfaceContext'
 import { useMe } from '../../hooks/useMe'
@@ -91,6 +92,7 @@ export default function WerkLiteRoutes() {
                 <Route path="inventory" element={<InventoryHub />} />
                 <Route path="inventory/audit" element={<InventoryAudit />} />
                 <Route path="inventory/forecast" element={<FeatureGate feature="inventory_forecasting" label="Inventory Forecasting"><InventoryForecast /></FeatureGate>} />
+                <Route path="inventory/waste" element={<FeatureGate feature="inventory_waste" label="Inventory Waste"><InventoryWaste /></FeatureGate>} />
                 <Route path="inventory/:itemId" element={<InventoryHub />} />
               </Route>
               <Route path="boards/:projectId" element={<BoardView />} />

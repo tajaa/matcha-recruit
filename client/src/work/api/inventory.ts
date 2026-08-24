@@ -619,3 +619,13 @@ export function getForecastRun(runId: string) {
 export function applyForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) {
   return api.post(`/inventory/forecast/runs/${runId}/apply-par`, body)
 }
+
+export type WasteRollup = { total_units: number; total_value: number | null; revenue: number | null; waste_pct_of_revenue: number | null; groups: { key: string; label: string; units: number; value: number | null; pct: number | null }[] }
+export function getWasteRollup(start: string, end: string, groupBy: 'reason' | 'category' | 'item' = 'reason') {
+  return api.get<WasteRollup>(`/inventory/waste/rollup?start=${start}&end=${end}&group_by=${groupBy}`)
+}
+export function recordWaste(body: { item_id: string; quantity: number; reason: WasteReason; note?: string }) {
+  return api.post('/inventory/waste', body)
+}
+export function listExpiringLots(days = 7) { return api.get<{ lots: { id: string; item_id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[] }>(`/inventory/waste/lots?expiring_within_days=${days}`) }
+export function enrollAutoPar(itemIds: string[], enrolled: boolean) { return api.post('/inventory/waste/par/enroll', { item_ids: itemIds, enrolled }) }
