@@ -231,11 +231,14 @@ async def _execute_movement(company_id, actor_user_id, action) -> dict[str, Any]
                     conn, company_id=company_id, channel_id=None, source_message_id=None,
                     recorded_by=actor_user_id, kind=kind, narrative="Recorded via Huume chat",
                     note=action.get("note"),
-                    lines=[{"item_id": item_id, "quantity": quantity, "estimated": False}],
+                    lines=[{"item_id": item_id, "quantity": quantity, "estimated": False,
+                            "waste_reason": action.get("waste_reason")}],
                 )
             row = inserted[0] if inserted else None
             if kind == "stockout":
                 message = f"Marked {item_name} as out of stock."
+            elif kind == "waste":
+                message = f"Recorded {quantity} {item_name} as waste ({action.get('waste_reason') or 'unknown'})."
             else:
                 message = f"Recorded {quantity} {item_name} used."
 

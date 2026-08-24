@@ -173,7 +173,7 @@ _INVENTORY_ACTIONS = frozenset({
     "inventory_movement", "inventory_order_decision",
     "inventory_item_create", "inventory_item_archive", "inventory_receipt",
 })
-_INVENTORY_MOVEMENT_KINDS = frozenset({"out", "stockout", "adjust"})
+_INVENTORY_MOVEMENT_KINDS = frozenset({"out", "stockout", "adjust", "waste"})
 _INVENTORY_RECEIVED_STEER_MESSAGE = (
     "Received stock needs provenance — receive it against its open order with "
     "decide_inventory_order(decision='receive'), or attach the invoice CSV and "
@@ -655,6 +655,8 @@ def _validate_inventory_movement(staged: dict[str, Any]) -> HuumeVerdict:
             message="I need either an existing item id (lookup_context(topic='inventory')) or a name for a new item.",
         )
 
+    if kind == "waste" and not item_id:
+        return HuumeVerdict(kind="refuse", message="Waste must be tied to an existing item — look it up first.")
     quantity = staged.get("quantity")
     if kind == "stockout":
         quantity = None
@@ -678,6 +680,11 @@ def _validate_inventory_movement(staged: dict[str, Any]) -> HuumeVerdict:
     if note and len(note) > _MAX_INVENTORY_NOTE_CHARS:
         note = note[:_MAX_INVENTORY_NOTE_CHARS]
 
+    waste_reason = str(staged.get("waste_reason") or "unknown").strip().lower()
+    if kind == "waste" and waste_reason not in {
+        "spoilage", "expired", "prep_error", "overproduction", "breakage", "contamination", "theft", "comp", "recall", "unknown",
+    }:
+        return HuumeVerdict(kind="refuse", message="Choose a valid waste reason, such as spoilage, expired, or breakage.")
     return HuumeVerdict(kind="proceed", message="", action={
         "type": "inventory_movement",
         "kind": kind,
@@ -686,6 +693,7 @@ def _validate_inventory_movement(staged: dict[str, Any]) -> HuumeVerdict:
         "quantity": quantity,
         "location_id": str(location_id) if location_id else None,
         "note": note,
+        "waste_reason": waste_reason if kind == "waste" else None,
     })
 
 
