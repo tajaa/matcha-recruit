@@ -4,8 +4,8 @@ import json
 from uuid import UUID
 
 from .grounding import corroborated_candidates, url_fingerprint
-from .prompt import build_prompt
-from .provider import OpenAIWebSearchProvider
+from .prompt import build_query
+from .provider import SerpApiProvider
 from ..loyalty_service import LoyaltyError, canonicalize_social_url
 
 _PLATFORMS = {"instagram", "tiktok", "youtube", "facebook", "x"}
@@ -101,7 +101,7 @@ async def scan_brand(
     conn, brand_id: UUID, *, trigger: str = "scheduled", force: bool = False,
     manual_handle: dict | None = None, manual_max_results: int | None = None, provider=None,
 ) -> dict:
-    provider = provider or OpenAIWebSearchProvider()
+    provider = provider or SerpApiProvider()
     async with conn.transaction():
         await conn.execute(
             "UPDATE tellus_shoutout_scan_runs SET status='failed', finished_at=NOW(), error='stale run reclaimed' "
@@ -162,9 +162,9 @@ async def scan_brand(
         }
         if manual_max_results is not None:
             search_args["max_results"] = manual_max_results
-        searches = [provider.search(build_prompt(**search_args, focus="manual_handle" if manual_handle else "handles"))]
+        searches = [provider.search(build_query(**search_args, focus="manual_handle" if manual_handle else "handles"))]
         if manual_handle is None:
-            searches.append(provider.search(build_prompt(**search_args, focus="terms")))
+            searches.append(provider.search(build_query(**search_args, focus="terms")))
         results = await asyncio.gather(*searches)
         mentions = [mention for result in results for mention in result.mentions]
         if manual_handle is not None:

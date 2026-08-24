@@ -50,7 +50,7 @@ class ShoutoutEnableIn(BaseModel):
 
 class ShoutoutManualScanIn(ShoutoutHandleIn):
     """One-off public-post search target; it is never saved as a brand handle."""
-    max_results: int = Field(default=10, ge=1, le=10)
+    max_results: int = Field(default=10, ge=1, le=100)
 
 
 class ShoutoutRejectIn(BaseModel):

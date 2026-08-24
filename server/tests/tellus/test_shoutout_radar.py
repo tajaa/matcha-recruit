@@ -72,20 +72,31 @@ def test_grounding_gate_separates_invalid_urls_from_source_mismatches():
     assert result.source_mismatch == 1
 
 
-def test_manual_prompt_requests_the_selected_result_limit():
-    from app.tellus.services.shoutout.prompt import build_prompt
+def test_manual_query_scopes_to_the_handles_platform_and_result_limit():
+    from app.tellus.services.shoutout.prompt import build_query
 
-    prompt = build_prompt(
+    query = build_query(
         brand_name="Cafe", handles=[{"platform": "instagram", "handle": "cafe"}], brand_terms=[],
         city=None, state=None, lookback_days=14, focus="manual_handle", max_results=10,
     )
-    assert "Business:" not in prompt
-    assert "@cafe" in prompt
-    assert "public instagram posts" in prompt
-    assert "official instagram.com domain" in prompt
-    assert "Do not use aggregators" in prompt
-    assert "Return no more than 10 results." in prompt
-    assert "Sources: line with an OpenAI web-search citation for the exact public post URL" in prompt
+    assert "site:instagram.com" in query.q
+    assert '"@cafe"' in query.q
+    assert "cafe" in query.match_terms
+    assert query.num == 10
+
+
+def test_handles_and_terms_queries_cover_all_platforms_and_exclusions():
+    from app.tellus.services.shoutout.prompt import build_query
+
+    query = build_query(
+        brand_name="Cafe", handles=[{"platform": "instagram", "handle": "cafe"}], brand_terms=["matcha latte"],
+        exclude_terms=["giveaway"], city="Austin", state="TX", lookback_days=14, focus="terms",
+    )
+    assert "site:tiktok.com" in query.q
+    assert "site:youtube.com" in query.q
+    assert '"matcha latte"' in query.q
+    assert "Austin" in query.q and "TX" in query.q
+    assert '-"giveaway"' in query.q
 
 
 def test_brand_own_handle_scores_zero_and_terms_must_be_in_excerpt():
@@ -115,63 +126,47 @@ def test_reseen_update_never_touches_status_or_catches_unique_violation():
     assert "UniqueViolationError" not in inspect.getsource(scan_service)
 
 
-def test_openai_response_parser_collects_annotations_and_web_search_sources():
+def test_organic_results_are_parsed_into_mentions_with_matched_terms():
     from app.tellus.services.shoutout import provider
 
-    text, citations = provider._response_text_and_sources({
-        "output": [
-            {"type": "web_search_call", "action": {"sources": [
-                {"url": "https://instagram.com/p/source"},
-                {"url": "https://instagram.com/p/source-two"},
-            ]}},
-            {"type": "message", "content": [{"type": "output_text", "text": (
-                '{"mentions":[{"platform":"instagram","url":"https://instagram.com/p/real"}]}'
-                "\n\nSources: ([instagram.com](https://instagram.com/p/real))"
-            ), "annotations": [
-                {"type": "url_citation", "url": "https://instagram.com/p/real"},
-                {"type": "file_citation", "url": "https://example.com/ignore"},
-                {"type": "url_citation", "url": "https://instagram.com/p/real"},
-            ]}]},
-        ],
-    })
-    assert provider._json_object(text) == {"mentions": [{"platform": "instagram", "url": "https://instagram.com/p/real"}]}
-    assert citations == [
-        "https://instagram.com/p/source",
-        "https://instagram.com/p/source-two",
-        "https://instagram.com/p/real",
-    ]
+    result = provider._organic_results_to_mentions(
+        {
+            "organic_results": [
+                {
+                    "link": "https://www.instagram.com/p/real/",
+                    "title": "Best matcha latte in town",
+                    "snippet": "Just had the matcha latte at Cafe, so good!",
+                },
+                {"link": "https://example.com/blog/cafe-review", "title": "Cafe review", "snippet": "..."},
+                {"link": "not-a-real-url"},
+                None,
+            ],
+        },
+        match_terms=["matcha latte", "cafe"],
+    )
+    assert len(result.mentions) == 1
+    mention = result.mentions[0]
+    assert mention["platform"] == "instagram"
+    assert mention["url"] == "https://www.instagram.com/p/real/"
+    assert mention["matched_terms"] == ["matcha latte", "cafe"]
+    assert mention["confidence"] == 60
+    assert result.grounding_uris == ["https://www.instagram.com/p/real/"]
+    assert result.grounding_resolved == 1
 
 
-def test_openai_response_parser_ignores_malformed_sources():
+def test_organic_results_platform_host_map_covers_all_known_domains():
     from app.tellus.services.shoutout import provider
 
-    _, citations = provider._response_text_and_sources({
-        "output": [
-            {"type": "web_search_call", "action": {"sources": [None, {}, {"url": 4}]}},
-            {"type": "web_search_call", "action": None},
-        ],
-    })
-    assert citations == []
+    assert provider._platform_for_url("https://youtu.be/abc") == "youtube"
+    assert provider._platform_for_url("https://www.tiktok.com/@cafe/video/1") == "tiktok"
+    assert provider._platform_for_url("https://twitter.com/a/status/1") == "x"
+    assert provider._platform_for_url("https://fb.com/cafe/posts/1") == "facebook"
+    assert provider._platform_for_url("https://unrelated.com/post") is None
 
 
-def test_response_parser_tolerates_citation_markers_after_json():
+def test_provider_requests_google_engine_and_returns_grounding_uris(monkeypatch):
     from app.tellus.services.shoutout import provider
-
-    assert provider._json_object('{"mentions":[]}【source】') == {"mentions": []}
-
-
-def test_provider_uses_openai_responses_with_required_web_search():
-    from app.tellus.services.shoutout import provider
-
-    source = inspect.getsource(provider.OpenAIWebSearchProvider.search)
-    assert '"https://api.openai.com/v1/responses"' in source
-    assert '"type": "web_search_preview"' in source
-    assert '"tool_choice": "required"' in source
-    assert '"web_search_call.action.sources"' in source
-
-
-def test_provider_requests_and_returns_web_search_sources(monkeypatch):
-    from app.tellus.services.shoutout import provider
+    from app.tellus.services.shoutout.prompt import SearchQuery
 
     class FakeResponse:
         def raise_for_status(self):
@@ -179,19 +174,14 @@ def test_provider_requests_and_returns_web_search_sources(monkeypatch):
 
         def json(self):
             return {
-                "output": [
-                    {"type": "web_search_call", "action": {"sources": [
-                        {"url": "https://instagram.com/p/real"},
-                    ]}},
-                    {"type": "message", "content": [{"type": "output_text", "text": (
-                        '{"mentions":[{"platform":"instagram","url":"https://instagram.com/p/real"}]}'
-                    ), "annotations": []}]},
+                "organic_results": [
+                    {"link": "https://instagram.com/p/real", "title": "Cafe", "snippet": "matcha latte"},
                 ],
             }
 
     class FakeClient:
         def __init__(self):
-            self.payload = None
+            self.params = None
 
         async def __aenter__(self):
             return self
@@ -199,25 +189,32 @@ def test_provider_requests_and_returns_web_search_sources(monkeypatch):
         async def __aexit__(self, *_):
             return False
 
-        async def post(self, _url, *, headers, json):
-            self.payload = json
+        async def get(self, _url, *, params):
+            self.params = params
             return FakeResponse()
 
     client = FakeClient()
-    monkeypatch.setattr(provider, "get_settings", lambda: SimpleNamespace(
-        openai_api_key="test-key", openai_luna_model="gpt-5.6-luna",
-    ))
+    monkeypatch.setattr(provider, "get_settings", lambda: SimpleNamespace(serp_api_key="test-key"))
     monkeypatch.setattr(provider.httpx, "AsyncClient", lambda **_: client)
 
-    async def resolve(uris):
-        return uris, len(uris)
+    query = SearchQuery(q='site:instagram.com "matcha latte"', match_terms=["matcha latte"], num=20)
+    result = asyncio.run(provider.SerpApiProvider().search(query))
 
-    monkeypatch.setattr(provider, "resolve_grounding_uris", resolve)
-    result = asyncio.run(provider.OpenAIWebSearchProvider().search("find posts"))
-
-    assert client.payload["include"] == ["web_search_call.action.sources"]
+    assert client.params["engine"] == "google"
+    assert client.params["q"] == query.q
+    assert client.params["num"] == 20
+    assert client.params["api_key"] == "test-key"
     assert result.grounding_uris == ["https://instagram.com/p/real"]
     assert result.grounding_resolved == 1
+
+
+def test_provider_requires_serp_api_key(monkeypatch):
+    from app.tellus.services.shoutout import provider
+    from app.tellus.services.shoutout.prompt import SearchQuery
+
+    monkeypatch.setattr(provider, "get_settings", lambda: SimpleNamespace(serp_api_key=None))
+    with pytest.raises(RuntimeError, match="SERP_API_KEY"):
+        asyncio.run(provider.SerpApiProvider().search(SearchQuery(q="anything", match_terms=[], num=20)))
 
 
 def test_scan_run_uses_real_resolution_count_and_failure_backoff():

@@ -1,11 +1,12 @@
-"""OpenAI web-search provider behind the radar's future-provider seam."""
-import json
+"""SerpApi (Google Search) provider behind the radar's future-provider seam."""
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
 from ....config import get_settings
+from .prompt import SearchQuery
 
 
 @dataclass(frozen=True)
@@ -16,93 +17,71 @@ class SearchResult:
 
 
 class MentionProvider(Protocol):
-    async def search(self, prompt: str) -> SearchResult: ...
+    async def search(self, query: SearchQuery) -> SearchResult: ...
 
 
-def _json_object(text: str) -> dict:
-    value = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        start, end = value.find("{"), value.rfind("}")
-        if start < 0 or end < start:
-            return {}
-        try:
-            parsed = json.loads(value[start:end + 1])
-        except (TypeError, ValueError):
-            return {}
-    return parsed if isinstance(parsed, dict) else {}
+_HOST_PLATFORMS = {
+    "instagram.com": "instagram",
+    "tiktok.com": "tiktok",
+    "youtube.com": "youtube",
+    "youtu.be": "youtube",
+    "facebook.com": "facebook",
+    "fb.com": "facebook",
+    "x.com": "x",
+    "twitter.com": "x",
+}
 
 
-async def resolve_grounding_uris(uris: list[str]) -> tuple[list[str], int]:
-    """Resolve exactly one redirect hop without fetching social pages themselves."""
-    resolved: list[str] = []
-    successful = 0
-    async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
-        for uri in uris:
-            try:
-                response = await client.head(uri)
-                resolved.append(response.headers.get("location") or uri)
-                successful += 1
-            except httpx.HTTPError:
-                resolved.append(uri)
-    return resolved, successful
+def _platform_for_url(url: str) -> str | None:
+    host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    return _HOST_PLATFORMS.get(host)
 
 
-def _response_text_and_sources(payload: dict) -> tuple[str, list[str]]:
-    text, citations = [], []
-    for item in payload.get("output", []):
-        if not isinstance(item, dict):
+def _organic_results_to_mentions(payload: dict, match_terms: list[str]) -> SearchResult:
+    lowered_terms = [term.lower() for term in match_terms if term]
+    mentions: list[dict] = []
+    uris: list[str] = []
+    for result in payload.get("organic_results", []):
+        if not isinstance(result, dict):
             continue
-        if item.get("type") == "web_search_call":
-            action = item.get("action")
-            sources = action.get("sources", []) if isinstance(action, dict) else []
-            for source in sources:
-                if isinstance(source, dict) and isinstance(source.get("url"), str):
-                    citations.append(source["url"])
+        url = result.get("link")
+        if not isinstance(url, str):
             continue
-        if item.get("type") != "message":
+        platform = _platform_for_url(url)
+        if platform is None:
             continue
-        for content in item.get("content", []):
-            if not isinstance(content, dict) or content.get("type") != "output_text":
-                continue
-            if isinstance(content.get("text"), str):
-                text.append(content["text"])
-            for annotation in content.get("annotations", []):
-                if not isinstance(annotation, dict) or annotation.get("type") != "url_citation":
-                    continue
-                url = annotation.get("url")
-                if isinstance(url, str):
-                    citations.append(url)
-    return "\n".join(text), list(dict.fromkeys(citations))
+        snippet = result.get("snippet") if isinstance(result.get("snippet"), str) else ""
+        title = result.get("title") if isinstance(result.get("title"), str) else ""
+        haystack = f"{title} {snippet}".lower()
+        matched = [term for term in lowered_terms if term in haystack]
+        uris.append(url)
+        mentions.append({
+            "platform": platform,
+            "url": url,
+            "author_handle": None,
+            "excerpt": snippet.strip(),
+            "matched_terms": matched,
+            "confidence": 60 if matched else 40,
+            "corroborated": True,
+        })
+    resolved = list(dict.fromkeys(uris))
+    return SearchResult(mentions=mentions, grounding_uris=resolved, grounding_resolved=len(resolved))
 
 
-class OpenAIWebSearchProvider:
-    async def search(self, prompt: str) -> SearchResult:
+class SerpApiProvider:
+    async def search(self, query: SearchQuery) -> SearchResult:
         settings = get_settings()
-        if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for shoutout scans.")
-        if not settings.openai_luna_model:
-            raise RuntimeError("OPENAI_LUNA_MODEL is required for shoutout scans.")
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/responses",
-                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-                json={
-                    "model": settings.openai_luna_model,
-                    "input": prompt,
-                    "tools": [{"type": "web_search_preview"}],
-                    "tool_choice": "required",
-                    "include": ["web_search_call.action.sources"],
+        if not settings.serp_api_key:
+            raise RuntimeError("SERP_API_KEY is required for shoutout scans.")
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(
+                "https://serpapi.com/search",
+                params={
+                    "engine": "google",
+                    "q": query.q,
+                    "num": query.num,
+                    "api_key": settings.serp_api_key,
                 },
             )
             response.raise_for_status()
-        text, citations = _response_text_and_sources(response.json())
-        data = _json_object(text)
-        mentions = data.get("mentions") if isinstance(data.get("mentions"), list) else []
-        resolved, resolved_count = await resolve_grounding_uris(citations)
-        return SearchResult(
-            mentions=[item for item in mentions if isinstance(item, dict)],
-            grounding_uris=resolved,
-            grounding_resolved=resolved_count,
-        )
+        return _organic_results_to_mentions(response.json(), query.match_terms)

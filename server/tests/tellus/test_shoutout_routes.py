@@ -68,7 +68,7 @@ def test_manual_scan_normalizes_the_handle_without_persisting_it():
     with pytest.raises(ValueError):
         ShoutoutManualScanIn(platform="instagram", handle=" @ ")
     with pytest.raises(ValueError):
-        ShoutoutManualScanIn(platform="instagram", handle="oneoff_handle", max_results=11)
+        ShoutoutManualScanIn(platform="instagram", handle="oneoff_handle", max_results=101)
 
 
 def test_manual_scan_uses_the_grounded_scan_service():
