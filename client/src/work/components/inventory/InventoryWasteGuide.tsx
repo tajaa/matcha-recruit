@@ -12,19 +12,18 @@ const STEPS: Step[] = [
   { key: 'par', label: 'PAR', title: 'Use predictive PARs with guardrails', description: 'Review an item recommendation, apply it deliberately, or enroll a stable item in automatic updates.', location: 'Inventory → select an item → Predictive par; portfolio controls: Inventory → Forecast', bullets: ['Forecasting needs committed sales and mappings before it can recommend a PAR.', 'Maximum drift blocks a surprising automatic change.', 'PAR history explains every applied update.'], icon: SlidersHorizontal },
 ]
 
-export const INVENTORY_WASTE_GUIDE_STORAGE_KEY = 'matcha-inventory-waste-guide-v1'
-
 export default function InventoryWasteGuide({ open, onClose, initialStep = 0, autoOpenKey }: { open: boolean; onClose: () => void; initialStep?: number; autoOpenKey?: string }) {
   const [step, setStep] = useState(initialStep)
   const [autoDismissed, setAutoDismissed] = useState(false)
   const steps = useMemo<WizardStep[]>(() => STEPS.map(({ key, label }) => ({ key, label })), [])
-  const storageKey = autoOpenKey ? `${INVENTORY_WASTE_GUIDE_STORAGE_KEY}:${autoOpenKey}` : ''
-  const shouldAutoOpen = Boolean(storageKey) && !autoDismissed && (() => { try { return localStorage.getItem(storageKey) !== '1' } catch { return false } })()
+  // This guide intentionally reopens on every dashboard visit. Managers must
+  // actively skip it for the current visit rather than silently missing a
+  // newly introduced inventory-waste control.
+  const shouldAutoOpen = Boolean(autoOpenKey) && !autoDismissed
   const current = STEPS[step]
   const Icon = current.icon
 
   useEffect(() => { setStep(initialStep) }, [initialStep, open])
-  useEffect(() => { if (shouldAutoOpen) { try { localStorage.setItem(storageKey, '1') } catch { /* storage may be blocked */ } } }, [shouldAutoOpen, storageKey])
   function close() { setAutoDismissed(true); onClose() }
 
   return <Modal open={open || shouldAutoOpen} onClose={close} bare>
