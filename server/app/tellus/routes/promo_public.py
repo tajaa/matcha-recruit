@@ -97,7 +97,6 @@ async def shoutout_offer_preview(
 @router.post("/o/{offer_token}/claim", response_model=ShoutoutOfferClaimOut)
 async def shoutout_offer_claim(
     offer_token: str, request: Request, account: TellusAccount = Depends(require_consumer),
-    client_kind: Optional[str] = Header(default=None, alias="X-TellUs-Client"),
 ):
     ip = client_ip(request)
     await check_rate_limit(ip, "tellus_shoutout_offer_claim_burst", 5, 60)
@@ -105,7 +104,7 @@ async def shoutout_offer_claim(
     async with get_connection() as conn:
         try:
             return await offers_service.claim_offer(
-                conn, token=offer_token, account_id=account.id, client_kind=client_kind,
+                conn, token=offer_token, account_id=account.id,
             )
         except offers_service.OfferError as error:
             _raise_offer(error)
@@ -127,7 +126,6 @@ async def shoutout_offer_code_preview(
 @router.post("/o/code/{short_code}/claim", response_model=ShoutoutOfferClaimOut)
 async def shoutout_offer_code_claim(
     short_code: str, request: Request, account: TellusAccount = Depends(require_consumer),
-    client_kind: Optional[str] = Header(default=None, alias="X-TellUs-Client"),
 ):
     ip = client_ip(request)
     await check_rate_limit(ip, "tellus_shoutout_code_claim_burst", 3, 60)
@@ -135,7 +133,7 @@ async def shoutout_offer_code_claim(
     async with get_connection() as conn:
         try:
             return await offers_service.claim_offer(
-                conn, short_code=short_code, account_id=account.id, client_kind=client_kind,
+                conn, short_code=short_code, account_id=account.id,
             )
         except offers_service.OfferError as error:
             _raise_offer(error)

@@ -81,7 +81,18 @@ jobs:
           EVIDENCE_FILE: ${{ runner.temp }}/silent-error-evidence.txt
         run: |
           ./scripts/collect-silent-error-evidence.sh || true
-          echo '[]' > "$RUNNER_TEMP/incidents.json"
+          if [ ! -s "$RUNNER_TEMP/silent-error-evidence.txt" ]; then
+            echo '[]' > "$RUNNER_TEMP/incidents.json"
+            exit 0
+          fi
+          # Keep the fallback actionable: select.sh needs the same incident
+          # shape as the DB collector, while the evidence itself is already
+          # redacted by collect-silent-error-evidence.sh.
+          signature="$(sed -E -e 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+ /[TIME] /' -e 's/[0-9]+/[N]/g' "$RUNNER_TEMP/silent-error-evidence.txt" | sort -u | shasum -a 256 | cut -c1-12)"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg key "$signature" --arg seen "$now" --rawfile evidence "$RUNNER_TEMP/silent-error-evidence.txt" \
+            '[{stable_key: $key, error_id: "", kind: "http_error", level: "ERROR", exception_type: "LogFallback", message: $evidence, traceback: $evidence, source: "log_fallback", request_method: "", request_path: "", request_status: null, occurrences: 1, days_seen: 1, first_seen: $seen, last_seen: $seen, request_id: null, company_id: null}]' \
+            > "$RUNNER_TEMP/incidents.json"
 
       - name: Select one incident
         id: select

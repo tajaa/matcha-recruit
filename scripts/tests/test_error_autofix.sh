@@ -100,6 +100,15 @@ PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" "$AUTOFIX_DIR/collect.sh" 
 check "collect.sh rejects --hours with no value instead of crashing on \$2" $([ "$?" != "0" ] && echo 0 || echo 1)
 
 ################################################################################
+# Fallback workflow evidence must remain actionable, rather than being replaced
+# with an empty incident list before select.sh runs.
+################################################################################
+workflow="$REPO_ROOT/.github/workflows/silent-error-autofix.yml"
+fallback_block="$(sed -n '/Fallback log-grep evidence/,/Select one incident/p' "$workflow")"
+check "fallback turns nonempty evidence into an incident" \
+    $([[ "$fallback_block" == *'if [ ! -s "$RUNNER_TEMP/silent-error-evidence.txt" ]'* && "$fallback_block" == *'--rawfile evidence'* && "$fallback_block" == *'stable_key: $key'* ]] && echo 0 || echo 1)
+
+################################################################################
 # 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH
 ################################################################################
 GH_STUB_RESPONSE_FILE="$TMP_DIR/gh_response.json"

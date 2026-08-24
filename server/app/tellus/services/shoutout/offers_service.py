@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime, timezone
 from uuid import UUID
 
+from ....config import get_settings
 from ..email import tellus_web_url
 from .. import promo_service
 
@@ -176,7 +177,6 @@ async def preview_offer(
 
 async def claim_offer(
     conn, *, token: str | None = None, short_code: str | None = None, account_id: UUID,
-    client_kind: str | None = None,
 ) -> dict:
     async with conn.transaction():
         offer = await _load_offer(conn, token=token, short_code=short_code)
@@ -190,11 +190,17 @@ async def claim_offer(
                 "offer_id": offer["id"], "card_token": card["card_token"], "reward_text": offer["reward_text"],
                 "store_name": offer["store_name"], "claim_expires_at": offer["claim_expires_at"], "created": created,
             }
-        if offer.get("require_app_install") and client_kind != "ios":
+        if offer.get("require_app_install"):
             existed_when_offered = await conn.fetchval(
                 "SELECT created_at <= $2 FROM tellus_accounts WHERE id=$1", account_id, offer["offer_created_at"],
             )
-            if not existed_when_offered:
+            has_ios_install = await conn.fetchval(
+                """SELECT 1 FROM tellus_device_tokens
+                   WHERE account_id=$1 AND platform='ios' AND bundle_id=$2
+                   LIMIT 1""",
+                account_id, get_settings().apns_bundle_id_tellus,
+            )
+            if not existed_when_offered and not has_ios_install:
                 raise OfferError(409, "app_install_required", "Install the Tell-Us iPhone app to claim this offer.")
         if not _offer_available(offer):
             raise OfferError(410, "unavailable", "This offer is expired, revoked, or unavailable.")

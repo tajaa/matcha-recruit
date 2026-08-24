@@ -2,6 +2,7 @@
 import asyncio
 import inspect
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -36,9 +37,10 @@ class _Transaction:
 
 
 class _ClaimConn:
-    def __init__(self, offer, existing_card=None):
+    def __init__(self, offer, existing_card=None, has_ios_install=False):
         self.offer = offer
         self.existing_card = existing_card
+        self.has_ios_install = has_ios_install
         self.calls = []
 
     def transaction(self):
@@ -55,6 +57,8 @@ class _ClaimConn:
     async def fetchval(self, query, *_):
         if "FROM tellus_accounts" in query:
             return False
+        if "FROM tellus_device_tokens" in query:
+            return self.has_ios_install
         raise AssertionError(f"Unexpected query: {query}")
 
     async def execute(self, query, *_):
@@ -94,9 +98,12 @@ def test_claim_replay_returns_existing_card_before_cap_check(monkeypatch):
     assert result["created"] is False
 
 
-def test_install_gate_blocks_new_web_accounts_but_not_ios(monkeypatch):
+def test_install_gate_blocks_new_accounts_without_a_registered_ios_device(monkeypatch):
     conn = _ClaimConn(_offer(require_app_install=True))
     account_id = uuid4()
+    monkeypatch.setattr(
+        offers_service, "get_settings", lambda: SimpleNamespace(apns_bundle_id_tellus="com.beetlejuse.app"),
+    )
 
     with pytest.raises(offers_service.OfferError, match="Install the Tell-Us"):
         asyncio.run(offers_service.claim_offer(conn, token="offer", account_id=account_id))
@@ -105,5 +112,12 @@ def test_install_gate_blocks_new_web_accounts_but_not_ios(monkeypatch):
         return {"card_token": "card"}, True
 
     monkeypatch.setattr(offers_service.promo_service, "claim_card", claim_card)
-    result = asyncio.run(offers_service.claim_offer(conn, token="offer", account_id=account_id, client_kind="ios"))
+    registered_conn = _ClaimConn(_offer(require_app_install=True), has_ios_install=True)
+    result = asyncio.run(offers_service.claim_offer(registered_conn, token="offer", account_id=account_id))
     assert result["created"] is True
+
+
+def test_install_gate_does_not_trust_a_client_header():
+    source = inspect.getsource(offers_service.claim_offer)
+    assert "client_kind" not in source
+    assert "FROM tellus_device_tokens" in source
