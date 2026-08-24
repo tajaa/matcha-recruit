@@ -283,15 +283,20 @@ async def receive_channel_lines(
 async def commit_receipt_lines(
     conn, *, company_id: UUID, user_id: UUID, location_id: Optional[UUID],
     vendor: Optional[str], invoice_number: Optional[str], force: bool, lines: list[dict],
+    received_on: Optional[date] = None,
 ) -> dict:
     """Shared commit writer — REST route and the Huume chat tool both call
-    this. `lines`: [{item_id|new_item_name, quantity, order_id}]. Raises
-    ValueError("location not found") for an unowned location; raises
-    DuplicateInvoiceError when invoice_number already appears on a prior
-    movement's note and force is False. PER-LINE transactions — one wrapping
-    transaction can't survive a failed row in Postgres (first error aborts
-    it), and the caller's bad-rows-fail-alone contract needs that.
+    this. `lines`: [{item_id|new_item_name, quantity, order_id, expires_on}].
+    `received_on` is the reviewed receipt date (defaults to today); each
+    line may carry its own `expires_on` override, else record_lot falls
+    back to the item's shelf_life_days. Raises ValueError("location not
+    found") for an unowned location; raises DuplicateInvoiceError when
+    invoice_number already appears on a prior movement's note and force is
+    False. PER-LINE transactions — one wrapping transaction can't survive a
+    failed row in Postgres (first error aborts it), and the caller's
+    bad-rows-fail-alone contract needs that.
     Returns {total_rows, created, failed, errors, ids}."""
+    received_on = received_on or date.today()
     from app.matcha.services.inventory import movements as movements_service
     from app.matcha.services.inventory import orders as orders_service
 
@@ -366,7 +371,7 @@ async def commit_receipt_lines(
                     await lots_service.record_lot(
                         conn, company_id=company_id, item_id=item_id, location_id=location_id,
                         received_movement_id=inserted[0]["id"], quantity=quantity,
-                        received_on=date.today(), expires_on=None, lot_code=None,
+                        received_on=received_on, expires_on=line.get("expires_on"), lot_code=None,
                         unit_cost=None, created_by=user_id,
                     )
                 created += 1

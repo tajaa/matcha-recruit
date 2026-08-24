@@ -31,6 +31,7 @@ from app.matcha.services.inventory.waste import par_ai
 
 router = APIRouter()
 _forecast_gate = Depends(require_all_features("inventory", "sales_intake", "inventory_forecasting"))
+_par_gate = Depends(require_all_features("inventory", "sales_intake", "inventory_forecasting", "inventory_waste"))
 
 
 def _overrides(body) -> list[dict]:
@@ -203,7 +204,7 @@ async def get_latest_forecast_run(
 async def apply_forecast_par(
     run_id: UUID, body: ForecastParApply,
     company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client),
-    _gate=_forecast_gate,
+    _gate=_par_gate,
 ):
     # Explicit manager application can override a pinned/drifted par only for
     # named items. A body without item ids keeps the normal deterministic gate.
@@ -215,7 +216,7 @@ async def apply_forecast_par(
 
 
 @router.post('/par-ai')
-async def draft_par_exceptions(body: ForecastParAIDraft, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client), _gate=_forecast_gate):
+async def draft_par_exceptions(body: ForecastParAIDraft, company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client), _gate=_par_gate):
     await check_rate_limit(f'user:{user.id}', 'inventory_par_ai_burst', 5, 60)
     await check_rate_limit(f'user:{user.id}', 'inventory_par_ai', 40, 3600)
     await check_rate_limit(str(company_id), 'inventory_par_ai_company', 120, 3600)

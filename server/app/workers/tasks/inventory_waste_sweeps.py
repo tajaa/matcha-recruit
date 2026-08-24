@@ -132,14 +132,12 @@ async def _run_par():
         applied = 0
         setting = await scheduler_settings_row(conn, 'inventory_par_sweep')
         for company in await _companies(conn, int((setting or {}).get('max_per_cycle', 200))):
-            settings = await forecast_store.get_settings(conn, company['id'], None)
-            if not settings['par_auto_apply']:
-                continue
-            run = await forecast_store.create_run(conn, company_id=company['id'], user_id=None, location_id=None, forecast_start=date.today(), overrides=[])
-            result = await par_store.apply_par_recommendations(conn, company_id=company['id'], run_id=run['id'], user_id=None, mode='auto')
-            applied += result['applied']
-            if result['applied']:
-                await _notify(conn, company_id=company['id'], location_id=None, kind='par_applied', content=f"📦 Predictive par updated {result['applied']} item(s).")
+            for location_id in await forecast_store.list_par_auto_apply_scopes(conn, company_id=company['id']):
+                run = await forecast_store.create_run(conn, company_id=company['id'], user_id=None, location_id=location_id, forecast_start=date.today(), overrides=[])
+                result = await par_store.apply_par_recommendations(conn, company_id=company['id'], run_id=run['id'], user_id=None, mode='auto')
+                applied += result['applied']
+                if result['applied']:
+                    await _notify(conn, company_id=company['id'], location_id=location_id, kind='par_applied', content=f"📦 Predictive par updated {result['applied']} item(s).")
         return {'applied': applied}
     except Exception:
         if claimed:

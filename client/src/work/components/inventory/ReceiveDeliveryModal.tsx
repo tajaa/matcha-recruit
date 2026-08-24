@@ -10,6 +10,7 @@ type DraftLine = ReceiptLine & {
   selectedItemId: string
   createNew: boolean
   editableQty: number
+  expiresOn: string
   commitError?: string
 }
 
@@ -19,6 +20,7 @@ function toDraftLine(line: ReceiptLine): DraftLine {
     selectedItemId: line.item_id ?? '',
     createNew: !line.item_id,
     editableQty: line.quantity ?? 0,
+    expiresOn: '',
   }
 }
 
@@ -37,6 +39,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
   const [draft, setDraft] = useState<ReceiptDraft | null>(null)
   const [lines, setLines] = useState<DraftLine[]>([])
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null)
+  const [receivedOn, setReceivedOn] = useState('')
 
   const itemOptions = items.map((i) => ({ value: i.id, label: i.name }))
 
@@ -44,6 +47,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
     setDraft(null)
     setLines([])
     setDuplicateWarning(null)
+    setReceivedOn('')
   }
 
   function handleClose() {
@@ -59,6 +63,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
       const result = await parseReceipt(file, locationId)
       setDraft(result)
       setLines(result.lines.map(toDraftLine))
+      setReceivedOn(result.invoice_date ?? new Date().toISOString().slice(0, 10))
       if (!result.available) {
         toast("Couldn't read any line items from that file — check the format or enter items manually.", 'error')
       }
@@ -84,6 +89,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
         location_id: locationId,
         vendor: draft.vendor,
         invoice_number: draft.invoice_number,
+        received_on: receivedOn || undefined,
         force,
         lines: submitted.map(({ l }) => ({
           item_id: l.createNew ? undefined : l.selectedItemId || undefined,
@@ -93,6 +99,7 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
           // match — switching to "new item" or a different item must not
           // flip a stranger's order to received.
           order_id: !l.createNew && l.selectedItemId === l.item_id ? (l.open_order_id ?? undefined) : undefined,
+          expires_on: l.expiresOn || undefined,
         })),
       })
       setDuplicateWarning(null)
@@ -147,6 +154,15 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
               {draft.invoice_number ? `Invoice ${draft.invoice_number}` : ''}
             </div>
           )}
+          <label className="flex items-center gap-2 text-xs text-zinc-400">
+            Received on
+            <input
+              type="date"
+              value={receivedOn}
+              onChange={(e) => setReceivedOn(e.target.value)}
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-200"
+            />
+          </label>
           <div className="space-y-3 max-h-96 overflow-y-auto">
             {lines.map((line, idx) => (
               <div key={idx} className="border border-zinc-800 rounded-lg p-3 space-y-2">
@@ -189,6 +205,13 @@ export default function ReceiveDeliveryModal({ open, onClose, items, locationId,
                     value={line.editableQty}
                     onChange={(e) => updateLine(idx, { editableQty: Number(e.target.value) })}
                     className="w-24 text-sm rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1"
+                  />
+                  <input
+                    type="date"
+                    value={line.expiresOn}
+                    onChange={(e) => updateLine(idx, { expiresOn: e.target.value })}
+                    title="Expires on (optional — falls back to the item's shelf life)"
+                    className="w-36 text-sm rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1 text-zinc-400"
                   />
                 </div>
               </div>

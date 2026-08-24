@@ -706,7 +706,7 @@ async def commit_receipt_route(
 
     lines = [
         {"item_id": line.item_id, "new_item_name": line.new_item_name,
-         "quantity": line.quantity, "order_id": line.order_id}
+         "quantity": line.quantity, "order_id": line.order_id, "expires_on": line.expires_on}
         for line in body.lines
     ]
     async with get_connection() as conn:
@@ -714,6 +714,7 @@ async def commit_receipt_route(
             result = await receipts_service.commit_receipt_lines(
                 conn, company_id=company_id, user_id=user.id, location_id=body.location_id,
                 vendor=body.vendor, invoice_number=body.invoice_number, force=body.force, lines=lines,
+                received_on=body.received_on,
             )
         except ValueError:
             raise HTTPException(404, "Location not found.")

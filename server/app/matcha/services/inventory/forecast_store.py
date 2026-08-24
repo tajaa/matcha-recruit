@@ -115,6 +115,18 @@ async def upsert_settings(conn, *, company_id: UUID, user_id: UUID, values: dict
     return _settings_dict(row)
 
 
+async def list_par_auto_apply_scopes(conn, *, company_id: UUID) -> list[Optional[UUID]]:
+    """Every location_id (including NULL for company-wide) with its own
+    par_auto_apply=TRUE settings row. A location never inherits the
+    company-wide row's par_auto_apply — it must configure its own."""
+    rows = await conn.fetch(
+        "SELECT location_id FROM inventory_forecast_settings "
+        "WHERE company_id=$1 AND par_auto_apply=TRUE",
+        company_id,
+    )
+    return [row["location_id"] for row in rows]
+
+
 async def list_rules(conn, *, company_id: UUID, location_id: Optional[UUID]) -> list[dict]:
     settings = await get_settings(conn, company_id, location_id)
     rows = await conn.fetch(

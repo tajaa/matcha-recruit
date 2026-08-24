@@ -207,8 +207,9 @@ export function commitReceipt(body: {
   location_id?: string | null
   vendor?: string | null
   invoice_number?: string | null
+  received_on?: string | null
   force?: boolean
-  lines: { item_id?: string | null; new_item_name?: string | null; quantity: number; order_id?: string | null }[]
+  lines: { item_id?: string | null; new_item_name?: string | null; quantity: number; order_id?: string | null; expires_on?: string | null }[]
 }) {
   return api.post<ReceiptCommitResult>('/inventory/receipts/commit', body)
 }
@@ -632,5 +633,6 @@ export function listExpiringLots(days = 7) { return api.get<{ lots: { id: string
 export function enrollAutoPar(itemIds: string[], enrolled: boolean) { return api.post('/inventory/waste/par/enroll', { item_ids: itemIds, enrolled }) }
 export type ParHistoryEntry = { id: string; item_id: string; previous_par: number | null; new_par: number; par_basis: string | null; drift_pct: number | null; source: 'auto' | 'manual' | 'huume'; changed_at: string }
 export function getParHistory(itemId: string) { return api.get<{ history: ParHistoryEntry[] }>(`/inventory/waste/par/history?item_id=${itemId}`) }
-export function askWasteAnalyst(question: string) { return api.post<{ answer: string; citations: unknown[] }>('/inventory/waste/ask', { question }) }
+export type WasteAnalystCitation = { id: string; kind: string; data: unknown }
+export function askWasteAnalyst(question: string) { return api.post<{ answer: string; citations: WasteAnalystCitation[] }>('/inventory/waste/ask', { question }) }
 export function getWasteVariance(start: string, end: string) { return api.get<{ lines: { item_id: string; name: string; theoretical_usage: number | null; actual_usage: number | null; usage_variance: number | null }[] }>(`/inventory/waste/variance?start=${start}&end=${end}`) }

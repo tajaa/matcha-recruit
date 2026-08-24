@@ -20,7 +20,9 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
   const { toast } = useToast()
   const { hasFeature } = useMe()
   const canSales = hasFeature('sales_intake')
-  const canForecast = canSales && hasFeature('inventory_forecasting')
+  // Par apply/enroll live under the inventory_waste-gated backend endpoints —
+  // ParPanel's "Apply recommendation" button must not render without it.
+  const canForecast = canSales && hasFeature('inventory_forecasting') && hasFeature('inventory_waste')
   const [item, setItem] = useState<InventoryItem | null>(null)
   const [movements, setMovements] = useState<InventoryMovement[]>([])
   const [expected, setExpected] = useState<Awaited<ReturnType<typeof getItem>>['expected']>(null)

@@ -109,12 +109,14 @@ class ReceiptCommitLine(BaseModel):
     new_item_name: Optional[str] = None  # ... or create-new (exactly one required)
     quantity: float = Field(gt=0)        # the user-CONFIRMED count (invoice figure is only the prefill)
     order_id: Optional[UUID] = None      # open order to mark_received against
+    expires_on: Optional[date] = None    # per-line override; falls back to shelf_life_days if unset
 
 
 class ReceiptCommit(BaseModel):
     location_id: Optional[UUID] = None
     vendor: Optional[str] = None
     invoice_number: Optional[str] = None
+    received_on: Optional[date] = None   # reviewed receipt date; defaults to today if unset
     force: bool = False                  # override the duplicate_invoice 409
     lines: list[ReceiptCommitLine]
 
