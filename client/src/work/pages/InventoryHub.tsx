@@ -29,6 +29,7 @@ import ReceiveDeliveryModal from '../components/inventory/ReceiveDeliveryModal'
 import SalesImportModal from '../components/inventory/SalesImportModal'
 import SalesMappingsPanel from '../components/inventory/SalesMappingsPanel'
 import SalesIntakeWizard from '../components/inventory/SalesIntakeWizard'
+import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 import InventoryGuideWizard, {
   INVENTORY_HELP,
   InventoryHelpButton,
@@ -237,6 +238,11 @@ export default function InventoryHub() {
           if (action === 'receive') setReceiveOpen(true)
         }}
       />
+      {hasFeature('inventory_waste') && <InventoryWasteGuide
+        open={false}
+        autoOpenKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'}
+        onClose={() => undefined}
+      />}
       <InventoryHelpModal help={help} onClose={() => setHelp(null)} />
       {canSales && mappingsOpen && <SalesMappingsPanel
         items={visibleItems}
@@ -269,7 +275,7 @@ export default function InventoryHub() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-xl border border-w-line bg-w-surface">
+        <section id="waste-protect" className="scroll-mt-6 overflow-hidden rounded-xl border border-w-line bg-w-surface">
           <div className="flex flex-col gap-2 border-b border-w-line px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2 text-sm font-medium text-w-text"><Boxes size={15} className="text-w-accent" /> Inventory catalog <span className="text-xs font-normal text-w-faint">{visibleItems.length}{catalogIsFiltered ? ` of ${items.length}` : ''} shown</span></div>

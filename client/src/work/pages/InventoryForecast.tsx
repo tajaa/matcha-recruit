@@ -21,6 +21,7 @@ import {
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
+import { useMe } from '../../hooks/useMe'
 
 const DEFAULT_SETTINGS: ForecastSettings = {
   location_id: null,
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: ForecastSettings = {
 export default function InventoryForecast() {
   const base = useWorkBase()
   const navigate = useNavigate()
+  const { me } = useMe()
   const { toast } = useToast()
   const [locations, setLocations] = useState<ChannelLocation[]>([])
   const [locationId, setLocationId] = useState('')
@@ -160,7 +162,7 @@ export default function InventoryForecast() {
           </div>
         </header>
 
-        <section className="rounded-xl border border-w-line bg-w-surface p-4">
+        <section id="waste-par" className="scroll-mt-6 rounded-xl border border-w-line bg-w-surface p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <h2 className="text-sm font-medium">Forecast setup</h2>
@@ -218,7 +220,7 @@ export default function InventoryForecast() {
         ) : (
           <ForecastResults run={run} />
         )}
-        <InventoryWasteGuide open={guideOpen} initialStep={3} onClose={() => setGuideOpen(false)} />
+        <InventoryWasteGuide open={guideOpen} initialStep={3} autoOpenKey={me?.profile?.company_id ?? me?.user?.id ?? 'current'} onClose={() => setGuideOpen(false)} />
       </div>
     </div>
   )
