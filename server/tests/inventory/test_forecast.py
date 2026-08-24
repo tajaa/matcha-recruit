@@ -94,6 +94,16 @@ def test_case_pack_cannot_reinflate_past_shelf_cap():
     assert result["suggested_quantity"] == Decimal("10")
 
 
+def test_case_pack_still_rounds_when_shelf_life_does_not_cap():
+    result = calculate_replenishment(
+        current_quantity=Decimal("0"), daily_demand=[Decimal("2")] * 56,
+        forecast_start=date(2026, 2, 2), lead_time_days=2, safety_stock_days=5,
+        shelf_life_days=30, case_pack_quantity=Decimal("12"),
+    )
+    assert result["shelf_life_capped"] is False
+    assert result["suggested_quantity"] == Decimal("24")
+
+
 def test_shelf_life_cap_falls_back_when_window_is_past_horizon():
     result = calculate_replenishment(
         current_quantity=Decimal("0"), daily_demand=[Decimal("2")] * 3,

@@ -70,7 +70,7 @@ async def discard_lot(lot_id: UUID, company_id: UUID = Depends(get_client_compan
             lot = await conn.fetchrow("SELECT * FROM inventory_lots WHERE id=$1 AND company_id=$2 AND status='open' FOR UPDATE", lot_id, company_id)
             if lot is None: raise HTTPException(404, "Open lot not found.")
             quantity = lot['quantity_remaining']
-            rows = await movements.record_movements(conn, company_id=company_id, channel_id=None, source_message_id=None, recorded_by=user.id, kind='waste', narrative='Expired lot discarded', note=f"Lot {lot['lot_code'] or str(lot_id)}", lines=[{'item_id': lot['item_id'], 'quantity': quantity, 'estimated': False, 'waste_reason': 'expired'}])
+            rows = await movements.record_movements(conn, company_id=company_id, channel_id=None, source_message_id=None, recorded_by=user.id, kind='waste', narrative='Expired lot discarded', note=f"Lot {lot['lot_code'] or str(lot_id)}", lines=[{'item_id': lot['item_id'], 'quantity': quantity, 'estimated': False, 'waste_reason': 'expired', 'consume_lots': False}])
             await conn.execute("UPDATE inventory_lots SET quantity_remaining=0,status='discarded',updated_at=NOW() WHERE id=$1", lot_id)
     return {"lot_id": lot_id, "movement": rows[0] if rows else None}
 

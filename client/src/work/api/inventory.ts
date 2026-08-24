@@ -528,6 +528,7 @@ export type ForecastAIDraft = {
 
 export type ForecastLine = {
   id?: string
+  run_id: string
   item_id: string
   name: string
   unit: string | null
@@ -617,7 +618,7 @@ export function getForecastRun(runId: string) {
 }
 
 export function applyForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) {
-  return api.post(`/inventory/forecast/runs/${runId}/apply-par`, body)
+  return api.post<{ considered: number; applied: number; skipped: { item_id: string; reason: string }[] }>(`/inventory/forecast/runs/${runId}/apply-par`, body)
 }
 
 export type WasteRollup = { total_units: number; total_value: number | null; revenue: number | null; waste_pct_of_revenue: number | null; groups: { key: string; label: string; units: number; value: number | null; pct: number | null }[] }
@@ -629,5 +630,7 @@ export function recordWaste(body: { item_id: string; quantity: number; reason: W
 }
 export function listExpiringLots(days = 7) { return api.get<{ lots: { id: string; item_id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[] }>(`/inventory/waste/lots?expiring_within_days=${days}`) }
 export function enrollAutoPar(itemIds: string[], enrolled: boolean) { return api.post('/inventory/waste/par/enroll', { item_ids: itemIds, enrolled }) }
+export type ParHistoryEntry = { id: string; item_id: string; previous_par: number | null; new_par: number; par_basis: string | null; drift_pct: number | null; source: 'auto' | 'manual' | 'huume'; changed_at: string }
+export function getParHistory(itemId: string) { return api.get<{ history: ParHistoryEntry[] }>(`/inventory/waste/par/history?item_id=${itemId}`) }
 export function askWasteAnalyst(question: string) { return api.post<{ answer: string; citations: unknown[] }>('/inventory/waste/ask', { question }) }
 export function getWasteVariance(start: string, end: string) { return api.get<{ lines: { item_id: string; name: string; theoretical_usage: number | null; actual_usage: number | null; usage_variance: number | null }[] }>(`/inventory/waste/variance?start=${start}&end=${end}`) }

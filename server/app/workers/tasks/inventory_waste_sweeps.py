@@ -12,6 +12,34 @@ from ..utils import get_db_connection, scheduler_enabled, scheduler_settings_row
 
 logger = logging.getLogger(__name__)
 
+_EXPIRY_INTERVAL_HOURS = 20
+_PAR_INTERVAL_HOURS = 20
+_DIGEST_INTERVAL_HOURS = 24 * 7
+
+
+async def _claim_cycle(conn, task_key: str, interval_hours: int) -> bool:
+    """Atomically claim a scheduler cycle despite the 15-minute worker restart.
+
+    Scheduler dispatch deliberately happens on every worker boot.  Alert
+    dedupe protects delivery, but not the expensive forecast run or a rolling
+    weekly digest, so each task must own its cadence here.
+    """
+    claimed = await conn.fetchval(
+        """
+        UPDATE scheduler_settings SET last_run_at=NOW()
+        WHERE task_key=$1 AND enabled=TRUE
+          AND (last_run_at IS NULL OR last_run_at < NOW() - ($2 || ' hours')::interval)
+        RETURNING task_key
+        """,
+        task_key, str(interval_hours),
+    )
+    return claimed is not None
+
+
+async def _release_cycle(conn, task_key: str) -> None:
+    """Allow Celery's retry to make a fresh claim after a full task failure."""
+    await conn.execute("UPDATE scheduler_settings SET last_run_at=NULL WHERE task_key=$1", task_key)
+
 async def _companies(conn, limit):
     rows = await conn.fetch("SELECT id, enabled_features, signup_source FROM companies WHERE deleted_at IS NULL ORDER BY id LIMIT $1", limit)
     return [row for row in rows if (lambda f: f.get('matcha_ops') and f.get('inventory') and f.get('inventory_waste'))(merge_company_features(row['enabled_features'], row['signup_source']))]
@@ -52,8 +80,11 @@ async def _notify(conn, *, company_id, location_id, kind, content):
 
 async def _run_expiry():
     conn = await get_db_connection()
+    claimed = False
     try:
         if not await scheduler_enabled(conn, 'inventory_expiry_sweep', default=False): return {'disabled': True}
+        claimed = await _claim_cycle(conn, 'inventory_expiry_sweep', _EXPIRY_INTERVAL_HOURS)
+        if not claimed: return {'skipped': 'not_due'}
         setting = await scheduler_settings_row(conn, 'inventory_expiry_sweep')
         sent = 0
         for company in await _companies(conn, int((setting or {}).get('max_per_cycle', 200))):
@@ -64,27 +95,43 @@ async def _run_expiry():
                 if await _notify(conn, company_id=company['id'], location_id=location_id, kind='expiring', content=f"📦 {len(group)} lot(s) expire within 3 days: " + ', '.join(str(x['name']) for x in group[:5])):
                     sent += 1
         return {'sent': sent}
+    except Exception:
+        if claimed:
+            await _release_cycle(conn, 'inventory_expiry_sweep')
+        raise
     finally: await conn.close()
 
 async def _run_digest():
     conn = await get_db_connection()
+    claimed = False
     try:
         if not await scheduler_enabled(conn, 'inventory_waste_digest', default=False): return {'disabled': True}
+        claimed = await _claim_cycle(conn, 'inventory_waste_digest', _DIGEST_INTERVAL_HOURS)
+        if not claimed: return {'skipped': 'not_due'}
         sent = 0
-        for company in await _companies(conn, 200):
+        setting = await scheduler_settings_row(conn, 'inventory_waste_digest')
+        for company in await _companies(conn, int((setting or {}).get('max_per_cycle', 200))):
             result = await rollup.waste_rollup(conn, company_id=company['id'], location_id=None, start=date.today()-timedelta(days=7), end=date.today(), group_by='item')
             pct = f" ({result['waste_pct_of_revenue']:.1%} of revenue)" if result['waste_pct_of_revenue'] is not None else ''
             if result['total_units'] and await _notify(conn, company_id=company['id'], location_id=None, kind='waste_spike', content=f"📦 Weekly waste: {result['total_units']} units{pct}."):
                 sent += 1
         return {'sent': sent}
+    except Exception:
+        if claimed:
+            await _release_cycle(conn, 'inventory_waste_digest')
+        raise
     finally: await conn.close()
 
 async def _run_par():
     conn = await get_db_connection()
+    claimed = False
     try:
         if not await scheduler_enabled(conn, 'inventory_par_sweep', default=False): return {'disabled': True}
+        claimed = await _claim_cycle(conn, 'inventory_par_sweep', _PAR_INTERVAL_HOURS)
+        if not claimed: return {'skipped': 'not_due'}
         applied = 0
-        for company in await _companies(conn, 200):
+        setting = await scheduler_settings_row(conn, 'inventory_par_sweep')
+        for company in await _companies(conn, int((setting or {}).get('max_per_cycle', 200))):
             settings = await forecast_store.get_settings(conn, company['id'], None)
             if not settings['par_auto_apply']:
                 continue
@@ -94,11 +141,31 @@ async def _run_par():
             if result['applied']:
                 await _notify(conn, company_id=company['id'], location_id=None, kind='par_applied', content=f"📦 Predictive par updated {result['applied']} item(s).")
         return {'applied': applied}
+    except Exception:
+        if claimed:
+            await _release_cycle(conn, 'inventory_par_sweep')
+        raise
     finally: await conn.close()
 
-@celery_app.task(bind=True, max_retries=3)
-def run_inventory_expiry_sweep(self): return asyncio.run(_run_expiry())
-@celery_app.task(bind=True, max_retries=3)
-def run_inventory_waste_digest(self): return asyncio.run(_run_digest())
-@celery_app.task(bind=True, max_retries=3)
-def run_inventory_par_sweep(self): return asyncio.run(_run_par())
+@celery_app.task(bind=True, max_retries=3, acks_late=True)
+def run_inventory_expiry_sweep(self):
+    try:
+        return asyncio.run(_run_expiry())
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=120)
+
+
+@celery_app.task(bind=True, max_retries=3, acks_late=True)
+def run_inventory_waste_digest(self):
+    try:
+        return asyncio.run(_run_digest())
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=120)
+
+
+@celery_app.task(bind=True, max_retries=3, acks_late=True)
+def run_inventory_par_sweep(self):
+    try:
+        return asyncio.run(_run_par())
+    except Exception as exc:
+        raise self.retry(exc=exc, countdown=120)

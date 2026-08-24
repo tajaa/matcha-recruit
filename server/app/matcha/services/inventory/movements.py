@@ -4,6 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory.matching import best_match, normalize_name
+from app.matcha.services.inventory.waste import lots as lots_service
 
 
 async def list_item_names(conn, company_id: UUID, location_id: Optional[UUID] = None) -> list[dict]:
@@ -214,6 +215,14 @@ async def record_movements(
                 """,
                 line["item_id"], delta,
             )
+            # Lots are advisory labels, not a second stock ledger, but they
+            # still need to follow observed depletion or expiry alerts become
+            # permanently stale.  A targeted lot discard owns its own close
+            # and opts out to avoid consuming an unrelated FEFO lot.
+            if delta < 0 and line.get("consume_lots", True):
+                await lots_service.consume_fefo(
+                    conn, company_id=company_id, item_id=line["item_id"], quantity=abs(delta),
+                )
     return inserted
 
 

@@ -175,7 +175,7 @@ def calculate_replenishment(
         # A supplier's pack size is a constraint, not permission to order
         # inventory beyond its usable life. The discrepancy is surfaced as a
         # shelf-life cap for a supplier/pack-size decision.
-        if shelf_cap is not None:
+        if shelf_life_capped:
             suggested_quantity = min(suggested_quantity, max(target_quantity - _decimal(current_quantity) - _decimal(on_order_quantity), Decimal("0")))
 
     return {

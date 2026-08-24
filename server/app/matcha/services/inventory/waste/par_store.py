@@ -54,12 +54,10 @@ async def apply_par_recommendations(conn, *, company_id: UUID, run_id: UUID, use
             continue
         try:
             async with conn.transaction():
-                updated = await conn.fetchrow(
-                    "UPDATE inventory_items SET low_stock_threshold=$2, par_source=$3, updated_at=NOW() WHERE id=$1 AND company_id=$4 RETURNING id",
-                    row["item_id"], recommendation, "auto" if mode == "auto" else row["par_source"], company_id,
-                )
-                if updated is None:
-                    raise ValueError("item not found")
+                # Claim the (run, item) journal entry before changing the
+                # mutable par.  The unique index is the idempotency boundary:
+                # a retried *older* run must not overwrite a newer par just
+                # because its history insert later conflicts.
                 inserted = await conn.fetchrow(
                     """
                     INSERT INTO inventory_par_history
@@ -70,8 +68,16 @@ async def apply_par_recommendations(conn, *, company_id: UUID, run_id: UUID, use
                     """, company_id, row["item_id"], run_id, current, recommendation, row["par_basis"], drift,
                     mode, reason, user_id,
                 )
-                if inserted is not None:
-                    out["applied"] += 1
+                if inserted is None:
+                    out["skipped"].append({"item_id": row["item_id"], "reason": "already_applied"})
+                    continue
+                updated = await conn.fetchrow(
+                    "UPDATE inventory_items SET low_stock_threshold=$2, par_source=$3, updated_at=NOW() WHERE id=$1 AND company_id=$4 RETURNING id",
+                    row["item_id"], recommendation, "auto" if mode == "auto" else row["par_source"], company_id,
+                )
+                if updated is None:
+                    raise ValueError("item not found")
+                out["applied"] += 1
         except Exception:
             out["skipped"].append({"item_id": row["item_id"], "reason": "write_failed"})
     return out

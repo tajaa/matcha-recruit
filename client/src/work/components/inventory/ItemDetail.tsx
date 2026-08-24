@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Archive, Clock3, Loader2 } from 'lucide-react'
 import { Button, Input, useToast } from '../../../components/ui'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
-import { getItem, patchItem, type InventoryItem, type InventoryMovement } from '../../api/inventory'
+import { getItem, listExpiringLots, patchItem, type InventoryItem, type InventoryMovement } from '../../api/inventory'
 import { useMe } from '../../../hooks/useMe'
 import {
   INVENTORY_HELP,
@@ -11,6 +11,7 @@ import {
   InventoryHelpModal,
   type InventorySectionHelp,
 } from './InventoryHelp'
+import ParPanel from './ParPanel'
 
 export default function ItemDetail({ itemId }: { itemId: string }) {
   const navigate = useNavigate()
@@ -18,11 +19,17 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
   const { toast } = useToast()
   const { hasFeature } = useMe()
   const canSales = hasFeature('sales_intake')
+  const canForecast = canSales && hasFeature('inventory_forecasting')
   const [item, setItem] = useState<InventoryItem | null>(null)
   const [movements, setMovements] = useState<InventoryMovement[]>([])
   const [expected, setExpected] = useState<Awaited<ReturnType<typeof getItem>>['expected']>(null)
   const [loading, setLoading] = useState(true)
   const [countInput, setCountInput] = useState('')
+  const [categoryInput, setCategoryInput] = useState('')
+  const [shelfLifeInput, setShelfLifeInput] = useState('')
+  const [yieldInput, setYieldInput] = useState('')
+  const [lots, setLots] = useState<{ id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[]>([])
+  const [savingPerishable, setSavingPerishable] = useState(false)
   const [help, setHelp] = useState<InventorySectionHelp | null>(null)
 
   const load = () => {
@@ -33,9 +40,15 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
         setMovements(mv)
         setExpected(breakdown ?? null)
         setCountInput(it.current_quantity !== null ? String(it.current_quantity) : '')
+        setCategoryInput(it.category ?? '')
+        setShelfLifeInput(it.shelf_life_days == null ? '' : String(it.shelf_life_days))
+        setYieldInput(it.yield_pct == null ? '' : String(it.yield_pct))
       })
       .catch(() => toast('Failed to load item', 'error'))
       .finally(() => setLoading(false))
+    void listExpiringLots(365).then(({ lots: next }) => {
+      setLots(next.filter((lot) => lot.item_id === itemId))
+    }).catch(() => setLots([]))
   }
 
   useEffect(() => {
@@ -63,6 +76,25 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
       navigate(`${base}/inventory`)
     } catch {
       toast('Failed to archive item', 'error')
+    }
+  }
+
+  async function savePerishableSettings() {
+    const shelfLife = shelfLifeInput.trim() === '' ? undefined : Number(shelfLifeInput)
+    const yieldPct = yieldInput.trim() === '' ? undefined : Number(yieldInput)
+    if ((shelfLife !== undefined && (!Number.isInteger(shelfLife) || shelfLife < 1 || shelfLife > 3650)) || (yieldPct !== undefined && (yieldPct <= 0 || yieldPct > 1))) {
+      toast('Enter a shelf life of 1–3650 days and yield between 0 and 1', 'error')
+      return
+    }
+    setSavingPerishable(true)
+    try {
+      await patchItem(itemId, { category: categoryInput.trim() || undefined, shelf_life_days: shelfLife, yield_pct: yieldPct })
+      toast('Perishable settings saved', 'success')
+      load()
+    } catch {
+      toast('Could not save perishable settings', 'error')
+    } finally {
+      setSavingPerishable(false)
     }
   }
 
@@ -146,7 +178,11 @@ export default function ItemDetail({ itemId }: { itemId: string }) {
           )}
         </div>
 
-        <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="text-sm font-medium text-w-text">Perishable & par settings</h2><div className="mt-3 grid gap-2 sm:grid-cols-4"><DetailStat label="Category" value={item.category ?? 'Uncategorized'} /><DetailStat label="Shelf life" value={item.shelf_life_days ? `${item.shelf_life_days} days` : 'Not set'} /><DetailStat label="Yield" value={item.yield_pct ? `${Math.round(item.yield_pct * 100)}%` : '100%'} /><DetailStat label="Par source" value={item.par_source === 'auto' ? 'Auto-managed' : 'Manual'} /></div></section>
+        <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start justify-between gap-3"><div><h2 className="text-sm font-medium text-w-text">Perishable settings</h2><p className="mt-1 text-xs text-w-dim">Yield adjusts theoretical recipe usage; shelf life bounds replenishment.</p></div><Button size="sm" disabled={savingPerishable} onClick={() => void savePerishableSettings()}>Save</Button></div><div className="mt-3 grid gap-2 sm:grid-cols-3"><Input label="Category" value={categoryInput} onChange={(event) => setCategoryInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Shelf life (days)" type="number" min="1" max="3650" value={shelfLifeInput} onChange={(event) => setShelfLifeInput(event.target.value)} className="border-w-line bg-w-surface2" /><Input label="Usable yield (0–1)" type="number" min="0.01" max="1" step="0.01" value={yieldInput} onChange={(event) => setYieldInput(event.target.value)} className="border-w-line bg-w-surface2" /></div></section>
+
+        <ParPanel item={item} forecastEnabled={canForecast} onUpdated={load} />
+
+        <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="text-sm font-medium text-w-text">Lots expiring within a year</h2>{lots.length ? <div className="mt-3 divide-y divide-w-line text-sm">{lots.map((lot) => <div key={lot.id} className="flex justify-between py-2"><span className="text-w-text">{lot.name}</span><span className="text-w-dim">{lot.quantity_remaining} left · {lot.days_to_expiry}d</span></div>)}</div> : <p className="mt-2 text-xs text-w-dim">No open dated lots for this item.</p>}</section>
 
         <section className="overflow-hidden rounded-xl border border-w-line bg-w-surface">
           <div className="flex items-start justify-between gap-3 border-b border-w-line px-4 py-3">

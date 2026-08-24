@@ -173,7 +173,9 @@ export default function InventoryForecast() {
             <NumberField label="History days" value={settings.history_days} min={28} max={365} onChange={(value) => updateSetting('history_days', value)} />
             <NumberField label="Default lead time" value={settings.default_lead_time_days} min={0} max={180} onChange={(value) => updateSetting('default_lead_time_days', value)} />
             <NumberField label="Safety stock days" value={settings.default_safety_stock_days} min={0} max={180} onChange={(value) => updateSetting('default_safety_stock_days', value)} />
+            <NumberField label="Maximum auto-par drift" value={settings.par_max_drift_pct} min={0.01} max={5} step={0.01} onChange={(value) => updateSetting('par_max_drift_pct', value)} />
           </div>
+          <label className="mt-4 flex items-start gap-2 text-xs text-w-dim"><input type="checkbox" checked={settings.par_auto_apply} onChange={(event) => updateSetting('par_auto_apply', event.target.checked)} className="mt-0.5" /><span><strong className="font-medium text-w-text">Apply enrolled pars automatically</strong><br />Only auto-enrolled items with sufficient confidence and an in-bound drift are changed.</span></label>
            <p className="mt-3 text-[11px] text-w-faint">Historical sales come from committed imports and existing product-to-stock mappings. Suggestions below are review-only and never create an order.</p>
         </section>
 
@@ -235,8 +237,8 @@ function AIDraftPanel({ draft, accepted, onAccept }: { draft: ForecastAIDraft; a
   </div>
 }
 
-function NumberField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (value: number) => void }) {
-  return <Input label={label} type="number" min={min} max={max} value={String(value)} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} className="border-w-line bg-w-surface2" />
+function NumberField({ label, value, min, max, step, onChange }: { label: string; value: number; min: number; max: number; step?: number; onChange: (value: number) => void }) {
+  return <Input label={label} type="number" min={min} max={max} step={step} value={String(value)} onChange={(event) => onChange(Math.max(min, Math.min(max, Number(event.target.value) || min)))} className="border-w-line bg-w-surface2" />
 }
 
 function ForecastResults({ run }: { run: ForecastRun }) {

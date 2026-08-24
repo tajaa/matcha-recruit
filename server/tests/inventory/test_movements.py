@@ -179,6 +179,7 @@ class FakeRecordConn:
     def __init__(self):
         self.fetchrow_calls = []
         self.execute_calls = []
+        self.fetch_calls = []
         self._next_id = 0
 
     async def fetchrow(self, query, *args):
@@ -194,6 +195,11 @@ class FakeRecordConn:
 
     async def execute(self, query, *args):
         self.execute_calls.append((query, args))
+
+    async def fetch(self, query, *args):
+        # Advisory FEFO consumption sees no open lots in this unit double.
+        self.fetch_calls.append((query, args))
+        return []
 
 
 class TestRecordMovementsWaste:
@@ -211,6 +217,7 @@ class TestRecordMovementsWaste:
         assert len(update_calls) == 1
         _query, args = update_calls[0]
         assert args == ("item-1", -3.0)  # depletes, never adds
+        assert any("inventory_lots" in query for query, _args in conn.fetch_calls)
 
     def test_waste_reason_threaded_into_insert(self):
         conn = FakeRecordConn()
