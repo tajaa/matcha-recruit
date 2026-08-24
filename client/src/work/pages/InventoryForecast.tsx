@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, BarChart3, Check, Link2, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
+import { BarChart3, Check, Link2, Loader2, RefreshCw, Save, Sparkles } from 'lucide-react'
 import { Button, Input, useToast } from '../../components/ui'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 import {
@@ -18,7 +17,6 @@ import {
   type ForecastSettings,
   type POSConnection,
 } from '../api/inventory'
-import { useWorkBase } from '../routes/WorkSurfaceContext'
 import POSConnectionPanel from '../components/inventory/POSConnectionPanel'
 import InventoryWasteGuide from '../components/inventory/InventoryWasteGuide'
 import InventoryNavigation from '../components/inventory/InventoryNavigation'
@@ -37,8 +35,6 @@ const DEFAULT_SETTINGS: ForecastSettings = {
 }
 
 export default function InventoryForecast() {
-  const base = useWorkBase()
-  const navigate = useNavigate()
   const { me } = useMe()
   const { toast } = useToast()
   const [locations, setLocations] = useState<ChannelLocation[]>([])
@@ -143,14 +139,11 @@ export default function InventoryForecast() {
 
   return (
     <div className="h-full overflow-y-auto bg-w-bg text-w-text">
-      <div className="mx-auto max-w-[1500px] space-y-4 p-3 sm:p-5">
-        <header className="flex flex-col gap-3 border-b border-w-line pb-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mx-auto max-w-[1500px] space-y-4 p-3 sm:p-4">
+        <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <button type="button" onClick={() => navigate(`${base}/inventory`)} className="mb-3 inline-flex items-center gap-1.5 text-xs text-w-dim hover:text-w-text">
-              <ArrowLeft size={13} /> Inventory
-            </button>
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.2em] text-w-accent"><BarChart3 size={13} /> Operations / Forecast</div>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">Demand forecast</h1>
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.2em] text-w-accent"><BarChart3 size={13} /> Operations / Inventory</div>
+            <h1 className="text-2xl font-semibold tracking-tight text-w-text sm:text-3xl">Predictive PARs</h1>
             <p className="mt-1.5 max-w-2xl text-sm text-w-dim">Project demand from committed sales and turn it into an explainable replenishment recommendation. Nothing here approves an order.</p>
           </div>
           <div className="flex items-center gap-2">
