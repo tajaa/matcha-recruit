@@ -11,11 +11,14 @@ first error, hence one `conn.transaction()` per line, not one wrapping
 the loop)."""
 
 import logging
+from datetime import date
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory import movements as movements_service
 from app.matcha.services.inventory.expected import variance_rollup
+from app.matcha.services.inventory.waste import usage as usage_service
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,46 @@ async def commit_audit_lines(
         ]
         variance = variance_rollup(variance_lines, before)
 
+    # A count establishes a fresh expected-on-hand baseline.  Usage on this
+    # audit is therefore measured from the prior physical count, where one
+    # exists, through today.  New/un-counted items deliberately remain unknown.
+    usage_by_id = {}
+    if audit_run_id is not None and before:
+        item_ids = [row["id"] for row in before.values()]
+        baseline_rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (item_id) item_id, created_at::date AS baseline_date
+            FROM inventory_movements
+            WHERE company_id=$1 AND item_id=ANY($2::uuid[]) AND kind='adjust'
+            ORDER BY item_id, created_at DESC, id DESC
+            """, company_id, item_ids,
+        )
+        baselines = {row["item_id"]: row["baseline_date"] for row in baseline_rows}
+        if baselines:
+            ids_by_start = {}
+            for item_id, start in baselines.items():
+                ids_by_start.setdefault(start, []).append(item_id)
+            for start, known_ids in ids_by_start.items():
+                theoretical = await usage_service.theoretical_usage(
+                    conn, company_id=company_id, location_id=location_id,
+                    item_ids=known_ids, start=start, end=date.today(),
+                )
+                actual = await usage_service.actual_usage(
+                    conn, company_id=company_id, item_ids=known_ids,
+                    start=start, end=date.today(),
+                )
+                for item_id in known_ids:
+                    theory = theoretical.get(item_id)
+                    observed = actual.get(item_id, Decimal("0"))
+                    usage_by_id[item_id] = {
+                        "theoretical_usage": theory,
+                        "actual_usage": observed if theory is not None else None,
+                        **usage_service.usage_variance(
+                            theory, observed if theory is not None else None,
+                            before[str(item_id)].get("unit_cost"),
+                        ),
+                    }
+
     # Fetched lazily on the first new_item_name line (most audits are all
     # item_id lines and never need it), then reused + appended-to across
     # every subsequent new_item_name line so N new items in one audit don't
@@ -126,6 +169,31 @@ async def commit_audit_lines(
                 if audit_run_id is not None:
                     adjust_kwargs["audit_run_id"] = audit_run_id
                 await movements_service.adjust_item_count(**adjust_kwargs)
+                if audit_run_id is not None and item_id is not None:
+                    prior = before.get(str(item_id), {})
+                    usage = usage_by_id.get(item_id, {
+                        "theoretical_usage": None, "actual_usage": None,
+                        **usage_service.usage_variance(None, None, None),
+                    })
+                    expected = prior.get("current_quantity")
+                    counted = quantity
+                    count_variance = (
+                        Decimal(str(counted)) - Decimal(str(expected))
+                        if expected is not None else None
+                    )
+                    cost = prior.get("unit_cost")
+                    await conn.execute(
+                        """
+                        INSERT INTO inventory_audit_lines
+                            (run_id, item_id, expected, counted, variance, unit_cost, variance_value,
+                             theoretical_usage, actual_usage, usage_variance)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                        ON CONFLICT (run_id, item_id) DO NOTHING
+                        """,
+                        audit_run_id, item_id, expected, counted, count_variance, cost,
+                        count_variance * Decimal(str(cost)) if count_variance is not None and cost is not None else None,
+                        usage.get("theoretical_usage"), usage.get("actual_usage"), usage["variance_units"],
+                    )
                 applied += 1
                 # Only recorded once the line's transaction is guaranteed to
                 # commit — appending before adjust_item_count could run meant

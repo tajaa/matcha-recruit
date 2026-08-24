@@ -41,6 +41,7 @@ _IR_MONTHS = 24              # trailing window for the incident series
 _MAX_IR_TYPES = 8            # per-type series kept; the rest fold into the total
 _TOTAL_LABEL = "All incidents"
 _SCHEDULE_WEEKS = 26          # trailing window for the scheduling series
+_INVENTORY_MONTHS = 12        # loss-prevention view; monthly avoids noisy daily counts
 
 
 # --------------------------------------------------------------------------- #
@@ -115,6 +116,33 @@ def ir_monthly_series(rows: list[dict], as_of: date) -> dict:
         "periods": periods,
         "roles": {},                      # counts, no insurance/financial role
         "warnings": warnings,
+        "as_of": as_of.isoformat(),
+    }
+
+
+def inventory_loss_monthly_series(rows: list[dict], as_of: date) -> dict:
+    """Waste and theoretical-overage rows -> zero-filled loss-prevention series."""
+    if not rows:
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
+    periods = month_labels(as_of, _INVENTORY_MONTHS)
+    slot = {label: index for index, label in enumerate(periods)}
+    waste = [0.0] * len(periods)
+    variance = [0.0] * len(periods)
+    for row in rows:
+        month = row.get("month")
+        label = month.strftime("%Y-%m") if hasattr(month, "strftime") else str(month or "")[:7]
+        index = slot.get(label)
+        if index is None:
+            continue
+        waste[index] += float(row.get("waste_units") or 0)
+        variance[index] += float(row.get("usage_variance_units") or 0)
+    if not any(waste) and not any(variance):
+        return {"series": {}, "periods": [], "roles": {}, "warnings": [], "as_of": as_of.isoformat()}
+    return {
+        "series": {"Waste units": waste, "Usage variance units": variance},
+        "periods": periods,
+        "roles": {},
+        "warnings": ["Positive usage variance means actual depletion exceeded POS recipe usage."],
         "as_of": as_of.isoformat(),
     }
 
@@ -397,6 +425,34 @@ async def build_schedule_weekly(conn, company_id, **_opts) -> dict:
     return schedule_weekly_series(shifts, classified, as_of)
 
 
+async def build_inventory_loss_monthly(conn, company_id, **_opts) -> dict:
+    as_of = await conn.fetchval("SELECT date_trunc('month', CURRENT_DATE)::date") or date.today()
+    rows = await conn.fetch(
+        f"""
+        WITH waste AS (
+            SELECT date_trunc('month', created_at)::date AS month,
+                   SUM(ABS(COALESCE(quantity_delta, 0))) AS waste_units
+            FROM inventory_movements
+            WHERE company_id=$1 AND kind='waste'
+              AND created_at >= ($2::date - INTERVAL '{_INVENTORY_MONTHS - 1} months')
+            GROUP BY 1
+        ), variance AS (
+            SELECT date_trunc('month', al.created_at)::date AS month,
+                   SUM(COALESCE(al.usage_variance, 0)) AS usage_variance_units
+            FROM inventory_audit_lines al
+            JOIN inventory_audit_runs ar ON ar.id=al.run_id
+            WHERE ar.company_id=$1
+              AND al.created_at >= ($2::date - INTERVAL '{_INVENTORY_MONTHS - 1} months')
+            GROUP BY 1
+        )
+        SELECT COALESCE(waste.month, variance.month) AS month,
+               waste.waste_units, variance.usage_variance_units
+        FROM waste FULL OUTER JOIN variance ON variance.month=waste.month
+        """, company_id, as_of,
+    )
+    return inventory_loss_monthly_series([dict(row) for row in rows], as_of)
+
+
 SOURCES: list[PlatformSource] = [
     PlatformSource(
         key="ir_monthly",
@@ -425,6 +481,15 @@ SOURCES: list[PlatformSource] = [
         required_feature="schedule_intelligence",
         kind="timeseries",
         build=build_schedule_weekly,
+    ),
+    PlatformSource(
+        key="inventory_loss_monthly",
+        label="Inventory loss — waste and recipe variance",
+        description=(f"Recorded waste and theoretical-versus-actual usage variance by month "
+                     f"for the last {_INVENTORY_MONTHS} months."),
+        required_feature="inventory_waste",
+        kind="inventory",
+        build=build_inventory_loss_monthly,
     ),
 ]
 

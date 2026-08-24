@@ -66,6 +66,17 @@ def test_ir_monthly_with_no_incidents_yields_no_series_at_all():
     assert ps.ir_monthly_series(stale, date(2026, 7, 20))["series"] == {}
 
 
+def test_inventory_loss_monthly_zero_fills_waste_and_usage_variance():
+    built = ps.inventory_loss_monthly_series(
+        [{"month": date(2026, 7, 1), "waste_units": 3, "usage_variance_units": 2}],
+        date(2026, 7, 20),
+    )
+    assert len(built["periods"]) == ps._INVENTORY_MONTHS
+    assert built["series"]["Waste units"][-1] == 3
+    assert built["series"]["Usage variance units"][-1] == 2
+    assert built["series"]["Waste units"][-2] == 0
+
+
 # --- loss runs ----------------------------------------------------------------
 
 def _snap(label, valuation, paid, reserved, claims=4, open_=1, start="2024-01-01"):

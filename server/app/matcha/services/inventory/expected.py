@@ -4,19 +4,15 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from app.matcha.services.inventory.waste._baselines import BASELINES_CTE
+
 
 async def expected_breakdown(conn, company_id: UUID, item_ids: list[UUID], location_id: Optional[UUID]) -> list[dict]:
     if not item_ids:
         return []
     rows = await conn.fetch(
-        """
-        WITH baselines AS (
-            SELECT DISTINCT ON (item_id) item_id, created_at AS baseline_at,
-                   quantity AS baseline
-            FROM inventory_movements
-            WHERE company_id=$1 AND item_id=ANY($2::uuid[]) AND kind='adjust'
-            ORDER BY item_id, created_at DESC, id DESC
-        ), buckets AS (
+        f"""
+        WITH {BASELINES_CTE}, buckets AS (
             SELECT m.item_id,
                    SUM(CASE WHEN m.kind='in' THEN ABS(COALESCE(m.quantity_delta,0)) ELSE 0 END) AS received,
                    SUM(CASE WHEN m.kind='sale' THEN -COALESCE(m.quantity_delta,0) ELSE 0 END) AS sold,

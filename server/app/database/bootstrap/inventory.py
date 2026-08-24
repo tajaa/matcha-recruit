@@ -147,6 +147,27 @@ async def create_inventory(conn):
             variance_value NUMERIC
         )
     """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_audit_lines (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            run_id UUID NOT NULL REFERENCES inventory_audit_runs(id) ON DELETE CASCADE,
+            item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            expected NUMERIC,
+            counted NUMERIC NOT NULL,
+            variance NUMERIC,
+            unit_cost NUMERIC,
+            variance_value NUMERIC,
+            theoretical_usage NUMERIC,
+            actual_usage NUMERIC,
+            usage_variance NUMERIC,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (run_id, item_id)
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inventory_audit_lines_item
+        ON inventory_audit_lines (item_id, created_at DESC)
+    """)
 
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS inventory_movements (
