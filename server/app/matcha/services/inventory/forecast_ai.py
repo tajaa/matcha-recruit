@@ -54,7 +54,7 @@ def _coerce_adjustments(raw: dict, *, horizon_start: date, horizon_days: int) ->
             "demand_multiplier": multiplier,
             "reason": reason.strip()[:500],
             "confidence": confidence,
-            "source": "manual",
+            "source": "ai_accepted",
         })
     return output
 

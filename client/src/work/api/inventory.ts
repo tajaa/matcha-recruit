@@ -29,6 +29,7 @@ export interface InventoryItem {
   category: string | null
   shelf_life_days: number | null
   yield_pct: number | null
+  par_source: 'manual' | 'auto'
   auto_created: boolean
   archived_at: string | null
   location_id: string | null
@@ -102,6 +103,7 @@ export async function createItem(body: {
   category?: string
   shelf_life_days?: number
   yield_pct?: number
+  par_source?: 'manual' | 'auto'
   location_id?: string
 }) {
   return api.post<InventoryItem>('/inventory/items', body)
@@ -121,6 +123,7 @@ export async function patchItem(
     category: string
     shelf_life_days: number
     yield_pct: number
+    par_source: 'manual' | 'auto'
     set_quantity: number
     archived: boolean
   }>,
@@ -500,6 +503,8 @@ export type ForecastSettings = {
   default_lead_time_days: number
   default_safety_stock_days: number
   timezone: string
+  par_auto_apply: boolean
+  par_max_drift_pct: number
   configured: boolean
   created_at?: string
   updated_at?: string
@@ -538,6 +543,10 @@ export type ForecastLine = {
   lead_demand: number
   safety_demand: number
   target_quantity: number
+  recommended_par: number | null
+  par_basis: 'demand' | 'shelf_life' | 'structural_deficit' | 'no_demand' | 'insufficient'
+  current_par: number | null
+  shelf_cap_quantity: number | null
   shelf_cap: number | null
   shelf_life_capped: boolean
   suggested_quantity: number | null
@@ -605,4 +614,8 @@ export function getLatestForecastRun(locationId?: string) {
 
 export function getForecastRun(runId: string) {
   return api.get<ForecastRun>(`/inventory/forecast/runs/${runId}`)
+}
+
+export function applyForecastPar(runId: string, body: { item_ids?: string[]; mode?: 'manual' | 'huume' } = {}) {
+  return api.post(`/inventory/forecast/runs/${runId}/apply-par`, body)
 }

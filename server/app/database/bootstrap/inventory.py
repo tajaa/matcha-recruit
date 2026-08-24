@@ -397,12 +397,17 @@ async def create_inventory(conn):
             default_lead_time_days INT NOT NULL DEFAULT 7 CHECK (default_lead_time_days BETWEEN 0 AND 180),
             default_safety_stock_days INT NOT NULL DEFAULT 7 CHECK (default_safety_stock_days BETWEEN 0 AND 180),
             timezone VARCHAR(80) NOT NULL DEFAULT 'America/Los_Angeles',
+            par_auto_apply BOOLEAN NOT NULL DEFAULT FALSE,
+            par_max_drift_pct NUMERIC NOT NULL DEFAULT 0.5 CHECK (par_max_drift_pct > 0 AND par_max_drift_pct <= 5),
             created_by UUID REFERENCES users(id) ON DELETE SET NULL,
             updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
+    await conn.execute("ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS par_source VARCHAR(10) NOT NULL DEFAULT 'manual'")
+    await conn.execute("ALTER TABLE inventory_items DROP CONSTRAINT IF EXISTS inventory_items_par_source_check")
+    await conn.execute("ALTER TABLE inventory_items ADD CONSTRAINT inventory_items_par_source_check CHECK (par_source IN ('manual','auto'))")
     await conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_forecast_settings_scope
         ON inventory_forecast_settings (company_id, location_id) NULLS NOT DISTINCT
@@ -475,6 +480,28 @@ async def create_inventory(conn):
             order_by_date DATE,
             daily_demand JSONB NOT NULL DEFAULT '[]',
             calculation JSONB NOT NULL DEFAULT '{}',
+            recommended_par NUMERIC, par_basis VARCHAR(24), current_par NUMERIC,
+            shelf_cap_quantity NUMERIC, shelf_life_capped BOOLEAN NOT NULL DEFAULT FALSE,
             UNIQUE (run_id, item_id)
         )
     """)
+    await conn.execute("ALTER TABLE inventory_forecast_settings ADD COLUMN IF NOT EXISTS par_auto_apply BOOLEAN NOT NULL DEFAULT FALSE")
+    await conn.execute("ALTER TABLE inventory_forecast_settings ADD COLUMN IF NOT EXISTS par_max_drift_pct NUMERIC NOT NULL DEFAULT 0.5")
+    await conn.execute("ALTER TABLE inventory_forecast_lines ADD COLUMN IF NOT EXISTS recommended_par NUMERIC")
+    await conn.execute("ALTER TABLE inventory_forecast_lines ADD COLUMN IF NOT EXISTS par_basis VARCHAR(24)")
+    await conn.execute("ALTER TABLE inventory_forecast_lines ADD COLUMN IF NOT EXISTS current_par NUMERIC")
+    await conn.execute("ALTER TABLE inventory_forecast_lines ADD COLUMN IF NOT EXISTS shelf_cap_quantity NUMERIC")
+    await conn.execute("ALTER TABLE inventory_forecast_lines ADD COLUMN IF NOT EXISTS shelf_life_capped BOOLEAN NOT NULL DEFAULT FALSE")
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_par_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(), company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+            item_id UUID NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+            run_id UUID REFERENCES inventory_forecast_runs(id) ON DELETE SET NULL,
+            previous_par NUMERIC, new_par NUMERIC NOT NULL, par_basis VARCHAR(24), drift_pct NUMERIC,
+            source VARCHAR(10) NOT NULL CHECK (source IN ('auto','manual','huume')),
+            reason VARCHAR(200), changed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_inventory_par_history_item ON inventory_par_history (item_id, changed_at DESC)")
+    await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uniq_inventory_par_history_run_item ON inventory_par_history (run_id, item_id) WHERE run_id IS NOT NULL")

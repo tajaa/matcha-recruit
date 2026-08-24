@@ -34,6 +34,7 @@ class InventoryItemOut(BaseModel):
     category: Optional[str] = None
     shelf_life_days: Optional[int] = None
     yield_pct: Optional[Decimal] = None
+    par_source: Literal["manual", "auto"] = "manual"
     auto_created: bool
     archived_at: Optional[datetime] = None
     location_id: Optional[UUID] = None
@@ -52,6 +53,7 @@ class InventoryItemCreate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=60)
     shelf_life_days: Optional[int] = Field(default=None, ge=1, le=3650)
     yield_pct: Optional[Decimal] = Field(default=None, gt=0, le=1)
+    par_source: Literal["manual", "auto"] = "manual"
     location_id: Optional[UUID] = None
 
 
@@ -63,6 +65,7 @@ class InventoryItemPatch(BaseModel):
     category: Optional[str] = Field(default=None, max_length=60)
     shelf_life_days: Optional[int] = Field(default=None, ge=1, le=3650)
     yield_pct: Optional[Decimal] = Field(default=None, gt=0, le=1)
+    par_source: Optional[Literal["manual", "auto"]] = None
     set_quantity: Optional[Decimal] = None
     archived: Optional[bool] = None
 
@@ -250,6 +253,8 @@ class ForecastSettingsUpsert(BaseModel):
     default_lead_time_days: int = Field(default=7, ge=0, le=180)
     default_safety_stock_days: int = Field(default=7, ge=0, le=180)
     timezone: str = Field(default="America/Los_Angeles", min_length=1, max_length=80)
+    par_auto_apply: bool = False
+    par_max_drift_pct: Decimal = Field(default=Decimal("0.5"), gt=0, le=5)
 
 
 class ForecastRuleUpsert(BaseModel):
@@ -267,6 +272,11 @@ class ForecastPreviewRequest(BaseModel):
 
 class ForecastRunCreate(ForecastPreviewRequest):
     pass
+
+
+class ForecastParApply(BaseModel):
+    item_ids: Optional[list[UUID]] = None
+    mode: Literal["manual", "huume"] = "manual"
 
 
 class ForecastAIDraftRequest(BaseModel):

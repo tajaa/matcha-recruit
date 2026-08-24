@@ -143,7 +143,7 @@ def test_ai_adjustments_are_clamped_to_mondays_inside_horizon():
         "demand_multiplier": Decimal("1.25"),
         "reason": "promotion",
         "confidence": "medium",
-        "source": "manual",
+        "source": "ai_accepted",
     }]
 
 

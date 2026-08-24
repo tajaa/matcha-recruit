@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS: ForecastSettings = {
   default_lead_time_days: 7,
   default_safety_stock_days: 7,
   timezone: 'America/Los_Angeles',
+  par_auto_apply: false,
+  par_max_drift_pct: 0.5,
   configured: false,
 }
 
@@ -85,6 +87,8 @@ export default function InventoryForecast() {
         default_lead_time_days: settings.default_lead_time_days,
         default_safety_stock_days: settings.default_safety_stock_days,
         timezone: settings.timezone,
+        par_auto_apply: settings.par_auto_apply,
+        par_max_drift_pct: settings.par_max_drift_pct,
       })
       const next = await createForecastRun({ location_id: locationId || null, overrides: acceptedOverrides })
       setRun(next)

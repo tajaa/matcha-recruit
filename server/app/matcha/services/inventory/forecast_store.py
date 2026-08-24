@@ -8,6 +8,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.matcha.services.inventory.forecast import forecast_item
+from app.matcha.services.inventory.waste.par import recommend_par
 
 
 DEFAULT_SETTINGS = {
@@ -16,6 +17,8 @@ DEFAULT_SETTINGS = {
     "default_lead_time_days": 7,
     "default_safety_stock_days": 7,
     "timezone": "America/Los_Angeles",
+    "par_auto_apply": False,
+    "par_max_drift_pct": Decimal("0.5"),
 }
 
 
@@ -84,14 +87,16 @@ async def upsert_settings(conn, *, company_id: UUID, user_id: UUID, values: dict
         """
         INSERT INTO inventory_forecast_settings
             (company_id, location_id, horizon_days, history_days,
-             default_lead_time_days, default_safety_stock_days, timezone, updated_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             default_lead_time_days, default_safety_stock_days, timezone, par_auto_apply, par_max_drift_pct, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         ON CONFLICT (company_id, location_id) DO UPDATE SET
             horizon_days=EXCLUDED.horizon_days,
             history_days=EXCLUDED.history_days,
             default_lead_time_days=EXCLUDED.default_lead_time_days,
             default_safety_stock_days=EXCLUDED.default_safety_stock_days,
             timezone=EXCLUDED.timezone,
+            par_auto_apply=EXCLUDED.par_auto_apply,
+            par_max_drift_pct=EXCLUDED.par_max_drift_pct,
             updated_by=EXCLUDED.updated_by,
             updated_at=NOW()
         RETURNING *
@@ -103,6 +108,8 @@ async def upsert_settings(conn, *, company_id: UUID, user_id: UUID, values: dict
         values["default_lead_time_days"],
         values["default_safety_stock_days"],
         values["timezone"],
+        values.get("par_auto_apply", False),
+        values.get("par_max_drift_pct", Decimal("0.5")),
         user_id,
     )
     return _settings_dict(row)
@@ -173,7 +180,7 @@ async def _forecast_inputs(conn, *, company_id: UUID, location_id: Optional[UUID
     rows = await conn.fetch(
         """
         SELECT i.id, i.name, i.unit, i.location_id, i.current_quantity, i.unit_cost,
-               i.category, i.shelf_life_days, i.low_stock_threshold,
+               i.category, i.shelf_life_days, i.low_stock_threshold, i.par_source,
                COALESCE(r.lead_time_days, $3) AS lead_time_days,
                COALESCE(r.safety_stock_days, $4) AS safety_stock_days,
                COALESCE(r.case_pack_quantity, 1) AS case_pack_quantity,
@@ -255,6 +262,11 @@ async def build_preview(
             shelf_life_days=item["shelf_life_days"],
             overrides=overrides,
         )
+        par = recommend_par(
+            lead_demand=result["lead_demand"], safety_demand=result["safety_demand"],
+            daily_demand=result["daily_demand"], lead_time_days=item["lead_time_days"],
+            shelf_life_days=item["shelf_life_days"], status=result["status"],
+        )
         lines.append({
             "item_id": item["id"],
             "name": item["name"],
@@ -265,6 +277,12 @@ async def build_preview(
             "category": item["category"],
             "shelf_life_days": item["shelf_life_days"],
             "low_stock_threshold": item["low_stock_threshold"],
+            "current_par": item["low_stock_threshold"],
+            "par_source": item["par_source"],
+            "recommended_par": par["recommended_par"],
+            "par_basis": par["par_basis"],
+            "shelf_cap_quantity": par["shelf_cap"],
+            "structural_deficit": par["structural_deficit"],
             "lead_time_days": item["lead_time_days"],
             "safety_stock_days": item["safety_stock_days"],
             "case_pack_quantity": item["case_pack_quantity"],
@@ -346,9 +364,9 @@ async def create_run(
                      current_quantity, on_order_quantity, projected_demand,
                      average_daily_demand, lead_demand, safety_demand, target_quantity,
                      suggested_quantity, runout_date, order_by_date, daily_demand,
-                     calculation)
+                     recommended_par, par_basis, current_par, shelf_cap_quantity, shelf_life_capped, calculation)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                        $13, $14, $15, $16::jsonb, $17::jsonb)
+                        $13, $14, $15, $16::jsonb, $17, $18, $19, $20, $21, $22::jsonb)
                 """,
                 run["id"], line["item_id"], line["status"], line["confidence"],
                 line["history_nonzero_days"], line["current_quantity"],
@@ -356,7 +374,8 @@ async def create_run(
                 line["average_daily_demand"], line["lead_demand"],
                 line["safety_demand"], line["target_quantity"],
                 line["suggested_quantity"], line["runout_date"], line["order_by_date"],
-                json.dumps(_jsonable(line["daily_demand"])), json.dumps(calculation),
+                json.dumps(_jsonable(line["daily_demand"])), line["recommended_par"], line["par_basis"],
+                line["current_par"], line["shelf_cap_quantity"], line["shelf_life_capped"], json.dumps(calculation),
             )
     return await get_run(conn, company_id=company_id, run_id=run["id"])
 

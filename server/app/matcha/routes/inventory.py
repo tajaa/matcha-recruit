@@ -90,6 +90,7 @@ async def create_item(body: InventoryItemCreate, company_id: UUID = Depends(get_
                 current_quantity=body.current_quantity, low_stock_threshold=body.low_stock_threshold,
                 unit_cost=body.unit_cost, category=body.category, shelf_life_days=body.shelf_life_days,
                 yield_pct=body.yield_pct,
+                par_source=body.par_source,
                 location_id=body.location_id, created_by=user.id,
             )
         except ValueError as exc:
@@ -173,6 +174,9 @@ async def patch_item(item_id: UUID, body: InventoryItemPatch,
         if body.yield_pct is not None:
             values.append(body.yield_pct)
             fields.append(f"yield_pct = ${len(values) + 1}")
+        if body.par_source is not None:
+            values.append(body.par_source)
+            fields.append(f"par_source = ${len(values) + 1}")
         if body.archived is not None:
             fields.append("archived_at = %s" % ("NOW()" if body.archived else "NULL"))
 

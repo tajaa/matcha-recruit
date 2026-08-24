@@ -90,7 +90,7 @@ async def create_item_checked(
     conn, *, company_id: UUID, name: str, unit: Optional[str] = None,
     current_quantity=None, low_stock_threshold=None, unit_cost=None, category=None,
     shelf_life_days=None, yield_pct=None, location_id: Optional[UUID] = None,
-    created_by: Optional[UUID] = None,
+    par_source="manual", created_by: Optional[UUID] = None,
 ) -> dict:
     """Shared item-create writer — REST route and the Huume chat tool both
     call this. Raises ValueError("location not found") / ValueError("duplicate
@@ -116,11 +116,11 @@ async def create_item_checked(
         """
             INSERT INTO inventory_items (company_id, name, normalized_name, unit, current_quantity,
                                       low_stock_threshold, unit_cost, category, shelf_life_days, yield_pct,
-                                      created_by, location_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *
+                                      par_source, created_by, location_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *
         """,
         company_id, name, normalized, unit, current_quantity,
-        low_stock_threshold, unit_cost, category, shelf_life_days, yield_pct, created_by, location_id,
+        low_stock_threshold, unit_cost, category, shelf_life_days, yield_pct, par_source, created_by, location_id,
     )
     return dict(row)
 

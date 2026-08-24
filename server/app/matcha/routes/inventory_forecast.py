@@ -19,10 +19,12 @@ from app.matcha.models.inventory import (
     ForecastAIDraftRequest,
     ForecastRuleUpsert,
     ForecastRunCreate,
+    ForecastParApply,
     ForecastSettingsUpsert,
 )
 from app.matcha.services.inventory import forecast_store
 from app.matcha.services.inventory import forecast_ai
+from app.matcha.services.inventory.waste import par_store
 
 
 router = APIRouter()
@@ -192,6 +194,21 @@ async def get_latest_forecast_run(
     async with get_connection() as conn:
         return await forecast_store.get_latest_run(
             conn, company_id=company_id, location_id=location_id,
+        )
+
+
+@router.post("/runs/{run_id}/apply-par")
+async def apply_forecast_par(
+    run_id: UUID, body: ForecastParApply,
+    company_id: UUID = Depends(get_client_company_id), user=Depends(require_admin_or_client),
+    _gate=_forecast_gate,
+):
+    # Explicit manager application can override a pinned/drifted par only for
+    # named items. A body without item ids keeps the normal deterministic gate.
+    async with get_connection() as conn:
+        return await par_store.apply_par_recommendations(
+            conn, company_id=company_id, run_id=run_id, user_id=user.id,
+            mode=body.mode, item_ids=body.item_ids,
         )
 
 
