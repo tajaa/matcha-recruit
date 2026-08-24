@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ArrowLeft, RefreshCw } from 'lucide-react'
 import { Button, useToast } from '../../components/ui'
-import { getWasteRollup, listExpiringLots, type WasteRollup } from '../api/inventory'
+import { askWasteAnalyst, getWasteRollup, listExpiringLots, type WasteRollup } from '../api/inventory'
 import { useNavigate } from 'react-router-dom'
 
 function isoDay(offset = 0) { const value = new Date(); value.setDate(value.getDate() + offset); return value.toISOString().slice(0, 10) }
@@ -12,6 +12,7 @@ export default function InventoryWaste() {
   const [rollup, setRollup] = useState<WasteRollup | null>(null)
   const [lots, setLots] = useState<{ id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[]>([])
   const [loading, setLoading] = useState(true)
+  const [question, setQuestion] = useState(''); const [answer, setAnswer] = useState('')
   async function load() {
     setLoading(true)
     try { const [next, expiring] = await Promise.all([getWasteRollup(isoDay(-6), isoDay()), listExpiringLots(7)]); setRollup(next); setLots(expiring.lots) }
@@ -27,6 +28,7 @@ export default function InventoryWaste() {
     </section>
     <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="font-medium text-w-text">By reason</h2><div className="mt-3 divide-y divide-w-line">{rollup?.groups.map(group => <div key={group.key} className="flex justify-between py-2 text-sm"><span className="text-w-text">{group.label}</span><span className="text-w-dim">{group.units} units · {money(group.value)}</span></div>) ?? <p className="text-sm text-w-dim">No waste recorded in this period.</p>}</div></section>
     <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="font-medium text-w-text">Expiring within 7 days</h2><div className="mt-3 divide-y divide-w-line">{lots.map(lot => <div key={lot.id} className="flex justify-between py-2 text-sm"><span className="text-w-text">{lot.name}</span><span className="text-w-dim">{lot.quantity_remaining} left · {lot.days_to_expiry}d</span></div>)}{!lots.length && <p className="text-sm text-w-dim">No open lots expiring this week.</p>}</div></section>
+    <section className="rounded-xl border border-w-line bg-w-surface p-4"><h2 className="font-medium text-w-text">Ask the waste analyst</h2><div className="mt-3 flex gap-2"><input value={question} onChange={event => setQuestion(event.target.value)} placeholder="What is driving waste?" className="min-w-0 flex-1 rounded-lg border border-w-line bg-w-surface2 px-3 py-2 text-sm text-w-text" /><Button size="sm" disabled={!question.trim()} onClick={() => void askWasteAnalyst(question).then(result => setAnswer(result.answer)).catch(() => toast('Analyst unavailable', 'error'))}>Ask</Button></div>{answer && <p className="mt-3 text-sm text-w-dim">{answer}</p>}</section>
   </main>
 }
 function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-xl border border-w-line bg-w-surface p-4"><p className="text-xs text-w-dim">{label}</p><p className="mt-1 text-2xl font-semibold text-w-text">{value}</p></div> }

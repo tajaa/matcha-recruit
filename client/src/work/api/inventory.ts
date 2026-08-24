@@ -629,3 +629,4 @@ export function recordWaste(body: { item_id: string; quantity: number; reason: W
 }
 export function listExpiringLots(days = 7) { return api.get<{ lots: { id: string; item_id: string; name: string; quantity_remaining: number; expires_on: string; days_to_expiry: number }[] }>(`/inventory/waste/lots?expiring_within_days=${days}`) }
 export function enrollAutoPar(itemIds: string[], enrolled: boolean) { return api.post('/inventory/waste/par/enroll', { item_ids: itemIds, enrolled }) }
+export function askWasteAnalyst(question: string) { return api.post<{ answer: string; citations: unknown[] }>('/inventory/waste/ask', { question }) }
