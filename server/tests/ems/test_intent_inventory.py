@@ -15,6 +15,9 @@ INVENTORY_POSITIVES = [
     "@huume we used a case of paper towels",
     "@huume we used some napkins",
     "@huume i used a few gloves",
+    # Waste — the channel flow creates a waste movement (and an EMS event
+    # when the workspace has that feature enabled).
+    "@huume we wasted 3 bags of coffee today, it went expired",
     # F6 — chat-only addition claims, routed to the same strict receipt
     # branch as every other addition (never auto-created, never a lie).
     "@huume we got 3 more reams of printer paper in stock, please add them",

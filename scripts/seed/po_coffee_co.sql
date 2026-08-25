@@ -1,7 +1,7 @@
 -- Po Coffee Co (matcha_ops product, company_id c4c256c3-60ef-4cf5-8d4c-55e963c58416)
 -- heavy test/demo data: locations, roster, 2 weeks of schedule, inventory
--- catalog + movement history (incl. sales), matching the flags already ON
--- for this company: employees, inventory, employee_schedule, sales_intake.
+-- catalog + movement history (incl. sales). It also enables EMS + Inventory
+-- Waste so channel reports create both an Ops event and a waste movement.
 --
 -- All rows pinned under UUID prefix c0ffeeee- so undo/re-run are one-liners.
 -- Emails use @example.com (RFC 2606 reserved) per repo test-data rule.
@@ -9,6 +9,13 @@
 --   ./scripts/seed-prod.sh scripts/seed/po_coffee_co.sql --dry-run
 --   ./scripts/seed-prod.sh scripts/seed/po_coffee_co.sql
 --   ./scripts/seed-prod.sh scripts/seed/po_coffee_co.sql --undo
+
+-- The rest of this demo's Matcha Ops capabilities are already provisioned.
+-- These two flags make the channel-driven waste capture path testable.
+UPDATE companies
+SET enabled_features = COALESCE(enabled_features, '{}'::jsonb)
+  || '{"ems": true, "inventory_waste": true}'::jsonb
+WHERE id = 'c4c256c3-60ef-4cf5-8d4c-55e963c58416';
 
 -- ---------------------------------------------------------------------------
 -- Locations

@@ -136,7 +136,7 @@ export default function MessageComposer({
             onKeyDown={onKeyDown}
             placeholder={`Message #${channelName ?? 'channel'}...`}
             rows={1}
-            className="w-full px-3 py-2 bg-w-surface2 border border-w-line rounded-lg text-white text-sm placeholder:text-w-dim focus:outline-none focus:border-w-accent resize-none max-h-32"
+            className="w-full px-3 py-2 bg-w-surface2 border border-w-line rounded-lg text-w-text caret-w-text text-sm placeholder:text-w-dim focus:outline-none focus:border-w-accent resize-none max-h-32"
             style={{ minHeight: '38px' }}
           />
         </div>

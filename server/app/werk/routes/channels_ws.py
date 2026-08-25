@@ -1116,12 +1116,11 @@ async def _bg_inventory_request(
         if sys_row is not None:
             await broadcast_system_message(channel_id_str, _system_message_payload(channel_id_str, sys_row))
 
-        # A RETURN is a customer/patient interaction, not just a stock
-        # correction — the movement ledger records the units, but what
-        # happened (who returned what, and why) belongs in the event record
-        # too. Same dual-write shape as the OSHA-keyword case above, and
-        # guarded against firing twice for one message when both apply.
-        if kind == "return" and not osha_dual_write:
+        # Returns and waste are both reportable operational events, not just
+        # ledger corrections. Preserve the channel narrative in Ops while the
+        # inventory movement records the quantity and reason. OSHA reports
+        # already took this path above, so do not create a duplicate event.
+        if kind in {"return", "waste"} and not osha_dual_write:
             await _bg_ems_intake(channel_id_str, message_id_str, sender_user_id_str, content)
     except Exception:
         logger.exception("inventory chat request failed for message %s", message_id_str)

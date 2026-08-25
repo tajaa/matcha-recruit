@@ -116,6 +116,93 @@ class TestBgEmsDispatch:
         clarify_mock.assert_not_awaited()
         intake_mock.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_waste_report_routes_to_inventory(self, monkeypatch):
+        inventory_mock = AsyncMock(return_value=None)
+        intake_mock = AsyncMock(return_value=None)
+        monkeypatch.setattr(channels_ws, "_bg_inventory_request", inventory_mock)
+        monkeypatch.setattr(channels_ws, "_bg_ems_intake", intake_mock)
+
+        await channels_ws._bg_ems_dispatch(
+            "channel-1", "msg-1", None, "user-1",
+            "@huume we wasted 3 bags of coffee today, it went expired",
+            has_huume_mention=True,
+        )
+
+        inventory_mock.assert_awaited_once_with(
+            "channel-1", "msg-1", "user-1",
+            "@huume we wasted 3 bags of coffee today, it went expired",
+        )
+        intake_mock.assert_not_awaited()
+
+
+class TestInventoryWasteEventDualWrite:
+    @pytest.mark.asyncio
+    async def test_waste_capture_also_creates_an_ops_event(self, monkeypatch):
+        class Connection:
+            async def fetchrow(self, *_args):
+                return {"name": "Espresso Beans (House Blend)", "current_quantity": 37}
+
+            async def fetchval(self, *_args):
+                return "employee"
+
+        class ConnectionContext:
+            async def __aenter__(self):
+                return Connection()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        item = {"id": uuid4(), "name": "Espresso Beans (House Blend)"}
+        movement = {
+            "id": uuid4(), "item_id": item["id"], "quantity": 3,
+            "quantity_estimated": False,
+        }
+        event_mock = AsyncMock()
+        insert_mock = AsyncMock(return_value={"id": uuid4()})
+
+        monkeypatch.setattr(channels_ws, "get_connection", lambda: ConnectionContext())
+        monkeypatch.setattr(channels_ws, "check_rate_limit", AsyncMock())
+        monkeypatch.setattr(channels_ws, "_inventory_company_gate", AsyncMock(return_value=uuid4()))
+        monkeypatch.setattr(channels_ws, "_channel_location", AsyncMock(return_value=(uuid4(), "Downtown")))
+        monkeypatch.setattr(
+            channels_ws, "_schedule_company_features",
+            AsyncMock(return_value={"inventory": True, "inventory_waste": True}),
+        )
+        monkeypatch.setattr(channels_ws, "_insert_system_message", insert_mock)
+        monkeypatch.setattr(channels_ws, "_system_message_payload", lambda *_args: {})
+        monkeypatch.setattr(channels_ws, "broadcast_system_message", AsyncMock())
+        monkeypatch.setattr(channels_ws, "_bg_ems_intake", event_mock)
+
+        from app.matcha.services.ems import event_intake
+        from app.matcha.services.inventory import extraction, movements, pills
+
+        monkeypatch.setattr(event_intake, "fallback_classification", lambda _content: {"urgency": None})
+        monkeypatch.setattr(
+            extraction, "extract_inventory",
+            AsyncMock(return_value={
+                "actionable": True,
+                "kind": "waste",
+                "lines": [{"item_name": "Espresso Beans (House Blend)", "quantity": 3}],
+                "recipient_note": "expired",
+                "waste_reason": "expired",
+            }),
+        )
+        monkeypatch.setattr(movements, "list_item_names", AsyncMock(return_value=[{
+            "id": item["id"], "name": item["name"], "normalized_name": "espresso beans house blend",
+        }]))
+        monkeypatch.setattr(movements, "find_item", AsyncMock(return_value=item))
+        monkeypatch.setattr(movements, "record_movements", AsyncMock(return_value=[movement]))
+        monkeypatch.setattr(pills, "waste_pill", lambda *_args, **_kwargs: "waste logged")
+
+        channel_id = str(uuid4())
+        message_id = str(uuid4())
+        user_id = str(uuid4())
+        content = "@huume we wasted 3 bags of coffee today, it went expired"
+        await channels_ws._bg_inventory_request(channel_id, message_id, user_id, content)
+
+        event_mock.assert_awaited_once_with(channel_id, message_id, user_id, content)
+
 
 class TestHuumeMentionRouting:
     @pytest.mark.asyncio
