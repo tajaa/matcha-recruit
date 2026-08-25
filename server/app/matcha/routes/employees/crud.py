@@ -800,10 +800,12 @@ async def create_employee(
         # Auto-send invitation if enabled in notification settings
         if not request.skip_invitation:
             try:
-                settings = await conn.fetchrow(
-                    "SELECT auto_send_invitation FROM onboarding_notification_settings WHERE org_id = $1",
-                    company_id,
-                )
+                settings = None
+                if await _column_exists(conn, "onboarding_notification_settings", "auto_send_invitation"):
+                    settings = await conn.fetchrow(
+                        "SELECT auto_send_invitation FROM onboarding_notification_settings WHERE org_id = $1",
+                        company_id,
+                    )
                 if settings and settings["auto_send_invitation"]:
                     background_tasks.add_task(
                         _auto_send_invitation,
