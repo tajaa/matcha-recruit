@@ -687,7 +687,7 @@ async def create_employee(
             if org_fields_available:
                 job_title_val = row.get("job_title")
             if not job_title_val:
-                job_title_val = body.job_title
+                job_title_val = request.job_title
             work_state = row.get("work_state")
             work_city = row.get("work_city") if compensation_fields_available else None
             cred_reqs = await resolve_credential_requirements(
