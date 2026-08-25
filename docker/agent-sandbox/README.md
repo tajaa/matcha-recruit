@@ -4,10 +4,7 @@ Isolated Linux dev image shared by Codex, Claude Code, and OpenCode — no host
 home directory, browser profiles, Keychain, SSH agent, or Docker socket.
 
 ```bash
-msandbox build
-msandbox login codex   # or claude / opencode / gh
-msandbox dev
-msandbox codex         # in another terminal — or `claude` / `opencode`
+msandbox                # one command: build (if needed) + start + shell in
 ```
 
 (`msandbox` — not `sandbox` — because `sandbox` is already taken by an

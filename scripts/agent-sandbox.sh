@@ -17,7 +17,10 @@ COMPOSE=(docker compose --project-name matcha-agent-sandbox --file "$COMPOSE_FIL
 
 usage() {
     cat <<'EOF'
-Usage: msandbox <command> [args]   (or ./scripts/agent-sandbox.sh <command> [args])
+Usage: msandbox [command] [args]   (or ./scripts/agent-sandbox.sh [command] [args])
+
+Bare `msandbox` (no command) builds if needed, starts services, and drops you
+into a shell in the workspace — the one-command way in.
 
 Commands:
   build [--playwright]        Build the isolated workspace image.
@@ -243,7 +246,15 @@ case "$command_name" in
         require_docker
         import_database "${1:-}"
         ;;
-    -h|--help|help|"")
+    "")
+        # Bare `msandbox` — the one-command path: build (no-op if cached),
+        # start services, drop into a shell ready to run an agent.
+        require_docker
+        "${COMPOSE[@]}" build workspace
+        start_services
+        exec_workspace bash
+        ;;
+    -h|--help|help)
         usage
         ;;
     *)

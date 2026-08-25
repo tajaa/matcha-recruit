@@ -11,15 +11,21 @@ Quickstart, from anywhere (`~/.local/bin/msandbox` is a symlink to
 generic devcontainer launcher for other projects):
 
 ```bash
-msandbox build          # first time, or after Dockerfile/dependency changes
-msandbox login codex    # or: login claude / login opencode / login gh
-msandbox dev             # backend/worker/frontend/Tell-Us/Oceanlab in tmux
-msandbox codex           # in another terminal — or `claude` / `opencode`
-msandbox doctor          # isolation + capability self-check
+msandbox                # one command: build (if needed) + start + shell in
+```
+From that shell: `codex`, `claude`, or `opencode` are already on `PATH` and
+already logged in once you've run `login` (below) — or drive the rest from
+outside the container instead:
+```bash
+msandbox build --playwright   # rebuild with Chromium, or after Dockerfile changes
+msandbox login codex          # or: login claude / login opencode / login gh
+msandbox dev                  # backend/worker/frontend/Tell-Us/Oceanlab in tmux
+msandbox codex                # in another terminal — or `claude` / `opencode`
+msandbox doctor               # isolation + capability self-check
 ```
 
 `msandbox` is just `./scripts/agent-sandbox.sh` under a short name; both work
-identically. Run `msandbox` with no args for the full command list.
+identically. Run `msandbox help` for the full command list.
 
 ## What's isolated, and what isn't
 
