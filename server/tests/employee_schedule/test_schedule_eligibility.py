@@ -3,6 +3,7 @@ from datetime import date
 from uuid import uuid4
 
 from app.matcha.services.scheduling.schedule_eligibility import (
+    _schedule_blocking_requirements,
     open_expired_eligibility_cases,
     open_expiring_eligibility_warnings,
     schedule_eligibility_roster_flags,
@@ -194,6 +195,16 @@ def test_roster_flags_query_carries_the_broadened_authority_predicate():
     assert "COALESCE(ct.schedule_blocking, false) = true" in conn.queries[0]
 
 
+def test_tenant_opt_out_template_suppresses_the_curated_food_handler_fallback():
+    conn = QueryCapturingConn()
+    asyncio.run(_schedule_blocking_requirements(conn, uuid4(), [uuid4()]))
+
+    query = conn.queries[0]
+    assert "credential_requirement_templates opt_out" in query
+    assert "opt_out.schedule_blocking = false" in query
+    assert "opt_out.review_status IN ('approved', 'auto_approved')" in query
+
+
 # ── The 2-week advance warning ──────────────────────────────────────────
 
 class WarningWindowConn:
@@ -213,16 +224,29 @@ class WarningWindowConn:
 
 def test_credential_inside_warning_window_opens_a_case():
     row = {"requirement_id": uuid4(), "employee_id": uuid4(),
-           "expires_at": date(2026, 8, 31), "legal_basis": None, "warning_days": 14}
+           "expires_at": date(2026, 8, 31), "legal_basis": None, "warning_days": 14,
+           "work_location_id": uuid4()}
     opened = asyncio.run(open_expiring_eligibility_warnings(
         WarningWindowConn([row]), uuid4(), as_of=date(2026, 8, 21),
     ))
     assert len(opened) == 1
 
 
+def test_expiring_credential_case_is_scoped_to_the_employees_assigned_location():
+    assigned_location = uuid4()
+    row = {"requirement_id": uuid4(), "employee_id": uuid4(),
+           "expires_at": date(2026, 8, 31), "legal_basis": None, "warning_days": 14,
+           "work_location_id": assigned_location}
+    conn = WarningWindowConn([row])
+    asyncio.run(open_expiring_eligibility_warnings(conn, uuid4(), as_of=date(2026, 8, 21)))
+
+    assert conn.inserted[0][2] == assigned_location
+
+
 def test_credential_outside_warning_window_opens_nothing():
     row = {"requirement_id": uuid4(), "employee_id": uuid4(),
-           "expires_at": date(2026, 9, 20), "legal_basis": None, "warning_days": 14}
+           "expires_at": date(2026, 9, 20), "legal_basis": None, "warning_days": 14,
+           "work_location_id": uuid4()}
     conn = WarningWindowConn([row])
     opened = asyncio.run(open_expiring_eligibility_warnings(conn, uuid4(), as_of=date(2026, 8, 21)))
     assert opened == []
@@ -251,16 +275,18 @@ class PromoteConn:
         self.employee_id = employee_id
         self.expires_at = expires_at
         self.promoted_case_id = promoted_case_id
+        self.location_id = uuid4()
         self.inserted_new_case = False
         self.case_assignment_inserts: list[tuple] = []
 
     async def fetch(self, query, *args):
         if "schedule_shifts" in query:
-            return [{"shift_id": uuid4(), "location_id": uuid4(), "starts_at": None}]
+            return [{"shift_id": uuid4(), "location_id": self.location_id, "starts_at": None}]
         if "employee_credential_requirements" in query:
             return [{"requirement_id": self.requirement_id, "employee_id": self.employee_id,
                      "status": "verified", "expires_at": self.expires_at,
-                     "label": "Food Handler Card", "has_expiration": True, "legal_basis": None}]
+                     "label": "Food Handler Card", "has_expiration": True, "legal_basis": None,
+                     "work_location_id": self.location_id, "auto_unassign_on_expiry": False}]
         raise AssertionError(query)
 
     async def fetchval(self, query, *args):
@@ -297,3 +323,108 @@ def test_expired_credential_without_prior_warning_creates_new_case():
 
     assert len(opened) == 1
     assert conn.inserted_new_case is True
+
+
+# ── Food-handler expiry automatically removes future assignments ──────────
+
+class AutoUnassignConn:
+    def __init__(self, *, existing_case=False):
+        self.company_id = uuid4()
+        self.employee_id = uuid4()
+        self.requirement_id = uuid4()
+        self.location_id = uuid4()
+        self.shift_id = uuid4()
+        self.case_id = uuid4()
+        self.existing_case = existing_case
+        self.deleted = False
+        self.executed: list[str] = []
+        self.fetchval_queries: list[str] = []
+
+    async def fetch(self, query, *args):
+        if "employee_credential_requirements" in query:
+            return [{
+                "requirement_id": self.requirement_id,
+                "employee_id": self.employee_id,
+                "status": "verified",
+                "expires_at": date(2026, 8, 20),
+                "label": "Food Handler Card",
+                "has_expiration": True,
+                "legal_basis": None,
+                "work_location_id": self.location_id,
+                "auto_unassign_on_expiry": True,
+            }]
+        if "schedule_shifts" in query:
+            return [{"shift_id": self.shift_id, "location_id": self.location_id, "starts_at": None}]
+        raise AssertionError(query)
+
+    async def fetchval(self, query, *args):
+        self.fetchval_queries.append(query)
+        if "UPDATE schedule_eligibility_cases" in query:
+            if "SET blocking_reason_code = $6" in query and self.existing_case:
+                return self.case_id
+            return None
+        if "INSERT INTO schedule_eligibility_cases" in query:
+            return None if self.existing_case else self.case_id
+        if "DELETE FROM schedule_shift_assignments" in query:
+            self.deleted = True
+            return self.shift_id
+        raise AssertionError(query)
+
+    async def execute(self, query, *args):
+        self.executed.append(query)
+
+
+def test_expired_food_handler_card_removes_future_assignments_automatically():
+    conn = AutoUnassignConn()
+    opened = asyncio.run(open_expired_eligibility_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+
+    assert opened == [conn.case_id]
+    assert conn.deleted is True
+    assert any("INSERT INTO schedule_eligibility_case_assignments" in query for query in conn.executed)
+    assert any("action_status=$1" in query for query in conn.executed)
+
+
+def test_auto_enforcement_removes_shifts_for_an_already_open_case():
+    conn = AutoUnassignConn(existing_case=True)
+    opened = asyncio.run(open_expired_eligibility_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+
+    assert opened == []  # no duplicate notification for an old open case
+    assert conn.deleted is True
+    assert any("SET blocking_reason_code = $6" in query for query in conn.fetchval_queries)
+
+
+class MultiLocationAutoUnassignConn(AutoUnassignConn):
+    def __init__(self):
+        super().__init__()
+        self.second_location_id = uuid4()
+        self.second_shift_id = uuid4()
+        self.second_case_id = uuid4()
+        self.case_ids = iter((self.case_id, self.second_case_id))
+        self.deleted_shifts: list = []
+
+    async def fetch(self, query, *args):
+        if "schedule_shifts" in query:
+            return [
+                {"shift_id": self.shift_id, "location_id": self.location_id, "starts_at": None},
+                {"shift_id": self.second_shift_id, "location_id": self.second_location_id, "starts_at": None},
+            ]
+        return await super().fetch(query, *args)
+
+    async def fetchval(self, query, *args):
+        self.fetchval_queries.append(query)
+        if "UPDATE schedule_eligibility_cases" in query:
+            return None
+        if "INSERT INTO schedule_eligibility_cases" in query:
+            return next(self.case_ids)
+        if "DELETE FROM schedule_shift_assignments" in query:
+            self.deleted_shifts.append(args[0])
+            return args[0]
+        raise AssertionError(query)
+
+
+def test_multi_location_employee_gets_one_case_per_affected_location():
+    conn = MultiLocationAutoUnassignConn()
+    opened = asyncio.run(open_expired_eligibility_cases(conn, conn.company_id, as_of=date(2026, 8, 21)))
+
+    assert set(opened) == {conn.case_id, conn.second_case_id}
+    assert set(conn.deleted_shifts) == {conn.shift_id, conn.second_shift_id}

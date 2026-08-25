@@ -218,9 +218,9 @@ export default function EventsHub() {
             </div>
             <EventDetail
               event={selectedEvent}
-              canResolve={canResolve}
-              canPromote={canPromote && hasIncidents && selectedEvent.source_kind !== 'schedule_compliance_warning'}
-              canAssign={canAssign}
+              canResolve={canResolve && selectedEvent.source_kind !== 'schedule_eligibility_case'}
+              canPromote={canPromote && hasIncidents && selectedEvent.source_kind !== 'schedule_compliance_warning' && selectedEvent.source_kind !== 'schedule_eligibility_case'}
+              canAssign={canAssign && selectedEvent.source_kind !== 'schedule_eligibility_case'}
               onResolve={handleResolve}
               onPromote={() => setShowPromote(true)}
               onAssign={() => setShowAssign(true)}

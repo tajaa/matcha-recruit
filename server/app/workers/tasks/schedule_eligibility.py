@@ -1,7 +1,8 @@
-"""Open manager-decision cases for expired schedule-blocking requirements.
+"""Reconcile schedule-blocking credential expiry cases.
 
-This task intentionally never removes assignments. Managers decide removal or
-provide an explicit, audited acknowledgement through the scheduling API.
+Most requirements open manager-review cases. Credential types explicitly
+configured for automatic enforcement (food-handler cards) also remove future
+assignments at expiry and remain blocked until a renewed credential is approved.
 """
 import asyncio
 import logging
@@ -12,6 +13,10 @@ from ..utils import get_db_connection, scheduler_enabled
 from app.matcha.services.scheduling.schedule_eligibility import (
     open_expired_eligibility_cases,
     open_expiring_eligibility_warnings,
+    resolve_recovered_eligibility_cases,
+)
+from app.matcha.services.scheduling.schedule_eligibility_events import (
+    reconcile_schedule_eligibility_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ async def _dispatch() -> dict:
         companies = await conn.fetch("SELECT id FROM companies")
         opened = 0
         warned = 0
+        recovered = 0
         for company in companies:
             # Warnings first, then expirations, on every run. A credential
             # already past its warning threshold on a PRIOR run may cross
@@ -42,7 +48,9 @@ async def _dispatch() -> dict:
             opened += len(case_ids)
             for case_id in case_ids:
                 await _send_removal_requested_email(conn, case_id)
-        return {"opened": opened, "warned": warned, "companies": len(companies)}
+            recovered += await resolve_recovered_eligibility_cases(conn, company["id"], as_of=date.today())
+            await reconcile_schedule_eligibility_events(conn, company["id"])
+        return {"opened": opened, "warned": warned, "recovered": recovered, "companies": len(companies)}
     finally:
         await conn.close()
 
@@ -83,9 +91,10 @@ async def _location_scoped_recipients(conn, *, company_id, location_id, exclude_
 
 
 async def _send_removal_requested_email(conn, case_id) -> None:
-    """Notify the case's location managers of a pending decision without claiming legal advice."""
+    """Notify location managers when expiry has affected the schedule."""
     case = await conn.fetchrow(
-        """SELECT c.company_id, c.employee_id, c.location_id, c.expires_at, e.first_name, e.last_name
+        """SELECT c.company_id, c.employee_id, c.location_id, c.expires_at, c.blocking_reason_code,
+                  e.first_name, e.last_name
            FROM schedule_eligibility_cases c JOIN employees e ON e.id=c.employee_id WHERE c.id=$1""", case_id)
     if not case:
         return
@@ -97,13 +106,22 @@ async def _send_removal_requested_email(conn, case_id) -> None:
     from app.core.services.email import get_email_service
     service = get_email_service()
     name = f"{case['first_name']} {case['last_name']}".strip()
+    automatically_removed = str(case["blocking_reason_code"] or "").endswith("_auto_unassigned")
+    subject = (
+        f"Scheduling blocked: {name}"
+        if automatically_removed else f"Scheduling decision required: {name}"
+    )
+    body = (
+        "<p>Future shifts were removed automatically. New assignments remain blocked until a renewed credential is approved.</p>"
+        if automatically_removed else "<p>Review the schedule eligibility case and choose removal or explicitly acknowledge retention.</p>"
+    )
     for recipient in recipients:
         await service.send_email(
             to_email=recipient['email'], to_name=recipient['first_name'],
-            subject=f"Scheduling decision required: {name}",
+            subject=subject,
             html_content=(f"<p>{name} has an expired schedule-blocking requirement "
                           f"({case['expires_at'].isoformat() if case['expires_at'] else 'expired'}).</p>"
-                          "<p>Review the schedule eligibility case and choose removal or explicitly acknowledge retention.</p>"),
+                          f"{body}"),
         )
 
 

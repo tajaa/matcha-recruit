@@ -9,6 +9,7 @@ import {
   createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
   generateFromWeekTemplate, fetchRequests, reviewRequest, duplicateShift,
+  fetchEligibilityCases, type ScheduleEligibilityCase,
 } from '../../../api/employees/employeeSchedule'
 import { conflictPrompt } from './scheduleConflicts'
 import { trainingApi, type TrainingRequirement } from '../../../api/training/training'
@@ -189,7 +190,7 @@ export default function EmployeeSchedule() {
       )}
 
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
-      {tab === 'requests' && <RequestsTab onReviewed={reload} />}
+      {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}
       </div>
       <ScheduleHelperWizard open={guideOpen} onClose={closeGuide} />
@@ -816,11 +817,22 @@ function TemplateForm({ locationId, onDone, onCancel }: { locationId: string; on
 
 // ---------- Requests tab ----------
 
-function RequestsTab({ onReviewed }: { onReviewed: () => void }) {
+function RequestsTab({ locationId, onReviewed }: { locationId: string | null; onReviewed: () => void }) {
   const { toast } = useToast()
   const [requests, setRequests] = useState<ScheduleRequest[]>([])
+  const [eligibilityCases, setEligibilityCases] = useState<ScheduleEligibilityCase[]>([])
   const [loading, setLoading] = useState(true)
-  const load = useCallback(() => fetchRequests().then((r) => setRequests(r.requests)), [])
+  const load = useCallback(async () => {
+    const [requestResult, eligibilityResult] = await Promise.all([
+      // A location manager is permitted to see eligibility cases but not the
+      // company-wide employee-request inbox.  Do not let that expected 403
+      // hide the credential queue from the manager who must act on it.
+      fetchRequests().catch(() => ({ requests: [] })),
+      fetchEligibilityCases(locationId),
+    ])
+    setRequests(requestResult.requests)
+    setEligibilityCases(eligibilityResult.cases.filter((item) => item.status === 'warning_open' || item.status === 'removal_requested'))
+  }, [locationId])
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
   async function review(id: string, decision: 'approved' | 'denied') {
@@ -853,10 +865,39 @@ function RequestsTab({ onReviewed }: { onReviewed: () => void }) {
   }
 
   if (loading) return <div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
-  if (requests.length === 0) return <p className="text-sm text-zinc-600">No schedule requests.</p>
+  if (requests.length === 0 && eligibilityCases.length === 0) return <p className="text-sm text-zinc-600">No schedule requests or credential alerts.</p>
 
   return (
     <div className="space-y-2">
+      {eligibilityCases.length > 0 && (
+        <section className="space-y-2 pb-3 border-b border-zinc-800">
+          <div className="text-xs font-medium uppercase tracking-wide text-amber-300">Credential & eligibility</div>
+          {eligibilityCases.map((item) => {
+            const employeeName = `${item.first_name} ${item.last_name}`.trim() || 'Employee'
+            const expiry = item.expires_at ? `expired ${item.expires_at}` : 'requires attention'
+            const removed = item.removed_assignment_count > 0
+            return (
+              <Card key={item.id} className="border-amber-500/30 bg-amber-500/5 p-3">
+                <div className="flex items-start gap-3 flex-wrap">
+                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-300" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-zinc-100">{employeeName} · {item.credential_label || 'Required credential'}</div>
+                    <div className="mt-0.5 text-[11px] text-zinc-400">
+                      {item.status === 'warning_open'
+                        ? `Expires ${item.expires_at ?? 'soon'} — renew before it blocks scheduling.`
+                        : item.automatic_enforcement
+                          ? `${expiry}. ${removed ? `${item.removed_assignment_count} future shift${item.removed_assignment_count === 1 ? '' : 's'} removed automatically.` : 'New assignments are blocked until renewal.'}`
+                          : `${expiry}. ${item.affected_assignment_count} future shift${item.affected_assignment_count === 1 ? '' : 's'} need manager review.`}
+                    </div>
+                  </div>
+                  <Link to={`/app/employees/${item.employee_id}`} className="text-xs text-amber-300 hover:text-amber-200">Open credentials</Link>
+                </div>
+              </Card>
+            )
+          })}
+        </section>
+      )}
+      {requests.length > 0 && <div className="text-xs font-medium uppercase tracking-wide text-zinc-500 pt-1">Employee requests</div>}
       {requests.map((r) => (
         <Card key={r.id} className="p-3">
           <div className="flex items-center gap-3 flex-wrap">

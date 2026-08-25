@@ -201,6 +201,29 @@ export function reviewRequest(id: string, decision: 'approved' | 'denied', revie
   })
 }
 
+// ---- Schedule eligibility ----
+
+export interface ScheduleEligibilityCase {
+  id: string
+  employee_id: string
+  location_id: string | null
+  location_name: string | null
+  credential_label: string | null
+  blocking_reason_code: string
+  status: 'warning_open' | 'removal_requested' | 'removal_completed' | 'keep_acknowledged' | 'resolved'
+  expires_at: string | null
+  first_name: string
+  last_name: string
+  affected_assignment_count: number
+  removed_assignment_count: number
+  automatic_enforcement: boolean
+}
+
+export function fetchEligibilityCases(locationId?: string | null) {
+  const q = locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''
+  return api.get<{ cases: ScheduleEligibilityCase[] }>(`/employee-schedule/eligibility-cases${q}`)
+}
+
 // ---- Employee portal ----
 
 export function fetchMySchedule(start: string, end: string) {

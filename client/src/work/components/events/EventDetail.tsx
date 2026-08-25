@@ -32,9 +32,13 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
     ([, v]) => typeof v === 'string' && v.trim().length > 0,
   )
   const isScheduleWarning = event.source_kind === 'schedule_compliance_warning'
+  const isEligibilityCase = event.source_kind === 'schedule_eligibility_case'
+  const isScheduleAlert = isScheduleWarning || isEligibilityCase
   const scheduleShiftId = event.doc.shift_id
   const scheduleDate = event.doc.shift_starts_at?.slice(0, 10)
-  const scheduleHref = isScheduleWarning && scheduleShiftId
+  const scheduleHref = isEligibilityCase
+    ? event.doc.schedule_link
+    : isScheduleWarning && scheduleShiftId
     ? `/ops/schedule?date=${scheduleDate ?? ''}&shift=${scheduleShiftId}${event.location_id ? `&location=${event.location_id}` : ''}`
     : null
 
@@ -44,7 +48,7 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
         {/* Header */}
         <div>
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-w-dim font-medium">
-            <span>{isScheduleWarning ? 'Schedule warning' : EMS_CATEGORY_LABELS[event.category]}</span>
+            <span>{isEligibilityCase ? 'Scheduling eligibility' : isScheduleWarning ? 'Schedule warning' : EMS_CATEGORY_LABELS[event.category]}</span>
             {event.severity_hint && (
               <>
                 <span>·</span>
@@ -62,7 +66,7 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
                 {event.channel_name}
               </span>
             )}
-            {isScheduleWarning && <span>Schedule</span>}
+            {isScheduleAlert && <span>Schedule</span>}
             {event.location_name && (
               <span className="flex items-center gap-0.5">
                 <MapPin className="w-3 h-3" />
@@ -74,15 +78,20 @@ export function EventDetail({ event, canResolve, canPromote, canAssign, onResolv
           </p>
         </div>
 
-        {isScheduleWarning && (
+        {isScheduleAlert && (
           <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-amber-300">Scheduling follow-up needed</p>
+              <p className="font-medium text-amber-300">{isEligibilityCase ? 'Credential action needed' : 'Scheduling follow-up needed'}</p>
               <p className="mt-1.5">{event.doc.warning ?? event.narrative}</p>
               {scheduleHref && (
                 <a href={scheduleHref} className="mt-2 inline-flex text-xs font-medium text-amber-300 hover:text-amber-200">
-                  Open schedule
+                  {isEligibilityCase ? 'Review eligibility' : 'Open schedule'}
+                </a>
+              )}
+              {isEligibilityCase && event.doc.employee_link && (
+                <a href={event.doc.employee_link} className="mt-2 ml-3 inline-flex text-xs font-medium text-amber-300 hover:text-amber-200">
+                  Open credentials
                 </a>
               )}
             </div>

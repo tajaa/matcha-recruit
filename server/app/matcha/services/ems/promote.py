@@ -62,10 +62,10 @@ def evaluate_promote(
         return PromoteVerdict("refuse", "Incident reporting is not enabled for this company.", 403)
     if event_status != "logged":
         return PromoteVerdict("refuse", f"Event is already {event_status}, not logged.", 409)
-    if source_kind == "schedule_compliance_warning":
+    if source_kind in {"schedule_compliance_warning", "schedule_eligibility_case"}:
         return PromoteVerdict(
             "refuse",
-            "Schedule competency warnings are operational follow-ups, not incident reports.",
+            "Schedule credential alerts are operational follow-ups, not incident reports.",
             409,
         )
     return PromoteVerdict("proceed")

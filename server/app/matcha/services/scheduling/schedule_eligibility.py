@@ -101,6 +101,34 @@ def _credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
     return None
 
 
+async def _attach_case_assignment(
+    conn, *, case_id: UUID, company_id: UUID, employee_id: UUID, assignment, auto_unassign: bool,
+) -> None:
+    """Attach a future assignment to a case and, for a hard expiry policy,
+    remove it in the same reconciliation pass.  The case-assignment row is
+    retained as the audit trail even though the live assignment is deleted."""
+    await conn.execute(
+        """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
+           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+        case_id, assignment["shift_id"], employee_id, assignment["starts_at"],
+    )
+    if not auto_unassign:
+        return
+    deleted = await conn.fetchval(
+        """DELETE FROM schedule_shift_assignments a USING schedule_shifts s
+           WHERE a.shift_id=$1 AND a.employee_id=$2 AND a.shift_id=s.id AND s.company_id=$3
+           RETURNING a.shift_id""",
+        assignment["shift_id"], employee_id, company_id,
+    )
+    action = "removed" if deleted else "no_longer_assigned"
+    await conn.execute(
+        """UPDATE schedule_eligibility_case_assignments
+           SET action_status=$1, acted_at=NOW()
+           WHERE case_id=$2 AND shift_id=$3 AND employee_id=$4""",
+        action, case_id, assignment["shift_id"], employee_id,
+    )
+
+
 async def schedule_eligibility_violations(
     conn,
     company_id: UUID,
@@ -232,12 +260,55 @@ async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: d
     return opened
 
 
+async def resolve_recovered_eligibility_cases(conn, company_id: UUID, *, as_of: date) -> int:
+    """Close expired-credential cases once a replacement has been verified.
+
+    A food-handler event remains open after automatic shift removal because
+    the underlying credential still needs remediation.  This is the single
+    place that closes that case after the employee's renewed document is
+    approved.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT c.id, ecr.id AS requirement_id, ecr.status, ecr.expires_at,
+               ct.label, ct.has_expiration
+          FROM schedule_eligibility_cases c
+          LEFT JOIN employee_credential_requirements ecr ON ecr.id = c.requirement_id
+          LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+         WHERE c.company_id=$1 AND c.requirement_type='credential'
+           AND c.status='removal_requested'
+        """,
+        company_id,
+    )
+    resolved = 0
+    for row in rows:
+        current_problem = _credential_problem(row, as_of=as_of) if row["requirement_id"] else None
+        if current_problem:
+            continue
+        await conn.execute(
+            """UPDATE schedule_eligibility_cases
+                  SET status='resolved', resolution_reason='credential_renewed_or_cleared',
+                      resolved_at=NOW(), updated_at=NOW()
+                WHERE id=$1 AND status='removal_requested'""",
+            row["id"],
+        )
+        resolved += 1
+    return resolved
+
+
 async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date) -> list[UUID]:
-    """Idempotently create manager-decision cases; never removes assignments."""
+    """Create expiry cases and enforce type-specific automatic removals.
+
+    Most schedule-blocking requirements stay manager-mediated.  A curated
+    credential type may opt into the narrower ``auto_unassign_on_expiry``
+    policy; food-handler cards use it so an expired card removes only future
+    assignments while the credential remains blocked for new scheduling.
+    """
     rows = await conn.fetch(
         f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.status, ecr.expires_at, ct.label, ct.has_expiration,
-               crt.legal_basis, e.work_location_id
+               crt.legal_basis, e.work_location_id,
+               COALESCE(ct.auto_unassign_on_expiry, false) AS auto_unassign_on_expiry
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
@@ -251,18 +322,21 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
         if not problem:
             continue
         reason_code, _message = problem
+        auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
+        case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
         assignments = await conn.fetch(
             """SELECT s.id AS shift_id, s.location_id, s.starts_at
                FROM schedule_shifts s JOIN schedule_shift_assignments a ON a.shift_id=s.id
                WHERE s.company_id=$1 AND a.employee_id=$2 AND s.status <> 'cancelled'
-                 AND s.location_id IS NOT NULL AND s.starts_at::date >= $3""",
-            company_id, row["employee_id"], as_of,
+                 AND s.location_id IS NOT NULL AND s.starts_at > NOW()""",
+            company_id, row["employee_id"],
         )
         by_location: dict[UUID, list] = {}
         for assignment in assignments:
             by_location.setdefault(assignment["location_id"], []).append(assignment)
 
-        if not by_location:
+        primary_location = row["work_location_id"]
+        if not by_location and not auto_unassign:
             # Nothing upcoming to review — closing the stale warning (if any)
             # beats opening a removal_requested case with zero assignments
             # and no email that would otherwise sit open forever.
@@ -275,8 +349,11 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
                 company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
             )
             continue
-
-        primary_location = row["work_location_id"]
+        if not by_location:
+            # An expired food-handler card stays actionable even if this
+            # employee currently has no future shifts: assigning new work is
+            # still blocked until a renewed card is approved.
+            by_location[primary_location] = []
 
         # A warning_open case for this exact (employee, requirement, expiry,
         # location) may already exist from open_expiring_eligibility_warnings
@@ -295,15 +372,15 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
                AND location_id IS NOT DISTINCT FROM $5 AND status = 'warning_open'
             RETURNING id
             """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
-            primary_location, reason_code,
+            primary_location, case_reason_code,
         )
         if promoted_id:
             opened.append(promoted_id)
             for assignment in by_location.pop(primary_location, []):
-                await conn.execute(
-                    """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
-                       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
-                    promoted_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
+                await _attach_case_assignment(
+                    conn, case_id=promoted_id, company_id=company_id,
+                    employee_id=row["employee_id"], assignment=assignment,
+                    auto_unassign=auto_unassign,
                 )
 
         for location_id, location_assignments in by_location.items():
@@ -313,15 +390,37 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
                     (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
                 VALUES ($1,$2,$3,'credential',$4,$5,'removal_requested',$6,$7::jsonb)
                 ON CONFLICT DO NOTHING RETURNING id
-                """, company_id, row['employee_id'], location_id, row['requirement_id'], reason_code,
+                """, company_id, row['employee_id'], location_id, row['requirement_id'], case_reason_code,
                 row['expires_at'], json.dumps(_basis(row['legal_basis'])),
             )
+            new_case = bool(case_id)
+            # A prior run may have opened a manager-review case before this
+            # credential type was marked for automatic enforcement.  Reuse
+            # that still-open case so turning the policy on also protects
+            # existing schedules, rather than only newly-expired cards.
+            if not case_id and auto_unassign:
+                case_id = await conn.fetchval(
+                    """
+                    UPDATE schedule_eligibility_cases
+                       SET blocking_reason_code = $6, updated_at = NOW()
+                     WHERE company_id = $1 AND employee_id = $2
+                       AND requirement_type = 'credential' AND requirement_id = $3
+                       AND expires_at = $4 AND location_id IS NOT DISTINCT FROM $5
+                       AND status = 'removal_requested'
+                    RETURNING id
+                    """,
+                    company_id, row['employee_id'], row['requirement_id'], row['expires_at'], location_id,
+                    case_reason_code,
+                )
             if case_id:
-                opened.append(case_id)
+                # Only newly opened/promoted cases should fan out another
+                # notification.  Assignment removal itself is idempotent.
+                if new_case:
+                    opened.append(case_id)
                 for assignment in location_assignments:
-                    await conn.execute(
-                        """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
-                           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
-                        case_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
+                    await _attach_case_assignment(
+                        conn, case_id=case_id, company_id=company_id,
+                        employee_id=row["employee_id"], assignment=assignment,
+                        auto_unassign=auto_unassign,
                     )
     return opened

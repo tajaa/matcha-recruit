@@ -30,13 +30,31 @@ async def list_eligibility_cases(
         if not scope.is_company_operations and not scope.managed_location_ids:
             return {"cases": []}
         rows = await conn.fetch(
-            """SELECT c.*, e.first_name, e.last_name FROM schedule_eligibility_cases c
-               JOIN employees e ON e.id=c.employee_id WHERE c.company_id=$1
+            """SELECT c.*, e.first_name, e.last_name, ct.label AS credential_label,
+                      bl.name AS location_name,
+                      COUNT(a.shift_id) AS affected_assignment_count,
+                      COUNT(a.shift_id) FILTER (WHERE a.action_status='removed') AS removed_assignment_count
+                 FROM schedule_eligibility_cases c
+                 JOIN employees e ON e.id=c.employee_id
+                 LEFT JOIN employee_credential_requirements ecr ON ecr.id=c.requirement_id
+                 LEFT JOIN credential_types ct ON ct.id=ecr.credential_type_id
+                 LEFT JOIN business_locations bl ON bl.id=c.location_id
+                 LEFT JOIN schedule_eligibility_case_assignments a ON a.case_id=c.id
+              WHERE c.company_id=$1
                  AND ($2::uuid IS NULL OR c.location_id=$2)
                  AND ($3::boolean OR c.location_id=ANY($4::uuid[]))
-               ORDER BY c.detected_at DESC LIMIT 200""",
+              GROUP BY c.id, e.first_name, e.last_name, ct.label, bl.name
+              ORDER BY c.detected_at DESC LIMIT 200""",
             company_id, location_id, scope.is_company_operations, list(scope.managed_location_ids))
-    return {"cases": [{**dict(row), "id": str(row["id"]), "employee_id": str(row["employee_id"])} for row in rows]}
+    cases = []
+    for row in rows:
+        item = dict(row)
+        for key in ("id", "employee_id", "location_id", "requirement_id", "manager_decision_by", "manager_acknowledged_by"):
+            if item.get(key) is not None:
+                item[key] = str(item[key])
+        item["automatic_enforcement"] = str(item.get("blocking_reason_code") or "").endswith("_auto_unassigned")
+        cases.append(item)
+    return {"cases": cases}
 
 
 @router.post("/eligibility-cases/{case_id}/decision")
@@ -51,6 +69,11 @@ async def decide_eligibility_case(case_id: UUID, body: EligibilityCaseDecision,
             )
             if case["status"] not in ("removal_requested", "warning_open"):
                 raise HTTPException(status_code=409, detail="Eligibility case already decided")
+            if str(case["blocking_reason_code"] or "").endswith("_auto_unassigned"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="This expired credential is automatically enforced; approve a renewed credential before scheduling the employee again.",
+                )
             if body.decision == "keep" and (not body.acknowledgement_confirmed or not body.acknowledgement_note):
                 raise HTTPException(status_code=422, detail={
                     "code": "eligibility_acknowledgement_required",
