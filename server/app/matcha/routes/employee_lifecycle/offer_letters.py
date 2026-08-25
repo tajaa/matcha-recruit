@@ -687,70 +687,39 @@ async def submit_candidate_range(token: str, payload: CandidateRangeSubmit):
     return RangeNegotiateResult(result=result, matched_salary=matched_salary)
 
 
-async def _notify_huume_thread_of_offer_event(
-    offer: dict, *, event: str, detail: str,
-) -> None:
-    """Best-effort: post a system notice into the matcha-work thread that
-    originated this offer, and bell-notify the offer sender, thread's creator,
-    plus any designated HR approvers. Never raises — a candidate's click must not 500
-    because a thread got deleted or a WS push hiccuped. `thread_id` is bound
-    before the try body so the except's own logging can't itself raise.
-
-    Thread lookup prefers `offer_letters.source_thread_id` (set once, at
-    draft time, never repointed — see `draft_offer_letter`/
-    `save_offer_letter_draft`) and falls back to the older
-    `mw_threads.linked_offer_letter_id` reverse lookup for pre-migration
-    rows. The reverse lookup is fragile — that column is one slot per
-    thread, repointed by whichever offer was drafted there most recently —
-    which is exactly the bug `source_thread_id` exists to fix.
-
-    `event` is 'accepted' | 'declined'.
-    """
-    thread_id = None
+async def _resolve_huume_offer_thread(offer: dict) -> dict | None:
+    """Find an offer's originating thread without depending on optional assets."""
     try:
-        from app.matcha.services.matcha_work.matcha_work_document import (
-            add_message, apply_update,
-        )
-        from app.matcha.services.notification_service import create_notifications_bulk
-
         async with get_connection() as conn:
             thread = None
             if offer.get("source_thread_id"):
                 thread = await conn.fetchrow(
-                    """
-                    SELECT t.id, t.created_by,
-                           (
-                               SELECT ha.created_by
-                               FROM huume_assets ha
-                               WHERE ha.company_id = t.company_id
-                                 AND ha.ref_table = 'offer_letters'
-                                 AND ha.ref_id = $3::text
-                           ) AS offer_sender_id
-                    FROM mw_threads t
-                    WHERE t.id = $1 AND t.company_id = $2
-                    """,
-                    offer["source_thread_id"], offer["company_id"], offer["id"],
+                    "SELECT id, created_by FROM mw_threads WHERE id = $1 AND company_id = $2",
+                    offer["source_thread_id"], offer["company_id"],
                 )
             if not thread:
                 thread = await conn.fetchrow(
-                    """
-                    SELECT t.id, t.created_by,
-                           (
-                               SELECT ha.created_by
-                               FROM huume_assets ha
-                               WHERE ha.company_id = t.company_id
-                                 AND ha.ref_table = 'offer_letters'
-                                 AND ha.ref_id = $1::text
-                           ) AS offer_sender_id
-                    FROM mw_threads t
-                    WHERE t.linked_offer_letter_id = $1 AND t.company_id = $2
-                    """,
+                    """SELECT id, created_by FROM mw_threads
+                       WHERE linked_offer_letter_id = $1 AND company_id = $2""",
                     offer["id"], offer["company_id"],
                 )
-            if not thread:
-                return
-            thread_id = thread["id"]
+            return dict(thread) if thread else None
+    except Exception:
+        logger.exception(
+            "[Huume] offer thread lookup failed offer=%s",
+            offer.get("id"),
+        )
+        return None
 
+
+async def _resolve_huume_offer_recipients(offer: dict, thread: dict) -> set[UUID]:
+    """Return durable recipients; asset lookup is optional sender enrichment."""
+    recipients: set[UUID] = set()
+    if thread.get("created_by"):
+        recipients.add(thread["created_by"])
+
+    try:
+        async with get_connection() as conn:
             approver_rows = await conn.fetch(
                 """
                 SELECT u.id FROM clients c JOIN users u ON u.id = c.user_id
@@ -759,12 +728,59 @@ async def _notify_huume_thread_of_offer_event(
                 """,
                 offer["company_id"],
             )
-        recipient_ids = {r["id"] for r in approver_rows}
-        if thread["created_by"]:
-            recipient_ids.add(thread["created_by"])
-        if thread.get("offer_sender_id"):
-            recipient_ids.add(thread["offer_sender_id"])
+        recipients.update(row["id"] for row in approver_rows)
+    except Exception:
+        logger.exception(
+            "[Huume] offer approver lookup failed offer=%s thread=%s",
+            offer.get("id"), thread.get("id"),
+        )
 
+    try:
+        async with get_connection() as conn:
+            offer_sender_id = await conn.fetchval(
+                """
+                SELECT created_by FROM huume_assets
+                WHERE company_id = $1 AND ref_table = 'offer_letters' AND ref_id = $2
+                LIMIT 1
+                """,
+                offer["company_id"], str(offer["id"]),
+            )
+        if offer_sender_id:
+            recipients.add(offer_sender_id)
+    except Exception:
+        # huume_assets is enrichment only: a migration lag or stale registry
+        # must never hide the persisted chat event or the creator's bell.
+        logger.exception(
+            "[Huume] offer sender lookup failed offer=%s thread=%s",
+            offer.get("id"), thread.get("id"),
+        )
+
+    return recipients
+
+
+async def _notify_huume_thread_of_offer_event(
+    offer: dict, *, event: str, detail: str,
+) -> None:
+    """Persist and deliver a signed/declined offer event without coupling stages.
+
+    The thread comes from the offer's durable ``source_thread_id`` (with the
+    legacy reverse-link fallback). State, message, websocket fan-out, and bell
+    notification intentionally fail independently: a non-critical lookup or a
+    realtime problem must not suppress durable evidence of the signature.
+    """
+    thread = await _resolve_huume_offer_thread(offer)
+    if not thread:
+        logger.warning(
+            "[Huume] no originating thread for offer=%s event=%s",
+            offer.get("id"), event,
+        )
+        return
+
+    thread_id = thread["id"]
+    recipient_ids = await _resolve_huume_offer_recipients(offer, thread)
+
+    try:
+        from app.matcha.services.matcha_work.matcha_work_document import apply_update
         await apply_update(
             thread_id,
             {"huume_offer": {
@@ -775,10 +791,26 @@ async def _notify_huume_thread_of_offer_event(
             }},
             diff_summary=f"Offer {event} by candidate",
         )
+    except Exception:
+        logger.exception(
+            "[Huume] offer state update failed offer=%s thread=%s event=%s",
+            offer.get("id"), thread_id, event,
+        )
+
+    assistant_msg = None
+    try:
+        from app.matcha.services.matcha_work.matcha_work_document import add_message
         assistant_msg = await add_message(
             thread_id, "assistant", detail,
             metadata={"huume_event": f"offer_{event}", "offer_id": str(offer["id"])},
         )
+    except Exception:
+        logger.exception(
+            "[Huume] offer chat message failed offer=%s thread=%s event=%s",
+            offer.get("id"), thread_id, event,
+        )
+
+    if assistant_msg:
         try:
             from app.matcha.routes.work.thread_ws import thread_manager
             from app.matcha.routes.matcha_work._shared import _row_to_message
@@ -787,9 +819,14 @@ async def _notify_huume_thread_of_offer_event(
                 [_row_to_message(assistant_msg).model_dump(mode="json")],
             )
         except Exception:
-            logger.debug("[Huume] thread broadcast skipped for %s", thread_id, exc_info=True)
+            logger.exception(
+                "[Huume] offer thread broadcast failed offer=%s thread=%s event=%s",
+                offer.get("id"), thread_id, event,
+            )
 
-        if recipient_ids:
+    if recipient_ids:
+        try:
+            from app.matcha.services.notification_service import create_notifications_bulk
             recipient_list = list(recipient_ids)
             await create_notifications_bulk(
                 user_ids=recipient_list,
@@ -800,11 +837,11 @@ async def _notify_huume_thread_of_offer_event(
                 link=f"/work/{thread_id}",
                 metadata={"offer_id": str(offer["id"]), "event": event},
             )
-    except Exception:
-        logger.exception(
-            "[Huume] failed to notify thread %s of offer %s event=%s",
-            thread_id, offer.get("id"), event,
-        )
+        except Exception:
+            logger.exception(
+                "[Huume] offer bell notification failed offer=%s thread=%s event=%s",
+                offer.get("id"), thread_id, event,
+            )
 
 
 @candidate_router.get("/candidate/{token}/document", response_model=CandidateOfferDocumentView)
@@ -899,15 +936,7 @@ async def download_candidate_offer_pdf(token: str, request: Request):
 
 
 async def _finish_offer_accept(updated: dict, signed_name: str, signer_ip: str) -> None:
-    """Post-accept side effects — signed-PDF render/store, Huume thread notice,
-    employer email. Runs as a `BackgroundTasks` job, after the candidate's
-    accept response has already been sent: the DB commit (and thus the
-    candidate-visible 'accepted' state) happened before this ever runs, and
-    none of this work is on the critical path of that response. Each step is
-    already best-effort/never-raise on its own — a storage hiccup or email
-    failure here must not surface anywhere, since there's no request left to
-    fail.
-    """
+    """Post-accept PDF and email work, after the durable chat/bell event."""
     try:
         logo_src = await _build_logo_data_uri(updated.get("company_logo_url"))
         signature = {"name": signed_name, "signed_at": updated["signed_at"], "ip": signer_ip}
@@ -928,13 +957,6 @@ async def _finish_offer_accept(updated: dict, signed_name: str, signer_ip: str) 
         updated["signed_pdf_storage_path"] = storage_path
     except Exception:
         logger.exception("[OfferLetters] failed to render/store signed PDF for offer %s", updated["id"])
-
-    await _notify_huume_thread_of_offer_event(
-        updated, event="accepted",
-        detail=f"**{updated.get('candidate_name') or 'The candidate'}** accepted the offer for "
-               f"**{updated.get('position_title') or 'the role'}** — signed {signed_name} just now. "
-               f"Say \"build the onboarding plan\" when you're ready to start onboarding.",
-    )
 
     try:
         async with get_connection() as conn:
@@ -965,13 +987,11 @@ async def accept_candidate_offer(
     safe: a second call sees 0 rows updated and 409s rather than
     re-stamping signed_at or double-firing notifications.
 
-    Responds immediately after the DB commit + cache invalidation — signed-PDF
-    render/store, the Huume thread notice, and the employer email all run in
-    `background_tasks` afterward (see `_finish_offer_accept`). Previously these
-    ran inline, including a synchronous WeasyPrint render directly on the event
-    loop, which could stall the candidate's request for the full render
-    duration — the UI would sit on 'signing...' even though the accept had
-    already committed.
+    Responds after the DB commit, cache invalidation, and the durable Huume
+    chat/bell event. Signed-PDF render/store and employer email stay in
+    `background_tasks` afterward (see `_finish_offer_accept`), keeping the
+    expensive render off the candidate's signing path without allowing it to
+    delay or swallow the signature alert.
 
     Consequence: this response's `signed_pdf_storage_path` is always None —
     the render hasn't happened yet at return time. No current frontend reads
@@ -1012,21 +1032,19 @@ async def accept_candidate_offer(
     if redis:
         await cache_delete(redis, offer_letters_key(updated["company_id"]))
 
+    await _notify_huume_thread_of_offer_event(
+        updated, event="accepted",
+        detail=f"**{updated.get('candidate_name') or 'The candidate'}** accepted the offer for "
+               f"**{updated.get('position_title') or 'the role'}** — signed {signed_name} just now. "
+               f"Say \"build the onboarding plan\" when you're ready to start onboarding.",
+    )
     background_tasks.add_task(_finish_offer_accept, updated, signed_name, signer_ip)
 
     return OfferLetter(**updated)
 
 
-async def _finish_offer_decline(updated: dict, reason: str | None) -> None:
-    """Post-decline side effects — Huume thread notice + employer email. Runs
-    as a `BackgroundTasks` job after the decline response has been sent, same
-    reasoning as `_finish_offer_accept`."""
-    await _notify_huume_thread_of_offer_event(
-        updated, event="declined",
-        detail=f"**{updated.get('candidate_name') or 'The candidate'}** declined the offer for "
-               f"**{updated.get('position_title') or 'the role'}**"
-               + (f" — reason given: “{reason}”" if reason else "") + ".",
-    )
+async def _finish_offer_decline(updated: dict) -> None:
+    """Post-decline email work after the durable Huume chat/bell event."""
 
     try:
         async with get_connection() as conn:
@@ -1081,7 +1099,13 @@ async def decline_candidate_offer(
     if redis:
         await cache_delete(redis, offer_letters_key(updated["company_id"]))
 
-    background_tasks.add_task(_finish_offer_decline, updated, payload.reason)
+    await _notify_huume_thread_of_offer_event(
+        updated, event="declined",
+        detail=f"**{updated.get('candidate_name') or 'The candidate'}** declined the offer for "
+               f"**{updated.get('position_title') or 'the role'}**"
+               + (f" — reason given: “{payload.reason}”" if payload.reason else "") + ".",
+    )
+    background_tasks.add_task(_finish_offer_decline, updated)
 
     return {"status": "declined"}
 

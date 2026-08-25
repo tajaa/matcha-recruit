@@ -65,10 +65,18 @@ def _patch_side_effects(monkeypatch):
     return bulk
 
 
+def _thread_conn(*, thread=None, approvers=None, sender_id=None):
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value=thread or {"id": THREAD_ID, "created_by": CREATOR_ID})
+    conn.fetch = AsyncMock(return_value=approvers or [])
+    conn.fetchval = AsyncMock(return_value=sender_id)
+    return conn
+
+
 class TestNoThreadFound:
     @pytest.mark.asyncio
     async def test_returns_silently_when_nothing_matches(self, monkeypatch):
-        conn = MagicMock()
+        conn = _thread_conn(thread=None)
         conn.fetchrow = AsyncMock(return_value=None)
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
@@ -93,25 +101,50 @@ class TestNeverRaises:
 
     @pytest.mark.asyncio
     async def test_downstream_failure_after_thread_found_does_not_raise(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": CREATOR_ID})
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn()
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         monkeypatch.setattr(f"{DOC_MOD}.apply_update", AsyncMock(side_effect=RuntimeError("boom")))
-        monkeypatch.setattr(f"{DOC_MOD}.add_message", AsyncMock())
+        monkeypatch.setattr(f"{DOC_MOD}.add_message", AsyncMock(return_value=None))
         monkeypatch.setattr(f"{NOTIFY_MOD}.create_notifications_bulk", AsyncMock())
 
         await offer_letters_mod._notify_huume_thread_of_offer_event(
             _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
         )  # no raise
 
+    @pytest.mark.asyncio
+    async def test_state_failure_still_posts_message_and_notification(self, monkeypatch):
+        conn = _thread_conn()
+        monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        bulk = _patch_side_effects(monkeypatch)
+        add_message = AsyncMock(return_value={"id": uuid4()})
+        monkeypatch.setattr(f"{DOC_MOD}.apply_update", AsyncMock(side_effect=RuntimeError("state down")))
+        monkeypatch.setattr(f"{DOC_MOD}.add_message", add_message)
+
+        await offer_letters_mod._notify_huume_thread_of_offer_event(
+            _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
+        )
+
+        add_message.assert_awaited_once()
+        bulk.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_message_failure_still_creates_notification(self, monkeypatch):
+        conn = _thread_conn()
+        monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        bulk = _patch_side_effects(monkeypatch)
+        monkeypatch.setattr(f"{DOC_MOD}.add_message", AsyncMock(side_effect=RuntimeError("message down")))
+
+        await offer_letters_mod._notify_huume_thread_of_offer_event(
+            _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
+        )
+
+        bulk.assert_awaited_once()
+
 
 class TestThreadLookup:
     @pytest.mark.asyncio
     async def test_prefers_source_thread_id_over_reverse_lookup(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": CREATOR_ID})
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn()
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         _patch_side_effects(monkeypatch)
 
@@ -120,18 +153,13 @@ class TestThreadLookup:
         )
 
         first_query = conn.fetchrow.call_args_list[0].args[0]
-        assert "FROM mw_threads t" in first_query
+        assert "FROM mw_threads" in first_query
+        assert "huume_assets" not in first_query
         assert conn.fetchrow.call_count == 1  # never falls through to the reverse lookup
 
     @pytest.mark.asyncio
     async def test_offer_sender_is_notified_when_not_thread_creator_or_approver(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={
-            "id": THREAD_ID,
-            "created_by": CREATOR_ID,
-            "offer_sender_id": SENDER_ID,
-        })
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn(sender_id=SENDER_ID)
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
 
@@ -140,13 +168,11 @@ class TestThreadLookup:
         )
 
         assert set(bulk.call_args.kwargs["user_ids"]) == {CREATOR_ID, SENDER_ID}
-        assert "huume_assets" in conn.fetchrow.call_args.args[0]
+        assert "huume_assets" in conn.fetchval.call_args.args[0]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_linked_offer_letter_id_when_no_source_thread(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": CREATOR_ID})
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn()
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         _patch_side_effects(monkeypatch)
 
@@ -161,9 +187,7 @@ class TestThreadLookup:
 class TestNotificationShape:
     @pytest.mark.asyncio
     async def test_link_is_work_thread_not_work_threads_thread(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": CREATOR_ID})
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn()
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
 
@@ -176,9 +200,7 @@ class TestNotificationShape:
 
     @pytest.mark.asyncio
     async def test_recipients_are_creator_plus_hr_approvers_deduped(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": CREATOR_ID})
-        conn.fetch = AsyncMock(return_value=[{"id": CREATOR_ID}, {"id": APPROVER_ID}])
+        conn = _thread_conn(approvers=[{"id": CREATOR_ID}, {"id": APPROVER_ID}])
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
 
@@ -191,9 +213,7 @@ class TestNotificationShape:
 
     @pytest.mark.asyncio
     async def test_no_recipients_skips_notification_call_but_still_posts_message(self, monkeypatch):
-        conn = MagicMock()
-        conn.fetchrow = AsyncMock(return_value={"id": THREAD_ID, "created_by": None})
-        conn.fetch = AsyncMock(return_value=[])
+        conn = _thread_conn(thread={"id": THREAD_ID, "created_by": None})
         monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
         bulk = _patch_side_effects(monkeypatch)
         add_message_mock = AsyncMock(return_value={"id": uuid4()})
@@ -205,3 +225,19 @@ class TestNotificationShape:
 
         bulk.assert_not_called()
         add_message_mock.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_sender_lookup_failure_still_posts_message_and_notifies_creator(self, monkeypatch):
+        conn = _thread_conn()
+        conn.fetchval = AsyncMock(side_effect=RuntimeError("assets migration missing"))
+        monkeypatch.setattr(f"{MOD}.get_connection", MagicMock(return_value=_conn_ctx(conn)))
+        bulk = _patch_side_effects(monkeypatch)
+        add_message = AsyncMock(return_value={"id": uuid4()})
+        monkeypatch.setattr(f"{DOC_MOD}.add_message", add_message)
+
+        await offer_letters_mod._notify_huume_thread_of_offer_event(
+            _base_offer(source_thread_id=THREAD_ID), event="accepted", detail="signed",
+        )
+
+        add_message.assert_awaited_once()
+        assert bulk.call_args.kwargs["user_ids"] == [CREATOR_ID]
