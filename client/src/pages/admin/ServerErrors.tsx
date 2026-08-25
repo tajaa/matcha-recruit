@@ -103,6 +103,38 @@ function relTime(iso: string | null): string {
   return `${d}d ago`
 }
 
+function formatErrorReport(item: ErrorItem): string {
+  const request = [item.request_method, item.request_path].filter(Boolean).join(' ')
+  const details = [
+    'Matcha server error report',
+    `Error ID: ${item.id}`,
+    `Exception: ${item.exception_type || '—'}`,
+    `Message: ${item.message}`,
+    `Kind: ${KIND_LABEL[item.kind]} (${item.kind})`,
+    `Level: ${item.level}`,
+    `Source: ${item.source}`,
+    item.request_status != null ? `HTTP status: ${item.request_status}` : null,
+    request ? `Request: ${request}` : null,
+    item.logger_name ? `Logger: ${item.logger_name}` : null,
+    item.hostname ? `Host: ${item.hostname}` : null,
+    item.user_id ? `User ID: ${item.user_id}` : null,
+    item.user_email ? `User email: ${item.user_email}` : null,
+    `Occurrences: ${item.occurrences}`,
+    item.first_seen ? `First seen: ${item.first_seen}` : null,
+    item.last_seen ? `Last seen: ${item.last_seen}` : null,
+    `Fingerprint: ${item.fingerprint}`,
+  ].filter((detail): detail is string => Boolean(detail))
+
+  if (item.context && Object.keys(item.context).length > 0) {
+    details.push(`\nContext:\n${JSON.stringify(item.context, null, 2)}`)
+  }
+  if (item.traceback) {
+    details.push(`\nTraceback:\n${item.traceback}`)
+  }
+
+  return details.join('\n')
+}
+
 export default function ServerErrors() {
   const [kindFilter, setKindFilter] = useState<Kind | ''>('')
   const [sourceFilter, setSourceFilter] = useState<Source | ''>('')
@@ -145,12 +177,14 @@ export default function ServerErrors() {
     })
   }
 
-  async function copyText(text: string, id: string) {
+  async function copyErrorReport(item: ErrorItem) {
     try {
-      await navigator.clipboard.writeText(text)
-      setCopied(id)
+      await navigator.clipboard.writeText(formatErrorReport(item))
+      setCopied(item.id)
       setTimeout(() => setCopied(null), 1500)
-    } catch {}
+    } catch (error) {
+      console.error('Could not copy server error report', error)
+    }
   }
 
   async function resolve(id: string) {
@@ -340,20 +374,19 @@ export default function ServerErrors() {
                   </button>
                   {isOpen && (
                     <div className="px-4 pb-4 pl-11 space-y-3 bg-zinc-900/30">
+                      <div className="flex justify-end pt-3">
+                        <button
+                          onClick={() => copyErrorReport(item)}
+                          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+                          title="Copy the error message, request details, context, and traceback"
+                        >
+                          {copied === item.id ? <Check size={10} /> : <Copy size={10} />}
+                          {copied === item.id ? 'Copied' : 'Copy report'}
+                        </button>
+                      </div>
                       {item.traceback && (
                         <div>
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-                              Traceback
-                            </p>
-                            <button
-                              onClick={() => copyText(item.traceback!, item.id)}
-                              className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
-                            >
-                              {copied === item.id ? <Check size={10} /> : <Copy size={10} />}
-                              {copied === item.id ? 'Copied' : 'Copy'}
-                            </button>
-                          </div>
+                          <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Traceback</p>
                           <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950/80 p-3 rounded border border-zinc-800 overflow-x-auto whitespace-pre-wrap max-h-96 overflow-y-auto">
                             {item.traceback}
                           </pre>
