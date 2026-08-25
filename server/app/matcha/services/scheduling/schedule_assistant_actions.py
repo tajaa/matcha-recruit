@@ -8,7 +8,10 @@ from uuid import UUID
 
 from app.database import get_connection
 
-from .schedule_eligibility_authorization import require_eligibility_case_access
+from .schedule_eligibility_authorization import (
+    eligibility_case_decision_error,
+    require_eligibility_case_access,
+)
 from .schedule_guidance import refresh_assignment_break_guidance
 from .shift_writes import log_audit
 
@@ -241,8 +244,9 @@ async def decide_eligibility_case_core(
             )
             if case["location_id"] != location_id:
                 return {"status": "refused", "message": "That eligibility case is outside this schedule workspace."}
-            if case["status"] not in ("removal_requested", "warning_open"):
-                return {"status": "refused", "message": "Eligibility case already decided."}
+            decision_error = eligibility_case_decision_error(case)
+            if decision_error:
+                return {"status": "refused", "message": decision_error}
             if decision == "keep":
                 await conn.execute(
                     """UPDATE schedule_eligibility_cases

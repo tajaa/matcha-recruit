@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FocusEvent } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 
 type Option = { value: string; label: string }
@@ -61,6 +61,12 @@ export function Select({
     onChange?.({ target: { value: v } })
   }
 
+  function handleBlur(event: FocusEvent<HTMLDivElement>) {
+    const next = event.relatedTarget
+    if (next instanceof Node && event.currentTarget.contains(next)) return
+    onBlur?.()
+  }
+
   return (
     <div className={className}>
       {label && (
@@ -68,7 +74,7 @@ export function Select({
           {label}{required && <span className="text-red-400 ml-1">*</span>}
         </label>
       )}
-      <div ref={ref} className="relative">
+      <div ref={ref} className="relative" onBlur={handleBlur}>
         <button
           type="button"
           id={id}
@@ -76,14 +82,6 @@ export function Select({
           disabled={disabled}
           autoFocus={autoFocus}
           onClick={() => !disabled && setOpen((v) => !v)}
-          onBlur={() => {
-            // The options are rendered beside (rather than inside) the trigger
-            // button. Defer the blur check so clicking an option can move focus
-            // into the select before an owner tears the editor down.
-            window.setTimeout(() => {
-              if (!ref.current?.contains(document.activeElement)) onBlur?.()
-            }, 0)
-          }}
           className={`w-full flex items-center justify-between gap-2 bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-2 text-[12px] text-zinc-200 hover:border-white/15 hover:bg-zinc-800/60 transition-colors ${
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           } ${open ? 'border-white/20' : ''}`}

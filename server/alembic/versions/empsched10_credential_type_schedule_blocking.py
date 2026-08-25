@@ -32,6 +32,39 @@ def upgrade() -> None:
             ADD COLUMN IF NOT EXISTS warning_days INTEGER NOT NULL DEFAULT 14
     """)
     op.execute("UPDATE credential_types SET schedule_blocking = true WHERE key = 'food_handler_card'")
+    # PostgreSQL considers NULL values distinct in a regular unique index.  An
+    # unlocated employee can legitimately produce a NULL-location case, so
+    # normalize any historical duplicates before making that key idempotent.
+    op.execute("""
+        WITH ranked AS (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY company_id, employee_id, location_id,
+                                    requirement_type, requirement_id, expires_at
+                       ORDER BY CASE status
+                           WHEN 'removal_requested' THEN 0
+                           WHEN 'removal_confirmed' THEN 1
+                           WHEN 'keep_acknowledged' THEN 2
+                           ELSE 3
+                       END, detected_at, id
+                   ) AS row_number
+              FROM schedule_eligibility_cases
+             WHERE status IN ('warning_open', 'removal_requested',
+                              'removal_confirmed', 'keep_acknowledged')
+        )
+        UPDATE schedule_eligibility_cases c
+           SET status='resolved', resolution_reason='duplicate_reconciled',
+               resolved_at=NOW(), updated_at=NOW()
+          FROM ranked r
+         WHERE c.id=r.id AND r.row_number > 1
+    """)
+    op.execute("DROP INDEX IF EXISTS idx_schedule_eligibility_open_by_location")
+    op.execute("""CREATE UNIQUE INDEX idx_schedule_eligibility_open_by_location
+        ON schedule_eligibility_cases(
+            company_id, employee_id, location_id, requirement_type,
+            requirement_id, expires_at
+        ) NULLS NOT DISTINCT
+        WHERE status IN ('warning_open','removal_requested','removal_confirmed','keep_acknowledged')""")
     # Upsert rather than a bare UPDATE — empsched07 seeds this row, but if
     # it's ever missing a plain UPDATE would silently affect 0 rows and the
     # worker would stay disabled with no error.
@@ -44,6 +77,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("UPDATE scheduler_settings SET enabled = false WHERE task_key = 'schedule_eligibility'")
+    op.execute("DROP INDEX IF EXISTS idx_schedule_eligibility_open_by_location")
+    op.execute("""CREATE UNIQUE INDEX idx_schedule_eligibility_open_by_location
+        ON schedule_eligibility_cases(company_id, employee_id, location_id, requirement_type, requirement_id, expires_at)
+        WHERE status IN ('warning_open','removal_requested','removal_confirmed','keep_acknowledged')""")
     op.execute("""
         ALTER TABLE credential_types
             DROP COLUMN IF EXISTS warning_days,

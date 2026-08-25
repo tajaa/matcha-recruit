@@ -45,6 +45,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _duplicate_assignment_block(
+    conn,
+    company_id: UUID,
+    *,
+    employee_id: UUID,
+    location_id: UUID | None,
+    starts_at: datetime,
+    ends_at: datetime,
+    break_minutes: int,
+    shift_kind: str,
+    training_requirement_id: UUID | None,
+) -> dict | None:
+    """Return the live hard block for one duplicated assignment, if any."""
+    violations = await check_shift_compliance(
+        conn, company_id, location_id=location_id,
+        starts_at=starts_at, ends_at=ends_at, break_minutes=break_minutes,
+        employee_id=employee_id, shift_kind=shift_kind,
+        training_requirement_id=training_requirement_id,
+    )
+    return next((violation for violation in violations if violation.get("severity") == "block"), None)
+
+
 @router.get("/roster")
 async def get_roster(
     location: UUID = Query(..., description="Business location to scope the roster to"),
@@ -390,13 +412,20 @@ async def duplicate_shift(shift_id: UUID, body: DuplicateShift,
                     conflicts = await find_conflicts(conn, company_id, eid, new_start, new_end)
                     avail = availability_violations(avail_map.get(eid, {}), new_start, new_end)
                     unqualified = await check_job_qualification(conn, company_id, eid, src["job_id"])
-                    if conflicts or avail or unqualified:
+                    blocked = await _duplicate_assignment_block(
+                        conn, company_id, employee_id=eid, location_id=src["location_id"],
+                        starts_at=new_start, ends_at=new_end,
+                        break_minutes=src["break_minutes"] or 0, shift_kind=src["kind"],
+                        training_requirement_id=src["training_requirement_id"],
+                    )
+                    if conflicts or avail or unqualified or blocked:
                         dropped.append({
                             "date": d.isoformat(), "employee_id": str(eid),
                             "name": names.get(str(eid), ""),
                             "reason": "outside their logged availability" if avail
                                       else "already scheduled during this time" if conflicts
-                                      else unqualified["message"],
+                                      else unqualified["message"] if unqualified
+                                      else blocked["message"],
                         })
                         continue
                     surviving.append(eid)

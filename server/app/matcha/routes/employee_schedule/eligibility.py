@@ -8,6 +8,7 @@ from ...dependencies import require_company_member
 from ...models.scheduling.employee_schedule import EligibilityCaseDecision
 from ._shared import log_audit, require_company_id
 from ...services.scheduling.schedule_eligibility_authorization import (
+    eligibility_case_decision_error,
     require_eligibility_case_access,
     resolve_eligibility_manager_scope,
 )
@@ -67,13 +68,9 @@ async def decide_eligibility_case(case_id: UUID, body: EligibilityCaseDecision,
                 conn, company_id=company_id, case_id=case_id, actor_user_id=current_user.id,
                 actor_role=current_user.role, lock=True,
             )
-            if case["status"] not in ("removal_requested", "warning_open"):
-                raise HTTPException(status_code=409, detail="Eligibility case already decided")
-            if str(case["blocking_reason_code"] or "").endswith("_auto_unassigned"):
-                raise HTTPException(
-                    status_code=409,
-                    detail="This expired credential is automatically enforced; approve a renewed credential before scheduling the employee again.",
-                )
+            decision_error = eligibility_case_decision_error(case)
+            if decision_error:
+                raise HTTPException(status_code=409, detail=decision_error)
             if body.decision == "keep" and (not body.acknowledgement_confirmed or not body.acknowledgement_note):
                 raise HTTPException(status_code=422, detail={
                     "code": "eligibility_acknowledgement_required",

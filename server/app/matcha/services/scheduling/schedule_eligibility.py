@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
+
+from .shift_writes import remove_assignment_core
 
 
 def _basis(value) -> dict:
@@ -34,8 +37,8 @@ def _basis(value) -> dict:
 # POST/PUT /templates routes. Its presence is treated as a deliberate,
 # reviewed decision and suppresses the curated fallback for that credential
 # type company-wide, independent of the state/role that template names.
-_BLOCKING_AUTHORITY_SQL = """
-    AND (
+_BLOCKING_AUTHORITY_EXPR = """
+(
         (crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved'))
         OR (
             COALESCE(ct.schedule_blocking, false) = true
@@ -48,8 +51,10 @@ _BLOCKING_AUTHORITY_SQL = """
                   AND opt_out.schedule_blocking = false
             )
         )
-    )
+)
 """
+
+_BLOCKING_AUTHORITY_SQL = f"AND {_BLOCKING_AUTHORITY_EXPR}"
 
 # credential_requirement_templates.warning_days is NOT NULL DEFAULT 14, so a
 # blind COALESCE(crt.warning_days, ct.warning_days, 14) always picks crt's
@@ -101,6 +106,17 @@ def _credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
     return None
 
 
+def local_date_at(instant: datetime, timezone_name: str | None) -> date:
+    """Return an operational date in a business location's timezone."""
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    try:
+        zone = ZoneInfo(timezone_name or "UTC")
+    except (KeyError, ValueError):
+        zone = timezone.utc
+    return instant.astimezone(zone).date()
+
+
 async def _attach_case_assignment(
     conn, *, case_id: UUID, company_id: UUID, employee_id: UUID, assignment, auto_unassign: bool,
 ) -> None:
@@ -114,11 +130,15 @@ async def _attach_case_assignment(
     )
     if not auto_unassign:
         return
-    deleted = await conn.fetchval(
-        """DELETE FROM schedule_shift_assignments a USING schedule_shifts s
-           WHERE a.shift_id=$1 AND a.employee_id=$2 AND a.shift_id=s.id AND s.company_id=$3
-           RETURNING a.shift_id""",
-        assignment["shift_id"], employee_id, company_id,
+    deleted = await remove_assignment_core(
+        conn, company_id,
+        shift_id=assignment["shift_id"], employee_id=employee_id,
+        actor_user_id=None, shift_row=assignment,
+        audit_details={
+            "source": "schedule_eligibility_case",
+            "case_id": str(case_id),
+            "automatic": True,
+        },
     )
     action = "removed" if deleted else "no_longer_assigned"
     await conn.execute(
@@ -225,26 +245,46 @@ async def schedule_eligibility_roster_flags(
     return result
 
 
-async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: date) -> list[UUID]:
+async def open_expiring_eligibility_warnings(
+    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+) -> list[UUID]:
     """Idempotently open warning_open cases for blocking credentials inside
     their warning window but not yet expired. Never blocks scheduling — the
     block itself starts at expiry, via open_expired_eligibility_cases."""
+    # ``as_of`` remains for deterministic legacy callers/tests. Production
+    # passes one timezone-aware instant and evaluates it per case location.
+    instant = now or datetime.combine(as_of or date.today(), datetime.min.time(), tzinfo=timezone.utc)
     rows = await conn.fetch(
         f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.expires_at, crt.legal_basis,
-               e.work_location_id,
+               COALESCE(future.location_id, e.work_location_id) AS location_id,
+               scope_location.timezone,
                {_WARNING_DAYS_SQL} AS warning_days
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN LATERAL (
+            SELECT DISTINCT s.location_id
+              FROM schedule_shift_assignments a
+              JOIN schedule_shifts s ON s.id=a.shift_id
+             WHERE a.employee_id=ecr.employee_id AND s.company_id=e.org_id
+               AND s.status <> 'cancelled' AND s.location_id IS NOT NULL
+               AND s.starts_at > NOW()
+        ) future ON true
+        LEFT JOIN business_locations scope_location
+          ON scope_location.id=COALESCE(future.location_id, e.work_location_id)
         WHERE e.org_id = $1 AND ecr.is_required = true
-          AND ecr.status = 'verified' AND ecr.expires_at IS NOT NULL AND ecr.expires_at >= $2
+          AND ecr.status = 'verified' AND ecr.expires_at IS NOT NULL
           {_BLOCKING_AUTHORITY_SQL}
-        """, company_id, as_of,
+        """, company_id,
     )
     opened: list[UUID] = []
     for row in rows:
-        if row["expires_at"] > as_of + timedelta(days=row["warning_days"]):
+        location_id = row.get("location_id", row.get("work_location_id"))
+        local_as_of = local_date_at(instant, row.get("timezone"))
+        if row["expires_at"] < local_as_of:
+            continue
+        if row["expires_at"] > local_as_of + timedelta(days=row["warning_days"]):
             continue
         case_id = await conn.fetchval(
             """
@@ -252,7 +292,7 @@ async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: d
                 (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
             VALUES ($1,$2,$3,'credential',$4,'credential_expiring','warning_open',$5,$6::jsonb)
             ON CONFLICT DO NOTHING RETURNING id
-            """, company_id, row['employee_id'], row['work_location_id'], row['requirement_id'], row['expires_at'],
+            """, company_id, row['employee_id'], location_id, row['requirement_id'], row['expires_at'],
             json.dumps(_basis(row['legal_basis'])),
         )
         if case_id:
@@ -260,7 +300,9 @@ async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: d
     return opened
 
 
-async def resolve_recovered_eligibility_cases(conn, company_id: UUID, *, as_of: date) -> int:
+async def resolve_recovered_eligibility_cases(
+    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+) -> int:
     """Close expired-credential cases once a replacement has been verified.
 
     A food-handler event remains open after automatic shift removal because
@@ -268,35 +310,48 @@ async def resolve_recovered_eligibility_cases(conn, company_id: UUID, *, as_of: 
     place that closes that case after the employee's renewed document is
     approved.
     """
+    instant = now or datetime.combine(as_of or date.today(), datetime.min.time(), tzinfo=timezone.utc)
     rows = await conn.fetch(
-        """
+        f"""
         SELECT c.id, ecr.id AS requirement_id, ecr.status, ecr.expires_at,
-               ct.label, ct.has_expiration
+               ct.label, ct.has_expiration,
+               COALESCE(case_location.timezone, primary_location.timezone) AS timezone,
+               {_BLOCKING_AUTHORITY_EXPR} AS is_schedule_blocking
           FROM schedule_eligibility_cases c
+          LEFT JOIN employees e ON e.id=c.employee_id AND e.org_id=c.company_id
           LEFT JOIN employee_credential_requirements ecr ON ecr.id = c.requirement_id
           LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+          LEFT JOIN credential_requirement_templates crt ON crt.id=ecr.template_id
+          LEFT JOIN business_locations case_location ON case_location.id=c.location_id
+          LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
          WHERE c.company_id=$1 AND c.requirement_type='credential'
-           AND c.status='removal_requested'
+           AND c.status = ANY($2::text[])
         """,
-        company_id,
+        company_id, ["warning_open", "removal_requested", "keep_acknowledged"],
     )
     resolved = 0
     for row in rows:
-        current_problem = _credential_problem(row, as_of=as_of) if row["requirement_id"] else None
-        if current_problem:
+        current_problem = _credential_problem(
+            row, as_of=local_date_at(instant, row.get("timezone")),
+        ) if row["requirement_id"] else None
+        no_longer_blocking = not bool(row.get("is_schedule_blocking", True))
+        if current_problem and not no_longer_blocking:
             continue
+        reason = "credential_no_longer_schedule_blocking" if no_longer_blocking else "credential_renewed_or_cleared"
         await conn.execute(
             """UPDATE schedule_eligibility_cases
-                  SET status='resolved', resolution_reason='credential_renewed_or_cleared',
+                  SET status='resolved', resolution_reason=$2,
                       resolved_at=NOW(), updated_at=NOW()
-                WHERE id=$1 AND status='removal_requested'""",
-            row["id"],
+                WHERE id=$1 AND status = ANY($3::text[])""",
+            row["id"], reason, ["warning_open", "removal_requested", "keep_acknowledged"],
         )
         resolved += 1
     return resolved
 
 
-async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date) -> list[UUID]:
+async def open_expired_eligibility_cases(
+    conn, company_id: UUID, *, now: datetime | None = None, as_of: date | None = None,
+) -> list[UUID]:
     """Create expiry cases and enforce type-specific automatic removals.
 
     Most schedule-blocking requirements stay manager-mediated.  A curated
@@ -304,29 +359,27 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
     policy; food-handler cards use it so an expired card removes only future
     assignments while the credential remains blocked for new scheduling.
     """
+    instant = now or datetime.combine(as_of or date.today(), datetime.min.time(), tzinfo=timezone.utc)
     rows = await conn.fetch(
         f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.status, ecr.expires_at, ct.label, ct.has_expiration,
-               crt.legal_basis, e.work_location_id,
+               crt.legal_basis, e.work_location_id, primary_location.timezone AS primary_timezone,
                COALESCE(ct.auto_unassign_on_expiry, false) AS auto_unassign_on_expiry
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
         LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        LEFT JOIN business_locations primary_location ON primary_location.id=e.work_location_id
         WHERE e.org_id = $1 AND ecr.is_required = true
           {_BLOCKING_AUTHORITY_SQL}
         """, company_id,
     )
     opened: list[UUID] = []
     for row in rows:
-        problem = _credential_problem(row, as_of=as_of)
-        if not problem:
-            continue
-        reason_code, _message = problem
-        auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
-        case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
         assignments = await conn.fetch(
-            """SELECT s.id AS shift_id, s.location_id, s.starts_at
+            """SELECT s.id AS shift_id, s.location_id, s.starts_at, s.ends_at, s.status, s.kind,
+                      location.timezone
                FROM schedule_shifts s JOIN schedule_shift_assignments a ON a.shift_id=s.id
+               LEFT JOIN business_locations location ON location.id=s.location_id
                WHERE s.company_id=$1 AND a.employee_id=$2 AND s.status <> 'cancelled'
                  AND s.location_id IS NOT NULL AND s.starts_at > NOW()""",
             company_id, row["employee_id"],
@@ -336,91 +389,91 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
             by_location.setdefault(assignment["location_id"], []).append(assignment)
 
         primary_location = row["work_location_id"]
-        if not by_location and not auto_unassign:
-            # Nothing upcoming to review — closing the stale warning (if any)
-            # beats opening a removal_requested case with zero assignments
-            # and no email that would otherwise sit open forever.
-            await conn.execute(
-                """UPDATE schedule_eligibility_cases
-                     SET status = 'resolved', resolution_reason = 'expired_no_assignments',
-                         resolved_at = NOW(), updated_at = NOW()
-                   WHERE company_id = $1 AND employee_id = $2 AND requirement_type = 'credential'
-                     AND requirement_id = $3 AND expires_at = $4 AND status = 'warning_open'""",
-                company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
-            )
-            continue
         if not by_location:
-            # An expired food-handler card stays actionable even if this
-            # employee currently has no future shifts: assigning new work is
-            # still blocked until a renewed card is approved.
+            primary_problem = _credential_problem(
+                row, as_of=local_date_at(instant, row.get("primary_timezone")),
+            )
+            if not primary_problem:
+                continue
+            reason_code, _message = primary_problem
+            auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
+            if not auto_unassign:
+                # Nothing upcoming to review — closing the stale warning beats
+                # opening a manager case with zero assignments.
+                await conn.execute(
+                    """UPDATE schedule_eligibility_cases
+                         SET status='resolved', resolution_reason='expired_no_assignments',
+                             resolved_at=NOW(), updated_at=NOW()
+                       WHERE company_id=$1 AND employee_id=$2 AND requirement_type='credential'
+                         AND requirement_id=$3 AND expires_at=$4
+                         AND status IN ('warning_open', 'keep_acknowledged')""",
+                    company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+                )
+                continue
             by_location[primary_location] = []
 
-        # A warning_open case for this exact (employee, requirement, expiry,
-        # location) may already exist from open_expiring_eligibility_warnings
-        # — the unique partial index covers warning_open too, so a plain
-        # INSERT here would silently no-op via ON CONFLICT DO NOTHING and the
-        # removal case would never be created. Promote it instead, then fall
-        # through to the per-location loop below for every OTHER location
-        # the employee is assigned at — an employee working two locations
-        # must produce two cases, one per location's manager.
-        promoted_id = await conn.fetchval(
-            """
-            UPDATE schedule_eligibility_cases
-               SET status = 'removal_requested', blocking_reason_code = $6, updated_at = NOW()
-             WHERE company_id = $1 AND employee_id = $2 AND requirement_type = 'credential'
-               AND requirement_id = $3 AND expires_at = $4
-               AND location_id IS NOT DISTINCT FROM $5 AND status = 'warning_open'
-            RETURNING id
-            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
-            primary_location, case_reason_code,
-        )
-        if promoted_id:
-            opened.append(promoted_id)
-            for assignment in by_location.pop(primary_location, []):
-                await _attach_case_assignment(
-                    conn, case_id=promoted_id, company_id=company_id,
-                    employee_id=row["employee_id"], assignment=assignment,
-                    auto_unassign=auto_unassign,
-                )
-
         for location_id, location_assignments in by_location.items():
+            timezone_name = location_assignments[0].get("timezone") if location_assignments else row.get("primary_timezone")
+            problem = _credential_problem(row, as_of=local_date_at(instant, timezone_name))
+            if not problem:
+                continue
+            reason_code, _message = problem
+            auto_unassign = bool(row.get("auto_unassign_on_expiry", False)) and reason_code == "credential_expired"
+            case_reason_code = f"{reason_code}_auto_unassigned" if auto_unassign else reason_code
+
+            # A prior warning (or legacy acknowledgement) occupies the active
+            # case key.  Expiry must always turn it into the enforceable case.
             case_id = await conn.fetchval(
                 """
-                INSERT INTO schedule_eligibility_cases
-                    (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
-                VALUES ($1,$2,$3,'credential',$4,$5,'removal_requested',$6,$7::jsonb)
-                ON CONFLICT DO NOTHING RETURNING id
-                """, company_id, row['employee_id'], location_id, row['requirement_id'], case_reason_code,
-                row['expires_at'], json.dumps(_basis(row['legal_basis'])),
+                UPDATE schedule_eligibility_cases
+                   SET status='removal_requested', blocking_reason_code=$6,
+                       manager_decision_by=NULL, manager_decision_at=NULL,
+                       manager_acknowledged_by=NULL, manager_acknowledged_at=NULL,
+                       acknowledgement_note=NULL, resolved_at=NULL, updated_at=NOW()
+                 WHERE company_id=$1 AND employee_id=$2 AND requirement_type='credential'
+                   AND requirement_id=$3 AND expires_at=$4
+                   AND location_id IS NOT DISTINCT FROM $5
+                   AND status IN ('warning_open', 'keep_acknowledged')
+                RETURNING id
+                """,
+                company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+                location_id, case_reason_code,
             )
             new_case = bool(case_id)
-            # A prior run may have opened a manager-review case before this
-            # credential type was marked for automatic enforcement.  Reuse
-            # that still-open case so turning the policy on also protects
-            # existing schedules, rather than only newly-expired cards.
+            if not case_id:
+                case_id = await conn.fetchval(
+                    """
+                    INSERT INTO schedule_eligibility_cases
+                        (company_id, employee_id, location_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
+                    VALUES ($1,$2,$3,'credential',$4,$5,'removal_requested',$6,$7::jsonb)
+                    ON CONFLICT DO NOTHING RETURNING id
+                    """,
+                    company_id, row['employee_id'], location_id, row['requirement_id'], case_reason_code,
+                    row['expires_at'], json.dumps(_basis(row['legal_basis'])),
+                )
+                new_case = bool(case_id)
             if not case_id and auto_unassign:
                 case_id = await conn.fetchval(
                     """
                     UPDATE schedule_eligibility_cases
-                       SET blocking_reason_code = $6, updated_at = NOW()
-                     WHERE company_id = $1 AND employee_id = $2
-                       AND requirement_type = 'credential' AND requirement_id = $3
-                       AND expires_at = $4 AND location_id IS NOT DISTINCT FROM $5
-                       AND status = 'removal_requested'
+                       SET blocking_reason_code=$6, updated_at=NOW()
+                     WHERE company_id=$1 AND employee_id=$2 AND requirement_type='credential'
+                       AND requirement_id=$3 AND expires_at=$4
+                       AND location_id IS NOT DISTINCT FROM $5
+                       AND status='removal_requested'
                     RETURNING id
                     """,
-                    company_id, row['employee_id'], row['requirement_id'], row['expires_at'], location_id,
-                    case_reason_code,
+                    company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+                    location_id, case_reason_code,
                 )
-            if case_id:
-                # Only newly opened/promoted cases should fan out another
-                # notification.  Assignment removal itself is idempotent.
-                if new_case:
-                    opened.append(case_id)
-                for assignment in location_assignments:
-                    await _attach_case_assignment(
-                        conn, case_id=case_id, company_id=company_id,
-                        employee_id=row["employee_id"], assignment=assignment,
-                        auto_unassign=auto_unassign,
-                    )
+            if not case_id:
+                continue
+            if new_case:
+                opened.append(case_id)
+            for assignment in location_assignments:
+                await _attach_case_assignment(
+                    conn, case_id=case_id, company_id=company_id,
+                    employee_id=row["employee_id"], assignment=assignment,
+                    auto_unassign=auto_unassign,
+                )
     return opened

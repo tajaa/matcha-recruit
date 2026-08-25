@@ -16,6 +16,13 @@ SOURCE_KIND = "schedule_eligibility_case"
 _OPEN_CASE_STATUSES = ("warning_open", "removal_requested")
 
 
+def eligibility_event_mutation_error(source_kind: str | None, *, action: str) -> str | None:
+    """Projected eligibility events are controlled solely by their case."""
+    if source_kind == SOURCE_KIND:
+        return f"Schedule eligibility events cannot be {action}; resolve the underlying credential case instead."
+    return None
+
+
 async def _ems_enabled(conn, company_id: UUID) -> bool:
     features = await get_company_features(company_id, conn=conn)
     return bool(features.get("ems") and features.get("matcha_ops"))
@@ -86,7 +93,7 @@ async def reconcile_schedule_eligibility_events(conn, company_id: UUID) -> dict[
         source_ref = str(row["id"])
         active_refs.append(source_ref)
         title, narrative, severity, details = _event_copy(row)
-        inserted = await conn.fetchval(
+        event = await conn.fetchrow(
             """
             INSERT INTO ems_events (
                 company_id, title, category, severity_hint, doc, narrative,
@@ -94,27 +101,23 @@ async def reconcile_schedule_eligibility_events(conn, company_id: UUID) -> dict[
             )
             VALUES ($1, $2, 'operational', $3, $4::jsonb, $5, false, $6, 'logged', $7, $8)
             ON CONFLICT (company_id, source_kind, source_ref)
-                WHERE status = 'logged' AND source_kind IS NOT NULL AND source_ref IS NOT NULL
-            DO NOTHING
-            RETURNING id
+                WHERE source_kind = 'schedule_eligibility_case' AND source_ref IS NOT NULL
+            DO UPDATE SET
+                title=EXCLUDED.title, severity_hint=EXCLUDED.severity_hint,
+                doc=EXCLUDED.doc, narrative=EXCLUDED.narrative,
+                location_id=EXCLUDED.location_id, status='logged',
+                resolved_by=NULL, resolved_at=NULL, resolution_code=NULL,
+                resolution_note=NULL, updated_at=NOW()
+            RETURNING id, (xmax = 0) AS inserted
             """,
             company_id, title, severity, json.dumps(details), narrative,
             row["location_id"], SOURCE_KIND, source_ref,
         )
-        if inserted:
+        if event and event["inserted"]:
             await conn.execute(
                 """INSERT INTO ems_event_audit_log (event_id, user_id, action, details)
                    VALUES ($1, NULL, 'created', $2::jsonb)""",
-                inserted, json.dumps({"source_kind": SOURCE_KIND, "source_ref": source_ref}),
-            )
-        else:
-            await conn.execute(
-                """UPDATE ems_events
-                      SET title=$2, severity_hint=$3, doc=$4::jsonb, narrative=$5,
-                          location_id=$6, updated_at=NOW()
-                    WHERE company_id=$1 AND source_kind=$7 AND source_ref=$8 AND status='logged'""",
-                company_id, title, severity, json.dumps(details), narrative,
-                row["location_id"], SOURCE_KIND, source_ref,
+                event["id"], json.dumps({"source_kind": SOURCE_KIND, "source_ref": source_ref}),
             )
         changed += 1
 

@@ -6,10 +6,11 @@ assignments at expiry and remain blocked until a renewed credential is approved.
 """
 import asyncio
 import logging
-from datetime import date
+from datetime import datetime, timezone
 
 from ..celery_app import celery_app
 from ..utils import get_db_connection, scheduler_enabled
+from app.core.feature_flags import get_company_features
 from app.matcha.services.scheduling.schedule_eligibility import (
     open_expired_eligibility_cases,
     open_expiring_eligibility_warnings,
@@ -28,10 +29,14 @@ async def _dispatch() -> dict:
         if not await scheduler_enabled(conn, "schedule_eligibility", default=False):
             return {"opened": 0, "warned": 0, "skipped": True}
         companies = await conn.fetch("SELECT id FROM companies")
+        run_at = datetime.now(timezone.utc)
         opened = 0
         warned = 0
         recovered = 0
         for company in companies:
+            features = await get_company_features(company["id"], conn=conn)
+            if not (features.get("matcha_ops") and features.get("employee_schedule")):
+                continue
             # Warnings first, then expirations, on every run. A credential
             # already past its warning threshold on a PRIOR run may cross
             # into expired on this one — its warning_open row still needs
@@ -40,16 +45,18 @@ async def _dispatch() -> dict:
             # ON CONFLICT DO NOTHING). Same-run crossing is not possible:
             # the warning query requires expires_at >= as_of and the expired
             # path requires expires_at < as_of.
-            warning_ids = await open_expiring_eligibility_warnings(conn, company["id"], as_of=date.today())
+            async with conn.transaction():
+                warning_ids = await open_expiring_eligibility_warnings(conn, company["id"], now=run_at)
+                case_ids = await open_expired_eligibility_cases(conn, company["id"], now=run_at)
+                newly_recovered = await resolve_recovered_eligibility_cases(conn, company["id"], now=run_at)
+                await reconcile_schedule_eligibility_events(conn, company["id"])
             warned += len(warning_ids)
             for case_id in warning_ids:
                 await _send_expiry_warning_email(conn, case_id)
-            case_ids = await open_expired_eligibility_cases(conn, company["id"], as_of=date.today())
             opened += len(case_ids)
             for case_id in case_ids:
                 await _send_removal_requested_email(conn, case_id)
-            recovered += await resolve_recovered_eligibility_cases(conn, company["id"], as_of=date.today())
-            await reconcile_schedule_eligibility_events(conn, company["id"])
+            recovered += newly_recovered
         return {"opened": opened, "warned": warned, "recovered": recovered, "companies": len(companies)}
     finally:
         await conn.close()

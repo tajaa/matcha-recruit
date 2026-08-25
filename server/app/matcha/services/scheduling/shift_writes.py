@@ -397,7 +397,7 @@ async def remove_assignment_core(
     *,
     shift_id: UUID,
     employee_id: UUID,
-    actor_user_id: UUID,
+    actor_user_id: UUID | None,
     shift_row,
     audit_details: Optional[dict] = None,
     write_audit: bool = True,

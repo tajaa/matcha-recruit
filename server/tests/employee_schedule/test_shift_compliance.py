@@ -20,6 +20,9 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
     async def fake_location_state(*_args):
         return "CA", "Los Angeles"
 
+    async def fake_location_timezone(*_args):
+        return "UTC"
+
     async def fake_eligibility(*_args, **_kwargs):
         return [eligibility_violation]
 
@@ -33,6 +36,7 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
         return None, False
 
     monkeypatch.setattr(shift_compliance, "_location_state", fake_location_state)
+    monkeypatch.setattr(shift_compliance, "_location_timezone", fake_location_timezone)
     monkeypatch.setattr(schedule_eligibility, "schedule_eligibility_violations", fake_eligibility)
     monkeypatch.setattr(shift_compliance, "_week_hours", fake_week_hours)
     monkeypatch.setattr(shift_compliance, "_min_rest_gap", fake_min_rest)
@@ -50,3 +54,42 @@ def test_assigned_shift_keeps_schedule_eligibility_violations(monkeypatch):
     ))
 
     assert eligibility_violation in result
+
+
+def test_eligibility_uses_the_shift_locations_calendar_day(monkeypatch):
+    observed: list = []
+
+    async def fake_location_state(*_args):
+        return "CA", "Los Angeles"
+
+    async def fake_location_timezone(*_args):
+        return "America/Los_Angeles"
+
+    async def fake_eligibility(*_args, **kwargs):
+        observed.append(kwargs["shift_date"])
+        return []
+
+    async def fake_week_hours(*_args, **_kwargs):
+        return 0
+
+    async def fake_min_rest(*_args, **_kwargs):
+        return None
+
+    async def fake_employee_age(*_args, **_kwargs):
+        return None, False
+
+    monkeypatch.setattr(shift_compliance, "_location_state", fake_location_state)
+    monkeypatch.setattr(shift_compliance, "_location_timezone", fake_location_timezone)
+    monkeypatch.setattr(schedule_eligibility, "schedule_eligibility_violations", fake_eligibility)
+    monkeypatch.setattr(shift_compliance, "_week_hours", fake_week_hours)
+    monkeypatch.setattr(shift_compliance, "_min_rest_gap", fake_min_rest)
+    monkeypatch.setattr(shift_compliance, "_employee_age", fake_employee_age)
+
+    asyncio.run(shift_compliance.check_shift_compliance(
+        object(), uuid4(), location_id=uuid4(), employee_id=uuid4(),
+        starts_at=datetime(2026, 8, 26, 5, tzinfo=timezone.utc),
+        ends_at=datetime(2026, 8, 26, 13, tzinfo=timezone.utc),
+        break_minutes=30, lapse_items=[],
+    ))
+
+    assert observed == [datetime(2026, 8, 25).date()]

@@ -5,6 +5,7 @@ import {
   Send, Users, LayoutTemplate, Inbox, Sparkles, Pencil, Copy, AlertTriangle, CircleHelp,
 } from 'lucide-react'
 import { Card, useToast } from '../../../components/ui'
+import { ApiError } from '../../../api/client'
 import {
   createShift, updateShift, deleteShift, publishShift,
   assignEmployee, unassignEmployee, fetchWeekTemplates, createWeekTemplate, deleteWeekTemplate,
@@ -827,7 +828,10 @@ function RequestsTab({ locationId, onReviewed }: { locationId: string | null; on
       // A location manager is permitted to see eligibility cases but not the
       // company-wide employee-request inbox.  Do not let that expected 403
       // hide the credential queue from the manager who must act on it.
-      fetchRequests().catch(() => ({ requests: [] })),
+      fetchRequests().catch((error) => {
+        if (error instanceof ApiError && error.status === 403) return { requests: [] }
+        throw error
+      }),
       fetchEligibilityCases(locationId),
     ])
     setRequests(requestResult.requests)

@@ -16,6 +16,22 @@ class EligibilityManagerScope:
         return self.is_company_operations or (location_id is not None and location_id in self.managed_location_ids)
 
 
+def eligibility_case_decision_error(case) -> str | None:
+    """Return the shared policy error for a manager case decision.
+
+    Warnings are informational only.  In particular, allowing a warning to be
+    retained would occupy the active-case key and let an automatic expiry skip
+    its mandatory transition to removal_requested.
+    """
+    if case["status"] == "warning_open":
+        return "Credential warnings cannot be acknowledged; renew the credential before expiry."
+    if case["status"] != "removal_requested":
+        return "Eligibility case already decided"
+    if str(case["blocking_reason_code"] or "").endswith("_auto_unassigned"):
+        return "This expired credential is automatically enforced; approve a renewed credential before scheduling the employee again."
+    return None
+
+
 async def resolve_eligibility_manager_scope(conn, *, company_id: UUID, actor_user_id: UUID, actor_role: str) -> EligibilityManagerScope:
     if actor_role in {"admin", "client"}:
         return EligibilityManagerScope(True, frozenset())

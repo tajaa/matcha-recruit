@@ -1,14 +1,21 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from app.matcha.services.scheduling.schedule_eligibility import (
     _schedule_blocking_requirements,
+    local_date_at,
     open_expired_eligibility_cases,
     open_expiring_eligibility_warnings,
     schedule_eligibility_roster_flags,
     schedule_eligibility_violations,
 )
+
+
+def test_local_date_uses_location_timezone_and_falls_back_to_utc():
+    instant = datetime(2026, 8, 26, 5, tzinfo=timezone.utc)
+    assert local_date_at(instant, "America/Los_Angeles") == date(2026, 8, 25)
+    assert local_date_at(instant, "not/a-real-timezone") == date(2026, 8, 26)
 
 
 class FakeConn:
@@ -354,24 +361,31 @@ class AutoUnassignConn:
                 "auto_unassign_on_expiry": True,
             }]
         if "schedule_shifts" in query:
-            return [{"shift_id": self.shift_id, "location_id": self.location_id, "starts_at": None}]
+            return [{
+                "shift_id": self.shift_id, "location_id": self.location_id,
+                "starts_at": datetime(2026, 8, 22, 9, tzinfo=timezone.utc),
+                "ends_at": datetime(2026, 8, 22, 17, tzinfo=timezone.utc),
+                "status": "draft", "kind": "work",
+                "timezone": "UTC",
+            }]
         raise AssertionError(query)
 
     async def fetchval(self, query, *args):
         self.fetchval_queries.append(query)
         if "UPDATE schedule_eligibility_cases" in query:
-            if "SET blocking_reason_code = $6" in query and self.existing_case:
+            if "AND status='removal_requested'" in query and self.existing_case:
                 return self.case_id
             return None
         if "INSERT INTO schedule_eligibility_cases" in query:
             return None if self.existing_case else self.case_id
-        if "DELETE FROM schedule_shift_assignments" in query:
-            self.deleted = True
-            return self.shift_id
         raise AssertionError(query)
 
     async def execute(self, query, *args):
         self.executed.append(query)
+        if "DELETE FROM schedule_shift_assignments" in query:
+            self.deleted = True
+            return "DELETE 1"
+        return "UPDATE 1"
 
 
 def test_expired_food_handler_card_removes_future_assignments_automatically():
@@ -390,7 +404,7 @@ def test_auto_enforcement_removes_shifts_for_an_already_open_case():
 
     assert opened == []  # no duplicate notification for an old open case
     assert conn.deleted is True
-    assert any("SET blocking_reason_code = $6" in query for query in conn.fetchval_queries)
+    assert any("blocking_reason_code" in query for query in conn.fetchval_queries)
 
 
 class MultiLocationAutoUnassignConn(AutoUnassignConn):
@@ -405,8 +419,14 @@ class MultiLocationAutoUnassignConn(AutoUnassignConn):
     async def fetch(self, query, *args):
         if "schedule_shifts" in query:
             return [
-                {"shift_id": self.shift_id, "location_id": self.location_id, "starts_at": None},
-                {"shift_id": self.second_shift_id, "location_id": self.second_location_id, "starts_at": None},
+                {"shift_id": self.shift_id, "location_id": self.location_id,
+                 "starts_at": datetime(2026, 8, 22, 9, tzinfo=timezone.utc),
+                 "ends_at": datetime(2026, 8, 22, 17, tzinfo=timezone.utc),
+                 "status": "draft", "kind": "work", "timezone": "UTC"},
+                {"shift_id": self.second_shift_id, "location_id": self.second_location_id,
+                 "starts_at": datetime(2026, 8, 22, 9, tzinfo=timezone.utc),
+                 "ends_at": datetime(2026, 8, 22, 17, tzinfo=timezone.utc),
+                 "status": "draft", "kind": "work", "timezone": "UTC"},
             ]
         return await super().fetch(query, *args)
 
@@ -416,10 +436,14 @@ class MultiLocationAutoUnassignConn(AutoUnassignConn):
             return None
         if "INSERT INTO schedule_eligibility_cases" in query:
             return next(self.case_ids)
+        raise AssertionError(query)
+
+    async def execute(self, query, *args):
+        self.executed.append(query)
         if "DELETE FROM schedule_shift_assignments" in query:
             self.deleted_shifts.append(args[0])
-            return args[0]
-        raise AssertionError(query)
+            return "DELETE 1"
+        return "UPDATE 1"
 
 
 def test_multi_location_employee_gets_one_case_per_affected_location():

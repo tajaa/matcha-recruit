@@ -24,6 +24,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from . import schedule_compliance
 
@@ -148,6 +149,25 @@ async def _location_state(
     if not row:
         return None, None
     return row["state"], row["city"]
+
+
+async def _location_timezone(
+    conn, company_id: UUID, location_id: Optional[UUID],
+) -> str | None:
+    if location_id is None:
+        return None
+    return await conn.fetchval(
+        "SELECT timezone FROM business_locations WHERE id=$1 AND company_id=$2",
+        location_id, company_id,
+    )
+
+
+def _local_shift_date(starts_at: datetime, timezone_name: str | None) -> date:
+    try:
+        zone = ZoneInfo(timezone_name or "UTC")
+    except (KeyError, ValueError):
+        zone = timezone.utc
+    return starts_at.astimezone(zone).date()
 
 
 async def _employee_age(conn, company_id: UUID, employee_id: UUID, on: date) -> tuple[Optional[int], bool]:
@@ -383,6 +403,8 @@ async def check_shift_compliance(
     features and re-query training/credential lapses once per employee."""
     violations: list[dict] = []
     state, city = await _location_state(conn, company_id, location_id)
+    location_timezone = await _location_timezone(conn, company_id, location_id)
+    shift_date = _local_shift_date(starts_at, location_timezone)
     worked = _hours(starts_at, ends_at, break_minutes)
 
     week_hours: Optional[float] = None
@@ -391,14 +413,14 @@ async def check_shift_compliance(
     age_lookup_failed = False
     if employee_id is not None:
         age, age_lookup_failed = await _employee_age(
-            conn, company_id, employee_id, starts_at.astimezone(timezone.utc).date()
+            conn, company_id, employee_id, shift_date
         )
         from .schedule_eligibility import schedule_eligibility_violations
         violations.extend(await schedule_eligibility_violations(
             conn,
             company_id,
             employee_id=employee_id,
-            shift_date=starts_at.astimezone(timezone.utc).date(),
+            shift_date=shift_date,
             location_id=location_id,
             employee_age=age,
         ))
@@ -447,7 +469,7 @@ async def check_shift_compliance(
         if lapse_items is not None:
             violations += shape_lapse_advisories(
                 lapse_items,
-                shift_date=starts_at.astimezone(timezone.utc).date(),
+                shift_date=shift_date,
                 exclude_requirement_id=(
                     training_requirement_id if shift_kind == "training" else None
                 ),
@@ -455,7 +477,7 @@ async def check_shift_compliance(
         else:
             violations += await _training_lapse_advisories(
                 conn, company_id, employee_id,
-                shift_date=starts_at.astimezone(timezone.utc).date(),
+                shift_date=shift_date,
                 exclude_requirement_id=(
                     training_requirement_id if shift_kind == "training" else None
                 ),

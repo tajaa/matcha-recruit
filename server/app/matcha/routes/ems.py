@@ -52,6 +52,9 @@ from app.matcha.services.ems.resolution import (
     EventResolutionNotFound,
     resolve_event,
 )
+from app.matcha.services.scheduling.schedule_eligibility_events import (
+    eligibility_event_mutation_error,
+)
 from app.matcha.services.ops.permissions import (
     OpsCapability,
     OpsPermissionDenied,
@@ -172,11 +175,15 @@ async def create_event_assignment_route(
     current_user=Depends(get_current_user),
 ):
     async with get_connection() as conn:
-        company_id = await conn.fetchval(
-            "SELECT company_id FROM ems_events WHERE id = $1", event_id
+        event = await conn.fetchrow(
+            "SELECT company_id, source_kind FROM ems_events WHERE id = $1", event_id
         )
-        if not company_id:
+        if not event:
             raise HTTPException(status_code=404, detail="Event not found")
+        mutation_error = eligibility_event_mutation_error(event["source_kind"], action="assigned")
+        if mutation_error:
+            raise HTTPException(status_code=409, detail=mutation_error)
+        company_id = event["company_id"]
         access = await resolve_ops_access(conn, user=current_user, company_id=company_id)
         try:
             async with conn.transaction():
@@ -431,10 +438,13 @@ async def resolve_event_route(
     assignment_channels: list[tuple[UUID, UUID]] = []
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT company_id FROM ems_events WHERE id = $1", event_id
+            "SELECT company_id, source_kind FROM ems_events WHERE id = $1", event_id
         )
         if not row:
             raise HTTPException(status_code=404, detail="Event not found")
+        mutation_error = eligibility_event_mutation_error(row["source_kind"], action="resolved")
+        if mutation_error:
+            raise HTTPException(status_code=409, detail=mutation_error)
         company_id = row["company_id"]
         access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id
@@ -576,11 +586,15 @@ async def update_event(
     assignment_channels: list[tuple[UUID, UUID]] = []
 
     async with get_connection() as conn:
-        company_id = await conn.fetchval(
-            "SELECT company_id FROM ems_events WHERE id = $1", event_id,
+        event = await conn.fetchrow(
+            "SELECT company_id, source_kind FROM ems_events WHERE id = $1", event_id,
         )
-        if not company_id:
+        if not event:
             raise HTTPException(status_code=404, detail="Event not found")
+        mutation_error = eligibility_event_mutation_error(event["source_kind"], action="edited")
+        if mutation_error:
+            raise HTTPException(status_code=409, detail=mutation_error)
+        company_id = event["company_id"]
         access = await resolve_ops_access(
             conn, user=current_user, company_id=company_id,
         )
