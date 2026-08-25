@@ -15,13 +15,22 @@ if [[ -z "$DEV_DATABASE_URL" ]]; then
   ENV_FILE="$REPO_ROOT/server/.env"
   if [[ -f "$ENV_FILE" ]] && grep -q '^DEV_DATABASE_URL' "$ENV_FILE"; then
     DEV_DATABASE_URL=$(grep '^DEV_DATABASE_URL' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d ' ')
+  elif [[ "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+    DEV_DATABASE_URL="postgresql://matcha:matcha_dev@postgres:5432/matcha"
   else
     DEV_DATABASE_URL="postgresql://matcha:matcha_dev@localhost:${LOCAL_PORT}/matcha"
   fi
 fi
 
+# Inside the agent sandbox, Postgres is the Compose "postgres" service (already
+# up via `sandbox dev`/`sandbox start`), not a host matcha-postgres container.
+if [[ "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+  for _ in $(seq 1 30); do
+    pg_isready -h postgres -U matcha -d matcha >/dev/null 2>&1 && break
+    sleep 1
+  done
 # Ensure the local dev Postgres container is up (created/started by dev-remote.sh).
-if ! docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+elif ! docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
   if docker ps -a --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
     echo "Starting local matcha-postgres container..."
     docker start matcha-postgres

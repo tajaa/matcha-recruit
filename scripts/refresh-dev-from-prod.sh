@@ -60,7 +60,25 @@ KEEP_OLD=1   # how many matcha_old_* DBs to retain locally
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
 
-ddev() { docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+# Inside the agent sandbox, dev Postgres is the Compose "postgres" service
+# reached directly (no docker socket in there), not a host docker container.
+IS_AGENT_SANDBOX=false
+case "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" in
+    1|true|TRUE|yes|YES) IS_AGENT_SANDBOX=true ;;
+esac
+DEV_HOST="${DEV_HOST:-postgres}"
+
+if [[ "$IS_AGENT_SANDBOX" == true ]]; then
+    ddev() { psql -h "$DEV_HOST" -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+    dev_pg_dump() { pg_dump -h "$DEV_HOST" -U "$DB_USER" "$@"; }
+    dev_pg_restore() { pg_restore -h "$DEV_HOST" -U "$DB_USER" "$@"; }
+    dev_psql_file() { psql -h "$DEV_HOST" -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+else
+    ddev() { docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+    dev_pg_dump() { docker exec "$DEV_CONTAINER" pg_dump -U "$DB_USER" "$@"; }
+    dev_pg_restore() { docker exec -i "$DEV_CONTAINER" pg_restore -U "$DB_USER" "$@"; }
+    dev_psql_file() { docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+fi
 
 # --- Safety rails ------------------------------------------------------------
 # Destructive ops must NEVER target the prod container.
@@ -69,19 +87,27 @@ if [[ "$DEV_CONTAINER" == *prod* ]]; then
 fi
 [[ -f "$PEM" ]]      || { echo "${RED}SSH key not found: $PEM${NC}"; exit 1; }
 [[ -f "$ANON_SQL" ]] || { echo "${RED}Anonymizer not found: $ANON_SQL${NC}"; exit 1; }
-command -v docker >/dev/null || { echo "${RED}docker not found on PATH.${NC}"; exit 1; }
 
-if ! docker ps --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
-    if docker ps -a --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
-        echo "${YELLOW}Starting local $DEV_CONTAINER...${NC}"
-        docker start "$DEV_CONTAINER" >/dev/null
-        for _ in $(seq 1 30); do
-            docker exec "$DEV_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break
-            sleep 1
-        done
-    else
-        echo "${RED}Local container '$DEV_CONTAINER' not found. Run ./scripts/dev-remote.sh once first (it creates it).${NC}"
-        exit 1
+if [[ "$IS_AGENT_SANDBOX" == true ]]; then
+    for _ in $(seq 1 30); do
+        pg_isready -h "$DEV_HOST" -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break
+        sleep 1
+    done
+else
+    command -v docker >/dev/null || { echo "${RED}docker not found on PATH.${NC}"; exit 1; }
+
+    if ! docker ps --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
+        if docker ps -a --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
+            echo "${YELLOW}Starting local $DEV_CONTAINER...${NC}"
+            docker start "$DEV_CONTAINER" >/dev/null
+            for _ in $(seq 1 30); do
+                docker exec "$DEV_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break
+                sleep 1
+            done
+        else
+            echo "${RED}Local container '$DEV_CONTAINER' not found. Run ./scripts/dev-remote.sh once first (it creates it).${NC}"
+            exit 1
+        fi
     fi
 fi
 
@@ -115,7 +141,7 @@ fi
 cat <<EOF
 ${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
   source (prod, read-only): $PROD_DB_HOST:$PROD_DB_PORT : $DB_NAME (dumped on $APP_EC2)
-  target (dev,  REBUILT)  : local docker $DEV_CONTAINER : $DB_NAME
+  target (dev,  REBUILT)  : $([[ "$IS_AGENT_SANDBOX" == true ]] && echo "sandbox postgres service" || echo "local docker $DEV_CONTAINER") : $DB_NAME
   anonymize PII: $ANON_STATUS
   non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
   preserved real logins (keep real email + password): ${DEV_PRESERVE_EMAILS:-(none)}
@@ -178,7 +204,7 @@ TS=$(date +%F_%H-%M-%S)
 
 echo "${YELLOW}[1/6] Pre-refresh dev snapshot...${NC}"
 mkdir -p "$SNAP_DIR"
-docker exec "$DEV_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
+dev_pg_dump "$DB_NAME" | gzip > "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
 echo "      $(du -h "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz" | cut -f1) -> $SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
 ls -1t "$SNAP_DIR"/dev_pre_refresh_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f   # keep last 5
 
@@ -199,18 +225,22 @@ ddev -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME}_new;"
 ddev -d postgres -c "CREATE DATABASE ${DB_NAME}_new OWNER $DB_USER;"
 
 echo "${YELLOW}[3/6] Restoring staged RDS dump -> ${DB_NAME}_new...${NC}"
-docker exec -i "$DEV_CONTAINER" pg_restore -U "$DB_USER" -d "${DB_NAME}_new" --no-owner --no-privileges --exit-on-error < "$DUMP_FILE"
+dev_pg_restore -d "${DB_NAME}_new" --no-owner --no-privileges --exit-on-error < "$DUMP_FILE"
 
 if [[ "$SKIP_ANON" == true ]]; then
     echo "${YELLOW}[4/6] SKIPPING anonymization — dev will be a FULL UNSCRUBBED prod mirror (SKIP_ANONYMIZE set).${NC}"
 else
     echo "${YELLOW}[4/6] Anonymizing ${DB_NAME}_new...${NC}"
-    docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -d "${DB_NAME}_new" -v ON_ERROR_STOP=1 < "$RENDERED"
+    dev_psql_file -d "${DB_NAME}_new" < "$RENDERED"
 fi
 
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "${YELLOW}[5/6] DRY RUN — leaving anonymized clone as ${DB_NAME}_new, NOT swapping.${NC}"
-    echo "      Inspect: docker exec -it $DEV_CONTAINER psql -U $DB_USER -d ${DB_NAME}_new"
+    if [[ "$IS_AGENT_SANDBOX" == true ]]; then
+        echo "      Inspect: psql -h $DEV_HOST -U $DB_USER -d ${DB_NAME}_new"
+    else
+        echo "      Inspect: docker exec -it $DEV_CONTAINER psql -U $DB_USER -d ${DB_NAME}_new"
+    fi
     echo "${YELLOW}[6/6] Skipped swap.${NC}"
     exit 0
 fi

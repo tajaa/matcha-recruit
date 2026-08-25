@@ -1,18 +1,21 @@
-name: matcha-codex-sandbox
+name: matcha-agent-sandbox
 
 services:
   workspace:
     build:
       context: .
-      dockerfile: docker/codex-sandbox/Dockerfile
+      dockerfile: docker/agent-sandbox/Dockerfile
       args:
         INSTALL_PLAYWRIGHT_BROWSERS: ${INSTALL_PLAYWRIGHT_BROWSERS:-false}
+        USER_UID: ${SANDBOX_UID:-501}
+        USER_GID: ${SANDBOX_GID:-20}
     init: true
     working_dir: /workspace
     environment:
-      HOME: /home/codex
-      GIT_CONFIG_GLOBAL: /home/codex/.config/git/config
-      CODEX_SANDBOX: "1"
+      HOME: /home/agent
+      GIT_CONFIG_GLOBAL: /home/agent/.config/git/config
+      AGENT_SANDBOX: "1"
+      AWS_REGION: ${AWS_REGION:-us-west-1}
       BACKEND_PORT: ${BACKEND_PORT:-8001}
       FRONTEND_PORT: ${FRONTEND_PORT:-5174}
       TELLUS_PORT: ${TELLUS_PORT:-5191}
@@ -20,16 +23,15 @@ services:
       CHAT_PORT: ${CHAT_PORT:-8080}
     volumes:
       - .:/workspace
-      - codex_home:/home/codex
-      - codex_state:/home/codex/.codex
-      - codex_cache:/home/codex/.cache
-      - codex_npm_cache:/home/codex/.npm
-      - gh_config:/home/codex/.config/gh
-      - git_config:/home/codex/.config/git
-      - python_dependencies:/workspace/server/venv
-      - client_node_modules:/workspace/client/node_modules
-      - tellus_node_modules:/workspace/client/tellus/node_modules
-      - oceanlab_node_modules:/workspace/client/oceanlab/node_modules
+      - sandbox_home:/home/agent
+      - sandbox_npm_cache:/home/agent/.npm
+      # AWS static credentials, read-only. See docs/ops/AGENT_SANDBOX.md's
+      # threat model — this is deliberately reachable, not an oversight.
+      - ${HOME}/.aws:/home/agent/.aws:ro
+      - sandbox_server_venv:/workspace/server/venv
+      - sandbox_client_node_modules:/workspace/client/node_modules
+      - sandbox_tellus_node_modules:/workspace/client/tellus/node_modules
+      - sandbox_oceanlab_node_modules:/workspace/client/oceanlab/node_modules
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8001}:${BACKEND_PORT:-8001}"
       - "127.0.0.1:${FRONTEND_PORT:-5174}:${FRONTEND_PORT:-5174}"
@@ -48,7 +50,7 @@ services:
     cap_drop:
       - ALL
     # Required only for the root entrypoint to initialize named dependency
-    # volumes, then gosu drops to the dedicated `codex` user before commands.
+    # volumes, then gosu drops to the dedicated `agent` user before commands.
     cap_add:
       - CHOWN
       - SETGID
@@ -65,7 +67,7 @@ services:
       POSTGRES_PASSWORD: matcha_dev
       POSTGRES_DB: matcha
     volumes:
-      - codex_postgres_data:/var/lib/postgresql/data
+      - sandbox_postgres_data:/var/lib/postgresql/data
     tmpfs:
       - /var/run/postgresql:rw,nosuid,size=16m
     healthcheck:
@@ -80,7 +82,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - codex_redis_data:/data
+      - sandbox_redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -90,15 +92,11 @@ services:
       - no-new-privileges:true
 
 volumes:
-  codex_home:
-  codex_state:
-  codex_cache:
-  codex_npm_cache:
-  gh_config:
-  git_config:
-  python_dependencies:
-  client_node_modules:
-  tellus_node_modules:
-  oceanlab_node_modules:
-  codex_postgres_data:
-  codex_redis_data:
+  sandbox_home:
+  sandbox_npm_cache:
+  sandbox_server_venv:
+  sandbox_client_node_modules:
+  sandbox_tellus_node_modules:
+  sandbox_oceanlab_node_modules:
+  sandbox_postgres_data:
+  sandbox_redis_data:

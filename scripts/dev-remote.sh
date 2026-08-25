@@ -22,8 +22,9 @@ CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 #
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
 # DATABASE_URL, REDIS_URL, CHAT_PORT
-# Set CODEX_SANDBOX=1 when running from scripts/codex-sandbox.sh. In that mode
-# PostgreSQL and Redis are Compose services, not host Docker containers.
+# Set AGENT_SANDBOX=1 when running from scripts/agent-sandbox.sh (CODEX_SANDBOX=1
+# is accepted as an alias). In that mode PostgreSQL and Redis are Compose
+# services, not host Docker containers.
 
 # Colors
 GREEN='\033[0;32m'
@@ -35,9 +36,9 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-IS_CODEX_SANDBOX=false
-case "${CODEX_SANDBOX:-}" in
-    1|true|TRUE|yes|YES) IS_CODEX_SANDBOX=true ;;
+IS_AGENT_SANDBOX=false
+case "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" in
+    1|true|TRUE|yes|YES) IS_AGENT_SANDBOX=true ;;
 esac
 
 is_port_in_use() {
@@ -76,7 +77,7 @@ pick_available_port() {
     return 1
 }
 
-if [ "$IS_CODEX_SANDBOX" = false ] && [ ! -f "$KEY_FILE" ]; then
+if [ "$IS_AGENT_SANDBOX" = false ] && [ ! -f "$KEY_FILE" ]; then
     echo -e "${YELLOW}Note: SSH key not found at $KEY_FILE (only needed for remote ops; local dev DB doesn't need it).${NC}"
 fi
 
@@ -95,7 +96,7 @@ for arg in "$@"; do
     esac
 done
 
-if [ "$IS_CODEX_SANDBOX" = true ] && [ "$ENABLE_CHAT" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ] && [ "$ENABLE_CHAT" = true ]; then
     echo -e "${RED}--chat is not available in the Codex sandbox. Use a separately controlled model endpoint instead.${NC}"
     exit 1
 fi
@@ -175,7 +176,7 @@ ensure_local_postgres() {
         sleep 1
     done
 }
-if [ "$IS_CODEX_SANDBOX" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ]; then
     echo -e "${GREEN}Using sandbox PostgreSQL and Redis Compose services${NC}"
 else
     ensure_local_postgres
@@ -236,14 +237,14 @@ else
 fi
 
 if [ "$DATABASE_URL_SOURCE" = "default" ]; then
-    if [ "$IS_CODEX_SANDBOX" = true ]; then
+    if [ "$IS_AGENT_SANDBOX" = true ]; then
         DATABASE_URL="postgresql://matcha:matcha_dev@postgres:5432/matcha"
     else
         DATABASE_URL="postgresql://matcha:matcha_dev@localhost:${LOCAL_PORT}/matcha"
     fi
 fi
 if [ "$REDIS_URL_SOURCE" = "default" ]; then
-    if [ "$IS_CODEX_SANDBOX" = true ]; then
+    if [ "$IS_AGENT_SANDBOX" = true ]; then
         REDIS_URL="redis://redis:6379/0"
     else
         REDIS_URL="redis://localhost:${REDIS_PORT}/0"
@@ -280,13 +281,13 @@ GS_OFF="export POWERLEVEL9K_DISABLE_GITSTATUS=true &&"
 # receive VITE_TELLUS_TARGET (its '/tellus' proxy → this server, making
 # http://localhost:5174/tellus/ work in dev like prod). Range starts at the
 # tellus default (5191), clear of the main frontend's 5175-5190 fallback.
-if [ "$IS_CODEX_SANDBOX" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ]; then
     TELLUS_PORT="${TELLUS_PORT:-5191}"
 else
     TELLUS_PORT=""
 fi
 if [ -d "$PROJECT_ROOT/client/tellus/node_modules" ]; then
-    if [ "$IS_CODEX_SANDBOX" = false ]; then
+    if [ "$IS_AGENT_SANDBOX" = false ]; then
         TELLUS_PORT="$(pick_available_port 5191 5199)"
     fi
 fi
@@ -298,13 +299,13 @@ fi
 # Oceanlab frontend port — same pattern as Tell-Us above, picked before the
 # panes so the main frontend can receive VITE_OCEANLAB_TARGET (its '/oceanlab'
 # proxy -> this server). Default oceanlab port is 5201.
-if [ "$IS_CODEX_SANDBOX" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ]; then
     OCEANLAB_PORT="${OCEANLAB_PORT:-5201}"
 else
     OCEANLAB_PORT=""
 fi
 if [ -d "$PROJECT_ROOT/client/oceanlab/node_modules" ]; then
-    if [ "$IS_CODEX_SANDBOX" = false ]; then
+    if [ "$IS_AGENT_SANDBOX" = false ]; then
         OCEANLAB_PORT="$(pick_available_port 5201 5209)"
     fi
 fi
@@ -323,7 +324,7 @@ fi
 
 DEV_WATCH_ENV=""
 VITE_HOST_ARGS=""
-if [ "$IS_CODEX_SANDBOX" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ]; then
     # Bind-mounted macOS source trees do not reliably emit native filesystem
     # events inside Linux, and published ports need a non-loopback Vite bind.
     DEV_WATCH_ENV="export CHOKIDAR_USEPOLLING=true WATCHFILES_FORCE_POLLING=true &&"
@@ -386,7 +387,7 @@ tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
-if [ "$IS_CODEX_SANDBOX" = true ]; then
+if [ "$IS_AGENT_SANDBOX" = true ]; then
     echo -e "  - Database: sandbox postgres service (postgres:5432/matcha)"
     echo -e "  - Redis:    sandbox redis service (redis:6379)"
 else

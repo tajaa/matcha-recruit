@@ -10,6 +10,16 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 set -o pipefail  # Exit on pipe failure
 
+# The agent sandbox has no Docker daemon/socket by design (see
+# docs/ops/AGENT_SANDBOX.md) — docker buildx needs one. Build on the host.
+case "${AGENT_SANDBOX:-${CODEX_SANDBOX:-}}" in
+    1|true|TRUE|yes|YES)
+        echo "build-and-push.sh needs a local Docker daemon, which the agent sandbox intentionally omits." >&2
+        echo "Run this on the host instead: ./scripts/build-and-push.sh $*" >&2
+        exit 1
+        ;;
+esac
+
 # Color codes for output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
