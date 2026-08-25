@@ -58,9 +58,16 @@ describe('upsertMessage', () => {
     expect(next[0].pending).toBeUndefined()
   })
 
-  it('dedups by server id on reconnect replay', () => {
-    const m1 = msg({ id: 'dup' })
-    expect(upsertMessage([m1], msg({ id: 'dup' }))).toHaveLength(1)
+  it('refreshes an existing row from a live replay', () => {
+    const snapshot = msg({ id: 'dup', message_type: 'system' })
+    const live = msg({
+      id: 'dup',
+      message_type: 'system',
+      metadata: { action: { kind: 'event_draft', id: 'draft-1', status: 'pending' } },
+    })
+    const next = upsertMessage([snapshot], live)
+    expect(next).toHaveLength(1)
+    expect(next[0].metadata?.action).toEqual({ kind: 'event_draft', id: 'draft-1', status: 'pending' })
   })
 
   it('inserts out-of-order arrivals into (created_at, id) position', () => {

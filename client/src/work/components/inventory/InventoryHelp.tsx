@@ -121,6 +121,24 @@ export const INVENTORY_HELP = {
       'A difference is a prompt to investigate, not an automatic correction.',
     ],
   },
+  detailPerishable: {
+    title: 'Perishable settings',
+    summary: 'These settings keep theoretical usage and replenishment recommendations grounded in what can actually be used before it spoils.',
+    bullets: [
+      'Category groups the item with comparable goods for reporting and review.',
+      'Shelf life caps replenishment recommendations so they do not exceed likely usable demand.',
+      'Usable yield adjusts theoretical recipe usage for trim, prep, and other expected loss.',
+    ],
+  },
+  detailPar: {
+    title: 'Predictive par',
+    summary: 'Predictive PAR uses committed demand and movement history to recommend a target stock level; recommendations remain reviewable.',
+    bullets: [
+      'Automatic mode only updates enrolled items within the configured drift guardrail.',
+      'Shelf-life limits and incomplete data can constrain or suppress a recommendation.',
+      'Apply a recommendation to record the PAR change in the item history.',
+    ],
+  },
   detailLedger: {
     title: 'Movement ledger',
     summary: 'Every quantity-changing event for this item is listed here in chronological order.',

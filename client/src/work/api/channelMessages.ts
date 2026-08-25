@@ -47,7 +47,16 @@ export function upsertMessage(prev: ChannelMessage[], msg: ChannelMessage): Chan
       return next
     }
   }
-  if (prev.some((m) => m.id === msg.id)) return prev
+  const existingIndex = prev.findIndex((m) => m.id === msg.id)
+  if (existingIndex >= 0) {
+    // A REST snapshot can land just before a system-message WS broadcast.
+    // Keep the list position, but let the live payload enrich that snapshot:
+    // action metadata is what makes a Huume event-draft confirmation render
+    // its Confirm/Reject card immediately.
+    const next = prev.slice()
+    next[existingIndex] = { ...prev[existingIndex], ...msg }
+    return next
+  }
   const next = [...prev, msg]
   next.sort(compareMessages)
   return next

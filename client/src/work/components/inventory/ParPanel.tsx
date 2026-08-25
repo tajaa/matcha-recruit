@@ -6,11 +6,11 @@ import {
 } from '../../api/inventory'
 import { InventoryHelpButton } from './InventoryHelp'
 
-export default function ParPanel({ item, forecastEnabled, onUpdated, onGuide }: {
+export default function ParPanel({ item, forecastEnabled, onUpdated, onExplain }: {
   item: InventoryItem
   forecastEnabled: boolean
   onUpdated: () => void
-  onGuide?: () => void
+  onExplain?: () => void
 }) {
   const { toast } = useToast()
   const [history, setHistory] = useState<ParHistoryEntry[]>([])
@@ -68,7 +68,7 @@ export default function ParPanel({ item, forecastEnabled, onUpdated, onGuide }: 
   return <section className="rounded-xl border border-w-line bg-w-surface p-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-sm font-medium text-w-text">Predictive par</h2><p className="mt-1 text-xs text-w-dim">Forecast recommendations are reviewable; auto mode stays within its drift guardrail.</p></div>
-      <div className="flex gap-2">{onGuide && <InventoryHelpButton onClick={onGuide} />}<Button size="sm" variant={item.par_source === 'auto' ? 'secondary' : 'ghost'} disabled={saving} onClick={() => void toggleEnrollment()}>{item.par_source === 'auto' ? 'Auto-managed' : 'Enable auto par'}</Button></div>
+      <div className="flex gap-2">{onExplain && <InventoryHelpButton onClick={onExplain} />}<Button size="sm" variant={item.par_source === 'auto' ? 'secondary' : 'ghost'} disabled={saving} onClick={() => void toggleEnrollment()}>{item.par_source === 'auto' ? 'Auto-managed' : 'Enable auto par'}</Button></div>
     </div>
     <div className="mt-3 grid gap-2 sm:grid-cols-4">
       <Stat label="Current par" value={item.low_stock_threshold == null ? 'Not set' : String(item.low_stock_threshold)} />
