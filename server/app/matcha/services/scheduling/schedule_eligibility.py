@@ -17,21 +17,38 @@ def _basis(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+# A blocking credential has one of two independent sources of authority:
+# a tenant-authored template (crt.schedule_blocking, gated on human review —
+# _validate_schedule_blocking already requires a legal-basis citation before
+# a template can set this), OR a curated system credential type
+# (ct.schedule_blocking, set by migration for e.g. food_handler_card) that
+# needs no per-tenant setup. Either alone is sufficient. crt is a LEFT JOIN
+# so a requirement created with no template (credential_type_id is NOT NULL
+# on the table, so ct itself is always resolvable) still participates.
+_BLOCKING_AUTHORITY_SQL = """
+    AND (
+        (crt.schedule_blocking = true AND crt.review_status IN ('approved', 'auto_approved'))
+        OR COALESCE(ct.schedule_blocking, false) = true
+    )
+"""
+
+
 async def _schedule_blocking_requirements(conn, company_id: UUID, employee_ids: list[UUID]):
     if not employee_ids:
         return []
     return await conn.fetch(
-        """
+        f"""
         SELECT ecr.id, ecr.employee_id, ecr.status, ecr.expires_at,
-               ct.label, ct.has_expiration, crt.warning_days, crt.legal_basis
+               ct.label, ct.has_expiration,
+               COALESCE(crt.warning_days, ct.warning_days, 14) AS warning_days,
+               crt.legal_basis
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
-        JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
+        LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = ANY($2::uuid[])
           AND ecr.is_required = true
-          AND crt.schedule_blocking = true
-          AND crt.review_status IN ('approved', 'auto_approved')
+          {_BLOCKING_AUTHORITY_SQL}
         """,
         company_id, employee_ids,
     )
@@ -60,18 +77,18 @@ async def schedule_eligibility_violations(
     location_id: UUID | None = None,
     employee_age: int | None = None,
 ) -> list[dict]:
-    """Human-approved, schedule-blocking requirements cannot be bypassed."""
+    """A blocking requirement — tenant-approved template OR curated system
+    credential type — cannot be bypassed."""
     rows = await conn.fetch(
-        """
+        f"""
         SELECT ecr.id, ecr.status, ecr.expires_at, ct.label, ct.has_expiration, crt.legal_basis
         FROM employee_credential_requirements ecr
         JOIN employees e ON e.id = ecr.employee_id
-        JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
+        LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.employee_id = $2
           AND ecr.is_required = true
-          AND crt.schedule_blocking = true
-          AND crt.review_status IN ('approved', 'auto_approved')
+          {_BLOCKING_AUTHORITY_SQL}
         """, company_id, employee_id,
     )
     permits = await conn.fetch(
@@ -147,17 +164,51 @@ async def schedule_eligibility_roster_flags(
     return result
 
 
+async def open_expiring_eligibility_warnings(conn, company_id: UUID, *, as_of: date) -> list[UUID]:
+    """Idempotently open warning_open cases for blocking credentials inside
+    their warning window but not yet expired. Never blocks scheduling — the
+    block itself starts at expiry, via open_expired_eligibility_cases."""
+    rows = await conn.fetch(
+        f"""
+        SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.expires_at, crt.legal_basis,
+               COALESCE(crt.warning_days, ct.warning_days, 14) AS warning_days
+        FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
+        LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
+        LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        WHERE e.org_id = $1 AND ecr.is_required = true
+          AND ecr.status = 'verified' AND ecr.expires_at IS NOT NULL AND ecr.expires_at >= $2
+          {_BLOCKING_AUTHORITY_SQL}
+        """, company_id, as_of,
+    )
+    opened: list[UUID] = []
+    for row in rows:
+        if row["expires_at"] > as_of + timedelta(days=row["warning_days"]):
+            continue
+        case_id = await conn.fetchval(
+            """
+            INSERT INTO schedule_eligibility_cases
+                (company_id, employee_id, requirement_type, requirement_id, blocking_reason_code, status, expires_at, legal_basis)
+            VALUES ($1,$2,'credential',$3,'credential_expiring','warning_open',$4,$5::jsonb)
+            ON CONFLICT DO NOTHING RETURNING id
+            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'],
+            json.dumps(_basis(row['legal_basis'])),
+        )
+        if case_id:
+            opened.append(case_id)
+    return opened
+
+
 async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date) -> list[UUID]:
     """Idempotently create manager-decision cases; never removes assignments."""
     rows = await conn.fetch(
-        """
+        f"""
         SELECT ecr.id AS requirement_id, ecr.employee_id, ecr.status, ecr.expires_at, ct.label, ct.has_expiration,
                crt.legal_basis
         FROM employee_credential_requirements ecr JOIN employees e ON e.id = ecr.employee_id
-        JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
+        LEFT JOIN credential_requirement_templates crt ON crt.id = ecr.template_id
         LEFT JOIN credential_types ct ON ct.id = ecr.credential_type_id
         WHERE e.org_id = $1 AND ecr.is_required = true
-          AND crt.schedule_blocking AND crt.review_status IN ('approved','auto_approved')
+          {_BLOCKING_AUTHORITY_SQL}
         """, company_id,
     )
     opened: list[UUID] = []
@@ -176,6 +227,32 @@ async def open_expired_eligibility_cases(conn, company_id: UUID, *, as_of: date)
         by_location: dict[UUID, list] = {}
         for assignment in assignments:
             by_location.setdefault(assignment["location_id"], []).append(assignment)
+
+        # A warning_open case for this exact (employee, requirement, expiry)
+        # may already exist from open_expiring_eligibility_warnings — the
+        # unique partial index covers warning_open too, so a plain INSERT
+        # here would silently no-op via ON CONFLICT DO NOTHING and the
+        # removal case would never be created. Promote it instead.
+        promoted_id = await conn.fetchval(
+            """
+            UPDATE schedule_eligibility_cases
+               SET status = 'removal_requested', blocking_reason_code = $5, updated_at = NOW()
+             WHERE company_id = $1 AND employee_id = $2 AND requirement_type = 'credential'
+               AND requirement_id = $3 AND expires_at = $4 AND status = 'warning_open'
+            RETURNING id
+            """, company_id, row['employee_id'], row['requirement_id'], row['expires_at'], reason_code,
+        )
+        if promoted_id:
+            opened.append(promoted_id)
+            for location_assignments in by_location.values():
+                for assignment in location_assignments:
+                    await conn.execute(
+                        """INSERT INTO schedule_eligibility_case_assignments(case_id, shift_id, employee_id, shift_starts_at)
+                           VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING""",
+                        promoted_id, assignment["shift_id"], row["employee_id"], assignment["starts_at"],
+                    )
+            continue
+
         for location_id, location_assignments in by_location.items():
             case_id = await conn.fetchval(
                 """
