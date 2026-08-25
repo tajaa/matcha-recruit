@@ -84,7 +84,7 @@ run_build_version_case() {
     fi
 
     local out
-    out=$(cd "$tmp" && env -u CI -u GITHUB_ACTIONS ${run_number:+GITHUB_RUN_NUMBER="$run_number"} bash -c '
+    out=$(cd "$tmp" && env -u CI -u GITHUB_ACTIONS -u GITHUB_RUN_NUMBER ${run_number:+GITHUB_RUN_NUMBER="$run_number"} bash -c '
         source ./build-and-push.sh
         bump_landing_build_version
         echo "VERSION=${LANDING_BUILD_VERSION}"
@@ -162,6 +162,18 @@ else
     else
         check "all gitlinks resolve via .gitmodules (found: $(echo "$gitlink_paths" | tr '\n' ' '))" 1
     fi
+fi
+
+################################################################################
+# Case 8 — every successful Matcha deploy must retain the non-fatal post-deploy
+# observation dispatch. The monitor is intentionally outside the swap path, so
+# deleting its call would silently restore the original observability gap.
+################################################################################
+if grep -q 'trigger_post_deploy_monitor matcha' "$UPDATE_EC2" \
+    && grep -q 'post-deploy-error-regression.yml' "$UPDATE_EC2"; then
+    check "update-ec2.sh retains post-deploy error-monitor dispatch" 0
+else
+    check "update-ec2.sh retains post-deploy error-monitor dispatch" 1
 fi
 echo
 echo "----------------------------------------"

@@ -73,6 +73,7 @@ jobs:
     # needs SSH.
     permissions:
       contents: read
+      actions: write
     steps:
       # persist-credentials: false — steps in a job share a filesystem, and
       # this job also writes the prod EC2 private key to $RUNNER_TEMP; no
@@ -91,6 +92,7 @@ jobs:
       - name: Deploy (update-ec2.sh, verbatim laptop path)
         env:
           SSH_KEY: ${{ runner.temp }}/ec2.pem
+          GH_TOKEN: ${{ github.token }}
         run: |
           chmod +x ./scripts/update-ec2.sh
           FLAGS="--${{ inputs.target }}"

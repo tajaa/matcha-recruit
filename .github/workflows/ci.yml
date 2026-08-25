@@ -28,7 +28,15 @@ jobs:
           python-version: "3.11"
 
       - name: Backend/scripts syntax check
-        run: python -m compileall -q server/app server/alembic scripts
+        run: |
+          python -m pip install pytest 'asyncpg>=0.29.0'
+          python -m compileall -q server/app server/alembic scripts
+          python -m pytest -q scripts/tests/test_ops_health.py scripts/tests/test_operational_integrity.py
+          bash -n scripts/update-ec2.sh scripts/ops-health/prod-query.sh scripts/ops-health/publish-issue.sh scripts/ops-health/backup-probe.sh scripts/ops-health/schema-snapshot.sh
+          bash scripts/tests/test_ci_guards.sh
+          bash scripts/tests/test_error_autofix.sh
+          bash scripts/tests/test_operational_integrity.sh
+          bash scripts/tests/test_publish_issue.sh
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:

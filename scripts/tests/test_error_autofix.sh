@@ -100,13 +100,54 @@ PATH="$TMP_DIR/bin:$PATH" SSH_KEY="$TMP_DIR/fake.pem" "$AUTOFIX_DIR/collect.sh" 
 check "collect.sh rejects --hours with no value instead of crashing on \$2" $([ "$?" != "0" ] && echo 0 || echo 1)
 
 ################################################################################
+# investigate.sh — repeated --file options must be terminated before the prompt
+################################################################################
+cat > "$TMP_DIR/bin/opencode" <<'EOF'
+#!/usr/bin/env bash
+seen_separator=0
+message_count=0
+for arg in "$@"; do
+    if [ "$arg" = "--" ]; then
+        seen_separator=1
+    elif [ "$seen_separator" = "1" ]; then
+        message_count=$((message_count + 1))
+        [[ "$arg" == Investigate\ the\ attached\ production\ incident* ]] || exit 8
+    fi
+done
+[ "$seen_separator" = "1" ] && [ "$message_count" = "1" ] || exit 9
+cat > "$OPENCODE_STUB_REPORT" <<'REPORT'
+### Root cause
+stub
+### Fix
+stub
+### Blast radius
+stub
+### Confidence
+high
+REPORT
+EOF
+chmod +x "$TMP_DIR/bin/opencode"
+cat > "$TMP_DIR/investigate-incident.json" <<'EOF'
+{"message":"boom","traceback":"File \"/app/app/example.py\", line 1","stable_key":"abc123abc123"}
+EOF
+PATH="$TMP_DIR/bin:$PATH" OPENCODE_STUB_REPORT="$TMP_DIR/investigation.md" \
+    "$AUTOFIX_DIR/investigate.sh" "$TMP_DIR/investigate-incident.json" "$TMP_DIR/investigation.md" >/dev/null 2>&1
+check "investigate.sh terminates --file args before passing one prompt" $?
+
+################################################################################
 # Fallback workflow evidence must remain actionable, rather than being replaced
 # with an empty incident list before select.sh runs.
 ################################################################################
 workflow="$REPO_ROOT/.github/workflows/silent-error-autofix.yml"
+check "workflow checks for silent errors every 10 minutes" \
+    $(grep -qF "cron: '*/10 * * * *'" "$workflow" && echo 0 || echo 1)
 fallback_block="$(sed -n '/Fallback log-grep evidence/,/Select one incident/p' "$workflow")"
 check "fallback turns nonempty evidence into an incident" \
     $([[ "$fallback_block" == *'if [ ! -s "$RUNNER_TEMP/silent-error-evidence.txt" ]'* && "$fallback_block" == *'--rawfile evidence'* && "$fallback_block" == *'stable_key: $key'* ]] && echo 0 || echo 1)
+
+failure_block="$(sed -n '/Fail incomplete investigation/,/Verify (baseline vs branch)/p' "$workflow")"
+check "incomplete investigation fails without publishing a no-fix issue" \
+    $([[ "$failure_block" == *'exit 1'* && "$failure_block" != *'publish.sh'* ]] && echo 0 || echo 1)
 
 ################################################################################
 # 6-9: select.sh dedup decisions, via a stubbed `gh` on PATH

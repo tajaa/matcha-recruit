@@ -17,4 +17,20 @@ Two things used to make every deploy slow, both fixed 2026-07-19 — don't reint
 - **Never `docker image prune -a` before the pull.** It deletes the cached layers the pull is about to reuse, forcing a cold full-image pull every single deploy. Pruning belongs **after** the swap (running containers keep their images). The pre-pull prune survives only as a `<4GB` free-disk safety valve, and its `df` output is regex-validated — non-numeric output must warn and skip, never abort the deploy under `set -e` and never collapse to `0` (which silently restores the cold-pull cost).
 - **The deploy-triggered DB backup is queued and must stay non-fatal.** A normal backend deploy installs `deploy/backup-prod.sh`, `deploy/pg-backup.service`, and `deploy/pg-backup.timer`, enables the twice-daily timer, then uses `systemctl start --no-block` to queue an extra run. The whole install/trigger remains inside an `if`, so a transient scp/SSH/systemd failure warns without killing the deploy. `flock` in the backup script prevents timer/deploy overlap.
 
-The previous `pg-backup.service` ran `~/backup-postgres.sh` and had been **failing silently** because that script targeted a deleted local `matcha-postgres` container. A successful deploy or queued systemd job is not proof of backup completion: check `systemctl status pg-backup.service`, `~/backup.log`, and the newest object under `s3://matcha-recruit-backups/postgres-selfhosted/`.
+The previous `pg-backup.service` ran `~/backup-postgres.sh` and had been **failing silently** because that script targeted a deleted local `matcha-postgres` container. A successful deploy or queued systemd job is not proof of backup completion. `operational-integrity-checks.yml` verifies the newest `postgres-selfhosted/` object after each scheduled backup; for an investigation, also check `systemctl status pg-backup.service` and `~/backup.log`.
+
+## Post-deploy error observation
+
+Every successful Matcha frontend/backend deployment dispatches
+`post-deploy-error-regression.yml` from `update-ec2.sh`. The dispatch is
+deliberately non-fatal, so a GitHub outage or missing local `gh` session cannot
+turn a completed blue-green swap into a failed deploy. It covers laptop and
+GitHub Actions deployments, takes a read-only error snapshot immediately, then
+compares it with a second snapshot 15 minutes later.
+
+`server_error_reports.occurrences` is a cumulative fingerprint counter, not an
+event stream. The monitor therefore detects new normalized error fingerprints
+and growth from its own initial snapshot; it is a regression signal, not an
+exact request error-rate calculation. A detected spike opens a deduplicated
+`deploy-regression` GitHub issue with normalized messages and query-free paths
+only. It never creates a PR, changes production data, or blocks deployment.

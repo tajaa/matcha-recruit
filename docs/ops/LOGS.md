@@ -155,17 +155,51 @@ seconds. This path was silently broken for a long time (the reporter used a
 pool-only DB connection, and workers are pool-free by design), so it's worth
 re-checking after any change to the worker or the reporter.
 
+## Automated availability checks
+
+`.github/workflows/availability-checks.yml` runs daily and can be dispatched
+manually. It opens or updates a deduplicated `ops-health` GitHub issue when any
+check fails, then comments and closes that issue after recovery. It is
+read-only: it never restarts a worker, prunes disk, renews a certificate, or
+changes a database row.
+
+- TLS: validates public certificate chains, hostname verification, and a
+  21-day expiry threshold for Matcha, Gummfit, the origin, wildcard probe, and
+  active Cappe custom domains.
+- Disk: checks app-host root plus DB-host root and `/mnt/encdb/pgdata`; alerts
+  at 80% used or under 8 GiB free, and treats under 4 GiB/90% used as critical.
+- Worker: checks the `matcha-worker` container, a 10-second Celery ping, and
+  the systemd timer/service state. The timer must have triggered in the last
+  35 minutes.
+
+Collection failures are alerts too. A failed SSH or production DB query must
+never be represented as a healthy check.
+
+## Automated database integrity checks
+
+`.github/workflows/operational-integrity-checks.yml` runs twice daily after the
+scheduled Postgres backup. It is read-only and opens deduplicated `ops-health`
+issues for stale/unreadable backups, dev/prod Alembic drift, or monitor
+collection failures.
+
+- Backup issues report the newest S3 key, age, size, and custom-archive TOC
+  result. The check reads S3 through the app EC2's existing AWS identity, not
+  the GitHub ECR-only OIDC role. `pg_restore --list` validates archive metadata,
+  not a complete restore.
+- Schema issues report exact multi-head `alembic_version` sets. When they differ,
+  the workflow adds a bounded, redacted schema-only diff. A DDL-equal mismatch
+  still needs attention because data-only migrations and stale version rows are
+  possible.
+
+Raw schema dumps and backup contents never leave their temporary hosts. A failed
+collection opens a separate monitor issue and cannot resolve an existing health
+issue, since the current state is unknown.
+
 ## Known gaps
 
-- **Nothing restarts the worker on a schedule.** The design assumes periodic
-  tasks re-dispatch via `@worker_ready` on a ~15-minute restart cycle, but the
-  host has no cron and no systemd timer — the container just runs continuously
-  (`restart: unless-stopped`). In practice scheduled tasks only re-fire when a
-  deploy restarts it. Most scheduler rows are disabled anyway, so this is
-  latent rather than actively broken, but it means enabling a `scheduler_settings`
-  row is not sufficient to make that task run on a cadence.
-- **No external uptime monitoring.** No CloudWatch alarms, no third-party
-  pinger. The only automated health signal is the blue-green deploy gate
-  (which rolls back a bad deploy) and the error-alert email.
+- Worker scheduling configuration may still be broken: the checked-in
+  `matcha-worker.service` references `scripts/worker-cycle.sh`, but the active
+  scripts directory has no such file. The availability workflow reports this;
+  it does not repair it.
 - `server/agent/` (the standalone ops agent on :9100) has none of this — no
   error reporter, its own logging config. Out of scope so far.

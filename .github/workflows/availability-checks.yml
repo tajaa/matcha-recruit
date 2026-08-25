@@ -1,0 +1,149 @@
+name: Production availability checks
+
+on:
+  schedule:
+    - cron: '17 14 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ops-availability
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Collect active custom domains
+        id: domains
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: ./scripts/ops-health/prod-query.sh domains > "$RUNNER_TEMP/domains.json"
+
+      - name: Collect app-host status
+        id: app
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new ec2-user@54.177.107.107 'bash -s' > "$RUNNER_TEMP/app-status.txt" <<'REMOTE'
+          set +e
+          df -Pk / | awk 'NR == 2 {print "DF|/|" $2 "|" $4}'
+          printf 'WORKER|'; docker inspect -f '{{.State.Status}}' matcha-worker 2>/dev/null || printf 'missing'; printf '\n'
+          if docker exec matcha-worker celery -A app.workers.celery_app inspect ping --timeout 10 2>/dev/null | grep -q pong; then
+            printf 'CELERY_PING|ok\n'
+          else
+            printf 'CELERY_PING|failed\n'
+          fi
+          printf 'TIMER_ENABLED|'; systemctl is-enabled matcha-worker.timer 2>/dev/null || printf 'missing'; printf '\n'
+          printf 'TIMER_ACTIVE|'; systemctl is-active matcha-worker.timer 2>/dev/null || printf 'missing'; printf '\n'
+          last="$(systemctl show matcha-worker.timer -p LastTriggerUSec --value 2>/dev/null)"
+          if [ -n "$last" ] && [ "$last" != 'n/a' ]; then
+            printf 'TIMER_LAST|%s\n' "$last"
+            last_epoch="$(date -d "$last" +%s 2>/dev/null)"
+            if [ -n "$last_epoch" ]; then
+              printf 'TIMER_AGE_SECONDS|%s\n' "$(( $(date +%s) - last_epoch ))"
+            else
+              printf 'TIMER_AGE_SECONDS|-1\n'
+            fi
+          else
+            printf 'TIMER_LAST|n/a\n'
+            printf 'TIMER_AGE_SECONDS|-1\n'
+          fi
+          printf 'TIMER_RESULT|'; systemctl show matcha-worker.service -p Result --value 2>/dev/null || true; printf '\n'
+          REMOTE
+
+      - name: Collect database-host status
+        id: db
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new ec2-user@13.56.253.173 'bash -s' > "$RUNNER_TEMP/db-status.txt" <<'REMOTE'
+          set +e
+          df -Pk / | awk 'NR == 2 {print "DF|/|" $2 "|" $4}'
+          if df -Pk /mnt/encdb/pgdata >/dev/null 2>&1; then
+            df -Pk /mnt/encdb/pgdata | awk 'NR == 2 {print "DF|/mnt/encdb/pgdata|" $2 "|" $4}'
+          else
+            printf 'DF|/mnt/encdb/pgdata|0|0\n'
+          fi
+          REMOTE
+
+      - name: Assess availability
+        id: assess
+        if: steps.domains.outcome == 'success' && steps.app.outcome == 'success' && steps.db.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 scripts/ops-health/availability.py \
+            --domains "$RUNNER_TEMP/domains.json" \
+            --app-status "$RUNNER_TEMP/app-status.txt" \
+            --db-status "$RUNNER_TEMP/db-status.txt" \
+            --output "$RUNNER_TEMP/availability.json"
+
+      - name: Publish availability alert
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body="$RUNNER_TEMP/availability.md"
+          if [ "${{ steps.domains.outcome }}" != success ] || [ "${{ steps.app.outcome }}" != success ] || [ "${{ steps.db.outcome }}" != success ]; then
+            printf 'Production availability collection failed.\n\nReview this workflow run: %s\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$body"
+            ./scripts/ops-health/publish-issue.sh ops-health:monitor 'ops: production monitoring collection failed' "$body" ops-health
+          elif [ "${{ steps.assess.outcome }}" != success ]; then
+            python3 - "$RUNNER_TEMP/availability.json" > "$body" <<'PY'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          print("Production availability checks found a problem.\n")
+          for name in ("tls", "disks"):
+              for item in report[name]:
+                  if not item["ok"]:
+                      print(f"- `{item.get('host', item.get('mount'))}`: {item.get('reason', item.get('severity'))}")
+          for failure in report["worker"]["failures"]:
+              print(f"- worker: {failure}")
+          PY
+            ./scripts/ops-health/publish-issue.sh ops-health:availability 'ops: production availability check failed' "$body" ops-health
+          else
+            printf 'Availability checks recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$body"
+            ./scripts/ops-health/publish-issue.sh ops-health:availability 'ops: production availability check failed' "$body" ops-health --recover
+            ./scripts/ops-health/publish-issue.sh ops-health:monitor 'ops: production monitoring collection failed' "$body" ops-health --recover
+          fi
+
+      - name: Write summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/availability.json" ]; then
+            python3 - "$RUNNER_TEMP/availability.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+          print("## Production availability")
+          print("```json")
+          print(json.dumps(json.load(open(sys.argv[1])), indent=2))
+          print("```")
+          PY
+          else
+            echo '## Production availability' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Collection did not complete; see failed step above.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Mark availability failure
+        if: always() && (steps.domains.outcome != 'success' || steps.app.outcome != 'success' || steps.db.outcome != 'success' || steps.assess.outcome != 'success')
+        run: exit 1
+
+      - name: Delete production SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/matcha-prod.pem"
