@@ -519,6 +519,26 @@ async def assign_credential_requirements_to_employee(
     for req in requirements:
         due = base_date + timedelta(days=req.due_days)
 
+        # An employee can move into a role or jurisdiction with an existing
+        # credential type. Reuse that requirement rather than creating an
+        # orphan onboarding task, while updating the template that governs it.
+        existing_id = await conn.fetchval(
+            """SELECT id FROM employee_credential_requirements
+               WHERE employee_id = $1 AND credential_type_id = $2
+               FOR UPDATE""",
+            employee_id, req.credential_type_id,
+        )
+        if existing_id:
+            await conn.execute(
+                """UPDATE employee_credential_requirements
+                   SET template_id = $1, is_required = $2, priority = $3,
+                       notes = $4, updated_at = NOW()
+                   WHERE id = $5""",
+                req.template_id, req.is_required, req.priority, req.notes, existing_id,
+            )
+            count += 1
+            continue
+
         # Create onboarding task first (backward compat)
         task_id = await conn.fetchval(
             """

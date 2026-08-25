@@ -68,6 +68,61 @@ def _legal_basis(value: object) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+async def _tenant_override_for_global_template(conn, template, company_id: UUID):
+    """Return a company-owned copy of a system template.
+
+    System templates are shared reference data. Tenant edits, especially a
+    schedule block, must never alter another company's eligibility rules.
+    """
+    override = await conn.fetchrow(
+        """
+        INSERT INTO credential_requirement_templates
+            (company_id, state, city, role_category_id, credential_type_id,
+             is_required, due_days, priority, notes, source, ai_research_id,
+             ai_confidence, review_status, reviewed_by, reviewed_at, is_active,
+             schedule_blocking, warning_days, legal_basis)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'tenant_override', $10,
+                $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
+        ON CONFLICT (company_id, state, city, role_category_id, credential_type_id)
+        DO NOTHING
+        RETURNING *
+        """,
+        company_id,
+        template["state"],
+        template["city"],
+        template["role_category_id"],
+        template["credential_type_id"],
+        template["is_required"],
+        template["due_days"],
+        template["priority"],
+        template["notes"],
+        template["ai_research_id"],
+        template["ai_confidence"],
+        template["review_status"],
+        template["reviewed_by"],
+        template["reviewed_at"],
+        template["is_active"],
+        template["schedule_blocking"],
+        template["warning_days"],
+        json.dumps(_legal_basis(template["legal_basis"])),
+    )
+    if override:
+        return override
+
+    return await conn.fetchrow(
+        """
+        SELECT * FROM credential_requirement_templates
+        WHERE company_id = $1 AND state = $2 AND city IS NOT DISTINCT FROM $3
+          AND role_category_id = $4 AND credential_type_id = $5
+        """,
+        company_id,
+        template["state"],
+        template["city"],
+        template["role_category_id"],
+        template["credential_type_id"],
+    )
+
+
 class ResearchRequest(BaseModel):
     state: str
     city: Optional[str] = None
@@ -207,8 +262,11 @@ async def update_template(
         )
         if not row:
             raise HTTPException(404, "Template not found")
-        if row["company_id"] and row["company_id"] != company_id:
+        if row["company_id"] and row["company_id"] != company_id and user.role != "admin":
             raise HTTPException(403, "Not authorized")
+        if row["company_id"] is None and user.role != "admin":
+            row = await _tenant_override_for_global_template(conn, row, company_id)
+            template_id = row["id"]
 
         requested_blocking = body.schedule_blocking if body.schedule_blocking is not None else row["schedule_blocking"]
         requested_basis = body.legal_basis if body.legal_basis is not None else _legal_basis(row["legal_basis"])
@@ -243,7 +301,7 @@ async def update_template(
             )
             if updated["schedule_blocking"]:
                 await materialize_schedule_blocking_template(
-                    conn, company_id=company_id, template_id=updated["id"],
+                    conn, company_id=updated["company_id"] or company_id, template_id=updated["id"],
                 )
         return dict(updated)
 
@@ -262,7 +320,9 @@ async def delete_template(
         )
         if not row:
             raise HTTPException(404, "Template not found")
-        if row["company_id"] and row["company_id"] != company_id:
+        if row["company_id"] is None and user.role != "admin":
+            raise HTTPException(403, "System templates can only be removed by an admin")
+        if row["company_id"] and row["company_id"] != company_id and user.role != "admin":
             raise HTTPException(403, "Not authorized")
 
         await conn.execute(
@@ -284,6 +344,17 @@ async def approve_template(
     """Approve an AI-generated template."""
     async with get_connection() as conn:
         async with conn.transaction():
+            existing = await conn.fetchrow(
+                "SELECT * FROM credential_requirement_templates WHERE id = $1",
+                template_id,
+            )
+            if not existing:
+                raise HTTPException(404, "Template not found")
+            if existing["company_id"] and existing["company_id"] != company_id and user.role != "admin":
+                raise HTTPException(403, "Not authorized")
+            if existing["company_id"] is None and user.role != "admin":
+                existing = await _tenant_override_for_global_template(conn, existing, company_id)
+            template_id = existing["id"]
             row = await conn.fetchrow(
                 """
                 UPDATE credential_requirement_templates
@@ -297,7 +368,7 @@ async def approve_template(
                 raise HTTPException(404, "Template not found")
             if row["schedule_blocking"]:
                 await materialize_schedule_blocking_template(
-                    conn, company_id=company_id, template_id=template_id,
+                    conn, company_id=row["company_id"] or company_id, template_id=template_id,
                 )
         return {"ok": True}
 
@@ -306,17 +377,29 @@ async def approve_template(
 async def reject_template(
     template_id: UUID,
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
 ):
     """Reject an AI-generated template."""
     async with get_connection() as conn:
-        await conn.execute(
-            """
-            UPDATE credential_requirement_templates
-            SET review_status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
-            WHERE id = $2
-            """,
-            user.id, template_id,
-        )
+        async with conn.transaction():
+            existing = await conn.fetchrow(
+                "SELECT * FROM credential_requirement_templates WHERE id = $1",
+                template_id,
+            )
+            if not existing:
+                raise HTTPException(404, "Template not found")
+            if existing["company_id"] and existing["company_id"] != company_id and user.role != "admin":
+                raise HTTPException(403, "Not authorized")
+            if existing["company_id"] is None and user.role != "admin":
+                existing = await _tenant_override_for_global_template(conn, existing, company_id)
+            await conn.execute(
+                """
+                UPDATE credential_requirement_templates
+                SET review_status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
+                WHERE id = $2
+                """,
+                user.id, existing["id"],
+            )
         return {"ok": True}
 
 
@@ -324,18 +407,36 @@ async def reject_template(
 async def bulk_approve(
     research_id: UUID = Query(...),
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
 ):
     """Approve all pending templates from a research run."""
     async with get_connection() as conn:
-        result = await conn.execute(
-            """
-            UPDATE credential_requirement_templates
-            SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
-            WHERE ai_research_id = $2 AND review_status = 'pending'
-            """,
-            user.id, research_id,
-        )
-        count = int(result.split()[-1]) if result else 0
+        async with conn.transaction():
+            research = await conn.fetchrow(
+                "SELECT company_id FROM credential_research_logs WHERE id = $1",
+                research_id,
+            )
+            if not research:
+                raise HTTPException(404, "Research run not found")
+            if research["company_id"] is None and user.role != "admin":
+                raise HTTPException(403, "System research can only be approved by an admin")
+            if research["company_id"] and research["company_id"] != company_id and user.role != "admin":
+                raise HTTPException(403, "Not authorized")
+            rows = await conn.fetch(
+                """
+                UPDATE credential_requirement_templates
+                SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
+                WHERE ai_research_id = $2 AND review_status = 'pending'
+                RETURNING *
+                """,
+                user.id, research_id,
+            )
+            for row in rows:
+                if row["schedule_blocking"] and row["company_id"]:
+                    await materialize_schedule_blocking_template(
+                        conn, company_id=row["company_id"], template_id=row["id"],
+                    )
+        count = len(rows)
         return {"approved": count}
 
 
@@ -355,7 +456,7 @@ async def trigger_research(
             state=body.state,
             city=body.city,
             role_category_id=body.role_category_id,
-            company_id=None,  # System-wide templates
+            company_id=company_id,
             triggered_by=user.id,
         )
         return {"template_count": len(results), "requirements": results}

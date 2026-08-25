@@ -430,7 +430,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
                   <DocumentCard
                     key={doc.id}
                     doc={doc}
-                    onApprove={() => approve(doc.id)}
+                    onApprove={(expirationDate) => approve(doc.id, expirationDate)}
                     onReject={() => reject(doc.id)}
                     onDownload={() => download(doc.id)}
                     onDelete={() => remove(doc.id)}

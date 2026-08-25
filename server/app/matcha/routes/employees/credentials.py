@@ -404,10 +404,32 @@ async def delete_credential_document(
         if not row:
             raise HTTPException(status_code=404, detail="Document not found")
 
+        async with conn.transaction():
+            # A deleted file can no longer substantiate a verified requirement.
+            # Keep the scheduler fail-closed until a replacement is approved.
+            await conn.execute(
+                """UPDATE employee_onboarding_tasks
+                   SET status = 'pending', completed_at = NULL, completed_by = NULL, updated_at = NOW()
+                   WHERE credential_requirement_id IN (
+                       SELECT id FROM employee_credential_requirements
+                       WHERE credential_document_id = $1
+                   )""",
+                document_id,
+            )
+            await conn.execute(
+                """UPDATE employee_credential_requirements
+                   SET status = 'pending', credential_document_id = NULL,
+                       verified_at = NULL, verified_by = NULL, expires_at = NULL,
+                       updated_at = NOW()
+                   WHERE credential_document_id = $1""",
+                document_id,
+            )
+            await conn.execute("DELETE FROM credential_documents WHERE id = $1", document_id)
+
+        # Database eligibility state changes first. If object deletion fails,
+        # the credential remains unschedulable rather than fail-open.
         storage = get_storage()
         await storage.delete_private_file(row["file_path"])
-
-        await conn.execute("DELETE FROM credential_documents WHERE id = $1", document_id)
 
     return {"message": "Document deleted"}
 
@@ -576,13 +598,31 @@ async def reject_credential_document(
         if not exists:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        await conn.execute(
-            """UPDATE credential_documents
-               SET review_status = 'rejected', reviewed_by = $1, reviewed_at = NOW(),
-                   review_notes = $2, updated_at = NOW()
-               WHERE id = $3""",
-            current_user.id, body.notes, document_id,
-        )
+        async with conn.transaction():
+            await conn.execute(
+                """UPDATE employee_onboarding_tasks
+                   SET status = 'pending', completed_at = NULL, completed_by = NULL, updated_at = NOW()
+                   WHERE credential_requirement_id IN (
+                       SELECT id FROM employee_credential_requirements
+                       WHERE credential_document_id = $1
+                   )""",
+                document_id,
+            )
+            await conn.execute(
+                """UPDATE employee_credential_requirements
+                   SET status = 'pending', credential_document_id = NULL,
+                       verified_at = NULL, verified_by = NULL, expires_at = NULL,
+                       updated_at = NOW()
+                   WHERE credential_document_id = $1""",
+                document_id,
+            )
+            await conn.execute(
+                """UPDATE credential_documents
+                   SET review_status = 'rejected', reviewed_by = $1, reviewed_at = NOW(),
+                       review_notes = $2, updated_at = NOW()
+                   WHERE id = $3""",
+                current_user.id, body.notes, document_id,
+            )
 
     return {"message": "Document rejected"}
 

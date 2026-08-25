@@ -10,7 +10,10 @@ router = APIRouter()
 
 _MAX_CRED_UPLOAD = 10 * 1024 * 1024  # 10 MB
 _ALLOWED_CRED_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".tiff"}
-_VALID_DOC_TYPES = {"medical_license", "dea", "npi", "board_cert", "malpractice", "health_clearance", "other"}
+_VALID_DOC_TYPES = {
+    "medical_license", "dea", "npi", "board_cert", "malpractice",
+    "health_clearance", "food_handler_card", "other",
+}
 
 
 def _cred_doc_response(row) -> dict:

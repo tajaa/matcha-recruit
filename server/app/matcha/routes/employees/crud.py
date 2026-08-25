@@ -1016,7 +1016,38 @@ async def update_employee(
         """
         values.extend([employee_id, company_id])
 
-        row = await conn.fetchrow(query, *values)
+        async with conn.transaction():
+            row = await conn.fetchrow(query, *values)
+
+            # Existing staff can move into a role or jurisdiction that has
+            # schedule-blocking credentials. Ensure their requirement rows are
+            # created in the same transaction as the profile change so the
+            # scheduler never interprets a missing row as eligibility.
+            eligibility_scope_changed = (
+                request.work_state is not None
+                or (compensation_fields_available and request.work_city is not None)
+                or (org_fields_available and request.job_title is not None)
+            )
+            if eligibility_scope_changed:
+                from app.core.services.credential_template_service import (
+                    assign_credential_requirements_to_employee,
+                    resolve_credential_requirements,
+                )
+
+                credential_requirements = await resolve_credential_requirements(
+                    conn,
+                    company_id,
+                    row["work_state"],
+                    row["work_city"] if compensation_fields_available else None,
+                    row["job_title"] if org_fields_available else None,
+                )
+                await assign_credential_requirements_to_employee(
+                    conn,
+                    row["id"],
+                    company_id,
+                    credential_requirements,
+                    row["start_date"],
+                )
 
         if request.work_state is not None or (compensation_fields_available and request.work_city is not None):
             await _sync_employee_location_for_compliance(
