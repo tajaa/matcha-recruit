@@ -983,25 +983,24 @@ async def _bg_inventory_request(
                             kind="waste", lines=resolved_lines, narrative=stripped,
                             note=extracted.get("recipient_note"),
                         )
-                        if not inserted:
-                            return
-                        first = inserted[0]
-                        item_row = await conn.fetchrow(
-                            "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
-                        )
-                        pill_text = pills.waste_pill(
-                            item_row["name"], first["quantity"], item_row["current_quantity"],
-                            reason, first["quantity_estimated"], reason_coerced=reason_coerced,
-                        )
-                        single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
-                        if single_unknown:
-                            pill_text = pills.quantity_question(pill_text)
-                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
-                        if single_unknown:
-                            await conn.execute(
-                                "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
-                                sys_row["id"], inserted[0]["id"],
+                        if inserted:
+                            first = inserted[0]
+                            item_row = await conn.fetchrow(
+                                "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
                             )
+                            pill_text = pills.waste_pill(
+                                item_row["name"], first["quantity"], item_row["current_quantity"],
+                                reason, first["quantity_estimated"], reason_coerced=reason_coerced,
+                            )
+                            single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
+                            if single_unknown:
+                                pill_text = pills.quantity_question(pill_text)
+                            sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                            if single_unknown:
+                                await conn.execute(
+                                    "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                                    sys_row["id"], inserted[0]["id"],
+                                )
 
             elif kind == "receipt":
                 # Provenance invariant (services/inventory/CLAUDE.md): a
@@ -1056,25 +1055,24 @@ async def _bg_inventory_request(
                         # `in` row when the reporter added no aside.
                         note=extracted.get("recipient_note") or "Customer return (chat)",
                     )
-                    if not inserted:
-                        return
-                    first = inserted[0]
-                    item_row = await conn.fetchrow(
-                        "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
-                    )
-                    pill_text = pills.return_pill(
-                        item_row["name"], first["quantity"], item_row["current_quantity"],
-                        first["quantity_estimated"], unmatched_names,
-                    )
-                    single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
-                    if single_unknown:
-                        pill_text = pills.quantity_question(pill_text)
-                    sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
-                    if single_unknown:
-                        await conn.execute(
-                            "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
-                            sys_row["id"], inserted[0]["id"],
+                    if inserted:
+                        first = inserted[0]
+                        item_row = await conn.fetchrow(
+                            "SELECT name, current_quantity FROM inventory_items WHERE id = $1", first["item_id"],
                         )
+                        pill_text = pills.return_pill(
+                            item_row["name"], first["quantity"], item_row["current_quantity"],
+                            first["quantity_estimated"], unmatched_names,
+                        )
+                        single_unknown = len(inserted) == 1 and inserted[0]["quantity_estimated"]
+                        if single_unknown:
+                            pill_text = pills.quantity_question(pill_text)
+                        sys_row = await _insert_system_message(conn, channel_id_str, pill_text)
+                        if single_unknown:
+                            await conn.execute(
+                                "UPDATE inventory_movements SET clarify_message_id = $1 WHERE id = $2",
+                                sys_row["id"], inserted[0]["id"],
+                            )
 
             else:  # stockout / order_request
                 item_name = lines[0].get("item_name") if lines else stripped

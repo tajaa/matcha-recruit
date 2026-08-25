@@ -30,6 +30,8 @@ class FakeConn:
     async def fetchrow(self, query, *_args):
         if 'INSERT INTO inventory_sales_imports' in query:
             return {'id': 'import-1'}
+        if 'INSERT INTO inventory_sales_lines' in query:
+            return {'id': 'sales-line-1'}
         raise AssertionError(f'unexpected fetchrow: {query}')
 
     async def fetchval(self, query, *_args):
@@ -103,6 +105,13 @@ def test_recipe_sales_deplete_each_component_and_save_mapping_in_commit_transact
         {'item_id': 'coffee', 'quantity': 0.12, 'estimated': False},
         {'item_id': 'syrup', 'quantity': 0.06, 'estimated': False},
     ]
+    snapshots = [args for query, args in conn.executed if 'inventory_sales_line_components' in query]
+    assert snapshots == [
+        ('sales-line-1', 'cup', 1, None),
+        ('sales-line-1', 'milk', 0.25, None),
+        ('sales-line-1', 'coffee', 0.04, None),
+        ('sales-line-1', 'syrup', 0.02, None),
+    ]
 
 
 def test_unmapped_sibling_does_not_save_reviewed_recipe(monkeypatch):
@@ -143,3 +152,26 @@ def test_recipe_mapping_rejects_duplicate_stock_components():
         assert str(exc) == 'mapping components must use distinct inventory items'
     else:
         raise AssertionError('duplicate recipe components must be rejected')
+
+
+def test_foreign_mapping_id_is_rejected_without_persisting_it():
+    class ForeignMappingConn(FakeConn):
+        async def fetchval(self, query, *args):
+            if 'FROM inventory_sales_mappings' in query:
+                return False
+            return await super().fetchval(query, *args)
+
+    conn = ForeignMappingConn()
+    result = _run(sales_commit.commit_sales_import(
+        conn, company_id='company-1', user_id='user-1', location_id=None,
+        business_date='2026-08-25', source='upload', filename='sales.csv',
+        gmail_message_id=None, force=False,
+        lines=[{
+            'sold_name': 'Vanilla latte', 'quantity': 1, 'mapping_id': 'foreign-mapping',
+            'components': [{'item_id': 'attacker-supplied', 'quantity_per_sale': 1}],
+        }],
+    ))
+
+    assert result['errors'] == [{'row': 1, 'item': 'Vanilla latte', 'error': 'sales mapping not found'}]
+    sales_line_args = next(args for query, args in conn.executed if 'INSERT INTO inventory_sales_lines' in query)
+    assert sales_line_args[6] is None

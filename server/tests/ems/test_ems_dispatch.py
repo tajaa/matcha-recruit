@@ -192,7 +192,8 @@ class TestInventoryWasteEventDualWrite:
             "id": item["id"], "name": item["name"], "normalized_name": "espresso beans house blend",
         }]))
         monkeypatch.setattr(movements, "find_item", AsyncMock(return_value=item))
-        monkeypatch.setattr(movements, "record_movements", AsyncMock(return_value=[movement]))
+        movement_mock = AsyncMock(return_value=[movement])
+        monkeypatch.setattr(movements, "record_movements", movement_mock)
         monkeypatch.setattr(pills, "waste_pill", lambda *_args, **_kwargs: "waste logged")
 
         channel_id = str(uuid4())
@@ -202,6 +203,13 @@ class TestInventoryWasteEventDualWrite:
         await channels_ws._bg_inventory_request(channel_id, message_id, user_id, content)
 
         event_mock.assert_awaited_once_with(channel_id, message_id, user_id, content)
+
+        # Inventory movements dedupe on the source message. If an earlier
+        # attempt wrote the ledger row but died before the EMS intake, the
+        # retry must still hand the message to EMS's own idempotent intake.
+        movement_mock.return_value = []
+        await channels_ws._bg_inventory_request(channel_id, message_id, user_id, content)
+        assert event_mock.await_count == 2
 
 
 class TestHuumeMentionRouting:

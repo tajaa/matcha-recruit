@@ -27,6 +27,12 @@ def _date_value(value):
 async def _components_for_line(conn, company_id: UUID, line: dict) -> list[dict]:
     mapping_id = line.get("mapping_id")
     if mapping_id:
+        owned = await conn.fetchval(
+            "SELECT 1 FROM inventory_sales_mappings WHERE id=$1 AND company_id=$2",
+            mapping_id, company_id,
+        )
+        if not owned:
+            raise ValueError("sales mapping not found")
         rows = await conn.fetch(
             """
             SELECT l.item_id, l.quantity_per_sale, l.unit
@@ -35,8 +41,7 @@ async def _components_for_line(conn, company_id: UUID, line: dict) -> list[dict]
             WHERE l.mapping_id=$1 AND m.company_id=$2
             """, mapping_id, company_id,
         )
-        if rows:
-            return [dict(row) for row in rows]
+        return [dict(row) for row in rows]
     components = line.get("components") or []
     if components:
         return components
@@ -215,7 +220,8 @@ async def commit_sales_import(
             normalized_lines.append({
                 **line, "sold_name": sold_name or "(blank)",
                 "normalized_name": normalize_name(sold_name), "quantity": quantity or 0,
-                "mapping_id": line.get("mapping_id"), "status": "unmapped", "components": [],
+                # Never persist an unvalidated caller-provided mapping id.
+                "mapping_id": None, "status": "unmapped", "components": [],
             })
 
     if unmapped or errors:
@@ -284,16 +290,28 @@ async def commit_sales_import(
             line["mapping_id"] = saved["id"]
             line["components"] = saved.get("components", [])
         for line in normalized_lines:
-            await conn.execute(
+            sales_line = await conn.fetchrow(
                 """
                 INSERT INTO inventory_sales_lines
                     (import_id, company_id, sold_name, normalized_name, quantity,
                      gross_sales, mapping_id, status)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
                 """,
                 import_id, company_id, line["sold_name"], line["normalized_name"],
                 line["quantity"], line.get("gross_sales"), line.get("mapping_id"), line["status"],
             )
+            if line["status"] == "mapped":
+                for component in line["components"]:
+                    await conn.execute(
+                        """
+                        INSERT INTO inventory_sales_line_components
+                            (sales_line_id, item_id, quantity_per_sale, unit)
+                        VALUES ($1, $2, $3, $4)
+                        """,
+                        sales_line["id"], component["item_id"],
+                        component["quantity_per_sale"], component.get("unit"),
+                    )
         await movements_service.record_movements(
             conn, company_id=company_id, channel_id=None, source_message_id=None,
             recorded_by=user_id, kind="sale",

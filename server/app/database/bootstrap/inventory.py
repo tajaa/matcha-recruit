@@ -135,6 +135,21 @@ async def create_inventory(conn):
         )
     """)
     await conn.execute("""
+        CREATE TABLE IF NOT EXISTS inventory_sales_line_components (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            sales_line_id UUID NOT NULL REFERENCES inventory_sales_lines(id) ON DELETE CASCADE,
+            item_id UUID NOT NULL REFERENCES inventory_items(id),
+            quantity_per_sale NUMERIC NOT NULL CHECK (quantity_per_sale > 0),
+            unit VARCHAR(50),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (sales_line_id, item_id)
+        )
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_inventory_sales_line_components_item
+        ON inventory_sales_line_components (item_id)
+    """)
+    await conn.execute("""
         CREATE TABLE IF NOT EXISTS inventory_audit_runs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

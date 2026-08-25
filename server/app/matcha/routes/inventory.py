@@ -481,18 +481,33 @@ async def get_sales_import(
         lines = await conn.fetch(
             """
             SELECT sl.*, m.kind AS mapping_kind,
-                   COALESCE(jsonb_agg(jsonb_build_object(
-                       'item_id', ml.item_id,
-                       'quantity_per_sale', ml.quantity_per_sale,
-                       'unit', ml.unit
-                   ) ORDER BY ml.created_at) FILTER (WHERE ml.id IS NOT NULL), '[]'::jsonb) AS components
+                   COALESCE(
+                       (
+                           SELECT jsonb_agg(jsonb_build_object(
+                               'item_id', slc.item_id,
+                               'quantity_per_sale', slc.quantity_per_sale,
+                               'unit', slc.unit
+                           ) ORDER BY slc.created_at)
+                           FROM inventory_sales_line_components slc
+                           WHERE slc.sales_line_id=sl.id
+                       ),
+                       (
+                           SELECT jsonb_agg(jsonb_build_object(
+                               'item_id', ml.item_id,
+                               'quantity_per_sale', ml.quantity_per_sale,
+                               'unit', ml.unit
+                           ) ORDER BY ml.created_at)
+                           FROM inventory_sales_mapping_lines ml
+                           WHERE ml.mapping_id=m.id
+                       ),
+                       '[]'::jsonb
+                   ) AS components
             FROM inventory_sales_lines sl
-            LEFT JOIN inventory_sales_mappings m ON m.id=sl.mapping_id
-            LEFT JOIN inventory_sales_mapping_lines ml ON ml.mapping_id=sl.mapping_id
-            WHERE sl.import_id=$1
-            GROUP BY sl.id, m.kind
+            LEFT JOIN inventory_sales_mappings m
+              ON m.id=sl.mapping_id AND m.company_id=sl.company_id
+            WHERE sl.import_id=$1 AND sl.company_id=$2
             ORDER BY sl.id
-            """, import_id,
+            """, import_id, company_id,
         )
     if row is None:
         raise HTTPException(404, "Sales import not found.")

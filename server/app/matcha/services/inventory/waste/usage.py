@@ -15,21 +15,33 @@ async def theoretical_usage(
         return {}
     rows = await conn.fetch(
         """
-        SELECT ml.item_id,
-               SUM(sl.quantity * ml.quantity_per_sale
+        SELECT component.item_id,
+               SUM(sl.quantity * component.quantity_per_sale
                    / COALESCE(i.yield_pct, 1)) AS quantity
         FROM inventory_sales_lines sl
         JOIN inventory_sales_imports si ON si.id=sl.import_id
-        JOIN inventory_sales_mappings sm ON sm.id=sl.mapping_id
-        JOIN inventory_sales_mapping_lines ml ON ml.mapping_id=sm.id
-        JOIN inventory_items i ON i.id=ml.item_id
+        JOIN LATERAL (
+            SELECT slc.item_id, slc.quantity_per_sale, NULL::uuid AS mapping_location_id
+            FROM inventory_sales_line_components slc
+            WHERE slc.sales_line_id=sl.id
+            UNION ALL
+            SELECT ml.item_id, ml.quantity_per_sale, sm.location_id AS mapping_location_id
+            FROM inventory_sales_mappings sm
+            JOIN inventory_sales_mapping_lines ml ON ml.mapping_id=sm.id
+            WHERE sm.id=sl.mapping_id AND sm.company_id=si.company_id
+              AND NOT EXISTS (
+                  SELECT 1 FROM inventory_sales_line_components slc
+                  WHERE slc.sales_line_id=sl.id
+              )
+        ) component ON TRUE
+        JOIN inventory_items i ON i.id=component.item_id
         WHERE si.company_id=$1 AND sl.status='mapped' AND si.status='committed'
-          AND ml.item_id=ANY($2::uuid[])
+          AND component.item_id=ANY($2::uuid[])
           AND si.business_date >= $4 AND si.business_date <= $5
           AND ($3::uuid IS NULL OR si.location_id IS NULL OR si.location_id=$3)
-          AND ($3::uuid IS NULL OR sm.location_id IS NULL OR sm.location_id=$3)
+          AND ($3::uuid IS NULL OR component.mapping_location_id IS NULL OR component.mapping_location_id=$3)
           AND ($3::uuid IS NULL OR i.location_id IS NULL OR i.location_id=$3)
-        GROUP BY ml.item_id
+        GROUP BY component.item_id
         """,
         company_id, item_ids, location_id, start, end,
     )
