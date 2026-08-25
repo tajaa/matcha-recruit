@@ -1,23 +1,19 @@
-"""Huume's per-turn model/thinking tier — heuristic-first, mirroring cappe's
+"""Huume's per-turn model tier — heuristic-first, mirroring cappe's
 Merlin (`cappe/services/merlin/routing.py`): a free heuristic resolves the
 obvious cases, an ambiguous turn lands in the safe middle tier rather than
 the cheap one, and a routing failure never blocks the turn.
 
 Unlike Merlin, this is heuristic-ONLY (no classifier call) — Huume's tool
-loop already pays for its own Gemini calls per turn, and a routing verdict
+loop already pays for its own Luna calls per turn, and a routing verdict
 doesn't need a second one. The registry-driven `intent_hints` on discovery
 tools (`tools.HuumeTool.intent_hints`) double as the "this needs the strong
 tier" signal, so a new skill gets tiering by declaring its tool, with no
 changes here.
 
-Three tiers, not two: `lite` for confirm turns (the most common turn shape —
-"yes", "approve it"), `standard` for everything ordinary, `deep` for
-discovery/analytical asks or a narrative-shaped message. `lite` runs the
-cheaper flash-lite model — every tool reachable from a confirm turn
-(`execute_approved_steps`, the staged-action confirm leg, `cancel_staged`,
-`finish`) is a server-verified id echo, never a judgment call; a wrong tool
-pick 404s/refuses rather than mis-writing. `standard`/`deep` stay on flash —
-kept as a dataclass field so re-tiering later is a one-line catalog edit.
+The tiers describe turn complexity and UI behavior, not different providers:
+every Huume planner and tool-result follow-up is pinned to OpenAI Luna. A
+short confirmation remains a distinct tier because its server-side action
+envelope is narrower, while analytical turns still surface "Thinking hard…".
 """
 
 from __future__ import annotations
@@ -26,37 +22,25 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
-from google.genai import types
-
-from app.core.services.model_catalog import GEMINI_FLASH, GEMINI_FLASH_LITE
-
 from .tools import TOOLS, HuumeTool
 
-# Public — agent.py's own `_MODEL` alias reads this (kept there, not
-# re-literaled, so MODEL_PRICING lookups and any other "the model Huume
-# uses" reference track this catalog). Leading underscore would make that a
-# private-name reach-through; every other module-level name in this file
-# that outside code reads (TIERS, FALLBACK_TIER, HINT_INDEX, ...) is public
-# for the same reason.
-FLASH = GEMINI_FLASH
-# The `lite` tier's model — confirm turns only, never standard/deep.
-# Thinking-off is thinking_level="minimal", never thinking_budget=0 — see
-# model_catalog.GEMINI_FLASH_LITE's canonical note.
-FLASH_LITE = GEMINI_FLASH_LITE
+# Public — agent.py's `_MODEL` alias reads this so every Huume turn has one
+# canonical, auditable model id.
+LUNA = "gpt-5.6-luna"
 
 
 @dataclass(frozen=True)
 class HuumeTier:
     planner_model: str                 # first model call of the turn
-    planner_thinking: Optional[str]    # None = omit ThinkingConfig entirely (today's behavior)
+    planner_thinking: Optional[str]    # reserved for a future Responses reasoning setting
     executor_model: str                # calls 2..N (tool-result follow-ups)
     executor_thinking: Optional[str]
 
 
 TIERS: dict[str, HuumeTier] = {
-    "lite":     HuumeTier(FLASH_LITE, "minimal", FLASH_LITE, "minimal"),
-    "standard": HuumeTier(FLASH, None,   FLASH, None),
-    "deep":     HuumeTier(FLASH, "high", FLASH, "low"),
+    "lite":     HuumeTier(LUNA, None, LUNA, None),
+    "standard": HuumeTier(LUNA, None, LUNA, None),
+    "deep":     HuumeTier(LUNA, None, LUNA, None),
 }
 # Merlin's own rule: an unsure or failed routing decision lands in the
 # middle, never the cheap tier — the cheap tier is only for turns the
@@ -173,15 +157,3 @@ def resolve_tier(
         return FALLBACK_TIER
     except Exception:
         return FALLBACK_TIER
-
-
-def thinking_config(level: Optional[str]) -> Optional[types.ThinkingConfig]:
-    """`None` omits ThinkingConfig entirely (the `standard` tier's behavior);
-    any other value is a named thinking LEVEL — "none" maps to "minimal",
-    the 3.x thinking-off level. Never a thinking_budget: 0 is a hard 400 on
-    both fleet models (see model_catalog.GEMINI_FLASH_LITE's canonical note)."""
-    if level is None:
-        return None
-    if level == "none":
-        return types.ThinkingConfig(thinking_level="minimal")
-    return types.ThinkingConfig(thinking_level=level)

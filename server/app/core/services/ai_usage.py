@@ -50,6 +50,7 @@ LOGGING_ENABLED = os.getenv("AI_USAGE_LOGGING", "1") != "0"
 # logs cost_usd=NULL rather than a guessed number — the admin UI surfaces
 # "unpriced" calls so a real row gets added instead of a fabricated price.
 PRICING: dict[tuple[str, str], tuple[float, float]] = {
+    ("openai", "gpt-5.6-luna"): (1.00, 6.00),
     ("gemini", "gemini-3.7-flash"): (1.50, 7.50),  # fleet quality tier (rate mirrors 3.6-flash pending 3.7 GA)
     ("gemini", "gemini-3.6-flash"): (1.50, 7.50),  # kept for already-logged rows
     ("gemini", "gemini-3.5-flash"): (1.50, 9.00),
@@ -319,6 +320,27 @@ def _build_row(*, provider: str, model: str, method: str, feature: str,
         "status": status,
         "error": error[:500] if error else None,
     }
+
+
+async def record_openai_response(
+    *, model: str, latency_ms: int, input_tokens: Optional[int] = None,
+    output_tokens: Optional[int] = None, thinking_tokens: Optional[int] = None,
+    cached_tokens: Optional[int] = None, error: Optional[str] = None,
+) -> None:
+    """Record one direct Responses API call without requiring the OpenAI SDK.
+
+    Most existing callers are Gemini SDK proxies. Huume uses a small httpx
+    adapter for Responses tool calls, so it explicitly forwards equivalent
+    usage here and retains the same feature-scoped admin ledger.
+    """
+    if not LOGGING_ENABLED:
+        return
+    await _record_async(_build_row(
+        provider="openai", model=model, method="responses.create",
+        feature=_feature_label(), latency_ms=latency_ms,
+        status="error" if error else "ok", error=error,
+        usage=(input_tokens, output_tokens, thinking_tokens, cached_tokens),
+    ))
 
 
 # --- Client proxy -----------------------------------------------------------

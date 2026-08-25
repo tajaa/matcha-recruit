@@ -9,6 +9,13 @@ from decimal import Decimal, ROUND_UP
 
 # Price per 1M tokens (input / output) for each supported model
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
+    # OpenAI GPT-5.6 Luna — Huume's Responses API tool loop. Must stay in
+    # sync with core.services.ai_usage.PRICING so saved Huume-run cost and
+    # the admin AI ledger never disagree.
+    "gpt-5.6-luna": {
+        "input_per_1m": Decimal("1.00"),
+        "output_per_1m": Decimal("6.00"),
+    },
     # Gemini 3.5 Flash — pricing TBD (placeholder = prior 3-flash-preview
     # tier of $0.50 in / $3.00 out; revisit when Google publishes 3.5 GA pricing).
     "gemini-3-flash-preview": {

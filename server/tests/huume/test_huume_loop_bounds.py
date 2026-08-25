@@ -2,8 +2,8 @@
 
     cd server && ./venv/bin/python -m pytest tests/huume/test_huume_loop_bounds.py -q
 
-These tests stub Gemini and the schedule resolver. No database or external
-Gemini call is made; the only connection context is the stage-turn seam in
+These tests stub Luna and the schedule resolver. No database or external
+OpenAI call is made; the only connection context is the stage-turn seam in
 agent.py, which is replaced with an inert async context manager.
 """
 
@@ -65,7 +65,7 @@ async def _run_turn(
 ):
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=responses)
-    monkeypatch.setattr(agent, "get_genai_client", lambda: client)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
     _connection_context(monkeypatch)
     if schedule_result is not None:

@@ -345,7 +345,7 @@ def load_settings() -> Settings:
         database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
         openai_api_key=os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_1"),
-        openai_luna_model=os.getenv("OPENAI_LUNA_MODEL"),
+        openai_luna_model=os.getenv("OPENAI_LUNA_MODEL", "gpt-5.6-luna"),
         serp_api_key=os.getenv("SERP_API_KEY"),
         use_vertex_ai=os.getenv("USE_VERTEX_AI", "").strip().lower() in ("1", "true", "yes"),
         vertex_ai_project=os.getenv("VERTEX_AI_PROJECT"),

@@ -1,4 +1,4 @@
-"""Huume's agent loop — a bounded Gemini tool-calling loop, structurally
+"""Huume's agent loop — a bounded OpenAI Luna tool-calling loop, structurally
 mirroring cappe's Merlin (`cappe/services/merlin/agent.py`): fixed bounds on
 model calls and wall clock, force-finish with partial work on a bound hit,
 a never-raises contract (only `RateLimitExceeded` escapes), and an async
@@ -43,7 +43,6 @@ from uuid import UUID, uuid4
 from google.genai import types
 
 from app.core.services.ai_usage import feature_scope
-from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import GeminiRateLimiter, RateLimitExceeded
 from app.matcha.services.matcha_work.work_permissions import WorkAccess, WorkCapability
 
@@ -51,17 +50,16 @@ from . import (
     actions, assets, discipline_skill, er_skill, handbook_skill, inventory_skill, ir_skill,
     legal_skill, onboarding_skill, record_view, routing, store,
 )
+from .luna_client import get_luna_client
 from .prompt import build_state_block, build_system_prompt
 from .scope import HuumeSurfaceContext
 from .tools import TOOLS_BY_NAME, tool_declarations
 
 logger = logging.getLogger(__name__)
 
-# Kept as an alias (not re-literaled) so MODEL_PRICING lookups and any other
-# existing reference to "the model Huume uses" track routing.py's catalog —
-# the standard/deep tiers' planner/executor model is routing.FLASH; the lite
-# (confirm-turn) tier runs routing.FLASH_LITE instead (see routing.TIERS).
-_MODEL = routing.FLASH
+# Kept as an alias (not re-literaled) so stored token usage and any caller
+# asking which model Huume uses track routing.py's canonical Luna catalog.
+_MODEL = routing.LUNA
 _MAX_MODEL_CALLS = 8
 _MAX_SCHEDULE_PROPOSALS_PER_TURN = 1
 _MAX_TURN_PROMPT_TOKENS = 100_000
@@ -1718,25 +1716,21 @@ async def run_huume_turn(
     tier_name = routing.resolve_tier(_last_user_text(history), current_state=current_state)
     tier = routing.TIERS[tier_name]
 
-    client = get_genai_client()
+    client = get_luna_client()
     _system_instruction = build_system_prompt(
         company_name=company_name or "your company", today=date.today().isoformat(),
         state_block=build_state_block(current_state, schedule_surface=surface_context.is_schedule),
         surface_context=surface_context,
     )
     _tools_arg = [types.Tool(function_declarations=tool_declarations(allowed_names=allowed_tool_names))]
-    # Two configs, same tools + system prompt — only ThinkingConfig differs.
-    # Call 1 (the model's first read of the turn) uses the planner
-    # model/thinking; calls 2..N (tool-result follow-ups) use the executor's.
-    # A deep turn thinks hard once to plan, then executes at low thinking —
-    # a lite (confirm) turn skips thinking on every call.
+    # Two configs retain the planner/executor call boundary. Luna is pinned
+    # for both calls; the adapter converts the Gemini-shaped tool contract to
+    # Responses API function calls without sending any traffic to Gemini.
     planner_config = types.GenerateContentConfig(
         tools=_tools_arg, system_instruction=_system_instruction,
-        thinking_config=routing.thinking_config(tier.planner_thinking),
     )
     executor_config = types.GenerateContentConfig(
         tools=_tools_arg, system_instruction=_system_instruction,
-        thinking_config=routing.thinking_config(tier.executor_thinking),
     )
     contents = _to_contents(history, attachment_texts)
 
@@ -1951,7 +1945,7 @@ async def run_huume_turn(
             contents.append(types.Content(role="user", parts=response_parts))
 
     except RateLimitExceeded:
-        # Platform-wide Gemini capacity (GeminiRateLimiter), not this
+        # Platform-wide AI capacity (the shared rate limiter), not this
         # tenant's own quota. Before the first model call there is nothing
         # to lose — re-raise so the dispatcher reports a clean capacity
         # error and the turn is never billed (see turn_pipeline._run_
@@ -1964,7 +1958,7 @@ async def run_huume_turn(
         # fallback + huume_result yield below with NO further model call.
         if _rate_limit_disposition(model_calls) == "raise":
             raise
-        logger.info("Huume agent hit the platform Gemini limit mid-turn (calls=%s)", model_calls)
+        logger.info("Huume agent hit the platform AI limit mid-turn (calls=%s)", model_calls)
         yield {"type": "status", "message": "Hit the AI capacity limit — wrapping up with what's done."}
         # Persisted message must say why it's truncated — otherwise the
         # generic final_message fallback below reads as a normal finish and

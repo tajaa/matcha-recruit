@@ -192,65 +192,22 @@ class TestDiscoveryBlock:
         assert "find_discipline_candidates" in prompt
 
 
-class TestThinkingConfig:
-    def test_none_omits_config(self):
-        assert routing.thinking_config(None) is None
-
-    def test_none_level_maps_to_minimal_not_budget(self):
-        # "none" used to set thinking_budget=0 — a hard 400 on both 3.x
-        # fleet models (probed live 2026-08-01). Must be the minimal LEVEL.
-        cfg = routing.thinking_config("none")
-        assert isinstance(cfg, types.ThinkingConfig)
-        assert cfg.thinking_level == "MINIMAL"
-        assert cfg.thinking_budget is None
-
-    def test_high_sets_thinking_level(self):
-        cfg = routing.thinking_config("high")
-        assert cfg.thinking_level == "HIGH"
-
-    def test_low_sets_thinking_level(self):
-        cfg = routing.thinking_config("low")
-        assert cfg.thinking_level == "LOW"
-
-    def test_minimal_sets_thinking_level_not_budget(self):
-        # The lite tier's level — must go through the thinking_level branch,
-        # never thinking_budget=0 (that's a hard 400 on flash-lite).
-        cfg = routing.thinking_config("minimal")
-        assert cfg.thinking_level == "MINIMAL"
-        assert cfg.thinking_budget is None
-
-
 class TestTiersCatalog:
     def test_three_tiers_registered(self):
         assert set(routing.TIERS) == {"lite", "standard", "deep"}
 
-    def test_lite_uses_flash_lite_model_minimal_thinking_both_calls(self):
-        # flash-lite hard-400s on thinking_budget=0 (the "none" mapping) —
-        # lite must use a thinking_level ("minimal"), never that branch.
+    def test_lite_uses_luna_for_both_calls(self):
         tier = routing.TIERS["lite"]
-        assert tier.planner_model == routing.FLASH_LITE
-        assert tier.executor_model == routing.FLASH_LITE
-        assert tier.planner_thinking == "minimal"
-        assert tier.executor_thinking == "minimal"
+        assert tier.planner_model == routing.LUNA
+        assert tier.executor_model == routing.LUNA
 
-    def test_standard_and_deep_stay_on_flash(self):
-        assert routing.TIERS["standard"].planner_model == routing.FLASH
-        assert routing.TIERS["standard"].executor_model == routing.FLASH
-        assert routing.TIERS["deep"].planner_model == routing.FLASH
-        assert routing.TIERS["deep"].executor_model == routing.FLASH
+    def test_standard_and_deep_also_use_luna(self):
+        assert routing.TIERS["standard"].planner_model == routing.LUNA
+        assert routing.TIERS["standard"].executor_model == routing.LUNA
+        assert routing.TIERS["deep"].planner_model == routing.LUNA
+        assert routing.TIERS["deep"].executor_model == routing.LUNA
 
-    def test_standard_omits_thinking_config_both_calls(self):
-        tier = routing.TIERS["standard"]
-        assert tier.planner_thinking is None
-        assert tier.executor_thinking is None
-
-    def test_deep_thinks_hard_to_plan_low_to_execute(self):
-        tier = routing.TIERS["deep"]
-        assert tier.planner_thinking == "high"
-        assert tier.executor_thinking == "low"
-
-
-# ---- agent.py wiring: fake genai client records (model, config) per call ----
+# ---- agent.py wiring: fake Luna adapter records (model, config) per call ----
 
 
 def _fake_call(name, args):
@@ -282,9 +239,7 @@ class _NoopRateLimiter:
 
 @pytest.mark.asyncio
 async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
-    """Two model calls in one turn: call 1 (a tool call) must use the tier's
-    planner model/thinking; call 2 (the tool-result follow-up, which ends the
-    turn) must use the executor's."""
+    """Planner and tool-result calls both remain pinned to Luna."""
     recorded = []
 
     async def _generate(*, model, contents, config):
@@ -295,7 +250,7 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
 
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=_generate)
-    monkeypatch.setattr(agent, "get_genai_client", lambda: client)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
     monkeypatch.setattr(
         agent.onboarding_skill, "check_offer_status", AsyncMock(return_value={"status": "ok", "offer_status": "pending"}),
@@ -311,8 +266,10 @@ async def test_agent_loop_uses_planner_config_then_executor_config(monkeypatch):
     ]
 
     assert len(recorded) == 2
-    assert recorded[0]["thinking"].thinking_level == "HIGH"   # deep tier, planner call
-    assert recorded[1]["thinking"].thinking_level == "LOW"    # deep tier, executor call
+    assert recorded == [
+        {"model": routing.LUNA, "thinking": None},
+        {"model": routing.LUNA, "thinking": None},
+    ]
 
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "deep"
@@ -325,7 +282,7 @@ async def test_agent_loop_standard_tier_omits_thinking_config(monkeypatch):
 
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=_generate)
-    monkeypatch.setattr(agent, "get_genai_client", lambda: client)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
 
     frames = [
@@ -351,7 +308,7 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
 
     client = MagicMock()
     client.aio.models.generate_content = AsyncMock(side_effect=_generate)
-    monkeypatch.setattr(agent, "get_genai_client", lambda: client)
+    monkeypatch.setattr(agent, "get_luna_client", lambda: client)
     monkeypatch.setattr(agent, "GeminiRateLimiter", _NoopRateLimiter)
 
     frames = [
@@ -365,4 +322,4 @@ async def test_agent_loop_confirm_turn_is_lite_tier(monkeypatch):
 
     result_frame = next(f for f in frames if f["type"] == "huume_result")
     assert result_frame["data"]["token_usage"]["tier"] == "lite"
-    assert recorded == [routing.FLASH_LITE]
+    assert recorded == [routing.LUNA]
