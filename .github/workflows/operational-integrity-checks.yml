@@ -1,0 +1,243 @@
+name: Production operational integrity
+
+on:
+  schedule:
+    # Run after both 06:00 and 18:00 UTC pg-backup.timer triggers. This is a
+    # recovery window, not a backup trigger; the workflow never writes to a DB.
+    - cron: '17 9,21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  backup-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ops-backup-integrity
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Collect backup inventory
+        id: inventory
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: ./scripts/ops-health/backup-probe.sh inventory > "$RUNNER_TEMP/backup-inventory.json"
+
+      - name: Select newest backup
+        id: candidate
+        if: steps.inventory.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 scripts/ops-health/backup-integrity.py \
+            --inventory "$RUNNER_TEMP/backup-inventory.json" \
+            --candidate-output "$RUNNER_TEMP/backup-candidate.json" \
+            --output "$RUNNER_TEMP/backup-candidate-status.json" \
+            --markdown "$RUNNER_TEMP/backup-candidate.md" \
+            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Verify newest backup archive
+        id: probe
+        if: steps.candidate.outcome == 'success'
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          key="$(jq -r '.key' "$RUNNER_TEMP/backup-candidate.json")"
+          size="$(jq -r '.size_bytes' "$RUNNER_TEMP/backup-candidate.json")"
+          ./scripts/ops-health/backup-probe.sh readable "$key" "$size" > "$RUNNER_TEMP/backup-probe.json"
+
+      - name: Assess backup integrity
+        id: assess
+        if: steps.inventory.outcome == 'success' && steps.candidate.outcome == 'success' && steps.probe.outcome == 'success'
+        run: |
+          set +e
+          python3 scripts/ops-health/backup-integrity.py \
+            --inventory "$RUNNER_TEMP/backup-inventory.json" \
+            --probe "$RUNNER_TEMP/backup-probe.json" \
+            --output "$RUNNER_TEMP/backup-report.json" \
+            --markdown "$RUNNER_TEMP/backup-report.md" \
+            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          rc=$?
+          set -e
+          status="$(jq -r '.status // "unknown"' "$RUNNER_TEMP/backup-report.json")"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          [ "$status" != unknown ] || exit "$rc"
+
+      - name: Publish backup alert
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "${{ steps.inventory.outcome }}" != success ] || [ "${{ steps.candidate.outcome }}" != success ] || [ "${{ steps.probe.outcome }}" != success ] || [ "${{ steps.assess.outcome }}" != success ]; then
+            printf 'The backup integrity monitor could not complete a read-only check.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/backup-monitor.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:backup-monitor 'ops: backup integrity monitor failed' "$RUNNER_TEMP/backup-monitor.md" ops-health
+          elif [ "${{ steps.assess.outputs.status }}" = unhealthy ]; then
+            ./scripts/ops-health/publish-issue.sh ops-health:backup-integrity 'ops: production backup integrity failed' "$RUNNER_TEMP/backup-report.md" ops-health
+            printf 'Backup monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/backup-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:backup-monitor 'ops: backup integrity monitor failed' "$RUNNER_TEMP/backup-recovery.md" ops-health --recover
+          else
+            printf 'Backup integrity recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/backup-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:backup-integrity 'ops: production backup integrity failed' "$RUNNER_TEMP/backup-recovery.md" ops-health --recover
+            ./scripts/ops-health/publish-issue.sh ops-health:backup-monitor 'ops: backup integrity monitor failed' "$RUNNER_TEMP/backup-recovery.md" ops-health --recover
+          fi
+
+      - name: Write backup summary
+        if: always()
+        run: |
+          echo '## Production backup integrity' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/backup-report.json" ]; then
+            jq . "$RUNNER_TEMP/backup-report.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Backup collection did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Mark backup failure
+        if: always() && (steps.inventory.outcome != 'success' || steps.candidate.outcome != 'success' || steps.probe.outcome != 'success' || steps.assess.outcome != 'success' || steps.assess.outputs.status != 'healthy')
+        run: exit 1
+
+      - name: Delete backup probe files and SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/backup-* "$RUNNER_TEMP/matcha-prod.pem"
+
+  schema-drift:
+    # Local dev is the shared matcha-postgres Docker container on this Mac.
+    # Do not move this to a hosted runner or recreate/start that container here.
+    runs-on: [self-hosted, macOS, opencode]
+    timeout-minutes: 20
+    concurrency:
+      group: ops-schema-drift
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Write production SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/matcha-prod.pem"
+          printf '%s\n' "$EC2_SSH_KEY" > "$RUNNER_TEMP/matcha-prod.pem"
+
+      - name: Collect dev and production Alembic revisions
+        id: revisions
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          umask 077
+          ./scripts/ops-health/schema-snapshot.sh local-revisions > "$RUNNER_TEMP/dev-revisions.json"
+          ./scripts/ops-health/schema-snapshot.sh prod-revisions > "$RUNNER_TEMP/prod-revisions.json"
+          ./scripts/ops-health/schema-snapshot.sh local-client-version > "$RUNNER_TEMP/dev-pg-dump-version.txt"
+          ./scripts/ops-health/schema-snapshot.sh prod-client-version > "$RUNNER_TEMP/prod-pg-dump-version.txt"
+          grep -qE 'PostgreSQL\) 15\.' "$RUNNER_TEMP/dev-pg-dump-version.txt"
+          grep -qE 'PostgreSQL\) 15\.' "$RUNNER_TEMP/prod-pg-dump-version.txt"
+
+      - name: Compare Alembic revision sets
+        id: compare
+        if: steps.revisions.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/ops-health/schema-drift.py \
+            --dev-revisions "$RUNNER_TEMP/dev-revisions.json" \
+            --prod-revisions "$RUNNER_TEMP/prod-revisions.json" \
+            --output "$RUNNER_TEMP/schema-revision-report.json" \
+            --markdown "$RUNNER_TEMP/schema-report.md" \
+            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          rc=$?
+          set -e
+          status="$(jq -r '.status // "unknown"' "$RUNNER_TEMP/schema-revision-report.json")"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          [ "$status" = drift ] || exit "$rc"
+
+      - name: Capture read-only schema dumps on drift
+        id: dumps
+        if: steps.compare.outputs.status == 'drift'
+        continue-on-error: true
+        env:
+          SSH_KEY: ${{ runner.temp }}/matcha-prod.pem
+        run: |
+          umask 077
+          ./scripts/ops-health/schema-snapshot.sh local-dump > "$RUNNER_TEMP/dev-schema.sql"
+          ./scripts/ops-health/schema-snapshot.sh prod-dump > "$RUNNER_TEMP/prod-schema.sql"
+
+      - name: Compare schema dumps
+        id: schema
+        if: steps.dumps.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          python3 scripts/ops-health/schema-drift.py \
+            --dev-revisions "$RUNNER_TEMP/dev-revisions.json" \
+            --prod-revisions "$RUNNER_TEMP/prod-revisions.json" \
+            --dev-schema "$RUNNER_TEMP/dev-schema.sql" \
+            --prod-schema "$RUNNER_TEMP/prod-schema.sql" \
+            --output "$RUNNER_TEMP/schema-report.json" \
+            --markdown "$RUNNER_TEMP/schema-report.md" \
+            --workflow-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          rc=$?
+          set -e
+          status="$(jq -r '.status // "unknown"' "$RUNNER_TEMP/schema-report.json")"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          [ "$status" = drift ] || exit "$rc"
+
+      - name: Publish schema alert
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          workflow="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ "${{ steps.revisions.outcome }}" != success ] || [ "${{ steps.compare.outcome }}" != success ]; then
+            printf 'The schema monitor could not collect an authoritative read-only revision comparison.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
+          elif [ "${{ steps.compare.outputs.status }}" = drift ]; then
+            report="$RUNNER_TEMP/schema-report.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$report" ops-health
+            if [ "${{ steps.dumps.outcome }}" != success ] || [ "${{ steps.schema.outcome }}" != success ]; then
+              printf 'Alembic revision drift was detected, but the read-only schema diagnostics failed.\n\nWorkflow: %s\n' "$workflow" > "$RUNNER_TEMP/schema-monitor.md"
+              ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-monitor.md" ops-health
+            else
+              printf 'Schema monitor recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
+              ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
+            fi
+          else
+            printf 'Schema comparison recovered at %s.\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/schema-recovery.md"
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-drift 'ops: dev and production schema drift detected' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
+            ./scripts/ops-health/publish-issue.sh ops-health:schema-monitor 'ops: schema drift monitor failed' "$RUNNER_TEMP/schema-recovery.md" ops-health --recover
+          fi
+
+      - name: Write schema summary
+        if: always()
+        run: |
+          echo '## Dev versus production schema' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/schema-report.json" ]; then
+            jq 'del(.schema.diff)' "$RUNNER_TEMP/schema-report.json" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f "$RUNNER_TEMP/schema-revision-report.json" ]; then
+            jq . "$RUNNER_TEMP/schema-revision-report.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Schema collection did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Mark schema failure
+        if: always() && (steps.revisions.outcome != 'success' || steps.compare.outcome != 'success' || steps.compare.outputs.status != 'equal' || steps.dumps.outcome == 'failure' || steps.schema.outcome == 'failure')
+        run: exit 1
+
+      - name: Delete schema dumps and SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/dev-schema.sql "$RUNNER_TEMP"/prod-schema.sql "$RUNNER_TEMP"/dev-revisions.json "$RUNNER_TEMP"/prod-revisions.json "$RUNNER_TEMP"/dev-pg-dump-version.txt "$RUNNER_TEMP"/prod-pg-dump-version.txt "$RUNNER_TEMP"/schema-* "$RUNNER_TEMP/matcha-prod.pem"

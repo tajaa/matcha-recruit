@@ -175,6 +175,26 @@ changes a database row.
 Collection failures are alerts too. A failed SSH or production DB query must
 never be represented as a healthy check.
 
+## Automated database integrity checks
+
+`.github/workflows/operational-integrity-checks.yml` runs twice daily after the
+scheduled Postgres backup. It is read-only and opens deduplicated `ops-health`
+issues for stale/unreadable backups, dev/prod Alembic drift, or monitor
+collection failures.
+
+- Backup issues report the newest S3 key, age, size, and custom-archive TOC
+  result. The check reads S3 through the app EC2's existing AWS identity, not
+  the GitHub ECR-only OIDC role. `pg_restore --list` validates archive metadata,
+  not a complete restore.
+- Schema issues report exact multi-head `alembic_version` sets. When they differ,
+  the workflow adds a bounded, redacted schema-only diff. A DDL-equal mismatch
+  still needs attention because data-only migrations and stale version rows are
+  possible.
+
+Raw schema dumps and backup contents never leave their temporary hosts. A failed
+collection opens a separate monitor issue and cannot resolve an existing health
+issue, since the current state is unknown.
+
 ## Known gaps
 
 - Worker scheduling configuration may still be broken: the checked-in
