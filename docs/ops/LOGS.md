@@ -155,17 +155,31 @@ seconds. This path was silently broken for a long time (the reporter used a
 pool-only DB connection, and workers are pool-free by design), so it's worth
 re-checking after any change to the worker or the reporter.
 
+## Automated availability checks
+
+`.github/workflows/availability-checks.yml` runs daily and can be dispatched
+manually. It opens or updates a deduplicated `ops-health` GitHub issue when any
+check fails, then comments and closes that issue after recovery. It is
+read-only: it never restarts a worker, prunes disk, renews a certificate, or
+changes a database row.
+
+- TLS: validates public certificate chains, hostname verification, and a
+  21-day expiry threshold for Matcha, Gummfit, the origin, wildcard probe, and
+  active Cappe custom domains.
+- Disk: checks app-host root plus DB-host root and `/mnt/encdb/pgdata`; alerts
+  at 80% used or under 8 GiB free, and treats under 4 GiB/90% used as critical.
+- Worker: checks the `matcha-worker` container, a 10-second Celery ping, and
+  the systemd timer/service state. The timer must have triggered in the last
+  35 minutes.
+
+Collection failures are alerts too. A failed SSH or production DB query must
+never be represented as a healthy check.
+
 ## Known gaps
 
-- **Nothing restarts the worker on a schedule.** The design assumes periodic
-  tasks re-dispatch via `@worker_ready` on a ~15-minute restart cycle, but the
-  host has no cron and no systemd timer — the container just runs continuously
-  (`restart: unless-stopped`). In practice scheduled tasks only re-fire when a
-  deploy restarts it. Most scheduler rows are disabled anyway, so this is
-  latent rather than actively broken, but it means enabling a `scheduler_settings`
-  row is not sufficient to make that task run on a cadence.
-- **No external uptime monitoring.** No CloudWatch alarms, no third-party
-  pinger. The only automated health signal is the blue-green deploy gate
-  (which rolls back a bad deploy) and the error-alert email.
+- Worker scheduling configuration may still be broken: the checked-in
+  `matcha-worker.service` references `scripts/worker-cycle.sh`, but the active
+  scripts directory has no such file. The availability workflow reports this;
+  it does not repair it.
 - `server/agent/` (the standalone ops agent on :9100) has none of this — no
   error reporter, its own logging config. Out of scope so far.

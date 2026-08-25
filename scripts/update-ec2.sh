@@ -249,6 +249,34 @@ cleanup() {
     ssh_cmd "docker builder prune -f" || true
 }
 
+trigger_post_deploy_monitor() {
+    local target="$1"
+    local deployed_at deploy_id sha source
+    deployed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    sha="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    deploy_id="${sha}-$(date -u +%Y%m%d%H%M%S)"
+    source="laptop"
+    [ "${GITHUB_ACTIONS:-}" = "true" ] && source="github"
+
+    # The monitor is observational: a missing gh session, token, or temporary
+    # GitHub outage must never turn a healthy production swap into a failed deploy.
+    if ! command -v gh >/dev/null 2>&1; then
+        log_warn "Post-deploy error monitor not dispatched: gh CLI is unavailable"
+        return 0
+    fi
+    if gh workflow run post-deploy-error-regression.yml --ref main \
+        -f deploy_id="$deploy_id" \
+        -f deployed_at="$deployed_at" \
+        -f target="$target" \
+        -f sha="$sha" \
+        -f source="$source"
+    then
+        log_success "Post-deploy error monitor dispatched ($deploy_id)"
+    else
+        log_warn "Could not dispatch post-deploy error monitor; deploy remains successful"
+    fi
+}
+
 # Parse arguments
 UPDATE_BACKEND=false
 UPDATE_FRONTEND=false
@@ -356,6 +384,16 @@ if [ "$HOTFIX" = false ]; then
     cleanup
 fi
 show_status
+
+if [ "$UPDATE_MATCHA" = true ]; then
+    if [ "$UPDATE_BACKEND" = true ] && [ "$UPDATE_FRONTEND" = true ]; then
+        trigger_post_deploy_monitor matcha
+    elif [ "$UPDATE_BACKEND" = true ]; then
+        trigger_post_deploy_monitor backend
+    else
+        trigger_post_deploy_monitor frontend
+    fi
+fi
 
 # Test tenants (Sunset Smile Dental Group, 720 Behavioral, Onc, ...) stay in
 # sync dev<->prod by riding every normal deploy — see scripts/sync_tenants.py

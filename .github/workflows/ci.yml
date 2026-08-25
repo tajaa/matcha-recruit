@@ -28,7 +28,12 @@ jobs:
           python-version: "3.11"
 
       - name: Backend/scripts syntax check
-        run: python -m compileall -q server/app server/alembic scripts
+        run: |
+          python -m pip install pytest
+          python -m compileall -q server/app server/alembic scripts
+          python -m pytest -q scripts/tests/test_ops_health.py
+          bash -n scripts/update-ec2.sh scripts/ops-health/prod-query.sh scripts/ops-health/publish-issue.sh
+          bash scripts/tests/test_ci_guards.sh
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
