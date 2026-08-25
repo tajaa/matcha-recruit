@@ -16,6 +16,8 @@ services:
       GIT_CONFIG_GLOBAL: /home/agent/.config/git/config
       AGENT_SANDBOX: "1"
       AWS_REGION: ${AWS_REGION:-us-west-1}
+      LOCAL_PORT: ${HOST_DB_PORT:-5432}
+      REDIS_PORT: ${HOST_REDIS_PORT:-6380}
       BACKEND_PORT: ${BACKEND_PORT:-8001}
       FRONTEND_PORT: ${FRONTEND_PORT:-5174}
       TELLUS_PORT: ${TELLUS_PORT:-5191}
@@ -38,11 +40,6 @@ services:
       - "127.0.0.1:${TELLUS_PORT:-5191}:${TELLUS_PORT:-5191}"
       - "127.0.0.1:${OCEANLAB_PORT:-5201}:${OCEANLAB_PORT:-5201}"
       - "127.0.0.1:${CHAT_PORT:-8080}:${CHAT_PORT:-8080}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=1g
@@ -70,37 +67,6 @@ services:
     pids_limit: 1024
     command: ["sleep", "infinity"]
 
-  postgres:
-    image: pgvector/pgvector:pg15
-    environment:
-      POSTGRES_USER: matcha
-      POSTGRES_PASSWORD: matcha_dev
-      POSTGRES_DB: matcha
-    volumes:
-      - sandbox_postgres_data:/var/lib/postgresql/data
-    tmpfs:
-      - /var/run/postgresql:rw,nosuid,size=16m
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U matcha -d matcha"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    security_opt:
-      - no-new-privileges:true
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - sandbox_redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    security_opt:
-      - no-new-privileges:true
-
 volumes:
   sandbox_home:
   sandbox_npm_cache:
@@ -108,5 +74,3 @@ volumes:
   sandbox_client_node_modules:
   sandbox_tellus_node_modules:
   sandbox_oceanlab_node_modules:
-  sandbox_postgres_data:
-  sandbox_redis_data:

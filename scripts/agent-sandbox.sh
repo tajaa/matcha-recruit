@@ -24,14 +24,12 @@ into a shell in the workspace — the one-command way in.
 
 Commands:
   build [--playwright]        Build the isolated workspace image.
-  start                       Start workspace, PostgreSQL, and Redis.
+  start                       Start workspace and the normal local dev services.
   stop                        Stop sandbox services without deleting their volumes.
   status                      Show sandbox service status and published localhost ports.
   shell [cmd...]               Open a workspace shell (or run one command).
   dev [args]                   Run scripts/dev-remote.sh inside the workspace container.
   doctor                       Check the isolation + capability checklist.
-  import-db [--yes]            Replace sandbox PostgreSQL with a dump of local matcha-postgres.
-
   login <codex|claude|opencode|gh>   Authenticate one agent (or GitHub) in its own state volume.
   run <codex|claude|opencode> [args] Start that agent with full execution inside the container boundary.
   codex [args]                       Shorthand for `run codex`.
@@ -40,9 +38,9 @@ Commands:
   git-login                          Alias for `login gh`.
 
 Set INSTALL_PLAYWRIGHT_BROWSERS=true (or `build --playwright`) to include an
-isolated Chromium binary for Playwright. `import-db --yes` skips its
-confirmation prompt. Set SANDBOX_UID/SANDBOX_GID to change the in-container
-user (defaults to your macOS uid/gid so file ownership matches on both sides).
+isolated Chromium binary for Playwright. Set SANDBOX_UID/SANDBOX_GID to change
+the in-container user (defaults to your macOS uid/gid so file ownership matches
+on both sides).
 EOF
 }
 
@@ -57,8 +55,32 @@ require_docker() {
     }
 }
 
+host_published_port() {
+    local container_name=$1
+    local container_port=$2
+    local published_port
+
+    published_port="$(docker port "$container_name" "$container_port" 2>/dev/null | head -n 1 | awk -F: '{print $NF}')"
+    [[ -n "$published_port" ]] || {
+        echo "Could not determine $container_name's published $container_port port." >&2
+        return 1
+    }
+    printf '%s\n' "$published_port"
+}
+
+ensure_host_dev_services() {
+    # The host-side launcher owns matcha-postgres/matcha-redis lifecycle. Run
+    # only its service bootstrap mode here; agents still receive no Docker
+    # socket and reach the services through Docker Desktop's host gateway.
+    AGENT_SANDBOX= CODEX_SANDBOX= "$PROJECT_ROOT/scripts/dev-remote.sh" services
+    HOST_DB_PORT="$(host_published_port matcha-postgres 5432/tcp)"
+    HOST_REDIS_PORT="$(host_published_port matcha-redis 6379/tcp)"
+    export HOST_DB_PORT HOST_REDIS_PORT
+}
+
 start_services() {
-    "${COMPOSE[@]}" up --detach postgres redis workspace
+    ensure_host_dev_services
+    "${COMPOSE[@]}" up --detach workspace
 }
 
 exec_workspace() {
@@ -120,37 +142,6 @@ run_agent() {
     esac
 }
 
-import_database() {
-    local source_container="${SOURCE_DB_CONTAINER:-matcha-postgres}"
-    local source_database="${SOURCE_DB_NAME:-matcha}"
-    local source_user="${SOURCE_DB_USER:-matcha}"
-    local confirmed="${1:-}"
-
-    if [[ "$source_container" == *prod* ]]; then
-        echo "Refusing to import from a production-shaped container name: $source_container" >&2
-        exit 1
-    fi
-    if ! docker ps --format '{{.Names}}' | grep -Fxq "$source_container"; then
-        echo "Source container '$source_container' is not running." >&2
-        echo "Start the local development database first, or set SOURCE_DB_CONTAINER." >&2
-        exit 1
-    fi
-    if [[ "$confirmed" != "--yes" ]]; then
-        echo "This replaces only the sandbox Postgres volume with '$source_container:$source_database'."
-        read -r -p "Type 'import-sandbox-db' to continue: " confirmed
-        [[ "$confirmed" == "import-sandbox-db" ]] || { echo "Aborted."; return 0; }
-    fi
-
-    "${COMPOSE[@]}" up --detach postgres
-    docker exec "$source_container" pg_dump -U "$source_user" --format=custom "$source_database" \
-        | "${COMPOSE[@]}" exec --no-TTY postgres sh -ceu '
-            dropdb -U "$POSTGRES_USER" --if-exists "$POSTGRES_DB"
-            createdb -U "$POSTGRES_USER" "$POSTGRES_DB"
-            pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-privileges --exit-on-error
-        '
-    echo "Sandbox database import completed. Host PostgreSQL volumes were not mounted or modified."
-}
-
 check() {
     local label="$1"
     shift
@@ -172,9 +163,9 @@ run_doctor() {
     check "ssh to app EC2" exec_workspace ssh -i secrets/roonMT-arm.pem -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new ec2-user@54.177.107.107 true
     check "aws sts get-caller-identity" exec_workspace aws sts get-caller-identity
 
-    echo "Local dev services:"
-    check "postgres reachable" exec_workspace pg_isready -h postgres -U matcha -d matcha
-    check "redis reachable" exec_workspace redis-cli -h redis ping
+    echo "Host local dev services:"
+    check "matcha-postgres reachable" exec_workspace pg_isready -h host.docker.internal -p "$HOST_DB_PORT" -U matcha -d matcha
+    check "matcha-redis reachable" exec_workspace redis-cli -h host.docker.internal -p "$HOST_REDIS_PORT" ping
 
     echo "Agent CLIs on PATH:"
     for bin in codex claude opencode gh aws ssh git; do
@@ -253,10 +244,6 @@ case "$command_name" in
     stop)
         require_docker
         "${COMPOSE[@]}" stop
-        ;;
-    import-db)
-        require_docker
-        import_database "${1:-}"
         ;;
     "")
         # Bare `msandbox` — the one-command path: build (no-op if cached),

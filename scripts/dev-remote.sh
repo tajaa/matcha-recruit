@@ -23,8 +23,8 @@ CHAT_MMPROJ_PATH="$CHAT_MODEL_DIR/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
 # Optional overrides: LOCAL_PORT/LOCAL_DB_PORT, REDIS_PORT, FRONTEND_PORT,
 # DATABASE_URL, REDIS_URL, CHAT_PORT
 # Set AGENT_SANDBOX=1 when running from scripts/agent-sandbox.sh (CODEX_SANDBOX=1
-# is accepted as an alias). In that mode PostgreSQL and Redis are Compose
-# services, not host Docker containers.
+# is accepted as an alias). In that mode PostgreSQL and Redis remain the normal
+# host dev services, reached from Docker Desktop at host.docker.internal.
 
 # Colors
 GREEN='\033[0;32m'
@@ -83,6 +83,7 @@ fi
 
 # Parse arguments
 ENABLE_CHAT=false
+START_SERVICES_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         stop)
@@ -92,6 +93,9 @@ for arg in "$@"; do
             ;;
         --chat)
             ENABLE_CHAT=true
+            ;;
+        services)
+            START_SERVICES_ONLY=true
             ;;
     esac
 done
@@ -177,11 +181,11 @@ ensure_local_postgres() {
     done
 }
 if [ "$IS_AGENT_SANDBOX" = true ]; then
-    echo -e "${GREEN}Using sandbox PostgreSQL and Redis Compose services${NC}"
+    echo -e "${GREEN}Using host local PostgreSQL and Redis through Docker Desktop${NC}"
 else
     ensure_local_postgres
 
-    if is_port_in_use "$FRONTEND_PORT"; then
+    if [ "$START_SERVICES_ONLY" = false ] && is_port_in_use "$FRONTEND_PORT"; then
         if [ "$FRONTEND_PORT_SOURCE" = "env" ]; then
             echo -e "${RED}Error: FRONTEND_PORT $FRONTEND_PORT is already in use. Set FRONTEND_PORT to a free port.${NC}"
             exit 1
@@ -236,16 +240,21 @@ else
     fi
 fi
 
+if [ "$START_SERVICES_ONLY" = true ]; then
+    echo -e "${GREEN}Local development services ready: Postgres $LOCAL_PORT, Redis $REDIS_PORT${NC}"
+    exit 0
+fi
+
 if [ "$DATABASE_URL_SOURCE" = "default" ]; then
     if [ "$IS_AGENT_SANDBOX" = true ]; then
-        DATABASE_URL="postgresql://matcha:matcha_dev@postgres:5432/matcha"
+        DATABASE_URL="postgresql://matcha:matcha_dev@host.docker.internal:${LOCAL_PORT}/matcha"
     else
         DATABASE_URL="postgresql://matcha:matcha_dev@localhost:${LOCAL_PORT}/matcha"
     fi
 fi
 if [ "$REDIS_URL_SOURCE" = "default" ]; then
     if [ "$IS_AGENT_SANDBOX" = true ]; then
-        REDIS_URL="redis://redis:6379/0"
+        REDIS_URL="redis://host.docker.internal:${REDIS_PORT}/0"
     else
         REDIS_URL="redis://localhost:${REDIS_PORT}/0"
     fi
@@ -329,9 +338,9 @@ if [ "$IS_AGENT_SANDBOX" = true ]; then
     # events inside Linux, and published ports need a non-loopback Vite bind.
     DEV_WATCH_ENV="export CHOKIDAR_USEPOLLING=true WATCHFILES_FORCE_POLLING=true &&"
     VITE_HOST_ARGS="--host 0.0.0.0"
-    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until pg_isready -h postgres -p 5432 -U matcha -d matcha >/dev/null 2>&1 && redis-cli -h redis ping >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'Sandbox Postgres or Redis did not become ready within 60s.'; exit 1; fi; done; }"
-    STATUS_PANE="echo 'Sandbox service status (PostgreSQL + Redis)'; while true; do date; pg_isready -h postgres -p 5432 -U matcha -d matcha; redis-cli -h redis ping; sleep 5; done"
-    WAITING_MESSAGE="Waiting for sandbox Postgres and Redis..."
+    SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until pg_isready -h host.docker.internal -p $LOCAL_PORT -U matcha -d matcha >/dev/null 2>&1 && redis-cli -h host.docker.internal -p $REDIS_PORT ping >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'Host Postgres or Redis did not become ready within 60s.'; exit 1; fi; done; }"
+    STATUS_PANE="echo 'Host local service status (PostgreSQL + Redis)'; while true; do date; pg_isready -h host.docker.internal -p $LOCAL_PORT -U matcha -d matcha; redis-cli -h host.docker.internal -p $REDIS_PORT ping; sleep 5; done"
+    WAITING_MESSAGE="Waiting for host local Postgres and Redis..."
 else
     SERVICE_WAIT_LOOP="{ WAITED=0; MAX_WAIT=60; until lsof -n -P -iTCP:$LOCAL_PORT -sTCP:LISTEN >/dev/null 2>&1; do sleep 1; WAITED=\$((WAITED+1)); if [ \"\$WAITED\" -ge \"\$MAX_WAIT\" ]; then echo 'DB tunnel did not become ready within 60s.'; exit 1; fi; done; }"
     STATUS_PANE="echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
@@ -388,8 +397,8 @@ tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
 if [ "$IS_AGENT_SANDBOX" = true ]; then
-    echo -e "  - Database: sandbox postgres service (postgres:5432/matcha)"
-    echo -e "  - Redis:    sandbox redis service (redis:6379)"
+    echo -e "  - Database: host local matcha-postgres (host.docker.internal:$LOCAL_PORT/matcha)"
+    echo -e "  - Redis:    host local matcha-redis ($REDIS_PORT)"
 else
     echo -e "  - Database: LOCAL matcha-postgres (localhost:$LOCAL_PORT/matcha)"
     echo -e "  - Redis:    Local ($REDIS_PORT)"

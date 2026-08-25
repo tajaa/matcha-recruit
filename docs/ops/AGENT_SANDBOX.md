@@ -45,6 +45,10 @@ that's a design choice made in this plan, documented below rather than hidden.
 
 **Deliberately reachable** (by design — see `docker-compose.sandbox.yml`):
 - the repo bind mount, including `secrets/roonMT-arm.pem` and `server/.env`
+- the normal host `matcha-postgres` and `matcha-redis` development services,
+  through Docker Desktop's `host.docker.internal` gateway. A permissionless
+  agent can change that same local development data; it cannot inspect or
+  control the host Docker daemon.
 - SSH to the app EC2 (`54.177.107.107`) and DB EC2 (`13.56.253.173`) — prod
   scripts (`prod-psql.sh`, `logs.sh`, `migrate-prod.sh`, `backups.sh`,
   `sync-test-tenants.sh`) work from inside the sandbox
@@ -57,8 +61,9 @@ that's a design choice made in this plan, documented below rather than hidden.
 
 ## Three lanes
 
-**In-sandbox** (the default): editing code, running the dev stack, hitting
-local sandbox Postgres/Redis, reading prod logs/DB, most of `scripts/`.
+**In-sandbox** (the default): editing code, running the dev stack against the
+normal local development Postgres/Redis, reading prod logs/DB, most of
+`scripts/`.
 
 **Host-only build/deploy**: `build-and-push.sh` refuses to run inside the
 sandbox — it needs `docker buildx` against a real daemon, which the sandbox
@@ -86,11 +91,10 @@ and prod-tunneled runs — this wrapper doesn't reimplement those.
 | Command | What it does |
 |---|---|
 | `build [--playwright]` | Build the workspace image |
-| `start` / `stop` / `status` | Compose lifecycle (`stop` preserves volumes) |
+| `start` / `stop` / `status` | Workspace lifecycle; `start` also ensures the normal local dev DB/Redis are running |
 | `shell [cmd...]` | Plain shell, or run one command, in the workspace |
 | `dev [args]` | `AGENT_SANDBOX=1 ./scripts/dev-remote.sh` inside the container |
 | `doctor` | Runs the isolation/capability checklist below |
-| `import-db [--yes]` | Sandbox-only Postgres replaced with a dump of local `matcha-postgres` |
 | `login <codex\|claude\|opencode\|gh>` | Authenticate one agent (own state volume) |
 | `run <codex\|claude\|opencode> [args]` | Start that agent with full execution |
 | `codex` / `claude` / `opencode` | Shorthand for `run <agent>` |
@@ -100,9 +104,7 @@ still works as an alias in `dev-remote.sh` and the two dev-DB scripts).
 `SANDBOX_UID`/`SANDBOX_GID` override the in-container user (default: your
 macOS uid/gid, so files the agent writes land owned by you, not root).
 `INSTALL_PLAYWRIGHT_BROWSERS=true` bakes in a Chromium for isolated Playwright
-runs. `SOURCE_DB_CONTAINER`/`SOURCE_DB_NAME`/`SOURCE_DB_USER` retarget
-`import-db`. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the
-sandbox.
+runs. `SANDBOX_ALLOW_DEPLOY=1` permits `update-ec2.sh` from inside the sandbox.
 
 ## Validation checklist
 
@@ -115,7 +117,8 @@ sandbox.
   warning
 - SSH to the app EC2 succeeds
 - `aws sts get-caller-identity` succeeds
-- sandbox Postgres/Redis are reachable
+- the normal host `matcha-postgres`/`matcha-redis` services are reachable
+  through the Docker Desktop gateway
 - `codex`, `claude`, `opencode`, `gh`, `aws`, `ssh`, `git` are all on `PATH`
 
 Manual checks worth doing once after a fresh build:
@@ -123,11 +126,9 @@ Manual checks worth doing once after a fresh build:
   `client/src` file on the host and confirm HMR fires (the sandbox uses
   polling watchers since bind-mounted macOS trees don't emit native Linux
   filesystem events)
-- `msandbox import-db` only ever changes the `sandbox_postgres_data` volume —
-  `docker ps -a | grep matcha-postgres` after should still show your normal
-  local dev DB container untouched
 - `msandbox stop` leaves the host's browser data, Docker state, and
-  `matcha-postgres`/`matcha-redis` containers alone
+  `matcha-postgres`/`matcha-redis` containers alone (the data persists because
+  it is the normal local development stack)
 
 ## Chat model
 

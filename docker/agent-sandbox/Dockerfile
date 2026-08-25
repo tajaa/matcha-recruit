@@ -268,6 +268,13 @@ RUN printf '%s\n' \
         > /home/agent/.config/opencode/opencode.json \
     && chown "${USER_UID}:${USER_GID}" /home/agent/.config/opencode/opencode.json
 
+# Docker Desktop's virtualized Apple-silicon CPU can advertise ARM crypto
+# capabilities that cryptography's bundled OpenSSL cannot safely execute,
+# causing AES setup to terminate Python with SIGILL. Disable that runtime
+# autodetection only in this local sandbox; real production ARM hosts are not
+# affected by the Docker Desktop virtualization issue.
+ENV OPENSSL_armcap=0
+
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/agent-sandbox-entrypoint"]
 CMD ["sleep", "infinity"]
