@@ -9,8 +9,10 @@ point. Its session service authorizes the manager/location/week tuple on every
 turn; the generic Work capability resolver is intentionally bypassed for this
 surface, so role-based schedule capability is not a substitute for location
 authorization. `_assert_manager_location` is the authoritative location check.
-The required route flags are `matcha_ops` + `employee_schedule` for the
-session route, and `matcha_work` + `huume` + `employee_schedule` for turns.
+The session route requires `employee_schedule`; turns require
+`matcha_work` + `employee_schedule`. The separate company-wide `huume` flag
+does not gate this scoped surface: the editor assistant is included with
+scheduling and cannot access the global Huume tool set.
 
 The surface has only the tools in `SCHEDULE_TOOLS` and the lookup topics in
 `SCHEDULE_LOOKUP_TOPICS`. All writes are staged and require a later turn with

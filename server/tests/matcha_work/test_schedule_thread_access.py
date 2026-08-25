@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 
 from app.matcha.services.matcha_work.matcha_work_document import threads
+from app.matcha.services.matcha_work.turn_pipeline import _huume_dispatch_feature_gate
 
 
 class _ConnectionContext:
@@ -24,6 +25,21 @@ class _Conn:
     async def fetchrow(self, query, *params):
         self.query = query
         return {"current_state": {}}
+
+
+def test_schedule_assistant_is_gated_by_scheduling_not_global_huume():
+    assert _huume_dispatch_feature_gate(
+        {"employee_schedule": True, "huume": False}, is_schedule_thread=True,
+    ) is None
+    assert _huume_dispatch_feature_gate(
+        {"employee_schedule": False, "huume": True}, is_schedule_thread=True,
+    ) == "employee_schedule"
+
+
+def test_workspace_huume_keeps_global_feature_gate():
+    assert _huume_dispatch_feature_gate(
+        {"employee_schedule": True, "huume": False}, is_schedule_thread=False,
+    ) == "huume"
 
 
 @pytest.mark.asyncio

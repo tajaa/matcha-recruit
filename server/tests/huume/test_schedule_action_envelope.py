@@ -39,6 +39,33 @@ def test_schedule_surface_still_requires_matcha_work_flag():
     assert "Matcha Work" in verdict.message
 
 
+def test_schedule_surface_does_not_require_global_huume_flag():
+    verdict = evaluate_huume_action(
+        staged_action=_note_action(),
+        features={**FEATURES, "huume": False},
+        role="client",
+        thread_huume_mode=True,
+        this_turn_staged_new=False,
+        schedule_surface=True,
+    )
+    assert verdict.kind == "proceed"
+
+
+def test_schedule_surface_cannot_use_global_huume_actions():
+    verdict = evaluate_huume_action(
+        staged_action={
+            "type": "send_offer", "status": "proposed", "offer_id": str(uuid4()),
+        },
+        features={**FEATURES, "offer_letters": True},
+        role="client",
+        thread_huume_mode=True,
+        this_turn_staged_new=False,
+        schedule_surface=True,
+    )
+    assert verdict.kind == "refuse"
+    assert "outside this schedule workspace" in verdict.message
+
+
 def test_employee_role_passes_the_capability_gate_on_schedule_surface():
     # This only proves evaluate_huume_action's role-based capability check
     # (schedule_manager_authorized in actions.py) admits any employee role.
@@ -92,6 +119,18 @@ def test_non_schedule_surface_keeps_matcha_work_gate():
     )
     assert verdict.kind == "refuse"
     assert "Matcha Work" in verdict.message
+
+
+def test_non_schedule_surface_keeps_global_huume_gate():
+    verdict = evaluate_huume_action(
+        staged_action=_note_action(),
+        features={**FEATURES, "huume": False},
+        role="client",
+        thread_huume_mode=True,
+        this_turn_staged_new=False,
+    )
+    assert verdict.kind == "refuse"
+    assert "Huume" in verdict.message
 
 
 def test_keep_case_requires_written_acknowledgement():

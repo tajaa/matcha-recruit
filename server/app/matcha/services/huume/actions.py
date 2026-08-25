@@ -107,8 +107,10 @@ class HuumeVerdict:
         return self.kind == "proceed"
 
 
-# Feature flag each staged huume_action type requires beyond `huume` +
-# `matcha_work` + role. Mirrors PILOT_TOOL_REQUIRED_FEATURE/STEP_REQUIRED_FEATURE.
+# Feature flag each staged huume_action type requires beyond the surface's
+# base flags + role. Workspace actions require `huume` + `matcha_work`;
+# schedule-surface actions require `employee_schedule` + `matcha_work`.
+# Mirrors PILOT_TOOL_REQUIRED_FEATURE/STEP_REQUIRED_FEATURE.
 _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "send_offer": "offer_letters",
     "discipline_draft": "discipline",
@@ -137,6 +139,10 @@ _HUUME_ACTION_REQUIRED_FEATURE: dict[str, str] = {
     "work_permit": "employee_schedule",
     "eligibility_case_decision": "employee_schedule",
 }
+_SCHEDULE_SURFACE_ACTIONS = frozenset({
+    "schedule_change", "schedule_note", "meal_break_waiver", "work_permit",
+    "eligibility_case_decision",
+})
 
 # discipline_from_incident / discipline_decision — the incident-triggered
 # discipline skill's two staged action types, routed to discipline_skill.py
@@ -234,7 +240,11 @@ def evaluate_huume_action(
 
     if not thread_huume_mode:
         return HuumeVerdict(kind="refuse", message="Huume actions are only available in a Huume thread.")
-    if not features.get("huume"):
+    if schedule_surface and action_type not in _SCHEDULE_SURFACE_ACTIONS:
+        return HuumeVerdict(
+            kind="refuse", message="That action is outside this schedule workspace.",
+        )
+    if not schedule_surface and not features.get("huume"):
         return HuumeVerdict(kind="refuse", message="Huume isn't enabled for this company.")
     # `matcha_work` is always required here regardless of surface — the message
     # never reaches this function unless it already passed through the

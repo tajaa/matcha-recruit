@@ -68,13 +68,18 @@ def _messages(contents: list[Any]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     for content in contents:
         role = "assistant" if getattr(content, "role", None) == "model" else "user"
+        text_type = "output_text" if role == "assistant" else "input_text"
         parts: list[dict[str, Any]] = []
         for part in getattr(content, "parts", None) or []:
             text = getattr(part, "text", None)
             if text is not None:
-                parts.append({"type": "input_text", "text": text})
+                # Responses validates content types by role: replayed model
+                # history is assistant output, while caller history is input.
+                # Sending input_text for an assistant message is a provider
+                # 400 before any tokens are consumed.
+                parts.append({"type": text_type, "text": text})
             inline = getattr(part, "inline_data", None)
-            if inline is not None and getattr(inline, "data", None):
+            if role == "user" and inline is not None and getattr(inline, "data", None):
                 encoded = base64.b64encode(inline.data).decode("ascii")
                 mime = getattr(inline, "mime_type", None) or "application/octet-stream"
                 parts.append({"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"})
@@ -146,8 +151,13 @@ class _LunaModels:
                 )
                 response.raise_for_status()
         except httpx.HTTPError as exc:
+            provider_detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                provider_detail = f"; response={exc.response.text[:300]}"
             await record_openai_response(
-                model=model, latency_ms=int((time.monotonic() - started) * 1000), error=str(exc),
+                model=model,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                error=f"{exc}{provider_detail}",
             )
             raise
         data = response.json()

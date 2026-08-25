@@ -71,6 +71,13 @@ HUUME_TURN_LIMIT = 120
 HUUME_TURN_WINDOW_SECONDS = 3600
 
 
+def _huume_dispatch_feature_gate(features: dict, *, is_schedule_thread: bool) -> str | None:
+    """Return the unavailable feature for this Huume transport surface."""
+    if is_schedule_thread:
+        return None if features.get("employee_schedule") else "employee_schedule"
+    return None if features.get("huume") else "huume"
+
+
 async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> str | None:
     """Fetch compliance RAG context for a user question. Returns None on failure."""
     try:
@@ -890,25 +897,29 @@ async def _run_huume_dispatch(tc: TurnContext):
     if not (tc.body.content or "").strip():
         return
 
-    # The toggle route gates on required_feature, but the column stays true
-    # if the flag is later revoked — re-check here, same as every other
-    # mode's re-check in _inject_mode_contexts, so a downgraded company
-    # falls through to the normal skill engine instead of keeping Huume.
+    # Re-check feature access on every turn. Generic workspace threads fall
+    # back to the normal skill engine if Huume is later revoked; schedule
+    # sessions fail closed because this surface has no generic-AI fallback.
     features = await get_company_features(company_id)
     is_schedule_thread = thread.get("surface") == "schedule_assistant"
-    if not features.get("huume") or (is_schedule_thread and not features.get("employee_schedule")):
-        if is_schedule_thread:
-            # An employee is only admitted to this endpoint (messaging.py)
-            # BECAUSE the thread is schedule_assistant. Falling through to
-            # the generic skill engine below — the normal behavior for a
-            # downgraded non-schedule company, see the comment above — would
-            # hand that same employee the full workspace AI the surface
-            # exists to deny them.
-            yield _sse_data({
-                "type": "error",
-                "message": "Scheduling isn't enabled for this company right now.",
-            })
-            tc.terminated = True
+    unavailable_feature = _huume_dispatch_feature_gate(
+        features, is_schedule_thread=is_schedule_thread,
+    )
+    if unavailable_feature == "employee_schedule":
+        # An employee is only admitted to this endpoint (messaging.py)
+        # BECAUSE the thread is schedule_assistant. Falling through to the
+        # generic skill engine would hand that employee the full workspace AI
+        # the surface exists to deny them.
+        yield _sse_data({
+            "type": "error",
+            "message": "Scheduling isn't enabled for this company right now.",
+        })
+        tc.terminated = True
+        return
+    if unavailable_feature == "huume":
+        # The schedule editor's scoped assistant is part of employee_schedule,
+        # not the separately sold company-wide Huume workspace. Ordinary
+        # Matcha Work threads retain the global Huume gate.
         return
 
     from app.matcha.services.huume import agent as huume_agent, store as huume_store
