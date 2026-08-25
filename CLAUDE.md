@@ -364,9 +364,9 @@ Keep `LOG_LEVEL` at `INFO` or lower — some log calls sit at `WARNING` delibera
 
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 
-**Agent sandbox**: `sandbox` (or `./scripts/agent-sandbox.sh`) runs Codex/Claude Code/OpenCode in an isolated
+**Agent sandbox**: `msandbox` (or `./scripts/agent-sandbox.sh`) runs Codex/Claude Code/OpenCode in an isolated
 Docker container — no host home dir/Keychain/SSH-agent/Docker-socket — with full/no-approval execution inside
-that boundary. `sandbox dev` runs this same `dev-remote.sh` with `AGENT_SANDBOX=1`. `build-and-push.sh` (needs
+that boundary. `msandbox dev` runs this same `dev-remote.sh` with `AGENT_SANDBOX=1`. `build-and-push.sh` (needs
 a Docker daemon) and Xcode/`platforms/**` builds (`scripts/xcode-build.sh`) don't run there — host only.
 Full writeup: `docs/ops/AGENT_SANDBOX.md`.
 

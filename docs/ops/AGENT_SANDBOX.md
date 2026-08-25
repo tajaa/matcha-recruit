@@ -5,19 +5,21 @@ or OpenCode) against this repo with broad/no-approval execution, without
 giving it the macOS home directory, browser profiles, Keychain, host SSH
 agent, or the host Docker socket.
 
-Quickstart, from anywhere (`~/.local/bin/sandbox` is a symlink to
-`scripts/agent-sandbox.sh`):
+Quickstart, from anywhere (`~/.local/bin/msandbox` is a symlink to
+`scripts/agent-sandbox.sh` — named `msandbox`, not `sandbox`, because
+`~/Documents/github/claude-sandbox/sandbox` already owns that name as a
+generic devcontainer launcher for other projects):
 
 ```bash
-sandbox build          # first time, or after Dockerfile/dependency changes
-sandbox login codex    # or: login claude / login opencode / login gh
-sandbox dev             # backend/worker/frontend/Tell-Us/Oceanlab in tmux
-sandbox codex           # in another terminal — or `claude` / `opencode`
-sandbox doctor          # isolation + capability self-check
+msandbox build          # first time, or after Dockerfile/dependency changes
+msandbox login codex    # or: login claude / login opencode / login gh
+msandbox dev             # backend/worker/frontend/Tell-Us/Oceanlab in tmux
+msandbox codex           # in another terminal — or `claude` / `opencode`
+msandbox doctor          # isolation + capability self-check
 ```
 
-`sandbox` is just `./scripts/agent-sandbox.sh` under a short name; both work
-identically. Run `sandbox` with no args for the full command list.
+`msandbox` is just `./scripts/agent-sandbox.sh` under a short name; both work
+identically. Run `msandbox` with no args for the full command list.
 
 ## What's isolated, and what isn't
 
@@ -97,7 +99,7 @@ sandbox.
 
 ## Validation checklist
 
-`sandbox doctor` runs all of this automatically. What it checks:
+`msandbox doctor` runs all of this automatically. What it checks:
 
 - `/var/run/docker.sock` absent inside the container
 - no `/Users` (host home) visible inside the container
@@ -109,14 +111,14 @@ sandbox.
 - `codex`, `claude`, `opencode`, `gh`, `aws`, `ssh`, `git` are all on `PATH`
 
 Manual checks worth doing once after a fresh build:
-- `sandbox dev` starts backend/worker/frontend/Tell-Us/Oceanlab; edit a
+- `msandbox dev` starts backend/worker/frontend/Tell-Us/Oceanlab; edit a
   `client/src` file on the host and confirm HMR fires (the sandbox uses
   polling watchers since bind-mounted macOS trees don't emit native Linux
   filesystem events)
-- `sandbox import-db` only ever changes the `sandbox_postgres_data` volume —
+- `msandbox import-db` only ever changes the `sandbox_postgres_data` volume —
   `docker ps -a | grep matcha-postgres` after should still show your normal
   local dev DB container untouched
-- `sandbox stop` leaves the host's browser data, Docker state, and
+- `msandbox stop` leaves the host's browser data, Docker state, and
   `matcha-postgres`/`matcha-redis` containers alone
 
 ## Chat model

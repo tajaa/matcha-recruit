@@ -3,7 +3,7 @@
 # development sandbox. See docs/ops/AGENT_SANDBOX.md for the full writeup.
 set -euo pipefail
 
-# Resolve through symlinks (e.g. ~/.local/bin/sandbox -> this file) so
+# Resolve through symlinks (e.g. ~/.local/bin/msandbox -> this file) so
 # PROJECT_ROOT is the matcha repo root regardless of how this was invoked.
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [[ -L "$SCRIPT_SOURCE" ]]; do
@@ -17,7 +17,7 @@ COMPOSE=(docker compose --project-name matcha-agent-sandbox --file "$COMPOSE_FIL
 
 usage() {
     cat <<'EOF'
-Usage: sandbox <command> [args]   (or ./scripts/agent-sandbox.sh <command> [args])
+Usage: msandbox <command> [args]   (or ./scripts/agent-sandbox.sh <command> [args])
 
 Commands:
   build [--playwright]        Build the isolated workspace image.
