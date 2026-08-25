@@ -8,6 +8,7 @@ import { NewHirePacket } from '../../../components/employees/NewHirePacket'
 import { LeaveEligibilityPanel } from '../../../components/employees/LeaveEligibilityPanel'
 import SupervisorToggle from '../../../components/employees/SupervisorToggle'
 import { EmployeeTrainingPanel } from '../../../components/employees/EmployeeTrainingPanel'
+import { MinorCompliancePanel } from '../../../components/employees/MinorCompliancePanel'
 import { useEmployeeDetail } from '../../../hooks/employees/useEmployeeDetail'
 import { useMe } from '../../../hooks/useMe'
 import { typeLabel, statusLabel } from '../../../types/employee'
@@ -53,7 +54,7 @@ export default function EmployeeDetail() {
   const navigate = useNavigate()
   const {
     employee, loading, error,
-    updateEmployee, updateStatus, deleteEmployee,
+    updateEmployee, updateStatus, deleteEmployee, refetch,
   } = useEmployeeDetail(employeeId!)
   const { hasFeature } = useMe()
   // Deep-link support: the compliance risk cockpit links straight to the
@@ -212,6 +213,14 @@ export default function EmployeeDetail() {
                     )
                   })}
                 </div>
+                <MinorCompliancePanel
+                  employeeId={employeeId!}
+                  minorStatus={employee.minor_status ?? 'unknown'}
+                  dateOfBirthOnFile={employee.date_of_birth_on_file ?? false}
+                  workLocationId={employee.work_location_id}
+                  locations={locations}
+                  onUpdated={refetch}
+                />
                 {editing && (
                   <div className="flex items-center gap-3 mt-6 pt-4 border-t border-zinc-800">
                     {saveError && <p className="text-sm text-red-400 mr-auto">{saveError}</p>}

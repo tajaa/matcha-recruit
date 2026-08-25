@@ -51,7 +51,15 @@ def _credential_problem(row, *, as_of: date) -> tuple[str, str] | None:
     return None
 
 
-async def schedule_eligibility_violations(conn, company_id: UUID, *, employee_id: UUID, shift_date: date) -> list[dict]:
+async def schedule_eligibility_violations(
+    conn,
+    company_id: UUID,
+    *,
+    employee_id: UUID,
+    shift_date: date,
+    location_id: UUID | None = None,
+    employee_age: int | None = None,
+) -> list[dict]:
     """Human-approved, schedule-blocking requirements cannot be bypassed."""
     rows = await conn.fetch(
         """
@@ -67,10 +75,11 @@ async def schedule_eligibility_violations(conn, company_id: UUID, *, employee_id
         """, company_id, employee_id,
     )
     permits = await conn.fetch(
-        """SELECT id, expires_at, legal_basis FROM employee_work_permits
+        """SELECT id, location_id, issued_at, expires_at, legal_basis FROM employee_work_permits
            WHERE company_id = $1 AND employee_id = $2 AND schedule_blocking = true
-             AND status = 'active' AND confirmed_on_file = true AND expires_at < $3""",
-        company_id, employee_id, shift_date,
+             AND status = 'active' AND confirmed_on_file = true
+             AND ($3::uuid IS NULL OR location_id = $3)""",
+        company_id, employee_id, location_id,
     )
     out = []
     for row in rows:
@@ -80,10 +89,35 @@ async def schedule_eligibility_violations(conn, company_id: UUID, *, employee_id
             out.append({"check": "schedule_eligibility", "severity": "block", "code": code,
                         "message": message,
                         "statute": _basis(row['legal_basis']).get('citation'), "state": ""})
-    for row in permits:
-        out.append({"check": "schedule_eligibility", "severity": "block", "code": "minor_work_permit_expired",
-                    "message": f"Work permit expired {row['expires_at'].isoformat()} and blocks new scheduling.",
-                    "statute": _basis(row['legal_basis']).get('citation'), "state": ""})
+    # Old direct callers do not provide an age. Preserve their expired-permit
+    # behavior while write paths supply age and apply the rule only to minors.
+    if employee_age is None:
+        expired_permits = [row for row in permits if row["expires_at"] < shift_date]
+        for row in expired_permits:
+            out.append({"check": "schedule_eligibility", "severity": "block", "code": "minor_work_permit_expired",
+                        "message": f"Work permit expired {row['expires_at'].isoformat()} and blocks new scheduling.",
+                        "statute": _basis(row['legal_basis']).get('citation'), "state": ""})
+    elif employee_age < 18 and location_id is not None:
+        valid_permit = next(
+            (
+                row for row in permits
+                if (row.get("issued_at") is None or row["issued_at"] <= shift_date)
+                and row["expires_at"] >= shift_date
+            ),
+            None,
+        )
+        if valid_permit is None:
+            expired = next((row for row in permits if row["expires_at"] < shift_date), None)
+            if expired:
+                code = "minor_work_permit_expired"
+                message = f"Work permit expired {expired['expires_at'].isoformat()} and blocks new scheduling."
+                statute = _basis(expired["legal_basis"]).get("citation")
+            else:
+                code = "minor_work_permit_missing"
+                message = "A confirmed work permit is required before scheduling this minor at this location."
+                statute = None
+            out.append({"check": "schedule_eligibility", "severity": "block", "code": code,
+                        "message": message, "statute": statute, "state": ""})
     return out
 
 

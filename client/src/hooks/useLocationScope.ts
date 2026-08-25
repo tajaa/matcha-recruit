@@ -5,13 +5,16 @@ import { api } from '../api/client'
 export type CompanyLocation = {
   id: string
   name: string | null
+  address?: string | null
   city: string
   state: string
+  zipcode?: string | null
   is_active: boolean
 }
 
 export function locationLabel(l: CompanyLocation): string {
-  const base = l.name || `${l.city}, ${l.state}`
+  const address = [l.address, l.city, l.state, l.zipcode].filter(Boolean).join(', ')
+  const base = l.name && address ? `${l.name} — ${address}` : (l.name || address)
   return l.is_active ? base : `${base} (inactive)`
 }
 

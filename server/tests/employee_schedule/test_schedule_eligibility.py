@@ -67,6 +67,49 @@ def test_credential_is_valid_through_its_expiration_date():
     assert violations == []
 
 
+class MinorPermitConn:
+    def __init__(self, permits):
+        self.permits = permits
+
+    async def fetch(self, query, *args):
+        if "employee_credential_requirements" in query:
+            return []
+        if "employee_work_permits" in query:
+            return self.permits
+        raise AssertionError(query)
+
+
+def test_minor_without_a_current_location_permit_is_blocked():
+    violations = asyncio.run(schedule_eligibility_violations(
+        MinorPermitConn([]),
+        uuid4(),
+        employee_id=uuid4(),
+        location_id=uuid4(),
+        employee_age=17,
+        shift_date=date(2026, 8, 21),
+    ))
+    assert violations == [{
+        "check": "schedule_eligibility", "severity": "block", "code": "minor_work_permit_missing",
+        "message": "A confirmed work permit is required before scheduling this minor at this location.",
+        "statute": None, "state": "",
+    }]
+
+
+def test_minor_with_a_current_location_permit_is_allowed():
+    violations = asyncio.run(schedule_eligibility_violations(
+        MinorPermitConn([{
+            "id": uuid4(), "location_id": uuid4(), "issued_at": date(2026, 1, 1),
+            "expires_at": date(2026, 8, 21), "legal_basis": {},
+        }]),
+        uuid4(),
+        employee_id=uuid4(),
+        location_id=uuid4(),
+        employee_age=16,
+        shift_date=date(2026, 8, 21),
+    ))
+    assert violations == []
+
+
 class RosterFlagConn:
     async def fetch(self, query, *args):
         assert "ANY($2::uuid[])" in query

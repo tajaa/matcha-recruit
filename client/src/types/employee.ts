@@ -56,6 +56,8 @@ export type EmployeeDetail = Employee & {
   phone: string | null
   address: string | null
   emergency_contact: Record<string, string> | null
+  date_of_birth_on_file: boolean
+  minor_status: 'minor' | 'adult' | 'unknown'
   updated_at: string
 }
 

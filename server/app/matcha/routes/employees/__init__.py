@@ -29,6 +29,7 @@ from .incidents import router as _incidents_router; router.include_router(_incid
 from .credentials import router as _credentials_router; router.include_router(_credentials_router)
 from .oig import router as _oig_router; router.include_router(_oig_router)
 from .work_permits import router as _work_permits_router; router.include_router(_work_permits_router)
+from .demographics import router as _demographics_router; router.include_router(_demographics_router)
 
 __all__ = [
     "router",

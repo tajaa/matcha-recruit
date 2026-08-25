@@ -23,11 +23,35 @@ class WorkPermitCreate(BaseModel):
 async def list_work_permits(employee_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
+        employee = await conn.fetchval(
+            "SELECT 1 FROM employees WHERE id=$1 AND org_id=$2", employee_id, company_id,
+        )
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
         rows = await conn.fetch(
-            """SELECT id, location_id, issued_at, expires_at, status, confirmed_on_file, created_at
-               FROM employee_work_permits WHERE company_id=$1 AND employee_id=$2
-               ORDER BY created_at DESC""", company_id, employee_id)
-    return {"permits": [{**dict(row), "id": str(row["id"]), "location_id": str(row["location_id"]) if row["location_id"] else None} for row in rows]}
+            """SELECT p.id, p.location_id, bl.name AS location_name, p.issued_at, p.expires_at,
+                      p.status, p.confirmed_on_file, p.created_at
+               FROM employee_work_permits p
+               LEFT JOIN business_locations bl ON bl.id = p.location_id AND bl.company_id = p.company_id
+               WHERE p.company_id=$1 AND p.employee_id=$2
+               ORDER BY p.created_at DESC""", company_id, employee_id)
+    today = date.today()
+    permits = []
+    for row in rows:
+        validity = "valid"
+        if row["status"] != "active" or not row["confirmed_on_file"]:
+            validity = "inactive"
+        elif row["expires_at"] < today:
+            validity = "expired"
+        elif row["expires_at"] <= date.fromordinal(today.toordinal() + 14):
+            validity = "expiring"
+        permits.append({
+            **dict(row),
+            "id": str(row["id"]),
+            "location_id": str(row["location_id"]) if row["location_id"] else None,
+            "validity": validity,
+        })
+    return {"permits": permits}
 
 
 @router.post("/{employee_id}/work-permits")

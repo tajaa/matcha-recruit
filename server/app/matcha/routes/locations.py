@@ -20,7 +20,7 @@ async def list_company_locations(current_user=Depends(require_admin_or_client)):
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, city, state, is_active
+            SELECT id, name, address, city, state, zipcode, is_active
             FROM business_locations
             WHERE company_id = $1
             ORDER BY is_active DESC, name NULLS LAST, city, state
@@ -28,7 +28,8 @@ async def list_company_locations(current_user=Depends(require_admin_or_client)):
             company_id,
         )
     return {"locations": [
-        {"id": str(r["id"]), "name": r["name"], "city": r["city"],
-         "state": r["state"], "is_active": r["is_active"]}
+        {"id": str(r["id"]), "name": r["name"], "address": r["address"],
+         "city": r["city"], "state": r["state"], "zipcode": r["zipcode"],
+         "is_active": r["is_active"]}
         for r in rows
     ]}

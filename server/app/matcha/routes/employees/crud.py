@@ -176,7 +176,36 @@ class EmployeeDetailResponse(EmployeeListResponse):
     phone: Optional[str]
     address: Optional[str]
     emergency_contact: Optional[dict]
+    # DOB stays in the PII-segregated employee_demographics table. The profile
+    # only receives the derived compliance state, never the date itself.
+    date_of_birth_on_file: bool = False
+    minor_status: str = "unknown"
     updated_at: datetime
+
+
+def _minor_status(date_of_birth: Optional[date], *, on: Optional[date] = None) -> str:
+    if date_of_birth is None:
+        return "unknown"
+    today = on or date.today()
+    age = today.year - date_of_birth.year - ((today.month, today.day) < (date_of_birth.month, date_of_birth.day))
+    return "minor" if age < 18 else "adult"
+
+
+async def _employee_profile_compliance(conn, employee_id: UUID, company_id: UUID) -> tuple[Optional[str], Optional[date]]:
+    row = await conn.fetchrow(
+        """
+        SELECT bl.name AS work_location_name, ed.date_of_birth
+        FROM employees e
+        LEFT JOIN business_locations bl ON bl.id = e.work_location_id AND bl.company_id = e.org_id
+        LEFT JOIN employee_demographics ed ON ed.employee_id = e.id AND ed.org_id = e.org_id
+        WHERE e.id = $1 AND e.org_id = $2
+        """,
+        employee_id,
+        company_id,
+    )
+    if not row:
+        return None, None
+    return row["work_location_name"], row["date_of_birth"]
 
 
 # ================================
@@ -715,6 +744,9 @@ async def create_employee(
         pay_classification, pay_rate, work_city = _employee_compensation_values(
             row, compensation_fields_available
         )
+        work_location_name, date_of_birth = await _employee_profile_compliance(
+            conn, row["id"], company_id
+        )
 
         response = EmployeeDetailResponse(
             id=row["id"],
@@ -737,9 +769,13 @@ async def create_employee(
             work_city=work_city,
             job_title=row.get("job_title"),
             department=row.get("department"),
+            work_location_id=row.get("work_location_id"),
+            work_location_name=work_location_name,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
+            date_of_birth_on_file=date_of_birth is not None,
+            minor_status=_minor_status(date_of_birth),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -805,6 +841,8 @@ async def get_employee(
             SELECT
                 e.*,
                 m.first_name || ' ' || m.last_name as manager_name,
+                bl.name AS work_location_name,
+                ed.date_of_birth,
                 (
                     SELECT status FROM employee_invitations
                     WHERE employee_id = e.id
@@ -812,6 +850,8 @@ async def get_employee(
                 ) as invitation_status
             FROM employees e
             LEFT JOIN employees m ON e.manager_id = m.id
+            LEFT JOIN business_locations bl ON bl.id = e.work_location_id AND bl.company_id = e.org_id
+            LEFT JOIN employee_demographics ed ON ed.employee_id = e.id AND ed.org_id = e.org_id
             WHERE e.id = $1 AND e.org_id = $2
             """,
             employee_id, company_id
@@ -848,9 +888,13 @@ async def get_employee(
             employment_status=row.get("employment_status"),
             status_changed_at=row.get("status_changed_at"),
             status_reason=row.get("status_reason"),
+            work_location_id=row.get("work_location_id"),
+            work_location_name=row.get("work_location_name"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
+            date_of_birth_on_file=row.get("date_of_birth") is not None,
+            minor_status=_minor_status(row.get("date_of_birth")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -992,13 +1036,14 @@ async def update_employee(
             values.append(request.department.strip() if request.department else None)
             param_num += 1
 
-        if request.work_location_id is not None and await _column_exists(conn, "employees", "work_location_id"):
-            location_row = await conn.fetchval(
-                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
-                request.work_location_id, company_id,
-            )
-            if not location_row:
-                raise HTTPException(status_code=404, detail="Location not found")
+        if "work_location_id" in request.model_fields_set and await _column_exists(conn, "employees", "work_location_id"):
+            if request.work_location_id is not None:
+                location_row = await conn.fetchval(
+                    "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+                    request.work_location_id, company_id,
+                )
+                if not location_row:
+                    raise HTTPException(status_code=404, detail="Location not found")
             updates.append(f"work_location_id = ${param_num}")
             values.append(request.work_location_id)
             param_num += 1
@@ -1089,6 +1134,9 @@ async def update_employee(
         pay_classification, pay_rate, work_city = _employee_compensation_values(
             row, compensation_fields_available
         )
+        work_location_name, date_of_birth = await _employee_profile_compliance(
+            conn, row["id"], company_id
+        )
 
         return EmployeeDetailResponse(
             id=row["id"],
@@ -1114,9 +1162,13 @@ async def update_employee(
             employment_status=row.get("employment_status"),
             status_changed_at=row.get("status_changed_at"),
             status_reason=row.get("status_reason"),
+            work_location_id=row.get("work_location_id"),
+            work_location_name=work_location_name,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
+            date_of_birth_on_file=date_of_birth is not None,
+            minor_status=_minor_status(date_of_birth),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -1182,6 +1234,10 @@ async def update_employee_status(
             row, compensation_fields_available
         )
 
+        work_location_name, date_of_birth = await _employee_profile_compliance(
+            conn, row["id"], company_id
+        )
+
         return EmployeeDetailResponse(
             id=row["id"],
             email=row["email"],
@@ -1206,9 +1262,13 @@ async def update_employee_status(
             employment_status=row.get("employment_status"),
             status_changed_at=row.get("status_changed_at"),
             status_reason=row.get("status_reason"),
+            work_location_id=row.get("work_location_id"),
+            work_location_name=work_location_name,
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
+            date_of_birth_on_file=date_of_birth is not None,
+            minor_status=_minor_status(date_of_birth),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
