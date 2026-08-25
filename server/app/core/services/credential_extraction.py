@@ -62,6 +62,12 @@ EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {
         {"field": "issuing_org", "description": "Organization that issued the clearance"},
         {"field": "holder_name", "description": "Full name of the person"},
     ],
+    "food_handler_card": [
+        {"field": "certificate_number", "description": "Food handler card or certificate number"},
+        {"field": "expiration", "description": "Expiration date in YYYY-MM-DD format"},
+        {"field": "issuing_org", "description": "Organization or jurisdiction that issued the card"},
+        {"field": "holder_name", "description": "Full name of the card holder"},
+    ],
     "other": [
         {"field": "document_title", "description": "Title or type of the document"},
         {"field": "holder_name", "description": "Name of the person the document belongs to"},

@@ -44,6 +44,9 @@ export function createTemplate(data: {
   due_days?: number
   priority?: string
   notes?: string
+  schedule_blocking?: boolean
+  warning_days?: number
+  legal_basis?: Record<string, unknown>
 }) {
   return api.post<CredentialRequirementTemplate>('/credential-templates/templates', data)
 }
@@ -53,6 +56,9 @@ export function updateTemplate(id: string, data: {
   due_days?: number
   priority?: string
   notes?: string
+  schedule_blocking?: boolean
+  warning_days?: number
+  legal_basis?: Record<string, unknown>
 }) {
   return api.put<CredentialRequirementTemplate>(`/credential-templates/templates/${id}`, data)
 }

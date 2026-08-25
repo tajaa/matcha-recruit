@@ -43,9 +43,10 @@ export function useCredentialDocuments(employeeId: string) {
     return doc
   }, [employeeId])
 
-  const approve = useCallback(async (docId: string, applyToCredentials = true, notes?: string) => {
+  const approve = useCallback(async (docId: string, applyToCredentials = true, expirationDate?: string, notes?: string) => {
     await api.post(`/employees/${employeeId}/credential-documents/${docId}/approve`, {
       apply_to_credentials: applyToCredentials,
+      expiration_date: expirationDate || undefined,
       notes,
     })
     await fetchAll()

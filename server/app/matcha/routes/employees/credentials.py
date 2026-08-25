@@ -222,7 +222,10 @@ async def upsert_employee_credentials(
 
 MAX_CREDENTIAL_UPLOAD_SIZE = 10 * 1024 * 1024  # 10 MB
 ALLOWED_CREDENTIAL_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".tiff"}
-VALID_DOCUMENT_TYPES = {"medical_license", "dea", "npi", "board_cert", "malpractice", "health_clearance", "other"}
+VALID_DOCUMENT_TYPES = {
+    "medical_license", "dea", "npi", "board_cert", "malpractice",
+    "health_clearance", "food_handler_card", "other",
+}
 
 
 class CredentialDocumentResponse(BaseModel):
@@ -304,9 +307,6 @@ async def upload_credential_document(
     """Upload a credential document for an employee. Triggers AI extraction."""
     company_id = await get_client_company_id(current_user)
 
-    if document_type not in VALID_DOCUMENT_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid document_type. Must be one of: {sorted(VALID_DOCUMENT_TYPES)}")
-
     filename = file.filename or "document"
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
     if ext not in ALLOWED_CREDENTIAL_EXTENSIONS:
@@ -323,6 +323,20 @@ async def upload_credential_document(
         )
         if not emp:
             raise HTTPException(status_code=404, detail="Employee not found")
+        required_document_type = await conn.fetchval(
+            """
+            SELECT 1
+            FROM employee_credential_requirements ecr
+            JOIN credential_types ct ON ct.id = ecr.credential_type_id
+            WHERE ecr.employee_id = $1 AND ct.key = $2
+            """,
+            employee_id, document_type,
+        )
+        if document_type not in VALID_DOCUMENT_TYPES and not required_document_type:
+            raise HTTPException(
+                status_code=400,
+                detail="Document type is not recognized for this employee",
+            )
 
     storage = get_storage()
     file_path = await storage.upload_private_file(
@@ -401,6 +415,7 @@ async def delete_credential_document(
 class ApproveRequest(BaseModel):
     apply_to_credentials: bool = False
     notes: Optional[str] = None
+    expiration_date: Optional[date] = None
 
 
 @router.post("/{employee_id}/credential-documents/{document_id}/approve")
@@ -414,21 +429,59 @@ async def approve_credential_document(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
+        async with conn.transaction():
+            row = await conn.fetchrow(
             """SELECT * FROM credential_documents
                WHERE id = $1 AND employee_id = $2 AND company_id = $3""",
             document_id, employee_id, company_id,
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Document not found")
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Document not found")
 
-        await conn.execute(
-            """UPDATE credential_documents
-               SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(),
-                   review_notes = $2, updated_at = NOW()
-               WHERE id = $3""",
-            current_user.id, body.notes, document_id,
-        )
+            requirement = await conn.fetchrow(
+            """
+            SELECT ecr.id, ct.has_expiration
+            FROM employee_credential_requirements ecr
+            JOIN credential_types ct ON ct.id = ecr.credential_type_id
+            WHERE ecr.employee_id = $1 AND ct.key = $2
+            FOR UPDATE
+            """,
+            employee_id, row["document_type"],
+            )
+            if requirement and requirement["has_expiration"] and body.expiration_date is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Confirm the credential expiration date before approving this document",
+                )
+
+            await conn.execute(
+                """UPDATE credential_documents
+                   SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(),
+                       review_notes = $2, updated_at = NOW()
+                   WHERE id = $3""",
+                current_user.id, body.notes, document_id,
+            )
+
+            if requirement:
+                await conn.execute(
+                    """
+                    UPDATE employee_credential_requirements
+                    SET status = 'verified', credential_document_id = $1,
+                        verified_at = NOW(), verified_by = $2, expires_at = $3,
+                        waived_at = NULL, waived_by = NULL, waiver_reason = NULL,
+                        updated_at = NOW()
+                    WHERE id = $4
+                    """,
+                    document_id, current_user.id, body.expiration_date, requirement["id"],
+                )
+
+            # Keep the task in the same transaction as requirement verification.
+            await conn.execute(
+                """UPDATE employee_onboarding_tasks
+                   SET status = 'completed', completed_at = NOW(), completed_by = $1, updated_at = NOW()
+                   WHERE employee_id = $2 AND document_type = $3 AND status = 'pending'""",
+                current_user.id, employee_id, row["document_type"],
+            )
 
         if body.apply_to_credentials and row.get("extracted_data"):
             extracted = row["extracted_data"] if isinstance(row["extracted_data"], dict) else json.loads(row["extracted_data"])
@@ -493,18 +546,11 @@ async def approve_credential_document(
                 """
                 await conn.execute(sql, *values)
 
-        # Auto-complete matching credential onboarding task
-        try:
-            await conn.execute(
-                """UPDATE employee_onboarding_tasks
-                   SET status = 'completed', completed_at = NOW(), completed_by = $1, updated_at = NOW()
-                   WHERE employee_id = $2 AND document_type = $3 AND status = 'pending'""",
-                current_user.id, employee_id, row["document_type"],
-            )
-        except Exception:
-            logger.exception("Failed to auto-complete onboarding task for credential doc %s", document_id)
-
-    return {"message": "Document approved", "applied_to_credentials": body.apply_to_credentials}
+    return {
+        "message": "Document approved",
+        "applied_to_credentials": body.apply_to_credentials,
+        "expiration_date": body.expiration_date.isoformat() if body.expiration_date else None,
+    }
 
 
 class RejectRequest(BaseModel):

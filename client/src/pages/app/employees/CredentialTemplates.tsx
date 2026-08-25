@@ -6,6 +6,7 @@ import {
   fetchTemplates,
   approveTemplate,
   rejectTemplate,
+  updateTemplate,
   triggerResearch,
   deleteTemplate,
   previewRequirements,
@@ -96,6 +97,19 @@ export default function CredentialTemplates() {
 
   const handleDelete = async (id: string) => {
     await deleteTemplate(id)
+    loadData()
+  }
+
+  const handleScheduleBlocking = async (template: CredentialRequirementTemplate) => {
+    const next = !template.schedule_blocking
+    let legalBasis = template.legal_basis
+    if (next) {
+      const existingCitation = typeof legalBasis?.citation === 'string' ? legalBasis.citation : ''
+      const citation = window.prompt('Legal-basis citation for this scheduling block:', existingCitation)
+      if (!citation?.trim()) return
+      legalBasis = { ...legalBasis, citation: citation.trim() }
+    }
+    await updateTemplate(template.id, { schedule_blocking: next, legal_basis: legalBasis })
     loadData()
   }
 
@@ -241,6 +255,9 @@ export default function CredentialTemplates() {
                                 {!t.is_required && (
                                   <span className="text-[10px] text-zinc-600">optional</span>
                                 )}
+                                {t.schedule_blocking && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-400">blocks scheduling</span>
+                                )}
                               </div>
                               {t.notes && (
                                 <p className="text-[10px] text-zinc-600 mt-0.5 truncate max-w-md">{t.notes}</p>
@@ -267,6 +284,9 @@ export default function CredentialTemplates() {
                                 Remove
                               </button>
                             )}
+                            <button onClick={() => handleScheduleBlocking(t)} className={`text-[10px] px-2 py-1 rounded ${t.schedule_blocking ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                              {t.schedule_blocking ? 'Allow scheduling' : 'Block scheduling'}
+                            </button>
                           </div>
                         </div>
                       ))}

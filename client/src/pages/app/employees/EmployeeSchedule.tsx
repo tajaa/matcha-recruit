@@ -380,6 +380,12 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
           const flags = rosterFlags?.[a.employee_id]
           const lapseCount = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
           const warningDetails = flags?.warnings ?? []
+          const blockingDetails = [
+            ...(flags?.blocking_credentials ?? []),
+            ...(flags?.credential_expirations ?? [])
+              .filter((credential) => credential.expires_at < shift.starts_at.slice(0, 10))
+              .map((credential) => `${credential.label} expired ${credential.expires_at} and blocks new scheduling.`),
+          ]
           return (
             <span key={a.employee_id} className="inline-flex items-center gap-1 bg-zinc-800 rounded-full pl-2 pr-1 py-0.5 text-[11px] text-zinc-200">
               {a.name}
@@ -389,6 +395,11 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
                   title={warningDetails.join('; ') || `${lapseCount} scheduling warning${lapseCount === 1 ? '' : 's'}`}
                   aria-label={warningDetails.join('; ') || `${lapseCount} scheduling warning${lapseCount === 1 ? '' : 's'}`}
                 >
+                  <AlertTriangle className="h-3 w-3" />
+                </span>
+              )}
+              {blockingDetails.length > 0 && (
+                <span className="inline-flex shrink-0 text-red-400" title={blockingDetails.join('; ')} aria-label={blockingDetails.join('; ')}>
                   <AlertTriangle className="h-3 w-3" />
                 </span>
               )}
@@ -413,9 +424,15 @@ function ShiftCard({ shift, roster, rosterFlags, onPatch, onChanged, highlighted
           {available.map((e) => {
             const flags = rosterFlags?.[e.id]
             const lapseCount = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
+            const blockingDetails = [
+              ...(flags?.blocking_credentials ?? []),
+              ...(flags?.credential_expirations ?? [])
+                .filter((credential) => credential.expires_at < shift.starts_at.slice(0, 10))
+                .map((credential) => `${credential.label} expired ${credential.expires_at} and blocks new scheduling.`),
+            ]
             return (
-              <option key={e.id} value={e.id}>
-                {e.name}{e.job_title ? ` — ${e.job_title}` : ''}{lapseCount > 0 ? ` — ⚠ ${lapseCount} lapsed` : ''}
+              <option key={e.id} value={e.id} disabled={blockingDetails.length > 0}>
+                {e.name}{e.job_title ? ` — ${e.job_title}` : ''}{blockingDetails.length > 0 ? ' — BLOCKED: credential required' : lapseCount > 0 ? ` — ⚠ ${lapseCount} lapsed` : ''}
               </option>
             )
           })}

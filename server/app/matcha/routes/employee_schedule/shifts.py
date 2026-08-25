@@ -19,7 +19,7 @@ from app.matcha.models.scheduling.employee_schedule import (
 from ...services.scheduling.schedule_rules import (
     build_patch, summarize_shifts as _summarize, week_bounds as _week_bounds,
 )
-from ...services.scheduling import schedule_compliance, schedule_intelligence
+from ...services.scheduling import schedule_compliance, schedule_eligibility, schedule_intelligence
 from ...services.scheduling.shift_writes import create_shift_core
 from ...services.scheduling.schedule_location_readiness import (
     assert_schedule_location_ready_to_publish,
@@ -140,6 +140,23 @@ async def get_week(
                 }
                 for emp_id, items in lapses.items()
             }
+            if credential_templates_enabled:
+                eligibility_flags = await schedule_eligibility.schedule_eligibility_roster_flags(
+                    conn, company_id, emp_uuids, as_of=today,
+                )
+                for emp_id, flags in eligibility_flags.items():
+                    entry = roster_flags.setdefault(emp_id, {
+                        "overdue_training": 0,
+                        "lapsed_credentials": 0,
+                        "warnings": [],
+                        "credential_expirations": [],
+                    })
+                    blocks = flags["blocking_credentials"]
+                    warnings = flags["credential_warnings"]
+                    entry["blocking_credentials"] = blocks
+                    entry["credential_warnings"] = warnings
+                    entry["credential_expirations"] = flags["credential_expirations"]
+                    entry["warnings"].extend(warnings)
     return {
         "week_start": start.isoformat(),
         "location_id": str(location),

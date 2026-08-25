@@ -95,6 +95,9 @@ export type RosterFlags = Record<string, {
   overdue_training: number
   lapsed_credentials: number
   warnings?: string[]
+  blocking_credentials?: string[]
+  credential_warnings?: string[]
+  credential_expirations?: { label: string; expires_at: string }[]
 }>
 
 export interface WeekResponse {

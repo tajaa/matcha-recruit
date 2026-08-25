@@ -13,14 +13,17 @@ interface RosterPanelProps {
 
 function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
   employee: RosterEmployee
-  flags?: { overdue_training: number; lapsed_credentials: number; warnings?: string[] }
+  flags?: { overdue_training: number; lapsed_credentials: number; warnings?: string[]; blocking_credentials?: string[] }
   selected: boolean
   requiredJobId?: string | null
   onSelect(): void
 }) {
+  const blockedReasons = flags?.blocking_credentials ?? []
+  const blocked = blockedReasons.length > 0
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `roster-${employee.id}`,
     data: { kind: 'roster-employee', employeeId: employee.id },
+    disabled: blocked,
   })
   const warnings = (flags?.overdue_training ?? 0) + (flags?.lapsed_credentials ?? 0)
   const unqualified = !!requiredJobId && !employee.job_ids.includes(requiredJobId)
@@ -31,15 +34,18 @@ function EmployeeRow({ employee, flags, selected, requiredJobId, onSelect }: {
       {...listeners}
       {...attributes}
       onClick={onSelect}
-      className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${selected ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-transparent bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900'} ${isDragging ? 'opacity-40' : ''}`}
-      aria-label={`Drag ${employee.name} to a shift`}
+      disabled={blocked}
+      title={blocked ? blockedReasons.join('; ') : undefined}
+      className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors ${blocked ? 'cursor-not-allowed border-red-500/30 bg-red-500/5 opacity-70' : selected ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-transparent bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900'} ${isDragging ? 'opacity-40' : ''}`}
+      aria-label={blocked ? `${employee.name} cannot be scheduled: ${blockedReasons.join('; ')}` : `Drag ${employee.name} to a shift`}
     >
       <UserRound className="h-4 w-4 shrink-0 text-zinc-500" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs text-zinc-200">{employee.name}</span>
         <span className="block truncate text-[10px] text-zinc-600">{employee.job_title || employee.department || 'Employee'}</span>
       </span>
-      {warnings > 0 && <span className="text-[10px] text-amber-400" title={flags?.warnings?.join('; ') || 'Training or credential lapse'}>{warnings}</span>}
+      {blocked && <span className="text-[10px] text-red-400" title={blockedReasons.join('; ')}>Blocked</span>}
+      {!blocked && warnings > 0 && <span className="text-[10px] text-amber-400" title={flags?.warnings?.join('; ') || 'Training or credential lapse'}>{warnings}</span>}
       {unqualified && <span className="text-[10px] text-amber-400" title="Not qualified for this job">Not qualified</span>}
     </button>
   )

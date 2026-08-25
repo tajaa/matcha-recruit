@@ -35,6 +35,9 @@ export type CredentialRequirementTemplate = {
   reviewed_by: string | null
   reviewed_at: string | null
   is_active: boolean
+  schedule_blocking: boolean
+  warning_days: number
+  legal_basis: Record<string, unknown>
   created_at: string
   updated_at: string
   // Joined fields
@@ -72,6 +75,7 @@ export type EmployeeCredentialRequirement = {
   onboarding_task_id: string | null
   credential_document_id: string | null
   verified_at: string | null
+  expires_at: string | null
   waived_at: string | null
   waiver_reason: string | null
   notes: string | null

@@ -1,7 +1,8 @@
 """Credential requirement template management routes."""
 
+import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from app.core.services.credential_template_service import (
     research_credential_requirements,
     resolve_credential_requirements,
     match_job_title_to_role_category,
+    materialize_schedule_blocking_template,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,9 @@ class TemplateCreate(BaseModel):
     due_days: int = 7
     priority: str = "standard"
     notes: Optional[str] = None
+    schedule_blocking: bool = False
+    warning_days: int = 14
+    legal_basis: dict[str, Any] | None = None
 
 
 class TemplateUpdate(BaseModel):
@@ -41,6 +46,26 @@ class TemplateUpdate(BaseModel):
     due_days: Optional[int] = None
     priority: Optional[str] = None
     notes: Optional[str] = None
+    schedule_blocking: Optional[bool] = None
+    warning_days: Optional[int] = None
+    legal_basis: dict[str, Any] | None = None
+
+
+def _validate_schedule_blocking(*, enabled: bool, legal_basis: dict[str, Any] | None) -> None:
+    if enabled and not (legal_basis or {}).get("citation"):
+        raise HTTPException(
+            status_code=422,
+            detail="A legal-basis citation is required before a credential can block scheduling",
+        )
+
+
+def _legal_basis(value: object) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
 class ResearchRequest(BaseModel):
@@ -143,19 +168,27 @@ async def create_template(
     company_id: UUID = Depends(get_client_company_id),
 ):
     """Manually create a credential requirement template."""
+    _validate_schedule_blocking(enabled=body.schedule_blocking, legal_basis=body.legal_basis)
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO credential_requirement_templates
-                (company_id, state, city, role_category_id, credential_type_id,
-                 is_required, due_days, priority, notes, source, review_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'admin_manual', 'approved')
-            RETURNING *
-            """,
-            company_id, body.state, body.city, body.role_category_id,
-            body.credential_type_id, body.is_required, body.due_days,
-            body.priority, body.notes,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO credential_requirement_templates
+                    (company_id, state, city, role_category_id, credential_type_id,
+                     is_required, due_days, priority, notes, schedule_blocking,
+                     warning_days, legal_basis, source, review_status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, 'admin_manual', 'approved')
+                RETURNING *
+                """,
+                company_id, body.state, body.city, body.role_category_id,
+                body.credential_type_id, body.is_required, body.due_days,
+                body.priority, body.notes, body.schedule_blocking, body.warning_days,
+                json.dumps(body.legal_basis or {}),
+            )
+            if row["schedule_blocking"]:
+                await materialize_schedule_blocking_template(
+                    conn, company_id=company_id, template_id=row["id"],
+                )
         return dict(row)
 
 
@@ -177,15 +210,24 @@ async def update_template(
         if row["company_id"] and row["company_id"] != company_id:
             raise HTTPException(403, "Not authorized")
 
+        requested_blocking = body.schedule_blocking if body.schedule_blocking is not None else row["schedule_blocking"]
+        requested_basis = body.legal_basis if body.legal_basis is not None else _legal_basis(row["legal_basis"])
+        _validate_schedule_blocking(enabled=requested_blocking, legal_basis=requested_basis)
+
         updates = []
         params = []
         idx = 1
-        for field in ["is_required", "due_days", "priority", "notes"]:
+        for field in ["is_required", "due_days", "priority", "notes", "schedule_blocking", "warning_days"]:
             val = getattr(body, field, None)
             if val is not None:
                 updates.append(f"{field} = ${idx}")
                 params.append(val)
                 idx += 1
+
+        if body.legal_basis is not None:
+            updates.append(f"legal_basis = ${idx}::jsonb")
+            params.append(json.dumps(body.legal_basis))
+            idx += 1
 
         if not updates:
             return dict(row)
@@ -193,11 +235,16 @@ async def update_template(
         updates.append(f"updated_at = NOW()")
         params.append(template_id)
 
-        updated = await conn.fetchrow(
-            f"UPDATE credential_requirement_templates SET {', '.join(updates)} "
-            f"WHERE id = ${idx} RETURNING *",
-            *params,
-        )
+        async with conn.transaction():
+            updated = await conn.fetchrow(
+                f"UPDATE credential_requirement_templates SET {', '.join(updates)} "
+                f"WHERE id = ${idx} RETURNING *",
+                *params,
+            )
+            if updated["schedule_blocking"]:
+                await materialize_schedule_blocking_template(
+                    conn, company_id=company_id, template_id=updated["id"],
+                )
         return dict(updated)
 
 
@@ -232,17 +279,26 @@ async def delete_template(
 async def approve_template(
     template_id: UUID,
     user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
 ):
     """Approve an AI-generated template."""
     async with get_connection() as conn:
-        await conn.execute(
-            """
-            UPDATE credential_requirement_templates
-            SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
-            WHERE id = $2
-            """,
-            user.id, template_id,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE credential_requirement_templates
+                SET review_status = 'approved', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW()
+                WHERE id = $2
+                RETURNING *
+                """,
+                user.id, template_id,
+            )
+            if not row:
+                raise HTTPException(404, "Template not found")
+            if row["schedule_blocking"]:
+                await materialize_schedule_blocking_template(
+                    conn, company_id=company_id, template_id=template_id,
+                )
         return {"ok": True}
 
 

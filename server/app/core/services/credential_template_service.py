@@ -565,6 +565,65 @@ async def assign_credential_requirements_to_employee(
     return count
 
 
+async def materialize_schedule_blocking_template(
+    conn, *, company_id: UUID, template_id: UUID,
+) -> int:
+    """Attach an enabled schedule-blocking template to matching active staff.
+
+    Requirement rows are normally created when an employee is onboarded. A
+    blocking rule must also cover people already on the roster; otherwise the
+    scheduler would treat their absence as an all-clear. Existing records keep
+    their verification history while being associated with the newly activated
+    template.
+    """
+    template = await conn.fetchrow(
+        """
+        SELECT crt.id, crt.state, crt.city, crt.role_category_id,
+               crt.credential_type_id, crt.is_required, crt.priority, crt.due_days
+        FROM credential_requirement_templates crt
+        WHERE crt.id = $1 AND crt.is_active = true
+          AND crt.schedule_blocking = true
+          AND crt.review_status IN ('approved', 'auto_approved')
+        """,
+        template_id,
+    )
+    if not template:
+        return 0
+
+    employees = await conn.fetch(
+        """
+        SELECT e.id, e.start_date
+        FROM employees e
+        JOIN role_categories rc ON rc.id = $4
+        WHERE e.org_id = $1 AND e.work_state = $2
+          AND ($3::text IS NULL OR lower(e.work_city) = lower($3))
+          AND COALESCE(e.employment_status, 'active') NOT IN ('terminated', 'offboarded', 'inactive')
+          AND e.job_title IS NOT NULL
+          AND e.job_title ~* ANY(rc.match_patterns)
+        """,
+        company_id, template["state"], template["city"], template["role_category_id"],
+    )
+    materialized = 0
+    for employee in employees:
+        due_date = (employee["start_date"] or date.today()) + timedelta(days=template["due_days"])
+        await conn.execute(
+            """
+            INSERT INTO employee_credential_requirements
+                (employee_id, credential_type_id, template_id, status, is_required, priority, due_date)
+            VALUES ($1, $2, $3, 'pending', $4, $5, $6)
+            ON CONFLICT (employee_id, credential_type_id) DO UPDATE SET
+                template_id = EXCLUDED.template_id,
+                is_required = EXCLUDED.is_required,
+                priority = EXCLUDED.priority,
+                updated_at = NOW()
+            """,
+            employee["id"], template["credential_type_id"], template["id"],
+            template["is_required"], template["priority"], due_date,
+        )
+        materialized += 1
+    return materialized
+
+
 # ── Query helpers ─────────────────────────────────────────────────────
 
 

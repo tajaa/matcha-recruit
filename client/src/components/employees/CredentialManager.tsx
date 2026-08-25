@@ -56,14 +56,18 @@ function DocumentCard({
   onReject,
   onDownload,
   onDelete,
+  requiresExpiration = false,
 }: {
   doc: CredentialDocument
-  onApprove: () => void
+  onApprove: (expirationDate?: string) => void
   onReject: () => void
   onDownload: () => void
   onDelete: () => void
+  requiresExpiration?: boolean
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [expirationDate, setExpirationDate] = useState('')
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
@@ -92,7 +96,7 @@ function DocumentCard({
           <Button size="sm" variant="ghost" onClick={onDownload}>Download</Button>
           {doc.review_status === 'pending' && (
             <>
-              <Button size="sm" variant="primary" onClick={onApprove}>Approve</Button>
+              <Button size="sm" variant="primary" onClick={() => setApproving(true)}>Approve</Button>
               <Button size="sm" variant="ghost" onClick={onReject}>Reject</Button>
             </>
           )}
@@ -105,6 +109,20 @@ function DocumentCard({
           )}
         </div>
       </div>
+      {approving && (
+        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+          {requiresExpiration && (
+            <Input label="Card expiration" type="date" value={expirationDate} onChange={(event) => setExpirationDate(event.target.value)} />
+          )}
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={() => { onApprove(expirationDate || undefined); setApproving(false) }} disabled={requiresExpiration && !expirationDate}>
+              Confirm approval
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setApproving(false)}>Cancel</Button>
+          </div>
+          {requiresExpiration && <p className="mt-2 text-[10px] text-zinc-500">Confirm the expiry from the document; the scheduler will block work after this date.</p>}
+        </div>
+      )}
       {doc.extraction_status === 'extracted' && (
         <ExtractedFields data={doc.extracted_data} />
       )}
@@ -373,6 +391,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
                 </span>
                 <span className="text-xs text-zinc-300">{r.credential_type_label}</span>
                 {!r.is_required && <span className="text-[10px] text-zinc-600">(opt)</span>}
+                {r.expires_at && <ExpirationBadge date={r.expires_at} />}
               </div>
             ))}
           </div>
@@ -384,7 +403,8 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
         const docs = docsByType[docType] ?? []
         const hasApproved = docs.some((d) => d.review_status === 'approved')
         const req = reqByType[docType]
-        const isVerifiedViaData = req?.status === 'verified' && docs.length === 0
+        const requirementExpired = !!req?.expires_at && new Date(`${req.expires_at}T00:00:00`).getTime() < new Date().setHours(0, 0, 0, 0)
+        const isVerifiedViaData = req?.status === 'verified' && !requirementExpired && docs.length === 0
 
         return (
           <div key={docType}>
@@ -392,7 +412,8 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               <h4 className="text-xs font-medium text-zinc-300">
                 {req?.credential_type_label || (DOC_TYPE_LABELS[docType] ?? docType)}
               </h4>
-              {(hasApproved || isVerifiedViaData) && <Badge variant="success">Verified</Badge>}
+              {(hasApproved || isVerifiedViaData) && !requirementExpired && <Badge variant="success">Verified</Badge>}
+              {requirementExpired && <Badge variant="danger">Expired</Badge>}
               {!hasApproved && !isVerifiedViaData && docs.length > 0 && <Badge variant="warning">Pending Review</Badge>}
               {!hasApproved && !isVerifiedViaData && docs.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
               {req && !req.is_required && <span className="text-[10px] text-zinc-600">Optional</span>}
@@ -413,6 +434,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
                     onReject={() => reject(doc.id)}
                     onDownload={() => download(doc.id)}
                     onDelete={() => remove(doc.id)}
+                    requiresExpiration={req?.has_expiration ?? doc.document_type === 'food_handler_card'}
                   />
                 ))}
               </div>

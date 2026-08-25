@@ -12,6 +12,7 @@ export const DOC_TYPE_LABELS: Record<string, string> = {
   board_cert: 'Board Certification',
   malpractice: 'Malpractice Insurance',
   health_clearance: 'Health Clearance',
+  food_handler_card: 'Food Handler Card',
   other: 'Other Document',
 }
 
@@ -24,14 +25,30 @@ export function useCredentialManager(employeeId: string) {
   const [requirements, setRequirements] = useState<EmployeeCredentialRequirement[]>([])
   const [reqLoading, setReqLoading] = useState(true)
 
+  const loadRequirements = async () => {
+    try {
+      setRequirements(await fetchEmployeeRequirements(employeeId))
+    } catch {
+      // Keep document management available if this optional feature endpoint fails.
+    } finally {
+      setReqLoading(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
+    setReqLoading(true)
     fetchEmployeeRequirements(employeeId)
       .then((reqs) => { if (!cancelled) setRequirements(reqs) })
       .catch(() => {})
       .finally(() => { if (!cancelled) setReqLoading(false) })
     return () => { cancelled = true }
   }, [employeeId])
+
+  const approveDocument = async (documentId: string, expirationDate?: string) => {
+    await approve(documentId, true, expirationDate)
+    await loadRequirements()
+  }
 
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Record<string, string>>({})
@@ -116,7 +133,7 @@ export function useCredentialManager(employeeId: string) {
   return {
     credentials,
     loading,
-    approve, reject, remove, download,
+    approve: approveDocument, reject, remove, download,
     requirements,
     reqLoading,
     editing, setEditing,
